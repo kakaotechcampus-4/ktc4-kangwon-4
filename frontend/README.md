@@ -1,0 +1,64 @@
+# RE:BORN Frontend
+
+폐업을 결심한 소상공인의 폐업 과정을 하나의 Closure Case로 관리하는 Agent, RE:BORN의 프론트엔드.
+
+## 시작하기
+
+**Node.js `^20.19.0` 또는 `>=22.12.0`** 이 필요합니다 (Vite 8 요구사항).
+
+```bash
+node -v          # 위 버전 확인
+cd frontend
+npm ci           # lockfile 그대로 설치. 처음이거나 CI라면 이쪽
+npm run dev
+```
+
+패키지를 추가·변경할 때만 `npm install`을 씁니다.
+
+http://localhost:5173
+
+## 스택
+
+| 기술 | 비고 |
+|---|---|
+| React 19 + TypeScript | UI · 컴포넌트 |
+| Vite | 빌드 도구 |
+| Tailwind CSS 4 | `tailwind.config.js`와 PostCSS 설정이 **없습니다**. `@tailwindcss/vite` 플러그인과 `src/index.css`의 `@import "tailwindcss";` 로 동작합니다 |
+| Fetch API | 통신 |
+| React 내장 | 상태관리 (`useState` / `useContext`) |
+
+Mobile-first 반응형, 기준 폭 375px.
+
+**아직 도입하지 않은 것** — React Router(첫 화면 구현 시 추가), Vercel 배포(설정 예정)
+
+## npm script
+
+| 명령 | 설명 |
+|---|---|
+| `npm run dev` | 개발 서버 (5173) |
+| `npm run build` | 프로덕션 빌드 (`tsc -b && vite build`) |
+| `npm run lint` | ESLint |
+| `npm run preview` | 빌드 결과 미리보기 |
+
+## 폴더 구조
+
+```
+frontend/
+├─ CLAUDE.md          Claude Code 작업 규칙
+├─ docs/
+│  └─ ui-guidelines.md
+├─ src/
+│  ├─ main.tsx        진입점
+│  ├─ App.tsx
+│  └─ index.css       Tailwind import
+├─ index.html
+└─ vite.config.ts
+```
+
+`src/` 이하 세부 구조는 `[미정 — 첫 화면 구현 시 확정]`
+
+## 문서
+
+- `CLAUDE.md` — FE 개발 규칙
+- `docs/ui-guidelines.md` — 디자인 토큰과 UI 기준
+- 화면 흐름 · API 스펙 · 데이터 모델 → 레포 루트 `docs/` (작성 예정)
