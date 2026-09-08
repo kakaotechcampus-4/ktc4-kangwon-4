@@ -14,7 +14,7 @@ interface AppShellProps {
  */
 export function AppShell({ title, subtitle, children }: AppShellProps) {
   return (
-    <div className="mx-auto flex min-h-dvh max-w-md flex-col bg-gray-50">
+    <div className="mx-auto flex min-h-dvh max-w-md flex-col border-x border-gray-200 bg-gray-50">
       <header className="border-b border-gray-200 bg-white px-4 py-3 text-center">
         <h1 className="text-lg font-bold text-gray-900">{title}</h1>
         {subtitle && <p className="mt-0.5 text-xs text-gray-500">{subtitle}</p>}
