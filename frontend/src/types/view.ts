@@ -48,9 +48,13 @@ export interface NextAction {
  *
  * | blocker | nextAction | 화면 |
  * | --- | --- | --- |
- * | O | O | 정상 |
- * | null | O | 막고 있는 것 없음 |
- * | * | null | 정보가 부족해 다음 할 일을 정할 수 없음 |
+ * | O | O | Next Action + Blocker |
+ * | null | O | Next Action + 막힌 것 없음 |
+ * | O | null | 정보 부족 + Blocker |
+ * | null | null | 정보 부족만 |
+ *
+ * "막힌 것 없음"은 다음 할 일이 있을 때만 의미 있는 정보다. 할 일을 정하지 못한 상태에서
+ * 막힌 게 없다고 하면 긍정 신호로 오해된다.
  */
 export interface CurrentCaseView {
   /** 확인된 것과 미확인을 모두 담는다. 서버가 정한 순서를 그대로 쓴다 */

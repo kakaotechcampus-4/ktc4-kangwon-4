@@ -27,7 +27,8 @@ export function CurrentCasePage({ data }: CurrentCasePageProps) {
         <InsufficientInfoCard missing={pending} />
       )}
 
-      {blocker ? <BlockerCard blocker={blocker} /> : <NoBlockerCard />}
+      {blocker && <BlockerCard blocker={blocker} />}
+      {nextAction && !blocker && <NoBlockerCard />}
 
       <FactList
         title="내 가게 상황"

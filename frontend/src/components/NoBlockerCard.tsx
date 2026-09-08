@@ -3,7 +3,9 @@
  *
  * 여기서 "확인이 필요합니다" 같은 회피 문구를 띄우면 안 된다.
  * 정보가 다 모였는데 아무것도 안 알려주는 화면이 되어버린다.
- * 아래 Next Action 카드가 이어서 다음 할 일을 보여준다.
+ *
+ * 다음 할 일이 있을 때만 렌더된다. 할 일을 정하지 못한 상태에서 "막힌 게 없다"고 하면
+ * 긍정 신호로 오해된다.
  */
 export function NoBlockerCard() {
   return (
@@ -17,7 +19,7 @@ export function NoBlockerCard() {
         지금 막고 있는 것이 없습니다.
       </p>
       <p className="mt-2 text-base leading-relaxed text-emerald-800">
-        확인이 필요한 항목이 모두 정리됐어요. 아래 할 일부터 진행하시면 됩니다.
+        확인이 필요한 항목이 모두 정리됐어요. 안내된 할 일을 진행하시면 됩니다.
       </p>
     </section>
   )
