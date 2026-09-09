@@ -52,7 +52,7 @@ GET /auth/kakao/callback?code=...
   "businessType": "CAFE",
   "franchiseStatus": false,
   "employeeCount": 2,
-  "leaseStatus": "LEASED",
+  "leaseStatus": "LEASED_PAID",
   "plannedClosureDate": null
 }
 ```
@@ -69,7 +69,7 @@ GET /auth/kakao/callback?code=...
     "businessType": "CAFE",
     "franchiseStatus": false,
     "employeeCount": 2,
-    "leaseStatus": "LEASED",
+    "leaseStatus": "LEASED_PAID",
     "restorationStatus": "UNKNOWN",
     "restorationScope": "UNKNOWN",
     "demolitionRequired": "UNKNOWN",
@@ -88,6 +88,8 @@ GET /auth/kakao/callback?code=...
 }
 ```
 
+**`stepProgress`는 `evaluate_step_eligibility(case)`(`docs/data-model.md` §6.1)가 반환하는 모든 절차를 초기화합니다** — 위 예시는 지면상 1개만 보여준 것이고, 실제로는 이 예시 조건(`employeeCount: 2`, `leaseStatus: LEASED_PAID`)에서 `RESTORATION_CHECK`/`EQUIPMENT_DISPOSAL`/`LEASE_TERMINATION_NOTICE`/`EMPLOYEE_SEPARATION`/`CLOSURE_REPORT` 5개가 함께 `NOT_STARTED`로 초기화됩니다(`DEMOLITION`만 `demolition_required`가 아직 `UNKNOWN`이라 제외). 아래 §4 예시도 동일 규칙을 따릅니다.
+
 ## 4. `GET /cases/{caseId}` — 현재 Case 조회 (AI 호출 없음)
 
 ```json
@@ -98,15 +100,15 @@ GET /auth/kakao/callback?code=...
     "businessType": "CAFE",
     "franchiseStatus": false,
     "employeeCount": 2,
-    "leaseStatus": "LEASED",
+    "leaseStatus": "LEASED_PAID",
     "restorationStatus": "IN_PROGRESS",
-    "restorationScope": "UNKNOWN",
-    "demolitionRequired": "UNKNOWN",
+    "restorationScope": "DEMOLITION_REQUIRED",
+    "demolitionRequired": "REQUIRED",
     "caseStatus": "IN_PROGRESS",
     "plannedClosureDate": null
   },
   "stepProgress": [
-    { "procedureStepId": 1, "stepCode": "RESTORATION_CHECK", "stepName": "원상복구 범위 확인", "status": "IN_PROGRESS" },
+    { "procedureStepId": 1, "stepCode": "RESTORATION_CHECK", "stepName": "원상복구 범위 확인", "status": "COMPLETED" },
     { "procedureStepId": 2, "stepCode": "DEMOLITION", "stepName": "철거", "status": "NOT_STARTED" }
   ],
   "latestDecision": {

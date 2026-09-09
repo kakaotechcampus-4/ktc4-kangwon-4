@@ -11,7 +11,7 @@ Case를 설계할 때 아래 다섯 가지는 서로 다른 축입니다. 실제
 | 사실 상태 | `demolition_required = UNKNOWN/REQUIRED/NOT_REQUIRED` | 현재 Case에 저장된 사실 값 |
 | 사실 출처 | `USER_INPUT`, `DOCUMENT`, `OFFICIAL_API`, `EXPERT` | 그 사실을 어디서 얻었는가 |
 | 확인 상태 | `UNCONFIRMED`, `CONFIRMED`, `CONFLICT`, `UNDETERMINED` | 그 사실을 저장해도 되는 정도 (fact-level) |
-| 절차 상태 | `NOT_STARTED`, `IN_PROGRESS`, `APPROVAL_PENDING`, `COMPLETED` | 해당 절차(procedure step)를 어디까지 실행했는가 |
+| 절차 상태 | `NOT_STARTED`, `IN_PROGRESS`, `APPROVAL_PENDING`, `COMPLETED`, `SKIPPED` | 해당 절차(procedure step)를 어디까지 실행했는가 |
 | 지원 비교 상태 | `NOT_CHECKED`, `POSSIBLY_RELEVANT`, `NEEDS_CONFIRMATION`, `NOT_RELEVANT`, `STALE` | 지원항목과 Case의 비교 결과 |
 
 예: 임대인이 "철거해야 한다"고 말했다는 것은 `demolition_required = REQUIRED`라는 사실 후보가 될 수 있지만, 철거비 지원 신청을 완료했다는 뜻은 아닙니다 — 전자는 사실 상태, 후자는 절차 상태(또는 `subsidy_application.application_status`) 영역입니다.
@@ -187,7 +187,7 @@ REJECTED
 | id | BIGINT PK | |
 | case_id | BIGINT FK → case.id | |
 | procedure_step_id | BIGINT FK → procedure_step.id | |
-| status | ENUM | §1.2 절차 상태 (`NOT_STARTED`/`IN_PROGRESS`/`APPROVAL_PENDING`/`COMPLETED`) |
+| status | ENUM | §1.2 절차 상태 5값 (`NOT_STARTED`/`IN_PROGRESS`/`APPROVAL_PENDING`/`COMPLETED`/`SKIPPED`) |
 | updated_at | DATETIME | |
 
 ### `subsidy_application`
