@@ -48,6 +48,10 @@ frontend/
 ├─ docs/
 │  └─ ui-guidelines.md
 ├─ src/
+│  ├─ components/     재사용 UI
+│  ├─ pages/          화면
+│  ├─ types/          view.ts — 화면이 필요한 데이터 모양
+│  ├─ mocks/          서버 연동 전 데이터 소스
 │  ├─ main.tsx        진입점
 │  ├─ App.tsx
 │  └─ index.css       Tailwind import
@@ -55,7 +59,8 @@ frontend/
 └─ vite.config.ts
 ```
 
-`src/` 이하 세부 구조는 `[미정 — 첫 화면 구현 시 확정]`
+화면이 5개 규모라 `features/` 없이 `pages/` + `components/` 로 나눈다.
+`types/api.ts`(서버 계약)와 `adapters/`는 서버 스키마가 확정되면 추가한다.
 
 ## 문서
 
