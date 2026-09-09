@@ -175,6 +175,8 @@ JSON API 필드는 `camelCase`를 따릅니다 (`/CLAUDE.md` 용어 규칙). `bl
 
 `POST /results`의 `UPDATED` 응답과 동일한 shape(§5)을 반환합니다 — `caseVersion`은 되돌린 뒤 새로 증가한 값이고, `changes`는 되돌아간 필드들을 보여줍니다.
 
+되돌릴 대상이 없거나(변경 이력이 없는 케이스) 직전 이벤트가 이미 되돌리기였다면(연속 되돌리기 방지, `docs/data-model.md` §12) `{"result": "NOTHING_TO_ROLLBACK"}`을 반환합니다(§12 에러/상태 처리 표 참고).
+
 ## 6. `POST /cases/{caseId}/results/confirm` — Conflict 확인 후 반영
 
 ### Request
@@ -400,6 +402,7 @@ REPLAN_FAILED
 | `CONFLICT` | 200 | 기존 Case와 새 입력이 충돌 | 사용자 확인 UI, `/results/confirm` 유도 |
 | `INVALID_TRANSITION` | 200 | 상태 기계상 허용되지 않는 전이 | 정정 입력 요청 |
 | `REPLAN_FAILED` | 200 | Case 반영 후 판단 생성 실패 | §13 TBD 참고 — 재시도/오류 안내 |
+| `NOTHING_TO_ROLLBACK` | 200 | `/rollback` 호출 시 되돌릴 대상이 없거나 직전 이벤트가 이미 되돌리기였음 | "이전" 버튼 비활성화 안내 (`docs/data-model.md` §12) |
 | `CASE_NOT_FOUND` | 404 | Case 없음 또는 접근 권한 없음 | 오류 화면 |
 
 **규칙**: 검증 실패(`NEEDS_MORE_INFO`/`CONFLICT`/`INVALID_TRANSITION`/`REPLAN_FAILED`)를 포함해 요청 자체가 정상 처리된 경우는 항상 HTTP 200을 반환하고, FE는 `res.ok`가 아니라 **본문의 `result` 필드로 분기**해야 합니다. `CASE_NOT_FOUND`(권한 없음 포함)만 404입니다. `STALE_SUPPORT_DATA`는 이 표에 속하지 않습니다 — §11.2 설명대로 `GET /subsidies`의 `matchStatus` 필드 값(`STALE`)이며 `/results`의 `result`에는 나타나지 않습니다.

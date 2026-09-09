@@ -72,7 +72,7 @@ REJECTED
 
 ## 2. 테이블 스키마 (BE 확정본, 2026-09)
 
-9개 테이블 전체 컬럼입니다. 이 문서가 "출처" 표에서 자주 언급하던 "AI 리드 제안 vs Notion BE 초안" 두 버전은 여기서 **BE가 실제로 확정한 아래 스키마로 통일**합니다.
+9개 테이블 전체 컬럼입니다(BE 확정본, 2026-09). 이 문서가 "출처" 표에서 자주 언급하던 "AI 리드 제안 vs Notion BE 초안" 두 버전은 여기서 **BE가 실제로 확정한 아래 스키마로 통일**합니다. (이후 §11에서 AI 리드가 추가 제안한 `case_equipment_item`/`support_check_result` 2개 테이블은 별도 표시 — 아직 BE 승인 전이라 이 "9개"에는 포함하지 않습니다.)
 
 ### `members`
 
@@ -143,9 +143,10 @@ REJECTED
 | `DEMOLITION` | 철거(건물) | `LANDLORD` | 건물 구조물 철거 — `점포철거비 지원`과 연결된 유일한 절차 |
 | `EQUIPMENT_DISPOSAL` | 집기·장비 처리 | `USER` | 건물이 아닌 사장님 소유 이동자산(의자·테이블·커피머신 등) 처리 — 건물주 응답과 무관, 사용자 본인 결정이 기준. 다른 절차와 순서 의존관계 없음(독립 진행 가능) |
 | `LEASE_TERMINATION_NOTICE` | 임대차 계약 해지 통보 | `LANDLORD` | |
+| `EMPLOYEE_SEPARATION` | 직원 퇴직 처리(4대보험 상실신고 등) | `OFFICIAL` | `case.employee_count > 0`일 때만 적용 — 적용조건은 `step_eligibility` 데이터가 아니라 코드로 체크(바로 아래 설명) |
 | `CLOSURE_REPORT` | 사업자등록 폐업신고 | `OFFICIAL` | `case_status`가 `CLOSED`로 전이하려면 이 절차가 `COMPLETED`여야 함(§2.2) |
 
-**`EMPLOYEE_SEPARATION`(직원 퇴직 처리)은 마스터 데이터에 넣지 않습니다** — `case.employee_count > 0`일 때만 적용되는데, 이건 `step_eligibility`의 정확값 비교로 표현할 수 없는 조건(0보다 큰지)이라 데이터로 만들지 않고 `app/rules/evaluate_step_eligibility()` 코드에 직접 `if case.employee_count > 0` 분기로 하드코딩합니다 — 이미 `app/rules/`의 상태 전이표(§6.2)도 코드로 강제되는 규칙이 있으므로 같은 패턴입니다.
+**정정(2026-09)**: `EMPLOYEE_SEPARATION`은 위 표처럼 `procedure_step`에 **정상적으로 행이 존재**해야 합니다 — `case_step_progress.procedure_step_id`가 FK라서, 행이 없으면 이 절차의 진행 상태 자체를 저장할 곳이 없어지기 때문입니다. 마스터 데이터에서 빠지는 건 이 절차 자체가 아니라 **"언제 적용되는지"를 결정하는 조건**뿐입니다 — `case.employee_count > 0`은 `step_eligibility`의 정확값 비교로 표현할 수 없는 조건(0보다 큰지)이라, 이 조건 판단만 데이터로 만들지 않고 `app/rules/evaluate_step_eligibility()` 코드에 직접 `if case.employee_count > 0` 분기로 하드코딩합니다 — 이미 `app/rules/`의 상태 전이표(§6.2)도 코드로 강제되는 규칙이 있으므로 같은 패턴입니다.
 
 **세무 신고(부가세 확정신고 등)는 MVP 절차 목록에서 제외합니다** — 법적으로 세무사가 반드시 필요한 업무는 아니지만(사업자 본인이 홈택스로 신고 가능), 세무보조 Agent 자체가 MVP 범위 밖(`architecture.md` §7)이므로 절차로도 넣지 않습니다. **추후 세무보조 Agent를 확장할 때 이 절차를 추가할 예정**이라는 확장 지점으로만 남겨둡니다.
 
@@ -426,6 +427,8 @@ application_period: "2026년 1월 ~ 예산 소진 시"
 | status | ENUM | `NOT_STARTED`/`IN_PROGRESS`/`COMPLETED` (§1.2와 동일 값 재사용, `APPROVAL_PENDING`/`SKIPPED`는 이 항목엔 해당 없음) |
 | created_at / updated_at | DATETIME | |
 
+**`EQUIPMENT_DISPOSAL`의 `case_step_progress.status` 집계 규칙(2026-09)**: 이 케이스의 `case_equipment_item` 행이 **1개 이상 등록되어 있고 전부 `COMPLETED`일 때만** `case_step_progress.status`도 `COMPLETED`로 올립니다. 행이 하나도 없으면(아직 대화로 파악 전) `NOT_STARTED`, 일부만 완료됐으면 `IN_PROGRESS`로 유지합니다.
+
 ### `support_check_result` — 지원 비교 상태(`match_status`) 저장
 
 `match_status`(§1.4)를 저장할 곳이 기존 9개 테이블 어디에도 없었습니다(재검증 결과, `subsidy_application`에 컬럼으로 추가하는 안은 폐기 — 아래 이유 참고).
@@ -448,9 +451,13 @@ application_period: "2026년 1월 ~ 예산 소진 시"
 
 사용자가 "이전" 버튼을 누르면 **바로 직전 1단계 처리만** 되돌릴 수 있습니다(여러 단계 소급 되돌리기는 MVP 범위 밖 — 잘못 누르면 오래된 상태로 확 돌아가버리는 위험을 피하기 위함).
 
-**동작 방식**: 가장 최근 `case_history`의 `changed_fields`(`[{field, before, after}, ...]`)를 읽어서 `after`→`before`로 되돌리는 값을 새로운 Case UPDATE로 반영하고, `event_type=ACTION_REVERTED`인 새 `case_history` 행을 추가합니다(§4 "기존 기록은 절대 지우지 않는다" 원칙 그대로 유지 — 되돌리기도 삭제가 아니라 새 기록 추가입니다). 이후 Rule 엔진을 다시 실행해서 되돌려진 케이스 상태 기준으로 Blocker/Next Action을 재계산합니다(R5와 동일 흐름).
+**동작 방식**: `changed_fields`가 **비어있지 않은** 가장 최근 `case_history` 행(예: `SUPPORT_CHECKED`처럼 Case를 바꾸지 않는 이벤트는 건너뜀)을 찾아 그 `[{field, before, after}, ...]`을 `after`→`before`로 되돌리는 값으로 새로운 Case UPDATE를 반영하고, `event_type=ACTION_REVERTED`인 새 `case_history` 행을 추가합니다(§4 "기존 기록은 절대 지우지 않는다" 원칙 그대로 유지 — 되돌리기도 삭제가 아니라 새 기록 추가입니다). 이후 Rule 엔진을 다시 실행해서 되돌려진 케이스 상태 기준으로 Blocker/Next Action을 재계산합니다(R5와 동일 흐름).
 
-**API**: `docs/interface-spec.md` §5.1 `POST /cases/{caseId}/rollback` 참고.
+**연속 되돌리기 금지**: 되돌릴 대상으로 찾은 그 행이 이미 `event_type=ACTION_REVERTED`이면 요청을 거부합니다(`NOTHING_TO_ROLLBACK`, §5.1 참고) — "1단계만" 원칙을 지키기 위해, 새로운 결과 입력(`/results`) 없이 `/rollback`을 연속 호출해 여러 단계를 되돌리는 것을 막습니다.
+
+**되돌릴 대상이 없는 경우**: `changed_fields`가 있는 행이 하나도 없으면(예: `CASE_CREATED`뿐인 새 Case) 마찬가지로 `NOTHING_TO_ROLLBACK`을 반환합니다.
+
+**API**: `docs/interface-spec.md` §5.1 `POST /cases/{caseId}/rollback`, §12 `NOTHING_TO_ROLLBACK` 참고.
 
 ---
 
