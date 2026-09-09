@@ -1,0 +1,29 @@
+# RE:BORN backend — 확정 버전 (2026-09, BE기술스택.html 기준 + AI팀 uv sync 교차검증).
+# BE 8개 패키지 + 설정 로더 2개 + Agent 스택 5개를 하나의 프로세스(단일 컨테이너)에 함께 설치한다.
+# BE가 이 8개 + Agent 4개(langchain/langgraph/langfuse/openai, 버전 미지정)를 같은 가상환경에 동시 설치해
+# pip check 통과 + import 테스트를 마쳤고, 그 결과 버전이 AI팀이 backend/에서 `uv sync`로 독립적으로
+# 얻은 확정 버전과 정확히 일치함을 교차 확인했다(langchain 1.4.0 / langgraph 1.2.11 / langfuse 4.15.1 / openai 3.8.0).
+
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+pydantic==2.13.5
+sqlalchemy==2.0.52
+pymysql==1.2.0
+alembic==1.19.2
+pyjwt==2.13.0
+httpx==0.28.1
+
+# 설정 로더 — backend/app/config.py가 사용 (루트 config.py와 동일 패턴)
+pydantic-settings==2.15.0
+python-dotenv==1.2.3
+
+# Agent 스택 — AI팀 교차검증 완료 버전
+langchain==1.4.0
+langchain-openai==1.6.0
+langgraph==1.2.11
+langfuse==4.15.1
+openai==3.8.0
+
+# 벡터스토어 — Chroma (2026-09 확정, 셀프호스팅. docs/architecture.md §6 참고)
+langchain-chroma==1.1.0
+chromadb==1.5.9
