@@ -57,7 +57,7 @@ GET /auth/kakao/callback?code=...
 }
 ```
 
-자연어(`rawInput`)만으로 생성할지, 구조화 필드를 함께 받을지는 화면 설계에 따라 다르지만 서버는 최소한 위 구조화 필드는 선택적으로 받습니다. `businessType`/`franchiseStatus`/`employeeCount`/`leaseStatus`/`plannedClosureDate`는 `docs/data-model.md` §2 `case` 테이블 필드와 1:1 camelCase 매핑입니다.
+자연어(`rawInput`)만으로 생성할지, 구조화 필드를 함께 받을지는 화면 설계에 따라 다르지만 서버는 최소한 위 구조화 필드는 선택적으로 받습니다. `businessType`/`franchiseStatus`/`employeeCount`/`leaseStatus`/`plannedClosureDate`는 `docs/data-model.md` §2 `case` 테이블 필드와 1:1 camelCase 매핑입니다. `entityType`/`buildingUseType`/`previousSupportHistory`는 이 요청에 포함하지 않습니다 — `demolitionRequired`처럼 `UNKNOWN`으로 시작해 이후 대화(`/results`)로 채워집니다.
 
 ### Response
 
@@ -70,6 +70,9 @@ GET /auth/kakao/callback?code=...
     "franchiseStatus": false,
     "employeeCount": 2,
     "leaseStatus": "LEASED_PAID",
+    "entityType": "UNKNOWN",
+    "buildingUseType": "UNKNOWN",
+    "previousSupportHistory": "UNKNOWN",
     "restorationStatus": "UNKNOWN",
     "restorationScope": "UNKNOWN",
     "demolitionRequired": "UNKNOWN",
@@ -101,6 +104,9 @@ GET /auth/kakao/callback?code=...
     "franchiseStatus": false,
     "employeeCount": 2,
     "leaseStatus": "LEASED_PAID",
+    "entityType": "UNKNOWN",
+    "buildingUseType": "UNKNOWN",
+    "previousSupportHistory": "UNKNOWN",
     "restorationStatus": "IN_PROGRESS",
     "restorationScope": "DEMOLITION_REQUIRED",
     "demolitionRequired": "REQUIRED",
@@ -270,6 +276,7 @@ MVP에서 별도 History 화면이 없다면 구현 우선순위는 낮습니다
 | `POST /results/confirm` | 충돌 대상·소유권 확인, 사용자가 선택한 값을 Transaction으로 UPDATE, 정정 History INSERT, Rule 재실행 | 충돌 내용을 이해하기 쉬운 문장으로 설명, 확인 질문 생성 |
 | `GET /cases/{caseId}/subsidies` | Case에 연결된 지원항목·신청 상태 조회 | 저장된 `SupportCheckResult`가 없거나 오래된 경우 지원금 Agent 실행 |
 | `PATCH /subsidy-applications/{applicationId}` | 신청 상태 변경 (사용자가 실제 신청 결과를 입력할 때만) | 해당 없음 — 조회만으로 `subsidy_application`을 자동 생성하지 않음 |
+| `POST /cases/{caseId}/rollback` | 소유권·버전 확인, 되돌릴 대상 탐색(`docs/data-model.md` §12), Case UPDATE + `ACTION_REVERTED` History INSERT | Rule 엔진 재실행으로 되돌려진 상태 기준 Blocker/Next Action 재계산 |
 
 ## 11. LLM/Rule JSON 계약
 
@@ -385,7 +392,7 @@ REPLAN_FAILED
     },
     {
       "criterion_code": "PREVIOUS_SUPPORT_HISTORY",
-      "case_value": null,
+      "case_value": "UNKNOWN",
       "required_value": "NO_DUPLICATE_SUPPORT",
       "status": "UNKNOWN",
       "evidence_refs": ["evidence-002"]
@@ -400,7 +407,7 @@ REPLAN_FAILED
 }
 ```
 
-`match_status` 값은 `docs/data-model.md` §1.4를 참고하세요. `ELIGIBLE`은 사용하지 않습니다. `case_value`/`required_value`의 `LEASED_PAID`는 `docs/data-model.md` §2.1에서 다루는 미확정 enum 확장안입니다 — `lease_status`가 실제로 `LEASED_PAID`/`LEASED_FREE`/`OWNED`로 확장되기 전까지는 예시 표기입니다.
+`match_status` 값은 `docs/data-model.md` §1.4를 참고하세요. `ELIGIBLE`은 사용하지 않습니다. `case_value`는 `case` 테이블 값을 그대로 옮긴 것이라 미확인 상태도 `null`이 아니라 `"UNKNOWN"` 문자열로 나타납니다(`docs/data-model.md` §2 신규 필드 참고).
 
 ## 12. 에러/상태 처리 표
 

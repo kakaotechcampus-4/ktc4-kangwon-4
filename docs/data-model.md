@@ -107,9 +107,9 @@ REJECTED
 | business_type | VARCHAR | 업종. 예: "카페" |
 | franchise_status | BOOLEAN | 프랜차이즈 여부 |
 | employee_count | INT | 직원 수 |
-| entity_type | ENUM | `INDIVIDUAL`(개인사업자)/`CORPORATION`(법인·비영리) — §9 지원사업 제외조건("비영리·법인") 매칭에 필요(AI 리드 신규 추가, 2026-09) |
-| building_use_type | ENUM | `BUSINESS`(상업용)/`RESIDENTIAL`(주거용) — §9 제외조건("주거용도 건축물") 매칭에 필요(AI 리드 신규 추가, 2026-09) |
-| previous_support_history | BOOLEAN | 동일/유사 정부 지원사업 수혜 이력 여부 — §9 제외조건("기 수혜 이력 1회 한도") 및 `docs/interface-spec.md` §11.4 `PREVIOUS_SUPPORT_HISTORY` criterion 매칭에 필요(AI 리드 신규 추가, 2026-09) |
+| entity_type | ENUM | `UNKNOWN`/`INDIVIDUAL`(개인사업자)/`CORPORATION`(법인·비영리) — §9 지원사업 제외조건("비영리·법인") 매칭에 필요(AI 리드 신규 추가, 2026-09) |
+| building_use_type | ENUM | `UNKNOWN`/`BUSINESS`(상업용)/`RESIDENTIAL`(주거용) — §9 제외조건("주거용도 건축물") 매칭에 필요(AI 리드 신규 추가, 2026-09) |
+| previous_support_history | ENUM | `UNKNOWN`/`YES`/`NO` — 동일/유사 정부 지원사업 수혜 이력 여부. §9 제외조건("기 수혜 이력 1회 한도") 및 `docs/interface-spec.md` §11.4 `PREVIOUS_SUPPORT_HISTORY` criterion 매칭에 필요(AI 리드 신규 추가, 2026-09) |
 | lease_status | ENUM | §2.1 참고 |
 | restoration_status | ENUM | 원상복구 진행 세부 상태 |
 | restoration_scope | ENUM | `UNKNOWN`, `MINOR_ONLY`, `DEMOLITION_REQUIRED` |
@@ -121,7 +121,7 @@ REJECTED
 | closed_at | DATETIME, nullable | Case 종료 처리 시점 |
 | created_at / updated_at | DATETIME | |
 
-**신규 3개 필드 근거**: §9에 이미 시딩된 "점포철거비 지원"의 `exclusion_conditions`(자가건물/무상임차, 기 수혜 이력, 주거용도 건축물, 유사 정부사업 중복수혜, 단순 이전/3년 내 재창업, 비영리·법인, 제외업종)를 기존 `case` 필드와 대조한 결과, `entity_type`/`building_use_type`/`previous_support_history` 3개는 저장할 곳이 아예 없었습니다.
+**신규 3개 필드 근거**: §9에 이미 시딩된 "점포철거비 지원"의 `exclusion_conditions`(자가건물/무상임차, 기 수혜 이력, 주거용도 건축물, 유사 정부사업 중복수혜, 단순 이전/3년 내 재창업, 비영리·법인, 제외업종)를 기존 `case` 필드와 대조한 결과, `entity_type`/`building_use_type`/`previous_support_history` 3개는 저장할 곳이 아예 없었습니다. 셋 다 `UNKNOWN` 값을 두어 다른 사실 필드(`lease_status` 등)와 동일하게 "아직 안 물어봤음"을 NULL이 아니라 명시적 enum 값으로 표현합니다. `POST /cases`(`docs/interface-spec.md` §3) 요청에는 포함하지 않고 `demolitionRequired`처럼 `UNKNOWN`으로 시작해 대화를 통해 채워집니다.
 
 **"단순 이전/3년 내 재창업" 조건은 의도적으로 매칭 필드를 만들지 않습니다**(AI 리드 확정, 2026-09): "단순 이전"은 RE:BORN 자체가 폐업 과정을 돕는 서비스라 대상 사용자가 아니고(서비스 정의상 발생하지 않는 케이스), "3년 내 재창업"은 폐업 **이후** 미래 시점의 일이라 Case 시점에 알 수 없을 뿐더러 `/CLAUDE.md` "하지 않는 것"에 "재취업·재창업 기능을 만들지 않는다"고 이미 명시돼 있어 이 축을 다루는 것 자체가 스코프 밖입니다. `compare_support_conditions()`는 이 criterion을 `status: UNKNOWN`으로 남겨두고(§11.4 `PREVIOUS_SUPPORT_HISTORY` 예시와 동일한 처리 방식), 어차피 R7에 따라 최종 자격은 확정하지 않으므로 이 미확인 상태 자체가 문제되지 않습니다.
 
