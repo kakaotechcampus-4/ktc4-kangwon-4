@@ -42,7 +42,9 @@ git pull origin develop
 # 멘토님 Approve를 받고 그 주 일요일까지 main 으로 merge
 ```
 
-## 커밋 메시지 prefix
+## 커밋/PR 제목 형식
+
+`[역할] <prefix>: <내용>` — 역할 태그(`[PM]`, `[AI 리드]`, `[FE]`, `[BE]` 등)를 prefix 앞에 붙입니다. 예: `[PM] docs: 팀 공통 CLAUDE.md 작성`.
 
 커밋 메시지는 아래 prefix로 시작합니다: `<prefix>: <내용>`
 
