@@ -185,7 +185,7 @@ REJECTED
 | id | BIGINT PK | |
 | case_id | BIGINT FK → case.id | |
 | procedure_step_id | BIGINT FK → procedure_step.id | |
-| status | ENUM | §1.2 절차 상태 5값 (`NOT_STARTED`/`IN_PROGRESS`/`APPROVAL_PENDING`/`COMPLETED`/`SKIPPED`) |
+| status | ENUM | §1.2 절차 상태 참고(값 목록은 여기서 재나열하지 않음) |
 | updated_at | DATETIME | |
 
 ### `subsidy_application`
@@ -323,23 +323,9 @@ def compare_support_conditions(case: CaseState, item: SupportItem) -> SupportChe
 
 주의: "철거 전 30일"과 같은 기한은 공식 최신 공고·첨부문서에 근거가 있을 때만 Rule로 사용합니다. 예시 문구를 영구적인 정책값으로 하드코딩하지 않습니다.
 
-### Worked example 1
+### Worked example
 
-```
-원상복구 범위 = UNKNOWN
-철거 필요 여부 = UNKNOWN
-→ Blocker: 원상복구·철거 범위가 확인되지 않음
-→ Next Action: 임대인에게 원상복구 범위와 철거 필요 여부를 확인
-```
-
-### Worked example 2
-
-```
-철거 필요 여부 = REQUIRED
-지원 조건 = NOT_CHECKED
-→ Blocker: 철거 전에 확인해야 할 지원 조건과 증빙이 남아 있음
-→ Next Action: 공식 점포철거비 지원 조건과 신청 전 필요 서류를 확인
-```
+`docs/hero-scenario.md` Turn 1(원상복구·철거 범위 미확인 → 임대인 확인 요청)과 Turn 2(철거 필요 확정 → 지원조건 확인 요청)가 이 우선순위 로직이 실제 적용된 예시입니다 — 내용을 여기서 다시 서술하지 않습니다.
 
 ## 7. `support_item` 스키마
 
