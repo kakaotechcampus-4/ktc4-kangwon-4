@@ -55,6 +55,16 @@ export interface NextAction {
  *
  * "막힌 것 없음"은 다음 할 일이 있을 때만 의미 있는 정보다. 할 일을 정하지 못한 상태에서
  * 막힌 게 없다고 하면 긍정 신호로 오해된다.
+ *
+ * TODO(BE 확인): `nextAction: null`이 실제로 어떤 서버 상태인지 확정되지 않았다.
+ * `GET /cases/{caseId}`의 `latestDecision`이 `null`로 올 수 있는지, 있다면 어떤 상황인지.
+ *
+ * `POST /cases`와 `GET /cases/{caseId}`는 판단을 함께 반환하고, `/results`의
+ * `NEEDS_MORE_INFO`는 Case를 바꾸지 않아 이전 판단이 그대로 유효하다. 그러면 남는 건
+ * `REPLAN_FAILED`(오류) 쪽인데, 그건 정보 부족이 아니라 재시도 안내가 맞다.
+ *
+ * 지금 화면은 "정보 부족"으로 안내한다. 오류 상태에 이 문구를 쓰면 서버 실패를
+ * 사용자 탓으로 돌리게 되므로, 계약이 확정되면 화면 소속과 문구를 다시 정한다.
  */
 export interface CurrentCaseView {
   /** 확인된 것과 미확인을 모두 담는다. 서버가 정한 순서를 그대로 쓴다 */

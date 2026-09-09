@@ -1,7 +1,11 @@
 import type { Fact } from '../types/view'
 
 interface InsufficientInfoCardProps {
-  /** 물어볼 항목. 서버가 정한 순서 그대로 받는다 */
+  /**
+   * 물어볼 항목. 서버가 정한 순서 그대로 받는다.
+   * `UNKNOWN`만 넘긴다 — `IN_PROGRESS`는 이미 확인하러 간 것이라 여기 넣으면
+   * "알려주세요"와 "지금 확인 중"이 같은 화면에서 다른 말을 하게 된다.
+   */
   missing: Fact[]
 }
 
@@ -10,6 +14,11 @@ interface InsufficientInfoCardProps {
  *
  * Next Action 자리를 대신하지만 어두운 배경을 쓰지 않는다.
  * 강하게 강조하는 것은 실제로 할 일이 있을 때뿐이다.
+ *
+ * TODO(BE 확인): 이 카드가 뜨는 조건(`nextAction === null`)이 실제로 어떤 서버 상태인지
+ * 확정되지 않았다. `types/view.ts`의 `CurrentCaseView` 주석 참고.
+ * 오류 상태라면 이 화면은 `/results`의 `NEEDS_MORE_INFO` 자리로 옮기고,
+ * 여기에는 재시도 안내를 두는 것이 맞다.
  */
 export function InsufficientInfoCard({ missing }: InsufficientInfoCardProps) {
   return (

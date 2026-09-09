@@ -15,6 +15,8 @@ export function CurrentCasePage({ data }: CurrentCasePageProps) {
 
   const confirmed = facts.filter((fact) => fact.status === 'CONFIRMED')
   const pending = facts.filter((fact) => fact.status !== 'CONFIRMED')
+  // 확인 중인 항목은 이미 사용자가 알아보러 간 것이라 "알려주세요" 목록에 넣지 않는다
+  const unknown = pending.filter((fact) => fact.status === 'UNKNOWN')
 
   return (
     <AppShell
@@ -24,7 +26,7 @@ export function CurrentCasePage({ data }: CurrentCasePageProps) {
       {nextAction ? (
         <NextActionCard nextAction={nextAction} />
       ) : (
-        <InsufficientInfoCard missing={pending} />
+        <InsufficientInfoCard missing={unknown} />
       )}
 
       {blocker && <BlockerCard blocker={blocker} />}
