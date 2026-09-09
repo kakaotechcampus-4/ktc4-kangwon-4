@@ -305,6 +305,8 @@ def compare_support_conditions(case: CaseState, item: SupportItem) -> SupportChe
 # support_item.eligibility_json과 Case 필드를 비교해 criteria[]·match_status 계산 (R7)
 ```
 
+**`NextActionSelector`의 문구 생성은 `procedure_step.decision_authority`(§2)를 참고합니다**(AI 리드 확정, 2026-09): `LANDLORD`면 "임대인에게 확인하세요"처럼 제3자 확인을 요청하는 문구, `USER`면 "정리 방침을 결정해 알려주세요"처럼 사용자 본인 결정을 요청하는 문구, `OFFICIAL`이면 "관할 기관에 문의·신고하세요"처럼 공식 절차 안내 문구로 Supervisor가 표현을 다르게 합니다.
+
 ### 6.2 상태 전이표 (R3 상세 스펙)
 
 `INVALID_TRANSITION`을 판단하는 최소 기준입니다 — 여기 없는 전이는 허용으로 간주합니다.
