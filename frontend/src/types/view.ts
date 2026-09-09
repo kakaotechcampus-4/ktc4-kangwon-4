@@ -1,0 +1,74 @@
+/**
+ * 화면이 필요한 데이터 모양 (FE 소유).
+ *
+ * 서버 계약(`types/api.ts`)과 변환 어댑터는 데이터 스키마가 확정된 뒤 별도로 추가한다.
+ * 컴포넌트는 이 타입만 받는다 — 그래야 서버 응답 형태가 바뀌어도 어댑터만 고치면 된다.
+ */
+
+/** fact 하나의 확인 상태 */
+export type FactStatus =
+  /** 값이 확정됨 */
+  | 'CONFIRMED'
+  /** 지금 사용자가 확인하고 있는 항목 */
+  | 'IN_PROGRESS'
+  /** 아직 확인되지 않음 */
+  | 'UNKNOWN'
+
+/** Case를 이루는 사실 하나 */
+export interface Fact {
+  key: string
+  label: string
+  /** CONFIRMED일 때만 존재한다. 없으면 화면에서 미확인으로 표시한다 */
+  value?: string
+  status: FactStatus
+}
+
+/** 지금 진행을 막고 있는 것 */
+export interface Blocker {
+  title: string
+  description?: string
+}
+
+/** 지금 먼저 할 일 — 화면에서 유일하게 강하게 강조하는 요소 */
+export interface NextAction {
+  /** 몇 번째 할 일인지. 서버가 센다 */
+  seq: number
+  title: string
+  /** 왜 이걸 먼저 해야 하는지 */
+  reason: string
+  /** "이렇게 물어보시면 됩니다" — 사용자가 상대에게 물을 질문 */
+  questions?: string[]
+}
+
+/**
+ * ② 현재 Case 화면이 필요한 전체 데이터.
+ *
+ * 예외 상태를 `null` 조합으로 표현한다. 프론트가 조건을 판단하지 않고
+ * 서버가 준 형태에 따라 화면을 고른다.
+ *
+ * | blocker | nextAction | 화면 |
+ * | --- | --- | --- |
+ * | O | O | Next Action + Blocker |
+ * | null | O | Next Action + 막힌 것 없음 |
+ * | O | null | 정보 부족 + Blocker |
+ * | null | null | 정보 부족만 |
+ *
+ * "막힌 것 없음"은 다음 할 일이 있을 때만 의미 있는 정보다. 할 일을 정하지 못한 상태에서
+ * 막힌 게 없다고 하면 긍정 신호로 오해된다.
+ *
+ * TODO(BE 확인): `nextAction: null`이 실제로 어떤 서버 상태인지 확정되지 않았다.
+ * `GET /cases/{caseId}`의 `latestDecision`이 `null`로 올 수 있는지, 있다면 어떤 상황인지.
+ *
+ * `POST /cases`와 `GET /cases/{caseId}`는 판단을 함께 반환하고, `/results`의
+ * `NEEDS_MORE_INFO`는 Case를 바꾸지 않아 이전 판단이 그대로 유효하다. 그러면 남는 건
+ * `REPLAN_FAILED`(오류) 쪽인데, 그건 정보 부족이 아니라 재시도 안내가 맞다.
+ *
+ * 지금 화면은 "정보 부족"으로 안내한다. 오류 상태에 이 문구를 쓰면 서버 실패를
+ * 사용자 탓으로 돌리게 되므로, 계약이 확정되면 화면 소속과 문구를 다시 정한다.
+ */
+export interface CurrentCaseView {
+  /** 확인된 것과 미확인을 모두 담는다. 서버가 정한 순서를 그대로 쓴다 */
+  facts: Fact[]
+  blocker: Blocker | null
+  nextAction: NextAction | null
+}
