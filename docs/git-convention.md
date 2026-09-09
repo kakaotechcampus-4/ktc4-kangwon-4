@@ -46,8 +46,6 @@ git pull origin develop
 
 커밋 메시지는 아래 prefix로 시작합니다: `<prefix>: <내용>`
 
-커밋 메시지는 아래 prefix로 시작합니다: `<prefix>: <내용>`
-
 | prefix | 의미 |
 |---|---|
 | `feat:` | 새로운 기능 추가 |

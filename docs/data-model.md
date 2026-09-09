@@ -2,6 +2,20 @@
 
 > Case 상태 구조 및 데이터 모델 정의. `docs/architecture.md`, `docs/interface-spec.md`, `docs/hero-scenario.md`는 아래 enum·테이블·Rule을 재정의하지 않고 이 문서를 인용합니다.
 
+## BE 승인 대기 체크리스트
+
+이 문서 안의 "AI 리드 확정" 표기는 **AI 리드가 결정했다는 뜻이지 BE가 동의했다는 뜻이 아닙니다** — `/CLAUDE.md` 문서 소유권 규칙(data-model.md 변경 시 BE 리뷰 필수)에 따라 아래 전부 BE 승인 전까지는 제안 상태입니다.
+
+- [ ] `lease_status` 4값 확장 (§2.1)
+- [ ] `case_status` 3값 확정 + `CLOSED` 전이조건 (§2.2)
+- [ ] `case`에 `entity_type`/`building_use_type`/`previous_support_history` 필드 추가 (§2)
+- [ ] `procedure_step`에 `decision_authority` 컬럼 + 6종 `step_code` 목록 (§2)
+- [ ] `step_dependency.dependency_type`(`REQUIRED`/`RECOMMENDED`) + `case_step_progress.SKIPPED` 상태 (§1.2, §2)
+- [ ] `step_eligibility` MVP 데이터 (§2)
+- [ ] `case_history` 컬럼 확장 + `event_type.ACTION_REVERTED` (§4, §4.1)
+- [ ] 신규 테이블 `case_equipment_item`/`support_check_result` (§11)
+- [ ] 되돌리기(rollback) 메커니즘 + `POST /rollback` 엔드포인트 (§12, `docs/interface-spec.md` §5.1)
+
 ## 1. 다섯 가지 개념 — 혼동하지 말 것
 
 Case를 설계할 때 아래 다섯 가지는 서로 다른 축입니다. 실제로 IDEATHON 초안들에서 "진행중"이라는 라벨이 절차 상태와 확인 상태 양쪽에 쓰이며 혼용된 적이 있어, 이 문서에서 명시적으로 분리합니다.
@@ -284,6 +298,8 @@ R10  Blocker와 Next Action은 근거를 추적할 수 있어야 한다. → Cas
 ### 6.1 `app/rules/` 최소 함수 시그니처
 
 이름·시그니처는 확정이 아니라 **권장안**입니다 — `backend/CLAUDE.md`가 언급하는 6개 모듈을 실제로 구현할 때 이 모양을 그대로 써도 됩니다.
+
+`CaseState`는 `case` 테이블(§2)의 한 row를 그대로 담은 스냅샷입니다(SQLAlchemy 모델 인스턴스 또는 그 필드를 옮긴 Pydantic 객체 — 구현 시 택일, `architecture.md` §4.4 `agent/state.py`의 파이프라인 State와는 다른 객체입니다). `resolve_dependencies`만 `case_id: int`를 받는 이유는 `step_dependency`가 `case_step_progress`(별도 테이블, `CaseState`엔 없는 진행 상태)와 대조가 필요해서입니다.
 
 ```python
 def validate_transition(field: str, before: str, after: str) -> ValidationResult: ...
