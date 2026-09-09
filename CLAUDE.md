@@ -96,7 +96,7 @@ CLAUDE.md는 Claude Code가 따라야 할 원칙일 뿐, 보안이나 상태 전
 - `develop`: 기본 통합 브랜치 — 여기도 직접 커밋하지 않고 feature/refactor 브랜치에서 작업 후 PR로 합칩니다
 - `feature/<이슈명>`
 - `refactor/<내용>`
-- 커밋 메시지 prefix 규칙은 `docs/git-convention.md` 참고
+- 브랜치 전략·커밋 메시지 prefix·PR 흐름 상세는 `docs/git-convention.md` 참고
 
 PR 본문에는 변경 요약 / 리뷰 포인트 / 설계·예외 사항을 포함합니다.
 
