@@ -1,0 +1,36 @@
+# RE:BORN 로컬 개발/배포 공용 인프라 (docker-compose).
+# BE기술스택.html §7 기준 — BE가 실제로 빌드·구동 테스트를 마친 파일 그대로.
+# AI팀도 이 파일로 `docker-compose up` 한 번이면 backend+agent 전체 서버와 MySQL을 동일한 환경으로 띄울 수 있다
+# (backend/app/ 코드가 아직 없어 지금 당장 `app` 서비스가 뜨지는 않음 — 스캐폴딩 이후 사용).
+#
+# 환경별 MySQL 실행 방식(BE기술스택.html §3-1): 로컬/배포는 이 파일(docker-compose), 테스트는 testcontainers를
+# 별도 사용(코드로 컨테이너 직접 실행) — 단, 이미지 버전(mysql:8.0)은 항상 동일하게 맞춘다.
+#
+# Redis는 BE 확정 스택에 포함되어 있지 않다 — config.py/.env의 REDIS_URL은 아직 실제 사용처가 없는 선점 변수다.
+
+services:
+  db:
+    image: mysql:8.0
+    restart: always
+    environment:
+      MYSQL_DATABASE: closure_agent
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-devpassword}
+    ports:
+      - "3306:3306"
+    volumes:
+      - db_data:/var/lib/mysql
+
+  app:
+    build: ./backend
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: mysql+pymysql://root:${MYSQL_ROOT_PASSWORD:-devpassword}@db:3306/closure_agent
+    depends_on:
+      - db
+    volumes:
+      - ./backend/app:/code/app   # 로컬 코드 수정 즉시 반영 (개발용 — 배포 시 제거 권장)
+
+volumes:
+  db_data:   # 컨테이너 재시작/재빌드에도 DB 데이터 유지
