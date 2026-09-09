@@ -107,7 +107,9 @@ REJECTED
 | closed_at | DATETIME, nullable | Case 종료 처리 시점 |
 | created_at / updated_at | DATETIME | |
 
-**신규 3개 필드 근거**: §9에 이미 시딩된 "점포철거비 지원"의 `exclusion_conditions`(자가건물/무상임차, 기 수혜 이력, 주거용도 건축물, 유사 정부사업 중복수혜, 단순 이전/3년 내 재창업, 비영리·법인, 제외업종)를 기존 `case` 필드와 대조한 결과, `entity_type`/`building_use_type`/`previous_support_history` 3개는 저장할 곳이 아예 없었습니다. "단순 이전/3년 내 재창업" 조건은 아직 매칭할 필드가 마땅치 않아 **명시적 TBD로 남깁니다**(§10 참고).
+**신규 3개 필드 근거**: §9에 이미 시딩된 "점포철거비 지원"의 `exclusion_conditions`(자가건물/무상임차, 기 수혜 이력, 주거용도 건축물, 유사 정부사업 중복수혜, 단순 이전/3년 내 재창업, 비영리·법인, 제외업종)를 기존 `case` 필드와 대조한 결과, `entity_type`/`building_use_type`/`previous_support_history` 3개는 저장할 곳이 아예 없었습니다.
+
+**"단순 이전/3년 내 재창업" 조건은 의도적으로 매칭 필드를 만들지 않습니다**(AI 리드 확정, 2026-09): "단순 이전"은 RE:BORN 자체가 폐업 과정을 돕는 서비스라 대상 사용자가 아니고(서비스 정의상 발생하지 않는 케이스), "3년 내 재창업"은 폐업 **이후** 미래 시점의 일이라 Case 시점에 알 수 없을 뿐더러 `/CLAUDE.md` "하지 않는 것"에 "재취업·재창업 기능을 만들지 않는다"고 이미 명시돼 있어 이 축을 다루는 것 자체가 스코프 밖입니다. `compare_support_conditions()`는 이 criterion을 `status: UNKNOWN`으로 남겨두고(§11.4 `PREVIOUS_SUPPORT_HISTORY` 예시와 동일한 처리 방식), 어차피 R7에 따라 최종 자격은 확정하지 않으므로 이 미확인 상태 자체가 문제되지 않습니다.
 
 **폐업 결정 여부(`closure_decision_status`)와 "지원정보 확인 상태"는 이 테이블의 컬럼이 아닙니다** — 전자는 서비스 진입 전제라 수집하지 않고(F1), 후자는 `subsidy_application` 레코드 존재 여부로 판단합니다(별도 컬럼 없음, F1). `region`처럼 이전 초안이 제안했던 필드도 이 확정 스키마에는 없습니다 — 필요해지면 마이그레이션(Alembic)으로 추가합니다.
 
@@ -409,7 +411,6 @@ application_period: "2026년 1월 ~ 예산 소진 시"
 
 - **`REPLAN_FAILED` 시 정책**: Case UPDATE는 성공했지만 그 다음 재계획(Blocker/Next Action 재산정)이 실패한 경우, Case를 rollback할지 아니면 Case는 저장한 채로 판단만 재시도할지는 **BE 멘토링·팀 회의에서 정합니다**. 유일하게 고정된 원칙은: 어느 쪽이든 이전 판단을 새 Case 버전의 판단인 것처럼 화면에 보여주지 않는다는 것입니다.
 - **`procedureStepId`를 FE가 지정할지 Agent가 문맥에서 판단할지**: `docs/interface-spec.md`에서 다시 다룹니다.
-- **"단순 이전/3년 내 재창업" 매칭 필드**: §9 제외조건 중 이것만 아직 어느 `case` 필드로 매칭할지 정하지 못했습니다 — 근거 없이 지어내지 않고 TBD로 남깁니다.
 - 위 항목 외 인증(JWT)·트랜잭션 경계·Conflict 임시저장·Obsidian 동기화·스케줄러 등 BE 확인이 필요한 나머지 항목은 `docs/architecture.md` §8, `docs/interface-spec.md` §13 참고 — **현재 BE 확인 대기 중, 추가로 재촉하지 않습니다.**
 
 ## 11. 신규 테이블 (AI 리드 확정, 2026-09 — BE 승인 대기)
