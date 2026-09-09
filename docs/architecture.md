@@ -186,6 +186,8 @@ RAG chunk metadata 예시 — `docs/data-model.md` §8 `Evidence` 스키마와 �
 
 `config.py`의 `REQUIRED_BY_AGENT`에는 세무/CODEF 관련 항목이 없습니다 — `LLM (전체 공통)`, `정보분석 / 행정`, `철거 보조`, `지원금` 4개 그룹 모두 무료 API(`data_go_kr_service_key`, `bizinfo_api_key`)만 요구해 위 원칙과 일치합니다. ("철거 보조" 그룹명은 `정보분석 / 행정`과 동일 키만 요구하는 참고용 라벨입니다.)
 
+**`data_go_kr_service_key`/`bizinfo_api_key`의 실제 호출 지점이 어디에도 정의돼 있지 않습니다**(발견, 2026-09) — `REQUIRED_BY_AGENT`에 "정보분석/행정", "철거 보조", "지원금" 노드가 이 키들을 필요로 한다고만 되어 있고, 어느 엔드포인트를 어떤 데이터를 위해 호출하는지는 이 문서 어디에도 없습니다. §6에서 확정한 지원금 조회 흐름(Wiki-first + RAG, S3/Chroma 기반)은 실시간 공공 API 호출을 전제하지 않으므로, 이 두 키가 실제로 Agent 실행 경로에서 쓰이는지조차 불확실합니다. 가장 그럴듯한 용도는 `docs/data-model.md` §11의 STALE 판정용 "매일 1회 원문 재조회" 배치일 수 있으나 **근거 없이 단정하지 않습니다 — BE·AI 리드가 함께 실제 호출 대상을 확인해야 합니다**(§8 TBD 추가).
+
 **절차 목록(`procedure_step`)에도 세무 신고를 넣지 않습니다** — 세무보조 Agent가 생기기 전까지는 체크리스트 항목으로도 노출하지 않고, 확장 시점에만 추가하는 확장 지점으로 남겨둡니다(`docs/data-model.md` §2 `procedure_step` 참고, AI 리드 확정 2026-09).
 
 ## 8. 명시적 TBD 요약
@@ -193,6 +195,7 @@ RAG chunk metadata 예시 — `docs/data-model.md` §8 `Evidence` 스키마와 �
 - **트랜잭션 경계** (§5): Case UPDATE / History INSERT / Replan 저장의 정확한 경계
 - **Obsidian 서버 동기화 메커니즘** (§6.3): Git pull vs S3 sync worker vs plugin/bridge, 최신성 감지 방법
 - **Agent 분리 배포 여부**: 현재는 동일 프로세스(§2)로 확정되었으나, 향후 Agent가 별도 배포 단위가 될 가능성은 열어두되 지금 결정하지 않음
+- **`data_go_kr_service_key`/`bizinfo_api_key` 실제 호출 지점** (§7): 어느 엔드포인트를, 무엇을 위해 호출하는지 미정의 — BE·AI 리드 확인 필요
 
 ~~호스팅 플랫폼~~ → **해소됨**: AWS EC2로 확정(§2.1, 2026-09).
 

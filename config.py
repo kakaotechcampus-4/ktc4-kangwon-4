@@ -34,12 +34,13 @@ class Settings(BaseSettings):
     proxy_token: Optional[str] = Field(default=None, alias="PROXY_TOKEN")
     chat_proxy_url: Optional[str] = Field(default=None, alias="CHAT_PROXY_URL")
     embedding_proxy_url: Optional[str] = Field(default=None, alias="EMBEDDING_PROXY_URL")
-    openai_model: Optional[str] = Field(default="openai/gpt-4.1-mini", alias="OPENAI_MODEL")
+    openai_model: Optional[str] = Field(default="openai/gpt-5.6-luna", alias="OPENAI_MODEL")
+    # GPT-5.6 Luna가 지원하는 값: none / low / medium / high. 각 Agent 노드가 "bounded 단일 LLM 호출"이라
+    # 기본은 low로 두고, 필요한 노드만 호출 시점에 override.
+    openai_reasoning_effort: Optional[str] = Field(default="low", alias="OPENAI_REASONING_EFFORT")
     openai_embedding_model: Optional[str] = Field(
         default="openai/text-embedding-3-small", alias="OPENAI_EMBEDDING_MODEL"
     )
-    anthropic_api_key: Optional[str] = Field(default=None, alias="ANTHROPIC_API_KEY")
-    voyage_api_key: Optional[str] = Field(default=None, alias="VOYAGE_API_KEY")
 
     # 2. 공용 (정보분석 · 행정 · 철거 · 지원금)
     data_go_kr_service_key: Optional[str] = Field(default=None, alias="DATA_GO_KR_SERVICE_KEY")
@@ -65,12 +66,15 @@ class Settings(BaseSettings):
 
 # agent별로 반드시 있어야 동작하는 키 매핑
 # (여기 없는 키는 전부 선택사항: 없어도 서버는 뜨지만 해당 기능만 비활성화됨)
-# CODEF/POPBILL(세무), WORK24(재취업·재창업), UPSTAGE(OCR), LANGSMITH는 삭제함.
+# CODEF/POPBILL(세무), WORK24(재취업·재창업), UPSTAGE(OCR), LANGSMITH, ANTHROPIC_API_KEY,
+# VOYAGE_API_KEY는 삭제함.
 # - CODEF·POPBILL: 유료 API 배제 원칙에 따라 애초에 신청하지 않기로 함
 # - WORK24: 재취업·재창업 기능은 이번 MVP 스펙아웃 대상
 # - UPSTAGE: 문서처리/OCR도 별도 서비스 없이 CHAT_PROXY_URL의 멀티모달 모델(이미지 입력)로 통합
 # - LANGSMITH: 서드파티 SaaS라 사용자 원문이 외부로 나감 + AWS 크레딧이 있어 셀프호스팅 가능한
 #   Langfuse로 대체 (EC2에 함께 배포, 데이터가 우리 인프라 밖으로 안 나감)
+# - ANTHROPIC_API_KEY·VOYAGE_API_KEY: LLM/임베딩 모두 OpenAI(mlapi.run 경유)로 확정되어
+#   (docs/tech-stack.md §3) 실제로 어느 코드에서도 참조하지 않는 죽은 설정이라 제거(2026-09)
 REQUIRED_BY_AGENT: dict[str, list[str]] = {
     "LLM (전체 공통)": ["proxy_token", "chat_proxy_url"],
     "정보분석 / 행정": ["data_go_kr_service_key"],

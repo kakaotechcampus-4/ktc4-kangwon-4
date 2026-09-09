@@ -42,6 +42,7 @@ Redis는 이 확정 스택에 포함되어 있지 않습니다 — `config.py`/`
 | 구분 | 기술 | 비고 |
 |---|---|---|
 | LLM Provider | OpenAI API (mlapi.run 프록시 경유, `OPENAI_API_KEY` 직접 호출 아님 — §6 참고) | |
+| 모델 | **GPT-5.6 Luna**(`openai/gpt-5.6-luna`, 2026-09 확정) | 컨텍스트 105만 토큰, `reasoning_effort`(none/low/medium/high) 지원 — `config.py`의 `OPENAI_MODEL`/`OPENAI_REASONING_EFFORT`로 설정. 각 Agent 노드가 "bounded 단일 LLM 호출"(architecture.md §4.1)이라 기본값 `low` |
 | 에이전트 프레임워크 | LangChain | LLM 체인·툴 연동 |
 | 에이전트 오케스트레이션 | LangGraph | 멀티스텝/상태 기반 워크플로우 |
 | 관측성(Observability) | Langfuse | 실제 구현 착수 시점에 연동 예정 (아직 미연동), 셀프호스팅 — EC2에 백엔드와 함께 배포 예정(서드파티 SaaS로 사용자 원문이 외부로 나가는 것을 피하기 위함, `config.py` 주석 근거) |
