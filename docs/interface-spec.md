@@ -288,6 +288,13 @@ MVP에서 별도 History 화면이 없다면 구현 우선순위는 낮습니다
       "parser_version": "input-parser-v1"
     }
   ],
+  "equipment_items": [
+    {
+      "item_name": "커피머신",
+      "disposal_plan": "폐기",
+      "source_span": "커피머신은 그냥 버리려고요"
+    }
+  ],
   "questions": [],
   "uncertain_fields": []
 }
@@ -299,6 +306,7 @@ MVP에서 별도 History 화면이 없다면 구현 우선순위는 낮습니다
 - `source_span`은 사용자 입력에 실제로 존재해야 합니다.
 - 애매한 표현은 `requires_confirmation: true` 또는 `uncertain_fields`로 반환합니다.
 - 문장에 없는 필드의 기본값을 만들어내지 않습니다.
+- **`equipment_items`(신규, AI 리드 2026-09)**: `case` 테이블의 scalar 필드가 아니라 `case_equipment_item`(`docs/data-model.md` §11) 각 행으로 저장됩니다 — `facts` 배열과 다른 대상이라 별도 배열로 분리했습니다. `item_name`/`disposal_plan`은 미리 정해둔 목록이 아니라 사용자가 말한 그대로 기록합니다(추정 금지 원칙 동일 적용).
 
 **금지되는 출력 예시** (절대 반환하면 안 되는 형태):
 

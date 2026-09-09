@@ -76,6 +76,25 @@ Case 저장소 ───────▶ │  Supervisor Agent   │
 
 `SupportResearchTool`이라는 옛 이름이 하던 일(공식 API·페이지·원문 검색 + Evidence 반환)은 지금 `support_agent/wiki/` + `support_agent/rag/`가 담당합니다 — 아키텍처 레벨 명칭은 이 이름으로 통일하되, 내부 헬퍼 함수명으로는 옛 이름을 계속 써도 됩니다.
 
+### 4.4 공유 State 스키마 (`agent/state.py`)
+
+`docs/tech-stack.md` §4.2가 "필드 목록은 이 문서 §4 참고"라고 가리키는 대상인데 실제로는 어디에도 없었습니다 — 여기서 신규 정의합니다(AI 리드, 2026-09).
+
+| 필드 | 타입 | 설명 |
+|---|---|---|
+| `case_id` | int | |
+| `requester_id` | int | 소유권 검증용(`/CLAUDE.md` 개인정보 invariant) |
+| `raw_input` | str | 사용자 입력 원문 |
+| `expected_version` | int | 낙관적 잠금(`docs/data-model.md` §3) |
+| `client_event_id` | str | |
+| `fact_candidate` | `FactCandidate` | 정보분석 Agent 출력(`docs/interface-spec.md` §11.1) |
+| `validation_result` | `ValidationResult` | Validator 출력(§11.2) |
+| `rule_decision` | `RuleDecision` \| `None` | Rule 엔진 출력(§11.3) |
+| `support_check_result` | `SupportCheckResult` \| `None` | 지원금 Agent 출력(§11.4) — §5 흐름에서 조건부로만 채워짐 |
+| `final_response` | dict | Response Writer(Supervisor)가 조립한 최종 응답 — §5 FE 응답 shape과 동일 |
+
+각 노드는 이 State 중 자기 담당 필드만 채워서 반환합니다(§4.1 "bounded 파이프라인 스텝" 정의와 일관 — 노드가 State 전체를 임의로 고치지 않음).
+
 ## 5. 요청 라이프사이클 — `POST /cases/{caseId}/results`
 
 ```

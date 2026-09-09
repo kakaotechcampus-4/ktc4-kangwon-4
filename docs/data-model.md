@@ -220,7 +220,7 @@ case_history
 ├─ case_version         INT
 ├─ raw_input            TEXT (nullable) — 사용자 입력 원문
 ├─ changed_fields       JSON      — [{field, before, after}, ...]
-├─ decision_json        JSON      — 판단 근거 전체를 저장(AI 리드 확정, 2026-09): {case_snapshot: {...판단 시점의 케이스 상태...}, applicable_steps: [...그 시점에 진행해야 하는 절차 목록...], blocker:{code,reason,affected_fields}, next_action:{code,title,reason,questions,requires_human}, rule_version} — `docs/interface-spec.md` §4.3 `RuleDecision`에 `case_snapshot`/`applicable_steps`를 추가한 확장판(`case_id`/`case_version`/`evidence_refs`는 이미 이 테이블의 다른 컬럼이라 중복 저장하지 않음)
+├─ decision_json        JSON      — 판단 근거 전체를 저장(AI 리드 확정, 2026-09): {case_snapshot: {...판단 시점 case 테이블 전체 필드 스냅샷...}, applicable_steps: [...그 시점 stepProgress와 동일 shape `{procedureStepId, stepCode, stepName, status}` 배열...], blocker:{code,reason,affected_fields}, next_action:{code,title,reason,questions,requires_human}, rule_version} — `docs/interface-spec.md` §11.3 `RuleDecision`에 `case_snapshot`/`applicable_steps`를 추가한 확장판(`case_id`/`case_version`/`evidence_refs`는 이미 이 테이블의 다른 컬럼이라 중복 저장하지 않음)
 ├─ evidence_refs        JSON      — [evidence_id, ...]
 ├─ source_type          VARCHAR         (§1.3 enum)
 ├─ source_ref           VARCHAR (nullable)
@@ -442,6 +442,8 @@ application_period: "2026년 1월 ~ 예산 소진 시"
 | checked_at | DATETIME | 마지막 비교 시각 |
 | source_version | VARCHAR | 비교에 사용한 `support_item.source_notice_version` 스냅샷 — STALE 판정에 사용 |
 | evidence_refs | JSON | `[evidence_id, ...]` |
+
+**쓰기 시점**: 지원금 Agent가 `compare_support_conditions()`(§6.1)를 실행할 때마다 `(case_id, support_item_id)` 기준으로 upsert합니다 — 새 조회 결과가 기존 값을 덮어씁니다(신청 상태와 달리 이 값은 "최신 판단"이라 History로 누적하지 않습니다).
 
 **`subsidy_application`에 넣지 않은 이유**: `match_status`는 사용자가 신청 여부를 결정하기 **전에** 이미 존재해야 하는 값인데, `subsidy_application`은 "Agent가 지원항목을 발견했다고 자동 생성하지 않는다"(§1.5)는 원칙이 있어 이 테이블에 넣으면 저장하는 순간 자동 생성 금지 원칙과 모순됩니다. 그래서 신청 여부와 무관하게 독립적으로 존재할 수 있는 별도 테이블로 분리합니다.
 
