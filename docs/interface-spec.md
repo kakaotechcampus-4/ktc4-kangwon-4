@@ -431,6 +431,7 @@ REPLAN_FAILED
 - **JWT 전달·저장 방식**: §2 참고 — Access/Refresh를 body로 줄지 쿠키로 줄지, refresh 회전 방식.
 - **`refresh_token`(카카오) 저장 방식**: 평문 저장 금지 원칙만 확정, 암호화 또는 별도 인증 테이블 등 구체 방식은 BE 확인 필요 (`/CLAUDE.md` 개인정보 섹션과 연계).
 - **`procedureStepId` 포함 여부**: §5 참고, FE·BE 확정 필요.
+- **필드 한글 라벨("업종", "원상복구 범위" 등) 제공 주체**: 지금까지 서버가 내려주는 값은 전부 raw enum 코드뿐이고 라벨을 함께 준 적이 없어(예외: `blocker`/`nextAction` 완성 문장, `blockerCode`/`nextActionCode` 코드), 이 패턴상 **FE가 key→label 매핑을 갖는 쪽을 AI 리드가 추천**합니다 — 다만 FE·BE 확정 필요 (`feature/current-case` PR 리뷰에서 발견).
 
 ---
 
