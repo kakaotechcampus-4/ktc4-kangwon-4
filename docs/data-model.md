@@ -115,9 +115,7 @@ REJECTED
 
 #### 2.1 `lease_status` — 4값으로 확장 확정
 
-`case.lease_status`를 `UNKNOWN`/`LEASED_PAID`/`LEASED_FREE`/`OWNED` 4값 enum으로 확장합니다(AI 리드 확정, 2026-09 — **BE 승인 대기**). 별도 boolean(`is_paid_lease`)을 추가하는 대신 enum을 확장하는 이유: (1) `restoration_scope`처럼 이 스키마는 이미 "두 축을 하나의 enum으로 합치는" 패턴을 쓰고 있어 일관성이 있고, (2) boolean을 따로 두면 `lease_status=OWNED`인데 `is_paid_lease=true`처럼 모순되는 조합이 만들어질 수 있는데 단일 enum은 이를 구조적으로 차단하며, (3) `docs/interface-spec.md` §11.4 예시가 이미 `case_value: "LEASED_PAID"` 단일 값 비교를 전제로 작성돼 있습니다.
-
-(기존 문제 인식: 이미 seed된 `support_item_점포철거비지원.json`의 자격조건이 "`LEASED_PAID`(유상임차만 — 무상임차·자가건물 제외)"를 요구하는데 기존 2값 enum에는 그 구분이 없었습니다.)
+`case.lease_status`: `UNKNOWN`/`LEASED_PAID`/`LEASED_FREE`/`OWNED` 4값 enum(AI 리드 확정, 2026-09 — **BE 승인 대기**). 별도 boolean(`is_paid_lease`) 대신 단일 enum으로 확장한 이유: `OWNED`이면서 `is_paid_lease=true`처럼 모순 조합이 생기는 걸 구조적으로 막고, `restoration_scope`와 같은 "두 축을 하나의 enum으로 합치는" 기존 패턴과 일관되며, `docs/interface-spec.md` §11.4가 이미 단일 값 비교(`case_value: "LEASED_PAID"`)를 전제로 작성돼 있기 때문입니다. (2값(`LEASED`/`OWNED`) 시절엔 seed된 `support_item_점포철거비지원.json`의 유상/무상 임차 구분 조건을 표현할 수 없었습니다.)
 
 #### 2.2 `case_status` enum
 
@@ -148,7 +146,7 @@ REJECTED
 | `EMPLOYEE_SEPARATION` | 직원 퇴직 처리(4대보험 상실신고 등) | `OFFICIAL` | `case.employee_count > 0`일 때만 적용 — 적용조건은 `step_eligibility` 데이터가 아니라 코드로 체크(바로 아래 설명) |
 | `CLOSURE_REPORT` | 사업자등록 폐업신고 | `OFFICIAL` | `case_status`가 `CLOSED`로 전이하려면 이 절차가 `COMPLETED`여야 함(§2.2) |
 
-**정정(2026-09)**: `EMPLOYEE_SEPARATION`은 위 표처럼 `procedure_step`에 **정상적으로 행이 존재**해야 합니다 — `case_step_progress.procedure_step_id`가 FK라서, 행이 없으면 이 절차의 진행 상태 자체를 저장할 곳이 없어지기 때문입니다. 마스터 데이터에서 빠지는 건 이 절차 자체가 아니라 **"언제 적용되는지"를 결정하는 조건**뿐입니다 — `case.employee_count > 0`은 `step_eligibility`의 정확값 비교로 표현할 수 없는 조건(0보다 큰지)이라, 이 조건 판단만 데이터로 만들지 않고 `app/rules/evaluate_step_eligibility()` 코드에 직접 `if case.employee_count > 0` 분기로 하드코딩합니다 — 이미 `app/rules/`의 상태 전이표(§6.2)도 코드로 강제되는 규칙이 있으므로 같은 패턴입니다.
+`EMPLOYEE_SEPARATION`은 위 표처럼 `procedure_step`에 **정상적인 행으로 존재**합니다(`case_step_progress.procedure_step_id`가 FK라서, 행이 없으면 진행 상태를 저장할 곳이 없습니다). 적용 조건(`case.employee_count > 0`)만 `step_eligibility` 데이터가 아니라 `app/rules/evaluate_step_eligibility()` 코드에 `if case.employee_count > 0` 분기로 둡니다 — 정확값 비교가 아니라 범위 비교라 `step_eligibility` 테이블로 표현할 수 없기 때문입니다(§6.2 상태 전이표도 같은 이유로 코드 기반).
 
 **세무 신고(부가세 확정신고 등)는 MVP 절차 목록에서 제외합니다** — 법적으로 세무사가 반드시 필요한 업무는 아니지만(사업자 본인이 홈택스로 신고 가능), 세무보조 Agent 자체가 MVP 범위 밖(`architecture.md` §7)이므로 절차로도 넣지 않습니다. **추후 세무보조 Agent를 확장할 때 이 절차를 추가할 예정**이라는 확장 지점으로만 남겨둡니다.
 
@@ -432,7 +430,7 @@ application_period: "2026년 1월 ~ 예산 소진 시"
 
 ### `support_check_result` — 지원 비교 상태(`match_status`) 저장
 
-`match_status`(§1.4)를 저장할 곳이 기존 9개 테이블 어디에도 없었습니다(재검증 결과, `subsidy_application`에 컬럼으로 추가하는 안은 폐기 — 아래 이유 참고).
+`match_status`(§1.4)는 신청 여부와 무관하게 존재해야 하는 값이라 `subsidy_application`이 아닌 별도 테이블에 둡니다 — `subsidy_application`에 컬럼으로 두면 이 값을 쓰는 시점에 그 행이 있어야 하므로 "Agent가 지원항목을 발견했다고 `subsidy_application`을 자동 생성하지 않는다"(§1.5)는 원칙과 모순됩니다.
 
 | 필드 | 타입 | 설명 |
 |---|---|---|
@@ -445,8 +443,6 @@ application_period: "2026년 1월 ~ 예산 소진 시"
 | evidence_refs | JSON | `[evidence_id, ...]` |
 
 **쓰기 시점**: 지원금 Agent가 `compare_support_conditions()`(§6.1)를 실행할 때마다 `(case_id, support_item_id)` 기준으로 upsert합니다 — 새 조회 결과가 기존 값을 덮어씁니다(신청 상태와 달리 이 값은 "최신 판단"이라 History로 누적하지 않습니다).
-
-**`subsidy_application`에 넣지 않은 이유**: `match_status`는 사용자가 신청 여부를 결정하기 **전에** 이미 존재해야 하는 값인데, `subsidy_application`은 "Agent가 지원항목을 발견했다고 자동 생성하지 않는다"(§1.5)는 원칙이 있어 이 테이블에 넣으면 저장하는 순간 자동 생성 금지 원칙과 모순됩니다. 그래서 신청 여부와 무관하게 독립적으로 존재할 수 있는 별도 테이블로 분리합니다.
 
 **`STALE` 판정 기준(AI 리드 확정, 2026-09)**: 날짜 경과가 아니라 **원문 비교 결과**로 판정합니다 — 매일 1회(주기 확정, 구체 메커니즘은 APScheduler vs cron **BE 확인 필요**) 공식 원문을 다시 조회해서 `support_item.document_hash`/`source_notice_version`이 바뀐 게 확인되면 관련 `support_check_result.match_status`를 `STALE`로 갱신합니다. "며칠 지나면 오래됨" 같은 날짜 임계값은 근거 없이 지어내는 것이라 쓰지 않습니다(§6.2의 "예시 문구를 영구 정책값으로 하드코딩하지 않는다" 원칙과 동일).
 

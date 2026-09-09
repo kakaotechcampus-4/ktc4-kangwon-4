@@ -78,7 +78,7 @@ Case 저장소 ───────▶ │  Supervisor Agent   │
 
 ### 4.4 공유 State 스키마 (`agent/state.py`)
 
-`docs/tech-stack.md` §4.2가 "필드 목록은 이 문서 §4 참고"라고 가리키는 대상인데 실제로는 어디에도 없었습니다 — 여기서 신규 정의합니다(AI 리드, 2026-09).
+LangGraph 파이프라인 전체가 공유하는 State 필드입니다(AI 리드 확정, 2026-09 — `docs/tech-stack.md` §4.2가 참조하는 필드 목록).
 
 | 필드 | 타입 | 설명 |
 |---|---|---|

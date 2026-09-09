@@ -214,7 +214,7 @@ JSON API 필드는 `camelCase`를 따릅니다 (`/CLAUDE.md` 용어 규칙). `bl
 }
 ```
 
-**수정(AI 리드, 2026-09)**: 신청 전(=`subsidy_application` 행이 아직 없는) 항목은 `applicationId`/`applicationStatus`/`appliedAt`을 전부 `null`로 반환합니다 — `subsidy_application`을 자동 생성하지 않는다는 원칙(§1.5)과 앞뒤를 맞추기 위함입니다. `matchStatus`는 `subsidy_application`과 무관하게 `support_check_result`(`docs/data-model.md` §11)에서 조회하므로 신청 여부와 상관없이 항상 채워집니다. 사용자가 실제로 신청해서 `subsidy_application` 행이 생긴 뒤부터 `applicationId`/`applicationStatus`가 채워집니다.
+**신청 전**(=`subsidy_application` 행이 아직 없는) 항목은 `applicationId`/`applicationStatus`/`appliedAt`을 전부 `null`로 반환합니다(AI 리드 확정, 2026-09) — `subsidy_application`을 자동 생성하지 않는다는 원칙(§1.5)과 일관됩니다. `matchStatus`는 `subsidy_application`과 무관하게 `support_check_result`(`docs/data-model.md` §11)에서 조회하므로 신청 여부와 상관없이 항상 채워집니다. 사용자가 실제로 신청해서 `subsidy_application` 행이 생긴 뒤부터 `applicationId`/`applicationStatus`가 채워집니다.
 
 `applicationStatus`는 `subsidy_application` 테이블 값(`docs/data-model.md` §1.5), `matchStatus`는 저장된 `SupportCheckResult.match_status`(§1.4)입니다 — 서로 다른 축이므로 응답에도 둘 다 노출합니다. FE는 자격조건을 직접 계산하지 않습니다.
 
