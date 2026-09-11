@@ -1,0 +1,56 @@
+name: Frontend CI
+
+# FE PR의 lint·타입·빌드를 검증한다. 배포는 하지 않는다.
+#
+# workflow 자체를 수정한 PR에서도 CI 동작을 확인할 수 있도록
+# 이 파일도 paths에 포함한다.
+#
+# PR 검증이 목적이므로 push 이벤트는 사용하지 않는다.
+# push와 pull_request를 함께 사용하면 PR 브랜치 push 시
+# 중복 실행될 수 있다.
+
+on:
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/frontend-ci.yml"
+
+# 같은 PR에 연속 push되면 이전 실행을 취소한다.
+concurrency:
+  group: frontend-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    # 모노레포라 레포 루트에는 package.json이 없다.
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run lint
+        run: npm run lint
+
+      # build = tsc -b && vite build
+      # TypeScript 타입 검사도 이 단계에 포함된다.
+      - name: Run build
+        run: npm run build
