@@ -29,7 +29,7 @@ http://localhost:5173
 
 Mobile-first 반응형, 기준 폭 375px.
 
-**아직 도입하지 않은 것** — React Router(라우트가 생기는 시점에 추가), 배포(플랫폼 검토 중)
+**아직 도입하지 않은 것** — React Router(라우트가 생기는 시점에 추가)
 
 ## npm script
 
@@ -52,7 +52,27 @@ npm ci  →  npm run lint  →  npm run build
 - 앞 단계가 실패하면 이후 단계는 실행되지 않습니다. PR의 Checks에서 로그를 확인합니다
 - 고친 뒤 같은 브랜치에 push하면 기존 PR에서 자동으로 다시 실행됩니다
 
-배포는 포함되지 않습니다. 설정 파일은 레포 루트의 `.github/workflows/frontend-ci.yml` 입니다.
+CI는 검증만 하고 배포하지 않습니다. 설정 파일은 레포 루트의 `.github/workflows/frontend-ci.yml` 입니다.
+
+## 배포
+
+merge되면 Vercel이 자동으로 배포합니다. 사람이 배포 명령을 실행하지 않습니다.
+
+| 브랜치 | Vercel 환경 | 용도 |
+|---|---|---|
+| `main` | Production | 실제 서비스 |
+| `develop` | Preview | 팀 통합 확인 |
+| PR 브랜치 | Preview | 리뷰용 |
+
+Preview 배포에서는 URL 쿼리로 예외 화면을 확인할 수 있습니다. `VITE_ENABLE_MOCK_SWITCH`를
+Preview 환경에만 설정하기 때문이며, Production에서는 항상 정상 화면만 나옵니다.
+
+```
+?mock=no-blocker      막고 있는 것 없음
+?mock=insufficient    정보 부족
+```
+
+배포 URL은 확정되면 여기에 적습니다.
 
 ## 폴더 구조
 
