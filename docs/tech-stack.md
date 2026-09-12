@@ -42,13 +42,13 @@ Redis는 이 확정 스택에 포함되어 있지 않습니다 — `config.py`/`
 | 구분 | 기술 | 비고 |
 |---|---|---|
 | LLM Provider | OpenAI API (mlapi.run 프록시 경유, `OPENAI_API_KEY` 직접 호출 아님 — §6 참고) | |
-| 모델 | **GPT-5.6 Luna**(`openai/gpt-5.6-luna`, 2026-09 확정) | 컨텍스트 105만 토큰, `reasoning_effort`(none/low/medium/high) 지원 — `config.py`의 `OPENAI_MODEL`/`OPENAI_REASONING_EFFORT`로 설정. 각 Agent 노드가 "bounded 단일 LLM 호출"(architecture.md §4.1)이라 기본값 `low` |
+| 모델 | **GPT-5.6 Luna**(`openai/gpt-5.6-luna`, 2026-09 확정) | `config.py`의 `OPENAI_MODEL`/`OPENAI_REASONING_EFFORT`로 설정. 구성요소별로 다른 모델을 강제하지 않고 실행 컨텍스트를 분리 |
 | 에이전트 프레임워크 | LangChain | LLM 체인·툴 연동 |
 | 에이전트 오케스트레이션 | LangGraph | 멀티스텝/상태 기반 워크플로우 |
-| 관측성(Observability) | Langfuse | 실제 구현 착수 시점에 연동 예정 (아직 미연동), 셀프호스팅 — EC2에 백엔드와 함께 배포 예정(서드파티 SaaS로 사용자 원문이 외부로 나가는 것을 피하기 위함, `config.py` 주석 근거) |
-| 지원금(정책) 도메인 지식베이스 | LLM Wiki + Obsidian | Obsidian 볼트에 지식 축적 + LLM Wiki 패턴으로 질의. 검증된 `support_item` 레코드에 없는 지원사업명·조건은 생성하지 않음 |
+| 관측성(Observability) | Langfuse | 실제 구현 착수 시점에 연동 예정 (아직 미연동). LLM·Tool 호출 수, token·비용, 지연, 오류와 Review 반송을 관찰 |
+| 지원금(정책) 도메인 지식베이스 | LLM Wiki + Obsidian | Obsidian 볼트에 지식 축적 + LLM Wiki 패턴으로 질의. 검증된 지원사업 항목에 없는 사업명·조건은 생성하지 않음 |
 | 벡터스토어/임베딩 | **Chroma**(2026-09 확정) | 셀프호스팅(임베디드로 시작, 필요 시 컨테이너로 분리) — Pinecone은 데이터 외부 반출로 Langfuse 셀프호스팅 원칙과 배치, Weaviate는 MVP 규모 대비 운영 부담 과함. `langchain-chroma` 통합. 아래 4.4 참고, 상시 사용 아니고 Wiki miss/업데이트 시점에만 사용 |
-| Agent 구성 | Supervisor + 정보분석 Agent + 지원금 Agent (LLM 기반), 행정지원은 Rule 엔진 기반 | 아래 4.3 참고 |
+| Agent 구성 | Supervisor + 정보분석·지원금 Agent-as-Tool + 절차조회 Tool + 필수 Review Tool | 아래 4.3 참고 |
 
 정확한 버전은 §6(단일 출처)을 참고하세요 — Agent 5개 패키지는 BE가 자신들의 8개 패키지와 함께 설치해 충돌 없음을 확인했고, AI팀이 독립적으로 얻은 버전과 정확히 일치합니다.
 
@@ -58,9 +58,9 @@ Redis는 이 확정 스택에 포함되어 있지 않습니다 — `config.py`/`
 
 - **루트 `/CLAUDE.md`**: FE/BE/Agent 공통 원칙 (서비스 정의, Hero Loop, 하지 않는 것, 역할 경계, 개인정보, 용어, 참조 문서, 레포 운영, 문서 소유권)
 - **파트별 `CLAUDE.md`**: 각 파트에서만 필요한 구현 규칙 (`frontend/CLAUDE.md`, `backend/CLAUDE.md`)
-- 초기에는 `.claude/rules/`, `.claude/skills/`는 만들지 않고, 실제 필요가 확인될 때 추가
+- CLAUDE.md에는 변하지 않는 원칙만 두고, 반복되는 디렉터리·작업 지침은 Skill로 분리합니다. 정확한 Skill 구조는 구현할 작업이 생길 때 추가합니다.
 
-### 4.2 디렉토리 구조
+### 4.2 목표 디렉토리 구조 (아직 미구현)
 
 ```
 ktc4-kangwon-4/
@@ -73,7 +73,8 @@ ktc4-kangwon-4/
 ├─ docs/
 │  ├─ hero-scenario.md      # 사용자 시나리오 / Hero Loop 상세
 │  ├─ interface-spec.md     # FE/BE API 인터페이스 정의
-│  ├─ data-model.md         # Case 상태/데이터 모델
+│  ├─ schema/
+│  │  └─ schema_table.md    # 물리 DB 테이블 정의
 │  ├─ architecture.md       # 전체 시스템 아키텍처
 │  └─ tech-stack.md         # 이 문서
 │
@@ -93,46 +94,45 @@ ktc4-kangwon-4/
       ├─ shared/            # BE와 Agent가 공동으로 쓰는 영역
       │  ├─ db.py           # DB 세션/커넥션 (SQLAlchemy + pymysql, MySQL 접속)
       │  ├─ models/         # Case, SupportItem 등 도메인 모델(테이블 정의)
-      │  ├─ schemas/        # Pydantic 스키마 — API 응답 ↔ Agent tool 입출력 공용
+      │  ├─ schemas/        # BE API·DB 경계 스키마. Agent 내부 schema는 AI가 소유
       │  └─ functions/      # DB 접근 함수 본체 — Agent가 "함수 호출"로 쓰는 바로 그 함수,
       │                     # api/ 라우터도 동일 함수를 재사용 (구현이 두 곳에 따로 없음). 최소 함수 목록은 backend/CLAUDE.md 참고
       │
       ├─ api/               # BE 전용 — API 라우터 (shared/functions 호출)
       │
-      ├─ agent/             # Agent 전용 — Supervisor + Sub-agent 구조 (§4.3)
-      │  ├─ graph.py        # 최상위 LangGraph 그래프 — Supervisor가 Sub-agent를 라우팅
-      │  ├─ state.py        # 공유 State 스키마 (필드 목록은 docs/architecture.md §4 참고)
+      ├─ agent/             # Agent 런타임 — 상세 경계는 architecture.md
+      │  ├─ graph.py        # Supervisor Global Loop + 필수 Review 경로
+      │  ├─ state.py        # 공유 실행 상태. 정확한 schema는 AI 확정 대기
       │  │
-      │  ├─ supervisor/     # Supervisor Agent — Rule/대조 결과 + Sub-agent 결과 종합 → Blocker 1개·Next Action 1개
+      │  ├─ supervisor/     # 호출 선택·결과 평가·Blocker/Next Action·종료 판단
       │  │  └─ prompts/
       │  │
-      │  ├─ info_agent/     # 정보분석 Agent — 사용자 입력을 사실 후보로 해석
+      │  ├─ info_agent/     # 정보분석 Agent-as-Tool — bounded Local Loop
       │  │  ├─ tools/       # shared/functions를 LangChain 툴로 감싼 어댑터
       │  │  └─ prompts/
       │  │
-      │  ├─ support_agent/  # 지원금 Agent
+      │  ├─ support_agent/  # 지원금 Agent-as-Tool — bounded Local Loop
       │  │  ├─ wiki/        # LLM Wiki(Obsidian) 조회 — Wiki 우선 경로 (§4.4)
       │  │  ├─ rag/         # Wiki miss·업데이트 시 RAG (§4.4)
       │  │  ├─ tools/
       │  │  └─ prompts/
       │  │
+      │  ├─ procedure_tool/ # 절차조회 일반 Tool
+      │  ├─ review_tool/    # 필수 Review 일반 Tool
       │  ├─ llm.py          # OpenAI 클라이언트 초기화
-      │  └─ tracing.py      # Langfuse 연동
-      │
-      └─ rules/             # Case 상태 전이 validation + 행정지원(Rule 엔진 기반, LLM Agent 아님). Rule 시그니처는 docs/data-model.md §5~6 참고
-                             # shared/functions가 쓰기 전에 호출 — Agent는 이 검증을 우회할 수 없음
+      │  └─ tracing.py      # Langfuse 호출 수·token·비용·지연 관측
 ```
 
-- **`shared/`가 필요한 이유**: Agent는 DB를 "함수처럼 호출"하기로 했는데, 그 함수의 실제 구현이 `api/`에도 있고 `agent/`에도 따로 있으면 두 곳이 어긋날 수 있음. `shared/functions/`에 구현을 하나만 두고 `api/` 라우터와 `agent/tools/`가 같은 함수를 각자 호출하는 방식으로 정리.
-- **`rules/`와의 관계**: `shared/functions/`가 쓰기 작업 전에 `rules/`의 validation을 거치므로, Agent가 `agent/tools/` → `shared/functions/` 경로로만 DB에 접근하는 한 상태 전이 invariant를 우회할 수 없음.
+- **`shared/`가 필요한 이유**: DB 함수가 API와 Agent 쪽에 중복되면 구현이 어긋날 수 있습니다. `shared/functions/`에 BE 구현을 하나만 두고 API 라우터와 각 Agent/Tool adapter가 재사용합니다.
+- 독립 Rule 엔진 디렉터리는 두지 않습니다. Input / State Transition / Output Guardrail의 정확한 코드 위치는 구현 착수 시 정하되, Agent가 우회할 수 없는 경로에 둡니다.
 
-### 4.3 Agent 내부 구조 (Supervisor + Sub-agent)
+### 4.3 Agent 내부 구조
 
-MVP 기준 Agent 구성은 **Supervisor + 정보분석 Agent + 지원금 Agent**(LLM 기반)이고, **행정지원**은 별도 LLM Agent가 아니라 **Rule 엔진**(코드)으로 처리합니다. "Agent" = 자체 tool 선택·재추론 루프 없는 LangGraph 노드 1개(bounded 파이프라인 스텝) — 상세 정의·다이어그램·역할 경계는 **`docs/architecture.md` §4**를 참고하세요(여기서 재서술하지 않음).
+Supervisor가 전역 호출·재호출·종료를 판단합니다. 정보분석·지원금 구성요소는 내부 bounded Local Loop를 가진 Agent-as-Tool이고, 절차조회·Review는 자체 루프가 없는 일반 Tool입니다. Review는 선택할 수 없는 필수 경로입니다. 상세 정의와 다이어그램은 **`docs/architecture.md`**를 참고하세요.
 
 ### 4.4 지원금 지식 흐름 (LLM Wiki + RAG)
 
-지원금 조회는 기본적으로 **Wiki 우선**이고, LLM/RAG는 Wiki miss·정보 업데이트 시에만 개입합니다. 상세 흐름도와 저장소 구조는 **`docs/architecture.md` §6**을 참고하세요(여기서 재서술하지 않음). 검증된 `support_item`에 없는 지원사업명·조건은 생성하지 않습니다(`/CLAUDE.md` 역할 경계 원칙).
+지원금 조회는 기본적으로 **Wiki 우선**이고, LLM/RAG는 Wiki miss·정보 업데이트 시에만 개입합니다. 상세 흐름도와 저장소 구조는 **`docs/architecture.md` §6**을 참고하세요(여기서 재서술하지 않음). 검증된 지원사업 항목에 없는 사업명·조건은 생성하지 않습니다(`/CLAUDE.md` 역할 경계 원칙).
 
 ### 4.5 문서 소유권
 
