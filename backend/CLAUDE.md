@@ -34,36 +34,32 @@ Redis는 이 확정 스택에 포함되어 있지 않습니다 — `config.py`/`
 
 ## Agent ↔ DB 연동 방식
 
-- Agent와 API 서버는 동일 DB를 공유한다.
-- Agent는 별도 데이터 레이어를 거치지 않고, DB 접근을 **함수 호출(tool/function-calling)** 형태로 수행한다.
-- 그 함수의 실제 구현은 `app/shared/functions/`에 하나만 두고, `app/api/` 라우터와 `app/agent/tools/`가 각자 같은 함수를 호출한다. API와 Agent에 구현이 따로 존재하지 않는다.
+- Agent와 API 서버는 같은 DB를 사용하지만 Agent가 SQL·ORM을 직접 호출하지 않는다.
+- DB 접근 함수와 API는 BE가 구현하고, AI는 필요한 Agent Tool·입출력 schema를 정의해 해당 함수를 호출한다.
+- DB 함수의 실제 구현은 `app/shared/functions/`에 하나만 두고, `app/api/` 라우터와 Agent Tool adapter가 같은 함수를 재사용한다.
 
 ## 디렉토리 역할
 
 - `app/shared/` — BE와 Agent가 공동으로 쓰는 영역
   - `db.py` — DB 세션/커넥션 (SQLAlchemy Engine + pymysql, MySQL 접속)
   - `models/` — Case, SupportItem 등 도메인 모델(테이블 정의)
-  - `schemas/` — Pydantic 스키마 (API 응답 ↔ Agent tool 입출력 공용)
-  - `functions/` — DB 접근 함수 본체. Hero Loop에 필요한 최소 함수(시그니처는 확정 아님, 구현 시 이름 그대로 사용 권장):
-    ```python
-    def create_case(owner_id: int, initial_facts: dict) -> Case: ...
-    def get_case(case_id: int, requester_id: int) -> Case: ...  # requester_id != case.member_id면 조회 거부(개인정보 invariant)
-    def apply_fact_candidates(case_id: int, expected_version: int, facts: list[FactCandidate]) -> ValidationResult: ...
-    def confirm_conflict(case_id: int, expected_version: int, confirmed_changes: list[dict]) -> ValidationResult: ...
-    ```
+  - `schemas/` — BE API·DB 경계의 Pydantic 스키마. Agent 내부 입출력 스키마는 AI가 정의하고, BE 연동 DTO만 합의 후 공유
+  - `functions/` — DB 접근 함수 본체. Case 생성, 소유권 조건을 포함한 조회, 확인된 변경 후보 반영, 충돌 확인 기능이 필요합니다. 함수명·인자·동시성 제어와 트랜잭션 경계는 BE 계약에서 확정합니다.
 - `app/api/` — API 라우터 (`shared/functions` 호출)
-- `app/agent/` — LangChain/LangGraph 에이전트. MVP 구성은 **Supervisor + 정보분석 Agent + 지원금 Agent**(`docs/tech-stack.md` §4.3 참고). 행정지원은 여기 없고 `app/rules/`의 Rule 엔진으로 처리한다. **각 Agent 노드는 자체 tool-selection이나 재추론 루프 없이 단일 LLM 호출(또는 정해진 Wiki→RAG 순서)만 수행한다 — 상세 정의는 `docs/architecture.md` §4 참고.**
+- `app/agent/` — LangChain/LangGraph 런타임. **Supervisor가 전역 계획을 담당**하고 정보분석·지원금 Agent를 Agent-as-Tool로, 절차조회 Tool을 일반 Tool로 선택 호출한다. 모든 정상 초안은 Review Tool을 반드시 거친다(`docs/architecture.md`).
   - `graph.py`, `state.py` — 최상위 그래프/공유 상태 정의
-  - `supervisor/` — Rule 엔진·정보분석·지원금 Agent 결과를 종합해 Blocker 1개·Next Action 1개로 정리
-  - `info_agent/` — 정보분석 Agent: 사용자 입력을 사실 후보로 해석 (Case를 직접 갱신하지 않음)
-  - `support_agent/` — 지원금 Agent
+  - `supervisor/` — 호출 대상 선택, 결과 평가, Blocker 1개·Next Action 1개 결정, 재호출·종료 판단
+  - `info_agent/` — 정보분석 Agent-as-Tool. 자기 분석 범위의 bounded Local Loop만 허용
+  - `support_agent/` — 지원금 Agent-as-Tool. 근거 확보를 위한 bounded Local Loop만 허용
     - `wiki/` — LLM Wiki(Obsidian) 조회 (Wiki 우선 경로)
     - `rag/` — Wiki miss·업데이트 시 RAG (`docs/tech-stack.md` §4.4 참고)
     - `tools/`, `prompts/`
+  - `procedure_tool/` — 정형 절차 데이터 조회 Tool. 우선순위와 Next Action을 결정하지 않음
+  - `review_tool/` — 제공된 초안·Evidence만 독립 검토하는 필수 Tool. 검색·직접 수정·자체 루프 없음
   - `llm.py`, `tracing.py` — OpenAI 클라이언트, Langfuse 연동
-- `app/rules/` — Case 상태 전이 validation, 절차 적용조건 등 시스템 invariant를 코드로 강제하는 영역. **행정지원(신고·말소 등 정형 절차)도 여기서 Rule 엔진으로 처리하며 LLM Agent로 만들지 않는다.** `shared/functions`가 쓰기 작업 전에 호출하므로 Agent가 이 검증을 우회할 수 없다.
+- 독립된 `app/rules/` Rule 엔진은 두지 않는다. 입력·상태 전이·출력의 결정 가능한 제약은 코드 Guardrail로, 절차 정보 조회는 절차조회 Tool로 분리한다.
 
 ## Case / 검증 규칙
 
-- 상태 전이 유효성, 선행조건은 이 레이어(코드)에서 검증하며 LLM에 위임하지 않는다. (루트 CLAUDE.md "역할 경계" 참고)
+- 상태 전이 유효성과 충돌 자동 덮어쓰기 방지는 코드로 강제한다. 절차 후보와 조건은 절차조회 Tool이 반환하고 최종 순서는 Supervisor가 판단한다.
 - API naming, Case validation 세부 규칙은 추가 예정
