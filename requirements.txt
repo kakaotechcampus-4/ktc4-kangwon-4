@@ -1,0 +1,4 @@
+# 루트 config.py 하나만 돌리기 위한 최소 의존성입니다 (pip install -r requirements.txt).
+# 실제 백엔드 앱의 의존성/버전 고정은 backend/pyproject.toml + uv가 담당하며, 여기서 관리하지 않습니다.
+pydantic-settings>=2.5,<3
+python-dotenv>=1.0,<2

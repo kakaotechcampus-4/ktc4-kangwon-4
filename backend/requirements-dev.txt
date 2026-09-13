@@ -1,0 +1,4 @@
+# 테스트 전용 (BE기술스택.html §6 기준). httpx(TestClient)와 unittest.mock은
+# requirements.txt/표준 라이브러리에 이미 있어 여기 추가하지 않는다.
+pytest==9.1.1
+testcontainers[mysql]==4.15.0

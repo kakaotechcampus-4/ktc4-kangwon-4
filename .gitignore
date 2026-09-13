@@ -66,6 +66,13 @@ target/
 *.jar
 !gradle/wrapper/gradle-wrapper.jar
 
+# ── Agent 로컬 데이터 (Chroma 등, docs/architecture.md §6.1) ─
+# Chroma PersistentClient가 로컬에 만드는 벡터스토어 데이터 — 코드가 아니라 실행 산출물이라 커밋 대상 아님.
+# 실제 사용할 persist 경로 이름이 다르면 이 목록에 추가하세요.
+chroma_db/
+.chroma/
+langfuse_data/
+
 # ── 기타 ────────────────────────────────────────────
 *.sqlite3
 *.db
