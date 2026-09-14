@@ -23,7 +23,9 @@ const MOCKS: Record<string, CurrentCaseView> = {
 
 export function CurrentCasePage() {
   const { search } = useLocation()
-  const { facts, blocker, nextAction }: CurrentCaseView = MOCKS[readMockKey(search)] ?? normalCase
+  const mockKey = readMockKey(search)
+  const view: CurrentCaseView = Object.hasOwn(MOCKS, mockKey) ? MOCKS[mockKey] : normalCase
+  const { facts, blocker, nextAction } = view
 
   const confirmed = facts.filter((fact) => fact.status === 'CONFIRMED')
   const pending = facts.filter((fact) => fact.status !== 'CONFIRMED')
