@@ -36,6 +36,8 @@ export function ResultInputForm({ value, onChange, onSubmit, disabled }: ResultI
         value={value}
         disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
+        // TODO(UX): 이 예시는 철거 상황을 가정하고 있다. 세무·지원 등 다른 Next Action
+        // 뒤에 오는 사용자에게도 같은 문구가 뜨므로, ① 화면까지 만든 뒤 일반 문구로 바꾼다.
         placeholder="예: 임대인이 철거해야 한다고 했어요."
         className="mt-4 w-full resize-none rounded-xl border border-gray-300 p-3.5 text-base leading-relaxed text-gray-900 placeholder:text-gray-400 focus:border-gray-900 focus:outline-none disabled:bg-gray-50 disabled:text-gray-500"
       />
