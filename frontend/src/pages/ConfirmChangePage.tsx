@@ -37,6 +37,8 @@ export function ConfirmChangePage() {
 
     // TODO(API): POST /cases/{caseId}/results/confirm 으로 선택값을 보낸다.
     // 요청 형태는 confirmedChanges: [{ field, value }] 배열이다.
+    // 그때 AbortController로 화면 이탈도 처리한다 — 지금은 기다리다 뒤로 가도
+    // 응답이 오면 화면이 /replan 으로 끌려간다.
     // 실패 시 대기 상태에서 빠져나올 경로도 그때 함께 만든다 — 지금은 Mock이라
     // 실패하지 않지만, fetch로 바꾸면 오류가 나도 화면이 잠긴 채로 남는다.
     const replan = await simulateConfirm(choices)

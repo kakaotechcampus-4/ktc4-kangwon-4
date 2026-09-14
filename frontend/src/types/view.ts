@@ -89,6 +89,9 @@ export interface ResultInputView {
  * 서버 응답 중 **화면을 옮기지 않는 것들**만 여기 온다. `UPDATED`·`NO_CHANGE`는
  * ⑤로, `CONFLICT`는 ④로 가므로 이 목록에 없다.
  *
+ * `CASE_NOT_FOUND`는 여기 없다. 404라서 화면 상태가 아니라 통신 층에서 다룰 것이다.
+ * TODO(API): fetch를 붙일 때 그 경로를 어디서 받을지 정한다.
+ *
  * 서버의 `result` 값을 그대로 쓰지 않고 화면 상태로 다시 이름 붙인 것은,
  * `PENDING`처럼 서버에 없는 상태가 섞이기 때문이다. 변환은 어댑터가 맡는다.
  */

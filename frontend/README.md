@@ -41,7 +41,7 @@ Mobile-first 반응형, 기준 폭 375px.
 | `/confirm` | 충돌 확인 | 기존 기록과 어긋날 때만 들른다 |
 | `/replan` | 재계획 결과 | 무엇이 바뀌었고 다음은 무엇인가 |
 
-`/confirm`과 `/replan`은 이전 화면에서 라우터 state로 데이터를 받습니다. 주소로 직접 열면
+`/results`·`/confirm`·`/replan`은 이전 화면에서 라우터 state로 데이터를 받습니다. 주소로 직접 열면
 개발·Preview에서는 Mock으로, 그 외에는 `/`로 이동합니다.
 
 ## npm script
@@ -81,9 +81,17 @@ Preview 배포에서는 URL 쿼리로 예외 화면을 확인할 수 있습니�
 Preview 환경에만 설정하기 때문이며, Production에서는 항상 정상 화면만 나옵니다.
 
 ```
-?mock=no-blocker      막고 있는 것 없음
-?mock=insufficient    정보 부족
+/?mock=no-blocker           막고 있는 것 없음
+/?mock=insufficient         정보 부족
+/results?mock=conflict      제출하면 충돌 확인으로
+/results?mock=more-info     추가 질문
+/results?mock=invalid       정정 요청
+/results?mock=failed        재시도 안내
+/replan?mock=no-change      바뀐 것 없음
 ```
+
+`/` 에서 붙인 `?mock=` 은 "결과 알려주기"를 눌러도 이어집니다. `/?mock=conflict` 로 들어가면
+클릭만으로 충돌 흐름 끝까지 볼 수 있습니다.
 
 | 환경 | URL |
 |---|---|
