@@ -3,10 +3,11 @@
 > 상태: **v0.3 — AI standalone 실행 구현 완료 / BE 계약 합의 전**
 > 기준일: 2026-09-15
 > 기준 구조: `docs/architecture.md`의 Supervisor Global Loop, 정보분석/지원금 Local Loop, 절차조회 Tool, 필수 Review Tool
+> 문서 분리: Agent 독립 실행 조건은 [`agent-standalone-runtime-requirements.md`](./agent-standalone-runtime-requirements.md), BE 구현·회신 요구사항은 [`be-agent-integration-requirements.md`](./be-agent-integration-requirements.md)를 따릅니다.
 
 이 문서는 Agent 런타임과 BE 사이, Supervisor와 하위 Agent/Tool 사이의 데이터 계약을 먼저 합의하기 위한 문서입니다. AI 소유 범위의 standalone Pydantic 모델과 실행 Graph는 구현되어 있으나, BE adapter·인증/소유권 확인·DB migration·저장 API는 아직 구현되지 않았습니다. 현재 구현 범위와 목표 BE 계약의 차이는 §18에 정리합니다.
 
-역할과 호출 방향은 `docs/architecture.md`가 기준입니다. 합의 전까지 `docs/interface-spec.md` §11의 기존 예시와 이 문서 모두 구현 확정본이 아닙니다.
+역할과 호출 방향은 `docs/architecture.md`가 기준입니다. 현재 standalone 실행의 최종 권한은 `backend/app/agent/schemas.py`와 자동 테스트에 있습니다. 이 문서에서 **현재 구현**으로 표시한 항목은 실행 계약이고, **목표 BE 계약**으로 표시한 항목은 AI/BE 공동 승인 전 제안입니다. `docs/interface-spec.md` §11의 기존 Agent 예시는 deprecated이며 구현 기준으로 사용하지 않습니다.
 
 ## 1. 먼저 합의할 결론
 
@@ -28,8 +29,8 @@
 ```text
 FastAPI / PlanningCoordinator (코드)
   1. Input Guardrail + 인증/소유권 확인
-  2. CaseSnapshot 생성
-  3. Agent Graph 실행
+  2. SharedCaseSnapshotDTO 조립 → AI adapter의 CaseSnapshot 검증
+  3. shared 실행 context로 Agent Graph 실행
        Supervisor
          ├─ 정보분석 Agent-as-Tool
          ├─ 지원금 Agent-as-Tool
@@ -38,15 +39,15 @@ FastAPI / PlanningCoordinator (코드)
   4. Review PASS 결과와 ReviewSubject digest 검증
   5. Output Guardrail
   6. State Transition Guardrail — 변경 후보 전체를 승인하거나 전체 거부
-  7. BE shared/functions로만 저장
+  7. BE shared/functions와 ADR로 합의한 atomic boundary로만 저장
   8. 외부 HTTP 응답으로 변환
 ```
 
 Supervisor나 Agent Graph가 DB 저장 Tool을 호출하지 않습니다. Graph는 `AgentRunOutcome`을 `PlanningCoordinator`에 반환하고, Coordinator가 코드 Guardrail과 transaction을 소유합니다.
 
-### 목표 BE 호출 계약 (adapter 미구현)
+### 목표 shared/내부 호출 계약 (adapter 미구현)
 
-현재 standalone 공개 진입점은 envelope 없이 `AgentGraph.run(SupervisorRunInput, trace_id=None) -> AgentRunOutcome`이며, 하위 구성요소도 payload/result 또는 안전한 예외를 직접 주고받습니다. 아래 표의 `ComponentRequest`/`ComponentResult`와 `PlanningCoordinator`는 BE 통합 시 구현할 목표 경계이지 현재 호출 형태가 아닙니다.
+현재 standalone 공개 진입점은 envelope 없이 `AgentGraph.run(SupervisorRunInput, trace_id=None) -> AgentRunOutcome`이며, 하위 구성요소도 payload/result 또는 안전한 예외를 직접 주고받습니다. 아래 표에서 PlanningCoordinator→Graph와 PlanningCoordinator→저장 함수만 BE/shared 경계입니다. Supervisor→하위 Agent/Tool envelope는 AI 내부 목표 계약이며 BE HTTP API나 BE 구현 산출물이 아닙니다.
 
 | 호출자 | 수신자 | 입력 payload | 출력 payload |
 |---|---|---|---|
@@ -83,12 +84,12 @@ Supervisor나 Agent Graph가 DB 저장 Tool을 호출하지 않습니다. Graph�
 | `case_version` | positive integer | DB/BE | X |
 | `snapshot_id` | UUID | PlanningCoordinator | X |
 | `run_id` | UUID | PlanningCoordinator | X |
-| `call_id` | UUID | Agent runtime | X |
+| `call_id` | UUID | top-level Graph 호출은 PlanningCoordinator, 내부 구성요소 호출은 Agent runtime | X |
 | `input_event_id` | opaque string | BE | X |
 | `candidate_id` | UUID | 구조화 출력 검증 후 runtime | X |
 | `draft_id` | UUID | Supervisor output 검증 후 runtime | X |
 | `review_subject_id` | UUID | runtime | X |
-| `evidence_id` | opaque string | BE 또는 신뢰된 read-only resolver | X |
+| `evidence_id` | opaque string | BE 또는 승인된 ingestion pipeline; BE가 저장·복원 | X |
 | `conflict_ref` | opaque string | BE. 저장 ID 또는 서명된 token | X |
 | `procedure_step_id` | positive integer | DB/BE master | X |
 | `support_program_id` | positive integer | DB/BE catalog | X |
@@ -101,7 +102,7 @@ LLM은 의미 필드만 구조화해서 반환합니다. ID, 시각, digest, 출
 
 ## 4. 공통 실행 envelope
 
-이 절의 `ComponentRequest[T]`와 `ComponentResult[T]`는 목표 BE adapter 계약입니다. standalone 런타임에는 아직 이 envelope adapter가 없으며, 런타임이 생성한 `InvocationMeta`는 Review provenance와 내부 실행 경계에서 사용합니다.
+이 절의 `ComponentRequest[T]`와 `ComponentResult[T]`는 목표 typed envelope입니다. PlanningCoordinator→Graph envelope만 BE/shared 계약이고, Supervisor→하위 구성요소 envelope는 AI 내부 계약입니다. standalone 런타임에는 아직 이 adapter가 없으며, 런타임이 생성한 `InvocationMeta`는 Review provenance와 내부 실행 경계에서 사용합니다.
 
 ### `InvocationMeta`
 
@@ -243,7 +244,7 @@ runtime은 `target_path`가 `ReviewSubject.supervisor_draft` 안의 사용자 �
 ### 개인정보와 trace
 
 - `redacted_text`, span text, Evidence excerpt, 이유·질문 문구는 기본 `no_trace` 대상입니다.
-- Langfuse에는 run/call ID, component, latency, token, status, digest만 기본 기록합니다.
+- 향후 Langfuse adapter에는 run/call ID, component, latency, prompt/completion token **개수**, status, digest만 허용합니다. 현재 Graph는 model/token count를 수집하지 않고 `NullTraceSink` 또는 metadata-only test sink만 사용합니다.
 - 모델에 전달한 Evidence ID와 시각은 감사 이력으로 남기되 원문은 기록하지 않습니다.
 - Output Guardrail은 모든 자유 문자열의 개인정보 유출을 검사하고 탐지 시 전체 거부합니다. Review 뒤 문자열을 마스킹·재작성하지 않습니다.
 
@@ -477,11 +478,11 @@ runtime이 하위 결과와 다른 값으로 mutation을 재작성하는 것은 
 
 `CONFLICT_CONFIRMED`는 클라이언트가 임의로 붙이는 source type이 아닙니다. BE가 유효한 `conflict_ref`, 현재 값/version, 확인 event를 검증한 뒤에만 Supervisor 입력을 만듭니다.
 
-정보분석 모델은 `conflict_ref`나 digest를 만들지 않습니다. 모델의 fact candidate를 구조화 검증한 뒤 PlanningCoordinator의 deterministic conflict resolver가 snapshot과 비교하고, 충돌이면 candidate를 이 타입으로 변환한 다음 서명 token 또는 pending row 방식으로 `conflict_ref`를 발급합니다.
+정보분석 모델은 `conflict_ref`나 digest를 만들지 않습니다. 현재 standalone runtime은 구조화 검증 뒤 simulation 전용 `standalone:` ref를 만듭니다. 생산 방식은 P0 결정 사항으로, ref 없는 충돌을 Coordinator가 pending row/서명 token에 결합하거나 BE-backed `ConflictRefFactory`를 runtime에 주입하는 방법 중 하나를 합의해야 합니다. 어느 방식이든 BE는 소유권·snapshot/version·digest에 결합된 ref만 저장·복원합니다.
 
 ## 7. `CaseSnapshot`
 
-BE가 인증·소유권 확인 후 만드는 읽기 전용 snapshot입니다.
+BE가 인증·소유권 확인 후 한 읽기 시점에 만든 `SharedCaseSnapshotDTO`를 AI adapter가 아래 목표 필드로 변환·strict 검증한 읽기 전용 snapshot입니다. adapter는 누락값이나 Evidence를 합성할 수 없습니다. 두 DTO를 같은 코드 생성 schema로 통일하기로 공동 승인하면 별도 변환 없이 동일 shape를 사용할 수 있습니다.
 
 | 필드 | 타입 | 필수 | 설명 |
 |---|---|---:|---|
@@ -1048,9 +1049,10 @@ runtime은 Review의 `ComponentSuccess.meta`가 subject의 run/case 및 요청 c
 | `snapshot_id` | UUID | O | 충돌 기준 |
 | `case_version` | positive integer \| null | O | 동시성 버전 |
 | `conflicts` | `ConflictCandidate[]` (min 1) | O | 구조화 충돌 |
+| `evidence_records` | `EvidenceRecord[]` | O | 모든 conflict `source_evidence_refs`를 해석하는 닫힌 최소 집합 |
 | `message_code` | literal `CONFIRM_CONFLICT` | O | BE 고정 문구 key |
 
-LLM이 만든 자유 문장은 넣지 않습니다. 충돌 안내를 새로 생성해야 한다면 `NeedsMoreInfoDecisionDraft`로 만들어 Review를 거칩니다.
+모든 conflict Evidence ref는 trigger/snapshot 또는 이 `evidence_records`에서 해석되어야 하며 같은 ID의 내용 충돌을 거부합니다. LLM이 만든 자유 문장은 넣지 않습니다. 충돌 안내를 새로 생성해야 한다면 `NeedsMoreInfoDecisionDraft`로 만들어 Review를 거칩니다.
 
 ### `NoChangeOutcome`
 
@@ -1311,9 +1313,9 @@ PYTHONPATH=backend backend/.venv/bin/python -m pytest -q backend/tests/agent
 PYTHONPATH=backend backend/.venv/bin/python -m app.agent.cli --live --compact --trace-id local-smoke
 ```
 
-CLI는 임의의 실제 Case 입력을 받지 않고 repository의 합성 fixture만 사용합니다. `--live`는 필수이고 설정된 provider에 과금 가능한 실제 API 요청을 보내지만, BE API·DB·외부 저장소에는 쓰지 않습니다.
+CLI는 임의의 실제 Case 입력을 받지 않고 repository의 합성 fixture만 사용합니다. `--live`는 필수이고 설정된 chat provider에 과금 가능한 실제 API 요청을 보내지만, BE API·DB·지원사업 API·Wiki·RAG·S3에는 접근하지 않습니다.
 
-필수 환경변수 이름은 `CHAT_PROXY_URL`, `PROXY_TOKEN`, `OPENAI_MODEL`입니다. `CHAT_PROXY_URL`은 loopback 개발 서버를 제외하면 HTTPS여야 하고 credential/query/fragment를 포함할 수 없습니다. 연결 endpoint가 허용하는 모델명을 써야 하며 2026-09-15 최종 검증에도 `openai/gpt-4.1-mini`를 사용했습니다. 선택 설정은 `OPENAI_REASONING_EFFORT`, `AGENT_LLM_TIMEOUT_SECONDS`, `AGENT_LLM_MAX_RETRIES`, `AGENT_LLM_RETRY_BACKOFF_SECONDS`입니다. 토큰과 실제 endpoint 값은 문서·출력·trace에 남기지 않습니다.
+필수 환경변수 이름은 `CHAT_PROXY_URL`, `PROXY_TOKEN`, `OPENAI_MODEL`입니다. `CHAT_PROXY_URL`은 loopback 개발 서버를 제외하면 HTTPS여야 하고 credential/query/fragment를 포함할 수 없습니다. 연결 endpoint가 허용하는 모델명을 써야 하며 2026-09-15 최종 검증에도 `openai/gpt-4.1-mini`를 사용했습니다. 선택 설정은 `OPENAI_REASONING_EFFORT`, `AGENT_LLM_TIMEOUT_SECONDS`, `AGENT_LLM_MAX_RETRIES`, `AGENT_LLM_RETRY_BACKOFF_SECONDS`입니다. `PROXY_TOKEN`/API credential 값과 실제 endpoint는 문서·출력·trace에 남기지 않습니다. 현재 token count도 수집하지 않으며 향후 telemetry adapter에서도 집계 count만 허용합니다.
 
 2026-09-15 최종 검증 결과는 다음과 같습니다.
 
@@ -1336,6 +1338,7 @@ standalone 정상 실행은 아래 생산 연동 기능의 완료를 뜻하지 �
 - 현재 mutation은 목표 저장 계약의 절차 `execution_input_event_id`, `source_observation_id`, `source_observation_call_id`와 지원 `before_match`를 아직 포함하지 않습니다.
 - `PlanningCoordinator`, 인증/소유권, idempotency, version/CAS, Output Guardrail, State Transition Guardrail, transaction, DB 저장 함수는 미구현입니다.
 - standalone `conflict_ref`는 `standalone:<24-hex digest prefix>` 형식의 simulation 전용 값입니다. 저장하거나 `/results/confirm`에 전달할 수 없으며, BE가 발급·복원하는 reference와 confirmed-conflict round trip이 별도로 필요합니다.
+- 현재 `ConflictOutcome`은 Info Agent가 만든 `evidence_records`를 포함하지 않아 outcome 단독 Evidence closure가 성립하지 않습니다. 목표 production schema의 `evidence_records` 필드와 resolver 검증을 구현해야 합니다.
 - 현재 `FactCandidate`는 단일 모델+validator이고, 목표 BE 계약은 `SET | CLEAR` tagged union입니다.
 - provider semantic schema는 BE schema가 아니며 그대로 shared DTO로 사용하면 안 됩니다.
 - `CASE_FIELD_SPECS`는 standalone 임시 registry입니다. BE canonical enum/type과 합의 없이 확장하거나 production 판단에 사용하면 안 됩니다.
@@ -1417,12 +1420,12 @@ standalone 정상 실행은 아래 생산 연동 기능의 완료를 뜻하지 �
 
 P0 합의 뒤 BE shared 경계에 우선 필요한 schema는 다음과 같습니다.
 
-1. `CaseSnapshot`, `CaseFact`, `ProcedureProgress`, `SupportApplicationSummary`, `SupportMatchSummary`
-2. `EvidenceRecord`와 Evidence resolver 계약
-3. `SupervisorRunInput`, `ConfirmedConflictResolution`, `ProcedureProgressObservation`
+1. `SharedCaseSnapshotDTO`와 nested `CaseFact`, `ProcedureProgress`, `SupportApplicationSummary`, `SupportMatchSummary`
+2. `EvidenceRecord`와 Evidence 발급·저장·resolver 계약
+3. `RedactedInput`, `ComponentRequest[SupervisorRunInput]`, `ConfirmedConflictResolution`, `ProcedureProgressObservation`
 4. `ReviewSubject`, `ReviewProof`, `MutationSet`
 5. 목표 `AgentRunOutcome` 네 variant. 현재 standalone은 `REVIEWED_PLAN | CONFLICT | SAFE_FAILURE`만 구현하고 `NO_CHANGE`는 보류
 6. `OutputGuardrailProof`, `StateGuardrailProof`, `GuardrailRejection`, `ConcurrencyConflictDetail`, `PersistReviewedPlanCommand`, `PersistResult`
 7. 외부 API 결과와 `viewState`용 discriminated response DTO
 
-정보분석·지원금·절차조회·Review의 모델 출력 schema는 AI 영역에서 정의하되, BE shared DTO 경계를 임의 `dict`로 받지 않도록 함께 import 가능한 계약으로 확정합니다.
+정보분석·지원금·절차조회·Review의 provider/local 출력 schema는 AI 내부 영역입니다. BE는 이를 HTTP DTO로 만들 필요가 없으며, Coordinator→Graph와 Coordinator→Guardrail/persistence shared 경계만 임의 `dict`가 아닌 versioned 계약으로 확정합니다.
