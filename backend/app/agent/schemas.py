@@ -1,0 +1,2012 @@
+"""Strict Agent/Tool contracts for the standalone RE:BORN runtime.
+
+The models in this module are the executable, conservative subset of
+``docs/agent-tool-io-schema.md`` needed to execute one complete planning run.
+They deliberately keep BE persistence and HTTP response DTOs out of the Agent
+package.
+
+Values described as runtime-injected are never trusted when proposed by an
+LLM.  Callers must construct them after validating the semantic LLM payload.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+from datetime import date, datetime, timezone
+from enum import Enum
+from typing import Annotated, Any, Generic, Literal, TypeAlias, TypeVar
+from uuid import UUID
+
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictInt,
+    StrictStr,
+    StringConstraints,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
+
+
+class AgentSchema(BaseModel):
+    """Base contract: unknown fields and assignment-time corruption are errors."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        validate_assignment=True,
+        validate_default=True,
+    )
+
+
+NonEmptyStr = Annotated[StrictStr, Field(min_length=1)]
+UpperSnakeCode = Annotated[
+    StrictStr,
+    StringConstraints(pattern=r"^[A-Z][A-Z0-9_]*$", min_length=1),
+]
+JsonPointer = Annotated[
+    StrictStr,
+    StringConstraints(pattern=r"^(?:/(?:[^~/]|~[01])*)*$"),
+]
+Digest = Annotated[
+    StrictStr,
+    StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$"),
+]
+PositiveStrictInt = Annotated[StrictInt, Field(gt=0)]
+NonNegativeStrictInt = Annotated[StrictInt, Field(ge=0)]
+ConfidenceBps = Annotated[StrictInt, Field(ge=0, le=10_000)]
+RuntimeUUID = Annotated[
+    UUID,
+    Field(
+        description="Trusted runtime-generated value; an LLM must not generate it.",
+        json_schema_extra={"x-runtime-injected": True},
+    ),
+]
+RuntimeDateTime = Annotated[
+    AwareDatetime,
+    Field(
+        description="Trusted runtime/resolver timestamp; an LLM must not generate it.",
+        json_schema_extra={"x-runtime-injected": True},
+    ),
+]
+
+StrictScalar: TypeAlias = StrictStr | StrictInt | StrictBool | date | None
+NonNullStrictScalar: TypeAlias = StrictStr | StrictInt | StrictBool | date
+
+
+class StrEnum(str, Enum):
+    """String enum whose value is stable in JSON and prompts."""
+
+
+class Component(StrEnum):
+    SUPERVISOR = "SUPERVISOR"
+    INFO_AGENT = "INFO_AGENT"
+    SUPPORT_AGENT = "SUPPORT_AGENT"
+    PROCEDURE_TOOL = "PROCEDURE_TOOL"
+    REVIEW_TOOL = "REVIEW_TOOL"
+
+
+class FreshnessStatus(StrEnum):
+    CURRENT = "CURRENT"
+    STALE = "STALE"
+    UNKNOWN = "UNKNOWN"
+
+
+class CaseFieldKey(StrEnum):
+    BUSINESS_TYPE = "business_type"
+    FRANCHISE_STATUS = "franchise_status"
+    EMPLOYEE_COUNT = "employee_count"
+    LEASE_STATUS = "lease_status"
+    ENTITY_TYPE = "entity_type"
+    BUILDING_USE_TYPE = "building_use_type"
+    PREVIOUS_SUPPORT_HISTORY = "previous_support_history"
+    RESTORATION_STATUS = "restoration_status"
+    RESTORATION_SCOPE = "restoration_scope"
+    RESTORATION_SCOPE_DETAIL = "restoration_scope_detail"
+    DEMOLITION_REQUIRED = "demolition_required"
+    PLANNED_CLOSURE_DATE = "planned_closure_date"
+
+
+class FactValueType(StrEnum):
+    STRING = "STRING"
+    INTEGER = "INTEGER"
+    BOOLEAN = "BOOLEAN"
+    DATE = "DATE"
+    ENUM = "ENUM"
+
+
+class FactStatus(StrEnum):
+    CONFIRMED = "CONFIRMED"
+    UNKNOWN = "UNKNOWN"
+
+
+class FactOperation(StrEnum):
+    SET = "SET"
+    CLEAR = "CLEAR"
+
+
+class CaseStatus(StrEnum):
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
+
+
+class ProcedureProgressStatus(StrEnum):
+    NOT_STARTED = "NOT_STARTED"
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
+
+
+class SupportMatchStatus(StrEnum):
+    POSSIBLY_RELEVANT = "POSSIBLY_RELEVANT"
+    NEEDS_CONFIRMATION = "NEEDS_CONFIRMATION"
+    NOT_RELEVANT = "NOT_RELEVANT"
+    STALE = "STALE"
+    UNVERIFIABLE = "UNVERIFIABLE"
+
+
+class EvidenceSourceType(StrEnum):
+    USER_INPUT = "USER_INPUT"
+    EXPERT_CONFIRMATION = "EXPERT_CONFIRMATION"
+    PROCEDURE_MASTER = "PROCEDURE_MASTER"
+    REVIEWED_WIKI = "REVIEWED_WIKI"
+    OFFICIAL_DOCUMENT = "OFFICIAL_DOCUMENT"
+    OFFICIAL_API = "OFFICIAL_API"
+    CALCULATION_RESULT = "CALCULATION_RESULT"
+    SYSTEM_RECORD = "SYSTEM_RECORD"
+
+
+# This catalog is intentionally local to the standalone Agent.  The unresolved
+# BE/API enum mismatch remains a boundary decision.  Expanding these values must
+# be an explicit contract change; free-form text never passes an ENUM field.
+CASE_FIELD_SPECS: dict[CaseFieldKey, tuple[FactValueType, frozenset[str] | None]] = {
+    CaseFieldKey.BUSINESS_TYPE: (FactValueType.STRING, None),
+    CaseFieldKey.FRANCHISE_STATUS: (FactValueType.BOOLEAN, None),
+    CaseFieldKey.EMPLOYEE_COUNT: (FactValueType.INTEGER, None),
+    CaseFieldKey.LEASE_STATUS: (
+        FactValueType.ENUM,
+        frozenset({"ACTIVE", "TERMINATION_NOTIFIED", "TERMINATED", "OWNED"}),
+    ),
+    CaseFieldKey.ENTITY_TYPE: (
+        FactValueType.ENUM,
+        frozenset({"SOLE_PROPRIETOR", "CORPORATION"}),
+    ),
+    CaseFieldKey.BUILDING_USE_TYPE: (
+        FactValueType.ENUM,
+        frozenset({"NEIGHBORHOOD_LIVING", "OTHER"}),
+    ),
+    CaseFieldKey.PREVIOUS_SUPPORT_HISTORY: (
+        FactValueType.ENUM,
+        frozenset({"NONE", "RECEIVED"}),
+    ),
+    CaseFieldKey.RESTORATION_STATUS: (
+        FactValueType.ENUM,
+        frozenset({"NOT_STARTED", "IN_PROGRESS", "COMPLETED"}),
+    ),
+    CaseFieldKey.RESTORATION_SCOPE: (
+        FactValueType.ENUM,
+        frozenset(
+            {
+                "AGREEMENT_REQUIRED",
+                "TENANT_ALL",
+                "LANDLORD_ALL",
+                "SHARED",
+                "NOT_REQUIRED",
+            }
+        ),
+    ),
+    CaseFieldKey.RESTORATION_SCOPE_DETAIL: (FactValueType.STRING, None),
+    CaseFieldKey.DEMOLITION_REQUIRED: (
+        FactValueType.ENUM,
+        frozenset({"REQUIRED", "NOT_REQUIRED"}),
+    ),
+    CaseFieldKey.PLANNED_CLOSURE_DATE: (FactValueType.DATE, None),
+}
+
+SIMULATION_CONFLICT_REF_PREFIX = "standalone:"
+
+
+def validate_case_field_value(
+    field_path: CaseFieldKey,
+    value_type: FactValueType,
+    value: StrictScalar,
+    *,
+    allow_null: bool,
+) -> None:
+    """Validate a fact against the standalone canonical field registry.
+
+    ``UNKNOWN`` is represented by the surrounding status and a null value.  It
+    is never accepted as a confirmed enum value.
+    """
+
+    expected_type, allowed_values = CASE_FIELD_SPECS[field_path]
+    if value_type != expected_type:
+        raise ValueError(
+            f"{field_path.value} requires value_type={expected_type.value}"
+        )
+    if value is None:
+        if allow_null:
+            return
+        raise ValueError(f"{field_path.value} requires a non-null value")
+
+    if expected_type == FactValueType.BOOLEAN:
+        valid = type(value) is bool
+    elif expected_type == FactValueType.INTEGER:
+        valid = type(value) is int and value >= 0
+    elif expected_type == FactValueType.DATE:
+        valid = (type(value) is date) or (
+            type(value) is str
+            and re.fullmatch(r"\d{4}-\d{2}-\d{2}", value) is not None
+            and _is_iso_date(value)
+        )
+    else:
+        valid = type(value) is str and bool(value.strip())
+
+    if not valid:
+        raise ValueError(
+            f"{field_path.value} value does not match {expected_type.value}"
+        )
+    if allowed_values is not None and value not in allowed_values:
+        allowed = ", ".join(sorted(allowed_values))
+        raise ValueError(f"{field_path.value} must be one of: {allowed}")
+
+
+def _is_iso_date(value: str) -> bool:
+    try:
+        date.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
+
+
+def _ensure_unique(values: list[Any], key: Any, label: str) -> None:
+    seen: set[Any] = set()
+    for value in values:
+        item_key = key(value)
+        if item_key in seen:
+            raise ValueError(f"duplicate {label}: {item_key}")
+        seen.add(item_key)
+
+
+class InvocationMeta(AgentSchema):
+    schema_version: Literal["agent-io/1.0"]
+    run_id: RuntimeUUID
+    call_id: RuntimeUUID
+    parent_call_id: RuntimeUUID | None
+    case_id: PositiveStrictInt
+    component: Component
+    attempt: PositiveStrictInt
+    requested_at: RuntimeDateTime
+    trace_id: NonEmptyStr | None
+
+
+T = TypeVar("T")
+
+
+class ComponentRequest(AgentSchema, Generic[T]):
+    meta: InvocationMeta
+    input: T
+
+
+class ComponentWarning(AgentSchema):
+    code: UpperSnakeCode
+    message: NonEmptyStr
+    target_path: JsonPointer | None
+
+
+class ComponentErrorCode(StrEnum):
+    INVALID_INPUT = "INVALID_INPUT"
+    SCHEMA_VALIDATION_FAILED = "SCHEMA_VALIDATION_FAILED"
+    SNAPSHOT_UNAVAILABLE = "SNAPSHOT_UNAVAILABLE"
+    SOURCE_UNAVAILABLE = "SOURCE_UNAVAILABLE"
+    TIMEOUT = "TIMEOUT"
+    RATE_LIMITED = "RATE_LIMITED"
+    UPSTREAM_ERROR = "UPSTREAM_ERROR"
+    LOOP_LIMIT_REACHED = "LOOP_LIMIT_REACHED"
+    INTERNAL_ERROR = "INTERNAL_ERROR"
+
+
+class ComponentError(AgentSchema):
+    code: ComponentErrorCode
+    message_code: UpperSnakeCode
+    retryable: StrictBool
+    failed_dependency: NonEmptyStr | None
+    retry_after_ms: NonNegativeStrictInt | None
+
+
+class ComponentSuccess(AgentSchema, Generic[T]):
+    execution_status: Literal["SUCCESS"]
+    meta: InvocationMeta
+    output: T
+    warnings: list[ComponentWarning]
+
+
+class ComponentFailure(AgentSchema):
+    execution_status: Literal["ERROR"]
+    meta: InvocationMeta
+    error: ComponentError
+
+
+class EvidenceRecord(AgentSchema):
+    evidence_id: NonEmptyStr
+    source_type: EvidenceSourceType
+    source_ref: NonEmptyStr
+    source_version: NonEmptyStr | None
+    locator: NonEmptyStr
+    excerpt: NonEmptyStr
+    parent_evidence_refs: list[NonEmptyStr]
+    published_at: AwareDatetime | None
+    retrieved_at: RuntimeDateTime
+    freshness_status: FreshnessStatus
+    content_hash: Digest | None
+
+    @model_validator(mode="after")
+    def validate_lineage(self) -> EvidenceRecord:
+        if self.evidence_id in self.parent_evidence_refs:
+            raise ValueError("evidence cannot be its own parent")
+        if len(set(self.parent_evidence_refs)) != len(self.parent_evidence_refs):
+            raise ValueError("parent_evidence_refs must be unique")
+        return self
+
+
+class ProcedureStepRef(AgentSchema):
+    procedure_step_id: PositiveStrictInt
+    step_code: UpperSnakeCode
+
+
+class SupportProgramRef(AgentSchema):
+    support_program_id: PositiveStrictInt
+    wiki_uuid: UUID
+
+
+class CaseFact(AgentSchema):
+    field_path: CaseFieldKey
+    value_type: FactValueType
+    value: StrictScalar
+    status: FactStatus
+    evidence_refs: list[NonEmptyStr]
+    updated_at: AwareDatetime | None
+
+    @model_validator(mode="after")
+    def validate_fact_state(self) -> CaseFact:
+        if self.status == FactStatus.UNKNOWN:
+            if self.value is not None:
+                raise ValueError("UNKNOWN fact must have value=null")
+            if self.evidence_refs:
+                raise ValueError("UNKNOWN fact must not claim confirming evidence")
+        else:
+            if self.value is None:
+                raise ValueError("CONFIRMED fact requires a value")
+            if not self.evidence_refs:
+                raise ValueError("CONFIRMED fact requires evidence")
+        validate_case_field_value(
+            self.field_path,
+            self.value_type,
+            self.value,
+            allow_null=self.status == FactStatus.UNKNOWN,
+        )
+        return self
+
+
+class ProcedureProgress(AgentSchema):
+    procedure_step: ProcedureStepRef
+    status: ProcedureProgressStatus
+    evidence_refs: list[NonEmptyStr]
+    updated_at: AwareDatetime
+
+    @model_validator(mode="after")
+    def completed_requires_evidence(self) -> ProcedureProgress:
+        if self.status == ProcedureProgressStatus.COMPLETED and not self.evidence_refs:
+            raise ValueError("COMPLETED procedure progress requires evidence")
+        return self
+
+
+class CaseSnapshot(AgentSchema):
+    snapshot_id: RuntimeUUID
+    case_id: PositiveStrictInt
+    case_version: PositiveStrictInt | None
+    case_status: CaseStatus
+    facts: list[CaseFact]
+    procedure_progress: list[ProcedureProgress]
+    evidence_records: list[EvidenceRecord]
+    captured_at: RuntimeDateTime
+
+    @model_validator(mode="after")
+    def validate_snapshot_integrity(self) -> CaseSnapshot:
+        _ensure_unique(self.facts, lambda item: item.field_path, "fact field_path")
+        _ensure_unique(
+            self.procedure_progress,
+            lambda item: item.procedure_step.procedure_step_id,
+            "procedure_step_id",
+        )
+        _ensure_unique(
+            self.evidence_records, lambda item: item.evidence_id, "evidence_id"
+        )
+        known_evidence = {item.evidence_id for item in self.evidence_records}
+        referenced = {
+            evidence_ref for fact in self.facts for evidence_ref in fact.evidence_refs
+        } | {
+            evidence_ref
+            for progress in self.procedure_progress
+            for evidence_ref in progress.evidence_refs
+        }
+        missing = referenced - known_evidence
+        if missing:
+            raise ValueError(
+                "snapshot contains unresolved evidence refs: "
+                + ", ".join(sorted(missing))
+            )
+        return self
+
+
+class RedactionType(StrEnum):
+    ADDRESS = "ADDRESS"
+    NATIONAL_ID = "NATIONAL_ID"
+    ACCOUNT = "ACCOUNT"
+    TOKEN = "TOKEN"
+    OTHER = "OTHER"
+
+
+class Redaction(AgentSchema):
+    type: RedactionType
+    placeholder: NonEmptyStr
+    start_offset: NonNegativeStrictInt
+    end_offset: PositiveStrictInt
+
+    @model_validator(mode="after")
+    def validate_offsets(self) -> Redaction:
+        if self.end_offset <= self.start_offset:
+            raise ValueError("end_offset must be greater than start_offset")
+        return self
+
+
+class InputSourceType(StrEnum):
+    USER_INPUT = "USER_INPUT"
+    EXPERT_CONFIRMATION = "EXPERT_CONFIRMATION"
+
+
+class RedactedInput(AgentSchema):
+    input_event_id: NonEmptyStr
+    source_type: InputSourceType
+    redacted_text: NonEmptyStr
+    redactions: list[Redaction]
+    submitted_at: AwareDatetime
+
+    @model_validator(mode="after")
+    def validate_redactions(self) -> RedactedInput:
+        text_length = len(self.redacted_text)
+        previous_end = 0
+        for redaction in sorted(self.redactions, key=lambda item: item.start_offset):
+            if redaction.start_offset < previous_end:
+                raise ValueError("redaction spans must not overlap")
+            if redaction.end_offset > text_length:
+                raise ValueError("redaction span is outside redacted_text")
+            if (
+                self.redacted_text[redaction.start_offset : redaction.end_offset]
+                != redaction.placeholder
+            ):
+                raise ValueError("redaction placeholder must match redacted_text span")
+            previous_end = redaction.end_offset
+        return self
+
+
+class VerifiedTextSpan(AgentSchema):
+    input_event_id: NonEmptyStr
+    text: NonEmptyStr
+    start_offset: NonNegativeStrictInt
+    end_offset: PositiveStrictInt
+
+    @model_validator(mode="after")
+    def validate_offsets(self) -> VerifiedTextSpan:
+        if self.end_offset <= self.start_offset:
+            raise ValueError("end_offset must be greater than start_offset")
+        if self.end_offset - self.start_offset != len(self.text):
+            raise ValueError("span offsets must match text length")
+        return self
+
+
+class FactCandidate(AgentSchema):
+    candidate_id: RuntimeUUID
+    operation: FactOperation
+    field_path: CaseFieldKey
+    value_type: FactValueType
+    value: StrictScalar
+    source_span: VerifiedTextSpan
+    source_evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
+    confidence_bps: ConfidenceBps
+    requires_confirmation: StrictBool
+    reason_summary: NonEmptyStr
+
+    @model_validator(mode="after")
+    def validate_candidate(self) -> FactCandidate:
+        is_clear = self.operation == FactOperation.CLEAR
+        if is_clear and self.value is not None:
+            raise ValueError("CLEAR fact candidate must have value=null")
+        if not is_clear and self.value is None:
+            raise ValueError("SET fact candidate requires a value")
+        validate_case_field_value(
+            self.field_path,
+            self.value_type,
+            self.value,
+            allow_null=is_clear,
+        )
+        return self
+
+
+class FactChangeSourceType(StrEnum):
+    INFO_ANALYSIS = "INFO_ANALYSIS"
+    CONFIRMED_CONFLICT = "CONFIRMED_CONFLICT"
+
+
+class FactChangeCandidate(AgentSchema):
+    candidate_id: RuntimeUUID
+    operation: FactOperation
+    source_fact_candidate_id: RuntimeUUID
+    source_type: FactChangeSourceType
+    field_path: CaseFieldKey
+    value_type: FactValueType
+    before_status: FactStatus
+    before_value: StrictScalar
+    proposed_status: FactStatus
+    proposed_value: StrictScalar
+    candidate_status: Literal["READY_FOR_REVIEW"]
+    reason_summary: NonEmptyStr
+    source_evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
+    source_call_id: RuntimeUUID | None
+    confirmed_conflict_ref: NonEmptyStr | None
+
+    @model_validator(mode="after")
+    def validate_change(self) -> FactChangeCandidate:
+        if self.before_status == FactStatus.UNKNOWN and self.before_value is not None:
+            raise ValueError("UNKNOWN before state must have value=null")
+        if self.before_status == FactStatus.CONFIRMED and self.before_value is None:
+            raise ValueError("CONFIRMED before state requires a value")
+        validate_case_field_value(
+            self.field_path,
+            self.value_type,
+            self.before_value,
+            allow_null=self.before_status == FactStatus.UNKNOWN,
+        )
+
+        if self.operation == FactOperation.SET:
+            if self.proposed_status != FactStatus.CONFIRMED:
+                raise ValueError("SET must propose CONFIRMED")
+            if self.proposed_value is None:
+                raise ValueError("SET requires a proposed value")
+        else:
+            if self.proposed_status != FactStatus.UNKNOWN:
+                raise ValueError("CLEAR must propose UNKNOWN")
+            if self.proposed_value is not None:
+                raise ValueError("CLEAR must propose value=null")
+        validate_case_field_value(
+            self.field_path,
+            self.value_type,
+            self.proposed_value,
+            allow_null=self.operation == FactOperation.CLEAR,
+        )
+
+        if self.source_type == FactChangeSourceType.INFO_ANALYSIS:
+            if self.source_call_id is None or self.confirmed_conflict_ref is not None:
+                raise ValueError("INFO_ANALYSIS requires source_call_id only")
+        elif self.source_call_id is not None or self.confirmed_conflict_ref is None:
+            raise ValueError("CONFIRMED_CONFLICT requires confirmed_conflict_ref only")
+        return self
+
+
+class PlanningContext(AgentSchema):
+    case_snapshot: CaseSnapshot
+    fact_overlays: list[FactChangeCandidate]
+
+    @model_validator(mode="after")
+    def validate_overlays(self) -> PlanningContext:
+        _ensure_unique(
+            self.fact_overlays, lambda item: item.candidate_id, "candidate_id"
+        )
+        _ensure_unique(
+            self.fact_overlays, lambda item: item.field_path, "overlay field_path"
+        )
+        return self
+
+
+class KnownProcedureStep(AgentSchema):
+    procedure_step: ProcedureStepRef
+    step_name: NonEmptyStr
+    utterance_aliases: list[NonEmptyStr]
+
+
+class InfoCompletionStatus(StrEnum):
+    COMPLETE = "COMPLETE"
+    NEEDS_USER_INPUT = "NEEDS_USER_INPUT"
+    PARTIAL = "PARTIAL"
+
+
+class MissingFieldBlock(StrEnum):
+    PROCEDURE_LOOKUP = "PROCEDURE_LOOKUP"
+    SUPPORT_ANALYSIS = "SUPPORT_ANALYSIS"
+    SUPERVISOR_DECISION = "SUPERVISOR_DECISION"
+
+
+class MissingField(AgentSchema):
+    field_path: CaseFieldKey
+    reason_summary: NonEmptyStr
+    blocks: Annotated[list[MissingFieldBlock], Field(min_length=1)]
+    question_candidate_id: RuntimeUUID | None
+
+
+class UncertaintyCode(StrEnum):
+    AMBIGUOUS_INPUT = "AMBIGUOUS_INPUT"
+    LOW_CONFIDENCE = "LOW_CONFIDENCE"
+    CONTEXT_MISSING = "CONTEXT_MISSING"
+    SOURCE_STALE = "SOURCE_STALE"
+    SOURCE_UNAVAILABLE = "SOURCE_UNAVAILABLE"
+
+
+class Uncertainty(AgentSchema):
+    code: UncertaintyCode
+    target_path: JsonPointer
+    reason_summary: NonEmptyStr
+    evidence_refs: list[NonEmptyStr]
+
+
+class QuestionCandidate(AgentSchema):
+    question_id: RuntimeUUID
+    text: NonEmptyStr
+    resolves_field_paths: Annotated[list[CaseFieldKey], Field(min_length=1)]
+    reason_summary: NonEmptyStr
+
+
+class ProcedureProgressObservation(AgentSchema):
+    observation_id: RuntimeUUID
+    procedure_step: ProcedureStepRef
+    observed_status: Literal[
+        ProcedureProgressStatus.IN_PROGRESS,
+        ProcedureProgressStatus.COMPLETED,
+    ]
+    source_span: VerifiedTextSpan
+    source_evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
+    requires_confirmation: StrictBool
+    reason_summary: NonEmptyStr
+
+
+class ConflictCandidate(AgentSchema):
+    conflict_ref: Annotated[
+        NonEmptyStr,
+        Field(
+            description=(
+                "BE-issued conflict reference. Values beginning with 'standalone:' "
+                "are simulation-only and must never be persisted or accepted by a "
+                "production confirmation endpoint."
+            )
+        ),
+    ]
+    conflict_digest: Digest
+    candidate_id: RuntimeUUID
+    snapshot_id: RuntimeUUID
+    case_version: PositiveStrictInt | None
+    field_path: CaseFieldKey
+    committed_status: Literal[FactStatus.CONFIRMED]
+    committed_value: NonNullStrictScalar
+    proposed_operation: FactOperation
+    proposed_status: FactStatus
+    proposed_value: StrictScalar
+    source_evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
+    source_call_id: RuntimeUUID
+
+    @model_validator(mode="after")
+    def validate_proposal(self) -> ConflictCandidate:
+        validate_case_field_value(
+            self.field_path,
+            CASE_FIELD_SPECS[self.field_path][0],
+            self.committed_value,
+            allow_null=False,
+        )
+        if self.proposed_operation == FactOperation.SET:
+            if (
+                self.proposed_status != FactStatus.CONFIRMED
+                or self.proposed_value is None
+            ):
+                raise ValueError("SET conflict must propose a confirmed value")
+        elif (
+            self.proposed_status != FactStatus.UNKNOWN
+            or self.proposed_value is not None
+        ):
+            raise ValueError("CLEAR conflict must propose UNKNOWN/null")
+        validate_case_field_value(
+            self.field_path,
+            CASE_FIELD_SPECS[self.field_path][0],
+            self.proposed_value,
+            allow_null=self.proposed_operation == FactOperation.CLEAR,
+        )
+        if self.conflict_ref.startswith(
+            SIMULATION_CONFLICT_REF_PREFIX
+        ) and not re.fullmatch(
+            rf"{re.escape(SIMULATION_CONFLICT_REF_PREFIX)}[0-9a-f]{{24}}",
+            self.conflict_ref,
+        ):
+            raise ValueError(
+                "standalone conflict_ref must contain a 24-hex digest suffix"
+            )
+        self.assert_integrity()
+        return self
+
+    def calculate_digest(self) -> str:
+        """Digest all conflict content except the server/simulation reference."""
+
+        return canonical_digest(
+            self,
+            exclude={"conflict_ref", "conflict_digest"},
+        )
+
+    @property
+    def is_simulation_only(self) -> bool:
+        return self.conflict_ref.startswith(SIMULATION_CONFLICT_REF_PREFIX)
+
+    @classmethod
+    def create(cls, *, conflict_ref: str, **values: Any) -> ConflictCandidate:
+        """Bind trusted conflict fields and a resolver-issued reference to a digest."""
+
+        provisional = cls.model_construct(
+            conflict_ref=conflict_ref,
+            conflict_digest="sha256:" + "0" * 64,
+            **values,
+        )
+        digest = provisional.calculate_digest()
+        return cls.model_validate(
+            {
+                **values,
+                "conflict_ref": conflict_ref,
+                "conflict_digest": digest,
+            }
+        )
+
+    @classmethod
+    def create_standalone(cls, **values: Any) -> ConflictCandidate:
+        """Build a digest-bound conflict with an explicitly non-production ref."""
+
+        provisional = cls.model_construct(
+            conflict_ref=SIMULATION_CONFLICT_REF_PREFIX + "0" * 24,
+            conflict_digest="sha256:" + "0" * 64,
+            **values,
+        )
+        digest = provisional.calculate_digest()
+        return cls.create(
+            conflict_ref=(
+                SIMULATION_CONFLICT_REF_PREFIX + digest.removeprefix("sha256:")[:24]
+            ),
+            **values,
+        )
+
+    def assert_integrity(self) -> None:
+        if self.conflict_digest != self.calculate_digest():
+            raise ValueError("conflict_digest does not match conflict candidate")
+
+    @model_serializer(mode="wrap")
+    def serialize_with_integrity(self, handler: Any) -> Any:
+        self.assert_integrity()
+        return handler(self)
+
+
+class InfoAnalysisInput(AgentSchema):
+    input: RedactedInput
+    case_snapshot: CaseSnapshot
+    allowed_field_paths: Annotated[list[CaseFieldKey], Field(min_length=1)]
+    known_procedure_steps: list[KnownProcedureStep]
+    review_feedback: list[ReviewIssue]
+
+    @model_validator(mode="after")
+    def validate_input(self) -> InfoAnalysisInput:
+        if len(set(self.allowed_field_paths)) != len(self.allowed_field_paths):
+            raise ValueError("allowed_field_paths must be unique")
+        _ensure_unique(
+            self.known_procedure_steps,
+            lambda item: item.procedure_step.procedure_step_id,
+            "known procedure_step_id",
+        )
+        return self
+
+
+class InfoAnalysisResult(AgentSchema):
+    completion_status: InfoCompletionStatus
+    fact_candidates: list[FactCandidate]
+    procedure_progress_observations: list[ProcedureProgressObservation]
+    conflicts: list[ConflictCandidate]
+    missing_fields: list[MissingField]
+    uncertainties: list[Uncertainty]
+    question_candidates: list[QuestionCandidate]
+    evidence_records: list[EvidenceRecord]
+    parser_version: Annotated[
+        NonEmptyStr,
+        Field(json_schema_extra={"x-runtime-injected": True}),
+    ]
+    based_on_snapshot_id: RuntimeUUID
+
+    @model_validator(mode="after")
+    def validate_result(self) -> InfoAnalysisResult:
+        candidates: list[Any] = [*self.fact_candidates, *self.conflicts]
+        _ensure_unique(candidates, lambda item: item.candidate_id, "candidate_id")
+        _ensure_unique(
+            self.procedure_progress_observations,
+            lambda item: item.observation_id,
+            "observation_id",
+        )
+        _ensure_unique(
+            self.question_candidates, lambda item: item.question_id, "question_id"
+        )
+        _ensure_unique(
+            self.evidence_records, lambda item: item.evidence_id, "evidence_id"
+        )
+        if self.completion_status == InfoCompletionStatus.NEEDS_USER_INPUT and (
+            not self.missing_fields or not self.question_candidates
+        ):
+            raise ValueError(
+                "NEEDS_USER_INPUT requires missing_fields and question_candidates"
+            )
+        known_evidence = {item.evidence_id for item in self.evidence_records}
+        referenced = {
+            evidence_ref
+            for candidate in self.fact_candidates
+            for evidence_ref in candidate.source_evidence_refs
+        } | {
+            evidence_ref
+            for observation in self.procedure_progress_observations
+            for evidence_ref in observation.source_evidence_refs
+        }
+        missing = referenced - known_evidence
+        if missing:
+            raise ValueError(
+                "info result contains unresolved evidence refs: "
+                + ", ".join(sorted(missing))
+            )
+        return self
+
+
+class SupportLookupGoal(StrEnum):
+    DISCOVER_RELEVANT = "DISCOVER_RELEVANT"
+    CHECK_SPECIFIC = "CHECK_SPECIFIC"
+    REFRESH_STALE = "REFRESH_STALE"
+
+
+class DiscoverSupportInput(AgentSchema):
+    lookup_goal: Literal[SupportLookupGoal.DISCOVER_RELEVANT]
+    planning_context: PlanningContext
+    related_steps: list[ProcedureStepRef]
+    as_of: date
+    review_feedback: list[ReviewIssue]
+
+
+class CheckSpecificSupportInput(AgentSchema):
+    lookup_goal: Literal[SupportLookupGoal.CHECK_SPECIFIC]
+    planning_context: PlanningContext
+    related_steps: list[ProcedureStepRef]
+    as_of: date
+    review_feedback: list[ReviewIssue]
+    support_programs: Annotated[list[SupportProgramRef], Field(min_length=1)]
+
+
+class RefreshSupportInput(AgentSchema):
+    lookup_goal: Literal[SupportLookupGoal.REFRESH_STALE]
+    planning_context: PlanningContext
+    related_steps: list[ProcedureStepRef]
+    as_of: date
+    review_feedback: list[ReviewIssue]
+    support_programs: Annotated[list[SupportProgramRef], Field(min_length=1)]
+
+
+SupportAnalysisInput: TypeAlias = Annotated[
+    DiscoverSupportInput | CheckSpecificSupportInput | RefreshSupportInput,
+    Field(discriminator="lookup_goal"),
+]
+
+
+class CriterionStatus(StrEnum):
+    MET = "MET"
+    NOT_MET = "NOT_MET"
+    UNKNOWN = "UNKNOWN"
+
+
+class SupportCriterionResult(AgentSchema):
+    criterion_code: UpperSnakeCode
+    case_value: StrictScalar
+    required_values: Annotated[list[NonNullStrictScalar], Field(min_length=1)]
+    status: CriterionStatus
+    reason_summary: NonEmptyStr
+    evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
+
+    @model_validator(mode="after")
+    def validate_unknown(self) -> SupportCriterionResult:
+        if (self.case_value is None) != (self.status == CriterionStatus.UNKNOWN):
+            raise ValueError("case_value is null iff criterion status is UNKNOWN")
+        return self
+
+
+class SourcedText(AgentSchema):
+    text: NonEmptyStr
+    evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
+
+
+class RequiredDocument(AgentSchema):
+    name: NonEmptyStr
+    submission_stage: NonEmptyStr | None
+    evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
+
+
+class SupportCheck(AgentSchema):
+    support_program: SupportProgramRef
+    program_name: NonEmptyStr
+    related_steps: list[ProcedureStepRef]
+    match_status: SupportMatchStatus
+    criteria: list[SupportCriterionResult]
+    unknown_field_paths: list[CaseFieldKey]
+    required_documents: list[RequiredDocument]
+    application_channel: SourcedText | None
+    application_url: SourcedText | None
+    application_period: SourcedText | None
+    source_version: NonEmptyStr | None
+    freshness_status: FreshnessStatus
+    checked_at: RuntimeDateTime
+    reason_summary: NonEmptyStr
+    evidence_refs: list[NonEmptyStr]
+
+    @model_validator(mode="after")
+    def validate_safety(self) -> SupportCheck:
+        if self.freshness_status == FreshnessStatus.STALE:
+            if self.match_status != SupportMatchStatus.STALE:
+                raise ValueError("STALE evidence must produce STALE match status")
+        elif self.match_status == SupportMatchStatus.STALE:
+            raise ValueError("STALE match status requires STALE evidence")
+
+        if (
+            self.freshness_status == FreshnessStatus.UNKNOWN
+            and self.match_status != SupportMatchStatus.UNVERIFIABLE
+        ):
+            raise ValueError("UNKNOWN freshness must produce UNVERIFIABLE match status")
+
+        positive = {
+            SupportMatchStatus.POSSIBLY_RELEVANT,
+            SupportMatchStatus.NEEDS_CONFIRMATION,
+        }
+        if self.match_status in positive:
+            if self.freshness_status != FreshnessStatus.CURRENT:
+                raise ValueError(
+                    "positive support comparison requires CURRENT evidence"
+                )
+            if not self.evidence_refs:
+                raise ValueError("positive support comparison requires evidence")
+
+        if self.match_status == SupportMatchStatus.NOT_RELEVANT:
+            if self.freshness_status != FreshnessStatus.CURRENT:
+                raise ValueError("NOT_RELEVANT requires CURRENT evidence")
+            if not any(
+                item.status == CriterionStatus.NOT_MET for item in self.criteria
+            ):
+                raise ValueError("NOT_RELEVANT requires a NOT_MET criterion")
+
+        if len(set(self.unknown_field_paths)) != len(self.unknown_field_paths):
+            raise ValueError("unknown_field_paths must be unique")
+        return self
+
+
+class SupportSearchSummary(AgentSchema):
+    wiki_lookup: Literal["HIT", "MISS", "NOT_REQUESTED"]
+    rag_used: StrictBool
+    official_source_checked: StrictBool
+    checked_at: RuntimeDateTime
+
+
+class SupportCompletionStatus(StrEnum):
+    COMPLETE = "COMPLETE"
+    NO_CANDIDATE = "NO_CANDIDATE"
+    PARTIAL = "PARTIAL"
+
+
+class SupportAnalysisResult(AgentSchema):
+    completion_status: SupportCompletionStatus
+    support_checks: list[SupportCheck]
+    no_candidate_reason_code: UpperSnakeCode | None
+    uncertainties: list[Uncertainty]
+    search_summary: SupportSearchSummary
+    evidence_records: list[EvidenceRecord]
+    based_on_snapshot_id: RuntimeUUID
+    based_on_candidate_ids: list[RuntimeUUID]
+
+    @model_validator(mode="after")
+    def validate_completion(self) -> SupportAnalysisResult:
+        if self.completion_status == SupportCompletionStatus.NO_CANDIDATE:
+            if self.support_checks or self.no_candidate_reason_code is None:
+                raise ValueError("NO_CANDIDATE requires no checks and a reason code")
+        elif self.completion_status == SupportCompletionStatus.COMPLETE:
+            if not self.support_checks or self.no_candidate_reason_code is not None:
+                raise ValueError("COMPLETE requires checks and no no-candidate reason")
+        else:
+            if not self.uncertainties or self.no_candidate_reason_code is not None:
+                raise ValueError("PARTIAL requires uncertainty and no reason code")
+        _ensure_unique(
+            self.support_checks,
+            lambda item: item.support_program.support_program_id,
+            "support_program_id",
+        )
+        if len(set(self.based_on_candidate_ids)) != len(self.based_on_candidate_ids):
+            raise ValueError("based_on_candidate_ids must be unique")
+        return self
+
+
+class ProcedureLookupScope(StrEnum):
+    ALL_STEPS = "ALL_STEPS"
+    SPECIFIC_STEPS = "SPECIFIC_STEPS"
+
+
+class AllProcedureLookupInput(AgentSchema):
+    lookup_scope: Literal[ProcedureLookupScope.ALL_STEPS]
+    planning_context: PlanningContext
+    as_of: date
+
+
+class SpecificProcedureLookupInput(AgentSchema):
+    lookup_scope: Literal[ProcedureLookupScope.SPECIFIC_STEPS]
+    planning_context: PlanningContext
+    as_of: date
+    step_codes: Annotated[list[UpperSnakeCode], Field(min_length=1)]
+
+    @field_validator("step_codes")
+    @classmethod
+    def unique_step_codes(cls, value: list[str]) -> list[str]:
+        if len(set(value)) != len(value):
+            raise ValueError("step_codes must be unique")
+        return value
+
+
+ProcedureLookupInput: TypeAlias = Annotated[
+    AllProcedureLookupInput | SpecificProcedureLookupInput,
+    Field(discriminator="lookup_scope"),
+]
+
+
+class ProcedureConditionResult(AgentSchema):
+    condition_id: PositiveStrictInt
+    field_path: CaseFieldKey
+    operator: Literal["EQ", "IN", "GT", "GTE", "LT", "LTE"]
+    expected_values: Annotated[list[NonNullStrictScalar], Field(min_length=1)]
+    actual_value: StrictScalar
+    status: CriterionStatus
+    evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
+
+    @model_validator(mode="after")
+    def validate_unknown(self) -> ProcedureConditionResult:
+        if (self.actual_value is None) != (self.status == CriterionStatus.UNKNOWN):
+            raise ValueError("actual_value is null iff condition status is UNKNOWN")
+        value_type = CASE_FIELD_SPECS[self.field_path][0]
+        for expected in self.expected_values:
+            validate_case_field_value(
+                self.field_path,
+                value_type,
+                expected,
+                allow_null=False,
+            )
+        validate_case_field_value(
+            self.field_path,
+            value_type,
+            self.actual_value,
+            allow_null=self.status == CriterionStatus.UNKNOWN,
+        )
+        return self
+
+
+class PrerequisiteSatisfaction(StrEnum):
+    SATISFIED = "SATISFIED"
+    NOT_SATISFIED = "NOT_SATISFIED"
+    UNKNOWN = "UNKNOWN"
+
+
+class ProcedurePrerequisiteResult(AgentSchema):
+    procedure_step: ProcedureStepRef
+    dependency_type: Literal["REQUIRED", "RECOMMENDED"]
+    current_status: ProcedureProgressStatus | None
+    satisfaction: PrerequisiteSatisfaction
+    reason_summary: NonEmptyStr
+
+    @model_validator(mode="after")
+    def validate_satisfaction(self) -> ProcedurePrerequisiteResult:
+        if self.current_status is None:
+            expected = PrerequisiteSatisfaction.UNKNOWN
+        elif self.current_status == ProcedureProgressStatus.COMPLETED:
+            expected = PrerequisiteSatisfaction.SATISFIED
+        else:
+            expected = PrerequisiteSatisfaction.NOT_SATISFIED
+        if self.satisfaction != expected:
+            raise ValueError(
+                f"prerequisite satisfaction must be {expected.value} for current status"
+            )
+        return self
+
+
+class ProcedureUnavailableCode(StrEnum):
+    STEP_INACTIVE = "STEP_INACTIVE"
+    CONDITION_NOT_MET = "CONDITION_NOT_MET"
+    CONDITION_UNKNOWN = "CONDITION_UNKNOWN"
+    PREREQUISITE_INCOMPLETE = "PREREQUISITE_INCOMPLETE"
+
+
+class ProcedureUnavailableReason(AgentSchema):
+    code: ProcedureUnavailableCode
+    message: NonEmptyStr
+    evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
+
+
+class ProcedureApplicability(StrEnum):
+    APPLICABLE = "APPLICABLE"
+    NOT_APPLICABLE = "NOT_APPLICABLE"
+    UNDETERMINED = "UNDETERMINED"
+
+
+class ProcedureReadiness(StrEnum):
+    READY = "READY"
+    BLOCKED = "BLOCKED"
+    UNDETERMINED = "UNDETERMINED"
+
+
+class DecisionAuthority(StrEnum):
+    USER = "USER"
+    LANDLORD = "LANDLORD"
+    OFFICIAL_AGENCY = "OFFICIAL_AGENCY"
+    PROFESSIONAL = "PROFESSIONAL"
+    UNKNOWN = "UNKNOWN"
+
+
+class ProcedureStepEvaluation(AgentSchema):
+    procedure_step: ProcedureStepRef
+    step_name: NonEmptyStr
+    is_active: StrictBool
+    applicability: ProcedureApplicability
+    readiness: ProcedureReadiness
+    current_status: ProcedureProgressStatus | None
+    conditions: list[ProcedureConditionResult]
+    prerequisites: list[ProcedurePrerequisiteResult]
+    unavailable_reasons: list[ProcedureUnavailableReason]
+    requires_professional: StrictBool
+    professional_type: NonEmptyStr | None
+    decision_authority: DecisionAuthority
+    evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
+
+    @model_validator(mode="after")
+    def validate_decision_table(self) -> ProcedureStepEvaluation:
+        if self.requires_professional != (self.professional_type is not None):
+            raise ValueError(
+                "professional_type is present iff requires_professional is true"
+            )
+
+        reason_codes = {item.code for item in self.unavailable_reasons}
+        statuses = {item.status for item in self.conditions}
+        safe_unknown_override = (
+            self.is_active
+            and CriterionStatus.NOT_MET not in statuses
+            and ProcedureUnavailableCode.CONDITION_UNKNOWN in reason_codes
+            and self.applicability == ProcedureApplicability.UNDETERMINED
+            and self.readiness == ProcedureReadiness.UNDETERMINED
+        )
+        if safe_unknown_override:
+            return self
+
+        required = [
+            item for item in self.prerequisites if item.dependency_type == "REQUIRED"
+        ]
+        if not self.is_active or CriterionStatus.NOT_MET in statuses:
+            expected = (
+                ProcedureApplicability.NOT_APPLICABLE,
+                ProcedureReadiness.BLOCKED,
+            )
+        elif CriterionStatus.UNKNOWN in statuses:
+            expected = (
+                ProcedureApplicability.UNDETERMINED,
+                ProcedureReadiness.UNDETERMINED,
+            )
+        elif any(
+            item.satisfaction == PrerequisiteSatisfaction.NOT_SATISFIED
+            for item in required
+        ):
+            expected = (
+                ProcedureApplicability.APPLICABLE,
+                ProcedureReadiness.BLOCKED,
+            )
+        elif any(
+            item.satisfaction == PrerequisiteSatisfaction.UNKNOWN for item in required
+        ):
+            expected = (
+                ProcedureApplicability.APPLICABLE,
+                ProcedureReadiness.UNDETERMINED,
+            )
+        else:
+            expected = (
+                ProcedureApplicability.APPLICABLE,
+                ProcedureReadiness.READY,
+            )
+        if (self.applicability, self.readiness) != expected:
+            raise ValueError(
+                "applicability/readiness violate the procedure decision table"
+            )
+        return self
+
+
+class ProcedureCompletionStatus(StrEnum):
+    COMPLETE = "COMPLETE"
+    PARTIAL = "PARTIAL"
+
+
+class ProcedureLookupResult(AgentSchema):
+    completion_status: ProcedureCompletionStatus
+    procedure_data_version: NonEmptyStr
+    step_evaluations: list[ProcedureStepEvaluation]
+    evidence_records: list[EvidenceRecord]
+    based_on_snapshot_id: RuntimeUUID
+    based_on_candidate_ids: list[RuntimeUUID]
+
+    @model_validator(mode="after")
+    def validate_result(self) -> ProcedureLookupResult:
+        _ensure_unique(
+            self.step_evaluations,
+            lambda item: item.procedure_step.procedure_step_id,
+            "procedure_step_id",
+        )
+        if len(set(self.based_on_candidate_ids)) != len(self.based_on_candidate_ids):
+            raise ValueError("based_on_candidate_ids must be unique")
+        return self
+
+
+class Blocker(AgentSchema):
+    blocker_code: UpperSnakeCode
+    title: NonEmptyStr
+    description: NonEmptyStr
+    evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
+
+
+BlockerDraft = Blocker
+
+
+class NextAction(AgentSchema):
+    action_code: UpperSnakeCode
+    sequence: PositiveStrictInt
+    title: NonEmptyStr
+    reason: NonEmptyStr
+    questions_to_ask: list[NonEmptyStr]
+    target_procedure: ProcedureStepRef | None
+    evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
+
+
+NextActionDraft = NextAction
+
+
+class DecisionType(StrEnum):
+    ACTION = "ACTION"
+    NEEDS_MORE_INFO = "NEEDS_MORE_INFO"
+    CASE_COMPLETE = "CASE_COMPLETE"
+
+
+class ActionDecisionDraft(AgentSchema):
+    decision_type: Literal[DecisionType.ACTION]
+    draft_id: RuntimeUUID
+    draft_version: PositiveStrictInt
+    selection_summary: NonEmptyStr
+    requires_human: StrictBool
+    evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
+    based_on_call_ids: Annotated[list[RuntimeUUID], Field(min_length=1)]
+    created_at: RuntimeDateTime
+    blocker: Blocker
+    next_action: NextAction
+    questions_for_user: list[NonEmptyStr]
+
+    @field_validator("questions_for_user")
+    @classmethod
+    def action_has_no_user_question_branch(cls, value: list[str]) -> list[str]:
+        if value:
+            raise ValueError("ACTION questions_for_user must be []")
+        return value
+
+
+class NeedsMoreInfoDecisionDraft(AgentSchema):
+    decision_type: Literal[DecisionType.NEEDS_MORE_INFO]
+    draft_id: RuntimeUUID
+    draft_version: PositiveStrictInt
+    selection_summary: NonEmptyStr
+    requires_human: Literal[True]
+    evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
+    based_on_call_ids: Annotated[list[RuntimeUUID], Field(min_length=1)]
+    created_at: RuntimeDateTime
+    blocker: Blocker
+    next_action: None
+    questions_for_user: Annotated[list[NonEmptyStr], Field(min_length=1)]
+
+
+class CaseCompleteDecisionDraft(AgentSchema):
+    decision_type: Literal[DecisionType.CASE_COMPLETE]
+    draft_id: RuntimeUUID
+    draft_version: PositiveStrictInt
+    selection_summary: NonEmptyStr
+    requires_human: Literal[False]
+    evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
+    based_on_call_ids: Annotated[list[RuntimeUUID], Field(min_length=1)]
+    created_at: RuntimeDateTime
+    blocker: None
+    next_action: None
+    questions_for_user: list[NonEmptyStr]
+
+    @field_validator("questions_for_user")
+    @classmethod
+    def complete_has_no_questions(cls, value: list[str]) -> list[str]:
+        if value:
+            raise ValueError("CASE_COMPLETE questions_for_user must be []")
+        return value
+
+
+DecisionDraft: TypeAlias = Annotated[
+    ActionDecisionDraft | NeedsMoreInfoDecisionDraft | CaseCompleteDecisionDraft,
+    Field(discriminator="decision_type"),
+]
+
+
+class ProcedureProgressChangeCandidate(AgentSchema):
+    candidate_id: RuntimeUUID
+    procedure_step: ProcedureStepRef
+    before_status: ProcedureProgressStatus | None
+    proposed_status: ProcedureProgressStatus
+    reason_summary: NonEmptyStr
+    execution_evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
+    procedure_evaluation_call_id: RuntimeUUID
+
+    @model_validator(mode="after")
+    def validate_forward_transition(self) -> ProcedureProgressChangeCandidate:
+        order = {
+            None: -1,
+            ProcedureProgressStatus.NOT_STARTED: 0,
+            ProcedureProgressStatus.IN_PROGRESS: 1,
+            ProcedureProgressStatus.COMPLETED: 2,
+        }
+        if order[self.proposed_status] <= order[self.before_status]:
+            raise ValueError("procedure progress change must move forward")
+        return self
+
+
+class SupportMatchUpdateCandidate(AgentSchema):
+    candidate_id: RuntimeUUID
+    support_check: SupportCheck
+    source_call_id: RuntimeUUID
+
+
+class CaseStatusChangeCandidate(AgentSchema):
+    candidate_id: RuntimeUUID
+    before_status: Literal[CaseStatus.IN_PROGRESS]
+    proposed_status: Literal[CaseStatus.COMPLETED]
+    reason_summary: NonEmptyStr
+    evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
+
+
+class MutationSet(AgentSchema):
+    fact_changes: list[FactChangeCandidate]
+    procedure_progress_changes: list[ProcedureProgressChangeCandidate]
+    support_match_updates: list[SupportMatchUpdateCandidate]
+    case_status_change: CaseStatusChangeCandidate | None
+
+    @model_validator(mode="after")
+    def validate_uniqueness(self) -> MutationSet:
+        all_candidates: list[Any] = [
+            *self.fact_changes,
+            *self.procedure_progress_changes,
+            *self.support_match_updates,
+        ]
+        if self.case_status_change is not None:
+            all_candidates.append(self.case_status_change)
+        _ensure_unique(all_candidates, lambda item: item.candidate_id, "candidate_id")
+        _ensure_unique(
+            self.fact_changes, lambda item: item.field_path, "fact field_path"
+        )
+        _ensure_unique(
+            self.procedure_progress_changes,
+            lambda item: item.procedure_step.procedure_step_id,
+            "procedure_step_id",
+        )
+        _ensure_unique(
+            self.support_match_updates,
+            lambda item: item.support_check.support_program.support_program_id,
+            "support_program_id",
+        )
+        return self
+
+
+class ClaimType(StrEnum):
+    SUPPORT_PROGRAM = "SUPPORT_PROGRAM"
+    AMOUNT = "AMOUNT"
+    DATE_OR_DEADLINE = "DATE_OR_DEADLINE"
+    ELIGIBILITY = "ELIGIBILITY"
+    LEGAL = "LEGAL"
+    TAX = "TAX"
+    PROCEDURE = "PROCEDURE"
+
+
+class GroundedClaim(AgentSchema):
+    claim_id: RuntimeUUID
+    claim_type: ClaimType
+    target_path: JsonPointer
+    text: NonEmptyStr
+    assertion_level: Literal["INFORMATION", "NEEDS_CONFIRMATION"]
+    evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
+
+    @model_validator(mode="after")
+    def eligibility_needs_confirmation(self) -> GroundedClaim:
+        if (
+            self.claim_type == ClaimType.ELIGIBILITY
+            and self.assertion_level != "NEEDS_CONFIRMATION"
+        ):
+            raise ValueError("eligibility claims always need confirmation")
+        return self
+
+
+class SupervisorDraft(AgentSchema):
+    decision: DecisionDraft
+    mutations: MutationSet
+    grounded_claims: list[GroundedClaim]
+    source_call_ids: Annotated[list[RuntimeUUID], Field(min_length=1)]
+
+    @model_validator(mode="after")
+    def validate_decision_and_sources(self) -> SupervisorDraft:
+        if len(set(self.source_call_ids)) != len(self.source_call_ids):
+            raise ValueError("source_call_ids must be unique")
+        if set(self.source_call_ids) != set(self.decision.based_on_call_ids):
+            raise ValueError(
+                "source_call_ids must exactly match decision.based_on_call_ids"
+            )
+        if self.decision.decision_type == DecisionType.CASE_COMPLETE:
+            if self.mutations.case_status_change is None:
+                raise ValueError("CASE_COMPLETE requires a case status change")
+        elif self.mutations.case_status_change is not None:
+            raise ValueError("only CASE_COMPLETE may include a case status change")
+        return self
+
+    @property
+    def blocker(self) -> Blocker | None:
+        return self.decision.blocker
+
+    @property
+    def next_action(self) -> NextAction | None:
+        return self.decision.next_action
+
+
+class CaseCreatedTrigger(AgentSchema):
+    trigger_type: Literal["CASE_CREATED"]
+    input_event_id: NonEmptyStr
+    client_event_id: NonEmptyStr | None
+    input: RedactedInput
+    submitted_at: AwareDatetime
+
+    @model_validator(mode="after")
+    def validate_event(self) -> CaseCreatedTrigger:
+        if self.input.input_event_id != self.input_event_id:
+            raise ValueError("trigger and input event IDs must match")
+        return self
+
+
+class ResultSubmittedTrigger(AgentSchema):
+    trigger_type: Literal["RESULT_SUBMITTED"]
+    input_event_id: NonEmptyStr
+    client_event_id: NonEmptyStr | None
+    input: RedactedInput
+    submitted_at: AwareDatetime
+
+    @model_validator(mode="after")
+    def validate_event(self) -> ResultSubmittedTrigger:
+        if self.input.input_event_id != self.input_event_id:
+            raise ValueError("trigger and input event IDs must match")
+        return self
+
+
+class SupportRefreshTrigger(AgentSchema):
+    trigger_type: Literal["SUPPORT_REFRESH"]
+    input_event_id: NonEmptyStr
+    client_event_id: NonEmptyStr | None
+    support_programs: Annotated[list[SupportProgramRef], Field(min_length=1)]
+    as_of: date
+
+
+RunTrigger: TypeAlias = Annotated[
+    CaseCreatedTrigger | ResultSubmittedTrigger | SupportRefreshTrigger,
+    Field(discriminator="trigger_type"),
+]
+
+
+class SupervisorRunInput(AgentSchema):
+    trigger: RunTrigger
+    case_snapshot: CaseSnapshot
+
+
+class ReviewIssueCode(StrEnum):
+    CASE_MISMATCH = "CASE_MISMATCH"
+    UNSUPPORTED_CLAIM = "UNSUPPORTED_CLAIM"
+    MISSING_EVIDENCE = "MISSING_EVIDENCE"
+    STALE_EVIDENCE = "STALE_EVIDENCE"
+    OVERCONFIDENT_LANGUAGE = "OVERCONFIDENT_LANGUAGE"
+    INFEASIBLE_ACTION = "INFEASIBLE_ACTION"
+    HUMAN_CONFIRMATION_OMITTED = "HUMAN_CONFIRMATION_OMITTED"
+    AMBIGUOUS_LANGUAGE = "AMBIGUOUS_LANGUAGE"
+    PROCEDURE_CONFLICT = "PROCEDURE_CONFLICT"
+    CONTRACT_VIOLATION = "CONTRACT_VIOLATION"
+
+
+class ReviewIssue(AgentSchema):
+    issue_code: ReviewIssueCode
+    category: Literal[
+        "FACTUALITY",
+        "EVIDENCE",
+        "PROCEDURE",
+        "SAFETY",
+        "ACTIONABILITY",
+        "LANGUAGE",
+        "CONTRACT",
+    ]
+    severity: Literal["BLOCKING", "WARNING"]
+    target_component: Literal[
+        Component.SUPERVISOR,
+        Component.INFO_AGENT,
+        Component.SUPPORT_AGENT,
+        Component.PROCEDURE_TOOL,
+    ]
+    target_call_id: RuntimeUUID | None
+    target_path: JsonPointer
+    reason_summary: NonEmptyStr
+    evidence_refs: list[NonEmptyStr]
+
+    @model_validator(mode="after")
+    def dangerous_issues_are_blocking(self) -> ReviewIssue:
+        always_blocking = {
+            ReviewIssueCode.UNSUPPORTED_CLAIM,
+            ReviewIssueCode.MISSING_EVIDENCE,
+            ReviewIssueCode.STALE_EVIDENCE,
+            ReviewIssueCode.PROCEDURE_CONFLICT,
+            ReviewIssueCode.CONTRACT_VIOLATION,
+        }
+        if self.issue_code in always_blocking and self.severity != "BLOCKING":
+            raise ValueError(f"{self.issue_code.value} must be BLOCKING")
+        return self
+
+
+class MissingEvidence(AgentSchema):
+    claim_path: JsonPointer
+    required_source_types: Annotated[list[EvidenceSourceType], Field(min_length=1)]
+    reason_summary: NonEmptyStr
+
+
+ReviewSourceOutput: TypeAlias = (
+    InfoAnalysisResult | SupportAnalysisResult | ProcedureLookupResult
+)
+
+
+class ReviewSourceResult(AgentSchema):
+    meta: InvocationMeta
+    output_digest: Digest
+    output: ReviewSourceOutput
+
+    @model_validator(mode="after")
+    def component_matches_output(self) -> ReviewSourceResult:
+        expected_type: dict[Component, type[AgentSchema]] = {
+            Component.INFO_AGENT: InfoAnalysisResult,
+            Component.SUPPORT_AGENT: SupportAnalysisResult,
+            Component.PROCEDURE_TOOL: ProcedureLookupResult,
+        }
+        expected = expected_type.get(self.meta.component)
+        if expected is None or not isinstance(self.output, expected):
+            raise ValueError("source result component does not match output type")
+        if self.output_digest != canonical_digest(self.output):
+            raise ValueError("source output_digest does not match output")
+        return self
+
+
+class ReviewSubject(AgentSchema):
+    schema_version: Literal["agent-io/1.0"]
+    review_subject_id: RuntimeUUID
+    review_attempt: Annotated[StrictInt, Field(ge=1, le=3)]
+    run_id: RuntimeUUID
+    case_id: PositiveStrictInt
+    trigger: RunTrigger
+    snapshot: CaseSnapshot
+    source_results: Annotated[list[ReviewSourceResult], Field(min_length=1)]
+    supervisor_draft: SupervisorDraft
+    subject_digest: Digest
+
+    @model_validator(mode="after")
+    def validate_subject(self) -> ReviewSubject:
+        self.assert_integrity()
+        return self
+
+    def assert_integrity(self) -> None:
+        """Reject any structural or nested change made after subject creation."""
+
+        if self.case_id != self.snapshot.case_id:
+            raise ValueError("review case_id must match snapshot")
+        call_ids = [item.meta.call_id for item in self.source_results]
+        if len(set(call_ids)) != len(call_ids):
+            raise ValueError("source result call IDs must be unique")
+        if set(call_ids) != set(self.supervisor_draft.source_call_ids):
+            raise ValueError("source results must exactly match supervisor sources")
+        for result in self.source_results:
+            if result.meta.run_id != self.run_id or result.meta.case_id != self.case_id:
+                raise ValueError("source result run/case does not match review subject")
+            based_on_snapshot_id = getattr(result.output, "based_on_snapshot_id", None)
+            if based_on_snapshot_id != self.snapshot.snapshot_id:
+                raise ValueError("source result snapshot does not match review subject")
+            if result.output_digest != canonical_digest(result.output):
+                raise ValueError(
+                    "source output changed after its digest was calculated"
+                )
+        if self.subject_digest != self.calculate_digest():
+            raise ValueError("subject_digest does not match review subject")
+
+    @model_serializer(mode="wrap")
+    def serialize_with_integrity(self, handler: Any) -> Any:
+        self.assert_integrity()
+        return handler(self)
+
+    def calculate_digest(self) -> str:
+        return canonical_digest(self, exclude={"subject_digest"})
+
+    @classmethod
+    def create(cls, **values: Any) -> ReviewSubject:
+        """Construct a subject and inject its digest after all other IDs exist."""
+
+        draft = cls.model_construct(
+            **values,
+            subject_digest="sha256:" + "0" * 64,
+        )
+        values["subject_digest"] = draft.calculate_digest()
+        return cls.model_validate(values)
+
+
+class ReviewVerdict(StrEnum):
+    PASS = "PASS"
+    REVISE = "REVISE"
+
+
+class ReviewResult(AgentSchema):
+    reviewed_subject_id: RuntimeUUID
+    reviewed_subject_digest: Digest
+    verdict: ReviewVerdict
+    issues: list[ReviewIssue]
+    missing_evidence: list[MissingEvidence]
+    recommended_rework_targets: list[
+        Literal[
+            Component.SUPERVISOR,
+            Component.INFO_AGENT,
+            Component.SUPPORT_AGENT,
+            Component.PROCEDURE_TOOL,
+        ]
+    ]
+    resolution_reason: NonEmptyStr
+
+    @model_validator(mode="after")
+    def enforce_review_gate(self) -> ReviewResult:
+        blocking = any(issue.severity == "BLOCKING" for issue in self.issues)
+        if self.verdict == ReviewVerdict.PASS:
+            if blocking or self.missing_evidence or self.recommended_rework_targets:
+                raise ValueError(
+                    "PASS cannot contain blocking issues, missing evidence, or rework"
+                )
+        elif not blocking and not self.missing_evidence:
+            raise ValueError("REVISE requires a blocking issue or missing evidence")
+        return self
+
+
+class ReviewProof(AgentSchema):
+    review_call_id: RuntimeUUID
+    run_id: RuntimeUUID
+    case_id: PositiveStrictInt
+    snapshot_id: RuntimeUUID
+    case_version: PositiveStrictInt | None
+    review_subject_id: RuntimeUUID
+    reviewed_subject_digest: Digest
+    verdict: Literal[ReviewVerdict.PASS]
+    reviewed_at: RuntimeDateTime
+
+    @classmethod
+    def from_passed_review(
+        cls,
+        *,
+        subject: ReviewSubject,
+        result: ReviewResult,
+        review_meta: InvocationMeta,
+        reviewed_at: datetime,
+    ) -> ReviewProof:
+        """Issue proof only for a matching, successful Review Tool response."""
+
+        subject.assert_integrity()
+        if review_meta.component != Component.REVIEW_TOOL:
+            raise ValueError("review proof requires REVIEW_TOOL invocation metadata")
+        if (
+            review_meta.run_id != subject.run_id
+            or review_meta.case_id != subject.case_id
+        ):
+            raise ValueError("review invocation does not match review subject")
+        if result.verdict != ReviewVerdict.PASS:
+            raise ValueError("review proof can only be issued for PASS")
+        if (
+            result.reviewed_subject_id != subject.review_subject_id
+            or result.reviewed_subject_digest != subject.subject_digest
+        ):
+            raise ValueError("review result does not match review subject")
+        return cls(
+            review_call_id=review_meta.call_id,
+            run_id=subject.run_id,
+            case_id=subject.case_id,
+            snapshot_id=subject.snapshot.snapshot_id,
+            case_version=subject.snapshot.case_version,
+            review_subject_id=subject.review_subject_id,
+            reviewed_subject_digest=subject.subject_digest,
+            verdict=ReviewVerdict.PASS,
+            reviewed_at=reviewed_at,
+        )
+
+
+class ReviewedPlanOutcome(AgentSchema):
+    outcome_type: Literal["REVIEWED_PLAN"]
+    review_subject: ReviewSubject
+    review_proof: ReviewProof
+
+    @model_validator(mode="after")
+    def validate_proof(self) -> ReviewedPlanOutcome:
+        self.assert_integrity()
+        return self
+
+    def assert_integrity(self) -> None:
+        """Recheck the reviewed payload and proof immediately before release."""
+
+        subject = self.review_subject
+        proof = self.review_proof
+        subject.assert_integrity()
+        expected = (
+            subject.run_id,
+            subject.case_id,
+            subject.snapshot.snapshot_id,
+            subject.snapshot.case_version,
+            subject.review_subject_id,
+            subject.subject_digest,
+        )
+        actual = (
+            proof.run_id,
+            proof.case_id,
+            proof.snapshot_id,
+            proof.case_version,
+            proof.review_subject_id,
+            proof.reviewed_subject_digest,
+        )
+        if actual != expected:
+            raise ValueError("review proof does not match review subject")
+
+    @model_serializer(mode="wrap")
+    def serialize_with_integrity(self, handler: Any) -> Any:
+        self.assert_integrity()
+        return handler(self)
+
+
+class ConflictOutcome(AgentSchema):
+    outcome_type: Literal["CONFLICT"]
+    run_id: RuntimeUUID
+    case_id: PositiveStrictInt
+    trigger: RunTrigger
+    snapshot_id: RuntimeUUID
+    case_version: PositiveStrictInt | None
+    conflicts: Annotated[list[ConflictCandidate], Field(min_length=1)]
+    message_code: Literal["CONFIRM_CONFLICT"]
+
+    @model_validator(mode="after")
+    def validate_conflicts(self) -> ConflictOutcome:
+        _ensure_unique(self.conflicts, lambda item: item.conflict_ref, "conflict_ref")
+        _ensure_unique(self.conflicts, lambda item: item.candidate_id, "candidate_id")
+        for conflict in self.conflicts:
+            if (
+                conflict.snapshot_id != self.snapshot_id
+                or conflict.case_version != self.case_version
+            ):
+                raise ValueError("conflict does not match outcome snapshot/version")
+        return self
+
+
+class SafeFailureOutcome(AgentSchema):
+    outcome_type: Literal["SAFE_FAILURE"]
+    run_id: RuntimeUUID
+    case_id: PositiveStrictInt
+    trigger: RunTrigger
+    snapshot_id: RuntimeUUID
+    case_version: PositiveStrictInt | None
+    failure_code: Literal[
+        "REVIEW_RETRY_EXHAUSTED",
+        "COMPONENT_UNAVAILABLE",
+        "STRUCTURED_OUTPUT_FAILED",
+    ]
+    message_code: UpperSnakeCode
+    recovery_action_code: Literal["RETRY", "RESUBMIT_INPUT", "CONTACT_SUPPORT", "NONE"]
+    requested_field_paths: list[CaseFieldKey]
+    retryable: StrictBool
+    failed_component: Component | None
+    trace_id: NonEmptyStr | None
+
+
+AgentRunOutcome: TypeAlias = Annotated[
+    ReviewedPlanOutcome | ConflictOutcome | SafeFailureOutcome,
+    Field(discriminator="outcome_type"),
+]
+
+
+def _canonical_value(value: Any) -> Any:
+    if isinstance(value, BaseModel):
+        return _canonical_value(_model_field_values(value))
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, UUID):
+        return str(value)
+    if isinstance(value, datetime):
+        return (
+            value.astimezone(timezone.utc)
+            .isoformat(timespec="microseconds")
+            .replace("+00:00", "Z")
+        )
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(key): _canonical_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_canonical_value(item) for item in value]
+    if isinstance(value, float):
+        raise TypeError("floats are not allowed in canonical Agent contract digests")
+    return value
+
+
+def _model_field_values(
+    value: BaseModel,
+    *,
+    exclude: set[str] | None = None,
+) -> dict[str, Any]:
+    """Read declared fields without invoking serialization integrity hooks."""
+
+    excluded = exclude or set()
+    return {
+        field_name: getattr(value, field_name)
+        for field_name in type(value).model_fields
+        if field_name not in excluded
+    }
+
+
+def canonical_digest(value: BaseModel, *, exclude: set[str] | None = None) -> str:
+    """Return the deterministic digest used by ReviewSource/ReviewSubject."""
+
+    payload = _model_field_values(value, exclude=exclude)
+    canonical = json.dumps(
+        _canonical_value(payload),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+    return "sha256:" + hashlib.sha256(canonical).hexdigest()
+
+
+# Resolve feedback/result forward references after ReviewIssue exists.
+InfoAnalysisInput.model_rebuild()
+DiscoverSupportInput.model_rebuild()
+CheckSpecificSupportInput.model_rebuild()
+RefreshSupportInput.model_rebuild()
+
+
+__all__ = [
+    "CASE_FIELD_SPECS",
+    "SIMULATION_CONFLICT_REF_PREFIX",
+    "ActionDecisionDraft",
+    "AgentRunOutcome",
+    "AgentSchema",
+    "AllProcedureLookupInput",
+    "Blocker",
+    "BlockerDraft",
+    "CaseCompleteDecisionDraft",
+    "CaseCreatedTrigger",
+    "CaseFact",
+    "CaseFieldKey",
+    "CaseSnapshot",
+    "CaseStatus",
+    "CaseStatusChangeCandidate",
+    "CheckSpecificSupportInput",
+    "ClaimType",
+    "Component",
+    "ComponentError",
+    "ComponentErrorCode",
+    "ComponentFailure",
+    "ComponentRequest",
+    "ComponentSuccess",
+    "ComponentWarning",
+    "ConflictCandidate",
+    "ConflictOutcome",
+    "CriterionStatus",
+    "DecisionAuthority",
+    "DecisionDraft",
+    "DecisionType",
+    "Digest",
+    "DiscoverSupportInput",
+    "EvidenceRecord",
+    "EvidenceSourceType",
+    "FactCandidate",
+    "FactChangeCandidate",
+    "FactChangeSourceType",
+    "FactOperation",
+    "FactStatus",
+    "FactValueType",
+    "FreshnessStatus",
+    "GroundedClaim",
+    "InfoAnalysisInput",
+    "InfoAnalysisResult",
+    "InfoCompletionStatus",
+    "InputSourceType",
+    "InvocationMeta",
+    "JsonPointer",
+    "KnownProcedureStep",
+    "MissingEvidence",
+    "MissingField",
+    "MissingFieldBlock",
+    "MutationSet",
+    "NeedsMoreInfoDecisionDraft",
+    "NextAction",
+    "NextActionDraft",
+    "NonNullStrictScalar",
+    "PlanningContext",
+    "ProcedureApplicability",
+    "ProcedureCompletionStatus",
+    "ProcedureConditionResult",
+    "ProcedureLookupInput",
+    "ProcedureLookupResult",
+    "ProcedureLookupScope",
+    "ProcedurePrerequisiteResult",
+    "ProcedureProgress",
+    "ProcedureProgressChangeCandidate",
+    "ProcedureProgressObservation",
+    "ProcedureProgressStatus",
+    "ProcedureReadiness",
+    "ProcedureStepEvaluation",
+    "ProcedureStepRef",
+    "ProcedureUnavailableCode",
+    "ProcedureUnavailableReason",
+    "QuestionCandidate",
+    "RedactedInput",
+    "Redaction",
+    "RedactionType",
+    "RefreshSupportInput",
+    "RequiredDocument",
+    "ResultSubmittedTrigger",
+    "ReviewIssue",
+    "ReviewIssueCode",
+    "ReviewProof",
+    "ReviewResult",
+    "ReviewSourceOutput",
+    "ReviewSourceResult",
+    "ReviewSubject",
+    "ReviewVerdict",
+    "ReviewedPlanOutcome",
+    "RunTrigger",
+    "RuntimeDateTime",
+    "RuntimeUUID",
+    "SafeFailureOutcome",
+    "SourcedText",
+    "SpecificProcedureLookupInput",
+    "StrictScalar",
+    "SupervisorDraft",
+    "SupervisorRunInput",
+    "SupportAnalysisInput",
+    "SupportAnalysisResult",
+    "SupportCheck",
+    "SupportCompletionStatus",
+    "SupportCriterionResult",
+    "SupportLookupGoal",
+    "SupportMatchStatus",
+    "SupportMatchUpdateCandidate",
+    "SupportProgramRef",
+    "SupportSearchSummary",
+    "Uncertainty",
+    "UpperSnakeCode",
+    "VerifiedTextSpan",
+    "canonical_digest",
+    "validate_case_field_value",
+]
