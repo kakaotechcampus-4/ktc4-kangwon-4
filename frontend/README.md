@@ -24,12 +24,25 @@ http://localhost:5173
 | React 19 + TypeScript | UI · 컴포넌트 |
 | Vite | 빌드 도구 |
 | Tailwind CSS 4 | `tailwind.config.js`와 PostCSS 설정이 **없습니다**. `@tailwindcss/vite` 플러그인과 `src/index.css`의 `@import "tailwindcss";` 로 동작합니다 |
+| React Router | 라우팅. v7부터 `react-router-dom`이 아니라 `react-router` 한 패키지입니다 |
 | Fetch API | 통신 |
 | React 내장 | 상태관리 (`useState` / `useContext`) |
 
 Mobile-first 반응형, 기준 폭 375px.
 
-**아직 도입하지 않은 것** — React Router(라우트가 생기는 시점에 추가)
+**아직 도입하지 않은 것** — 서버 통신(`types/api.ts`·`adapters/`), 테스트, 웹폰트
+
+## 화면
+
+| 경로 | 화면 | 내용 |
+|---|---|---|
+| `/` | 현재 Case | 지금 막혀 있는 것과 다음에 할 일 |
+| `/results` | 결과 입력 | 실행 결과를 한 줄로 전달 |
+| `/confirm` | 충돌 확인 | 기존 기록과 어긋날 때만 들른다 |
+| `/replan` | 재계획 결과 | 무엇이 바뀌었고 다음은 무엇인가 |
+
+`/confirm`과 `/replan`은 이전 화면에서 라우터 state로 데이터를 받습니다. 주소로 직접 열면
+개발·Preview에서는 Mock으로, 그 외에는 `/`로 이동합니다.
 
 ## npm script
 
@@ -91,14 +104,19 @@ frontend/
 │  ├─ pages/          화면
 │  ├─ types/          view.ts — 화면이 필요한 데이터 모양
 │  ├─ mocks/          서버 연동 전 데이터 소스
+│  ├─ lib/            화면에 속하지 않는 보조 코드
+│  ├─ routes.tsx      라우트 정의
 │  ├─ main.tsx        진입점
-│  ├─ App.tsx
+│  ├─ App.tsx         RouterProvider
+│  ├─ vite-env.d.ts   환경변수 타입 선언
 │  └─ index.css       Tailwind import
 ├─ index.html
+├─ vercel.json        SPA fallback
 └─ vite.config.ts
 ```
 
 화면이 5개 규모라 `features/` 없이 `pages/` + `components/` 로 나눈다.
+데이터를 구하는 것은 페이지가, 그리는 것은 컴포넌트가 맡는다.
 `types/api.ts`(서버 계약)와 `adapters/`는 서버 스키마가 확정되면 추가한다.
 
 ## 문서
