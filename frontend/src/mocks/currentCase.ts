@@ -53,13 +53,21 @@ export const noBlockerCase: CurrentCaseView = {
   },
 }
 
-/** 예외 — 정보가 부족해 다음 할 일을 정할 수 없는 상태 */
+/**
+ * 예외 — 정보가 부족해 다음 할 일을 정할 수 없는 상태.
+ *
+ * 업종·프랜차이즈·직원 수·점포 형태는 Case 생성 때 사장님이 직접 답하는 값이라
+ * 항상 채워져 있다. 미확인으로 남는 것은 임대인·지자체에 물어봐야 아는 항목들이다.
+ */
 export const insufficientCase: CurrentCaseView = {
   facts: [
     { key: 'business_type', label: '업종', value: '카페', status: 'CONFIRMED' },
-    { key: 'lease_status', label: '점포 형태', status: 'UNKNOWN' },
-    { key: 'franchise', label: '프랜차이즈', status: 'UNKNOWN' },
-    { key: 'employee_count', label: '직원 수', status: 'UNKNOWN' },
+    { key: 'franchise', label: '프랜차이즈', value: '비프랜차이즈', status: 'CONFIRMED' },
+    { key: 'employee_count', label: '직원 수', value: '2명', status: 'CONFIRMED' },
+    { key: 'lease_status', label: '점포 형태', value: '임차', status: 'CONFIRMED' },
+    { key: 'restoration_scope', label: '원상복구 범위', status: 'UNKNOWN' },
+    { key: 'demolition_required', label: '철거 필요 여부', status: 'UNKNOWN' },
+    { key: 'support_check', label: '지원 조건 확인', status: 'UNKNOWN' },
   ],
   blocker: null,
   nextAction: null,
