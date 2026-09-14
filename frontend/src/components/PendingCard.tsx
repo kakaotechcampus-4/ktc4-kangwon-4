@@ -5,8 +5,19 @@ interface PendingCardProps {
   messages: string[]
 }
 
-/** 문구를 넘기는 간격 */
-const STEP_MS = 1200
+/**
+ * 문구를 넘기는 간격. 뒤로 갈수록 길어진다.
+ *
+ * 실제로도 뒤 단계가 오래 걸린다 — 지원 근거를 Wiki·Chroma·S3에서 찾는 일이
+ * 문장에서 사실을 뽑는 것보다 느리다. 균등 간격이면 뒤쪽이 빠르게 지나가는
+ * 느낌이 들어 진행 상황과 어긋난다.
+ */
+const STEP_MS = [1200, 1800, 2400]
+
+/** 목록을 넘어가면 마지막 간격을 계속 쓴다 */
+function stepDelay(index: number): number {
+  return STEP_MS[index] ?? STEP_MS[STEP_MS.length - 1]
+}
 
 /**
  * 처리 중 상태.
@@ -25,7 +36,7 @@ export function PendingCard({ messages }: PendingCardProps) {
     // 같은 단계를 반복하는 것처럼 보여 오히려 진행이 멈춘 인상을 준다.
     if (index >= messages.length - 1) return
 
-    const timer = window.setTimeout(() => setIndex((current) => current + 1), STEP_MS)
+    const timer = window.setTimeout(() => setIndex((current) => current + 1), stepDelay(index))
     return () => window.clearTimeout(timer)
   }, [index, messages.length])
 

@@ -36,6 +36,15 @@ export function ResultInputForm({ value, onChange, onSubmit, disabled }: ResultI
         value={value}
         disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
+        onKeyDown={(event) => {
+          // Enter는 줄바꿈으로 둔다. 되돌리기 수단이 없어서, 문장을 마치기 전에
+          // 전송되면 잘못 해석된 상태를 취소할 방법이 없다.
+          // 데스크톱에서 빠르게 보내고 싶은 경우만 Ctrl/⌘ + Enter로 받는다.
+          if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && canSubmit) {
+            event.preventDefault()
+            onSubmit()
+          }
+        }}
         // TODO(UX): 이 예시는 철거 상황을 가정하고 있다. 세무·지원 등 다른 Next Action
         // 뒤에 오는 사용자에게도 같은 문구가 뜨므로, ① 화면까지 만든 뒤 일반 문구로 바꾼다.
         placeholder="예: 임대인이 철거해야 한다고 했어요."
