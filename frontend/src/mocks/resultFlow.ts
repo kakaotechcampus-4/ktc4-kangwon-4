@@ -1,5 +1,6 @@
 import type {
   ConfirmView,
+  ConflictSide,
   ReplanView,
   ResultInputView,
   SubmitOutcome,
@@ -75,9 +76,48 @@ export const updatedReplan: ReplanView = {
   },
 }
 
-/** ⑤ 예외 — 이미 알고 있던 내용이라 바뀐 것이 없는 상태 */
+/**
+ * ⑤ 예외 — 이미 알고 있던 내용이라 바뀐 것이 없는 상태.
+ *
+ * 사실이 그대로이므로 이전 판단도 그대로다.
+ */
 export const noChangeReplan: ReplanView = {
   changes: [],
+  blocker: updatedReplan.blocker,
+  nextAction: updatedReplan.nextAction,
+}
+
+/**
+ * ④에서 기존 기록을 유지하기로 한 경우.
+ *
+ * Case가 바뀌지 않았으므로 판단도 바뀌지 않는다. 여기서 새 할 일을 만들면
+ * "바뀐 것이 없다"는 안내와 화면이 서로 다른 말을 하게 된다.
+ */
+export const keptReplan: ReplanView = {
+  changes: [],
+  blocker: {
+    title: '원상복구 범위가 아직 확인되지 않았습니다.',
+    description: '이 내용이 확인되면 다음 순서를 바로 알려드릴 수 있어요.',
+  },
+  nextAction: resultInput.nextAction,
+}
+
+/**
+ * ④에서 새 값을 택한 경우.
+ *
+ * `updatedReplan`과 달리 이전 값이 `미확인`이 아니라 기록돼 있던 `필요 없음`이다.
+ * ④가 "지금 기록된 내용: 필요 없음"이라고 보여준 직후라, 같은 값을 써야 두 화면이
+ * 같은 과거를 말한다. 충돌 항목이 아닌 원상복구 범위는 여기 담지 않는다.
+ */
+export const confirmedReplan: ReplanView = {
+  changes: [
+    {
+      key: 'demolition_required',
+      label: '철거 필요 여부',
+      previousValue: '필요 없음',
+      newValue: '필요함',
+    },
+  ],
   blocker: updatedReplan.blocker,
   nextAction: updatedReplan.nextAction,
 }
@@ -130,13 +170,18 @@ const OUTCOMES: Record<string, SubmitOutcome> = {
   },
 }
 
-const PENDING_MS = 2400
+/**
+ * 처리 중 지연.
+ *
+ * `PendingCard`의 문구 전환이 누적 5.4초다. 마지막 문구가 읽힐 시간까지 두려면
+ * 그보다 넉넉해야 한다. 실제 응답도 여러 Agent와 필수 Review를 거쳐 수 초가 걸린다.
+ */
+const PENDING_MS = 7000
 
 export function simulateSubmit(mockKey: string): Promise<SubmitOutcome> {
-  const outcome: SubmitOutcome = OUTCOMES[mockKey] ?? {
-    kind: 'REPLAN',
-    view: updatedReplan,
-  }
+  const outcome: SubmitOutcome = Object.hasOwn(OUTCOMES, mockKey)
+    ? OUTCOMES[mockKey]
+    : { kind: 'REPLAN', view: updatedReplan }
 
   return new Promise((resolve) => {
     window.setTimeout(() => resolve(outcome), PENDING_MS)
@@ -146,13 +191,22 @@ export function simulateSubmit(mockKey: string): Promise<SubmitOutcome> {
 /**
  * ④에서 선택을 보낸 뒤의 결과.
  *
- * 어느 쪽을 고르든 같은 결과를 돌려준다. 선택에 따라 다른 판단을 만들려면
- * 프론트가 재계획을 해야 하는데, 그건 서버 몫이다.
+ * 준비된 응답 중 하나를 고를 뿐 재계획을 계산하지 않는다.
+ *
+ * 선택을 필드별로 받는 것은 실제 계약이 `confirmedChanges: [{ field, value }]` 형태라
+ * 그대로 옮길 수 있게 하려는 것이다. 지금은 "전부 유지했는가"만 보고 두 응답 중
+ * 하나를 고르므로, 충돌이 둘 이상이고 선택이 엇갈리면 화면이 실제 선택과 달라진다 —
+ * Mock이 충돌 1건만 내려주는 동안은 드러나지 않는다.
  *
  * TODO(API): POST /cases/{caseId}/results/confirm 호출로 바꾼다.
+ * 그때 이 인자를 요청 본문으로 옮기면 위 한계도 함께 사라진다.
+ * 실패 응답과 네트워크 오류 처리도 그때 함께 넣는다.
  */
-export function simulateConfirm(): Promise<ReplanView> {
+export function simulateConfirm(choices: Record<string, ConflictSide>): Promise<ReplanView> {
+  const sides = Object.values(choices)
+  const keptAll = sides.length > 0 && sides.every((side) => side === 'STORED')
+
   return new Promise((resolve) => {
-    window.setTimeout(() => resolve(updatedReplan), PENDING_MS)
+    window.setTimeout(() => resolve(keptAll ? keptReplan : confirmedReplan), PENDING_MS)
   })
 }

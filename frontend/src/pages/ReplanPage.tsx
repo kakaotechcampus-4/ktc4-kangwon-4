@@ -3,7 +3,6 @@ import { Link, Navigate, useLocation } from 'react-router'
 import { AppShell } from '../components/AppShell'
 import { BlockerCard } from '../components/BlockerCard'
 import { ChangeList } from '../components/ChangeList'
-import { InsufficientInfoCard } from '../components/InsufficientInfoCard'
 import { NextActionCard } from '../components/NextActionCard'
 import { NoBlockerCard } from '../components/NoBlockerCard'
 import { NoticeCard } from '../components/NoticeCard'
@@ -30,7 +29,12 @@ const MOCKS: Record<string, ReplanView> = {
 export function ReplanPage() {
   const { search, state } = useLocation()
 
-  const fallback = MOCKS[readMockKey(search)] ?? (MOCK_SWITCH_ENABLED ? updatedReplan : null)
+  const mockKey = readMockKey(search)
+  const fallback = Object.hasOwn(MOCKS, mockKey)
+    ? MOCKS[mockKey]
+    : MOCK_SWITCH_ENABLED
+      ? updatedReplan
+      : null
   const view = (state as ReplanView | null) ?? fallback
 
   if (!view) return <Navigate to="/" replace />
@@ -45,14 +49,18 @@ export function ReplanPage() {
         <NoticeCard
           tone="NEUTRAL"
           title="바뀐 것이 없습니다."
-          description="말씀하신 내용은 이미 기록되어 있어요. 다음 할 일도 그대로입니다."
+          description="기록된 내용이 그대로라 다음 할 일도 달라지지 않았어요."
         />
       )}
 
       {nextAction ? (
         <NextActionCard nextAction={nextAction} />
       ) : (
-        <InsufficientInfoCard missing={[]} />
+        <NoticeCard
+          tone="NEUTRAL"
+          title="다음 할 일을 정하려면 확인이 더 필요합니다."
+          description="현재 상황에서 어떤 항목이 비어 있는지 확인해 주세요."
+        />
       )}
 
       {blocker && <BlockerCard blocker={blocker} />}

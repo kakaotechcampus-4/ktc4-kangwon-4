@@ -39,8 +39,10 @@ export function NextActionCard({ nextAction }: NextActionCardProps) {
         </div>
       )}
 
+      {/* 어떤 할 일의 결과인지 다음 화면이 알아야 한다. 모르면 직전 할 일을 보여주게 된다 */}
       <Link
         to="/results"
+        state={nextAction}
         className="mt-4 flex min-h-13 w-full items-center justify-center rounded-xl bg-white text-base font-bold text-gray-900"
       >
         결과 알려주기

@@ -1,6 +1,4 @@
-import type { ConflictItem } from '../types/view'
-
-export type ConflictSide = 'STORED' | 'INCOMING'
+import type { ConflictItem, ConflictSide } from '../types/view'
 
 interface ConflictChoiceProps {
   item: ConflictItem

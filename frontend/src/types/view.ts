@@ -104,6 +104,9 @@ export type SubmitState =
   /** 재계획에 실패했다. 사용자 탓이 아니므로 문구를 구분한다 */
   | { kind: 'FAILED'; message: string }
 
+/** ④에서 사용자가 고른 쪽 */
+export type ConflictSide = 'STORED' | 'INCOMING'
+
 /** 기존 기록과 새 입력이 어긋난 항목 하나 */
 export interface ConflictItem {
   key: string

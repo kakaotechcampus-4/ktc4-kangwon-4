@@ -2,11 +2,11 @@ import { useState } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router'
 
 import { AppShell } from '../components/AppShell'
-import { ConflictChoice, type ConflictSide } from '../components/ConflictChoice'
+import { ConflictChoice } from '../components/ConflictChoice'
 import { PendingCard } from '../components/PendingCard'
 import { MOCK_SWITCH_ENABLED } from '../lib/mockSwitch'
 import { conflictConfirm, pendingMessages, simulateConfirm } from '../mocks/resultFlow'
-import type { ConfirmView } from '../types/view'
+import type { ConfirmView, ConflictSide } from '../types/view'
 
 /**
  * ④ 충돌 확인.
@@ -25,6 +25,9 @@ export function ConfirmChangePage() {
   const [isPending, setIsPending] = useState(false)
 
   if (!view) return <Navigate to="/" replace />
+  // 고를 것이 없으면 이 화면의 존재 이유가 없다. 서버가 빈 목록을 보내도 막다른 골목이
+  // 되지 않게 현재 Case로 돌린다.
+  if (view.conflicts.length === 0) return <Navigate to="/" replace />
 
   const { rawInput, conflicts } = view
   const allDecided = conflicts.every((conflict) => choices[conflict.key])
@@ -34,7 +37,9 @@ export function ConfirmChangePage() {
 
     // TODO(API): POST /cases/{caseId}/results/confirm 으로 선택값을 보낸다.
     // 요청 형태는 confirmedChanges: [{ field, value }] 배열이다.
-    const replan = await simulateConfirm()
+    // 실패 시 대기 상태에서 빠져나올 경로도 그때 함께 만든다 — 지금은 Mock이라
+    // 실패하지 않지만, fetch로 바꾸면 오류가 나도 화면이 잠긴 채로 남는다.
+    const replan = await simulateConfirm(choices)
     navigate('/replan', { state: replan })
   }
 
