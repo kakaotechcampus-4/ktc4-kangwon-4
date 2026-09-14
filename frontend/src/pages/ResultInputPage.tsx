@@ -40,9 +40,11 @@ export function ResultInputPage() {
     setState({ kind: 'PENDING' })
 
     // TODO(API): 계약이 확정되면 POST /cases/{caseId}/results 로 바꾼다.
+    // 그때 AbortController로 화면 이탈도 처리한다 — 지금은 기다리다 뒤로 가도
+    // 응답이 오면 화면이 /replan 으로 끌려간다.
     // 그때 실패 처리도 함께 넣는다 — 오류가 나면 PENDING에서 빠져나오지 못해
     // 입력창이 잠긴 채로 남는다. FAILED 상태가 그 자리다.
-    const outcome = await simulateSubmit(readMockKey(search))
+    const outcome = await simulateSubmit(readMockKey(search), text)
 
     switch (outcome.kind) {
       case 'REPLAN':
@@ -89,7 +91,7 @@ export function ResultInputPage() {
           tone="NEUTRAL"
           title={state.message}
           description="잠시 후 다시 시도해 주세요. 같은 내용을 그대로 보내셔도 됩니다."
-          action={canRetry ? { label: '다시 시도', onClick: handleSubmit } : undefined}
+          action={{ label: '다시 시도', onClick: handleSubmit, disabled: !canRetry }}
         />
       )}
     </AppShell>

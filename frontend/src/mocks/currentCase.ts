@@ -56,6 +56,9 @@ export const noBlockerCase: CurrentCaseView = {
 /**
  * 예외 — 정보가 부족해 다음 할 일을 정할 수 없는 상태.
  *
+ * 지원 조건 확인은 사장님이 알려줄 수 있는 것이 아니라 시스템이 조회할 항목이라
+ * 여기 담지 않는다. 이 화면의 목록은 "알려주세요"로 읽힌다.
+ *
  * 업종·프랜차이즈·직원 수·점포 형태는 Case 생성 때 사장님이 직접 답하는 값이라
  * 항상 채워져 있다. 미확인으로 남는 것은 임대인·지자체에 물어봐야 아는 항목들이다.
  */
@@ -67,7 +70,6 @@ export const insufficientCase: CurrentCaseView = {
     { key: 'lease_status', label: '점포 형태', value: '임차', status: 'CONFIRMED' },
     { key: 'restoration_scope', label: '원상복구 범위', status: 'UNKNOWN' },
     { key: 'demolition_required', label: '철거 필요 여부', status: 'UNKNOWN' },
-    { key: 'support_check', label: '지원 조건 확인', status: 'UNKNOWN' },
   ],
   blocker: null,
   nextAction: null,

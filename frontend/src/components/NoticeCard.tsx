@@ -5,8 +5,12 @@ interface NoticeCardProps {
   tone: NoticeTone
   title: string
   description: string
-  /** 사용자가 할 수 있는 일이 있을 때만 준다 */
-  action?: { label: string; onClick: () => void }
+  /**
+   * 사용자가 할 수 있는 일이 있을 때만 준다.
+   * 조건이 안 맞을 때는 숨기지 말고 `disabled`로 둔다 — 버튼이 사라지면
+   * 왜 사라졌는지 알 수 없고, 눌리는데 반응이 없으면 고장으로 보인다.
+   */
+  action?: { label: string; onClick: () => void; disabled?: boolean }
 }
 
 /**
@@ -48,7 +52,8 @@ export function NoticeCard({ tone, title, description, action }: NoticeCardProps
         <button
           type="button"
           onClick={action.onClick}
-          className="mt-4 min-h-13 w-full rounded-xl border border-gray-300 bg-white text-base font-bold text-gray-900"
+          disabled={action.disabled}
+          className="mt-4 min-h-13 w-full rounded-xl border border-gray-300 bg-white text-base font-bold text-gray-900 disabled:border-gray-200 disabled:bg-gray-50 disabled:text-gray-400"
         >
           {action.label}
         </button>

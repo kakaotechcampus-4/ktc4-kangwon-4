@@ -135,12 +135,7 @@ export const conflictConfirm: ConfirmView = {
   ],
 }
 
-/**
- * `?mock=` 키에 따라 제출 결과를 돌려준다.
- *
- * 지연을 두는 것은 처리 중 화면을 눌러볼 수 있게 하려는 것이다.
- * TODO(API): 계약이 확정되면 이 함수를 `POST /cases/{caseId}/results` 호출로 바꾼다.
- */
+/** `?mock=` 키별로 준비된 제출 결과. 키가 없으면 정상 경로를 쓴다 */
 const OUTCOMES: Record<string, SubmitOutcome> = {
   conflict: { kind: 'CONFIRM', view: conflictConfirm },
   'no-change': { kind: 'REPLAN', view: noChangeReplan },
@@ -171,35 +166,43 @@ const OUTCOMES: Record<string, SubmitOutcome> = {
 }
 
 /**
- * 처리 중 지연.
+ * `?mock=` 키에 따라 제출 결과를 돌려준다.
  *
- * `PendingCard`의 문구 전환이 누적 5.4초다. 마지막 문구가 읽힐 시간까지 두려면
- * 그보다 넉넉해야 한다. 실제 응답도 여러 Agent와 필수 Review를 거쳐 수 초가 걸린다.
+ * 사용자가 친 문장을 함께 받아 충돌 화면에 그대로 싣는다. 서버는 이 문장을 응답에
+ * 돌려주지 않으므로(`docs/interface-spec.md` §5), 연동 후에도 프론트가 자기가 보낸
+ * 문장을 넘겨야 한다.
+ *
+ * 지연을 두는 것은 처리 중 화면을 눌러볼 수 있게 하려는 것이다.
+ * TODO(API): 계약이 확정되면 이 함수를 `POST /cases/{caseId}/results` 호출로 바꾼다.
  */
-const PENDING_MS = 7000
-
-export function simulateSubmit(mockKey: string): Promise<SubmitOutcome> {
+export function simulateSubmit(mockKey: string, rawInput: string): Promise<SubmitOutcome> {
   const outcome: SubmitOutcome = Object.hasOwn(OUTCOMES, mockKey)
     ? OUTCOMES[mockKey]
     : { kind: 'REPLAN', view: updatedReplan }
 
+  const resolved: SubmitOutcome =
+    outcome.kind === 'CONFIRM'
+      ? { kind: 'CONFIRM', view: { ...outcome.view, rawInput } }
+      : outcome
+
   return new Promise((resolve) => {
-    window.setTimeout(() => resolve(outcome), PENDING_MS)
+    window.setTimeout(() => resolve(resolved), PENDING_MS)
   })
 }
+
+const PENDING_MS = 7000
 
 /**
  * ④에서 선택을 보낸 뒤의 결과.
  *
  * 준비된 응답 중 하나를 고를 뿐 재계획을 계산하지 않는다.
  *
- * 선택을 필드별로 받는 것은 실제 계약이 `confirmedChanges: [{ field, value }]` 형태라
- * 그대로 옮길 수 있게 하려는 것이다. 지금은 "전부 유지했는가"만 보고 두 응답 중
- * 하나를 고르므로, 충돌이 둘 이상이고 선택이 엇갈리면 화면이 실제 선택과 달라진다 —
- * Mock이 충돌 1건만 내려주는 동안은 드러나지 않는다.
+ * 선택을 필드별로 받지만 지금은 "전부 유지했는가"만 본다. 충돌이 둘 이상이고 선택이
+ * 엇갈리면 화면이 실제 선택과 달라진다 — Mock이 1건만 내려주는 동안은 드러나지 않는다.
  *
- * TODO(API): POST /cases/{caseId}/results/confirm 호출로 바꾼다.
- * 그때 이 인자를 요청 본문으로 옮기면 위 한계도 함께 사라진다.
+ * TODO(API): POST /cases/{caseId}/results/confirm 호출로 바꾼다. 요청 본문은
+ * `rawInput`과 `confirmedChanges: [{ field, value }]` 라, 여기 오는 STORED/INCOMING을
+ * 실제 값으로 바꾸고 입력 문장을 함께 넘기는 변환이 그때 필요하다.
  * 실패 응답과 네트워크 오류 처리도 그때 함께 넣는다.
  */
 export function simulateConfirm(choices: Record<string, ConflictSide>): Promise<ReplanView> {
