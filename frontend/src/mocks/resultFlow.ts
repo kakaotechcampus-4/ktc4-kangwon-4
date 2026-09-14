@@ -142,3 +142,17 @@ export function simulateSubmit(mockKey: string): Promise<SubmitOutcome> {
     window.setTimeout(() => resolve(outcome), PENDING_MS)
   })
 }
+
+/**
+ * ④에서 선택을 보낸 뒤의 결과.
+ *
+ * 어느 쪽을 고르든 같은 결과를 돌려준다. 선택에 따라 다른 판단을 만들려면
+ * 프론트가 재계획을 해야 하는데, 그건 서버 몫이다.
+ *
+ * TODO(API): POST /cases/{caseId}/results/confirm 호출로 바꾼다.
+ */
+export function simulateConfirm(): Promise<ReplanView> {
+  return new Promise((resolve) => {
+    window.setTimeout(() => resolve(updatedReplan), PENDING_MS)
+  })
+}
