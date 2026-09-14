@@ -67,7 +67,7 @@ export function ReplanPage() {
       {nextAction && !blocker && <NoBlockerCard />}
 
       <Link
-        to="/"
+        to={{ pathname: '/', search }}
         className="flex min-h-13 items-center justify-center rounded-xl border border-gray-300 bg-white text-base font-bold text-gray-900"
       >
         현재 상황 보기

@@ -56,6 +56,11 @@ export function ResultInputPage() {
       case 'STAY':
         setState(outcome.state)
         return
+      default: {
+        // 갈래가 늘면 여기서 컴파일이 막힌다. 없으면 조용히 빠져나가 PENDING에 갇힌다
+        const unhandled: never = outcome
+        return unhandled
+      }
     }
   }
 

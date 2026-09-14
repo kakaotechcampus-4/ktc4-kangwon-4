@@ -8,6 +8,9 @@ import type { CurrentCaseView } from '../types/view'
  *
  * 각 Mock은 서버가 이미 판단을 마친 결과다. facts를 보고 blocker를 유도하는
  * 함수를 두면 안 된다 — 그 판단은 서버 몫이다.
+ *
+ * facts에는 사용자가 답할 수 있는 항목만 담는다. 지원 조건 확인처럼 시스템이
+ * 조회할 것은 넣지 않는다 — "아직 확인 안 된 것" 목록이 사용자에게 할 일로 읽힌다.
  */
 
 /** 정상 — 막힌 것이 있고 다음 할 일도 정해진 상태 */
@@ -19,7 +22,6 @@ export const normalCase: CurrentCaseView = {
     { key: 'lease_status', label: '점포 형태', value: '임차', status: 'CONFIRMED' },
     { key: 'restoration_scope', label: '원상복구 범위', status: 'IN_PROGRESS' },
     { key: 'demolition_required', label: '철거 필요 여부', status: 'UNKNOWN' },
-    { key: 'support_check', label: '지원 조건 확인', status: 'UNKNOWN' },
   ],
   blocker: {
     title: '원상복구 범위가 아직 확인되지 않았습니다.',
@@ -43,7 +45,6 @@ export const noBlockerCase: CurrentCaseView = {
     { key: 'lease_status', label: '점포 형태', value: '임차', status: 'CONFIRMED' },
     { key: 'restoration_scope', label: '원상복구 범위', value: '철거 필요', status: 'CONFIRMED' },
     { key: 'demolition_required', label: '철거 필요 여부', value: '필요함', status: 'CONFIRMED' },
-    { key: 'support_check', label: '지원 조건 확인', value: '확인함', status: 'CONFIRMED' },
   ],
   blocker: null,
   nextAction: {
@@ -55,9 +56,6 @@ export const noBlockerCase: CurrentCaseView = {
 
 /**
  * 예외 — 정보가 부족해 다음 할 일을 정할 수 없는 상태.
- *
- * 지원 조건 확인은 사장님이 알려줄 수 있는 것이 아니라 시스템이 조회할 항목이라
- * 여기 담지 않는다. 이 화면의 목록은 "알려주세요"로 읽힌다.
  *
  * 업종·프랜차이즈·직원 수·점포 형태는 Case 생성 때 사장님이 직접 답하는 값이라
  * 항상 채워져 있다. 미확인으로 남는 것은 임대인·지자체에 물어봐야 아는 항목들이다.

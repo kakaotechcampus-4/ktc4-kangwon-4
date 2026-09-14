@@ -190,6 +190,13 @@ export function simulateSubmit(mockKey: string, rawInput: string): Promise<Submi
   })
 }
 
+/**
+ * 처리 중 지연.
+ *
+ * `PendingCard`의 문구 전환이 누적 5.4초(`STEP_MS` 1200+1800+2400)다. 이보다 짧으면
+ * 뒤쪽 문구가 읽히기 전에 화면이 넘어가므로 넉넉하게 둔다. 실제 응답도 여러 Agent와
+ * 필수 Review를 거쳐 수 초가 걸린다.
+ */
 const PENDING_MS = 7000
 
 /**
