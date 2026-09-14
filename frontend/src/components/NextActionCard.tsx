@@ -1,3 +1,5 @@
+import { Link } from 'react-router'
+
 import type { NextAction } from '../types/view'
 
 interface NextActionCardProps {
@@ -37,15 +39,12 @@ export function NextActionCard({ nextAction }: NextActionCardProps) {
         </div>
       )}
 
-      {/* ③ 결과 입력 화면이 아직 없다. 라우트가 생길 때 연결한다 */}
-      <button
-        type="button"
-        disabled
-        className="mt-4 min-h-13 w-full rounded-xl bg-white text-base font-bold text-gray-900 disabled:cursor-not-allowed disabled:bg-white/40 disabled:text-gray-700"
+      <Link
+        to="/results"
+        className="mt-4 flex min-h-13 w-full items-center justify-center rounded-xl bg-white text-base font-bold text-gray-900"
       >
         결과 알려주기
-      </button>
-      <p className="mt-2 text-center text-sm text-gray-400">다음 단계 화면은 준비 중입니다</p>
+      </Link>
     </section>
   )
 }
