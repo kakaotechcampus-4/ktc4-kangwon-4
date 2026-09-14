@@ -72,7 +72,12 @@ Preview 환경에만 설정하기 때문이며, Production에서는 항상 정�
 ?mock=insufficient    정보 부족
 ```
 
-배포 URL은 확정되면 여기에 적습니다.
+| 환경 | URL |
+|---|---|
+| Production | https://ktc4-kangwon-4.vercel.app |
+| Preview (`develop`) | https://ktc4-kangwon-4-git-develop-blackwell-s-projects.vercel.app |
+
+PR 브랜치는 배포될 때마다 별도 Preview URL이 생기며, PR 화면에서 확인할 수 있습니다.
 
 ## 폴더 구조
 
