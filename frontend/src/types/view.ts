@@ -72,3 +72,89 @@ export interface CurrentCaseView {
   blocker: Blocker | null
   nextAction: NextAction | null
 }
+
+/**
+ * ③ 결과 입력 화면이 필요한 데이터.
+ *
+ * 무엇에 대한 결과인지 상기시키려고 직전 Next Action을 함께 보여준다.
+ * 사용자는 며칠 뒤에 들어올 수도 있어서, 자기가 무슨 일을 하러 갔는지 잊는다.
+ */
+export interface ResultInputView {
+  nextAction: NextAction
+}
+
+/**
+ * 결과를 보낸 뒤 ③ 화면이 머무는 상태.
+ *
+ * 서버 응답 중 **화면을 옮기지 않는 것들**만 여기 온다. `UPDATED`·`NO_CHANGE`는
+ * ⑤로, `CONFLICT`는 ④로 가므로 이 목록에 없다.
+ *
+ * 서버의 `result` 값을 그대로 쓰지 않고 화면 상태로 다시 이름 붙인 것은,
+ * `PENDING`처럼 서버에 없는 상태가 섞이기 때문이다. 변환은 어댑터가 맡는다.
+ */
+export type SubmitState =
+  /** 아직 보내지 않음 */
+  | { kind: 'IDLE' }
+  /** 보내고 기다리는 중 */
+  | { kind: 'PENDING' }
+  /** 입력만으로는 상태를 확정할 수 없어 되묻는다 */
+  | { kind: 'NEEDS_MORE_INFO'; questions: string[] }
+  /** 지금 상태에서 있을 수 없는 변화라 정정을 요청한다 */
+  | { kind: 'INVALID_TRANSITION'; message: string }
+  /** 재계획에 실패했다. 사용자 탓이 아니므로 문구를 구분한다 */
+  | { kind: 'FAILED'; message: string }
+
+/** 기존 기록과 새 입력이 어긋난 항목 하나 */
+export interface ConflictItem {
+  key: string
+  label: string
+  storedValue: string
+  incomingValue: string
+}
+
+/**
+ * ④ 충돌 확인 화면이 필요한 데이터.
+ *
+ * 사용자가 방금 한 말(`rawInput`)을 함께 보여준다. 어느 문장 때문에 이 화면이
+ * 떴는지 모르면 무엇을 고르는지도 알 수 없다.
+ */
+export interface ConfirmView {
+  rawInput: string
+  conflicts: ConflictItem[]
+}
+
+/** ⑤에서 보여줄 변경 한 건 */
+export interface FactChange {
+  key: string
+  label: string
+  /** null = 이전에는 미확인이었다. 빈 문자열로 대신하지 않는다 */
+  previousValue: string | null
+  newValue: string
+}
+
+/**
+ * ⑤ 재계획 결과 화면이 필요한 데이터.
+ *
+ * `changes`가 빈 배열이면 "바뀐 것이 없음"이다. 별도 플래그를 두지 않는다 —
+ * 서버가 상태 이름을 정하고 프론트가 그 이름을 해석하는 층을 만들지 않기 위해서다.
+ * `blocker`·`nextAction`의 `null` 의미는 `CurrentCaseView`와 같다.
+ */
+export interface ReplanView {
+  changes: FactChange[]
+  blocker: Blocker | null
+  nextAction: NextAction | null
+}
+
+/**
+ * 결과를 보낸 뒤 ③ 화면이 할 일.
+ *
+ * 응답 종류에 따라 화면을 옮기거나 그 자리에 머문다. 어디로 갈지는 화면이 정하고,
+ * 서버 응답을 이 모양으로 바꾸는 것은 어댑터가 맡는다.
+ */
+export type SubmitOutcome =
+  /** 반영됐다. ⑤로 이동 (`UPDATED` · `NO_CHANGE`) */
+  | { kind: 'REPLAN'; view: ReplanView }
+  /** 기존 기록과 어긋난다. ④로 이동 (`CONFLICT`) */
+  | { kind: 'CONFIRM'; view: ConfirmView }
+  /** 화면에 머문다 */
+  | { kind: 'STAY'; state: SubmitState }
