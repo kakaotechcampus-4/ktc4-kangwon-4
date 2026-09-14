@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Vercel CLI가 만드는 로컬 연결 정보 (프로젝트·조직 ID)
+.vercel
