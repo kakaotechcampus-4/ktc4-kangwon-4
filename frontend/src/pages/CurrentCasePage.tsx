@@ -1,17 +1,29 @@
+import { useLocation } from 'react-router'
+
 import { AppShell } from '../components/AppShell'
 import { BlockerCard } from '../components/BlockerCard'
 import { FactList } from '../components/FactList'
 import { InsufficientInfoCard } from '../components/InsufficientInfoCard'
 import { NextActionCard } from '../components/NextActionCard'
 import { NoBlockerCard } from '../components/NoBlockerCard'
+import { readMockKey } from '../lib/mockSwitch'
+import { insufficientCase, noBlockerCase, normalCase } from '../mocks/currentCase'
 import type { CurrentCaseView } from '../types/view'
 
-interface CurrentCasePageProps {
-  data: CurrentCaseView
+/**
+ * 이 화면에서 볼 수 있는 Mock.
+ *
+ * TODO(API): 계약이 확정되면 `GET /cases/{caseId}` 응답을 어댑터로 변환해 쓴다.
+ * 그때 이 목록은 테스트 픽스처로 옮긴다.
+ */
+const MOCKS: Record<string, CurrentCaseView> = {
+  'no-blocker': noBlockerCase,
+  insufficient: insufficientCase,
 }
 
-export function CurrentCasePage({ data }: CurrentCasePageProps) {
-  const { facts, blocker, nextAction } = data
+export function CurrentCasePage() {
+  const { search } = useLocation()
+  const { facts, blocker, nextAction }: CurrentCaseView = MOCKS[readMockKey(search)] ?? normalCase
 
   const confirmed = facts.filter((fact) => fact.status === 'CONFIRMED')
   const pending = facts.filter((fact) => fact.status !== 'CONFIRMED')
