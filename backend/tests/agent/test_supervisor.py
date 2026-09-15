@@ -8,6 +8,7 @@ from uuid import UUID
 
 import pytest
 from app.agent.schemas import (
+    AgentGraphInput,
     AgentSchema,
     CaseCreatedTrigger,
     CaseFact,
@@ -28,7 +29,8 @@ from app.agent.schemas import (
     ReviewIssue,
     ReviewSourceResult,
     SourcedText,
-    SupervisorRunInput,
+    SupervisorAgentInput,
+    SupervisorDraft,
     SupportAnalysisResult,
     SupportCheck,
     SupportProgramRef,
@@ -127,7 +129,7 @@ def snapshot() -> CaseSnapshot:
     )
 
 
-def run_input() -> SupervisorRunInput:
+def run_input() -> AgentGraphInput:
     redacted = RedactedInput(
         input_event_id="input-1",
         source_type="USER_INPUT",
@@ -135,7 +137,7 @@ def run_input() -> SupervisorRunInput:
         redactions=[],
         submitted_at=NOW,
     )
-    return SupervisorRunInput(
+    return AgentGraphInput(
         trigger=CaseCreatedTrigger(
             trigger_type="CASE_CREATED",
             input_event_id="input-1",
@@ -144,6 +146,29 @@ def run_input() -> SupervisorRunInput:
             submitted_at=NOW,
         ),
         case_snapshot=snapshot(),
+    )
+
+
+def supervisor_input(
+    source_results: list[ReviewSourceResult],
+    *,
+    graph_input: AgentGraphInput | None = None,
+    draft_version: int = 1,
+    review_feedback: list[ReviewIssue] | None = None,
+    fact_overlays: list[Any] | None = None,
+    previous_draft: SupervisorDraft | None = None,
+) -> SupervisorAgentInput:
+    """Build the single request model accepted at the Supervisor boundary."""
+
+    graph_input = graph_input or run_input()
+    return SupervisorAgentInput(
+        trigger=graph_input.trigger,
+        case_snapshot=graph_input.case_snapshot,
+        source_results=source_results,
+        draft_version=draft_version,
+        review_feedback=review_feedback or [],
+        fact_overlays=fact_overlays,
+        previous_draft=previous_draft,
     )
 
 
@@ -423,7 +448,7 @@ def semantic_payload(*, evidence_id: str = "ev-input") -> dict[str, Any]:
 def test_supervisor_builds_one_action_and_runtime_owned_mutation() -> None:
     llm = FakeLLM(semantic_payload())
     draft = asyncio.run(
-        SupervisorAgent(llm).draft(run_input(), [source(), procedure_source()])
+        SupervisorAgent(llm).draft(supervisor_input([source(), procedure_source()]))
     )
 
     assert draft.decision.decision_type == "ACTION"
@@ -477,8 +502,7 @@ def test_supervisor_falls_back_to_validated_info_questions_after_model_failure()
 
     draft = asyncio.run(
         SupervisorAgent(FakeLLM(invalid), max_local_attempts=1).draft(
-            run_input(),
-            [info_source, procedure_source()],
+            supervisor_input([info_source, procedure_source()])
         )
     )
 
@@ -534,8 +558,7 @@ def test_support_action_requires_exact_check_target_and_evidence() -> None:
 
     draft = asyncio.run(
         SupervisorAgent(FakeLLM(payload)).draft(
-            run_input(),
-            [source(), procedure_source(), support_source()],
+            supervisor_input([source(), procedure_source(), support_source()])
         )
     )
 
@@ -579,8 +602,7 @@ def test_support_target_cannot_hide_a_mixed_procedure_action(
     with pytest.raises(SupervisorGuardrailError, match="provenance checks"):
         asyncio.run(
             SupervisorAgent(FakeLLM(payload)).draft(
-                run_input(),
-                [source(), procedure_source(), support_source()],
+                supervisor_input([source(), procedure_source(), support_source()])
             )
         )
 
@@ -602,8 +624,7 @@ def test_procedure_target_cannot_hide_a_support_action(
     with pytest.raises(SupervisorGuardrailError, match="provenance checks"):
         asyncio.run(
             SupervisorAgent(FakeLLM(payload)).draft(
-                run_input(),
-                [source(), procedure_source()],
+                supervisor_input([source(), procedure_source()])
             )
         )
 
@@ -637,8 +658,7 @@ def test_support_target_cannot_name_another_support_program() -> None:
     with pytest.raises(SupervisorGuardrailError, match="provenance checks"):
         asyncio.run(
             SupervisorAgent(FakeLLM(payload)).draft(
-                run_input(),
-                [source(), procedure_source(), two_program_source],
+                supervisor_input([source(), procedure_source(), two_program_source])
             )
         )
 
@@ -646,7 +666,9 @@ def test_support_target_cannot_name_another_support_program() -> None:
 def test_supervisor_prompt_uses_minimum_content_free_projection() -> None:
     llm = FakeLLM(semantic_payload())
 
-    asyncio.run(SupervisorAgent(llm).draft(run_input(), [source(), procedure_source()]))
+    asyncio.run(
+        SupervisorAgent(llm).draft(supervisor_input([source(), procedure_source()]))
+    )
 
     prompt = llm.messages[0][1]["content"]
     assert "임대인에게 확인" not in prompt
@@ -672,7 +694,7 @@ def test_supervisor_prompt_uses_minimum_content_free_projection() -> None:
 def test_revision_prompt_uses_semantic_previous_draft_and_rebuilds_provenance() -> None:
     previous = asyncio.run(
         SupervisorAgent(FakeLLM(semantic_payload())).draft(
-            run_input(), [source(), procedure_source()]
+            supervisor_input([source(), procedure_source()])
         )
     )
     current_call_id = UUID("00000000-0000-4000-8000-000000000299")
@@ -698,11 +720,12 @@ def test_revision_prompt_uses_semantic_previous_draft_and_rebuilds_provenance() 
 
     revised = asyncio.run(
         SupervisorAgent(llm).draft(
-            run_input(),
-            [current_source, procedure_source()],
-            draft_version=2,
-            review_feedback=[feedback],
-            previous_draft=previous,
+            supervisor_input(
+                [current_source, procedure_source()],
+                draft_version=2,
+                review_feedback=[feedback],
+                previous_draft=previous,
+            )
         )
     )
 
@@ -739,7 +762,7 @@ def test_invented_evidence_is_retried_bounded_then_rejected() -> None:
 
     with pytest.raises(SupervisorGuardrailError, match="provenance checks"):
         asyncio.run(
-            SupervisorAgent(llm).draft(run_input(), [source(), procedure_source()])
+            SupervisorAgent(llm).draft(supervisor_input([source(), procedure_source()]))
         )
 
     assert llm.calls == 3
@@ -751,7 +774,7 @@ def test_conditional_contract_failure_is_corrected_by_local_retry() -> None:
     llm = SequenceLLM([invalid, semantic_payload()])
 
     draft = asyncio.run(
-        SupervisorAgent(llm).draft(run_input(), [source(), procedure_source()])
+        SupervisorAgent(llm).draft(supervisor_input([source(), procedure_source()]))
     )
 
     assert draft.decision.decision_type == "ACTION"
@@ -774,7 +797,7 @@ def test_scalar_claim_selector_is_mapped_to_final_decision_path() -> None:
 
     draft = asyncio.run(
         SupervisorAgent(FakeLLM(payload)).draft(
-            run_input(), [source(include_finding=True), procedure_source()]
+            supervisor_input([source(include_finding=True), procedure_source()])
         )
     )
 
@@ -797,7 +820,7 @@ def test_claim_text_and_path_are_bound_from_selected_runtime_field() -> None:
 
     draft = asyncio.run(
         SupervisorAgent(FakeLLM(payload)).draft(
-            run_input(), [source(), procedure_source(), support_source()]
+            supervisor_input([source(), procedure_source(), support_source()])
         )
     )
 
@@ -821,7 +844,7 @@ def test_grounded_claim_can_target_a_question_list_item() -> None:
 
     draft = asyncio.run(
         SupervisorAgent(FakeLLM(payload)).draft(
-            run_input(), [source(include_finding=True), procedure_source()]
+            supervisor_input([source(include_finding=True), procedure_source()])
         )
     )
 
@@ -833,8 +856,7 @@ def test_procedure_target_evidence_is_bound_to_next_action() -> None:
 
     draft = asyncio.run(
         SupervisorAgent(FakeLLM(payload)).draft(
-            run_input(),
-            [source(include_finding=True), procedure_source()],
+            supervisor_input([source(include_finding=True), procedure_source()])
         )
     )
 
@@ -860,7 +882,7 @@ def test_progress_mutation_uses_same_info_finding_and_observation() -> None:
 
     draft = asyncio.run(
         SupervisorAgent(FakeLLM(semantic_payload())).draft(
-            run_input(), [info_source, procedure_source()]
+            supervisor_input([info_source, procedure_source()])
         )
     )
 
@@ -888,11 +910,12 @@ def test_progress_observation_requiring_confirmation_does_not_create_mutation() 
 
     draft = asyncio.run(
         SupervisorAgent(FakeLLM(semantic_payload())).draft(
-            run_input(),
-            [
-                source(include_finding=True, observations=[observation]),
-                procedure_source(),
-            ],
+            supervisor_input(
+                [
+                    source(include_finding=True, observations=[observation]),
+                    procedure_source(),
+                ]
+            )
         )
     )
 
@@ -902,7 +925,7 @@ def test_progress_observation_requiring_confirmation_does_not_create_mutation() 
 def test_web_finding_alone_does_not_create_progress_mutation() -> None:
     draft = asyncio.run(
         SupervisorAgent(FakeLLM(semantic_payload())).draft(
-            run_input(), [source(include_finding=True), procedure_source()]
+            supervisor_input([source(include_finding=True), procedure_source()])
         )
     )
 
@@ -924,7 +947,7 @@ def test_invalid_claim_question_index_is_retried_then_rejected() -> None:
 
     with pytest.raises(SupervisorGuardrailError, match="provenance checks"):
         asyncio.run(
-            SupervisorAgent(llm).draft(run_input(), [source(), procedure_source()])
+            SupervisorAgent(llm).draft(supervisor_input([source(), procedure_source()]))
         )
 
     assert llm.calls == 3
@@ -969,7 +992,7 @@ def test_ungrounded_support_program_mention_is_corrected_by_local_retry() -> Non
 
     draft = asyncio.run(
         SupervisorAgent(llm).draft(
-            run_input(), [source(), procedure_source(), support_source()]
+            supervisor_input([source(), procedure_source(), support_source()])
         )
     )
 
@@ -983,7 +1006,7 @@ def test_transitive_official_source_supports_grounded_program_claim() -> None:
 
     draft = asyncio.run(
         SupervisorAgent(llm).draft(
-            run_input(), [source(), procedure_source(), support_source()]
+            supervisor_input([source(), procedure_source(), support_source()])
         )
     )
 
@@ -1009,7 +1032,7 @@ def test_support_program_claim_cannot_mask_explicit_eligibility_language(
     with pytest.raises(SupervisorGuardrailError, match="provenance checks"):
         asyncio.run(
             SupervisorAgent(llm).draft(
-                run_input(), [source(), procedure_source(), support_source()]
+                supervisor_input([source(), procedure_source(), support_source()])
             )
         )
 
@@ -1029,7 +1052,7 @@ def test_confirmation_only_eligibility_claim_accepts_nonfinal_wording() -> None:
 
     draft = asyncio.run(
         SupervisorAgent(llm).draft(
-            run_input(), [source(), procedure_source(), support_source()]
+            supervisor_input([source(), procedure_source(), support_source()])
         )
     )
 
@@ -1051,7 +1074,9 @@ def test_non_current_confirmation_claim_requires_visible_caveat() -> None:
         }
     ]
     sources = [source(), procedure_source()]
-    draft = asyncio.run(SupervisorAgent(FakeLLM(payload)).draft(run_input(), sources))
+    draft = asyncio.run(
+        SupervisorAgent(FakeLLM(payload)).draft(supervisor_input(sources))
+    )
     non_current = procedure_evidence().model_copy(
         update={"freshness_status": "UNKNOWN"}
     )
@@ -1079,7 +1104,7 @@ def test_overconfident_eligibility_wording_remains_blocked() -> None:
     with pytest.raises(SupervisorGuardrailError, match="provenance checks"):
         asyncio.run(
             SupervisorAgent(llm).draft(
-                run_input(), [source(), procedure_source(), support_source()]
+                supervisor_input([source(), procedure_source(), support_source()])
             )
         )
 
@@ -1094,7 +1119,7 @@ def test_overconfident_program_claim_is_retried_then_rejected() -> None:
     with pytest.raises(SupervisorGuardrailError, match="provenance checks"):
         asyncio.run(
             SupervisorAgent(llm).draft(
-                run_input(), [source(), procedure_source(), support_source()]
+                supervisor_input([source(), procedure_source(), support_source()])
             )
         )
 
@@ -1129,13 +1154,14 @@ def test_eligibility_claim_cannot_be_information_level() -> None:
 
 def test_case_complete_fails_closed_for_bounded_web_lookup() -> None:
     agent = SupervisorAgent(FakeLLM(semantic_payload()))
+    sources = [source(include_finding=True), procedure_source()]
 
     with pytest.raises(
         SupervisorGuardrailError, match="authoritative procedure coverage"
     ):
         agent._ensure_complete_is_supported(
-            run_input(),
-            [source(include_finding=True), procedure_source()],
+            supervisor_input(sources),
+            sources,
         )
 
 
@@ -1157,6 +1183,6 @@ def test_supervisor_rejects_info_finding_without_raw_lookup_provenance() -> None
     with pytest.raises(SupervisorGuardrailError, match="digest does not match"):
         asyncio.run(
             SupervisorAgent(FakeLLM(semantic_payload())).draft(
-                run_input(), [tampered_info, raw_source]
+                supervisor_input([tampered_info, raw_source])
             )
         )

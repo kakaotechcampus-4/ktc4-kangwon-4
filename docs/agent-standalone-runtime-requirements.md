@@ -94,7 +94,7 @@ PYTHONPATH=backend backend/.venv/bin/python \
 | `0` | `REVIEWED_PLAN` 또는 `CONFLICT`를 schema-valid하게 반환 |
 | `2` | 구성 오류, provider 오류 또는 `SAFE_FAILURE`; 민감한 내부 예외는 CLI에 출력하지 않음 |
 
-현재 CLI에는 자연어 인자가 없다. 임의 자연어를 실행하려면 이를 redaction하고 `CaseSnapshot`, Evidence, canonical step, reviewed catalog와 함께 `SupervisorRunInput`으로 조립하는 adapter가 필요하다. 실제 Case용 adapter는 BE 공동 계약과 구현 전이다.
+현재 CLI에는 자연어 인자가 없다. 임의 자연어를 실행하려면 이를 redaction하고 `CaseSnapshot`, Evidence, canonical step, reviewed catalog와 함께 `AgentGraphInput`으로 조립하는 adapter가 필요하다. 실제 Case용 adapter는 BE 공동 계약과 구현 전이다.
 
 ## 5. 데이터 모드
 
@@ -120,6 +120,7 @@ ruff format --check backend/app/agent backend/tests/agent
 | 기준일 | 코드 기준 commit | 결과 | 범위 |
 |---|---|---|---|
 | 2026-09-15 | `350f07b` | `349 passed`; Ruff check·format check 통과 | mock 기반 Agent test와 정적 검사 |
+| 2026-09-15 | 이번 PR 최신 상태 | `376 passed`; Ruff check·format check 통과 | Agent/Tool별 단일 입출력 경계와 JSON Schema 설명 회귀 검증 포함 |
 
 unit test는 외부 credential·quota를 쓰지 않는다. live smoke는 별도이며 외부 endpoint 상태와 모델의 structured-output 품질에 영향을 받는다.
 
@@ -134,7 +135,6 @@ unit test는 외부 credential·quota를 쓰지 않는다. live smoke는 별도�
 - 범용 crawler, parser/chunker corpus, vector index, RAG retriever가 없다.
 - Langfuse adapter가 없어 token·비용을 전송하지 않는다.
 - 공식 사이트나 LLM endpoint 장애 시 성공을 보장하지 않으며 안전 실패할 수 있다.
-- 현재 Info prompt의 CURRENT Evidence relevance 안내에는 `NOT_RELEVANT`가 적혀 있지만 실제 schema enum은 `POSSIBLY_RELEVANT`다. runtime validator는 schema enum을 기준으로 거부·재시도하므로 live 안정성을 위해 별도 코드 수정이 필요하다(`backend/app/agent/info_agent/agent.py`).
 
 생산 연동이 되려면 BE 전달 문서의 공동 계약이 승인되고 구현·통합 테스트까지 완료돼야 한다.
 

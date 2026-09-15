@@ -19,7 +19,7 @@ from app.agent.schemas import (
     FreshnessStatus,
     RequiredDocument,
     SourcedText,
-    SupportAnalysisInput,
+    SupportAgentInput,
     SupportAnalysisResult,
     SupportCheck,
     SupportCompletionStatus,
@@ -128,7 +128,7 @@ class SupportAgent:
         self._catalog = catalog.model_copy(deep=True) if catalog is not None else None
         self._clock = clock
 
-    async def analyze(self, request: SupportAnalysisInput) -> SupportAnalysisResult:
+    async def analyze(self, request: SupportAgentInput) -> SupportAnalysisResult:
         catalog = self._catalog
         if catalog is None:
             raise SupportCatalogUnavailableError(
@@ -203,7 +203,7 @@ class SupportAgent:
     def _assemble_result(
         self,
         *,
-        request: SupportAnalysisInput,
+        request: SupportAgentInput,
         catalog: ReviewedSupportCatalog,
         plans: list[_ProgramPlan],
         draft: SupportAnalysisDraft,
@@ -277,7 +277,7 @@ class SupportAgent:
 
     @staticmethod
     def _select_programs(
-        request: SupportAnalysisInput,
+        request: SupportAgentInput,
         catalog: ReviewedSupportCatalog,
     ) -> list[ReviewedSupportProgram]:
         programs_by_id = {
@@ -315,7 +315,7 @@ class SupportAgent:
 
     @staticmethod
     def _resolved_facts(
-        request: SupportAnalysisInput,
+        request: SupportAgentInput,
     ) -> dict[CaseFieldKey, _ResolvedFact]:
         snapshot = request.planning_context.case_snapshot
         facts = {
@@ -384,7 +384,7 @@ class SupportAgent:
 
     @staticmethod
     def _minimum_prompt_projection(
-        request: SupportAnalysisInput,
+        request: SupportAgentInput,
         catalog: ReviewedSupportCatalog,
         plans: list[_ProgramPlan],
     ) -> dict[str, Any]:

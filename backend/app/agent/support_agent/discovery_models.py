@@ -113,9 +113,23 @@ class SupportNoticeDiscoveryInput(SupportNoticeDiscoveryModel):
 
     keywords: Annotated[
         tuple[DiscoveryKeyword, ...],
-        Field(min_length=1, max_length=_MAX_KEYWORDS),
+        Field(
+            min_length=1,
+            max_length=_MAX_KEYWORDS,
+            description=(
+                "Deduplicated, non-sensitive Bizinfo hashtag terms selected by "
+                "trusted Agent code."
+            ),
+        ),
     ]
-    max_results: Annotated[StrictInt, Field(ge=1, le=_MAX_RESULTS)] = 20
+    max_results: Annotated[
+        StrictInt,
+        Field(
+            ge=1,
+            le=_MAX_RESULTS,
+            description="Maximum number of unique raw notices returned to the caller.",
+        ),
+    ] = 20
 
     @field_validator("keywords")
     @classmethod
@@ -200,25 +214,57 @@ class SupportNoticeCandidate(SupportNoticeDiscoveryModel):
 class SupportNoticeDiscoveryResult(SupportNoticeDiscoveryModel):
     """One completed provider read, including source evidence and truncation."""
 
-    provider: Literal["BIZINFO"] = "BIZINFO"
+    provider: Literal["BIZINFO"] = Field(
+        default="BIZINFO",
+        description="Official support-notice provider used for this read.",
+    )
     keywords: Annotated[
         tuple[DiscoveryKeyword, ...],
-        Field(min_length=1, max_length=_MAX_KEYWORDS),
+        Field(
+            min_length=1,
+            max_length=_MAX_KEYWORDS,
+            description="Normalized lookup keywords copied from the request.",
+        ),
     ]
-    applied_result_limit: Annotated[StrictInt, Field(ge=1, le=_MAX_RESULTS)]
-    provider_total_count: NonNegativeStrictInt | None
-    provider_returned_count: NonNegativeStrictInt
-    duplicate_count: NonNegativeStrictInt
-    result_count: NonNegativeStrictInt
-    truncated: StrictBool
-    retrieved_at: AwareDatetime
+    applied_result_limit: Annotated[
+        StrictInt,
+        Field(
+            ge=1,
+            le=_MAX_RESULTS,
+            description="Effective result limit after request and adapter caps.",
+        ),
+    ]
+    provider_total_count: NonNegativeStrictInt | None = Field(
+        description="Provider-reported total, or null for an empty provider response."
+    )
+    provider_returned_count: NonNegativeStrictInt = Field(
+        description="Raw notice rows returned by the provider before normalization."
+    )
+    duplicate_count: NonNegativeStrictInt = Field(
+        description="Duplicate notice rows removed during normalization."
+    )
+    result_count: NonNegativeStrictInt = Field(
+        description="Unique candidate count returned in this result."
+    )
+    truncated: StrictBool = Field(
+        description="Whether more unique provider results existed than were returned."
+    )
+    retrieved_at: AwareDatetime = Field(
+        description="Timezone-aware time at which the provider payload was retrieved."
+    )
     candidates: Annotated[
         tuple[SupportNoticeCandidate, ...],
-        Field(max_length=_MAX_RESULTS),
+        Field(
+            max_length=_MAX_RESULTS,
+            description="Normalized but unreviewed official support notice candidates.",
+        ),
     ]
     evidence_records: Annotated[
         tuple[EvidenceRecord, ...],
-        Field(max_length=_MAX_RESULTS),
+        Field(
+            max_length=_MAX_RESULTS,
+            description="One OFFICIAL_API Evidence record per returned candidate.",
+        ),
     ]
 
     @field_validator("keywords")

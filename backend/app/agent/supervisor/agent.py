@@ -50,10 +50,9 @@ from app.agent.schemas import (
     ProcedureFinding,
     ProcedureLookupResult,
     ProcedureProgressChangeCandidate,
-    ReviewIssue,
     ReviewSourceResult,
+    SupervisorAgentInput,
     SupervisorDraft,
-    SupervisorRunInput,
     SupportActionTarget,
     SupportAnalysisResult,
     SupportCheck,
@@ -197,16 +196,12 @@ class SupervisorAgent:
         self._uuid = uuid_factory
         self._max_local_attempts = max_local_attempts
 
-    async def draft(
-        self,
-        request: SupervisorRunInput,
-        source_results: Sequence[ReviewSourceResult],
-        *,
-        draft_version: int = 1,
-        review_feedback: Sequence[ReviewIssue] = (),
-        fact_overlays: Sequence[FactChangeCandidate] | None = None,
-        previous_draft: SupervisorDraft | None = None,
-    ) -> SupervisorDraft:
+    async def draft(self, request: SupervisorAgentInput) -> SupervisorDraft:
+        source_results = request.source_results
+        draft_version = request.draft_version
+        review_feedback = request.review_feedback
+        fact_overlays = request.fact_overlays
+        previous_draft = request.previous_draft
         if not source_results:
             raise SupervisorGuardrailError("Supervisor requires component results")
         call_ids = [item.meta.call_id for item in source_results]
@@ -486,7 +481,7 @@ class SupervisorAgent:
 
     def _materialize(
         self,
-        request: SupervisorRunInput,
+        request: SupervisorAgentInput,
         sources: list[ReviewSourceResult],
         semantic: SupervisorSemanticDraft,
         *,
@@ -794,7 +789,7 @@ class SupervisorAgent:
 
     def _build_mutations(
         self,
-        request: SupervisorRunInput,
+        request: SupervisorAgentInput,
         sources: list[ReviewSourceResult],
         decision: ActionDecisionDraft
         | NeedsMoreInfoDecisionDraft
@@ -888,7 +883,7 @@ class SupervisorAgent:
     @staticmethod
     def _evidence(
         sources: Sequence[ReviewSourceResult],
-        request: SupervisorRunInput,
+        request: SupervisorAgentInput,
     ) -> dict[str, EvidenceRecord]:
         records = [*request.case_snapshot.evidence_records]
         for source in sources:
@@ -939,7 +934,7 @@ class SupervisorAgent:
 
     @staticmethod
     def _ensure_complete_is_supported(
-        request: SupervisorRunInput,
+        request: SupervisorAgentInput,
         sources: Sequence[ReviewSourceResult],
     ) -> None:
         del request, sources

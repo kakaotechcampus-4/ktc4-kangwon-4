@@ -38,7 +38,7 @@
 현재 제품 서버가 아니라 persistence-free Python Agent 코어가 구현돼 있다.
 
 ```text
-schema-valid SupervisorRunInput
+schema-valid AgentGraphInput
   → AgentGraph (LangGraph)
       ├─ CASE_CREATED | RESULT_SUBMITTED
       │    → Procedure → Info → Support → Supervisor → Review
@@ -102,7 +102,7 @@ raw 공고와 검수 catalog를 분리하는 이유는 공고 문구만으로 �
 
 ### 5.3 Supervisor와 Review
 
-Procedure·Info·Support 결과는 각 call ID와 digest를 가진 `ReviewSourceResult`로 묶인다. Supervisor 초안과 source result는 immutable `ReviewSubject`가 되고, Review는 그 subject의 digest를 확인한다. 초안이 바뀌면 새 subject를 만들며 이전 Review를 재사용하지 않는다.
+Procedure·Info·Support 결과는 각 call ID와 digest를 가진 `ReviewSourceResult`로 묶인다. Graph는 이 결과와 snapshot·revision context를 하나의 `SupervisorAgentInput`으로 전달한다. Supervisor 초안과 source result는 immutable `ReviewSubject`가 되고, Review는 그 subject의 digest를 확인한다. 초안이 바뀌면 새 subject를 만들며 이전 Review를 재사용하지 않는다.
 
 ## 6. 지원 지식과 RAG의 아키텍처 경계
 

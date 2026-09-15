@@ -792,13 +792,36 @@ class ConflictCandidate(AgentSchema):
 
 
 class InfoAnalysisInput(AgentSchema):
-    input: RedactedInput
-    case_snapshot: CaseSnapshot
-    allowed_field_paths: Annotated[list[CaseFieldKey], Field(min_length=1)]
-    known_procedure_steps: list[KnownProcedureStep]
-    procedure_lookup_call_id: RuntimeUUID
-    procedure_lookup_result: ProcedureLookupResult
-    review_feedback: list[ReviewIssue]
+    """Complete request schema accepted by ``InfoAnalysisAgent.analyze``."""
+
+    input: RedactedInput = Field(
+        description="Redacted user or expert text to interpret in this call."
+    )
+    case_snapshot: CaseSnapshot = Field(
+        description="Immutable Case read view used as the analysis baseline."
+    )
+    allowed_field_paths: Annotated[
+        list[CaseFieldKey],
+        Field(
+            min_length=1,
+            description="Canonical Case fields that this call may propose changing.",
+        ),
+    ]
+    known_procedure_steps: list[KnownProcedureStep] = Field(
+        description="Canonical procedure steps to which source text may be linked."
+    )
+    source_call_id: RuntimeUUID = Field(
+        description="Invocation call ID assigned to this Info Agent result."
+    )
+    procedure_lookup_call_id: RuntimeUUID = Field(
+        description="Call ID of the Procedure Lookup result supplied below."
+    )
+    procedure_lookup_result: ProcedureLookupResult = Field(
+        description="Fetched official procedure documents to analyze."
+    )
+    review_feedback: list[ReviewIssue] = Field(
+        description="Blocking review issues supplied when this call is a rework."
+    )
 
     @model_validator(mode="after")
     def validate_input(self) -> InfoAnalysisInput:
@@ -834,22 +857,51 @@ class InfoAnalysisInput(AgentSchema):
 
 
 class InfoAnalysisResult(AgentSchema):
-    completion_status: InfoCompletionStatus
-    fact_candidates: list[FactCandidate]
-    procedure_progress_observations: list[ProcedureProgressObservation]
-    procedure_findings: list[ProcedureFinding]
-    conflicts: list[ConflictCandidate]
-    missing_fields: list[MissingField]
-    uncertainties: list[Uncertainty]
-    question_candidates: list[QuestionCandidate]
-    evidence_records: list[EvidenceRecord]
+    """Complete success schema returned by ``InfoAnalysisAgent.analyze``."""
+
+    completion_status: InfoCompletionStatus = Field(
+        description="Whether analysis completed or needs more input."
+    )
+    fact_candidates: list[FactCandidate] = Field(
+        description="Evidence-linked Case fact changes proposed for later review."
+    )
+    procedure_progress_observations: list[ProcedureProgressObservation] = Field(
+        description="User-evidenced observations of real procedure progress."
+    )
+    procedure_findings: list[ProcedureFinding] = Field(
+        description="Official procedure content linked to canonical Case steps."
+    )
+    conflicts: list[ConflictCandidate] = Field(
+        description="New statements that conflict with confirmed Case facts."
+    )
+    missing_fields: list[MissingField] = Field(
+        description="Unknown canonical facts that block a downstream decision."
+    )
+    uncertainties: list[Uncertainty] = Field(
+        description="Analysis limitations that must remain visible downstream."
+    )
+    question_candidates: list[QuestionCandidate] = Field(
+        description="Candidate user questions that resolve missing Case facts."
+    )
+    evidence_records: list[EvidenceRecord] = Field(
+        description="Evidence records that close all fact and progress references."
+    )
     parser_version: Annotated[
         NonEmptyStr,
-        Field(json_schema_extra={"x-runtime-injected": True}),
+        Field(
+            description="Version of the deterministic Info parser and guardrails.",
+            json_schema_extra={"x-runtime-injected": True},
+        ),
     ]
-    based_on_snapshot_id: RuntimeUUID
-    based_on_procedure_lookup_call_id: RuntimeUUID
-    based_on_procedure_lookup_digest: Digest
+    based_on_snapshot_id: RuntimeUUID = Field(
+        description="Snapshot ID against which this result was produced."
+    )
+    based_on_procedure_lookup_call_id: RuntimeUUID = Field(
+        description="Procedure Tool call ID used as this result's source."
+    )
+    based_on_procedure_lookup_digest: Digest = Field(
+        description="Canonical digest of the Procedure Tool result that was analyzed."
+    )
 
     @model_validator(mode="after")
     def validate_result(self) -> InfoAnalysisResult:
@@ -872,6 +924,11 @@ class InfoAnalysisResult(AgentSchema):
         )
         _ensure_unique(
             self.question_candidates, lambda item: item.question_id, "question_id"
+        )
+        _ensure_unique(
+            self.missing_fields,
+            lambda item: item.field_path,
+            "missing field_path",
         )
         _ensure_unique(
             self.evidence_records, lambda item: item.evidence_id, "evidence_id"
@@ -908,34 +965,89 @@ class SupportLookupGoal(StrEnum):
 
 
 class DiscoverSupportInput(AgentSchema):
-    lookup_goal: Literal[SupportLookupGoal.DISCOVER_RELEVANT]
-    planning_context: PlanningContext
-    related_steps: list[ProcedureStepRef]
-    as_of: date
-    review_feedback: list[ReviewIssue]
+    """Support Agent request for all reviewed programs relevant to the Case."""
+
+    lookup_goal: Literal[SupportLookupGoal.DISCOVER_RELEVANT] = Field(
+        description="Select reviewed programs relevant to the supplied Case context."
+    )
+    planning_context: PlanningContext = Field(
+        description="Immutable Case snapshot plus reviewable fact overlays."
+    )
+    related_steps: list[ProcedureStepRef] = Field(
+        description="Canonical procedure steps used to narrow program selection."
+    )
+    as_of: date = Field(
+        description="Decision date carried as provenance for this comparison."
+    )
+    review_feedback: list[ReviewIssue] = Field(
+        description="Blocking review issues supplied when this call is a rework."
+    )
 
 
 class CheckSpecificSupportInput(AgentSchema):
-    lookup_goal: Literal[SupportLookupGoal.CHECK_SPECIFIC]
-    planning_context: PlanningContext
-    related_steps: list[ProcedureStepRef]
-    as_of: date
-    review_feedback: list[ReviewIssue]
-    support_programs: Annotated[list[SupportProgramRef], Field(min_length=1)]
+    """Support Agent request for an explicit set of reviewed programs."""
+
+    lookup_goal: Literal[SupportLookupGoal.CHECK_SPECIFIC] = Field(
+        description="Compare only the explicitly requested reviewed programs."
+    )
+    planning_context: PlanningContext = Field(
+        description="Immutable Case snapshot plus reviewable fact overlays."
+    )
+    related_steps: list[ProcedureStepRef] = Field(
+        description="Canonical procedure steps used to validate program relevance."
+    )
+    as_of: date = Field(
+        description="Decision date carried as provenance for this comparison."
+    )
+    review_feedback: list[ReviewIssue] = Field(
+        description="Blocking review issues supplied when this call is a rework."
+    )
+    support_programs: Annotated[
+        list[SupportProgramRef],
+        Field(
+            min_length=1,
+            description="Stable identifiers of reviewed programs to compare.",
+        ),
+    ]
 
 
 class RefreshSupportInput(AgentSchema):
-    lookup_goal: Literal[SupportLookupGoal.REFRESH_STALE]
-    planning_context: PlanningContext
-    related_steps: list[ProcedureStepRef]
-    as_of: date
-    review_feedback: list[ReviewIssue]
-    support_programs: Annotated[list[SupportProgramRef], Field(min_length=1)]
+    """Support Agent request to re-evaluate programs in the injected catalog."""
+
+    lookup_goal: Literal[SupportLookupGoal.REFRESH_STALE] = Field(
+        description="Re-evaluate named programs from the already injected catalog."
+    )
+    planning_context: PlanningContext = Field(
+        description="Immutable Case snapshot plus reviewable fact overlays."
+    )
+    related_steps: list[ProcedureStepRef] = Field(
+        description="Canonical procedure steps used to validate program relevance."
+    )
+    as_of: date = Field(
+        description="Decision date carried as provenance for this comparison."
+    )
+    review_feedback: list[ReviewIssue] = Field(
+        description="Blocking review issues supplied when this call is a rework."
+    )
+    support_programs: Annotated[
+        list[SupportProgramRef],
+        Field(
+            min_length=1,
+            description="Stable identifiers of injected programs to re-evaluate.",
+        ),
+    ]
 
 
-SupportAnalysisInput: TypeAlias = Annotated[
+SupportAgentInput: TypeAlias = Annotated[
     DiscoverSupportInput | CheckSpecificSupportInput | RefreshSupportInput,
-    Field(discriminator="lookup_goal"),
+    Field(
+        title="SupportAgentInput",
+        discriminator="lookup_goal",
+        description=(
+            "Complete Support Agent input; lookup_goal selects exactly one request "
+            "schema."
+        ),
+    ),
 ]
 
 
@@ -1041,14 +1153,32 @@ class SupportCompletionStatus(StrEnum):
 
 
 class SupportAnalysisResult(AgentSchema):
-    completion_status: SupportCompletionStatus
-    support_checks: list[SupportCheck]
-    no_candidate_reason_code: UpperSnakeCode | None
-    uncertainties: list[Uncertainty]
-    search_summary: SupportSearchSummary
-    evidence_records: list[EvidenceRecord]
-    based_on_snapshot_id: RuntimeUUID
-    based_on_candidate_ids: list[RuntimeUUID]
+    """Complete success schema returned by ``SupportAgent.analyze``."""
+
+    completion_status: SupportCompletionStatus = Field(
+        description="Whether reviewed-program comparison completed or was partial."
+    )
+    support_checks: list[SupportCheck] = Field(
+        description="Per-program, evidence-linked comparison results."
+    )
+    no_candidate_reason_code: UpperSnakeCode | None = Field(
+        description="Machine code explaining an empty reviewed candidate set."
+    )
+    uncertainties: list[Uncertainty] = Field(
+        description="Unknown inputs or source limits preserved for downstream review."
+    )
+    search_summary: SupportSearchSummary = Field(
+        description="What reviewed lookup sources this call actually used."
+    )
+    evidence_records: list[EvidenceRecord] = Field(
+        description="Closed Evidence set referenced by support checks."
+    )
+    based_on_snapshot_id: RuntimeUUID = Field(
+        description="Case snapshot ID used for the comparison."
+    )
+    based_on_candidate_ids: list[RuntimeUUID] = Field(
+        description="Fact overlay candidate IDs used in addition to the snapshot."
+    )
 
     @model_validator(mode="after")
     def validate_completion(self) -> SupportAnalysisResult:
@@ -1100,14 +1230,42 @@ class ProcedureSearchProvider(StrEnum):
 
 
 class ProcedureLookupInput(AgentSchema):
-    lookup_goal: Literal[ProcedureLookupGoal.BUSINESS_CLOSURE]
-    search_queries: Annotated[list[NonEmptyStr], Field(min_length=1, max_length=4)]
-    as_of: date
-    locale: Literal["ko-KR"]
-    source_policy: Literal[ProcedureSourcePolicy.OFFICIAL_ONLY]
-    max_results_per_query: Annotated[StrictInt, Field(ge=1, le=10)]
-    based_on_snapshot_id: RuntimeUUID
-    review_feedback: list[ReviewIssue]
+    """Complete request schema accepted by ``ProcedureLookupTool.lookup``."""
+
+    lookup_goal: Literal[ProcedureLookupGoal.BUSINESS_CLOSURE] = Field(
+        description="Fixed lookup goal for business-closure procedures."
+    )
+    search_queries: Annotated[
+        list[NonEmptyStr],
+        Field(
+            min_length=1,
+            max_length=4,
+            description="Bounded, deduplicated queries selected by trusted Graph code.",
+        ),
+    ]
+    as_of: date = Field(
+        description="Lookup date copied into the result as request provenance."
+    )
+    locale: Literal["ko-KR"] = Field(
+        description="Locale of the requested Korean official sources."
+    )
+    source_policy: Literal[ProcedureSourcePolicy.OFFICIAL_ONLY] = Field(
+        description="Policy that permits only verified official source domains."
+    )
+    max_results_per_query: Annotated[
+        StrictInt,
+        Field(
+            ge=1,
+            le=10,
+            description="Maximum provider candidates retained for each query.",
+        ),
+    ]
+    based_on_snapshot_id: RuntimeUUID = Field(
+        description="Case snapshot ID for which the procedure lookup was requested."
+    )
+    review_feedback: list[ReviewIssue] = Field(
+        description="Blocking review issues supplied when this lookup is a rework."
+    )
 
     @field_validator("search_queries")
     @classmethod
@@ -1306,14 +1464,30 @@ class ProcedureSearchSummary(AgentSchema):
 
 
 class ProcedureLookupResult(AgentSchema):
-    completion_status: ProcedureCompletionStatus
-    lookup_id: RuntimeUUID
-    documents: list[ProcedureSourceDocument]
-    search_summary: ProcedureSearchSummary
-    warnings: list[ProcedureLookupWarning]
-    evidence_records: list[EvidenceRecord]
-    based_on_snapshot_id: RuntimeUUID
-    as_of: date
+    """Complete success schema returned by ``ProcedureLookupTool.lookup``."""
+
+    completion_status: ProcedureCompletionStatus = Field(
+        description="Whether official source retrieval completed, was partial, or empty."
+    )
+    lookup_id: RuntimeUUID = Field(
+        description="Unique runtime ID for this lookup result."
+    )
+    documents: list[ProcedureSourceDocument] = Field(
+        description="Fetched and verified official procedure source documents."
+    )
+    search_summary: ProcedureSearchSummary = Field(
+        description="Provider attempts, fallback use, and source filtering counts."
+    )
+    warnings: list[ProcedureLookupWarning] = Field(
+        description="Non-fatal source retrieval warnings."
+    )
+    evidence_records: list[EvidenceRecord] = Field(
+        description="One official-document Evidence record for every returned document."
+    )
+    based_on_snapshot_id: RuntimeUUID = Field(
+        description="Case snapshot ID copied from the lookup request."
+    )
+    as_of: date = Field(description="Lookup date copied from the request.")
 
     @model_validator(mode="after")
     def validate_result(self) -> ProcedureLookupResult:
@@ -1628,10 +1802,24 @@ class GroundedClaim(AgentSchema):
 
 
 class SupervisorDraft(AgentSchema):
-    decision: DecisionDraft
-    mutations: MutationSet
-    grounded_claims: list[GroundedClaim]
-    source_call_ids: Annotated[list[RuntimeUUID], Field(min_length=1)]
+    """Complete success schema returned by ``SupervisorAgent.draft``."""
+
+    decision: DecisionDraft = Field(
+        description="Exactly one Blocker/Next Action or needs-more-information decision."
+    )
+    mutations: MutationSet = Field(
+        description="Uncommitted Case changes that require a matching Review PASS."
+    )
+    grounded_claims: list[GroundedClaim] = Field(
+        description="Visible high-risk claims bound to exact Evidence records."
+    )
+    source_call_ids: Annotated[
+        list[RuntimeUUID],
+        Field(
+            min_length=1,
+            description="Exact lower-component calls used to build this draft.",
+        ),
+    ]
 
     @model_validator(mode="after")
     def validate_decision_and_sources(self) -> SupervisorDraft:
@@ -1699,9 +1887,22 @@ RunTrigger: TypeAlias = Annotated[
 ]
 
 
-class SupervisorRunInput(AgentSchema):
-    trigger: RunTrigger
-    case_snapshot: CaseSnapshot
+class AgentGraphInput(AgentSchema):
+    """Complete public request schema accepted by ``AgentGraph.run``."""
+
+    trigger: RunTrigger = Field(
+        description="Event that starts a first plan, replanning, or support refresh."
+    )
+    case_snapshot: CaseSnapshot = Field(
+        description="Immutable Case read view used throughout this Graph run."
+    )
+    trace_id: NonEmptyStr | None = Field(
+        default=None,
+        description=(
+            "Optional caller correlation identifier propagated to invocation metadata; "
+            "it is not a planning-decision input."
+        ),
+    )
 
 
 class ReviewIssueCode(StrEnum):
@@ -1785,17 +1986,111 @@ class ReviewSourceResult(AgentSchema):
         return self
 
 
+class SupervisorAgentInput(AgentSchema):
+    """Complete request schema accepted by ``SupervisorAgent.draft``."""
+
+    trigger: RunTrigger = Field(
+        description="Graph trigger whose planning decision is being drafted."
+    )
+    case_snapshot: CaseSnapshot = Field(
+        description="Immutable Case read view shared by every supplied source result."
+    )
+    source_results: Annotated[
+        list[ReviewSourceResult],
+        Field(
+            min_length=1,
+            description="Digest-bound outputs from the required lower components.",
+        ),
+    ]
+    draft_version: PositiveStrictInt = Field(
+        default=1,
+        description="One-based Supervisor draft attempt within this Graph run.",
+    )
+    review_feedback: list[ReviewIssue] = Field(
+        default_factory=list,
+        description="Blocking issues from the prior Review Tool attempt.",
+    )
+    fact_overlays: list[FactChangeCandidate] | None = Field(
+        default=None,
+        description=(
+            "Graph-built uncommitted Info fact changes, or null when the Supervisor "
+            "must derive them from source results for a direct call."
+        ),
+    )
+    previous_draft: SupervisorDraft | None = Field(
+        default=None,
+        description="Prior rejected draft supplied only for bounded review rework.",
+    )
+
+    @model_validator(mode="after")
+    def validate_sources(self) -> SupervisorAgentInput:
+        call_ids = [item.meta.call_id for item in self.source_results]
+        if len(set(call_ids)) != len(call_ids):
+            raise ValueError("Supervisor source call IDs must be unique")
+        run_ids = {item.meta.run_id for item in self.source_results}
+        if len(run_ids) != 1:
+            raise ValueError("Supervisor source results must belong to one run")
+        for source in self.source_results:
+            if source.meta.case_id != self.case_snapshot.case_id:
+                raise ValueError("Supervisor source case must match its snapshot")
+            if source.output.based_on_snapshot_id != self.case_snapshot.snapshot_id:
+                raise ValueError("Supervisor source snapshot must match its snapshot")
+        if self.fact_overlays is not None:
+            _ensure_unique(
+                self.fact_overlays,
+                lambda item: item.candidate_id,
+                "Supervisor fact overlay candidate_id",
+            )
+            _ensure_unique(
+                self.fact_overlays,
+                lambda item: item.field_path,
+                "Supervisor fact overlay field_path",
+            )
+        return self
+
+
 class ReviewSubject(AgentSchema):
-    schema_version: Literal["agent-io/2.0"]
-    review_subject_id: RuntimeUUID
-    review_attempt: Annotated[StrictInt, Field(ge=1, le=3)]
-    run_id: RuntimeUUID
-    case_id: PositiveStrictInt
-    trigger: RunTrigger
-    snapshot: CaseSnapshot
-    source_results: Annotated[list[ReviewSourceResult], Field(min_length=1)]
-    supervisor_draft: SupervisorDraft
-    subject_digest: Digest
+    """Complete request schema accepted by ``ReviewTool.review``."""
+
+    schema_version: Literal["agent-io/2.0"] = Field(
+        description="Version of the Agent/Tool contract represented by this subject."
+    )
+    review_subject_id: RuntimeUUID = Field(
+        description="Unique runtime identifier for this immutable review package."
+    )
+    review_attempt: Annotated[
+        StrictInt,
+        Field(
+            ge=1,
+            le=3,
+            description="One-based Review Tool attempt within the Graph run.",
+        ),
+    ]
+    run_id: RuntimeUUID = Field(
+        description="Graph run identifier shared by all source invocations."
+    )
+    case_id: PositiveStrictInt = Field(
+        description="Case identifier that must match the embedded snapshot."
+    )
+    trigger: RunTrigger = Field(
+        description="Event that initiated the plan under review."
+    )
+    snapshot: CaseSnapshot = Field(
+        description="Immutable Case baseline used by every reviewed component."
+    )
+    source_results: Annotated[
+        list[ReviewSourceResult],
+        Field(
+            min_length=1,
+            description="Digest-bound lower component outputs used by the draft.",
+        ),
+    ]
+    supervisor_draft: SupervisorDraft = Field(
+        description="Supervisor output being independently reviewed."
+    )
+    subject_digest: Digest = Field(
+        description="Canonical digest binding the entire review package."
+    )
 
     @model_validator(mode="after")
     def validate_subject(self) -> ReviewSubject:
@@ -1851,11 +2146,23 @@ class ReviewVerdict(StrEnum):
 
 
 class ReviewResult(AgentSchema):
-    reviewed_subject_id: RuntimeUUID
-    reviewed_subject_digest: Digest
-    verdict: ReviewVerdict
-    issues: list[ReviewIssue]
-    missing_evidence: list[MissingEvidence]
+    """Complete success schema returned by ``ReviewTool.review``."""
+
+    reviewed_subject_id: RuntimeUUID = Field(
+        description="Identifier of the exact ReviewSubject that was checked."
+    )
+    reviewed_subject_digest: Digest = Field(
+        description="Digest of the exact immutable ReviewSubject that was checked."
+    )
+    verdict: ReviewVerdict = Field(
+        description="PASS for release or REVISE for bounded component rework."
+    )
+    issues: list[ReviewIssue] = Field(
+        description="Review findings with severity, owner, path, reason, and evidence."
+    )
+    missing_evidence: list[MissingEvidence] = Field(
+        description="Supervisor claim paths that require additional evidence."
+    )
     recommended_rework_targets: list[
         Literal[
             Component.SUPERVISOR,
@@ -1863,8 +2170,10 @@ class ReviewResult(AgentSchema):
             Component.SUPPORT_AGENT,
             Component.PROCEDURE_TOOL,
         ]
-    ]
-    resolution_reason: NonEmptyStr
+    ] = Field(description="Components that must be re-executed before another review.")
+    resolution_reason: NonEmptyStr = Field(
+        description="Human-readable reason for the PASS or REVISE verdict."
+    )
 
     @model_validator(mode="after")
     def enforce_review_gate(self) -> ReviewResult:
@@ -1930,9 +2239,17 @@ class ReviewProof(AgentSchema):
 
 
 class ReviewedPlanOutcome(AgentSchema):
-    outcome_type: Literal["REVIEWED_PLAN"]
-    review_subject: ReviewSubject
-    review_proof: ReviewProof
+    """AgentGraph result released only after a matching Review Tool PASS."""
+
+    outcome_type: Literal["REVIEWED_PLAN"] = Field(
+        description="Discriminator for a plan that passed independent review."
+    )
+    review_subject: ReviewSubject = Field(
+        description="Exact immutable package that was supplied to the Review Tool."
+    )
+    review_proof: ReviewProof = Field(
+        description="Runtime proof binding the matching PASS to this review subject."
+    )
 
     @model_validator(mode="after")
     def validate_proof(self) -> ReviewedPlanOutcome:
@@ -1971,14 +2288,36 @@ class ReviewedPlanOutcome(AgentSchema):
 
 
 class ConflictOutcome(AgentSchema):
-    outcome_type: Literal["CONFLICT"]
-    run_id: RuntimeUUID
-    case_id: PositiveStrictInt
-    trigger: RunTrigger
-    snapshot_id: RuntimeUUID
-    case_version: PositiveStrictInt | None
-    conflicts: Annotated[list[ConflictCandidate], Field(min_length=1)]
-    message_code: Literal["CONFIRM_CONFLICT"]
+    """AgentGraph result that pauses only the current run for user confirmation."""
+
+    outcome_type: Literal["CONFLICT"] = Field(
+        description="Discriminator for confirmed-Case fact conflicts."
+    )
+    run_id: RuntimeUUID = Field(
+        description="Graph run identifier that produced these conflicts."
+    )
+    case_id: PositiveStrictInt = Field(
+        description="Case identifier copied from the input snapshot."
+    )
+    trigger: RunTrigger = Field(
+        description="Event that exposed the conflicting statements."
+    )
+    snapshot_id: RuntimeUUID = Field(
+        description="Immutable snapshot identifier against which conflicts were found."
+    )
+    case_version: PositiveStrictInt | None = Field(
+        description="Optional Case version copied from the input snapshot."
+    )
+    conflicts: Annotated[
+        list[ConflictCandidate],
+        Field(
+            min_length=1,
+            description="User statements that conflict with confirmed snapshot facts.",
+        ),
+    ]
+    message_code: Literal["CONFIRM_CONFLICT"] = Field(
+        description="Caller instruction to request explicit user confirmation."
+    )
 
     @model_validator(mode="after")
     def validate_conflicts(self) -> ConflictOutcome:
@@ -1994,28 +2333,67 @@ class ConflictOutcome(AgentSchema):
 
 
 class SafeFailureOutcome(AgentSchema):
-    outcome_type: Literal["SAFE_FAILURE"]
-    run_id: RuntimeUUID
-    case_id: PositiveStrictInt
-    trigger: RunTrigger
-    snapshot_id: RuntimeUUID
-    case_version: PositiveStrictInt | None
+    """Fail-closed AgentGraph result that never exposes an unreviewed draft."""
+
+    outcome_type: Literal["SAFE_FAILURE"] = Field(
+        description="Discriminator for a fail-closed Graph result."
+    )
+    run_id: RuntimeUUID = Field(
+        description="Graph run identifier in which the failure occurred."
+    )
+    case_id: PositiveStrictInt = Field(
+        description="Case identifier copied from the input snapshot."
+    )
+    trigger: RunTrigger = Field(
+        description="Event whose processing ended in this safe failure."
+    )
+    snapshot_id: RuntimeUUID = Field(
+        description="Immutable snapshot identifier used by the failed run."
+    )
+    case_version: PositiveStrictInt | None = Field(
+        description="Optional Case version copied from the input snapshot."
+    )
     failure_code: Literal[
         "REVIEW_RETRY_EXHAUSTED",
         "COMPONENT_UNAVAILABLE",
         "STRUCTURED_OUTPUT_FAILED",
-    ]
-    message_code: UpperSnakeCode
-    recovery_action_code: Literal["RETRY", "RESUBMIT_INPUT", "CONTACT_SUPPORT", "NONE"]
-    requested_field_paths: list[CaseFieldKey]
-    retryable: StrictBool
-    failed_component: Component | None
-    trace_id: NonEmptyStr | None
+    ] = Field(description="Bounded machine classification of the Graph failure.")
+    message_code: UpperSnakeCode = Field(
+        description="Safe caller-facing machine message code."
+    )
+    recovery_action_code: Literal[
+        "RETRY", "RESUBMIT_INPUT", "CONTACT_SUPPORT", "NONE"
+    ] = Field(description="Permitted caller recovery action for this failure.")
+    requested_field_paths: list[CaseFieldKey] = Field(
+        description="Canonical Case fields requested for a future resubmission."
+    )
+    retryable: StrictBool = Field(
+        description="Whether retrying the same operation may succeed."
+    )
+    failed_component: Component | None = Field(
+        description="Component that failed, or null for a Graph-level failure."
+    )
+    trace_id: NonEmptyStr | None = Field(
+        description="Optional caller trace identifier copied from AgentGraphInput."
+    )
 
 
 AgentRunOutcome: TypeAlias = Annotated[
     ReviewedPlanOutcome | ConflictOutcome | SafeFailureOutcome,
     Field(discriminator="outcome_type"),
+]
+
+# Public Graph output name.  The discriminated union preserves the existing
+# wire shape while making the Graph input/output pair explicit to callers.
+AgentGraphOutput: TypeAlias = Annotated[
+    AgentRunOutcome,
+    Field(
+        title="AgentGraphOutput",
+        description=(
+            "Complete AgentGraph result: a reviewed plan, a user-confirmable "
+            "conflict, or a fail-closed safe failure."
+        ),
+    ),
 ]
 
 
@@ -2085,6 +2463,8 @@ __all__ = [
     "CASE_FIELD_SPECS",
     "SIMULATION_CONFLICT_REF_PREFIX",
     "ActionDecisionDraft",
+    "AgentGraphInput",
+    "AgentGraphOutput",
     "AgentRunOutcome",
     "AgentSchema",
     "Blocker",
@@ -2180,10 +2560,10 @@ __all__ = [
     "SafeFailureOutcome",
     "SourcedText",
     "StrictScalar",
+    "SupervisorAgentInput",
     "SupervisorDraft",
-    "SupervisorRunInput",
     "SupportActionTarget",
-    "SupportAnalysisInput",
+    "SupportAgentInput",
     "SupportAnalysisResult",
     "SupportCheck",
     "SupportCompletionStatus",

@@ -40,7 +40,8 @@ def _parser() -> argparse.ArgumentParser:
 
 async def _run(args: argparse.Namespace) -> int:
     fixture = build_standalone_fixture()
-    request = fixture.request
+    request = fixture.request.model_copy(deep=True)
+    request.trace_id = args.trace_id
 
     client: StructuredLLMClient | None = None
     procedure_tool: ProcedureLookupTool | None = None
@@ -55,7 +56,7 @@ async def _run(args: argparse.Namespace) -> int:
             review_tool=ReviewTool(client),
             known_procedure_steps=fixture.known_procedure_steps,
         )
-        outcome = await runtime.run(request, trace_id=args.trace_id)
+        outcome = await runtime.run(request)
     finally:
         if procedure_tool is not None:
             await procedure_tool.aclose()

@@ -13,7 +13,7 @@ BE가 구현하거나 AI와 공동 승인해야 하는 HTTP/shared DTO와 저장
 
 | 표기 | 의미 | 현재 사용 가능 범위 |
 |---|---|---|
-| `[CURRENT_AI]` | 현재 코드·validator·Graph·테스트가 사용하는 AI 내부 계약 | 해당 producer와 consumer 사이에서 사용 가능 |
+| `[CURRENT_AI]` | 현재 코드·validator·테스트와 해당 직접 호출 경로에서 사용 가능한 AI 내부 계약 | 해당 producer와 consumer 사이에서 사용 가능; Graph 연결 여부는 `[NOT_WIRED]`로 별도 표시 |
 | `[TYPE_ONLY]` | Pydantic 타입과 validator는 존재하지만 현재 Graph의 정상 진입·호출·출력 경로에서는 생성되지 않거나 결정적으로 거부됨 | 타입 참고와 단위 검증만 가능 |
 | `[NOT_WIRED]` | 구현체는 직접 호출할 수 있지만 현재 `AgentGraph`에는 연결되지 않음 | 독립 호출 가능, Graph 기능으로 간주하면 안 됨 |
 
@@ -28,43 +28,56 @@ BE가 구현하거나 AI와 공동 승인해야 하는 HTTP/shared DTO와 저장
 
 ## 2. 현재 호출 구조
 
-### 2.1 공개 메서드와 실제 호출 형태
+### 2.1 공개 메서드와 실제 호출 계약
 
-현재 구성요소 호출은 `ComponentRequest`/`ComponentSuccess` envelope가 아니라 아래 Python payload와 결과를 직접 주고받는다.
+현재 공개 호출은 모두 **호출당 입력 schema 객체 1개**를 받고 **성공 출력 schema 객체 1개**를 반환한다. 생성자 dependency, provider 내부 draft, Graph 최종 결과는 직접 Agent/Tool 호출 입력에 섞지 않는다. `ComponentRequest`/`ComponentSuccess` envelope는 현재 실행 경로에서 사용하지 않는다.
 
-| 상태 | 호출 | 입력 | 정상 출력 | producer → consumer |
-|---|---|---|---|---|
-| `[CURRENT_AI]` | `AgentGraph.run()` | `SupervisorRunInput`, 선택적 non-empty `trace_id` | `AgentRunOutcome` | standalone caller → Graph → caller |
-| `[CURRENT_AI]` | `ProcedureLookupTool.lookup()` | `ProcedureLookupInput` | `ProcedureLookupResult` | Graph → 절차조회 Tool → Graph/Info/Review |
-| `[CURRENT_AI]` | `InfoAnalysisAgent.analyze()` | `InfoAnalysisInput`, 선택적 `source_call_id` | `InfoAnalysisResult` | Graph → 정보분석 Agent → Graph/Support/Supervisor/Review |
-| `[CURRENT_AI]` | `SupportAgent.analyze()` | `SupportAnalysisInput` | `SupportAnalysisResult` | Graph → 지원금 Agent → Graph/Supervisor/Review |
-| `[CURRENT_AI]` | `SupervisorAgent.draft()` | `SupervisorRunInput`, `ReviewSourceResult[]`, revision context | `SupervisorDraft` | Graph → Supervisor → Graph/Review |
-| `[CURRENT_AI]` | `ReviewTool.review()` | `ReviewSubject` | `ReviewResult` | Graph → Review Tool → Graph |
-| `[CURRENT_AI][NOT_WIRED]` | `BizInfoSupportDiscoveryTool.discover()` | `SupportNoticeDiscoveryInput` | `SupportNoticeDiscoveryResult` | 독립 caller → discovery adapter → caller |
+| 상태 | 구성요소·역할 | 직접 입력 schema | 성공 출력 schema | 생성 → 소비 | 정확한 의미·주의 |
+|---|---|---|---|---|---|
+| `[CURRENT_AI]` | `AgentGraph.run()`; 전체 실행 오케스트레이션 | `AgentGraphInput` | `AgentGraphOutput` | standalone caller/향후 BE adapter → Graph → caller | `trigger`, `case_snapshot`, 선택적 `trace_id`가 모두 한 입력 model 안에 있다. 출력은 검수 계획·충돌·안전 실패 중 하나다. |
+| `[CURRENT_AI]` | `ProcedureLookupTool.lookup()`; 공식 폐업 절차 원문 조회 | `ProcedureLookupInput` | `ProcedureLookupResult` | Graph → 절차조회 Tool → Graph/Info/Review | 출력은 직접 fetch·검증한 raw 공식 문서와 Evidence이며, canonical 절차 판단이나 진행 완료 결과가 아니다. |
+| `[CURRENT_AI]` | `InfoAnalysisAgent.analyze()`; 입력·snapshot·절차 원문 해석 | `InfoAnalysisInput` | `InfoAnalysisResult` | Graph → 정보분석 Agent → Graph/Support/Supervisor/Review | `source_call_id`까지 입력 model 안에 있으며 별도 keyword 인자가 없다. 출력은 fact·진행 관측·절차 finding·충돌·질문 **후보**이지 DB 반영 결과가 아니다. |
+| `[CURRENT_AI]` | `SupportAgent.analyze()`; Case와 검수 catalog 비교 | `SupportAgentInput` | `SupportAnalysisResult` | Graph → 지원금 Agent → Graph/Supervisor/Review | 입력은 `lookup_goal`로 구분하는 세 variant union이다. `ReviewedSupportCatalog`는 호출 payload가 아닌 생성자 dependency다. |
+| `[CURRENT_AI]` | `SupervisorAgent.draft()`; 하위 결과 종합·초안 생성 | `SupervisorAgentInput` | `SupervisorDraft` | Graph → Supervisor → Graph/Review | trigger, snapshot, source, revision context가 하나의 전용 input model에 닫혀 있다. 출력은 검수 전 초안이며 저장 완료 결과가 아니다. |
+| `[CURRENT_AI]` | `ReviewTool.review()`; 독립 검수 | `ReviewSubject` | `ReviewResult` | Graph → Review Tool → Graph | `PASS/REVISE`와 이유·문제 경로·근거·재작업 target을 반환하지만 초안을 직접 수정하지 않는다. `ReviewProof`는 Tool 출력이 아니다. |
+| `[CURRENT_AI][NOT_WIRED]` | `BizInfoSupportDiscoveryTool.discover()`; 기업마당 raw 공고 발견 | `SupportNoticeDiscoveryInput` | `SupportNoticeDiscoveryResult` | 독립 caller → discovery adapter → caller | 미검수 공고 후보와 `OFFICIAL_API` Evidence를 반환한다. Graph 또는 `ReviewedSupportCatalog` 발행 pipeline에는 미연결이다. |
 
-schema-valid boundary 입력으로 Graph를 실행한 뒤 발생한 component 실패는 각 구현의 typed exception으로 전달되고 Graph 경계에서 `SafeFailureOutcome`으로 변환된다. `[TYPE_ONLY]` `ComponentFailure`가 현재 호출 반환값으로 사용되는 것은 아니다.
+schema-valid boundary 입력으로 Graph를 실행한 뒤 발생한 component 실패는 각 구현의 typed exception으로 전달되고 Graph 경계에서 `SafeFailureOutcome`으로 변환된다. `[TYPE_ONLY]` `ComponentFailure`가 현재 호출 반환값으로 사용되는 것은 아니다. 따라서 현재 구현을 “모든 Agent/Tool이 독립적인 request/success/failure model 세트를 사용한다”고 설명하면 안 된다.
 
-### 2.2 Trigger별 실행 흐름
+### 2.2 Schema 종류별 의미와 소유자
+
+| 분류 | schema | 무엇인가 | 생성자 → 주요 소비자 |
+|---|---|---|---|
+| Graph 직접 계약 | `AgentGraphInput` / `AgentGraphOutput` | 한 번의 전체 실행 요청과 정확히 세 variant의 최종 결과 | standalone fixture/향후 BE adapter ↔ AgentGraph |
+| Agent/Tool 직접 계약 | `ProcedureLookupInput/Result`, `InfoAnalysisInput/Result`, `SupportAgentInput/SupportAnalysisResult`, `SupervisorAgentInput/SupervisorDraft`, `ReviewSubject/ReviewResult`, `SupportNoticeDiscoveryInput/Result` | 각 component 공개 메서드가 직접 받거나 반환하는 성공 입력·출력 | Graph/독립 caller ↔ 각 component |
+| 생성자 dependency·공통 context | `ReviewedSupportCatalog`, `CaseSnapshot`, `EvidenceRecord`, `KnownProcedureStep`, `PlanningContext`, `ReviewSourceResult` | 검수 catalog, Case 기준 상태, 근거, canonical 참조와 provenance wrapper. 그 자체가 component 직접 입력/출력인 것은 아님 | fixture/향후 resolver/Graph → Agent·Tool·Review |
+| provider 내부 형식·local draft | `InfoProviderOutput/InfoAnalysisDraft`, `SupportProviderOutput/SupportAnalysisDraft`, `SupervisorModelOutput/SupervisorSemanticDraft`, `ReviewProviderOutput/ReviewModelOutput` | LLM provider 응답을 제한하고 deterministic guardrail을 적용하기 위한 구현 내부 모델. 공개 Agent/Tool 성공 출력이 아님 | provider → 해당 component 내부 runtime |
+| Supervisor 출력 | `SupervisorDraft` | 하위 결과를 종합한 Decision, mutation 후보, grounded claim. DB 반영 결과가 아님 | Supervisor → Graph/Review |
+| nested 변경 후보 | `FactChangeCandidate`, `ProcedureProgressChangeCandidate`, `SupportMatchUpdateCandidate` | `SupervisorDraft.mutations`에 포함되는 검수 전 저장 후보. 독립 component 출력이 아님 | Graph/Supervisor → Review/향후 BE command adapter |
+| Graph 최종 결과 | `ReviewedPlanOutcome`, `ConflictOutcome`, `SafeFailureOutcome` | 검수 통과 계획, 사용자 확인 대기 충돌, fail-closed 실패의 tagged union | AgentGraph → caller/향후 BE |
+| Graph 검수 증명 | `ReviewProof` | matching `PASS`와 subject/run/snapshot/digest를 결합한 증명. Review Tool이 직접 반환하지 않음 | Graph → `ReviewedPlanOutcome` |
+
+### 2.3 Trigger별 실행 흐름
 
 ```text
 CASE_CREATED | RESULT_SUBMITTED
-  SupervisorRunInput
+  AgentGraphInput
     → ProcedureLookupInput → ProcedureLookupResult
     → InfoAnalysisInput     → InfoAnalysisResult
         ├─ conflicts 있음 → ConflictOutcome → END
         └─ conflicts 없음
-             → PlanningContext + SupportAnalysisInput
+             → SupportAgentInput
              → SupportAnalysisResult
-             → SupervisorDraft
+             → SupervisorAgentInput → SupervisorDraft
              → ReviewSubject → ReviewResult
                   ├─ PASS   → ReviewProof → ReviewedPlanOutcome
                   ├─ REVISE → 지정 dependency부터 재실행(최대 2회 수정)
                   └─ 실패/소진 → SafeFailureOutcome
 
 SUPPORT_REFRESH
-  SupervisorRunInput
+  AgentGraphInput
     → RefreshSupportInput → SupportAnalysisResult
-    → SupervisorDraft
+    → SupervisorAgentInput → SupervisorDraft
     → ReviewSubject → ReviewResult
          ├─ PASS   → ReviewedPlanOutcome
          ├─ REVISE → 지정 dependency부터 재실행
@@ -270,31 +283,35 @@ Graph가 입력을 만들고 `ProcedureLookupTool.lookup()`이 raw 공식문서 
 
 ### 5.2 입력 `ProcedureLookupInput`
 
-| 필드 | 타입 | 불변식/현재 producer |
-|---|---|---|
-| `lookup_goal` | literal `BUSINESS_CLOSURE` | Graph 고정 |
-| `search_queries` | string[] `1..4` | trim 후 중복 금지; Tool에서 각 200자 이하·ASCII U+0000–U+001F·민감정보 금지 추가 검사 |
-| `as_of` | date | 자연어 trigger는 `submitted_at.date()`, refresh는 trigger `as_of`; 현재 Tool은 provenance로 결과에 복사할 뿐 검색 필터·freshness 계산에는 미사용 |
-| `locale` | literal `ko-KR` | Graph 고정 |
-| `source_policy` | literal `OFFICIAL_ONLY` | Graph 고정 |
-| `max_results_per_query` | strict integer `1..10` | Graph는 5 생성 |
-| `based_on_snapshot_id` | runtime UUID | 입력 snapshot ID |
-| `review_feedback` | `ReviewIssue[]` | Graph가 최초 `[]`, 재작업 시 검수 feedback을 전달하지만 현재 Tool의 query·조회 동작에는 미사용 |
+`AgentGraph`가 이 model 하나를 만들어 `lookup(request)`에 전달한다.
+
+| 필드 | 타입 | 의미·producer | 검증 |
+|---|---|---|---|
+| `lookup_goal` | literal `BUSINESS_CLOSURE` | Graph가 폐업 절차 조회 목적을 고정 | 다른 목적 문자열 거부 |
+| `search_queries` | string[] `1..4` | Graph가 raw 사용자 문장 대신 canonical fact와 안전한 고정 문구로 생성 | trim 후 빈 값·중복 금지; Tool에서 각 200자 이하, ASCII U+0000–U+001F와 민감정보 금지 추가 검사 |
+| `as_of` | date | 자연어 trigger는 `submitted_at.date()`, refresh는 trigger `as_of`; 결과 provenance에 복사 | 유효한 date 필수; 현재 검색 필터·freshness 계산에는 미사용 |
+| `locale` | literal `ko-KR` | Graph 고정 | 다른 locale 거부 |
+| `source_policy` | literal `OFFICIAL_ONLY` | Graph 고정 | 검증된 공식 domain 이외 출처 사용 금지 |
+| `max_results_per_query` | strict integer `1..10` | Graph는 5 생성 | boolean·문자열 숫자·범위 밖 값 거부 |
+| `based_on_snapshot_id` | runtime UUID | Graph가 `AgentGraphInput.case_snapshot.snapshot_id`를 복사 | UUID 형식 필수; 결과가 동일 ID를 반환해야 함 |
+| `review_feedback` | `ReviewIssue[]` | Graph가 최초 `[]`, 재작업 시 직전 Review 문제를 전달 | 선언되지 않은 issue 필드 거부; 현재 query·조회 동작에는 미사용 |
 
 Graph는 raw 사용자 문장을 query에 복사하지 않는다. 확인된 Case fact와 제한된 키워드가 미리 정의된 정적 query를 선택하게 하고, 중복 제거 후 최대 4개로 자른다.
 
 ### 5.3 출력 `ProcedureLookupResult`
 
-| 필드 | 타입 |
-|---|---|
-| `completion_status` | `COMPLETE \| PARTIAL \| NO_RESULTS` |
-| `lookup_id` | runtime UUID |
-| `documents` | `ProcedureSourceDocument[]` |
-| `search_summary` | `ProcedureSearchSummary` |
-| `warnings` | `ProcedureLookupWarning[]` |
-| `evidence_records` | `EvidenceRecord[]` |
-| `based_on_snapshot_id` | runtime UUID |
-| `as_of` | date; 요청값을 그대로 반환 |
+`ProcedureLookupTool`이 provider 조회와 공식 원문 fetch를 마친 뒤 이 model 하나를 반환한다.
+
+| 필드 | 타입 | 의미·producer | 검증 |
+|---|---|---|---|
+| `completion_status` | `COMPLETE \| PARTIAL \| NO_RESULTS` | Tool이 query/fetch 집계로 계산 | 문서·실패 개수와 §5.4 상태 규칙이 일치해야 함 |
+| `lookup_id` | runtime UUID | Tool runtime이 조회마다 새로 생성 | UUID 형식 필수 |
+| `documents` | `ProcedureSourceDocument[]` | Tool이 허용 domain에서 직접 fetch하고 정규화한 공식 원문 | document ID·URL unique, 모든 문서에 대응 Evidence 필요 |
+| `search_summary` | `ProcedureSearchSummary` | Tool이 provider별 시도·성공·실패·fetch 수를 집계 | provider 순서와 모든 count 관계 검증 |
+| `warnings` | `ProcedureLookupWarning[]` | 일부 provider/fetch 실패 등 비치명 상태를 Tool이 기록 | code는 upper snake, message는 non-empty |
+| `evidence_records` | `EvidenceRecord[]` | Tool이 각 fetched 문서마다 생성 | 문서와 1:1, `OFFICIAL_DOCUMENT`, URL·excerpt·hash·시각 일치 |
+| `based_on_snapshot_id` | runtime UUID | Tool이 요청값을 그대로 복사 | 입력 `based_on_snapshot_id`와 같아야 함 |
+| `as_of` | date | Tool이 요청값을 그대로 복사 | 입력 `as_of`와 같아야 함 |
 
 `ProcedureSourceDocument`:
 
@@ -378,15 +395,18 @@ Provider 순서는 구성된 provider만 포함하면서 `OFFICIAL_SOURCE_REGIST
 
 ### 6.1 입력 `InfoAnalysisInput`
 
-| 필드 | 타입 | producer |
-|---|---|---|
-| `input` | `RedactedInput` | `CASE_CREATED`/`RESULT_SUBMITTED` trigger |
-| `case_snapshot` | `CaseSnapshot` | `SupervisorRunInput` |
-| `allowed_field_paths` | unique `CaseFieldKey[]`, min 1 | Graph의 전체 `CASE_FIELD_SPECS` key |
-| `known_procedure_steps` | `KnownProcedureStep[]` | Graph constructor 입력 |
-| `procedure_lookup_call_id` | runtime UUID | 직전 Procedure `InvocationMeta.call_id` |
-| `procedure_lookup_result` | `ProcedureLookupResult` | 직전 Tool 출력 |
-| `review_feedback` | `ReviewIssue[]` | 최초 `[]`, 재작업 시 feedback |
+`AgentGraph`가 이 model 하나를 만들어 `analyze(request)`에 전달한다. Info 호출 ID도 model 내부 필드이므로 별도 keyword 인자는 없다.
+
+| 필드 | 타입 | 의미·producer | 검증 |
+|---|---|---|---|
+| `input` | `RedactedInput` | Graph가 `CASE_CREATED`/`RESULT_SUBMITTED` trigger의 비식별 입력을 복사 | event ID·redaction span 무결성 검증 |
+| `case_snapshot` | `CaseSnapshot` | Graph가 `AgentGraphInput.case_snapshot`을 전달 | snapshot 내부 unique·Evidence closure 검증; Tool 결과 snapshot과 일치해야 함 |
+| `allowed_field_paths` | unique `CaseFieldKey[]`, min 1 | Graph가 전체 `CASE_FIELD_SPECS` key를 제공 | 빈 목록·중복·registry 밖 값 거부 |
+| `known_procedure_steps` | `KnownProcedureStep[]` | Graph constructor에 주입된 canonical step 목록 | step ID·code·정규화 name·모든 alias가 전체 목록에서 unique |
+| `source_call_id` | runtime UUID | Graph가 이번 Info `InvocationMeta.call_id`를 복사 | UUID 형식 필수; conflict·mutation provenance에 그대로 사용 |
+| `procedure_lookup_call_id` | runtime UUID | Graph가 직전 Procedure `InvocationMeta.call_id`를 복사 | UUID 형식 필수; 결과 provenance와 Review source에서 다시 대조 |
+| `procedure_lookup_result` | `ProcedureLookupResult` | Graph가 직전 Tool 출력을 전달 | `based_on_snapshot_id`가 입력 snapshot ID와 같아야 함 |
+| `review_feedback` | `ReviewIssue[]` | Graph가 최초 `[]`, 재작업 시 직전 Review 문제를 전달 | issue schema 검증; 재작업이 아니면 빈 목록 |
 
 입력 불변식:
 
@@ -398,21 +418,23 @@ Provider 순서는 구성된 provider만 포함하면서 `OFFICIAL_SOURCE_REGIST
 
 ### 6.2 출력 `InfoAnalysisResult`
 
-| 필드 | 타입 |
-|---|---|
-| `completion_status` | `COMPLETE \| NEEDS_USER_INPUT \| PARTIAL` |
-| `fact_candidates` | `FactCandidate[]` |
-| `procedure_progress_observations` | `ProcedureProgressObservation[]` |
-| `procedure_findings` | `ProcedureFinding[]` |
-| `conflicts` | `ConflictCandidate[]` |
-| `missing_fields` | `MissingField[]` |
-| `uncertainties` | `Uncertainty[]` |
-| `question_candidates` | `QuestionCandidate[]` |
-| `evidence_records` | `EvidenceRecord[]` |
-| `parser_version` | runtime-injected non-empty string |
-| `based_on_snapshot_id` | runtime UUID |
-| `based_on_procedure_lookup_call_id` | runtime UUID |
-| `based_on_procedure_lookup_digest` | digest |
+`InfoAnalysisAgent`가 provider 의미 후보를 local guardrail로 검증하고 runtime provenance를 결합해 이 model 하나를 반환한다.
+
+| 필드 | 타입 | 의미·producer | 검증 |
+|---|---|---|---|
+| `completion_status` | `COMPLETE \| NEEDS_USER_INPUT \| PARTIAL` | Agent runtime이 검증된 분석 상태를 확정 | `NEEDS_USER_INPUT`이면 missing field와 question이 모두 필요 |
+| `fact_candidates` | `FactCandidate[]` | provider 사실 후보를 runtime이 registry·exact span·Evidence와 결합 | candidate ID unique, field/type/value·SET/CLEAR 일치, Evidence closure 필요 |
+| `procedure_progress_observations` | `ProcedureProgressObservation[]` | 사용자 문장의 실제 수행 관측을 runtime이 canonical step에 결합 | observation ID unique, known step·exact span·Evidence 필요; 웹 Evidence만으로 생성 금지 |
+| `procedure_findings` | `ProcedureFinding[]` | 공식 절차 원문의 의미를 Agent가 canonical step에 연결 | finding ID·step unique, Evidence freshness·본문 포함·source call 규칙 검증 |
+| `conflicts` | `ConflictCandidate[]` | 현재 confirmed fact와 다른 명시적 입력을 Agent가 분리 | ref·candidate ID unique, snapshot/version/call ID·digest 무결성 검증 |
+| `missing_fields` | `MissingField[]` | downstream 결정을 막는 unknown fact를 Agent가 표시 | field unique; `NEEDS_USER_INPUT`이면 최소 1개와 연결 question 필요 |
+| `uncertainties` | `Uncertainty[]` | 모호성·낮은 신뢰·source 한계를 Agent가 보존 | enum code, JSON Pointer, Evidence ref 검증 |
+| `question_candidates` | `QuestionCandidate[]` | missing fact 해소 질문을 runtime이 생성 | question ID unique, 최소 한 field를 해소해야 함 |
+| `evidence_records` | `EvidenceRecord[]` | runtime이 사용자·전문가 입력의 exact span Evidence를 생성 | Evidence ID unique; fact/progress 참조는 이 목록에서, procedure finding·uncertainty의 공식 ref는 같은 Review package의 `ProcedureLookupResult`에서 해석 |
+| `parser_version` | runtime-injected non-empty string | Agent 설정의 deterministic parser/guardrail version | 빈 값 금지; provider 생성 금지 |
+| `based_on_snapshot_id` | runtime UUID | Agent가 입력 snapshot ID를 복사 | 입력 snapshot과 같아야 함 |
+| `based_on_procedure_lookup_call_id` | runtime UUID | Agent가 입력 Procedure call ID를 복사 | 입력 call ID와 같아야 함 |
+| `based_on_procedure_lookup_digest` | digest | Agent가 입력 Procedure 결과의 canonical digest를 계산 | 실제 입력 결과 digest와 같아야 함 |
 
 `NEEDS_USER_INPUT`이면 `missing_fields`와 `question_candidates`가 모두 1개 이상이어야 한다. candidate ID, observation ID, finding step/ID, question ID, Evidence ID는 각 범위에서 unique다. fact와 progress observation의 Evidence 참조는 이 결과의 `evidence_records`에서 해석되어야 한다.
 
@@ -548,7 +570,7 @@ LLM은 새 runtime UUID, offset, Evidence ID, digest를 생성하지 않는다. 
 
 상태: `[CURRENT_AI]`
 
-### 7.1 주입 계약 `ReviewedSupportCatalog`
+### 7.1 생성자 dependency `ReviewedSupportCatalog` — 직접 입출력 아님
 
 `SupportAgent`는 생성 시 검수 catalog를 deep copy한다. catalog 모델 자체는 frozen outer model과 tuple collection으로 **얕은 불변**을 제공하지만 nested `AgentSchema`까지 재귀적으로 frozen인 것은 아니다. `catalog=null`이면 분석하지 않고 `SupportCatalogUnavailableError`를 던진다. 아래 catalog는 BizInfo discovery 결과와 다른 계약이다.
 
@@ -586,7 +608,7 @@ Catalog 불변식:
 - claim Evidence source는 `REVIEWED_WIKI | OFFICIAL_DOCUMENT | OFFICIAL_API`만 허용한다.
 - `REVIEWED_WIKI` Evidence에는 직접 `OFFICIAL_DOCUMENT` 또는 `OFFICIAL_API` parent가 최소 하나 있어야 한다.
 
-### 7.2 `PlanningContext`
+### 7.2 입력에 포함되는 공통 context `PlanningContext`
 
 | 필드 | 타입 | 불변식 |
 |---|---|---|
@@ -595,24 +617,26 @@ Catalog 불변식:
 
 Overlay는 아직 저장되지 않은 fact 변경 후보다. 지원금 Agent는 snapshot을 바꾸지 않고 overlay를 적용한 view로 criterion을 비교한다.
 
-### 7.3 입력 `SupportAnalysisInput`
+### 7.3 입력 `SupportAgentInput`
 
-`lookup_goal` discriminator를 쓰는 union이다.
+`SupportAgentInput`은 `lookup_goal` discriminator를 쓰는 세 request schema의 union이다. `AgentGraph`는 선택한 variant 객체 하나를 `analyze(request)`에 전달한다. 생성자에 주입되는 `ReviewedSupportCatalog`는 이 호출별 입력 schema에 포함되지 않는다.
 
-| 상태 | variant | 필드 |
-|---|---|---|
-| `[CURRENT_AI]` | `DiscoverSupportInput` | `lookup_goal=DISCOVER_RELEVANT`, 공통 필드 |
-| `[CURRENT_AI][NOT_WIRED]` | `CheckSpecificSupportInput` | `lookup_goal=CHECK_SPECIFIC`, 공통 필드, `support_programs` min 1 |
-| `[CURRENT_AI]` | `RefreshSupportInput` | `lookup_goal=REFRESH_STALE`, 공통 필드, `support_programs` min 1 |
+| 상태 | 입력 variant | 목적·producer | variant 검증 |
+|---|---|---|---|
+| `[CURRENT_AI]` | `DiscoverSupportInput` | 일반 Graph 흐름이 검수 catalog에서 관련 program을 탐색할 때 생성 | `lookup_goal=DISCOVER_RELEVANT`; 공통 필드만 허용 |
+| `[CURRENT_AI][NOT_WIRED]` | `CheckSpecificSupportInput` | 독립 caller가 명시한 검수 program만 확인할 때 생성; Graph는 현재 생성하지 않음 | `lookup_goal=CHECK_SPECIFIC`; `support_programs` min 1 필수 |
+| `[CURRENT_AI]` | `RefreshSupportInput` | `SUPPORT_REFRESH` Graph 흐름이 주입된 catalog의 지정 program을 재평가할 때 생성 | `lookup_goal=REFRESH_STALE`; `support_programs` min 1 필수 |
 
 공통 필드:
 
-| 필드 | 타입 |
-|---|---|
-| `planning_context` | `PlanningContext` |
-| `related_steps` | `ProcedureStepRef[]` |
-| `as_of` | date |
-| `review_feedback` | `ReviewIssue[]` |
+| 필드 | 타입 | 의미·producer | 검증 |
+|---|---|---|---|
+| `lookup_goal` | 위 variant별 literal | Graph 또는 독립 caller가 분석 mode를 선택 | discriminator와 실제 variant 필드가 일치해야 함 |
+| `planning_context` | `PlanningContext` | Graph가 기준 snapshot과 검수 전 fact overlay를 묶어 생성 | snapshot schema, candidate ID·field path unique |
+| `related_steps` | `ProcedureStepRef[]` | Graph가 관련 Info finding의 canonical step을 전달 | 각 stable ID/code schema 검증; 빈 목록 허용 |
+| `as_of` | date | Graph가 자연어 trigger 날짜 또는 refresh 기준일을 전달 | 유효한 date 필수; 현재 prompt·freshness 계산에는 미사용 |
+| `review_feedback` | `ReviewIssue[]` | Graph가 최초 `[]`, 재작업 시 직전 Review 문제를 전달 | issue schema 검증 |
+| `support_programs` | `SupportProgramRef[]`, min 1 | `CHECK_SPECIFIC`/`REFRESH_STALE` caller가 지정 | 두 variant에서만 존재·필수; program ID/wiki UUID 형식 검증 |
 
 Graph는 일반 trigger에서 `DiscoverSupportInput`, `SUPPORT_REFRESH`에서 `RefreshSupportInput`만 만든다. 일반 흐름의 `related_steps`는 Info finding 중 relevance가 `RELEVANT | POSSIBLY_RELEVANT`인 step이다. 현재 Tool이 생성하는 Evidence freshness는 `UNKNOWN`이므로 해당 finding은 보통 `UNDETERMINED`이고 관련 step 목록에서 제외될 수 있다. `DISCOVER_RELEVANT`에서 `related_steps=[]`이면 Support Agent는 reviewed catalog 전체 프로그램을 대상으로 선택하고, 값이 있으면 related-step 교집합이 있는 프로그램만 선택한다.
 
@@ -620,16 +644,18 @@ Graph는 일반 trigger에서 `DiscoverSupportInput`, `SUPPORT_REFRESH`에서 `R
 
 ### 7.4 출력 `SupportAnalysisResult`
 
-| 필드 | 타입 |
-|---|---|
-| `completion_status` | `COMPLETE \| NO_CANDIDATE \| PARTIAL` |
-| `support_checks` | `SupportCheck[]` |
-| `no_candidate_reason_code` | `UpperSnakeCode \| null` |
-| `uncertainties` | `Uncertainty[]` |
-| `search_summary` | `SupportSearchSummary` |
-| `evidence_records` | `EvidenceRecord[]` |
-| `based_on_snapshot_id` | runtime UUID |
-| `based_on_candidate_ids` | runtime UUID[] unique |
+`SupportAgent`가 catalog, snapshot, overlay 비교를 검증하고 이 model 하나를 반환한다.
+
+| 필드 | 타입 | 의미·producer | 검증 |
+|---|---|---|---|
+| `completion_status` | `COMPLETE \| NO_CANDIDATE \| PARTIAL` | Agent runtime이 선택 program과 source freshness로 계산 | check·reason·uncertainty 존재 조건과 일치해야 함 |
+| `support_checks` | `SupportCheck[]` | Agent가 선택된 각 검수 program에 대해 하나씩 생성 | program ID unique; 선택 program 전체와 1:1; criterion·Evidence 일치 |
+| `no_candidate_reason_code` | `UpperSnakeCode \| null` | 후보가 없을 때 runtime이 기계 판독 이유를 제공 | `NO_CANDIDATE`일 때만 non-null |
+| `uncertainties` | `Uncertainty[]` | unknown fact와 stale/unknown source 한계를 Agent가 보존 | `PARTIAL`이면 최소 1개; path/ref schema 검증 |
+| `search_summary` | `SupportSearchSummary` | runtime이 catalog/wiki/RAG/공식 출처 사용 사실을 기록 | 현재 `wiki_lookup=NOT_REQUESTED`, `rag_used=false`; 공식 source 여부는 Evidence로 계산 |
+| `evidence_records` | `EvidenceRecord[]` | Agent가 선택 program의 검수 catalog 소유 Evidence와 parent closure를 복사 | catalog 소유 ref는 이 목록에서, Case snapshot·Info overlay ref는 같은 `ReviewSubject`의 snapshot·Info source와 합쳐 해석 |
+| `based_on_snapshot_id` | runtime UUID | Agent가 `planning_context.case_snapshot.snapshot_id`를 복사 | 입력 snapshot과 같아야 함 |
+| `based_on_candidate_ids` | runtime UUID[] unique | 실제 criterion 계산에 사용한 overlay ID만 runtime이 기록 | 입력 overlay의 부분집합, 중복 금지 |
 
 `SupportCheck`:
 
@@ -707,26 +733,30 @@ Catalog에서 대상 program이 없으면 LLM을 호출하지 않고 runtime이 
 
 ### 8.1 입력 `SupportNoticeDiscoveryInput`
 
-| 필드 | 타입 | 불변식 |
-|---|---|---|
-| `keywords` | immutable string tuple, `1..8` | 항목 `1..80`자, trim, case-insensitive unique, comma·ASCII U+0000–U+001F/U+007F·민감정보 금지 |
-| `max_results` | strict integer `1..100` | 기본 20 |
+독립 caller가 이 model 하나를 만들어 `discover(request)`에 전달한다. 현재 `AgentGraph` producer는 없다.
+
+| 필드 | 타입 | 의미·producer | 검증 |
+|---|---|---|---|
+| `keywords` | immutable string tuple, `1..8` | 독립 caller가 기업마당 공고 검색어를 제공 | 항목 `1..80`자, trim, case-insensitive unique, comma·ASCII U+0000–U+001F/U+007F·민감정보 금지 |
+| `max_results` | strict integer `1..100` | caller가 반환 상한을 지정; 기본 20 | boolean·문자열 숫자·범위 밖 값 거부 |
 
 ### 8.2 출력 `SupportNoticeDiscoveryResult`
 
-| 필드 | 타입 |
-|---|---|
-| `provider` | literal `BIZINFO` |
-| `keywords` | 검증된 input tuple |
-| `applied_result_limit` | strict integer `1..100` |
-| `provider_total_count` | non-negative integer \| null |
-| `provider_returned_count` | non-negative integer |
-| `duplicate_count` | non-negative integer |
-| `result_count` | non-negative integer |
-| `truncated` | strict boolean |
-| `retrieved_at` | aware datetime |
-| `candidates` | immutable `SupportNoticeCandidate[]`, max 100 |
-| `evidence_records` | frozen result의 `tuple[EvidenceRecord, ...]`, max 100; nested EvidenceRecord는 재귀적 frozen 아님 |
+adapter가 기업마당 API 응답을 정규화하고 이 model 하나를 반환한다.
+
+| 필드 | 타입 | 의미·producer | 검증 |
+|---|---|---|---|
+| `provider` | literal `BIZINFO` | adapter가 source provider를 고정 | 다른 값 거부 |
+| `keywords` | 검증된 input tuple | adapter가 요청 검색어를 복사 | 입력과 동일해야 함 |
+| `applied_result_limit` | strict integer `1..100` | adapter가 실제 적용한 요청 상한을 기록 | 입력 `max_results`와 adapter 설정 `max_results` 중 작은 값과 일치 |
+| `provider_total_count` | non-negative integer \| null | API가 제공한 전체 건수 또는 미제공 상태 | 반환 0건 iff null; 제공 시 반환 수 이상 |
+| `provider_returned_count` | non-negative integer | adapter가 받은 raw item 수를 기록 | candidate·중복·limit 집계와 일치 |
+| `duplicate_count` | non-negative integer | adapter가 notice ID 중복 제거 수를 계산 | 반환 수보다 클 수 없음 |
+| `result_count` | non-negative integer | adapter가 최종 unique candidate 수를 계산 | `len(candidates)` 및 §8.3 공식과 일치 |
+| `truncated` | strict boolean | 전체/unique 후보가 적용 상한을 넘었는지 adapter가 계산 | 실제 누락 후보가 있을 때만 true |
+| `retrieved_at` | aware datetime | adapter runtime clock | timezone 필수; 모든 Evidence와 동일 시각 |
+| `candidates` | immutable `SupportNoticeCandidate[]`, max 100 | adapter가 raw 공고를 안전한 필드로 정규화 | notice ID unique, URL/domain·첨부 pair·count 검증 |
+| `evidence_records` | frozen result의 `tuple[EvidenceRecord, ...]`, max 100 | adapter가 candidate마다 `OFFICIAL_API` Evidence 생성 | candidate와 1:1, ID·hash·locator·시각 일치; nested model은 재귀적 frozen 아님 |
 
 `SupportNoticeCandidate`의 선언 필드 전체:
 
@@ -782,50 +812,36 @@ Catalog에서 대상 program이 없으면 LLM을 호출하지 않고 runtime이 
 
 상태: `[CURRENT_AI]`
 
-### 9.1 Graph 진입 입력 `SupervisorRunInput`
+### 9.1 입력 `SupervisorAgentInput`
 
-| 필드 | 타입 |
-|---|---|
-| `trigger` | `RunTrigger` |
-| `case_snapshot` | `CaseSnapshot` |
+`AgentGraph`가 하위 결과와 revision context를 이 model 하나로 묶어 `draft(request)`에 전달한다. Graph 공개 입력인 `AgentGraphInput`과 별개의 Supervisor 전용 계약이다.
 
-`RunTrigger`는 `trigger_type` discriminator를 쓰는 정확히 세 variant다.
+| 필드 | 타입·기본값 | 의미·producer | 검증 |
+|---|---|---|---|
+| `trigger` | `RunTrigger` | Graph가 현재 run의 trigger를 복사 | `trigger_type`별 exact variant와 event 무결성 검증 |
+| `case_snapshot` | `CaseSnapshot` | Graph가 실행 시작 snapshot을 전달 | source의 case ID와 output snapshot ID가 모두 이 snapshot과 같아야 함 |
+| `source_results` | `ReviewSourceResult[]`, min 1 | Graph가 현재 run에서 성공한 하위 결과를 digest-bound wrapper로 전달 | call ID unique, 모든 source가 정확히 한 run 소속, output type/component/digest 일치 |
+| `draft_version` | positive strict integer, 기본 1 | Graph가 `revision_count + 1`로 생성 | boolean·문자열 숫자·0 이하 거부 |
+| `review_feedback` | `ReviewIssue[]`, 기본 `[]` | 최초에는 빈 목록, 재작업에는 직전 Review 문제를 Graph가 전달 | issue schema 검증 |
+| `fact_overlays` | `FactChangeCandidate[] \| null`, 기본 null | Graph가 Info 결과로 만든 미저장 fact 변경 후보를 전달; direct call의 null이면 Supervisor가 source에서 파생 | non-null이면 candidate ID와 field path 각각 unique |
+| `previous_draft` | `SupervisorDraft \| null`, 기본 null | Graph가 Review에서 거부된 직전 draft를 revision context로 전달 | nested `SupervisorDraft` 자체 schema만 검증; 현재 source와의 digest/provenance 관계 및 직전 draft ID와의 비동일성은 별도 교차검증하지 않음 |
 
-| variant | 필드 |
-|---|---|
-| `CaseCreatedTrigger` | `trigger_type=CASE_CREATED`, `input_event_id: non-empty string`, `client_event_id: non-empty string \| null`, `input: RedactedInput`, `submitted_at: aware datetime` |
-| `ResultSubmittedTrigger` | `trigger_type=RESULT_SUBMITTED`, 나머지는 CaseCreated와 같음 |
-| `SupportRefreshTrigger` | `trigger_type=SUPPORT_REFRESH`, `input_event_id: non-empty string`, `client_event_id: non-empty string \| null`, `support_programs: SupportProgramRef[]` min 1, `as_of: date` |
+추가 runtime guardrail은 Info의 procedure finding이 같은 `source_results` 안 Procedure call ID와 digest에 닫혀 있는지, source가 실제 decision·mutation·claim provenance를 모두 제공하는지 확인한다.
 
-자연어 trigger의 `input_event_id`와 nested `input.input_event_id`는 같아야 한다. refresh trigger에는 `input`이 없다.
+### 9.2 출력 `SupervisorDraft`
 
-### 9.2 실제 `SupervisorAgent.draft()` 입력
+`SupervisorAgent`가 provider 의미 초안과 deterministic mutation/provenance를 결합하고 이 model 하나를 반환한다.
 
-Supervisor가 받는 입력은 별도 wrapper model이 아니라 다음 Python 인자들이다.
-
-| 인자 | 타입/기본값 | 의미 |
-|---|---|---|
-| `request` | `SupervisorRunInput` | trigger와 기준 snapshot |
-| `source_results` | `Sequence[ReviewSourceResult]` | 현재 run에서 성공한 하위 결과, min 1 |
-| `draft_version` | integer, 기본 1 | Graph는 revision count + 1 |
-| `review_feedback` | `Sequence[ReviewIssue]`, 기본 `()` | 재작업 feedback |
-| `fact_overlays` | `Sequence[FactChangeCandidate] \| null` | Graph가 Info 결과에서 만든 overlay |
-| `previous_draft` | `SupervisorDraft \| null` | revision context; runtime ID 재사용 금지 |
-
-모든 source call ID는 unique이고 source의 case/snapshot은 request와 같아야 한다. Info procedure finding은 같은 `source_results` 안 Procedure result의 call ID와 digest에 닫혀야 한다.
-
-### 9.3 출력 `SupervisorDraft`
-
-| 필드 | 타입 |
-|---|---|
-| `decision` | `DecisionDraft` |
-| `mutations` | `MutationSet` |
-| `grounded_claims` | `GroundedClaim[]` |
-| `source_call_ids` | runtime UUID[] min 1, unique |
+| 필드 | 타입 | 의미·producer | 검증 |
+|---|---|---|---|
+| `decision` | `DecisionDraft` | Supervisor가 Blocker·Next Action·질문 중 허용 조합을 작성하고 runtime ID·version·시각을 주입 | discriminator별 exact 필드, target/source/Evidence/human-confirmation guardrail 검증 |
+| `mutations` | `MutationSet` | runtime이 검증된 Info/Support source에서 저장 **후보**를 결정론적으로 생성 | 후보 ID·대상 unique, before/after·source provenance 일치; DB 반영 아님 |
+| `grounded_claims` | `GroundedClaim[]` | provider selector를 runtime이 실제 draft path/text와 결합 | target path가 실제 노출 문자열과 exact match, 고위험 주장 Evidence·표현 검증 |
+| `source_call_ids` | runtime UUID[] min 1, unique | runtime이 실제 사용한 `ReviewSourceResult.meta.call_id`를 기록 | `decision.based_on_call_ids`와 집합이 정확히 같고 모든 provenance source를 포함 |
 
 `source_call_ids` 집합은 `decision.based_on_call_ids`와 정확히 같아야 하고, 실제 사용한 결과·Evidence·mutation provenance를 모두 포함해야 한다.
 
-### 9.4 Decision, Blocker, Next Action
+### 9.3 Decision, Blocker, Next Action
 
 `Blocker`:
 
@@ -878,7 +894,7 @@ Variant:
 
 `CASE_COMPLETE` 타입은 존재하지만 `SupervisorAgent._ensure_complete_is_supported()`가 항상 `SupervisorGuardrailError`를 던진다. 현재 bounded 절차조회로 전체 완료 coverage를 증명하지 못하기 때문에 **현 Graph에서 정상 도달 불가**다.
 
-### 9.5 Mutation schema
+### 9.4 Mutation schema
 
 `MutationSet`:
 
@@ -931,7 +947,7 @@ Info observation이 `requires_confirmation=false`이고 같은 step finding의 `
 
 `[TYPE_ONLY]` `CaseStatusChangeCandidate`는 `candidate_id`, `before_status=IN_PROGRESS`, `proposed_status=COMPLETED`, `reason_summary`, `evidence_refs`를 갖는다. `CASE_COMPLETE`가 차단되므로 현재 Graph가 생성하지 않는다.
 
-### 9.6 `GroundedClaim`
+### 9.5 `GroundedClaim`
 
 | 필드 | 타입 |
 |---|---|
@@ -944,7 +960,7 @@ Info observation이 `requires_confirmation=false`이고 같은 step finding의 `
 
 `ELIGIBILITY`는 항상 `NEEDS_CONFIRMATION`이어야 한다. target path는 `SupervisorDraft` 안 사용자 노출 string으로 해석되고 해당 값과 `text`가 정확히 같아야 한다. 고위험 문장에는 같은 path/text의 적절한 claim이 필요하며, stale/unknown Evidence로 확정 표현을 만들 수 없다.
 
-### 9.7 provider → local → runtime 경계
+### 9.6 provider → local → runtime 경계
 
 | 층 | 모델 | top-level key |
 |---|---|---|
@@ -962,18 +978,20 @@ Provider `GroundedClaimModelOutput`은 `claim_type`, `target_kind`, `target_inde
 
 ### 10.1 입력 `ReviewSubject`
 
-| 필드 | 타입 |
-|---|---|
-| `schema_version` | literal `agent-io/2.0` |
-| `review_subject_id` | runtime UUID |
-| `review_attempt` | strict integer `1..3` |
-| `run_id` | runtime UUID |
-| `case_id` | positive strict integer |
-| `trigger` | 현재 3개 `RunTrigger` union |
-| `snapshot` | `CaseSnapshot` |
-| `source_results` | `ReviewSourceResult[]`, min 1 |
-| `supervisor_draft` | `SupervisorDraft` |
-| `subject_digest` | digest |
+`AgentGraph`가 검수 package 전체를 `ReviewSubject.create()`로 묶어 이 model 하나를 `review(subject)`에 전달한다.
+
+| 필드 | 타입 | 의미·producer | 검증 |
+|---|---|---|---|
+| `schema_version` | literal `agent-io/2.0` | Graph/runtime이 계약 버전을 고정 | 다른 버전 거부 |
+| `review_subject_id` | runtime UUID | Graph가 검수 package마다 새로 생성 | UUID 형식 필수 |
+| `review_attempt` | strict integer `1..3` | Graph가 최초 1, revision마다 1씩 증가 | boolean·문자열 숫자·범위 밖 값 거부 |
+| `run_id` | runtime UUID | Graph가 현재 전체 실행 ID를 전달 | 모든 source meta와 같아야 함 |
+| `case_id` | positive strict integer | Graph가 snapshot case ID를 전달 | snapshot과 모든 source meta의 case ID가 같아야 함 |
+| `trigger` | 현재 3개 `RunTrigger` union | Graph가 `AgentGraphInput.trigger`를 복사 | discriminator·event ID·nested input 검증 |
+| `snapshot` | `CaseSnapshot` | Graph가 실행 시작 snapshot을 전달 | 모든 source output의 snapshot ID와 같아야 함 |
+| `source_results` | `ReviewSourceResult[]`, min 1 | Graph가 Procedure/Info/Support 결과와 meta/digest를 결합 | call ID unique; type/component/digest/run/case/snapshot closure 검증 |
+| `supervisor_draft` | `SupervisorDraft` | Graph가 직전 Supervisor 성공 출력을 전달 | source call ID 집합과 draft 사용 ID 집합이 정확히 같아야 함 |
+| `subject_digest` | digest | `ReviewSubject.create()`가 자신을 제외한 package 전체의 canonical digest를 계산 | 현재 전체 내용으로 재계산한 digest와 같아야 하며 nested 변경 시 직렬화 거부 |
 
 `ReviewSourceResult`:
 
@@ -989,15 +1007,17 @@ Provider `GroundedClaimModelOutput`은 `claim_type`, `target_kind`, `target_inde
 
 ### 10.2 출력 `ReviewResult`
 
-| 필드 | 타입 |
-|---|---|
-| `reviewed_subject_id` | 입력 subject UUID |
-| `reviewed_subject_digest` | 입력 subject digest |
-| `verdict` | `PASS \| REVISE` |
-| `issues` | `ReviewIssue[]` |
-| `missing_evidence` | `MissingEvidence[]` |
-| `recommended_rework_targets` | `SUPERVISOR \| INFO_AGENT \| SUPPORT_AGENT \| PROCEDURE_TOOL` unique 목록 |
-| `resolution_reason` | non-empty string |
+`ReviewTool`이 deterministic safety finding과 provider 검수 결과를 결합하고 이 model 하나를 반환한다. 이유는 `resolution_reason`과 각 issue의 `reason_summary`에 항상 포함된다.
+
+| 필드 | 타입 | 의미·producer | 검증 |
+|---|---|---|---|
+| `reviewed_subject_id` | runtime UUID | Tool이 입력 subject UUID를 복사 | 입력과 같아야 함 |
+| `reviewed_subject_digest` | digest | Tool이 검증한 입력 subject digest를 복사 | 입력과 같아야 함 |
+| `verdict` | `PASS \| REVISE` | Tool이 deterministic finding을 우선해 최종 판정 | PASS/REVISE gate 조건과 일치해야 함 |
+| `issues` | `ReviewIssue[]` | provider와 deterministic checker가 문제 path·owner·이유·근거를 반환 | 위험 issue는 BLOCKING, target path/ref/call owner를 runtime이 재검증 |
+| `missing_evidence` | `MissingEvidence[]` | Tool이 근거가 부족한 Supervisor claim path를 기록 | non-null `/supervisor_draft/...` 경로와 unique source type 필요 |
+| `recommended_rework_targets` | `SUPERVISOR \| INFO_AGENT \| SUPPORT_AGENT \| PROCEDURE_TOOL` unique 목록 | runtime이 blocking issue path의 실제 owner로 다시 계산 | 모든 blocking owner와 missing Evidence의 Supervisor owner를 정확히 포함 |
+| `resolution_reason` | non-empty string | Tool이 PASS 또는 REVISE 이유를 사람이 읽도록 반환 | 빈 값 금지 |
 
 `ReviewIssue`:
 
@@ -1055,58 +1075,86 @@ Review invocation component가 `REVIEW_TOOL`이고 run/case가 subject와 같으
 
 근거: [`review_tool/models.py`](../backend/app/agent/review_tool/models.py), [`review_tool/tool.py`](../backend/app/agent/review_tool/tool.py), [`test_review_tool.py`](../backend/tests/agent/test_review_tool.py).
 
-## 11. AgentGraph 최종 출력
+## 11. AgentGraph
 
 상태: `[CURRENT_AI]`
 
-`AgentRunOutcome`은 `outcome_type` discriminator를 쓰는 정확히 세 variant다.
+### 11.1 입력 `AgentGraphInput`
 
-### 11.1 `ReviewedPlanOutcome`
+standalone caller 또는 향후 BE adapter가 이 model 하나를 만들어 `run(request)`에 전달한다. `trace_id`를 포함해 Graph 실행에 필요한 공개 입력이 모두 이 schema에 들어 있다.
 
-| 필드 | 타입 |
-|---|---|
-| `outcome_type` | literal `REVIEWED_PLAN` |
-| `review_subject` | `ReviewSubject` |
-| `review_proof` | `ReviewProof` |
+| 필드 | 타입·기본값 | 의미·producer | 검증 |
+|---|---|---|---|
+| `trigger` | `RunTrigger` | caller가 전체 실행 사유와 event payload를 제공 | `trigger_type` discriminator로 정확히 한 variant 선택; 자연어 trigger의 outer/nested event ID 일치 |
+| `case_snapshot` | `CaseSnapshot` | caller가 같은 시점의 Case read view를 제공 | case ID/version, fact/progress unique, Evidence reference closure, timezone 검증 |
+| `trace_id` | non-empty string \| null, 기본 null | caller가 observability correlation 값을 선택적으로 제공 | 빈 문자열 거부; 판단 로직에는 사용하지 않지만 `InvocationMeta`를 통해 `ReviewSubject` package digest에는 포함 |
+
+`RunTrigger`의 exact variant는 다음과 같다.
+
+| 입력 variant | 필드 | producer·검증 |
+|---|---|---|
+| `CaseCreatedTrigger` | `trigger_type=CASE_CREATED`, `input_event_id`, `client_event_id`, `input: RedactedInput`, `submitted_at` | Case 생성 event caller가 생성; outer/nested input event ID 일치, submitted time timezone 필수 |
+| `ResultSubmittedTrigger` | `trigger_type=RESULT_SUBMITTED`, 나머지는 CaseCreated와 같음 | 결과 제출 event caller가 생성; 같은 event·time 검증 |
+| `SupportRefreshTrigger` | `trigger_type=SUPPORT_REFRESH`, `input_event_id`, `client_event_id`, `support_programs` min 1, `as_of` | refresh caller가 stable program ref와 기준일 제공; 자연어 `input` 필드는 허용하지 않음 |
+
+Graph는 입력을 deep copy하고 시작 snapshot digest를 보관해 실행 중 caller 또는 component가 기준 snapshot을 바꾸지 못하게 한다.
+
+### 11.2 출력 `AgentGraphOutput`
+
+`AgentGraphOutput`은 `outcome_type` discriminator를 쓰는 정확히 세 성공 반환 variant의 union이다. 여기서 “성공 반환”은 Python 호출이 typed 결과를 반환했다는 뜻이며, 반드시 업무 계획 성공을 뜻하지는 않는다.
+
+| 출력 variant | `outcome_type` | 언제 Graph가 생성하는가 | 소비자 해석·검증 |
+|---|---|---|---|
+| `ReviewedPlanOutcome` | `REVIEWED_PLAN` | Review가 exact subject에 `PASS`하고 Graph가 proof를 발급 | 검수된 계획 후보이며 DB 저장 완료가 아님; subject/proof 전 provenance 일치 필요 |
+| `ConflictOutcome` | `CONFLICT` | Info가 confirmed Case fact와 다른 새 입력을 발견 | 서비스 종료가 아니라 해당 run을 안전 종료하고 사용자 확인을 기다림; conflict digest/snapshot 일치 필요 |
+| `SafeFailureOutcome` | `SAFE_FAILURE` | component 실패, structured output 실패, Review revision 소진 | 미검수 draft/mutation을 노출하지 않는 fail-closed 결과; code·component·trace schema 검증 |
+
+### 11.3 `ReviewedPlanOutcome`
+
+| 필드 | 타입 | 의미·producer | 검증 |
+|---|---|---|---|
+| `outcome_type` | literal `REVIEWED_PLAN` | Graph가 검수 통과 결과 tag를 고정 | 다른 tag 거부 |
+| `review_subject` | `ReviewSubject` | Graph가 Review에 전달했던 exact package를 반환 | subject 자체 digest와 모든 source closure 검증 |
+| `review_proof` | `ReviewProof` | Graph가 matching `PASS` Review 호출 뒤 발급 | subject와 run/case/snapshot/version/ID/digest가 모두 일치 |
 
 subject와 proof의 run, case, snapshot, version, subject ID, digest가 모두 일치해야 한다. 이 outcome은 검수된 AI 결과라는 뜻이며 이 문서 범위에는 저장 동작이 없다.
 
-### 11.2 `ConflictOutcome`
+### 11.4 `ConflictOutcome`
 
-| 필드 | 타입 |
-|---|---|
-| `outcome_type` | literal `CONFLICT` |
-| `run_id` | runtime UUID |
-| `case_id` | positive strict integer |
-| `trigger` | `RunTrigger` |
-| `snapshot_id` | runtime UUID |
-| `case_version` | positive strict integer \| null |
-| `conflicts` | `ConflictCandidate[]`, min 1 |
-| `message_code` | literal `CONFIRM_CONFLICT` |
+| 필드 | 타입 | 의미·producer | 검증 |
+|---|---|---|---|
+| `outcome_type` | literal `CONFLICT` | Graph가 사용자 확인 대기 결과 tag를 고정 | 다른 tag 거부 |
+| `run_id` | runtime UUID | Graph가 현재 실행 ID를 기록 | UUID 형식 필수 |
+| `case_id` | positive strict integer | Graph가 snapshot case ID를 복사 | 입력 snapshot과 같아야 함 |
+| `trigger` | `RunTrigger` | Graph가 입력 trigger를 복사 | trigger variant schema 검증 |
+| `snapshot_id` | runtime UUID | Graph가 입력 snapshot ID를 복사 | 각 conflict snapshot ID와 같아야 함 |
+| `case_version` | positive strict integer \| null | Graph가 입력 snapshot version을 복사 | 각 conflict version과 같아야 함 |
+| `conflicts` | `ConflictCandidate[]`, min 1 | Graph가 Info 결과의 충돌을 반환 | ref·candidate ID unique, 각 digest와 snapshot/version 무결성 검증 |
+| `message_code` | literal `CONFIRM_CONFLICT` | Graph가 caller의 다음 처리 code를 고정 | 다른 code 거부 |
 
 Conflict ref와 candidate ID는 unique이고 각 conflict의 snapshot/version은 outcome과 같다. 현재 standalone `conflict_ref`는 simulation 전용이다. `ConflictOutcome`에는 별도 `evidence_records` 필드가 없으며, 이 shape를 다른 경계의 저장/확인 DTO로 간주하면 안 된다.
 
-### 11.3 `SafeFailureOutcome`
+### 11.5 `SafeFailureOutcome`
 
-| 필드 | 타입 |
-|---|---|
-| `outcome_type` | literal `SAFE_FAILURE` |
-| `run_id` | runtime UUID |
-| `case_id` | positive strict integer |
-| `trigger` | `RunTrigger` |
-| `snapshot_id` | runtime UUID |
-| `case_version` | positive strict integer \| null |
-| `failure_code` | `REVIEW_RETRY_EXHAUSTED \| COMPONENT_UNAVAILABLE \| STRUCTURED_OUTPUT_FAILED` |
-| `message_code` | `UpperSnakeCode` |
-| `recovery_action_code` | `RETRY \| RESUBMIT_INPUT \| CONTACT_SUPPORT \| NONE` |
-| `requested_field_paths` | `CaseFieldKey[]` |
-| `retryable` | strict boolean |
-| `failed_component` | `Component \| null` |
-| `trace_id` | non-empty string \| null |
+| 필드 | 타입 | 의미·producer | 검증 |
+|---|---|---|---|
+| `outcome_type` | literal `SAFE_FAILURE` | Graph가 fail-closed 결과 tag를 고정 | 다른 tag 거부 |
+| `run_id` | runtime UUID | Graph가 현재 실행 ID를 기록 | UUID 형식 필수 |
+| `case_id` | positive strict integer | Graph가 입력 snapshot case ID를 복사 | positive strict integer |
+| `trigger` | `RunTrigger` | Graph가 입력 trigger를 복사 | trigger variant schema 검증 |
+| `snapshot_id` | runtime UUID | Graph가 입력 snapshot ID를 복사 | UUID 형식 필수 |
+| `case_version` | positive strict integer \| null | Graph가 입력 snapshot version을 복사 | null 또는 positive strict integer |
+| `failure_code` | `REVIEW_RETRY_EXHAUSTED \| COMPONENT_UNAVAILABLE \| STRUCTURED_OUTPUT_FAILED` | Graph가 exception 종류 또는 revision 소진으로 분류 | 허용 enum만 가능 |
+| `message_code` | `UpperSnakeCode` | Graph가 안전한 caller-facing 기계 code를 선택 | upper snake 형식 |
+| `recovery_action_code` | `RETRY \| RESUBMIT_INPUT \| CONTACT_SUPPORT \| NONE` | Graph가 안전한 후속 처리 종류를 선택 | 현재 producer는 `RETRY` 또는 `NONE`만 생성 |
+| `requested_field_paths` | `CaseFieldKey[]` | 추가 입력 대상이 있을 경우 Graph가 제공하는 자리 | 현재 producer는 `[]`; registry 밖 값 거부 |
+| `retryable` | strict boolean | Graph가 failure 분류에 따라 계산 | `0/1` 등 boolean coercion 거부 |
+| `failed_component` | `Component \| null` | Graph가 실패 owner를 기록하거나 Graph-level 실패이면 null | 허용 component enum만 가능 |
+| `trace_id` | non-empty string \| null | Graph가 입력 trace ID를 복사 | 빈 문자열 거부 |
 
 현재 Graph producer는 recovery action으로 `RETRY` 또는 `NONE`만 만들고 `requested_field_paths=[]`를 사용한다. 구성요소의 schema/guardrail/value 오류는 `STRUCTURED_OUTPUT_FAILED`, 설정·요청·upstream 계열 오류는 `COMPONENT_UNAVAILABLE`로 분류한다. Review 수정 2회 소진 시 `REVIEW_RETRY_EXHAUSTED`다. 검수되지 않은 draft나 mutation은 포함하지 않는다.
 
-### 11.4 Review 재작업 라우팅
+### 11.6 Review 재작업 라우팅
 
 - 최초 Review + 수정 후 Review 최대 2회, 총 Review attempt 최대 3회다.
 - rework target이 없으면 Supervisor를 다시 실행한다.

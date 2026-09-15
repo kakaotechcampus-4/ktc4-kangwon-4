@@ -32,6 +32,7 @@ from pydantic import ValidationError
 NOW = datetime(2026, 9, 14, 3, 0, tzinfo=timezone.utc)
 SNAPSHOT_ID = UUID("00000000-0000-4000-8000-000000000101")
 PROCEDURE_CALL_ID = UUID("00000000-0000-4000-8000-000000000102")
+INFO_CALL_ID = UUID("00000000-0000-4000-8000-000000000105")
 
 
 class FakeLLM:
@@ -203,6 +204,7 @@ def request(*, existing: str | None = None) -> InfoAnalysisInput:
                 utterance_aliases=["임대인 확인"],
             )
         ],
+        source_call_id=INFO_CALL_ID,
         procedure_lookup_call_id=PROCEDURE_CALL_ID,
         procedure_lookup_result=procedure_result(),
         review_feedback=[],
@@ -397,6 +399,27 @@ def test_query_alias_exposes_and_enforces_candidate_procedure_step() -> None:
     document = prompt_input["procedure_lookup"]["documents"][0]
     assert document["candidate_step_codes"] == ["FILE_TAX_BUSINESS_CLOSURE"]
     assert document["permitted_relevance"] == ["UNDETERMINED"]
+
+    current_result_values = component_input.procedure_lookup_result.model_dump(
+        mode="python"
+    )
+    current_result_values["documents"][0]["freshness_status"] = "CURRENT"
+    current_result_values["evidence_records"][0]["freshness_status"] = "CURRENT"
+    current_input = component_input.model_copy(
+        update={
+            "procedure_lookup_result": ProcedureLookupResult.model_validate(
+                current_result_values
+            )
+        }
+    )
+    current_document = InfoAnalysisAgent._prompt_input(current_input)[
+        "procedure_lookup"
+    ]["documents"][0]
+    assert current_document["permitted_relevance"] == [
+        "RELEVANT",
+        "POSSIBLY_RELEVANT",
+        "UNDETERMINED",
+    ]
 
     payload = extraction_payload()
     payload["facts"] = []

@@ -1,7 +1,7 @@
 """Bounded LangGraph orchestration for one RE:BORN planning run.
 
 This graph is deliberately persistence-free.  A BE coordinator supplies the
-immutable ``SupervisorRunInput`` and, after a reviewed outcome is returned,
+immutable ``AgentGraphInput`` and, after a reviewed outcome is returned,
 owns authorization, transaction and storage guardrails.
 """
 
@@ -16,15 +16,18 @@ from uuid import UUID, uuid4
 from app.agent.enrichment import build_fact_overlays
 from app.agent.schemas import (
     CASE_FIELD_SPECS,
-    AgentRunOutcome,
+    AgentGraphInput,
+    AgentGraphOutput,
     Component,
     ConflictOutcome,
     DiscoverSupportInput,
     InfoAnalysisInput,
+    InfoAnalysisResult,
     InvocationMeta,
     KnownProcedureStep,
     PlanningContext,
     ProcedureLookupInput,
+    ProcedureLookupResult,
     RefreshSupportInput,
     ReviewedPlanOutcome,
     ReviewIssue,
@@ -34,8 +37,10 @@ from app.agent.schemas import (
     ReviewSubject,
     ReviewVerdict,
     SafeFailureOutcome,
+    SupervisorAgentInput,
     SupervisorDraft,
-    SupervisorRunInput,
+    SupportAgentInput,
+    SupportAnalysisResult,
     SupportRefreshTrigger,
     canonical_digest,
 )
@@ -45,33 +50,19 @@ from langgraph.graph import END, START, StateGraph
 
 
 class InfoRunner(Protocol):
-    async def analyze(
-        self,
-        request: InfoAnalysisInput,
-        *,
-        source_call_id: UUID | None = None,
-    ) -> Any: ...
+    async def analyze(self, request: InfoAnalysisInput) -> InfoAnalysisResult: ...
 
 
 class ProcedureRunner(Protocol):
-    async def lookup(self, request: ProcedureLookupInput) -> Any: ...
+    async def lookup(self, request: ProcedureLookupInput) -> ProcedureLookupResult: ...
 
 
 class SupportRunner(Protocol):
-    async def analyze(self, request: Any) -> Any: ...
+    async def analyze(self, request: SupportAgentInput) -> SupportAnalysisResult: ...
 
 
 class SupervisorRunner(Protocol):
-    async def draft(
-        self,
-        request: SupervisorRunInput,
-        source_results: Sequence[ReviewSourceResult],
-        *,
-        draft_version: int = 1,
-        review_feedback: Sequence[ReviewIssue] = (),
-        fact_overlays: Sequence[Any] | None = None,
-        previous_draft: SupervisorDraft | None = None,
-    ) -> SupervisorDraft: ...
+    async def draft(self, request: SupervisorAgentInput) -> SupervisorDraft: ...
 
 
 class ReviewRunner(Protocol):
@@ -113,12 +104,7 @@ class AgentGraph:
         self._max_review_revisions = max_review_revisions
         self.compiled = self._compile()
 
-    async def run(
-        self,
-        request: SupervisorRunInput,
-        *,
-        trace_id: str | None = None,
-    ) -> AgentRunOutcome:
+    async def run(self, request: AgentGraphInput) -> AgentGraphOutput:
         # An owned deep copy prevents caller-side mutation while the graph is in flight.
         owned_request = request.model_copy(deep=True)
         failure_request = request.model_copy(deep=True)
@@ -127,7 +113,7 @@ class AgentGraph:
         initial: AgentGraphState = {
             "request": owned_request,
             "run_id": run_id,
-            "trace_id": trace_id,
+            "trace_id": owned_request.trace_id,
             "phase": "PLANNING",
             "source_results": [],
             "fact_overlays": [],
@@ -144,13 +130,13 @@ class AgentGraph:
             outcome = result.get("outcome")
             if outcome is None:
                 raise RuntimeError("Agent graph terminated without a safe outcome")
-            return cast(AgentRunOutcome, outcome)
+            return cast(AgentGraphOutput, outcome)
         except Exception as exc:  # noqa: BLE001 - public graph boundary fails closed
             failure = self._failure(exc, None)
             return self._build_safe_failure(
                 failure_request,
                 run_id=run_id,
-                trace_id=trace_id,
+                trace_id=failure_request.trace_id,
                 failure=failure,
             )
 
@@ -236,16 +222,14 @@ class AgentGraph:
             case_snapshot=request.case_snapshot,
             allowed_field_paths=list(CASE_FIELD_SPECS),
             known_procedure_steps=self._known_procedure_steps,
+            source_call_id=meta.call_id,
             procedure_lookup_call_id=procedure_source.meta.call_id,
             procedure_lookup_result=procedure_source.output,
             review_feedback=state.get("review_feedback", []),
         )
         started = time.monotonic()
         try:
-            output = await self._info_agent.analyze(
-                component_input,
-                source_call_id=meta.call_id,
-            )
+            output = await self._info_agent.analyze(component_input)
             source = ReviewSourceResult(
                 meta=meta,
                 output_digest=canonical_digest(output),
@@ -341,7 +325,7 @@ class AgentGraph:
             if item.relevance.value in {"RELEVANT", "POSSIBLY_RELEVANT"}
         ]
         if isinstance(request.trigger, SupportRefreshTrigger):
-            component_input: Any = RefreshSupportInput(
+            component_input: SupportAgentInput = RefreshSupportInput(
                 lookup_goal="REFRESH_STALE",
                 planning_context=context,
                 related_steps=procedure_steps,
@@ -388,12 +372,15 @@ class AgentGraph:
                 else None
             )
             draft = await self._supervisor.draft(
-                state["request"],
-                state["source_results"],
-                draft_version=state.get("revision_count", 0) + 1,
-                review_feedback=state.get("review_feedback", []),
-                fact_overlays=state.get("fact_overlays", []),
-                previous_draft=previous_draft,
+                SupervisorAgentInput(
+                    trigger=state["request"].trigger,
+                    case_snapshot=state["request"].case_snapshot,
+                    source_results=state["source_results"],
+                    draft_version=state.get("revision_count", 0) + 1,
+                    review_feedback=state.get("review_feedback", []),
+                    fact_overlays=state.get("fact_overlays", []),
+                    previous_draft=previous_draft,
+                )
             )
         except Exception as exc:  # noqa: BLE001 - graph must fail closed
             self._emit(meta, started, "ERROR", exc)
@@ -487,7 +474,7 @@ class AgentGraph:
 
     @staticmethod
     def _build_safe_failure(
-        request: SupervisorRunInput,
+        request: AgentGraphInput,
         *,
         run_id: UUID,
         trace_id: str | None,
@@ -630,7 +617,7 @@ class AgentGraph:
         return value
 
     @staticmethod
-    def _as_of(request: SupervisorRunInput) -> date:
+    def _as_of(request: AgentGraphInput) -> date:
         trigger = request.trigger
         if isinstance(trigger, SupportRefreshTrigger):
             return trigger.as_of
@@ -675,7 +662,7 @@ class AgentGraph:
         }
 
     @staticmethod
-    def _procedure_queries(request: SupervisorRunInput) -> list[str]:
+    def _procedure_queries(request: AgentGraphInput) -> list[str]:
         """Build bounded PII-free queries from canonical values and safe hints.
 
         Redacted user text is never copied into a provider query.  A small,

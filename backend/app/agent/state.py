@@ -6,7 +6,8 @@ from typing import Literal, TypedDict
 from uuid import UUID
 
 from app.agent.schemas import (
-    AgentRunOutcome,
+    AgentGraphInput,
+    AgentGraphOutput,
     Component,
     FactChangeCandidate,
     InvocationMeta,
@@ -15,7 +16,6 @@ from app.agent.schemas import (
     ReviewSourceResult,
     ReviewSubject,
     SupervisorDraft,
-    SupervisorRunInput,
 )
 
 GraphPhase = Literal[
@@ -32,7 +32,7 @@ GraphPhase = Literal[
 
 
 class AgentGraphState(TypedDict, total=False):
-    request: SupervisorRunInput
+    request: AgentGraphInput
     run_id: UUID
     trace_id: str | None
     phase: GraphPhase
@@ -45,7 +45,7 @@ class AgentGraphState(TypedDict, total=False):
     review_feedback: list[ReviewIssue]
     rework_targets: list[Component]
     revision_count: int
-    outcome: AgentRunOutcome
+    outcome: AgentGraphOutput
     failure_code: str
     failure_message_code: str
     failed_component: Component | None

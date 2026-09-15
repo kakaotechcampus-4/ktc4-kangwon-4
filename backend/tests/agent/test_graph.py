@@ -8,6 +8,7 @@ from uuid import UUID
 from app.agent.graph import AgentGraph
 from app.agent.schemas import (
     ActionDecisionDraft,
+    AgentGraphInput,
     Blocker,
     CaseCreatedTrigger,
     CaseFact,
@@ -23,8 +24,8 @@ from app.agent.schemas import (
     RedactedInput,
     ReviewIssue,
     ReviewResult,
+    SupervisorAgentInput,
     SupervisorDraft,
-    SupervisorRunInput,
     SupportAnalysisResult,
     SupportSearchSummary,
     canonical_digest,
@@ -51,7 +52,7 @@ def evidence(evidence_id: str, source_type: str = "SYSTEM_RECORD") -> EvidenceRe
     )
 
 
-def request() -> SupervisorRunInput:
+def request(*, trace_id: str | None = None) -> AgentGraphInput:
     redacted = RedactedInput(
         input_event_id="input-graph",
         source_type="USER_INPUT",
@@ -59,7 +60,7 @@ def request() -> SupervisorRunInput:
         redactions=[],
         submitted_at=NOW,
     )
-    return SupervisorRunInput(
+    return AgentGraphInput(
         trigger=CaseCreatedTrigger(
             trigger_type="CASE_CREATED",
             input_event_id="input-graph",
@@ -86,6 +87,7 @@ def request() -> SupervisorRunInput:
             evidence_records=[evidence("ev-system")],
             captured_at=NOW,
         ),
+        trace_id=trace_id,
     )
 
 
@@ -95,12 +97,7 @@ class FakeInfo:
         self.calls = 0
         self.inputs: list[Any] = []
 
-    async def analyze(
-        self,
-        component_input: Any,
-        *,
-        source_call_id: UUID | None = None,
-    ) -> InfoAnalysisResult:
+    async def analyze(self, component_input: Any) -> InfoAnalysisResult:
         self.calls += 1
         self.inputs.append(component_input)
         conflicts = []
@@ -119,7 +116,7 @@ class FakeInfo:
                     proposed_status="CONFIRMED",
                     proposed_value="LANDLORD_ALL",
                     source_evidence_refs=["ev-conflict"],
-                    source_call_id=source_call_id,
+                    source_call_id=component_input.source_call_id,
                 )
             ]
         missing_fields = []
@@ -278,17 +275,11 @@ class FakeSupervisor:
         self.previous_drafts: list[SupervisorDraft | None] = []
         self.revised_title = revised_title
 
-    async def draft(
-        self,
-        component_input: SupervisorRunInput,
-        source_results: Any,
-        *,
-        draft_version: int = 1,
-        review_feedback: Any = (),
-        fact_overlays: Any = None,
-        previous_draft: SupervisorDraft | None = None,
-    ) -> SupervisorDraft:
-        del component_input, fact_overlays
+    async def draft(self, component_input: SupervisorAgentInput) -> SupervisorDraft:
+        source_results = component_input.source_results
+        draft_version = component_input.draft_version
+        review_feedback = component_input.review_feedback
+        previous_draft = component_input.previous_draft
         self.calls += 1
         self.feedback_sizes.append(len(review_feedback))
         self.previous_drafts.append(previous_draft)
@@ -470,7 +461,7 @@ def graph(
 
 def test_full_graph_returns_only_reviewed_plan_with_pass_proof() -> None:
     runtime, info, procedure, support, supervisor, review = graph()
-    outcome = asyncio.run(runtime.run(request(), trace_id="trace-graph"))
+    outcome = asyncio.run(runtime.run(request(trace_id="trace-graph")))
 
     assert outcome.outcome_type == "REVIEWED_PLAN"
     assert outcome.review_proof.verdict == "PASS"

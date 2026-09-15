@@ -325,12 +325,7 @@ class InfoAnalysisAgent:
         self._parser_version = parser_version
         self._max_local_attempts = max_local_attempts
 
-    async def analyze(
-        self,
-        request: InfoAnalysisInput,
-        *,
-        source_call_id: UUID | None = None,
-    ) -> InfoAnalysisResult:
+    async def analyze(self, request: InfoAnalysisInput) -> InfoAnalysisResult:
         prompt_input = self._prompt_input(request)
         try:
             ensure_projection_has_no_obvious_sensitive_text(prompt_input)
@@ -371,11 +366,7 @@ class InfoAnalysisAgent:
             )
             try:
                 draft = self._validated_draft(provider_output)
-                return self._materialize(
-                    request,
-                    draft,
-                    source_call_id=source_call_id,
-                )
+                return self._materialize(request, draft)
             except (GuardrailViolation, ValueError):
                 continue
         raise InfoAnalysisGuardrailError(
@@ -440,7 +431,7 @@ class InfoAnalysisAgent:
                             )
                         ),
                         "permitted_relevance": (
-                            ["RELEVANT", "NOT_RELEVANT", "UNDETERMINED"]
+                            ["RELEVANT", "POSSIBLY_RELEVANT", "UNDETERMINED"]
                             if item.freshness_status.value == "CURRENT"
                             else ["UNDETERMINED"]
                         ),
@@ -618,8 +609,6 @@ class InfoAnalysisAgent:
         self,
         request: InfoAnalysisInput,
         draft: InfoAnalysisDraft,
-        *,
-        source_call_id: UUID | None,
     ) -> InfoAnalysisResult:
         allowed = set(request.allowed_field_paths)
         known_steps = {
@@ -671,7 +660,7 @@ class InfoAnalysisAgent:
                         semantic,
                         current.value,
                         evidence.evidence_id,
-                        source_call_id=source_call_id or self._uuid(),
+                        source_call_id=request.source_call_id,
                     )
                 )
                 continue

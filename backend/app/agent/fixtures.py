@@ -11,13 +11,13 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from app.agent.schemas import (
+    AgentGraphInput,
     CaseCreatedTrigger,
     CaseFact,
     CaseSnapshot,
     EvidenceRecord,
     KnownProcedureStep,
     RedactedInput,
-    SupervisorRunInput,
     SupportProgramRef,
 )
 from app.agent.support_agent import (
@@ -32,7 +32,7 @@ DEMO_NOW = datetime(2026, 9, 14, 6, 0, tzinfo=timezone.utc)
 
 @dataclass(frozen=True, slots=True)
 class StandaloneFixture:
-    request: SupervisorRunInput
+    request: AgentGraphInput
     support_catalog: ReviewedSupportCatalog
     known_procedure_steps: tuple[KnownProcedureStep, ...]
 
@@ -143,7 +143,7 @@ def build_standalone_fixture() -> StandaloneFixture:
         redactions=[],
         submitted_at=DEMO_NOW,
     )
-    request = SupervisorRunInput(
+    request = AgentGraphInput(
         trigger=CaseCreatedTrigger(
             trigger_type="CASE_CREATED",
             input_event_id=redacted_input.input_event_id,

@@ -1,35 +1,48 @@
 from __future__ import annotations
 
+import inspect
 from datetime import datetime, timezone
+from typing import get_type_hints
 from uuid import UUID
 
 import pytest
+from app.agent.graph import AgentGraph
+from app.agent.info_agent import InfoAnalysisAgent
+from app.agent.procedure_tool import ProcedureLookupTool
+from app.agent.review_tool import ReviewTool
 from app.agent.schemas import (
     ActionDecisionDraft,
+    AgentGraphInput,
+    AgentGraphOutput,
     AgentRunOutcome,
     Blocker,
     CaseCreatedTrigger,
     CaseFact,
     CaseSnapshot,
     CaseStatus,
+    CheckSpecificSupportInput,
     Component,
     ConflictCandidate,
     ConflictOutcome,
+    DiscoverSupportInput,
     EvidenceRecord,
     EvidenceSourceType,
     FactStatus,
     FactValueType,
     FreshnessStatus,
+    InfoAnalysisInput,
     InfoAnalysisResult,
     InfoCompletionStatus,
     InvocationMeta,
     MutationSet,
     NextAction,
     ProcedureCompletionStatus,
+    ProcedureLookupInput,
     ProcedureLookupResult,
     ProcedureSearchSummary,
     ProcedureSourceDocument,
     RedactedInput,
+    RefreshSupportInput,
     ReviewedPlanOutcome,
     ReviewIssue,
     ReviewIssueCode,
@@ -38,7 +51,10 @@ from app.agent.schemas import (
     ReviewSourceResult,
     ReviewSubject,
     ReviewVerdict,
+    SafeFailureOutcome,
+    SupervisorAgentInput,
     SupervisorDraft,
+    SupportAgentInput,
     SupportAnalysisResult,
     SupportCheck,
     SupportCompletionStatus,
@@ -46,6 +62,12 @@ from app.agent.schemas import (
     SupportProgramRef,
     SupportSearchSummary,
     canonical_digest,
+)
+from app.agent.supervisor import SupervisorAgent
+from app.agent.support_agent import BizInfoSupportDiscoveryTool, SupportAgent
+from app.agent.support_agent.discovery_models import (
+    SupportNoticeDiscoveryInput,
+    SupportNoticeDiscoveryResult,
 )
 from pydantic import TypeAdapter, ValidationError
 from pydantic_core import PydanticSerializationError
@@ -279,6 +301,27 @@ def test_case_snapshot_rejects_duplicate_fields_and_dangling_evidence() -> None:
     data["facts"][0]["evidence_refs"] = ["missing-evidence"]
     with pytest.raises(ValidationError, match="unresolved evidence refs"):
         CaseSnapshot.model_validate(data)
+
+
+def test_info_result_rejects_duplicate_missing_field_paths() -> None:
+    payload = info_result().model_dump(mode="python")
+    payload["missing_fields"] = [
+        {
+            "field_path": "restoration_scope",
+            "reason_summary": "원상복구 범위 확인이 필요합니다.",
+            "blocks": ["SUPERVISOR_DECISION"],
+            "question_candidate_id": None,
+        },
+        {
+            "field_path": "restoration_scope",
+            "reason_summary": "같은 필드를 중복 요청하면 안 됩니다.",
+            "blocks": ["PROCEDURE_LOOKUP"],
+            "question_candidate_id": None,
+        },
+    ]
+
+    with pytest.raises(ValidationError, match="duplicate missing field_path"):
+        InfoAnalysisResult.model_validate(payload)
 
 
 def support_check(
@@ -753,6 +796,87 @@ def test_all_e2e_top_level_contracts_are_json_schema_serializable() -> None:
 
     outcome_schema = TypeAdapter(AgentRunOutcome).json_schema()
     assert "discriminator" in outcome_schema
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        AgentGraphInput,
+        DiscoverSupportInput,
+        CheckSpecificSupportInput,
+        RefreshSupportInput,
+        InfoAnalysisInput,
+        InfoAnalysisResult,
+        ProcedureLookupInput,
+        ProcedureLookupResult,
+        SupervisorAgentInput,
+        SupervisorDraft,
+        ReviewSubject,
+        ReviewResult,
+        SupportAnalysisResult,
+        ReviewedPlanOutcome,
+        ConflictOutcome,
+        SafeFailureOutcome,
+        SupportNoticeDiscoveryInput,
+        SupportNoticeDiscoveryResult,
+    ],
+)
+def test_each_component_boundary_model_has_schema_and_field_descriptions(
+    model: type,
+) -> None:
+    schema = model.model_json_schema()
+
+    assert schema.get("description"), model.__name__
+    assert schema.get("additionalProperties") is False, model.__name__
+    assert schema.get("properties"), model.__name__
+    for field_name, field_schema in schema["properties"].items():
+        assert field_schema.get("description"), f"{model.__name__}.{field_name}"
+
+
+def test_discriminated_component_boundary_unions_are_independent_schemas() -> None:
+    support_schema = TypeAdapter(SupportAgentInput).json_schema()
+    graph_output_schema = TypeAdapter(AgentGraphOutput).json_schema()
+
+    assert support_schema["title"] == "SupportAgentInput"
+    assert support_schema["description"]
+    assert support_schema["discriminator"]["propertyName"] == "lookup_goal"
+    assert len(support_schema["oneOf"]) == 3
+    assert graph_output_schema["title"] == "AgentGraphOutput"
+    assert graph_output_schema["description"]
+    assert graph_output_schema["discriminator"]["propertyName"] == "outcome_type"
+    assert len(graph_output_schema["oneOf"]) == 3
+
+
+@pytest.mark.parametrize(
+    ("method", "input_schema", "output_schema"),
+    [
+        (AgentGraph.run, AgentGraphInput, AgentGraphOutput),
+        (InfoAnalysisAgent.analyze, InfoAnalysisInput, InfoAnalysisResult),
+        (SupportAgent.analyze, SupportAgentInput, SupportAnalysisResult),
+        (SupervisorAgent.draft, SupervisorAgentInput, SupervisorDraft),
+        (ProcedureLookupTool.lookup, ProcedureLookupInput, ProcedureLookupResult),
+        (ReviewTool.review, ReviewSubject, ReviewResult),
+        (
+            BizInfoSupportDiscoveryTool.discover,
+            SupportNoticeDiscoveryInput,
+            SupportNoticeDiscoveryResult,
+        ),
+    ],
+)
+def test_each_public_boundary_accepts_one_schema_and_returns_one_schema(
+    method: object,
+    input_schema: object,
+    output_schema: object,
+) -> None:
+    signature = inspect.signature(method)
+    request_parameters = [
+        parameter for name, parameter in signature.parameters.items() if name != "self"
+    ]
+    hints = get_type_hints(method, include_extras=True)
+
+    assert len(request_parameters) == 1
+    assert hints[request_parameters[0].name] == input_schema
+    assert hints["return"] == output_schema
 
 
 def test_conflict_outcome_is_structured_and_snapshot_bound() -> None:
