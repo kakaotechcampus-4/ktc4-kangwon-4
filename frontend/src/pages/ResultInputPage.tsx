@@ -62,8 +62,9 @@ export function ResultInputPage() {
     // 함께 챙길 것:
     // - 대기 중 이탈해도 서버에는 이미 반영됐을 수 있다. /로 돌아왔을 때 그 변경이
     //   보이도록 현재 Case를 다시 불러와야 한다.
-    // - "다시 시도"는 같은 clientEventId로 재전송한다(interface-spec.md §5).
-    //   새 값으로 보내면, 첫 요청이 반영됐는데 응답만 실패한 경우 같은 내용이 두 번 들어간다.
+    // - "다시 시도"가 같은 요청을 두 번 만들 수 있다. §5 요청 예시에 clientEventId가
+    //   있지만 의미가 계약에 정의돼 있지 않다 — 중복 제거 키가 맞는지 BE에 먼저 확인하고,
+    //   맞다면 재시도 때 같은 값을 보낸다.
     // 그때 실패 처리도 함께 넣는다 — 오류가 나면 PENDING에서 빠져나오지 못해
     // 입력창이 잠긴 채로 남는다. FAILED 상태가 그 자리다.
     const outcome = await simulateSubmit(readMockKey(search), text)
