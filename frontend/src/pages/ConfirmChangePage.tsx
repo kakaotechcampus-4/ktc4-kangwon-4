@@ -59,7 +59,10 @@ export function ConfirmChangePage() {
     // 실패하지 않지만, fetch로 바꾸면 오류가 나도 화면이 잠긴 채로 남는다.
     const replan = await simulateConfirm(choices)
     if (!alive.current) return
-    navigate('/replan', { state: replan })
+    // 이미 해결한 충돌 화면으로 뒤로 돌아가 같은 결정을 다시 제출하는 일을 막는다.
+    // 히스토리에서 이 항목을 지우는 것이라 확인을 마친 경우에만 해당한다 —
+    // 아직 고르지 않고 떠난 충돌은 그대로 남아 다시 들어올 수 있다.
+    navigate('/replan', { state: replan, replace: true })
   }
 
   return (
