@@ -1,15 +1,29 @@
-# RE:BORN Agent/Tool 내부 입출력 스키마
+# RE:BORN Agent·Tool 공개 호출 입·출력 계약
 
 - **계약 버전:** `agent-io/2.0`
 - **기준일:** 2026-09-15
-- **범위:** 현재 Python 코드로 구현된 standalone Agent/Tool 내부 계약
+- **범위:** 현재 Python 코드로 구현된 standalone Agent·Tool 공개 메서드와 내부 데이터 계약
 - **제외 범위:** BE HTTP DTO, DB 모델·migration, 인증·인가, 운영 저장, 외부 Guardrail 계약
 
-이 문서는 **현재 AI 런타임 안에서 실제로 생성·검증·소비하는 Agent/Tool 입출력**의 단일 설명서다. 실행 가능한 최종 권위는 [`backend/app/agent/schemas.py`](../backend/app/agent/schemas.py)와 각 구성요소의 Pydantic 모델·validator이며, 이 문서는 그 코드를 사람이 검토할 수 있도록 같은 경계를 정리한다.
+이 문서는 **각 Agent·Tool의 Python 메서드가 무엇을 받고 무엇을 반환하는지** 설명한다. 여기서 공개 호출은 HTTP API나 Agent끼리의 직접 통신이 아니다. 현재는 프로젝트 내부 실행기 `AgentGraph`가 이전 결과로 다음 호출 입력을 만든다.
+
+실행 가능한 최종 기준은 [`backend/app/agent/schemas.py`](../backend/app/agent/schemas.py)와 각 구성요소의 Pydantic 모델·validator다. 이 문서는 해당 코드를 사람이 검토할 수 있도록 정리한 설명서다.
 
 BE가 구현하거나 AI와 공동 승인해야 하는 HTTP/shared DTO와 저장 불변식은 [`be-agent-integration-requirements.md`](./be-agent-integration-requirements.md)만 따른다. 전체 호출 구조는 [`architecture.md`](./architecture.md), 실행법·환경변수·데이터 모드는 [`agent-standalone-runtime-requirements.md`](./agent-standalone-runtime-requirements.md), 외부 공식 데이터/API와 크롤링·RAG 계획은 [`agent-official-data-source-strategy.md`](./agent-official-data-source-strategy.md)를 따른다. 이 문서에는 해당 내용을 중복 정의하지 않는다.
 
-## 0. 먼저 보는 핵심 용어
+## 0. 이 문서를 읽는 방법
+
+전체 1,300여 줄을 처음부터 읽을 필요는 없다.
+
+1. **구성요소의 역할과 입력·출력만 확인하려면:** §1~2
+2. **공통 검증 규칙을 확인하려면:** §3~4
+3. **특정 Agent·Tool의 정확한 필드를 확인하려면:** §5~10
+4. **전체 실행 입력·결과를 확인하려면:** §11
+5. **구현됐지만 미연결된 항목을 확인하려면:** §12
+
+필드 표는 코드와 정확히 대조하기 위한 상세 사전이다. PR 범위와 전체 흐름을 먼저 이해하려면 [`architecture.md`](./architecture.md)를 읽는다.
+
+### 핵심 용어
 
 - **snapshot:** 한 번의 실행이 기준으로 삼는 특정 시점의 Case 읽기 상태
 - **fact:** Case에서 관리하는 구조화된 사실 값
@@ -18,8 +32,10 @@ BE가 구현하거나 AI와 공동 승인해야 하는 HTTP/shared DTO와 저장
 - **provenance:** 어떤 run·호출·snapshot·Evidence에서 결과가 나왔는지 나타내는 출처 연결 정보
 - **digest:** 내용 변경을 검출하기 위해 canonical JSON에 계산한 SHA-256 값
 - **provider:** LLM 또는 외부 검색/API처럼 구성요소가 호출하는 외부 제공자
+- **canonical:** 코드와 팀이 미리 정한 공식 field·ID·값. LLM이나 검색 결과가 새로 만들 수 없음
+- **fixture:** 실제 사용자의 정보가 아닌, standalone 실행과 테스트를 위해 만든 합성 입력
 
-## 1. 리뷰 전에 알아야 할 상태 기준
+## 1. 구현 상태를 구분하는 기준
 
 이 문서의 연결 상태는 **현재 feature 브랜치의 standalone Python 실행 경로**를 기준으로 한다. BE API·DB 연동 완료 또는 최종 Agent 아키텍처 승인을 뜻하지 않는다. 기존 영문 내부 상태 코드는 리뷰 시 의미를 다시 해석해야 하므로 사용하지 않고, 아래 한국어 상태를 직접 적는다.
 
@@ -30,17 +46,9 @@ BE가 구현하거나 AI와 공동 승인해야 하는 HTTP/shared DTO와 저장
 
 따라서 “코드에 타입이 있다”, “독립 단위 테스트가 통과한다”, “standalone 실행에서 호출된다”, “실제 사용자 Case와 연동됐다”는 서로 다른 상태다.
 
-### 빠른 검토 순서
+## 2. Agent·Tool별 공개 호출 계약
 
-1. 아래 §2에서 Agent와 Tool의 역할·직접 입출력·연결 상태를 확인한다.
-2. §3~4에서 모든 schema에 공통으로 적용되는 strict type, Evidence, Case snapshot 규칙을 확인한다.
-3. §5~10에서 각 Agent와 Tool의 필드·조건부 불변식을 확인한다.
-4. §11에서 Agent가 아닌 LangGraph 실행 경계와 최종 결과를 확인한다.
-5. §12에서 타입·기능별 현재 실행 상태를 확인한다.
-
-## 2. Agent·Tool별 직접 입출력 스키마
-
-각 Agent와 Tool의 공개 메서드는 **입력 Pydantic schema 객체 하나**를 받고, 정상 처리 시 **반환 schema 객체 하나**를 돌려준다. 생성자 dependency, LLM provider 내부 draft, LangGraph 내부 state, DB 저장 모델은 이 직접 입출력에 섞지 않는다.
+각 Agent와 Tool의 공개 Python 메서드는 **입력 Pydantic schema 객체 하나**를 받고, 정상 처리 시 **반환 schema 객체 하나**를 돌려준다. Agent끼리 서로 호출하는 구조가 아니라 `AgentGraph`가 각 메서드를 호출한다. 생성자 dependency, LLM의 내부 초안, LangGraph 내부 state와 DB 저장 모델은 이 공개 호출 계약에 섞지 않는다.
 
 구성요소 오류는 반환 schema가 아니라 typed exception으로 전달한다. LangGraph 실행 경계는 이를 검수되지 않은 결과가 섞이지 않는 `SafeFailureOutcome`으로 변환한다. 현재 `ComponentRequest`/`ComponentSuccess`/`ComponentFailure` envelope는 타입만 정의돼 있고 공개 호출에는 사용하지 않는다.
 
@@ -52,9 +60,9 @@ BE가 구현하거나 AI와 공동 승인해야 하는 HTTP/shared DTO와 저장
 - **역할:** 비식별 사용자 입력, Case snapshot, 공식 절차 원문을 해석해 사실 변경·절차 진행 관측·충돌·누락 정보·질문 **후보**를 만든다. Case를 직접 변경하지 않는다.
 - **현재 호출 위치:** `AgentGraph`의 `info_analysis` node
 - **연결 상태:** `CASE_CREATED`, `RESULT_SUBMITTED` 실행 흐름에 연결됨
-- **직접 입력:** [`InfoAnalysisInput`](#61-입력-infoanalysisinput)
+- **호출 입력:** [`InfoAnalysisInput`](#61-입력-infoanalysisinput)
   - 핵심 필드: `input`, `case_snapshot`, 허용 field, canonical 절차 step, 절차조회 결과·call ID, Review feedback
-- **직접 반환:** [`InfoAnalysisResult`](#62-출력-infoanalysisresult)
+- **정상 반환:** [`InfoAnalysisResult`](#62-출력-infoanalysisresult)
   - 핵심 필드: fact·progress·procedure 후보, conflict, missing field, 사용자 질문, uncertainty, Evidence, snapshot·source provenance
 
 #### 지원금 Agent
@@ -63,9 +71,9 @@ BE가 구현하거나 AI와 공동 승인해야 하는 HTTP/shared DTO와 저장
 - **역할:** Case와 미저장 fact 후보를 주입된 검수 지원사업 catalog와 비교한다. raw 공고를 직접 검색하거나 실제 수급 자격을 확정하지 않는다.
 - **현재 호출 위치:** `AgentGraph`의 `support_analysis` node
 - **연결 상태:** `DISCOVER_RELEVANT`, `REFRESH_STALE`은 연결됐고 `CHECK_SPECIFIC`은 미연결
-- **직접 입력:** [`SupportAgentInput`](#73-입력-supportagentinput)
+- **호출 입력:** [`SupportAgentInput`](#73-입력-supportagentinput)
   - 핵심 필드: `lookup_goal`별 요청, `planning_context`, 관련 절차 step, 기준일, Review feedback
-- **직접 반환:** [`SupportAnalysisResult`](#74-출력-supportanalysisresult)
+- **정상 반환:** [`SupportAnalysisResult`](#74-출력-supportanalysisresult)
   - 핵심 필드: program별 criterion 비교 결과, `support_checks[].unknown_field_paths`, uncertainty, 검색 요약, catalog Evidence·provenance
 
 #### Supervisor Agent
@@ -74,9 +82,9 @@ BE가 구현하거나 AI와 공동 승인해야 하는 HTTP/shared DTO와 저장
 - **역할:** 앞 단계 결과를 종합해 Blocker, Next Action, 변경 후보와 근거를 포함한 **검수 전 초안**을 만든다. 현재는 실행 순서를 정하거나 하위 Agent·Tool을 직접 호출하지 않는다.
 - **현재 호출 위치:** `AgentGraph`의 `supervisor` node
 - **연결 상태:** Info conflict로 끝나지 않은 현재 실행 흐름에 연결됨
-- **직접 입력:** [`SupervisorAgentInput`](#91-입력-supervisoragentinput)
+- **호출 입력:** [`SupervisorAgentInput`](#91-입력-supervisoragentinput)
   - 핵심 필드: `trigger`, `case_snapshot`, 선행 결과와 digest, fact overlay, draft version, Review feedback, 이전 초안
-- **직접 반환:** [`SupervisorDraft`](#92-출력-supervisordraft)
+- **정상 반환:** [`SupervisorDraft`](#92-출력-supervisordraft)
   - 핵심 필드: `decision`, 검수 전 `mutations`, `grounded_claims`, 사용한 source call ID
 
 `ReviewedSupportCatalog`는 `SupportAgent.analyze()`의 호출별 입력이 아니라 Agent 생성 시 주입하는 dependency다. 현재 standalone에서는 합성 fixture를 주입한다.
@@ -89,9 +97,9 @@ BE가 구현하거나 AI와 공동 승인해야 하는 HTTP/shared DTO와 저장
 - **역할:** 폐업 절차 관련 공식 URL을 찾고 원문을 직접 가져와 문서와 Evidence로 정규화한다. Case 적용 여부나 절차 완료 여부는 판단하지 않는다.
 - **현재 호출 위치:** `AgentGraph`의 `procedure_lookup` node
 - **연결 상태:** `CASE_CREATED`, `RESULT_SUBMITTED`에서 Info보다 먼저 호출
-- **직접 입력:** [`ProcedureLookupInput`](#52-입력-procedurelookupinput)
+- **호출 입력:** [`ProcedureLookupInput`](#52-입력-procedurelookupinput)
   - 핵심 필드: 조회 query, 기준일, `OFFICIAL_ONLY` 정책, 결과 상한, 기준 snapshot ID, Review feedback
-- **직접 반환:** [`ProcedureLookupResult`](#53-출력-procedurelookupresult)
+- **정상 반환:** [`ProcedureLookupResult`](#53-출력-procedurelookupresult)
   - 핵심 필드: 직접 fetch한 공식 문서, provider별 검색 요약, warning, `OFFICIAL_DOCUMENT` Evidence, snapshot provenance
 
 #### Review Tool
@@ -100,9 +108,9 @@ BE가 구현하거나 AI와 공동 승인해야 하는 HTTP/shared DTO와 저장
 - **역할:** snapshot, 선행 결과, Supervisor 초안을 provenance·근거·안전 규칙에 따라 검수한다. 초안을 직접 수정하지 않는다.
 - **현재 호출 위치:** `AgentGraph`의 `review` node
 - **연결 상태:** Supervisor 초안 뒤 필수 호출
-- **직접 입력:** [`ReviewSubject`](#101-입력-reviewsubject)
+- **호출 입력:** [`ReviewSubject`](#101-입력-reviewsubject)
   - 핵심 필드: trigger, snapshot, 선행 결과와 digest, Supervisor 초안, subject digest, Review attempt
-- **직접 반환:** [`ReviewResult`](#102-출력-reviewresult)
+- **정상 반환:** [`ReviewResult`](#102-출력-reviewresult)
   - 핵심 필드: `PASS`/`REVISE`, 판정 이유, issue, 누락 Evidence, 권고 재작업 대상
 
 #### 기업마당 공고조회 Tool
@@ -111,30 +119,30 @@ BE가 구현하거나 AI와 공동 승인해야 하는 HTTP/shared DTO와 저장
 - **역할:** 기업마당 API 응답을 검수 전 raw 공고 후보와 공식 API Evidence로 정규화한다. 지원 자격 판정이나 검수 catalog 발행은 하지 않는다.
 - **현재 호출 위치:** app 호출자 없음. 현재 저장소 호출자는 단위 테스트뿐이며 독립 직접 호출은 가능하다.
 - **연결 상태:** 구현됨 · 실행 흐름 미연결
-- **직접 입력:** [`SupportNoticeDiscoveryInput`](#81-입력-supportnoticediscoveryinput)
-  - 핵심 필드: keyword, 최대 결과 수
-- **직접 반환:** [`SupportNoticeDiscoveryResult`](#82-출력-supportnoticediscoveryresult)
+- **호출 입력:** [`SupportNoticeDiscoveryInput`](#81-입력-supportnoticediscoveryinput)
+  - 핵심 필드: `keywords`, 최대 결과 수
+- **정상 반환:** [`SupportNoticeDiscoveryResult`](#82-출력-supportnoticediscoveryresult)
   - 핵심 필드: provider, raw 공고 후보, `OFFICIAL_API` Evidence, 원본·중복·절단 건수
 
 `ReviewProof`는 Review Tool의 반환값이 아니다. 실행기가 exact `PASS`와 동일한 subject/run/snapshot/digest를 확인한 뒤에만 생성한다.
 
-### 2.3 LangGraph 실행 경계 — Agent/Tool 아님
+### 2.3 LangGraph 실행 경계 — Agent·Tool 아님
 
 `LangGraph`는 외부 프레임워크이고 `StateGraph`는 그 프레임워크가 제공하는 그래프 구성 객체다. `AgentGraph`는 이번 feature 브랜치에서 `StateGraph`를 구성·compile·실행하도록 만든 **프로젝트 내부 Python 클래스명**이다. 새로운 Agent도 아니고 LangGraph의 다른 이름도 아니다.
 
 - **공개 호출:** `AgentGraph.run()`
 - **역할:** 현재 고정 실행 순서, 단계 간 결과 전달, Review 재작업, 반복 상한, fail-closed 처리
-- **직접 입력:** [`AgentGraphInput`](#111-입력-agentgraphinput)
-- **직접 반환:** [`AgentGraphOutput`](#112-출력-agentgraphoutput)
+- **호출 입력:** [`AgentGraphInput`](#111-입력-agentgraphinput)
+- **정상 반환:** [`AgentGraphOutput`](#112-출력-agentgraphoutput)
 - **연결 상태:** standalone CLI/test 실행 흐름에 연결됨. 실제 사용자 Case read/write 경로는 없음.
 
 `AgentGraphOutput`은 `ReviewedPlanOutcome | ConflictOutcome | SafeFailureOutcome` union이다. 여기서 Python 호출이 schema 객체를 반환했다는 사실과 업무 계획이 성공했다는 의미는 다르다.
 
-### 2.4 직접 계약과 내부 보조 schema 구분
+### 2.4 공개 호출 계약과 내부 보조 schema 구분
 
-- **실행기 직접 계약 — `AgentGraphInput`, `AgentGraphOutput`:** 한 번의 전체 실행 요청과 최종 결과다. Agent/Tool 자체의 입출력은 아니다.
-- **Agent/Tool 직접 계약 — 위 §2.1~2.2의 입력·반환 schema:** 각 공개 메서드가 직접 받거나 반환하는 객체다.
-- **생성자 dependency·공통 context — `ReviewedSupportCatalog`, `CaseSnapshot`, `EvidenceRecord`, `KnownProcedureStep`, `PlanningContext`, `ReviewSourceResult`:** 호출을 구성하거나 출처를 연결하는 보조 모델이다. 그 자체가 독립 Agent/Tool 결과는 아니다.
+- **실행기 공개 호출 계약 — `AgentGraphInput`, `AgentGraphOutput`:** 한 번의 전체 실행 요청과 최종 결과다. Agent·Tool 자체의 입출력은 아니다.
+- **Agent·Tool 공개 호출 계약 — 위 §2.1~2.2의 입력·반환 schema:** 각 공개 메서드가 받거나 정상 반환하는 객체다.
+- **생성자 dependency·공통 context — `ReviewedSupportCatalog`, `CaseSnapshot`, `EvidenceRecord`, `KnownProcedureStep`, `PlanningContext`, `ReviewSourceResult`:** 호출을 구성하거나 출처를 연결하는 보조 모델이다. 그 자체가 독립 Agent·Tool 결과는 아니다.
 - **provider 내부 형식·local draft — `InfoProviderOutput`, `SupportProviderOutput`, `SupervisorModelOutput`, `ReviewProviderOutput` 등:** LLM 구조화 출력을 제한하고 local guardrail을 적용하기 위한 구현 내부 모델이다.
 - **Supervisor 안의 변경 후보 — `FactChangeCandidate`, `ProcedureProgressChangeCandidate`, `SupportMatchUpdateCandidate`:** `SupervisorDraft.mutations` 안의 검수 전 후보이며 DB 반영 결과가 아니다.
 - **검수 증명 — `ReviewProof`:** Review Tool 출력이 아니라 실행기가 matching `PASS` 뒤 만든다.
@@ -176,7 +184,7 @@ SUPPORT_REFRESH
 - 지원금 Agent는 주입된 검수 catalog와 Case 사실을 비교한다.
 - Supervisor만 Blocker·Next Action·Decision 초안을 만들지만, 현재 하위 호출 순서는 정하지 않는다.
 - Review Tool은 초안과 근거 package를 검수하지만 초안을 수정하지 않는다.
-- Agent/Tool/Graph 어디에도 DB 쓰기 또는 HTTP endpoint가 없다.
+- Agent·Tool·Graph 어디에도 DB 쓰기 또는 외부 서비스에 제공하는 BE HTTP endpoint가 없다. Tool 내부의 공식 원문·외부 API HTTP 호출은 별도다.
 
 근거: [`graph.py`](../backend/app/agent/graph.py), [`state.py`](../backend/app/agent/state.py), [`test_graph.py`](../backend/tests/agent/test_graph.py).
 
@@ -634,13 +642,15 @@ Info Agent가 현재 확정 fact와 다른 명시적 입력을 발견하면 만�
 
 `conflict_digest`는 `conflict_ref`와 digest 자체를 제외한 전체 충돌 내용을 canonical digest로 묶는다. standalone ref의 24자리 suffix도 digest prefix에서 만든다. 내용이 바뀌면 직렬화도 실패한다.
 
-### 6.6 provider → local → runtime 경계
+### 6.6 LLM 응답이 공개 반환값이 되는 과정
+
+LLM이 만든 의미 후보를 그대로 반환하지 않는다. 먼저 로컬 검증을 거친 뒤 코드가 ID, Evidence와 출처 연결 정보를 추가한다.
 
 | 층 | 모델 | top-level key | 생성 권한 |
 |---|---|---|---|
 | provider 응답 형식 | `InfoProviderOutput` | `completion_status`, `facts`, `procedure_observations`, `procedure_findings`, `missing_fields`, `uncertainties` | 의미 후보만 반환 |
 | local 검증 결과 | `InfoAnalysisDraft` | provider와 같음 | registry, SET/CLEAR, completion 의미 검증 |
-| 공개 runtime 출력 | `InfoAnalysisResult` | §6.2의 13개 key | ID, span, Evidence, parser version, snapshot/call/digest 주입 |
+| 공개 메서드 정상 반환 | `InfoAnalysisResult` | §6.2의 13개 key | ID, span, Evidence, parser version, snapshot/call/digest 주입 |
 
 Provider nested 모델:
 
@@ -659,7 +669,7 @@ LLM은 새 runtime UUID, offset, Evidence ID, digest를 생성하지 않는다. 
 
 역할: Case의 확인된 사실과 미저장 fact 후보를 `ReviewedSupportCatalog`의 조건에 대조한다. 인터넷 raw 공고를 직접 읽지 않고, 지원 자격·선정·수급을 확정하지 않으며, Case나 catalog를 수정하지 않는다.
 
-### 7.1 생성자 dependency `ReviewedSupportCatalog` — 직접 입출력 아님
+### 7.1 생성자 dependency `ReviewedSupportCatalog` — 호출별 입력이 아님
 
 `SupportAgent`는 생성 시 검수 catalog를 deep copy한다. catalog 모델 자체는 frozen outer model과 tuple collection으로 **얕은 불변**을 제공하지만 nested `AgentSchema`까지 재귀적으로 frozen인 것은 아니다. `catalog=null`이면 분석하지 않고 `SupportCatalogUnavailableError`를 던진다. 아래 catalog는 BizInfo discovery 결과와 다른 계약이다.
 
@@ -800,13 +810,15 @@ Completion·판정 불변식:
 - `based_on_candidate_ids`에는 실제 criterion 평가에 사용한 overlay ID만 넣는다.
 - stale/unknown catalog Evidence는 runtime이 uncertainty를 추가하고 전체 completion을 `PARTIAL`로 낮춘다.
 
-### 7.5 provider → local → runtime 경계
+### 7.5 LLM 응답이 공개 반환값이 되는 과정
+
+지원금 Agent도 LLM 결과를 바로 반환하지 않는다. catalog와 조건을 코드로 다시 대조하고 runtime 정보와 Evidence를 결합한다.
 
 | 층 | 모델 | top-level key | 생성 권한 |
 |---|---|---|---|
 | provider 응답 형식 | `SupportProviderOutput` | `completion_status`, `support_checks`, `no_candidate_reason_code`, `uncertainties` | 의미 후보만 반환 |
 | local 검증 결과 | `SupportAnalysisDraft` | provider와 같음 | completion, program/criterion 중복 검증 |
-| 공개 runtime 출력 | `SupportAnalysisResult` | §7.4의 8개 key | catalog 값, case/required 값, freshness, 시각, Evidence, provenance 주입 |
+| 공개 메서드 정상 반환 | `SupportAnalysisResult` | §7.4의 8개 key | catalog 값, case/required 값, freshness, 시각, Evidence, provenance 주입 |
 
 Provider `SupportCheckModelOutput`은 `support_program`, `match_status`, `criteria`, `unknown_field_paths`, `reason_summary`, `evidence_refs`만 갖는다. nested criterion은 `criterion_code`, `status`, `reason_summary`, `evidence_refs`만 갖는다. program 표시명·신청 정보·case value·required value·freshness·checked time은 모델이 만들지 않는다.
 
@@ -901,7 +913,7 @@ adapter가 기업마당 API 응답을 정규화하고 이 model 하나를 반환
 
 현재 연결 상태: Info conflict로 끝나지 않은 현재 실행 흐름에서 Support 결과 뒤 호출됨. 현재 역할은 검수 전 초안 작성이며 하위 Agent·Tool 호출 계획은 세우지 않음.
 
-역할: 이미 수집된 Procedure·Info·Support 결과를 종합해 Blocker, Next Action, 추가 질문, 변경 후보와 grounded claim을 만든다. 출력은 Review 전 초안이며 DB 저장 결과가 아니다. 기존 목표 아키텍처의 Supervisor 주도 동적 호출 계획은 현재 구현과 구분한다.
+역할: 현재 실행 경로에서 수집된 Procedure·Info·Support 결과를 종합해 Blocker, Next Action, 추가 질문, 변경 후보와 grounded claim을 만든다. `SUPPORT_REFRESH`에서는 Support 결과만 받을 수 있다. 출력은 Review 전 초안이며 DB 저장 결과가 아니다. 기존 목표 아키텍처의 Supervisor 주도 동적 호출 계획은 현재 구현과 구분한다.
 
 ### 9.1 입력 `SupervisorAgentInput`
 
@@ -1051,13 +1063,15 @@ Info observation이 `requires_confirmation=false`이고 같은 step finding의 `
 
 `ELIGIBILITY`는 항상 `NEEDS_CONFIRMATION`이어야 한다. target path는 `SupervisorDraft` 안 사용자 노출 string으로 해석되고 해당 값과 `text`가 정확히 같아야 한다. 고위험 문장에는 같은 path/text의 적절한 claim이 필요하며, stale/unknown Evidence로 확정 표현을 만들 수 없다.
 
-### 9.6 provider → local → runtime 경계
+### 9.6 LLM 응답이 공개 반환값이 되는 과정
+
+Supervisor의 LLM 응답은 decision 의미 후보일 뿐이다. 코드는 선행 결과를 다시 확인하고 변경 후보와 출처 정보를 결합해 공개 반환값을 만든다.
 
 | 층 | 모델 | top-level key |
 |---|---|---|
 | provider 응답 형식 | `SupervisorModelOutput` | `decision_type`, `selection_summary`, `requires_human`, `evidence_refs`, `blocker`, `next_action`, `questions_for_user`, `grounded_claims` |
 | local 검증 결과 | `SupervisorSemanticDraft` | provider와 같음 |
-| 공개 runtime 출력 | `SupervisorDraft` | `decision`, `mutations`, `grounded_claims`, `source_call_ids` |
+| 공개 메서드 정상 반환 | `SupervisorDraft` | `decision`, `mutations`, `grounded_claims`, `source_call_ids` |
 
 Provider `GroundedClaimModelOutput`은 `claim_type`, `target_kind`, `target_index`, `assertion_level`, `evidence_refs`만 고른다. Runtime이 selector를 실제 visible field에 결합해 path/text/claim ID를 주입한다. draft ID, 시각, mutation, source call ID도 runtime 소유다. 최초 포함 `max_local_attempts=1..3`이고, 모델 출력이 계속 실패해도 Info가 제공한 안전한 질문과 적절한 Evidence가 있으면 결정론적 `NEEDS_MORE_INFO` fallback을 만들 수 있다.
 
@@ -1082,7 +1096,7 @@ Provider `GroundedClaimModelOutput`은 `claim_type`, `target_kind`, `target_inde
 | `case_id` | positive strict integer | Graph가 snapshot case ID를 전달 | snapshot과 모든 source meta의 case ID가 같아야 함 |
 | `trigger` | 현재 3개 `RunTrigger` union | Graph가 `AgentGraphInput.trigger`를 복사 | discriminator·event ID·nested input 검증 |
 | `snapshot` | `CaseSnapshot` | Graph가 실행 시작 snapshot을 전달 | 모든 source output의 snapshot ID와 같아야 함 |
-| `source_results` | `ReviewSourceResult[]`, min 1 | Graph가 Procedure/Info/Support 결과와 meta/digest를 결합 | call ID unique; type/component/digest/run/case/snapshot closure 검증 |
+| `source_results` | `ReviewSourceResult[]`, min 1 | Graph가 현재 실행 경로에서 수집된 Procedure/Info/Support 결과와 meta/digest를 결합 | call ID unique; type/component/digest/run/case/snapshot closure 검증 |
 | `supervisor_draft` | `SupervisorDraft` | Graph가 직전 Supervisor 성공 출력을 전달 | source call ID 집합과 draft 사용 ID 집합이 정확히 같아야 함 |
 | `subject_digest` | digest | `ReviewSubject.create()`가 자신을 제외한 package 전체의 canonical digest를 계산 | 현재 전체 내용으로 재계산한 digest와 같아야 하며 nested 변경 시 직렬화 거부 |
 
@@ -1138,13 +1152,15 @@ Review gate:
 - 최종 rework 목록은 모든 blocking issue owner와 missing Evidence의 Supervisor owner로 runtime이 다시 만든다.
 - 모델 `PASS`도 결정론적 safety finding을 제거할 수 없다.
 
-### 10.3 provider → local → runtime 경계
+### 10.3 LLM 응답이 공개 반환값이 되는 과정
+
+Review provider의 판정을 그대로 신뢰하지 않는다. 코드가 문제 위치와 source owner를 다시 계산하고 입력 digest와 결합한다.
 
 | 층 | 모델 | top-level key |
 |---|---|---|
 | provider 응답 형식 | `ReviewProviderOutput` | `verdict`, `issues`, `missing_evidence`, `recommended_rework_targets`, `resolution_reason` |
 | local 검증 결과 | `ReviewModelOutput` | provider와 같음 |
-| 공개 runtime 출력 | `ReviewResult` | subject ID/digest를 앞에 추가한 7개 key |
+| 공개 메서드 정상 반환 | `ReviewResult` | subject ID/digest를 앞에 추가한 7개 key |
 
 Provider 출력에는 subject ID와 digest가 없다. Review Tool이 입력 무결성을 먼저 검사하고 provider 출력의 path/ref/semantic을 검증한 뒤 해당 값을 주입한다. output 형식 수정 시도는 `max_output_attempts=1..3`, 각 provider 요청 재시도는 `provider_max_retries=0..2` 범위다.
 
@@ -1262,19 +1278,25 @@ Conflict ref와 candidate ID는 unique이고 각 conflict의 snapshot/version은
 
 ## 12. 타입·기능별 현재 실행 상태
 
-이 표가 “코드에 존재한다”와 “현재 Graph에서 동작한다”의 구분 기준이다.
+아래 목록은 “코드에 존재한다”와 “현재 Graph에서 동작한다”를 구분한다.
 
-| 항목 | 상태 | 현재 사실 |
-|---|---|---|
-| `InvocationMeta` | 현재 실행 흐름에 연결됨 | Graph가 source/Review provenance에 실제 사용 |
-| `ComponentRequest`, `ComponentSuccess`, `ComponentFailure`, `ComponentWarning`, `ComponentError` | 타입만 정의됨 | 타입은 있으나 현재 구성요소 호출은 bare payload/result/exception |
-| `CASE_CREATED`, `RESULT_SUBMITTED`, `SUPPORT_REFRESH` | 현재 실행 흐름에 연결됨 | 현재 `RunTrigger`와 Graph route에 존재 |
-| `CheckSpecificSupportInput` | 구현됨 · 실행 흐름 미연결 | `SupportAgent.analyze()` 직접 호출은 처리하지만 Graph가 생성하지 않음 |
-| `BizInfoSupportDiscoveryTool` 입출력 | 구현됨 · 실행 흐름 미연결 | 독립 공식 API adapter 구현·테스트됨; Graph/Support catalog와 자동 연결 없음 |
-| `CaseCompleteDecisionDraft` | 타입만 정의됨 | 타입은 유효하나 Supervisor가 항상 거부하여 Graph 도달 불가 |
-| `CaseStatusChangeCandidate` | 타입만 정의됨 | CASE_COMPLETE에만 생성되므로 현 Graph 도달 불가 |
-| `FactChangeSourceType.CONFIRMED_CONFLICT` branch | 타입만 정의됨 | validator는 있으나 확인 trigger/node가 없어 Graph 도달 불가 |
-| `ReviewedPlanOutcome`, `ConflictOutcome`, `SafeFailureOutcome` | 현재 실행 흐름에 연결됨 | 현재 공개 outcome union의 전부 |
+### 현재 실행 흐름에 연결됨
+
+- **`InvocationMeta`:** Graph가 선행 결과와 Review의 출처 연결에 사용한다.
+- **`CASE_CREATED`, `RESULT_SUBMITTED`, `SUPPORT_REFRESH`:** 현재 `RunTrigger`와 Graph 경로에 존재한다.
+- **`ReviewedPlanOutcome`, `ConflictOutcome`, `SafeFailureOutcome`:** 현재 전체 실행이 반환할 수 있는 세 가지 최종 결과다.
+
+### 구현됐지만 실행 흐름에 미연결
+
+- **`CheckSpecificSupportInput`:** `SupportAgent.analyze()`가 처리할 수 있지만 Graph가 이 입력을 만들지 않는다.
+- **`BizInfoSupportDiscoveryTool` 입출력:** 독립 공식 API adapter와 테스트는 있지만 Graph와 Support catalog에 자동 연결되지 않는다.
+
+### 타입만 정의됐거나 현재 도달할 수 없음
+
+- **`ComponentRequest`, `ComponentSuccess`, `ComponentFailure`, `ComponentWarning`, `ComponentError`:** 타입은 있지만 현재 공개 호출은 입력·정상 반환 schema와 exception을 직접 사용한다.
+- **`CaseCompleteDecisionDraft`:** 타입은 유효하지만 Supervisor가 현재 항상 거부한다.
+- **`CaseStatusChangeCandidate`:** `CASE_COMPLETE`일 때만 생성되므로 현재 도달할 수 없다.
+- **`FactChangeSourceType.CONFIRMED_CONFLICT`:** validator는 있지만 사용자 확인 trigger와 Graph 단계가 없다.
 
 다음 항목은 이 문서의 AI 내부 스키마가 아니므로 여기서 필드 계약을 정의하지 않는다.
 
@@ -1290,16 +1312,18 @@ Conflict ref와 candidate ID는 unique이고 각 conflict의 snapshot/version은
 
 ## 13. 구현 근거와 변경 동기화 규칙
 
-| 범위 | 구현 근거 | 회귀 근거 |
-|---|---|---|
-| 공통 schema·digest·outcome | [`schemas.py`](../backend/app/agent/schemas.py) | [`test_schemas.py`](../backend/tests/agent/test_schemas.py) |
-| Graph route·revision·safe failure | [`graph.py`](../backend/app/agent/graph.py), [`state.py`](../backend/app/agent/state.py) | [`test_graph.py`](../backend/tests/agent/test_graph.py) |
-| 정보분석 | [`info_agent/agent.py`](../backend/app/agent/info_agent/agent.py), [`enrichment.py`](../backend/app/agent/enrichment.py) | [`test_info_agent.py`](../backend/tests/agent/test_info_agent.py) |
-| 지원금 비교·catalog | [`support_agent/agent.py`](../backend/app/agent/support_agent/agent.py), [`support_agent/models.py`](../backend/app/agent/support_agent/models.py) | [`test_support_agent.py`](../backend/tests/agent/test_support_agent.py) |
-| BizInfo discovery | [`support_agent/discovery_models.py`](../backend/app/agent/support_agent/discovery_models.py), [`support_agent/discovery_tool.py`](../backend/app/agent/support_agent/discovery_tool.py) | [`test_support_discovery_tool.py`](../backend/tests/agent/test_support_discovery_tool.py) |
-| 절차조회 | [`procedure_tool/tool.py`](../backend/app/agent/procedure_tool/tool.py), [`procedure_tool/models.py`](../backend/app/agent/procedure_tool/models.py) | [`test_procedure_tool.py`](../backend/tests/agent/test_procedure_tool.py) |
-| Supervisor | [`supervisor/agent.py`](../backend/app/agent/supervisor/agent.py), [`claim_safety.py`](../backend/app/agent/claim_safety.py) | [`test_supervisor.py`](../backend/tests/agent/test_supervisor.py) |
-| Review | [`review_tool/tool.py`](../backend/app/agent/review_tool/tool.py), [`review_tool/models.py`](../backend/app/agent/review_tool/models.py) | [`test_review_tool.py`](../backend/tests/agent/test_review_tool.py) |
+### 코드와 테스트
+
+- **공통 schema·digest·최종 결과:** [`schemas.py`](../backend/app/agent/schemas.py), [`test_schemas.py`](../backend/tests/agent/test_schemas.py)
+- **Graph 경로·재작업·안전 실패:** [`graph.py`](../backend/app/agent/graph.py), [`state.py`](../backend/app/agent/state.py), [`test_graph.py`](../backend/tests/agent/test_graph.py)
+- **정보분석:** [`info_agent/agent.py`](../backend/app/agent/info_agent/agent.py), [`enrichment.py`](../backend/app/agent/enrichment.py), [`test_info_agent.py`](../backend/tests/agent/test_info_agent.py)
+- **지원금 비교·catalog:** [`support_agent/agent.py`](../backend/app/agent/support_agent/agent.py), [`support_agent/models.py`](../backend/app/agent/support_agent/models.py), [`test_support_agent.py`](../backend/tests/agent/test_support_agent.py)
+- **기업마당 공고조회:** [`support_agent/discovery_models.py`](../backend/app/agent/support_agent/discovery_models.py), [`support_agent/discovery_tool.py`](../backend/app/agent/support_agent/discovery_tool.py), [`test_support_discovery_tool.py`](../backend/tests/agent/test_support_discovery_tool.py)
+- **절차조회:** [`procedure_tool/tool.py`](../backend/app/agent/procedure_tool/tool.py), [`procedure_tool/models.py`](../backend/app/agent/procedure_tool/models.py), [`test_procedure_tool.py`](../backend/tests/agent/test_procedure_tool.py)
+- **Supervisor:** [`supervisor/agent.py`](../backend/app/agent/supervisor/agent.py), [`claim_safety.py`](../backend/app/agent/claim_safety.py), [`test_supervisor.py`](../backend/tests/agent/test_supervisor.py)
+- **Review:** [`review_tool/tool.py`](../backend/app/agent/review_tool/tool.py), [`review_tool/models.py`](../backend/app/agent/review_tool/models.py), [`test_review_tool.py`](../backend/tests/agent/test_review_tool.py)
+
+### schema를 바꿀 때 함께 확인할 것
 
 Schema를 바꿀 때는 한 PR에서 다음을 함께 갱신한다.
 

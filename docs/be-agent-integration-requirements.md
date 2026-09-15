@@ -1,36 +1,60 @@
-# RE:BORN BE ↔ Agent 생산 연동 요구안
+# RE:BORN Agent 외부 연동 공동 검토 요청서
 
 > 대상: BE, AI, PM
 >
-> 문서 역할: **BE·AI·PM이 shared 경계를 검토하고 공동 계약을 확정하기 위한 단일 전달 문서**
+> 현재 상태: **공동 계약 미승인 · BE 연동 미구현**
 >
-> 현재 상태: `[PROPOSED_SHARED][NOT_APPROVED][NOT_IMPLEMENTED]`
->
-> 현재 `[AGREED_SHARED]`: **0개**
+> 공동 확정된 DTO, endpoint, DB 계약: **0개**
 
-이 문서는 HTTP 후보, shared DTO 후보, 인증, 저장 불변식, 운영 요구사항과 승인 기준을 한곳에 정리한다. Agent 내부 모델의 규범적 설명은 [`agent-tool-io-schema.md`](./agent-tool-io-schema.md), 전체 실행 구조는 [`architecture.md`](./architecture.md), 공식 데이터 수집·크롤링·RAG 계획은 [`agent-official-data-source-strategy.md`](./agent-official-data-source-strategy.md)가 담당한다. BE는 이 문서만으로 shared 경계를 검토할 수 있어야 하며, 다른 문서의 오래된 JSON이나 물리 테이블 초안을 조합해 계약을 추정하면 안 된다.
+## 먼저 읽어주세요
 
-이 문서는 **승인 전 구현 명세가 아니다.** 아래 후보와 P0 질문을 공동 확정한 뒤 BE가 생성하는 exact DTO/JSON Schema·OpenAPI·migration이 실제 구현 기준이 된다.
+현재 AI에는 standalone Agent 코어와 AI 내부 schema가 있습니다. 하지만 실제 사용자 Case를 읽고 Agent 결과를 DB에 저장하는 BE 연동은 아직 없습니다.
 
-## 0. 상태를 읽는 법
+이 문서는 BE에 전달할 **요청서이자 공동 검토안**입니다. 바로 구현해야 하는 확정 명세가 아닙니다.
 
-상태는 계약, 구현, 검증의 서로 다른 축이다.
+### BE에게 요청하는 것
 
-| 축 | 값 | 의미 |
-|---|---|---|
-| 계약 | `[CURRENT_AI]` | 현재 AI 코드 내부에서 사용하는 계약이다. shared 계약 승인을 뜻하지 않는다. |
-| 계약 | `[TYPE_ONLY]` | AI 내부 타입은 존재하지만 현재 Graph의 정상 경로에서 생성·도달하지 않는다. |
-| 계약 | `[DECIDED_ARCHITECTURE]` | 프로젝트가 선택한 큰 기술 방향이다. endpoint·payload·저장 세부 합의를 뜻하지 않는다. |
-| 계약 | `[PROPOSED_SHARED]` | AI가 BE·PM에 제안한 경계 계약이다. 승인 전에는 확정 명세가 아니다. |
-| 계약 | `[NOT_APPROVED]` | 승인자·승인일·version·PR/ADR 중 하나라도 없어 구현 기준으로 사용할 수 없다. |
-| 계약 | `[AGREED_SHARED]` | 승인자, 승인일, 계약 version과 근거 PR/ADR가 기록된 항목에만 붙인다. 현재 0개다. |
-| 구현 | `[NOT_IMPLEMENTED]` | 대응 BE route, adapter, repository, migration 또는 coordinator가 없다. |
-| 구현 | `[IMPLEMENTED]` | 실제 코드와 변경 이력이 존재한다. |
-| 검증 | `[NOT_VERIFIED]` | contract·integration test 또는 실제 환경 검증이 없다. |
-| 검증 | `[TESTED]` | 자동화된 fixture/test가 통과했다. |
-| 검증 | `[LIVE_OBSERVED: YYYY-MM-DD]` | 날짜와 환경이 기록된 실호출 관찰이다. 생산 연동 완료와는 다르다. |
+1. §4의 `구현 전에 닫아야 할 P0 결정`마다 `동의 / 수정안 / 제외`로 회신해 주세요.
+2. 공동 결정 후 exact DTO·JSON Schema, OpenAPI, DB migration을 BE 기술 스택에 맞게 제시해 주세요.
+3. Case snapshot 조립, Agent 호출, CAS 저장, Evidence 조회를 담당할 BE coordinator·persistence 경계를 구현해 주세요.
+4. AI와 같은 contract fixture를 사용해 `Case 조회 → Agent 실행 → Review → 저장 → 재조회`를 통합 검증해 주세요.
 
-이 문서의 명령형 문장은 전부 `[PROPOSED_SHARED][NOT_APPROVED]` 요구안이다. 승인 전에는 필드, enum, HTTP status, 저장 위치를 임의로 구현하지 않는다. 승인 뒤 규범 우선순위는 다음과 같다.
+### 이 문서의 사용 방법
+
+- 다른 문서의 예전 JSON이나 DB 초안을 조합해 계약을 추정하지 맙니다.
+- 먼저 핵심 결정을 합의한 뒤, BE가 생성한 DTO·OpenAPI·migration을 실제 구현 기준으로 삼습니다.
+- AI 내부 schema의 상세는 [`agent-tool-io-schema.md`](./agent-tool-io-schema.md), AI 실행 구조는 [`architecture.md`](./architecture.md)에서 확인합니다.
+- 공식 데이터, 크롤링, RAG 계획은 [`agent-official-data-source-strategy.md`](./agent-official-data-source-strategy.md)에서 확인합니다.
+
+## 0. 이 문서의 상태
+
+### 이미 구현된 것
+
+- AI 내부 Agent·Tool schema와 standalone 실행기
+- Supervisor 초안과 Review 검수
+- 공식 폐업 절차 원문 제한 조회
+- 기업마당 raw 공고를 독립적으로 조회하는 adapter
+
+위 기능은 AI 내부 코드와 테스트가 있다는 뜻이다. 외부 HTTP·DB 계약이 승인됐다는 뜻은 아니다.
+
+### 이 문서에서 제안하는 것
+
+- 실제 Case를 Agent 입력으로 만드는 공통 DTO
+- 실행 요청·결과의 외부 API 형태
+- Case version, 중복 요청 방지와 저장 순서
+- Evidence 저장·조회와 conflict 확인 방식
+
+위 내용은 모두 **공동 검토 제안**이다. 아직 승인되거나 구현되지 않았다.
+
+### 아직 공동 확정된 계약
+
+현재는 **0개**다. 승인자, 승인일, 계약 version과 근거 PR 또는 ADR이 모두 기록돼야 공동 확정으로 본다.
+
+특정 날짜에 외부 API 호출을 성공한 기록은 해당 원천에 접근할 수 있었다는 뜻일 뿐, 실제 Case 연동 완료를 뜻하지 않는다.
+
+이 문서의 명령형 문장은 승인 전 요청안이다. 합의 전에 field, enum, HTTP status와 저장 위치를 확정된 값처럼 구현하지 않는다.
+
+승인 후 규범 우선순위는 다음과 같습니다.
 
 1. migration·repository·DTO 코드와 그 코드에서 생성한 JSON Schema/OpenAPI
 2. 공동 contract fixture와 digest test vector
@@ -41,32 +65,99 @@
 
 ## 1. 현재 사실과 생산 연동에 없는 것
 
-| 구분 | 현재 상태 | 근거 | 해석 |
-|---|---|---|---|
-| Agent 내부 strict schema | `[CURRENT_AI][IMPLEMENTED][TESTED]` | `backend/app/agent/schemas.py`, `backend/tests/agent/test_schemas.py` | `agent-io/2.0` 내부 모델이 존재한다. BE shared DTO가 있다는 뜻은 아니다. |
-| AgentGraph | `[CURRENT_AI][IMPLEMENTED][TESTED]` | `backend/app/agent/graph.py`, `backend/tests/agent/test_graph.py` | standalone 입력으로 세 outcome을 생성할 수 있다. 인증 Case를 읽거나 저장하지 않는다. |
-| Review | `[CURRENT_AI][IMPLEMENTED][TESTED]` | `backend/app/agent/review_tool/`, 관련 tests | `ReviewSubject`와 PASS proof가 있다. DB 저장 허가는 아니다. |
-| 절차 인터넷 조회 | `[CURRENT_AI][IMPLEMENTED][TESTED]` | `backend/app/agent/procedure_tool/`, 관련 tests | 공식 registry와 제한된 검색 fallback으로 실제 공식 원문을 읽는다. canonical DB step을 만들지는 않는다. |
-| 기업마당 discovery adapter | `[CURRENT_AI][IMPLEMENTED][TESTED]` | `backend/app/agent/support_agent/discovery_tool.py`, 관련 tests | 미검수 공고 후보를 읽는 독립 adapter다. Graph의 검수 catalog나 BE 저장소에는 연결되지 않았다. |
-| 인증된 Case snapshot adapter | `[PROPOSED_SHARED][NOT_IMPLEMENTED]` | 이 문서 §5 | 실제 사용자 Case 입력이 현재 Graph에 연결되지 않았다. |
-| HTTP endpoint와 외부 DTO | `[PROPOSED_SHARED][NOT_IMPLEMENTED]` | 이 문서 §6 | route, OpenAPI와 FE 합의가 없다. |
-| persistence·CAS·history | `[PROPOSED_SHARED][NOT_IMPLEMENTED]` | 이 문서 §7 | Review 결과를 실제 DB에 안전하게 반영하는 구현이 없다. |
-| production conflict 확인 | `[PROPOSED_SHARED][NOT_IMPLEMENTED]` | 이 문서 §5.5 | 현재 standalone ref를 운영에서 신뢰할 수 없다. |
+### AI에 구현되고 테스트까지 끝난 기능
 
-따라서 현재 Agent가 standalone으로 정상 실행되는 것과 BE 연동이 완료된 것은 다르다. HTTP 200, 외부 API 한 번 성공, mock test 통과도 실제 Case `read → plan → persist → read-back` 성공을 대신하지 않는다.
+- **AI 내부 schema와 검증 규칙**
+  - 근거: `backend/app/agent/schemas.py`, `backend/tests/agent/test_schemas.py`
+  - 의미: `agent-io/2.0` 내부 모델이 있습니다. 외부 연동용 공통 DTO가 있다는 뜻은 아닙니다.
+
+- **AgentGraph**
+  - 근거: `backend/app/agent/graph.py`, `backend/tests/agent/test_graph.py`
+  - 의미: standalone 입력으로 세 가지 최종 결과를 생성합니다. 인증된 Case를 읽거나 DB에 저장하지는 않습니다.
+
+- **Review**
+  - 근거: `backend/app/agent/review_tool/`와 관련 test
+  - 의미: Review Tool은 `ReviewSubject`를 검수해 `ReviewResult`를 반환합니다. 실행기는 같은 대상에 대한 정확한 `PASS`를 확인한 뒤 `ReviewProof`를 생성합니다. `PASS`와 `ReviewProof`는 DB 저장 허가가 아닙니다.
+
+- **절차 인터넷 조회**
+  - 근거: `backend/app/agent/procedure_tool/`와 관련 test
+  - 의미: 공식 registry와 제한된 검색 fallback으로 공식 원문을 읽습니다. canonical DB step을 만들지는 않습니다.
+
+- **기업마당 discovery adapter**
+  - 근거: `backend/app/agent/support_agent/discovery_tool.py`와 관련 test
+  - 의미: 미검수 공고 후보를 읽는 독립 adapter입니다. Graph의 reviewed catalog나 BE 저장소에는 연결되지 않았습니다.
+
+### BE 연동에 아직 없는 기능
+
+- **인증된 Case snapshot adapter**
+  - 상태: 제안 단계이며 미구현
+  - 영향: 실제 사용자 Case가 현재 Graph 입력으로 연결되지 않았습니다.
+
+- **HTTP endpoint와 외부 DTO**
+  - 상태: 제안 단계이며 미구현
+  - 영향: route, OpenAPI, FE 응답 계약이 아직 없습니다.
+
+- **Persistence, CAS, history**
+  - 상태: 제안 단계이며 미구현
+  - 영향: Review 결과를 실제 DB에 안전하게 반영하는 구현이 아직 없습니다.
+
+- **운영용 conflict 확인**
+  - 상태: 제안 단계이며 미구현
+  - 영향: 현재 standalone ref를 운영에서 신뢰할 수 없습니다.
+
+따라서 standalone 성공과 BE 연동 완료는 다른 상태입니다. HTTP 200, 외부 API 1회 성공, mock test 통과는 실제 Case의 `read → plan → persist → read-back` 성공을 대신하지 않습니다.
 
 ## 2. 소유권과 신뢰 경계
 
-| 범위 | BE 책임 | AI 책임 | 이유 |
-|---|---|---|---|
-| 인증·권한 | 서비스 JWT 검증, member/Case 소유권 확인, 비인가 Case 비노출 | token·credential을 prompt로 보내지 않음 | 모델은 권한 원천이 아니다. |
-| Case 입력 | 한 읽기 시점의 immutable shared snapshot 조립 | shared DTO를 내부 `CaseSnapshot`으로 strict 변환 | DB 구조와 모델 입력을 분리한다. |
-| 실행 조정 | input guardrail, idempotency, deadline, Graph 호출, 저장 순서 | AgentGraph와 내부 retry·Review | 외부 호출과 DB transaction을 분리한다. |
-| 절차 | canonical step registry와 progress 저장 | 공식 인터넷 원문 조회와 Info 분석 | 웹 제목이나 모델 출력이 DB identity가 되면 안 된다. |
-| 지원사업 | canonical ID, 승인 metadata, match/application 저장·조회 | 공고 수집·구조화 후보와 runtime 비교 | 발견, 검수, 자격 비교, 실제 신청은 다른 행위다. |
-| Evidence | 저장·resolve·보존·접근통제 | AI 생성 근거의 hash·lineage·참조 검증 | 당시 판단 근거를 재현해야 한다. |
-| Review 이후 | 현재 상태 재검증, guardrail, CAS, 원자 저장 | reviewed subject와 proof 제공 | PASS는 현재 DB 상태나 권한을 증명하지 않는다. |
-| 외부 HTTP | camelCase wire DTO, status와 FE view mapping | 내부 snake_case outcome | 내부 provider 모델을 외부 API로 노출하지 않는다. |
+이 절은 책임을 확정하는 명세가 아니라, 공동 검토를 시작하기 위한 제안이다.
+
+### 인증과 권한
+
+- **외부 서비스 경계:** 서비스 JWT, 사용자와 Case 소유권을 확인하고 권한 없는 Case를 노출하지 않는다.
+- **AI 경계:** token과 credential을 LLM prompt에 보내지 않는다.
+- **이유:** 모델은 인증과 권한의 판단 원천이 될 수 없다.
+
+### Case 입력
+
+- **외부 서비스 경계:** 한 번의 읽기 시점에서 Case snapshot을 조립한다.
+- **AI 경계:** 공동 DTO를 내부 `CaseSnapshot`으로 엄격하게 변환한다.
+- **이유:** DB 구조를 그대로 LLM 입력으로 노출하지 않고 한 실행의 기준 상태를 고정해야 한다.
+
+### 실행과 저장 순서
+
+- **외부 서비스 경계:** 입력 검증, 중복 요청 방지, 전체 제한 시간, Agent 호출과 저장 순서를 관리한다.
+- **AI 경계:** `AgentGraph` 실행, 내부 재시도와 Review를 담당한다.
+- **이유:** 오래 걸리는 외부 호출을 DB transaction과 분리해야 한다.
+
+### 폐업 절차
+
+- **외부 서비스 경계:** 공식 절차 단계 ID와 Case별 현재 진행 상태를 저장한다.
+- **AI 경계:** 공식기관 원문을 조회하고 Case 문맥에서 의미를 분석한다.
+- **이유:** 웹 제목이나 LLM 문장이 DB의 절차 ID가 되면 안 된다.
+
+### 지원사업
+
+- **외부 서비스 경계:** 안정적인 지원사업 ID와 실제 신청 상태를 저장·조회한다.
+- **AI 경계:** 공고 후보 수집·구조화와 검수 catalog 기반 비교를 담당한다.
+- **이유:** 공고 발견, 검수, 조건 비교와 실제 신청은 서로 다른 행위다.
+
+### Evidence
+
+- **외부 서비스 경계:** Evidence 저장·조회, 보존과 접근 권한을 관리한다.
+- **AI 경계:** 근거의 hash, 계보와 참조가 닫혀 있는지 검증한다.
+- **이유:** 당시 판단에 사용한 실제 근거를 나중에도 복원할 수 있어야 한다.
+
+### Review 이후
+
+- **외부 서비스 경계:** 저장 직전 Case 상태, 권한과 version을 다시 확인하고 한 transaction으로 저장한다.
+- **AI 경계:** Review한 대상과 일치하는 proof를 제공한다.
+- **이유:** Review `PASS`만으로 현재 DB 상태와 저장 권한까지 증명되지는 않는다.
+
+### 외부 HTTP 응답
+
+- **외부 서비스 경계:** 외부 `camelCase` DTO, HTTP status와 화면용 응답을 정의한다.
+- **AI 경계:** 내부 `snake_case` 결과를 제공한다.
+- **이유:** 내부 LLM·provider 모델을 외부 API로 그대로 노출하지 않는다.
 
 BE는 Agent 하위 구성요소를 개별 HTTP endpoint로 만들 필요가 없다. 생산 경계는 `BE Coordinator → AgentGraph` 입력·결과와 `BE Coordinator → guardrail/persistence`다.
 
@@ -93,37 +184,46 @@ BE는 Agent 하위 구성요소를 개별 HTTP endpoint로 만들 필요가 없�
 
 ## 4. 구현 전에 닫아야 할 P0 결정
 
-| 결정 | 제안 기본값 | BE가 회신할 내용 | 이유 |
-|---|---|---|---|
-| snapshot 동시성 | Case-level 증가 version과 `expectedVersion` CAS | version 원천, 증가 시점, conflict 응답 | 실행 중 변경을 덮어쓰지 않는다. |
-| idempotency | 사용자+endpoint+`clientEventId` 범위에서 같은 payload만 replay | uniqueness, 보존기간, 다른 payload 처리 | 중복 실행·이력·비용을 막는다. |
-| fact 미확인·삭제 | `UNKNOWN`은 `value=null`; 명시적 삭제는 별도 operation | null/unknown/not-applicable/clear 표현 | 서로 다른 상태를 null 하나로 섞지 않는다. |
-| canonical field/enum | versioned registry와 legacy mapping | v1 field 목록, enum, deprecated 값 | DB·API·Agent 간 임의 변환을 막는다. |
-| Case fact 범위 | 지원 판정에 필요한 사업체 형태·건축물 용도·과거 지원 이력 등을 명시적 v1 scope로 관리 | 포함/제외 field와 각 저장 원천 | Agent 입력에는 있으나 snapshot에서 복원할 수 없는 값을 없앤다. |
-| procedure registry | stable ID/code/name/alias/version | owner, 적용 조건, 변경·폐기 정책 | 웹 제목은 stable identity가 아니다. |
-| progress 초기화 | Case 적용 단계 전체를 한 transaction에서 생성·검증 | 초기화 시점과 registry 변경 처리 | unique만으로 누락 row를 막을 수 없다. |
-| support identity | canonical ID ↔ Wiki UUID ↔ 외부 공고 ID mapping | identity source와 revision 정책 | 같은 사업을 이름으로 연결하지 않는다. |
-| support 상태 | match와 application lifecycle 분리 | 각 상태 enum과 쓰기 권한 | 조회가 신청 row를 만들면 안 된다. |
-| 신청상태 쓰기 경로 | PATCH 또는 자연어 `/results` 중 하나를 authoritative 경로로 선택 | 허용 전이와 actor/audit | 두 write 경로가 상태와 idempotency를 갈라놓지 않게 한다. |
-| Evidence | immutable ID, source/version/locator/hash/lineage | 저장 위치, resolver, 보존·삭제 | Review와 감사가 실제 근거를 복원해야 한다. |
-| decision·Review 기록 | decision, subject digest, proof, run/trace 결합 | 보존·조회 모델 | 어떤 payload가 PASS였는지 재현한다. |
-| conflict 확인 | opaque ref+digest+Case/version+TTL+single-use | ref 발급·저장·소비 방식 | client field/value 바꿔치기를 막는다. |
-| outcome/API mapping | tagged union으로 변환 | `NEEDS_MORE_INFO`, no-change, failure HTTP 정책 | nullable 조합과 FE 추정을 막는다. |
-| auth | Kakao OAuth 후 서비스 JWT 방향 | claim, 전달, 만료, 회전, 401/403/404 | 카카오 token과 서비스 token을 구분한다. |
-| transaction | mutation·decision·history는 all-or-nothing | Evidence 선행 저장 허용 범위, 실패 정책 | 부분 저장을 막는다. |
-| 개인정보 | raw input 최소 보존, prompt·trace allowlist | 암호화, 접근, 보존, 삭제, 동의 | 사업자번호·주소·사용자 발화를 보호한다. |
-| timeout/retry | 하나의 전체 deadline 아래 bounded retry | gateway budget, retry owner, async 전환 기준 | 중복 실행과 긴 lock을 막는다. |
-| run context 소유권 | BE가 `runId`·deadline을 주입하는 목표안 | 현재 Graph 생성 `runId`와의 전환 방식 | trace·proof·idempotency ID가 두 벌이 되는 것을 막는다. |
-| runtime dependency 전달 | 한 version의 canonical step registry와 reviewed support catalog를 묶어 전달 | inline bundle 또는 권한 있는 resolver, cache·갱신·실패 정책 | version 문자열만으로는 현재 Graph를 생성할 수 없다. |
-| guardrail audit | BE Coordinator가 판정하고 별도 audit record를 남김 | 판정 필드, 발급·검증 주체, 저장·보존 방식 | 정의되지 않은 proof를 persistence command에 넣지 않는다. |
+아래 항목마다 `동의 / 수정안 / 제외`, 담당자, 결정일과 근거 PR 또는 ADR을 회신해야 한다. 결정되지 않은 값은 추정하지 않고 `UNKNOWN`, 확인 필요 또는 안전 실패로 처리한다.
 
-각 행에는 `동의 / 수정안 / 제외`, 담당자, 결정일, ADR 또는 PR 링크를 기록한다. 결정되지 않은 값은 `UNKNOWN`, 확인 필요 또는 safe failure로 처리하며 추정 default를 만들지 않는다.
+### 실행 중 상태 변경과 중복 요청
+
+- **Case version:** Case 단위 증가 version과 `expectedVersion` 비교 후 저장하는 방식을 제안한다. version의 원천, 증가 시점과 충돌 응답을 정해야 한다. 실행 중 바뀐 Case를 이전 판단으로 덮어쓰지 않기 위해 필요하다.
+- **중복 요청 방지:** 사용자·endpoint·`clientEventId` 범위에서 같은 요청만 기존 결과를 다시 주는 방식을 제안한다. key 범위, 보존기간과 같은 key에 다른 내용이 들어온 경우를 정해야 한다.
+- **전체 제한 시간:** 하나의 전체 deadline 안에서 제한된 재시도만 허용하는 방식을 제안한다. gateway 시간, 재시도 담당과 비동기 전환 기준을 정해야 한다.
+- **실행 ID 소유권:** 외부 coordinator가 `runId`와 deadline을 주입하는 목표안을 제안한다. 현재 `AgentGraph`가 내부 생성하는 `runId`와 어떻게 전환할지 정해야 한다.
+- **원자 저장:** 변경 후보, decision과 history를 전부 저장하거나 전부 취소하는 방식을 제안한다. Evidence를 먼저 중복 안전하게 저장할 수 있는 범위와 실패 정책을 정해야 한다.
+
+### Case 값과 절차 단계
+
+- **미확인과 삭제 구분:** `UNKNOWN`은 `value=null`, 명시적 삭제는 별도 operation으로 표현하는 안을 제안한다. `null`, 미확인, 해당 없음과 삭제를 어떻게 구분할지 정해야 한다.
+- **공식 field와 enum:** version이 있는 registry와 이전 값 mapping을 제안한다. v1 field·enum과 폐기 값을 정해야 한다.
+- **Case fact 범위:** 지원 판단에 필요한 사업체 형태, 건축물 용도와 과거 지원 이력 등의 포함 범위와 저장 원천을 정해야 한다.
+- **절차 registry:** 변하지 않는 ID·code, 표시명, 별칭과 registry version을 제안한다. 소유자, 적용 조건과 변경·폐기 정책을 정해야 한다.
+- **진행 상태 초기화:** Case에 적용되는 모든 절차 단계를 한 transaction에서 만들고 개수를 검증하는 방식을 제안한다. 초기화 시점과 registry 변경 시 처리를 정해야 한다.
+
+### 지원사업과 Evidence
+
+- **지원사업 ID:** 내부 ID, Wiki UUID와 외부 공고 ID의 안정적인 mapping을 제안한다. ID 원천과 공고 revision 처리 정책을 정해야 한다.
+- **지원 판단과 실제 신청 분리:** 지원 검토 결과와 실제 신청 lifecycle을 분리하는 방식을 제안한다. 각 상태와 쓰기 권한을 정해야 한다.
+- **신청 상태 쓰기:** 명시적 PATCH와 자연어 결과 입력 중 어느 경로를 기준으로 삼을지, 허용 상태 전이와 기록할 actor를 정해야 한다.
+- **Evidence:** 바뀌지 않는 ID, 출처, version, 원문 위치, hash와 계보를 보존하는 방식을 제안한다. 저장 위치, 조회 방법과 보존·삭제 정책을 정해야 한다.
+- **Decision·Review 기록:** decision, 검수 대상 digest, proof와 run·trace를 함께 기록하는 방식을 제안한다. 보존 기간과 조회 형태를 정해야 한다.
+- **실행 dependency:** 같은 version의 절차 registry와 검수된 지원사업 catalog 전체를 한 묶음으로 전달해야 한다. inline 전달과 권한 있는 resolver 중 하나를 고르고 cache·갱신·실패 정책을 정해야 한다.
+
+### 충돌, API 응답과 보안
+
+- **Conflict 확인:** 서버가 발급한 opaque ref에 digest, Case/version, 만료시간과 1회 사용 조건을 묶는 방식을 제안한다. ref 발급·저장·소비 방식을 정해야 한다.
+- **Agent 결과의 API 변환:** 결과 종류가 명확한 tagged union을 제안한다. `NEEDS_MORE_INFO`, 변경 없음과 실패를 어떤 body·HTTP status로 보낼지 정해야 한다.
+- **인증:** Kakao OAuth로 사용자를 식별하고 서비스 JWT로 이후 요청을 인증하는 큰 방향이 있다. claim, 전달 위치, 만료, rotation과 401·403·404 정책을 정해야 한다.
+- **개인정보:** 원문 입력 최소 보존과 prompt·trace 허용 목록을 제안한다. 암호화, 접근, 보존·삭제와 동의 범위를 정해야 한다.
+- **Guardrail 기록:** 저장 직전 판정과 별도 audit record를 coordinator가 남기는 방식을 제안한다. 판정 필드, 생성·검증 주체와 보존 방법을 정해야 한다.
 
 ## 5. shared DTO 후보
 
 ### 5.1 공통 규칙
 
-모든 DTO는 `[PROPOSED_SHARED][NOT_APPROVED][NOT_IMPLEMENTED]`다.
+아래 DTO는 모두 **검토를 위한 후보**다. 아직 승인되거나 구현되지 않았다.
 
 - 외부/shared JSON은 `camelCase`, Agent 내부 Python은 `snake_case`를 사용하고 adapter에서 명시적으로 변환한다.
 - 모든 object는 unknown extra field를 거부하고 `schemaVersion`을 가진다.
@@ -154,7 +254,7 @@ BE는 Agent 하위 구성요소를 개별 HTTP endpoint로 만들 필요가 없�
 
 `SharedFactDTO`는 `fieldPath`, `valueType`, `value`, `status`, `evidenceRefs`, `updatedAt`을 가진다. `SharedProcedureProgressDTO`는 canonical `procedureStepId`, `stepCode`, registry version, status, Evidence와 갱신 시각을 가진다. AI adapter는 누락값, Evidence 또는 procedure row를 합성하지 않는다.
 
-`[CURRENT_AI]` 내부 `CaseSnapshot`은 현재 `snapshot_id`, `case_id`, nullable `case_version`, `case_status`, `facts`, `procedure_progress`, `evidence_records`, `captured_at`의 8개 필드만 받는다. 위 shared 후보의 required version, support, latest decision과 history 영역은 현재 모델에 자동 입력되지 않는다. 계약 승인 후 AI가 별도 adapter와 필요한 내부 schema 확장을 구현해야 하며, BE가 확장 필드를 보내는 것만으로 연동되지는 않는다.
+현재 AI 내부 `CaseSnapshot`은 `snapshot_id`, `case_id`, nullable `case_version`, `case_status`, `facts`, `procedure_progress`, `evidence_records`, `captured_at`의 8개 필드만 받는다. 위 shared 후보의 필수 version, support, latest decision과 history 영역은 현재 모델에 자동 입력되지 않는다. 계약 승인 후 AI가 별도 adapter와 필요한 내부 schema 확장을 구현해야 하며, 외부에서 확장 필드를 보내는 것만으로 연동되지는 않는다.
 
 ### 5.3 `EvidenceDTO`
 
@@ -182,7 +282,7 @@ BE는 Agent 하위 구성요소를 개별 HTTP endpoint로 만들 필요가 없�
 | `snapshot` | `SharedCaseSnapshotDTO` |
 | `runtimeDependencies` | `RuntimeDependencyBundleDTO`; Graph 생성에 필요한 canonical step과 reviewed catalog |
 
-`[CURRENT_AI]` Graph는 현재 `runId`를 내부에서 만들고 optional `traceId`만 외부에서 받으며, trigger의 `clientEventId`를 DB idempotency로 처리하지 않는다. 따라서 위 invocation envelope는 현재 callable의 별칭이 아니다. P0에서 ID·deadline 소유권을 정한 뒤 AI entrypoint와 BE Coordinator를 함께 맞춰야 한다.
+현재 Graph는 `runId`를 내부에서 만들고 선택적인 `traceId`만 외부에서 받으며, trigger의 `clientEventId`를 DB 중복 요청 방지에 사용하지 않는다. 따라서 위 invocation envelope는 현재 공개 호출의 다른 이름이 아니다. P0에서 ID와 deadline 소유권을 정한 뒤 AI entrypoint와 외부 coordinator를 함께 맞춰야 한다.
 
 자연어 trigger의 `input` 후보는 `inputEventId`, `sourceType`, `redactedText`, placeholder와 Unicode code-point offset을 가진 `redactions[]`, `submittedAt`을 포함한다. raw text와 credential은 포함하지 않는다. `SUPPORT_REFRESH`는 자연어 대신 canonical support program ref 목록과 `asOf`를 받는다.
 
@@ -204,11 +304,13 @@ BE는 Agent 하위 구성요소를 개별 HTTP endpoint로 만들 필요가 없�
 
 | 내부 outcome | 필수 내용 | 외부 mapping 후보 |
 |---|---|---|
-| `REVIEWED_PLAN` | 수정 불가능한 `ReviewSubject`와 matching `ReviewProof` | decision에 따라 `UPDATED` 또는 `NEEDS_MORE_INFO` |
+| `REVIEWED_PLAN` | digest로 내용이 결속된 `ReviewSubject`와 matching `ReviewProof` | `NEEDS_MORE_INFO`이거나, 저장 결과에 따라 `UPDATED` 또는 `NO_CHANGE` |
 | `CONFLICT` | Case/snapshot/version에 묶인 conflict 후보 | `CONFLICT`와 server-issued 확인 ref |
 | `SAFE_FAILURE` | failure code, retryable, recovery action, trace | `FAILED` 또는 합의한 오류 envelope |
 
-BE가 검증·저장 경계에서 소비할 camelCase projection 후보는 다음과 같다. 이름이 같은 `[CURRENT_AI]` 내부 type을 wire format으로 직접 노출한다는 뜻은 아니다.
+외부 검증·저장 경계에서 사용할 camelCase 변환 후보는 다음과 같다. 이름이 같은 현재 AI 내부 type을 wire format으로 직접 노출한다는 뜻은 아니다.
+
+`REVIEWED_PLAN`의 decision만 보고 저장 성공을 뜻하는 `UPDATED`로 바꾸면 안 된다. `ACTION`이어도 변경 후보가 비어 있을 수 있으므로, 외부 coordinator가 ReviewProof와 저장 조건을 검증하고 transaction·재조회까지 마친 뒤 `UPDATED`와 `NO_CHANGE`를 구분해야 한다.
 
 | payload | 필수 의미 |
 |---|---|
@@ -238,7 +340,7 @@ Output/State Transition Guardrail의 판정은 BE Coordinator가 command를 받�
 
 `ConflictConfirmationRequest` 후보는 `conflictRef`, `confirmation=CONFIRM_ORIGINAL`, `expectedVersion`, `clientEventId`만 받는다. client가 원 후보의 field/value를 다시 보내거나 수정할 수 없다. 서버는 opaque ref로 원 candidate, subject digest, Case ID/version, owner를 복원하고 TTL·single-use·CAS를 검증해야 한다. `standalone:` ref는 운영 HTTP에 노출하지 않는다.
 
-그 뒤 확인된 후보를 새 Graph run과 Review에 넣는 경로는 `[TYPE_ONLY][NOT_IMPLEMENTED]`다. 현재 `CONFIRMED_CONFLICT` fact-change 타입만 있고 이를 만드는 trigger, Graph node, BE→AI adapter는 없다. 생산 confirm endpoint를 열기 전에 AI가 이 세 경로와 Review 회귀 테스트를 구현하고 shared 계약으로 승인받아야 한다.
+그 뒤 확인된 후보를 새 Graph 실행과 Review에 넣는 경로는 아직 구현되지 않았다. 현재 `CONFIRMED_CONFLICT` fact-change 타입만 있고 이를 만드는 trigger, Graph 단계와 외부→AI adapter는 없다. 운영 confirm endpoint를 열기 전에 AI가 이 경로와 Review 회귀 테스트를 구현하고 공통 계약으로 승인받아야 한다.
 
 ### 5.6 지원사업 DTO 분리
 
@@ -253,23 +355,21 @@ Output/State Transition Guardrail의 판정은 BE Coordinator가 command를 받�
 
 ### 6.1 endpoint 목록
 
-전부 `[PROPOSED_SHARED][NOT_APPROVED][NOT_IMPLEMENTED]`다. 별도 `/replan` endpoint는 만들지 않고 `/results` 처리 안에서 재계획하는 안이다.
+아래 endpoint는 모두 **검토 후보**이며 아직 승인되거나 구현되지 않았다. 별도 `/replan` endpoint를 만들지 않고 `/results` 처리 안에서 재계획하는 안이다.
 
-| Method | Path | 목적 | Agent 호출/쓰기 |
-|---|---|---|---|
-| `GET` | `/auth/kakao/login` | 카카오 로그인 시작 | 없음 |
-| `GET` | `/auth/kakao/callback` | OAuth callback과 서비스 session/token 발급 | 인증 쓰기 가능 |
-| `POST` | `/cases` | Case 생성, progress 초기화, 최초 계획 | Graph 호출, 저장 |
-| `GET` | `/cases/{caseId}` | current Case projection | 기본적으로 Agent 호출·쓰기 없음 |
-| `POST` | `/cases/{caseId}/results` | 자연어 결과 입력, 재계획, 검증, 저장 | Graph 호출, 저장 |
-| `POST` | `/cases/{caseId}/results/confirm` | 원 conflict에 대한 사용자 확인 | Graph 호출, CAS 저장 |
-| `GET` | `/cases/{caseId}/subsidies` | match와 application 분리 조회 | 조회만으로 쓰기 없음 |
-| `PATCH` | `/subsidy-applications/{applicationId}` | 실제 신청 lifecycle 변경 | Agent 호출 없음; 명시적 쓰기 |
-| `GET` | `/cases/{caseId}/history` | bounded decision/change history | Agent 호출·쓰기 없음; MVP 후순위 가능 |
+- **`GET /auth/kakao/login`:** 카카오 로그인 시작. Agent 호출과 업무 데이터 쓰기 없음
+- **`GET /auth/kakao/callback`:** OAuth callback과 서비스 session 또는 token 발급
+- **`POST /cases`:** Case 생성, 절차 진행 상태 초기화, 최초 Agent 실행과 저장
+- **`GET /cases/{caseId}`:** 현재 Case 조회. 기본적으로 Agent 호출과 쓰기 없음
+- **`POST /cases/{caseId}/results`:** 자연어 결과 입력, 재계획, 검증과 저장
+- **`POST /cases/{caseId}/results/confirm`:** 기존 conflict에 대한 사용자 확인, Agent 재실행과 CAS 저장
+- **`GET /cases/{caseId}/subsidies`:** 지원 검토 결과와 실제 신청 상태 분리 조회. 조회만으로 쓰기 없음
+- **`PATCH /subsidy-applications/{applicationId}`:** 사용자가 실제 수행한 신청 상태 변경. Agent 호출 없음
+- **`GET /cases/{caseId}/history`:** 제한된 decision·변경 이력 조회. Agent 호출과 쓰기 없음. MVP 이후로 미룰 수 있음
 
 `POST /cases/{caseId}/results` request 후보는 `rawInput`, `expectedVersion`, `clientEventId`를 갖는다. canonical procedure 대상은 서버 snapshot과 registry로 판단하며 client가 임의 DB step ID를 주입하지 않는다. 외부 response는 `result` discriminator, `caseVersion`, 변경 요약, decision/view state, Evidence reference를 포함하는 후보이며 내부 snake_case 객체를 그대로 직렬화하지 않는다.
 
-### 6.2 `[DECIDED_ARCHITECTURE]` 인증 방향 / `[PROPOSED_SHARED]` 세부 계약
+### 6.2 인증 방향과 아직 정할 세부 계약
 
 큰 방향은 카카오 OAuth로 사용자를 식별하고 RE:BORN 서버가 발급한 서비스 JWT로 이후 요청을 인증하는 것이다. 카카오 access/refresh token과 서비스 JWT access/refresh token은 다른 credential이다. claim, 쿠키/본문 전달, 만료, refresh rotation, 저장 위치와 401/403/404 비노출 정책은 P0 승인 전이다.
 
@@ -279,17 +379,15 @@ Case route는 항상 BE가 token과 Case owner를 검증한 뒤 snapshot을 조�
 
 아래는 결정용 후보이며 확정 status code가 아니다.
 
-| 상황 | body discriminator | HTTP 후보 | 규칙 |
-|---|---|---:|---|
-| reviewed 변경 저장 성공 | `UPDATED` | 200 | read-back version 포함 |
-| 추가 확인 질문 | `NEEDS_MORE_INFO` | 200 | 저장 가능한 변경과 질문 동시 처리 우선순위 결정 필요 |
-| 사용자 확인이 필요한 conflict | `CONFLICT` | 200 또는 409 | opaque ref만 노출 |
-| stale snapshot | `VERSION_CONFLICT` | 409 | 아무 업무 변경도 저장하지 않음 |
-| 중복 동일 event | 원 응답 replay | 원 status | 새 Graph run/history를 만들지 않음 |
-| 잘못된 요청 | 오류 code | 400 또는 422 | Agent 호출 전 차단 |
-| 인증 실패 | 오류 code | 401 | token 값은 log에 남기지 않음 |
-| 권한 없음/Case 없음 | 비노출 오류 | 404 후보 | 존재 여부 보호 |
-| provider/Review 실패 | `SAFE_FAILURE` mapping | 200 또는 5xx | retryable과 recovery action 보존 |
+- **변경 저장 성공:** body `UPDATED`, HTTP 200 후보. 저장 후 다시 읽은 Case version 포함
+- **추가 확인 질문:** body `NEEDS_MORE_INFO`, HTTP 200 후보. 저장 가능한 변경과 질문을 함께 받았을 때 우선순위 결정 필요
+- **사용자 확인이 필요한 충돌:** body `CONFLICT`, HTTP 200 또는 409 후보. 서버가 발급한 opaque ref만 노출
+- **오래된 snapshot:** body `VERSION_CONFLICT`, HTTP 409 후보. 업무 변경은 하나도 저장하지 않음
+- **동일 요청 재전송:** 이전 body와 HTTP status 재사용. 새 Agent 실행·history를 만들지 않음
+- **잘못된 요청:** HTTP 400 또는 422 후보. Agent 호출 전에 차단
+- **인증 실패:** HTTP 401 후보. token 값을 log에 남기지 않음
+- **권한 없음 또는 Case 없음:** HTTP 404 후보. Case 존재 여부를 보호하는 정책 필요
+- **외부 provider 또는 Review 실패:** `SAFE_FAILURE` 변환, HTTP 200 또는 5xx 후보. 재시도 가능 여부와 복구 행동을 보존
 
 ## 7. persistence 논리 요구사항
 
@@ -322,17 +420,35 @@ Case route는 항상 BE가 token과 Case owner를 검증한 뒤 snapshot을 조�
 
 ## 9. 보안·PII·trace·비용·재시도
 
-| 항목 | 최소 요구사항 | 검증 방법 |
-|---|---|---|
-| 인증정보 | OAuth/JWT/API key를 prompt, error body, 일반 log에 기록하지 않음 | secret pattern test와 log inspection |
-| 사용자 원문 | 입력 ID와 redacted text를 분리하고 최소 전달·최소 보존 | PII fixture로 prompt/trace 검증 |
-| 사업자 식별정보 | 권한 있는 deterministic resolver에만 전달, 암호화·마스킹·외부전송 audit | 타 사용자·일반 Agent 접근 부정 테스트 |
-| Evidence | 접근권한, source hash, lineage, 보존·삭제 정책 | 모든 ref resolve 및 변조 검출 test |
-| trace | `runId`, `traceId`, component call, retry, duration, outcome만 연결 | Case 간 trace 혼선 부정 테스트 |
-| 비용 | 모델/provider, prompt/completion token 집계와 retry 횟수 수집; 원문 미수집 | telemetry schema test |
-| idempotency | 동일 key+payload는 원 결과 replay, 동일 key+다른 payload는 거부 | 동시·재전송 test |
-| deadline | 전체 deadline 안에서 component budget과 bounded retry; 취소 정책 명시 | timeout/fault injection |
-| 외부 fetch | official allowlist, DNS/private IP 차단, redirect 재검증, 크기·MIME·시간 상한 | SSRF·redirect·대용량 fixture |
+### 인증정보
+
+- **최소 요구:** OAuth, JWT와 API key를 prompt, 오류 응답과 일반 log에 기록하지 않는다.
+- **검증:** secret pattern test와 log 점검
+
+### 사용자 원문과 사업자 식별정보
+
+- **최소 요구:** 입력 ID와 비식별 텍스트를 분리하고 필요한 범위만 전달·보존한다. 사업자 식별정보는 권한 있는 결정적 resolver에만 전달하고 암호화·마스킹·외부 전송 기록을 적용한다.
+- **검증:** PII fixture 기반 prompt·trace 검사와 다른 사용자 접근 거부 테스트
+
+### Evidence
+
+- **최소 요구:** 접근 권한, source hash, 계보, 보존과 삭제 정책을 가진다.
+- **검증:** 모든 reference 조회와 변조 검출 테스트
+
+### Trace와 비용
+
+- **최소 요구:** `runId`, `traceId`, 구성요소 호출, 재시도, 소요 시간과 결과를 연결한다. 모델·provider와 prompt/completion token, 재시도 횟수를 집계하되 사용자 원문은 수집하지 않는다.
+- **검증:** Case 간 trace 혼선 방지와 telemetry schema 테스트
+
+### 중복 요청과 제한 시간
+
+- **최소 요구:** 같은 key와 같은 내용은 이전 결과를 다시 주고, 같은 key에 다른 내용은 거부한다. 전체 deadline 안에서 구성요소 예산과 제한된 재시도를 적용하고 취소 정책을 정한다.
+- **검증:** 동시 재전송, timeout과 fault injection 테스트
+
+### 외부 원문 조회
+
+- **최소 요구:** 공식 allowlist, DNS와 private IP 차단, redirect 재검증, 응답 크기·MIME·시간 상한을 적용한다.
+- **검증:** SSRF, redirect와 대용량 응답 fixture 테스트
 
 Langfuse 등 특정 관측 제품은 이 계약의 필수조건이 아니다. 제품을 선택해도 raw prompt·PII·credential을 수집하지 않고 위 trace/cost 의미를 만족해야 한다.
 
@@ -340,18 +456,16 @@ Langfuse 등 특정 관측 제품은 이 계약의 필수조건이 아니다. �
 
 P0 합의 뒤 BE PR에는 다음이 함께 있어야 한다.
 
-| 산출물 | 최소 내용 | 완료 기준 |
-|---|---|---|
-| shared DTO 코드 | version, required/nullable, enum, tagged union, adapters | AI와 같은 fixture를 양방향 검증 |
-| 생성 OpenAPI | §6 endpoint, auth, response/error union, examples | CI에서 drift 검출, examples schema 통과 |
-| canonical registry | Case field/enum, procedure ID/code/alias/version, support identity | unknown/deprecated mapping test |
-| migration/data dictionary | BE가 정한 실제 구조, 제약, index, rollback | 기존 데이터 보존과 apply/rollback test |
-| snapshot assembler | 권한 검증 후 한 시점의 `SharedCaseSnapshotDTO` | AI strict adapter와 contract test |
-| coordinator | idempotency, deadline, Graph 호출, guardrail, persistence 순서 | duplicate/timeout/retry test |
-| persistence service | CAS, all-or-nothing mutation/decision/history, read-back | concurrency/fault-injection test |
-| Evidence resolver | source별 저장, hash, lineage, 권한, 보존 | 모든 ref resolve와 변조 부정 test |
-| conflict store/ref service | opaque ref, digest, owner, version, TTL, single-use | 변조·만료·replay·stale test |
-| 운영 ADR/runbook | auth, transaction, 개인정보, 외부 egress, timeout, 장애·rollback | 개발자가 secret 없이 절차를 재현 |
+- **공통 DTO 코드:** version, 필수·nullable, enum, tagged union과 adapter. AI와 같은 fixture를 양방향으로 검증해야 함
+- **생성된 OpenAPI:** §6 endpoint, 인증, 정상·오류 결과와 예시. CI에서 코드와 문서 차이를 검출하고 예시가 schema를 통과해야 함
+- **공식 registry:** Case field·enum, 절차 ID·code·별칭·version과 지원사업 ID. unknown·폐기 값 mapping을 테스트해야 함
+- **Migration과 data dictionary:** 실제 테이블·제약·index와 rollback. 기존 데이터 보존과 적용·복구 테스트가 있어야 함
+- **Snapshot assembler:** 권한 확인 후 한 시점의 `SharedCaseSnapshotDTO` 생성. AI strict adapter와 계약 테스트를 통과해야 함
+- **Coordinator:** 중복 요청 방지, 전체 제한 시간, Agent 호출, Guardrail과 저장 순서. 중복·timeout·retry 테스트가 있어야 함
+- **Persistence service:** CAS, 변경·decision·history의 원자 저장과 저장 후 재조회. 동시성과 fault injection 테스트가 있어야 함
+- **Evidence resolver:** 출처별 저장, hash, 계보, 권한과 보존. 모든 reference 조회와 변조 거부 테스트가 있어야 함
+- **Conflict reference service:** opaque ref, digest, owner, version, TTL과 1회 사용. 변조·만료·재사용·오래된 version을 거부해야 함
+- **운영 ADR·runbook:** 인증, transaction, 개인정보, 외부 통신, timeout, 장애와 rollback. 비밀값 없이 재현 가능한 절차가 있어야 함
 
 ## 11. 공동 acceptance checklist
 
@@ -379,33 +493,36 @@ P0 합의 뒤 BE PR에는 다음이 함께 있어야 한다.
 
 ## 12. 승인과 변경 절차
 
-1. BE·AI·PM은 §4 P0 각 행에 결정과 근거를 기록한다.
+1. BE·AI·PM은 §4 P0 각 항목에 결정과 근거를 기록한다.
 2. BE와 AI가 shared DTO version, canonical registry와 contract fixture를 함께 승인한다.
 3. BE가 OpenAPI, migration, coordinator/persistence 구현과 ADR를 PR로 제출한다.
 4. AI가 shared adapter와 필요한 runtime schema 확장을 별도 PR로 제출한다.
 5. 양측 CI에서 같은 contract fixture와 digest vector를 실행한다.
 6. 개발 Case로 read-only smoke를 먼저 통과한 뒤 쓰기 통합 test를 연다.
-7. §11을 모두 충족한 version에만 `[AGREED_SHARED][IMPLEMENTED][TESTED]`를 붙인다.
+7. §11을 모두 충족한 version만 공동 승인·구현·검증 완료로 기록한다.
 
-승인 기록 표:
+### 승인 기록에 반드시 남길 내용
 
-| Contract version | 상태 | 승인자(AI/BE/PM) | 승인일 | PR/ADR | 비고 |
-|---|---|---|---|---|---|
-| 미정 | `[PROPOSED_SHARED][NOT_APPROVED]` | 없음 | 없음 | 없음 | 현재 공동 승인 0개 |
+- 계약 version
+- 현재 상태
+- AI·BE·PM 승인자
+- 승인일
+- 근거 PR 또는 ADR
+- 예외와 남은 작업
+
+현재는 계약 version과 승인자·승인일·근거가 없으며, 공동 승인된 계약은 0개다.
 
 ## 13. 근거와 출처
 
-| 근거 | 이 문서에 반영한 내용 |
-|---|---|
-| `backend/app/agent/schemas.py` | 현재 `CaseSnapshot`, `EvidenceRecord`, `MutationSet`, `ReviewSubject`, `ReviewProof`, 세 가지 `AgentRunOutcome`과 strict invariant |
-| `backend/app/agent/graph.py`, `backend/tests/agent/test_graph.py` | 현재 Graph 실행 순서, retry/Review와 standalone outcome 범위 |
-| `backend/app/agent/procedure_tool/`, 관련 tests | 공식 원문 조회, discovery와 Evidence의 구분, 안전한 fetch 필요성 |
-| `backend/app/agent/support_agent/`, 관련 tests | support analysis와 기업마당 discovery adapter의 현재 분리 상태 |
-| `backend/app/agent/review_tool/`, 관련 tests | Review subject/digest/proof 무결성과 PASS 조건 |
-| `backend/CLAUDE.md` | Agent의 DB 직접 접근 금지와 shared function 경계 |
-| `docs/architecture.md` | Coordinator, Guardrail, persistence를 포함한 목표 생산 흐름 |
-| `docs/agent-tool-io-schema.md` | AI 내부 Agent·Tool별 정확한 current 입출력 계약 |
-| `docs/agent-official-data-source-strategy.md` | 공식 API 관찰, 검색·크롤링·RAG의 상태와 구현 계획 |
-| DB 리뷰 피드백 | `CASES` 명명, progress cardinality, Case field history, 완료 progress와 blocker 정합성 요구 |
+- **AI 내부 schema:** `backend/app/agent/schemas.py`의 `CaseSnapshot`, `EvidenceRecord`, `MutationSet`, `ReviewSubject`, `ReviewProof`와 세 가지 `AgentRunOutcome`
+- **현재 실행 순서와 결과:** `backend/app/agent/graph.py`, `backend/tests/agent/test_graph.py`
+- **공식 원문 조회:** `backend/app/agent/procedure_tool/`과 관련 테스트
+- **지원금 분석과 기업마당 조회의 분리:** `backend/app/agent/support_agent/`과 관련 테스트
+- **Review 무결성:** `backend/app/agent/review_tool/`과 관련 테스트
+- **Agent의 DB 직접 접근 금지:** `backend/CLAUDE.md`
+- **현재 구조와 목표 구조:** [`architecture.md`](./architecture.md)
+- **Agent·Tool의 정확한 공개 호출 계약:** [`agent-tool-io-schema.md`](./agent-tool-io-schema.md)
+- **공식 API 관찰과 crawler·RAG 계획:** [`agent-official-data-source-strategy.md`](./agent-official-data-source-strategy.md)
+- **DB 리뷰 의견:** `CASES` 명명, 절차 진행 row 개수, Case field 이력, 완료 상태와 Blocker의 정합성 요구
 
 이 문서가 확정하는 것은 **구현 방향이 아니라 검토할 단일 계약안**이다. 승인 전 공동 계약은 0개이며, 실제 BE migration·OpenAPI·통합 test가 생기기 전에는 생산 연동 완료로 보고하지 않는다.

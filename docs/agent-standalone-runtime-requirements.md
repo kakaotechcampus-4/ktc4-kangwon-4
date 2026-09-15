@@ -1,84 +1,117 @@
-# RE:BORN Agent standalone 실행 Runbook 및 상태
+# RE:BORN Agent standalone 실행 안내
 
 > 소유: AI
 >
 > 기준일: 2026-09-15
 >
 > 내부 schema version: `agent-io/2.0`
->
-> 이 문서의 책임: **BE 없는 실행법, 환경변수, 데이터 모드, 검증 결과, 현재 한계**
 
-구성요소의 정확한 필드는 [`agent-tool-io-schema.md`](./agent-tool-io-schema.md), 호출 구조는 [`architecture.md`](./architecture.md), 데이터 수집 계획은 [`agent-official-data-source-strategy.md`](./agent-official-data-source-strategy.md), 생산 연동 요구는 [`be-agent-integration-requirements.md`](./be-agent-integration-requirements.md)를 따른다.
+이 문서는 **BE 없이 Agent를 실행하는 방법, 사용하는 데이터, 현재 가능한 범위와 한계**를 설명한다.
 
-상태는 내부 약어 대신 `현재 실행`, `구현됨 · 미연결`, `후속 구현`, `외부 연동 전`으로 직접 적는다. 이 상태는 feature 브랜치의 standalone 실행 기준이며 생산 서비스 연동 상태가 아니다.
+- 구성요소의 정확한 필드: [`agent-tool-io-schema.md`](./agent-tool-io-schema.md)
+- 호출 구조: [`architecture.md`](./architecture.md)
+- 공식 데이터 수집 계획: [`agent-official-data-source-strategy.md`](./agent-official-data-source-strategy.md)
+- 생산 연동 요구사항: [`be-agent-integration-requirements.md`](./be-agent-integration-requirements.md)
 
-## 1. 결론
+## 1. 한눈에 보는 결론
 
-현재 **LangGraph 기반 standalone 실행기**는 BE와 DB 없이 실행된다. 코드 클래스명은 `AgentGraph`지만 별도 Agent가 아니다. 현재 CLI가 받는 것은 임의 자연어나 실제 사용자 Case가 아니라 코드에 고정된 비식별 fixture다.
+현재 LangGraph 기반 standalone 실행기는 BE와 DB 없이 실행된다. 코드 클래스명은 `AgentGraph`지만 별도 Agent가 아니라 LangGraph `StateGraph`를 구성·실행하는 프로젝트 내부 실행기다.
 
-| 범위 | 상태 | 현재 사용하는 데이터 |
-|---|---|---|
-| LangGraph 실행, Review, safe failure | 현재 실행 | schema-valid fixture 입력 |
-| LLM 분석 | 현재 실행 | 설정된 OpenAI-compatible endpoint의 실제 응답 |
-| 폐업 절차조회 | 현재 실행 | 공식 registry URL에서 실행 시점에 가져온 실제 원문 |
-| 지원금 분석 | 현재 실행 | 검수됐다고 가정한 합성 `ReviewedSupportCatalog` |
-| 기업마당 raw 공고 discovery | 구현됨 · 실행 흐름 미연결 | 별도 adapter의 실제 API 응답; CLI/Graph 판정에는 미사용 |
-| 실제 사용자 Case read/write | 외부 연동 전 | 인증·snapshot·동시성 보호·persistence가 없어 불가 |
-| 범용 crawler·RAG | AI 후속 구현 | corpus·index·retriever 없음 |
-| Langfuse 비용 추적 | AI 후속 구현 | 현재 기본 sink는 `NullTraceSink` |
+standalone 실행에서 데이터 출처는 다음과 같이 섞여 있다.
 
-따라서 현재 실행 결과를 “실제 Case 전체 연동 결과”라고 부르면 안 된다. **절차 원문과 LLM은 실제이고, Case와 지원금 catalog는 합성**이다.
+- **실제 외부 응답:** 설정된 OpenAI-compatible LLM endpoint의 응답
+- **실제 공식 원문:** 공식 registry URL에서 실행 시점에 가져오는 폐업 절차 문서
+- **합성 입력:** 코드에 고정된 비식별 `CaseSnapshot` fixture
+- **합성 지원사업 데이터:** 검수됐다고 가정해 작성한 `ReviewedSupportCatalog` fixture
+- **별도 호출만 가능:** 기업마당 실제 API의 raw 공고 후보. 현재 CLI와 Graph 판정에는 사용하지 않는다.
 
-## 2. 사전 조건
+따라서 standalone 성공은 **Agent 코어와 공식 절차 원문 조회 경로가 실행되고, 조회 결과를 schema에 따라 처리한다**는 뜻이다. 원문이 실제로 수집됐는지는 `ProcedureLookupResult.documents`와 live smoke 결과를 따로 확인해야 한다. 실제 사용자 Case의 `read → plan → review → persist → read-back`이 연결됐다는 뜻도 아니다.
+
+## 2. 지금 가능한 것과 불가능한 것
+
+### 현재 실행되는 기능
+
+- LangGraph 실행, Review 재작업, fail-closed `SAFE_FAILURE`
+- 설정된 endpoint를 이용한 실제 LLM 분석
+- 코드 검토된 공식 registry URL의 원문 조회
+- 합성 `ReviewedSupportCatalog`를 이용한 지원사업 조건 비교
+- schema-valid fixture를 이용한 standalone CLI 실행
+
+### 구현됐지만 현재 실행 흐름에는 연결되지 않은 기능
+
+- `BizInfoSupportDiscoveryTool`의 기업마당 raw 공고 조회
+  - 별도 adapter로 실제 API 응답을 받을 수 있다.
+  - 결과는 검수 전 후보이며 CLI, Graph, `ReviewedSupportCatalog` 발행에는 사용하지 않는다.
+
+### 아직 할 수 없는 기능
+
+- 실제 사용자 Case 조회·저장
+- 인증, Case 소유권 확인, version/CAS와 transaction
+- CLI에서 임의 자연어나 사업자 정보 입력
+- 기업마당 raw 공고를 검수 catalog로 발행하는 pipeline
+- 범용 crawler, parser/chunker corpus, vector index와 RAG retriever
+- Langfuse token·비용 전송
+
+## 3. 실행 전 준비
+
+### 필수 환경
 
 - Python 3.12
-- `backend/requirements.txt`와 개발 검증 시 `backend/requirements-dev.txt` 설치
-- 정적 검사 시 Ruff 0.16.5 별도 설치. 현재 `requirements-dev.txt`에는 Ruff가 pin돼 있지 않으므로 이를 설치 완료의 근거로 보지 않는다.
-- 저장소 루트 `.env` 또는 동일 이름의 process environment
-- 외부 호출을 허용할 네트워크
+- `backend/requirements.txt`
+- 개발 검증 시 `backend/requirements-dev.txt`
+- 외부 호출을 허용하는 네트워크
+- 저장소 루트 `.env` 또는 같은 이름의 process environment
+
+정적 검사에는 Ruff 0.16.5를 별도로 설치한다. 현재 `requirements-dev.txt`에는 Ruff가 pin돼 있지 않으므로 해당 파일 설치만으로 Ruff 준비가 끝났다고 보지 않는다.
 
 standalone은 MySQL을 읽거나 쓰지 않는다. `docker compose up -d db`는 BE의 DB 개발용이며 Agent CLI 실행 조건이 아니다. 루트 Compose에는 DB만 들어 있다.
 
-## 3. 현재 CLI가 소비하는 환경변수
+### LLM 설정 — 필수
 
 process environment가 저장소 루트 `.env`보다 우선한다. 비밀값은 출력·문서·trace에 남기지 않는다.
 
-### 3.1 LLM — 필수
+- `CHAT_PROXY_URL`: OpenAI-compatible chat endpoint base URL
+- `PROXY_TOKEN`: endpoint credential
+- `OPENAI_MODEL`: endpoint가 실제 지원하는 model ID
 
-| 변수 | 필수 여부 | 의미 |
-|---|---|---|
-| `CHAT_PROXY_URL` | 필수 | OpenAI-compatible chat endpoint base URL |
-| `PROXY_TOKEN` | 필수 | endpoint credential |
-| `OPENAI_MODEL` | 필수 | endpoint가 실제 지원하는 model ID |
-| `OPENAI_REASONING_EFFORT` | 선택 | provider가 지원할 때만 전달 |
-| `AGENT_LLM_TIMEOUT_SECONDS` | 선택 | provider 시도 deadline |
-| `AGENT_LLM_MAX_RETRIES` | 선택 | provider retry 상한 |
-| `AGENT_LLM_RETRY_BACKOFF_SECONDS` | 선택 | 첫 retry backoff, `0..60`초 |
-| `AGENT_LLM_MAX_RESPONSE_BYTES` | 선택 | 응답 크기 상한, 기본 1,000,000 bytes |
+다음 값은 선택 사항이다.
 
-### 3.2 절차조회 — registry는 key 불필요
+- `OPENAI_REASONING_EFFORT`: provider가 지원할 때만 전달
+- `AGENT_LLM_TIMEOUT_SECONDS`: provider 시도 deadline
+- `AGENT_LLM_MAX_RETRIES`: provider retry 상한
+- `AGENT_LLM_RETRY_BACKOFF_SECONDS`: 첫 retry backoff, `0..60`초
+- `AGENT_LLM_MAX_RESPONSE_BYTES`: 응답 크기 상한, 기본 `1,000,000` bytes
 
-| 변수 | 필수 여부 | 의미 |
-|---|---|---|
-| `PROCEDURE_OFFICIAL_REGISTRY_ENABLED` | 선택, 기본 `true` | 코드 검토된 공식 URL registry 사용 |
-| `PROCEDURE_KAKAO_REST_API_KEY` | 선택 | registry miss 시 1차 URL discovery |
-| `PROCEDURE_GOOGLE_API_KEY` | 선택 | Kakao miss 시 2차 URL discovery |
-| `PROCEDURE_GOOGLE_PROJECT_ID` | Google 사용 시 필수 | Google Cloud project |
-| `PROCEDURE_GOOGLE_ENGINE_ID` | Google 사용 시 필수 | 공개 웹사이트 engine |
-| `PROCEDURE_GOOGLE_LOCATION` | 선택, 기본 `global` | `global`, `us`, `eu` 중 하나 |
-| `PROCEDURE_SEARCH_ALLOWED_DOMAINS` | 선택 | 코드 검토된 trust root 범위 안에서 allowlist 축소 |
-| `PROCEDURE_SEARCH_TIMEOUT_SECONDS` | 선택, 기본 `8` | 요청별 timeout |
-| `PROCEDURE_SEARCH_TOTAL_TIMEOUT_SECONDS` | 선택, 기본 `60` | lookup 전체 deadline |
-| `PROCEDURE_SEARCH_MAX_RETRIES` | 선택, 기본 `1` | 외부 요청 retry, `0..4` |
-| `PROCEDURE_SEARCH_RETRY_BACKOFF_SECONDS` | 선택, 기본 `0.25` | retry backoff |
-| `PROCEDURE_SEARCH_MAX_RESPONSE_BYTES` | 선택, 기본 `1000000` | 검색 응답·원문 크기 상한 |
-| `PROCEDURE_SEARCH_MAX_REDIRECTS` | 선택, 기본 `3` | redirect 상한 |
+### 절차조회 설정 — registry는 key 불필요
+
+절차조회는 **공식 registry → Kakao → Google** 순서로 공식 URL을 찾는다. registry에 등록된 문서는 검색 key 없이 직접 조회할 수 있다.
+
+- `PROCEDURE_OFFICIAL_REGISTRY_ENABLED`: 선택, 기본 `true`; 코드 검토된 공식 URL registry 사용
+- `PROCEDURE_KAKAO_REST_API_KEY`: 선택; registry miss 시 1차 URL discovery
+- `PROCEDURE_GOOGLE_API_KEY`: 선택; Kakao miss 시 2차 URL discovery
+- `PROCEDURE_GOOGLE_PROJECT_ID`: Google 사용 시 필수; Google Cloud project
+- `PROCEDURE_GOOGLE_ENGINE_ID`: Google 사용 시 필수; 공개 웹사이트 engine
+- `PROCEDURE_GOOGLE_LOCATION`: 선택, 기본 `global`; `global`, `us`, `eu` 중 하나
+- `PROCEDURE_SEARCH_ALLOWED_DOMAINS`: 선택; 코드 검토된 trust root 범위 안에서 allowlist 축소
+- `PROCEDURE_SEARCH_TIMEOUT_SECONDS`: 선택, 기본 `8`; 요청별 timeout
+- `PROCEDURE_SEARCH_TOTAL_TIMEOUT_SECONDS`: 선택, 기본 `60`; lookup 전체 deadline
+- `PROCEDURE_SEARCH_MAX_RETRIES`: 선택, 기본 `1`; 외부 요청 retry, `0..4`
+- `PROCEDURE_SEARCH_RETRY_BACKOFF_SECONDS`: 선택, 기본 `0.25`; retry backoff
+- `PROCEDURE_SEARCH_MAX_RESPONSE_BYTES`: 선택, 기본 `1000000`; 검색 응답·원문 크기 상한
+- `PROCEDURE_SEARCH_MAX_REDIRECTS`: 선택, 기본 `3`; redirect 상한
 
 `PROCEDURE_SEARCH_API_KEY`와 `KAKAO_CLIENT_ID`는 Kakao key의 deprecated 호환 alias다. 새 설정에서는 `PROCEDURE_KAKAO_REST_API_KEY`만 사용한다. Naver 검색 결과는 Agent 입력으로 사용하지 않는다.
 
-`BIZINFO_API_KEY`는 별도 discovery adapter가 소비하지만 현재 CLI는 소비하지 않는다. `DATA_GO_KR_SERVICE_KEY`, `LAW_API_OC`, `LANGFUSE_*`, RAG 관련 값도 현재 CLI에는 연결되지 않았다. 해당 계획은 데이터 구현 계획과 기술 상태표에만 기록한다.
+### 현재 CLI가 사용하지 않는 설정
 
-## 4. 실행
+- `BIZINFO_API_KEY`: 별도 기업마당 discovery adapter만 사용
+- `DATA_GO_KR_SERVICE_KEY`, `LAW_API_OC`: 현재 CLI 미연결
+- `LANGFUSE_*`: 전송 adapter 미구현. 현재 기본 sink는 `NullTraceSink`
+- RAG 관련 값: corpus·index·retriever 미구현
+
+이 값들은 데이터 구현 계획과 기술 상태표에만 기록한다.
+
+## 4. 실행 방법
 
 저장소 루트에서 실행한다.
 
@@ -87,27 +120,51 @@ PYTHONPATH=backend backend/.venv/bin/python \
   -m app.agent.cli --live --compact --trace-id local-live-smoke
 ```
 
-`--live`는 실제 LLM과 공식 원문 HTTP 요청을 허용한다는 명시적 플래그라 필수다. 결과는 `REVIEWED_PLAN`, `CONFLICT`, `SAFE_FAILURE` 중 하나다.
+`--live`는 실제 LLM과 공식 원문 HTTP 요청을 허용하는 필수 플래그다. 결과는 다음 셋 중 하나다.
 
-| 종료 코드 | 의미 |
-|---:|---|
-| `0` | `REVIEWED_PLAN` 또는 `CONFLICT`를 schema-valid하게 반환 |
-| `2` | 구성 오류, provider 오류 또는 `SAFE_FAILURE`; 민감한 내부 예외는 CLI에 출력하지 않음 |
+- `REVIEWED_PLAN`: Review를 통과한 계획 후보
+- `CONFLICT`: 확정 사실과 새 입력이 충돌해 현재 run만 안전 종료
+- `SAFE_FAILURE`: 구성요소 실패 또는 Review 재작업 상한 소진을 fail-closed 처리
 
-현재 CLI에는 자연어 인자가 없다. 임의 자연어를 실행하려면 이를 redaction하고 `CaseSnapshot`, Evidence, canonical step, reviewed catalog와 함께 `AgentGraphInput`으로 조립하는 adapter가 필요하다. 실제 Case용 adapter는 BE 공동 계약과 구현 전이다.
+종료 코드는 다음과 같다.
 
-## 5. 데이터 모드
+- `0`: `REVIEWED_PLAN` 또는 `CONFLICT`를 schema-valid하게 반환
+- `2`: 구성 오류, provider 오류 또는 `SAFE_FAILURE`; 민감한 내부 예외는 CLI에 출력하지 않음
 
-| 모드 | Case | 절차 원문 | 지원사업 | 용도 |
-|---|---|---|---|---|
-| unit/contract test | 합성 | mock search/fetch 또는 registry | 합성 reviewed catalog | 결정론적 검증 |
-| standalone CLI | 합성 fixture | 실제 공식 원문; 선택 search fallback | 합성 reviewed catalog | Agent core·절차 live smoke |
-| BizInfo discovery | 없음 | 없음 | 실제 raw 공고 후보 | ingestion 입력 확인; 자격 판정 아님 |
-| 생산 | 미구현 | 목표: 공식 sources | 목표: 검수 catalog/RAG | 인증된 실제 Case 연동 |
+현재 CLI에는 자연어 인자가 없다. 임의 자연어를 실행하려면 redaction 후 `CaseSnapshot`, Evidence, canonical step, reviewed catalog와 함께 `AgentGraphInput`으로 조립하는 adapter가 필요하다. 실제 Case용 adapter는 BE 공동 계약과 구현 전이다.
 
-“실제 데이터로 실행했다”는 보고에는 어느 열이 실제인지 반드시 같이 기록한다. 외부 API의 HTTP 200은 데이터 원본 접근 확인이며, 실제 Case 조립·판정·저장 완료를 뜻하지 않는다.
+## 5. 실행 모드별 데이터
 
-## 6. 검증
+### 단위·계약 테스트
+
+- Case: 합성
+- 절차 자료: mock search/fetch 또는 registry
+- 지원사업: 합성 reviewed catalog
+- 목적: 외부 credential·quota를 사용하지 않는 결정론적 검증
+
+### standalone CLI
+
+- Case: 합성 fixture
+- 절차 자료: 실제 공식 원문과 선택적 검색 fallback
+- 지원사업: 합성 reviewed catalog
+- 목적: Agent 코어와 절차 조회 live smoke
+
+### 기업마당 discovery 직접 호출
+
+- Case와 절차 자료: 사용하지 않음
+- 지원사업: 실제 API의 raw 공고 후보
+- 목적: ingestion 입력 확인
+- 제한: 지원 자격 판정이나 Graph 실행이 아님
+
+### 생산 실행
+
+현재 미구현이다. 목표는 인증된 실제 Case, 공식 source, 검수된 catalog/RAG를 연결하는 것이다.
+
+“실제 데이터로 실행했다”는 보고에는 Case, 절차 원문, 지원사업, LLM 중 무엇이 실제인지 반드시 함께 기록한다. 외부 API의 HTTP 200은 데이터 원본 접근 확인이며 실제 Case 조립·판정·저장 완료를 뜻하지 않는다.
+
+## 6. 검증 방법과 기록
+
+저장소 루트에서 다음 명령을 실행한다.
 
 ```bash
 PYTHONPATH=backend backend/.venv/bin/python -m pytest -q backend/tests/agent
@@ -117,35 +174,46 @@ ruff check backend/app/agent backend/tests/agent
 ruff format --check backend/app/agent backend/tests/agent
 ```
 
-| 기준일 | 코드 기준 commit | 결과 | 범위 |
-|---|---|---|---|
-| 2026-09-15 | `350f07b` | `349 passed`; Ruff check·format check 통과 | mock 기반 Agent test와 정적 검사 |
-| 2026-09-15 | 이번 PR 최신 상태 | `376 passed`; Ruff check·format check 통과 | Agent/Tool별 단일 입출력 경계와 JSON Schema 설명 회귀 검증 포함 |
+2026-09-15 검증 기록:
 
-unit test는 외부 credential·quota를 쓰지 않는다. live smoke는 별도이며 외부 endpoint 상태와 모델의 structured-output 품질에 영향을 받는다.
+- 코드 기준 commit `350f07b`: `349 passed`; Ruff check·format check 통과
+- 이번 PR 최신 상태: `376 passed`; Ruff check·format check 통과
+  - Agent·Tool별 단일 입출력 경계와 JSON Schema 설명 회귀 검증 포함
 
-2026-09-15 제한 실측에서 팀 proxy의 `openai/gpt-4.1-mini`로 `REVIEWED_PLAN / NEEDS_MORE_INFO / PASS`까지 완료된 실행과 `REVIEW_RETRY_EXHAUSTED`로 안전 종료된 실행을 모두 관찰했다. 이는 해당 시점의 smoke 결과일 뿐 지속 가용성이나 생산 SLO가 아니다.
+unit test는 외부 credential·quota를 쓰지 않는다. live smoke는 외부 endpoint 상태와 모델의 structured-output 품질에 영향을 받는다.
 
-## 7. 현재 한계
+같은 날 팀 proxy의 `openai/gpt-4.1-mini`로 다음 두 흐름을 제한 실측했다.
 
-- 실제 사용자 Case 조회·저장, 인증·소유권, version/CAS, transaction이 없다.
-- CLI가 임의 자연어와 사업자 정보를 받지 않는다.
-- Support Agent는 실제 raw 공고가 아니라 합성 reviewed catalog를 사용한다.
-- 기업마당 discovery 결과를 검수 catalog로 승격하는 pipeline이 없다.
-- 범용 crawler, parser/chunker corpus, vector index, RAG retriever가 없다.
-- Langfuse adapter가 없어 token·비용을 전송하지 않는다.
-- 공식 사이트나 LLM endpoint 장애 시 성공을 보장하지 않으며 안전 실패할 수 있다.
+- `REVIEWED_PLAN / NEEDS_MORE_INFO / PASS`까지 완료
+- `REVIEW_RETRY_EXHAUSTED`로 안전 종료
 
-생산 연동이 되려면 BE 전달 문서의 공동 계약이 승인되고 구현·통합 테스트까지 완료돼야 한다.
+이는 2026-09-15 시점의 smoke 결과일 뿐 지속 가용성이나 생산 SLO가 아니다.
 
-## 8. 근거
+## 7. 생산 연동 전 남은 작업
 
-| 내용 | 저장소 근거 |
-|---|---|
-| CLI 플래그·fixture·종료 코드 | `backend/app/agent/cli.py`, `backend/app/agent/fixtures.py` |
-| LLM 환경변수·retry | `backend/app/agent/llm.py` |
-| 절차조회 환경변수·trust root | `backend/app/agent/procedure_tool/models.py`, `tool.py` |
-| 현재 Graph 결과 | `backend/app/agent/graph.py`, `schemas.py` |
-| BizInfo 별도 adapter | `backend/app/agent/support_agent/discovery_tool.py` |
-| DB-only Compose | `docker-compose.yml` |
-| 검증 suite | `backend/tests/agent/` |
+### AI 후속 작업
+
+- 기업마당 discovery 결과를 구조화·검수해 immutable catalog로 발행
+- 승인된 공식 출처용 bounded crawler와 parser/chunker 구현
+- versioned corpus, vector index, retriever와 Evidence 변환 경로 연결
+- Langfuse adapter와 token·비용 추적 구현
+
+### BE·AI 공동 작업
+
+- 인증과 Case 소유권 확인
+- 실제 Case snapshot adapter
+- version/CAS와 transaction 기반 저장
+- 실제 사용자 입력 redaction·조립 경계
+- 통합 테스트와 저장 후 read-back
+
+공식 사이트나 LLM endpoint 장애 시 standalone 성공을 보장하지 않으며 안전 실패할 수 있다. 생산 연동 완료로 판단하려면 BE 전달 문서의 공동 계약이 승인되고 실제 구현과 통합 테스트까지 끝나야 한다.
+
+## 8. 저장소 근거
+
+- CLI 플래그·fixture·종료 코드: `backend/app/agent/cli.py`, `backend/app/agent/fixtures.py`
+- LLM 환경변수·retry: `backend/app/agent/llm.py`
+- 절차조회 환경변수·trust root: `backend/app/agent/procedure_tool/models.py`, `backend/app/agent/procedure_tool/tool.py`
+- 현재 Graph 결과: `backend/app/agent/graph.py`, `backend/app/agent/schemas.py`
+- 기업마당 별도 adapter: `backend/app/agent/support_agent/discovery_tool.py`
+- DB-only Compose: `docker-compose.yml`
+- 검증 suite: `backend/tests/agent/`

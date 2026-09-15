@@ -4,306 +4,285 @@
 >
 > 기준일: 2026-09-15
 >
-> 이 문서의 책임: **목표 Agent 구조, 현재 구현 구조, 두 구조의 차이, 구성요소 책임과 호출 방향**
+> 이 문서의 책임: 현재 Agent 실행 구조, 목표 구조, 구성요소별 책임과 데이터 전달 방향
 
-이 문서는 필드·JSON·HTTP·DB 컬럼을 정의하지 않는다. 정확한 Agent/Tool 필드는 [`agent-tool-io-schema.md`](./agent-tool-io-schema.md)를 따른다.
+이 문서는 **누가 무엇을 호출하고 어떤 결과를 다음 단계에 전달하는지** 설명한다. 정확한 필드와 검증 규칙은 [`agent-tool-io-schema.md`](./agent-tool-io-schema.md)를 따른다.
 
-## 1. 한눈에 보는 결론
+## 1. 먼저 보는 결론
 
-- **현재 실행 프레임워크:** 외부 프레임워크 LangGraph의 `StateGraph`
-- **`AgentGraph`의 의미:** `StateGraph`를 구성·compile·실행하는 프로젝트 내부 Python 클래스. 별도 Agent가 아님
-- **Agent:** Supervisor, 정보분석, 지원금의 3개
-- **Tool:** 절차조회, Review, 기업마당 공고조회의 3개. 기업마당 공고조회는 현재 실행 흐름에 미연결
-- **목표 오케스트레이터:** 필요한 하위 Agent·Tool 선택과 재호출을 판단하는 Supervisor Agent
-- **현재 호출 순서 결정자:** trigger별 시작점과 정상 1차 순서를 가진 `AgentGraph` 클래스의 조건부 edge
-- **현재 구현 한계:** Supervisor는 초안만 만들며, Supervisor 주도 동적 planning은 아직 구현되지 않음
-- **LangChain·Langfuse:** package만 설치돼 있다. LangChain runtime import와 Langfuse 전송 adapter는 없으며 현재 직접 사용하는 관련 프레임워크는 LangGraph다.
+- 현재 실행에는 LangGraph의 `StateGraph`를 사용한다.
+- `AgentGraph`는 `StateGraph`를 구성하고 실행하는 프로젝트 내부 Python 클래스다. 별도 Agent가 아니다.
+- Agent는 Supervisor, 정보분석, 지원금의 3개다.
+- Tool은 절차조회, Review, 기업마당 공고조회의 3개다.
+- 기업마당 공고조회 Tool은 구현과 단위 테스트는 끝났지만 현재 전체 실행 흐름에는 연결되지 않았다.
+- 현재 호출 순서는 Supervisor가 정하지 않는다. `AgentGraph` 코드가 실행 이유와 앞 단계 결과에 따라 제한된 경로를 선택한다.
+- 목표는 Supervisor가 필요한 Agent·Tool을 선택하는 구조지만, 이 동적 계획 기능은 아직 구현되지 않았다.
+- 실제 사용자 Case 조회·저장과 DB 처리는 현재 Agent 실행 범위에 없다.
+- Lang 계열 프레임워크 중 현재 실행에 직접 사용하는 것은 LangGraph다. LangChain 실행 코드와 Langfuse 전송 코드는 아직 없다.
 
-## 2. 문서 지도
+### 이 문서에서 자주 쓰는 말
 
-- **Agent/Tool별 입력·출력 필드와 validator:** [`agent-tool-io-schema.md`](./agent-tool-io-schema.md)
-- **BE 없는 실행법과 실제·합성 데이터 구분:** [`agent-standalone-runtime-requirements.md`](./agent-standalone-runtime-requirements.md)
-- **공식 API, crawler, RAG의 현재 상태와 구현 순서:** [`agent-official-data-source-strategy.md`](./agent-official-data-source-strategy.md)
-- **외부 연동 전 shared DTO·저장 경계:** [`be-agent-integration-requirements.md`](./be-agent-integration-requirements.md)
-- **dependency 버전과 실제 import 여부:** [`tech-stack.md`](./tech-stack.md)
+- **실행 이유(trigger):** Case 생성, 사용자 결과 제출, 지원금 재평가처럼 Agent 실행을 시작한 이유
+- **실행(run):** 입력 하나를 받아 최종 결과 하나를 반환할 때까지의 전체 과정
+- **Case snapshot:** 한 번의 실행이 기준으로 삼는 특정 시점의 Case 읽기 상태
+- **Evidence:** 판단이 어떤 사용자 입력이나 공식 원문에 근거했는지 추적하는 기록
+- **digest:** Review한 내용이 이후 바뀌지 않았는지 확인하는 SHA-256 값
+- **검수된 계획 후보:** Review를 통과한 AI 결과. DB 저장 완료나 현실 업무 완료를 뜻하지 않음
 
-`interface-spec.md`와 `schema/schema_table.md`는 기존 링크를 보존하는 안내 파일이다. 이 문서들에 동일 계약을 다시 정의하지 않는다.
+## 2. 현재 구현된 실행 구조
 
-## 3. 목표 아키텍처 — Supervisor 주도
-
-이 저장소의 기존 아키텍처 문서가 정의한 목표는 **Supervisor Agent가 전역 계획과 오케스트레이션을 소유하는 구조**다.
-
-- Supervisor는 현재 Case와 실행 상태를 해석해 필요한 하위 Agent·Tool만 선택한다.
-- 정보분석 Agent와 지원금 Agent는 Supervisor에 Agent-as-Tool 형태로 노출한다.
-- 절차조회 Tool은 Supervisor가 필요할 때 호출하는 일반 Tool이다.
-- 하위 Agent·Tool끼리는 서로 직접 호출하지 않는다.
-- Supervisor는 결과가 충분한지 판단해 재호출·사용자 질문·종료를 결정한다.
-- 모든 정상 Supervisor 초안은 선택 사항이 아니라 필수 검증 관문인 Review Tool을 거친다.
-- LangGraph 실행기는 Supervisor의 계획을 허용된 dependency, 호출 횟수, 전체 deadline 안에서 실행한다.
+현재 `AgentGraph`는 실행 이유에 따라 시작점을 정하고, 각 Agent·Tool의 반환값으로 다음 호출 입력을 만든다. Agent와 Tool끼리는 서로 직접 호출하지 않는다.
 
 ```text
-실행 입력
-  → LangGraph 실행기
-  → Supervisor가 현재 상태 해석·호출 계획 수립
-       ├─ 필요 시 정보분석 Agent 호출
-       ├─ 필요 시 지원금 Agent 호출
-       └─ 필요 시 절차조회 Tool 호출
-  → Supervisor가 결과 충분성 평가·검수 전 초안 작성
-  → Review Tool 필수 검수
-       ├─ PASS   → 검수된 계획 후보
-       └─ REVISE → Supervisor가 재호출 대상 결정 후 다시 계획
+CASE_CREATED | RESULT_SUBMITTED
+  → 절차조회 Tool
+  → 정보분석 Agent
+      ├─ 기존 확정 사실과 새 입력이 충돌함 → CONFLICT
+      └─ 충돌 없음
+           → 지원금 Agent
+           → Supervisor Agent
+           → Review Tool
+                ├─ PASS   → ReviewProof → REVIEWED_PLAN
+                ├─ REVISE → 권고된 앞 단계부터 재실행
+                └─ 실패·상한 소진 → SAFE_FAILURE
+
+SUPPORT_REFRESH
+  → 지원금 Agent → Supervisor Agent → Review Tool
 ```
 
-이 목표 구조에서 Supervisor는 업무 판단과 호출 계획을 소유하고, LangGraph는 실행 상태와 안전 상한을 소유한다. “LangGraph가 있다”와 “AgentGraph가 별도 Agent다”는 같은 뜻이 아니다.
+### 최종 결과의 의미
 
-## 4. 현재 구현 — 고정 routing을 가진 standalone 실행기
+#### `REVIEWED_PLAN`
 
-현재 feature 브랜치에는 LangGraph `StateGraph`를 감싼 `AgentGraph` 클래스가 있다. 정상 1차 실행의 시작점과 순서는 이 클래스 코드가 정하며, 일부 조건에서만 분기한다.
+Review가 정확히 같은 Case snapshot, 선행 결과와 Supervisor 초안을 검수해 통과시킨 결과다. **검수된 계획 후보**이며 저장 완료 결과가 아니다.
 
-```text
-AgentGraphInput
-  → LangGraph StateGraph
-      ├─ CASE_CREATED | RESULT_SUBMITTED
-      │    → Procedure → Info
-      │         ├─ confirmed fact 충돌 → CONFLICT
-      │         └─ 충돌 없음 → Support → Supervisor → Review
-      └─ SUPPORT_REFRESH
-           → Support → Supervisor → Review
+#### `CONFLICT`
 
-Review PASS                    → REVIEWED_PLAN
-Review REVISE                  → 지정 dependency부터 재실행
-구성요소 실패·재작업 상한 소진 → SAFE_FAILURE
-```
+서비스나 Agent 프로세스를 종료하지 않는다. 기존에 확정된 Case 사실과 새 입력이 충돌할 때 잘못 덮어쓰지 않도록 **현재 실행만** 끝내고 사용자 확인이 필요하다고 알린다.
 
-`CONFLICT`는 서비스 프로세스 종료가 아니다. confirmed Case fact와 새 명시적 입력이 충돌했을 때 잘못 덮어쓰지 않도록 **해당 run만** 끝내고 caller에게 확인 요청을 지시하는 typed 결과다. 사용자 확인 결과를 받아 적용·재실행하는 trigger와 node는 현재 없다.
+사용자 확인을 받아 충돌 값을 적용하고 다시 실행하는 경로는 아직 없다.
 
-현재 Graph 전체를 “항상 하나의 선형 순서”라고 표현하면 정확하지 않다. Info conflict와 구성요소 실패는 조기 종료되고, Review의 권고 target에 따라 재작업 시작점이 달라진다. 다만 정상 1차 경로와 재작업 시작점 선택은 Supervisor가 아니라 Graph 코드가 담당한다.
+#### `SAFE_FAILURE`
 
-### 목표와 현재 구현의 차이
+구성요소 오류, 검증 실패 또는 Review 재작업 상한 소진을 성공처럼 반환하지 않는 안전 실패 결과다.
 
-#### 전역 오케스트레이션
+#### `NEEDS_MORE_INFO`
 
-- **목표:** Supervisor가 필요한 Agent·Tool 선택
-- **현재:** Graph 코드가 trigger별 경로 선택
+최상위 오류가 아니라 Supervisor가 만드는 decision의 한 종류다. 현재 정보만으로 안전한 다음 행동을 정할 수 없을 때 Blocker와 사용자 질문을 만든다. Review를 통과하면 `REVIEWED_PLAN` 안에 포함된다.
 
-#### 최초 실행 위치
+## 3. 구성요소별 책임
 
-- **목표:** Supervisor가 Case를 해석한 뒤 선택 호출
-- **현재:** Procedure 또는 Support에서 시작
-
-#### 하위 구성요소 호출
-
-- **목표:** Supervisor에 Agent-as-Tool과 일반 Tool로 노출
-- **현재:** `AgentGraph`가 runner를 직접 보유·호출
-
-#### Review 재작업
-
-- **목표:** Supervisor가 문제와 상태를 보고 재호출 대상 결정
-- **현재:** Review 권고 target을 Graph가 재실행 경로로 변환
-
-#### 목표와 일치하는 부분
-
-- Decision variant별 Blocker·Next Action·질문은 Supervisor가 결정한다.
-- 모든 정상 Supervisor 초안은 Review를 반드시 거친다.
-
-#### 전체 실행 제한
-
-- **목표:** 실행기가 전체 run 예산을 강제
-- **현재:** 전체 wall-clock deadline은 없고 호출별 timeout과 LangGraph recursion limit만 존재
-
-#### 외부 저장
-
-- **목표와 현재 모두:** DB·인증·저장은 Agent 실행 경계 밖
-
-따라서 현재 `AgentGraph` 구현을 사용자가 확정한 최종 Agent 아키텍처로 설명하지 않는다. 목표 구조가 구현됐다고 판단하려면 Supervisor planning schema뿐 아니라 최초 호출 선택, Review 뒤 재계획, 호출 allowlist·횟수·전체 deadline을 강제하는 router와 회귀 테스트가 모두 실제 실행 경로에 추가돼야 한다.
-
-## 5. 구성요소별 책임
-
-### 5.1 실행 인프라
+### 3.1 실행기
 
 #### LangGraph `StateGraph`
 
-- **구분:** 외부 프레임워크 구성요소
-- **책임:** node와 조건부 edge 실행, state 전달
+- **구분:** 외부 프레임워크가 제공하는 그래프 구성 객체
+- **책임:** 실행 단계와 조건 분기 수행, 실행 상태 전달
 
 #### 프로젝트 클래스 `AgentGraph`
 
 - **구분:** 현재 standalone 실행기. 별도 Agent가 아님
-- **책임:** `StateGraph` 구성·compile, 입력 전달, 결과 수집, Review 재작업, 반복 상한, safe failure 처리
+- **책임:** `StateGraph` 구성·실행, 다음 호출 입력 구성, 결과 수집, Review 재작업, 반복 상한과 안전 실패 처리
+- **하지 않는 일:** 실제 사용자 Case 조회·저장, 인증, DB 동시성 제어
 
 #### `TraceSink`
 
-- **책임:** run/call/component/status/latency/attempt/error metadata 경계
-- **현재 상태:** 기본 구현은 `NullTraceSink`. model·token 값은 채우지 않고 cost 필드와 Langfuse 전송도 없음
+- **책임:** 실행 ID, 호출 ID, 구성요소, 상태, 지연 시간, 시도 횟수와 오류를 받을 수 있는 추적 경계
+- **현재 상태:** 기본값은 아무 곳에도 전송하지 않는 `NullTraceSink`다. model·token·비용을 기록하거나 Langfuse로 전송하지 않는다.
 
-### 5.2 Agent
-
-#### Supervisor Agent
-
-- **현재 책임:** Procedure·Info·Support 결과를 종합해 Decision, 변경 후보, grounded claim 초안 생성
-- **Decision 조건:** `ACTION`이면 Blocker·Next Action 각 1개. `NEEDS_MORE_INFO`이면 Blocker 1개·질문 1개 이상·Next Action 없음
-- **하지 않는 일:** 현재 하위 구성요소 선택·직접 호출, Evidence 생성, Review 우회, DB 저장
-- **도달 불가:** `CASE_COMPLETE`
+### 3.2 Agent
 
 #### 정보분석 Agent
 
-- **현재 책임:** 비식별 입력·snapshot·공식 절차 원문을 분석해 사실·진행 관측·canonical 절차 finding·충돌·누락·질문 후보 생성
-- **하지 않는 일:** 인터넷 조회, 웹 제목으로 canonical step 생성, Case 직접 변경
+- **받는 내용:** 비식별 사용자 입력, Case snapshot, 절차조회 결과
+- **반환하는 내용:** 사실 변경 후보, 절차 진행 관측, 공식 절차 분석 결과, 충돌, 누락 정보, 사용자 질문 후보
+- **하지 않는 일:** 인터넷 조회, 검색 제목으로 절차 ID 생성, Case 직접 변경
 
 #### 지원금 Agent
 
-- **현재 책임:** Case 사실과 미저장 fact 후보를 생성 시 deep-copy한 read-only `ReviewedSupportCatalog` snapshot에 비교
+- **받는 내용:** Case 사실, 아직 저장되지 않은 사실 후보, 생성 시 주입된 `ReviewedSupportCatalog`
+- **반환하는 내용:** 지원사업별 조건 비교, 추가로 확인할 Case 정보와 불확실성
 - **하지 않는 일:** raw 공고 수집, 실제 자격·선정·수급 확정, 신청 상태 변경
-- **일부 미연결:** `CHECK_SPECIFIC` 입력은 직접 호출 가능하지만 현재 Graph는 생성하지 않음
+- **현재 제한:** `CHECK_SPECIFIC` 입력은 처리할 수 있지만 `AgentGraph`가 해당 경로를 만들지 않는다.
 
-### 5.3 Tool
+#### Supervisor Agent
+
+- **받는 내용:** 현재 실행 경로에서 수집된 Procedure·Info·Support 결과와 Case snapshot. `SUPPORT_REFRESH`에서는 Support 결과만 받을 수 있음
+- **반환하는 내용:** 현재 decision, Blocker, Next Action, 사용자 질문, 검수 전 변경 후보와 근거가 연결된 문장
+- **하지 않는 일:** 현재 하위 Agent·Tool 선택, Evidence 생성, Review 우회, DB 저장
+- **현재 제한:** `CASE_COMPLETE` 타입은 있지만 정상 실행에서 도달할 수 없다.
+
+### 3.3 Tool
 
 #### 절차조회 Tool
 
-- **현재 책임:** 공식 URL 선택·발견, 안전한 원문 fetch, 문서·Evidence 정규화
-- **연결 상태:** 현재 Graph의 Procedure 단계에서 사용
-- **하지 않는 일:** 원문 의미 분석, Case 적용 여부·완료 여부·우선순위 결정
+- **받는 내용:** 폐업 절차 조회어, 기준일, 공식 출처만 허용하는 정책
+- **반환하는 내용:** 직접 가져온 공식 원문, 검색 처리 요약, 경고와 공식 문서 Evidence
+- **하지 않는 일:** 원문 의미 분석, 사용자에게 적용되는 절차 판단, 실제 완료 여부 판단
 
 #### Review Tool
 
-- **현재 책임:** source digest·provenance·snapshot·Supervisor 초안 독립 검수, `PASS/REVISE`와 이유 반환
-- **연결 상태:** Supervisor 초안 뒤 필수 사용
-- **하지 않는 일:** 새 근거 검색, 초안 직접 수정, 저장
+- **받는 내용:** Case snapshot, 선행 결과, 각 결과의 digest, Supervisor 초안
+- **반환하는 내용:** `PASS` 또는 `REVISE`, 판정 이유, 문제 위치, 누락 Evidence와 권고 재작업 대상
+- **하지 않는 일:** 새 근거 검색, 초안 직접 수정, 결과 저장
 
 #### 기업마당 공고조회 Tool
 
-- **현재 책임:** 기업마당 API에서 raw 공고 후보와 `OFFICIAL_API` Evidence 생성
-- **연결 상태:** 구현·테스트됐으나 현재 Graph·catalog 발행 흐름 미연결
+- **받는 내용:** 검색어와 최대 결과 수
+- **반환하는 내용:** 기업마당 API의 검수 전 raw 공고 후보와 공식 API Evidence
+- **현재 상태:** 독립 호출과 단위 테스트는 가능하지만 `AgentGraph`와 catalog 발행 흐름에는 연결되지 않음
 - **하지 않는 일:** raw 공고 자동 승인, 지원 자격 판정
 
-## 6. 주요 데이터 흐름
+## 4. 구성요소 사이의 데이터 전달
 
-### 6.1 절차조회 → 정보분석
+### 4.1 절차조회 결과를 정보분석에 전달
 
-```text
-ProcedureLookupInput
-  → 절차조회 Tool
-  → 직접 fetch한 공식 원문 documents + Evidence
-  → 실행기가 InfoAnalysisInput에 동일 call ID와 함께 주입
-  → 정보분석 Agent가 Case 문맥에서 procedure finding 생성
-```
+1. 절차조회 Tool이 공식 URL을 찾고 원문을 직접 가져온다.
+2. Tool은 원문과 Evidence가 들어 있는 `ProcedureLookupResult`를 반환한다.
+3. `AgentGraph`가 이 결과와 호출 ID를 `InfoAnalysisInput`에 넣는다.
+4. 정보분석 Agent가 사용자 Case 문맥에서 원문 의미를 분석한다.
 
-절차조회 Tool은 정보분석 Agent에서 파생되지 않으며 정보분석 Agent를 호출하지도 않는다. Tool은 원문을 조회하고, Agent가 그 원문을 분석한다. 검색 결과의 title·snippet은 URL 발견 metadata일 뿐 Evidence가 아니다.
+검색 결과의 제목과 짧은 설명은 URL을 찾는 데만 사용한다. 공식 원문을 직접 가져오기 전에는 Evidence가 아니다.
 
-### 6.2 지원금
+### 4.2 지원사업 공고와 지원금 판단을 분리
 
-```text
-현재 standalone: 합성 ReviewedSupportCatalog → 지원금 Agent
+- 현재 standalone 지원금 판단은 합성 `ReviewedSupportCatalog`를 사용한다.
+- 기업마당 Tool은 실제 API에서 raw 공고 후보를 가져올 수 있다.
+- raw 공고를 검수 catalog로 발행하는 과정이 없어 두 기능은 아직 연결하지 않았다.
 
-별도 구현: 기업마당 API → raw candidate + Evidence
-                              └─ 현재 catalog·Graph와 미연결
-```
+이 경계를 두는 이유는 공고 문구를 바로 자격조건으로 단정하거나 미검수 자료가 확정 결과로 승격되는 것을 막기 위해서다.
 
-raw 공고와 검수 catalog를 분리하는 이유는 공고 문구를 바로 Boolean 자격조건으로 오해하거나 미검수 자료가 확정 결과로 승격되는 것을 막기 위해서다.
+### 4.3 Supervisor 초안을 Review에 전달
 
-### 6.3 Supervisor → Review
+1. `AgentGraph`가 선행 결과에 호출 ID와 output digest를 묶는다.
+2. Supervisor가 선행 결과를 종합해 `SupervisorDraft`를 만든다.
+3. `AgentGraph`가 Case snapshot, 선행 결과와 초안을 하나의 `ReviewSubject`로 묶는다.
+4. Review Tool이 `PASS` 또는 `REVISE`와 이유를 반환한다.
+5. `PASS`이면 `AgentGraph`가 같은 검수 대상을 가리키는 `ReviewProof`를 만든다.
 
-```text
-Procedure·Info·Support 결과
-  → call ID + output digest가 있는 ReviewSourceResult
-  → SupervisorDraft
-  → snapshot + source results + draft를 묶은 ReviewSubject
-  → ReviewResult
-       ├─ PASS   → 실행기가 matching ReviewProof 생성
-       └─ REVISE → 이유·문제 위치·재작업 권고 대상 반환
-```
+초안이나 선행 결과가 바뀌면 digest도 달라지므로 이전 Review 결과를 재사용할 수 없다.
 
-`digest`는 Review가 확인한 정확한 객체가 이후 바뀌지 않았는지 검사하는 SHA-256 값이다. 초안이나 source가 바뀌면 새 subject와 새 Review가 필요하다.
+## 5. 목표 구조와 현재 구조의 차이
 
-## 7. 재시도와 재작업
+### 목표: Supervisor가 호출 계획을 결정
 
-의미 출력 재생성과 HTTP 전송 재시도는 서로 다른 층이다. 한 번의 의미 출력 시도 안에서도 일시적인 HTTP 실패가 재시도될 수 있으므로 비용과 호출량을 계산할 때 둘을 곱해 봐야 한다.
+- Supervisor가 Case를 먼저 해석하고 필요한 Agent·Tool만 선택한다.
+- 정보분석 Agent와 지원금 Agent는 Supervisor가 호출할 수 있는 하위 Agent로 제공한다.
+- 절차조회 Tool은 필요할 때 선택한다.
+- Supervisor가 결과 충분성, 사용자 질문과 재호출 대상을 결정한다.
+- LangGraph 실행기는 허용된 구성요소, 호출 횟수와 전체 실행 시간 안에서 계획을 수행한다.
+- 모든 정상 초안은 Review Tool을 반드시 거친다.
 
-### 구성요소별 의미 출력
+### 현재: `AgentGraph` 코드가 실행 경로를 결정
 
-- **Info:** 기본·최대 총 3회. provider schema 변환 뒤 semantic·grounding 검증 실패 시 새 의미 출력을 요청한다.
-- **Support:** 고정 총 3회. catalog ID·조건·Evidence semantic 검증 실패 시 새 의미 출력을 요청한다.
-- **Supervisor:** 기본·최대 총 3회. 모두 실패해도 Info의 안전한 missing-field 질문이 있으면 결정론적 `NEEDS_MORE_INFO` fallback을 만들 수 있다.
-- **Review:** 기본 총 2회, 허용 1~3회. Review 출력 계약 실패 시 새 의미 출력을 요청한다.
+- Case 생성·결과 제출은 절차조회부터 시작한다.
+- 지원금 재평가는 지원금 Agent부터 시작한다.
+- Review가 `REVISE`를 반환하면 `AgentGraph`가 권고 대상을 재실행 경로로 바꾼다.
+- Supervisor는 Blocker와 Next Action 초안은 만들지만 호출 계획은 만들지 않는다.
+- 호출별 timeout과 LangGraph 반복 제한은 있지만 전체 실행 시간 제한은 없다.
 
-### 외부 요청 재시도
+따라서 현재 구현을 목표 아키텍처가 완료된 상태로 설명하지 않는다. 목표 완료에는 Supervisor planning schema, 제한된 router, Review 뒤 재계획, 전체 실행 시간 제한과 회귀 테스트가 모두 필요하다.
 
-- **공통 LLM HTTP:** 기본 재시도 2회, 허용 0~4회. 한 provider 요청당 기본 최대 3번 HTTP를 시도하고 호출별 기본 timeout은 45초다.
-- **Review 전용 provider:** 의미 출력마다 기본 재시도 1회, 허용 0~2회. 한 의미 출력당 기본 최대 2번 provider 요청을 시도한다.
-- **Procedure 검색·원문 fetch:** 각 요청 기본 재시도 1회, 허용 0~4회. 요청별 기본 timeout은 8초, 전체 lookup 기본 timeout은 60초다.
+## 6. 재시도와 재작업
 
-### Graph 상한
+LLM이 의미상 잘못된 결과를 내서 다시 생성하는 것과 HTTP 요청 자체가 실패해 다시 전송하는 것은 별도다.
 
-- **Review 재작업:** 수정 최대 2회. 최초 Review를 포함한 총 Review round는 최대 3회다.
-- **전체 Agent run:** LangGraph recursion limit은 32다. 현재 전체 wall-clock deadline은 없고 호출별 timeout만 존재한다.
+### 의미 결과 재생성
 
-Review가 `REVISE`를 반환하면 현재 실행기는 다음 순서에서 가장 앞선 권고 target부터 재실행한다.
+- **정보분석:** 최초 시도를 포함해 최대 3회
+- **지원금:** 최초 시도를 포함해 총 3회
+- **Supervisor:** 최초 시도를 포함해 최대 3회. 모두 실패해도 안전한 누락 정보 질문이 있으면 결정론적 `NEEDS_MORE_INFO`를 만들 수 있음
+- **Review:** 기본 총 2회, 설정 가능 범위 1~3회
 
-- **Procedure 문제:** Procedure → Info → Support → Supervisor → Review
-- **Info 문제:** Info → Support → Supervisor → Review
-- **Support 문제:** Support → Supervisor → Review
-- **Supervisor 문제 또는 target 없음:** Supervisor → Review
+### 외부 요청 재전송
 
-상한 소진이나 예외는 성공처럼 포장하지 않고 `SAFE_FAILURE`로 반환한다.
+- **공통 LLM 요청:** 기본 재시도 2회, 설정 가능 범위 0~4회, 요청별 기본 timeout 45초
+- **Review provider 요청:** 의미 결과 한 번마다 기본 재시도 1회, 설정 가능 범위 0~2회
+- **절차 검색·원문 조회:** 요청마다 기본 재시도 1회, 설정 가능 범위 0~4회, 요청별 기본 timeout 8초, 전체 조회 기본 timeout 60초
 
-## 8. 현재 코드가 강제하는 안전 조건
+### Review 재작업
 
-- public Pydantic schema는 주요 scalar에 `StrictStr`·`StrictInt`·`StrictBool`을 사용하고, 선언되지 않은 field와 timezone 없는 datetime을 거부한다.
-- UUID·시각 같은 runtime 값은 LLM 출력에서 제외하고 코드가 주입한다.
-- Case snapshot은 실행 중 read-only로 취급하고 시작·종료 digest를 비교한다.
-- LLM 출력은 provider 형식 검증 뒤 구성요소별 의미·provenance 검증을 다시 거친다.
-- unknown/stale Evidence로 확정형 기한·자격·법률·절차 claim을 만들지 않는다.
-- 웹 원문만으로 실제 절차 진행을 `COMPLETED`로 바꾸지 않는다.
-- 사용자 입력이나 검색 결과 제목으로 canonical ID를 만들지 않는다.
-- Review되지 않은 초안과 mutation은 `REVIEWED_PLAN`으로 반환하지 않는다.
-- 외부 문서와 사용자 입력은 실행 명령이 아니라 untrusted data로 취급한다.
+수정은 최대 2회이며 최초 Review를 포함한 총 Review 횟수는 최대 3회다.
 
-별도 업무 Rule 엔진은 두지 않는다. 업무 판단은 Agent와 Review가 하되, ID·schema·digest·provenance·호출 권한·반복 상한처럼 결정적으로 검증 가능한 조건은 코드가 강제한다.
+- Procedure 문제: Procedure부터 다시 실행
+- Info 문제: Info부터 다시 실행
+- Support 문제: Support부터 다시 실행
+- Supervisor 문제 또는 대상 없음: Supervisor부터 다시 실행
 
-## 9. AI 후속 구현
+각 경로는 필요한 뒤 단계를 다시 거쳐 Review로 돌아간다. 상한 소진이나 예외는 `SAFE_FAILURE`로 반환한다.
 
-### 9.1 Supervisor 주도 오케스트레이션
+## 7. 현재 코드가 강제하는 안전 조건
 
-- Supervisor planning 입출력 schema를 정의한다.
-- 현재 실행 상태에서 필요한 Agent·Tool과 호출 이유를 Supervisor가 선택하게 한다.
-- LangGraph router는 허용 dependency, 호출 횟수, deadline 안에서만 계획을 실행한다.
-- Review `REVISE` 뒤 재호출 대상 최종 선택도 Supervisor 책임으로 옮긴다.
-- 고정 route와 동적 route의 정상·거부·loop-limit 회귀 테스트를 만든다.
+- 선언되지 않은 입력 필드와 timezone 없는 시각을 거부한다.
+- 숫자·문자열·boolean의 잘못된 암시적 변환을 제한한다.
+- UUID와 생성 시각처럼 코드가 책임지는 값은 LLM이 만들지 않는다.
+- 한 실행 안에서 Case snapshot이 바뀌었는지 digest로 확인한다.
+- LLM 형식 검증 뒤 의미와 출처 연결을 다시 검증한다.
+- 최신성이 오래됐거나 확인되지 않은 Evidence로 기한·자격·법률·절차를 확정하지 않는다.
+- 공식 웹 원문만으로 사용자의 실제 절차 진행을 `COMPLETED`로 바꾸지 않는다.
+- 사용자 입력이나 검색 결과 제목으로 새로운 canonical ID를 만들지 않는다.
+- Review를 통과하지 않은 초안과 변경 후보를 `REVIEWED_PLAN`으로 반환하지 않는다.
+- 외부 문서와 사용자 입력을 실행 명령이 아니라 검증이 필요한 데이터로 취급한다.
 
-### 9.2 공식 데이터·crawler·RAG
+업무 판단은 Agent와 Review가 담당한다. 반면 ID, schema, digest, 출처 연결, 호출 권한과 반복 상한처럼 코드로 확실히 검사할 수 있는 조건은 코드가 강제한다.
 
-- 승인된 공식 출처만 bounded API connector/crawler로 수집한다.
-- parser·정규화·chunking 뒤 source version·hash·locator를 보존한다.
-- 검수 corpus와 immutable `ReviewedSupportCatalog`를 발행한다.
-- Chroma index·official-only retriever·Evidence adapter를 연결하고 retrieval 평가를 통과시킨다.
+## 8. 아직 구현되지 않았거나 연결되지 않은 것
 
-구현 순서와 완료 조건은 [`agent-official-data-source-strategy.md`](./agent-official-data-source-strategy.md)를 따른다.
+### 구현됐지만 전체 실행에 미연결
 
-### 9.3 Langfuse 관측성
+- 기업마당 raw 공고조회 Tool의 독립 호출
+- 지원금 Agent의 `CHECK_SPECIFIC` 입력 처리
 
-- 현재 `TraceSink` 경계에 Langfuse adapter를 구현한다.
-- prompt·사용자 입력·credential masking과 retention·access policy를 먼저 확정한다.
-- 실제 token·cost·latency·오류·Review 반송 trace 전송과 테스트가 끝난 뒤에만 사용 중으로 표시한다.
+### 타입만 있거나 현재 도달할 수 없음
 
-## 10. 완료 판정 기준
+- `ComponentRequest`, `ComponentSuccess`, `ComponentFailure`
+- `CASE_COMPLETE`
+- `CaseStatusChangeCandidate`
+- 사용자 확인을 반영하는 `CONFIRMED_CONFLICT`
 
-- **Agent 내부 계약:** 코드, validator, contract test, 실제 호출 경로가 모두 존재해야 한다.
-- **외부 API adapter:** 코드와 테스트가 있고 필요한 credential로 제한 실측해야 한다. HTTP 200과 실제 Case 연결은 별도로 기록한다.
-- **crawler/RAG:** 수집·파싱·버전·검수·index·retrieval·Evidence 연결과 평가를 모두 통과해야 한다.
-- **Supervisor 오케스트레이션:** planning schema, bounded router, Review 재계획 경로와 회귀 테스트가 모두 필요하다.
-- **Langfuse:** adapter, masking 정책, token·cost·latency 실전송 검증이 모두 필요하다.
-- **실제 사용자 Case 연동:** 인증된 read/write, 동시성 보호, 검수 결과 저장과 read-back 통합 검증이 필요하다. 현재 AI standalone 범위 밖이다.
+### 후속 AI 구현 대상
 
-## 11. 구현 근거
+- 기업마당 raw 공고 검수, `ReviewedSupportCatalog` 발행과 `AgentGraph` 연결
+- `AgentGraph`가 `CHECK_SPECIFIC` 입력을 만드는 실행 경로
+- Supervisor 주도 동적 호출 계획과 제한된 router
+- 사용자 확인 후 conflict 재실행
+- 승인된 공식 출처 crawler와 RAG
+- 전체 실행 시간 제한
+- Langfuse token·비용·지연 시간 전송
 
-- **LangGraph import, `AgentGraph` 클래스, node·조건부 edge:** [`graph.py`](../backend/app/agent/graph.py)
-- **실행 state:** [`state.py`](../backend/app/agent/state.py)
-- **Agent/Tool 입출력과 component enum:** [`schemas.py`](../backend/app/agent/schemas.py)
-- **Supervisor 현재 책임:** [`supervisor/`](../backend/app/agent/supervisor/)
-- **정보분석·지원금 책임:** [`info_agent/`](../backend/app/agent/info_agent/), [`support_agent/`](../backend/app/agent/support_agent/)
-- **절차조회·Review 책임:** [`procedure_tool/`](../backend/app/agent/procedure_tool/), [`review_tool/`](../backend/app/agent/review_tool/)
-- **standalone fixture·진입점:** [`fixtures.py`](../backend/app/agent/fixtures.py), [`cli.py`](../backend/app/agent/cli.py)
-- **metadata trace 경계:** [`tracing.py`](../backend/app/agent/tracing.py)
-- **현재 동작 검증:** [`backend/tests/agent/`](../backend/tests/agent/)
+crawler·RAG의 단계와 완료 조건은 [`agent-official-data-source-strategy.md`](./agent-official-data-source-strategy.md)를 따른다.
 
-현재 구현 사실은 코드와 테스트가 Markdown보다 우선한다. 목표 구조는 현재 구현 상태와 섞어 완료로 표시하지 않는다.
+## 9. 완료라고 판단하는 기준
+
+- **Agent 공개 호출 계약:** 코드, validator, 계약 테스트와 실제 호출 경로가 모두 있어야 함
+- **외부 API adapter:** 코드·테스트뿐 아니라 필요한 credential을 사용한 제한 실측이 있어야 함
+- **crawler·RAG:** 수집, 파싱, version, 검수, index, 검색, Evidence 연결과 평가를 모두 통과해야 함
+- **Supervisor 오케스트레이션:** planning schema, 제한된 router, Review 재계획과 회귀 테스트가 있어야 함
+- **Langfuse:** adapter, masking 정책과 실제 token·비용·지연 시간 전송 검증이 있어야 함
+- **실제 사용자 Case 연동:** 인증된 읽기·쓰기, 동시성 보호, 저장과 재조회 통합 검증이 있어야 함
+
+HTTP 200, 검색 성공, Agent 실행 성공, 실제 Case 연동 성공은 서로 다른 완료 조건으로 기록한다.
+
+## 10. 관련 문서와 구현 근거
+
+### 관련 문서
+
+- **Agent·Tool의 정확한 입력·출력:** [`agent-tool-io-schema.md`](./agent-tool-io-schema.md)
+- **standalone 실행법과 실제·합성 데이터:** [`agent-standalone-runtime-requirements.md`](./agent-standalone-runtime-requirements.md)
+- **공식 API, crawler, RAG:** [`agent-official-data-source-strategy.md`](./agent-official-data-source-strategy.md)
+- **외부 연동 공동 검토 요청:** [`be-agent-integration-requirements.md`](./be-agent-integration-requirements.md)
+- **라이브러리 선언과 실제 사용 여부:** [`tech-stack.md`](./tech-stack.md)
+
+`interface-spec.md`와 `schema/schema_table.md`는 이전 링크를 위한 안내 파일이며 같은 계약을 다시 정의하지 않는다.
+
+### 구현 근거
+
+- **LangGraph 실행기:** [`graph.py`](../backend/app/agent/graph.py), [`state.py`](../backend/app/agent/state.py)
+- **공통 schema와 결과 타입:** [`schemas.py`](../backend/app/agent/schemas.py)
+- **Agent:** [`info_agent/`](../backend/app/agent/info_agent/), [`support_agent/`](../backend/app/agent/support_agent/), [`supervisor/`](../backend/app/agent/supervisor/)
+- **Tool:** [`procedure_tool/`](../backend/app/agent/procedure_tool/), [`review_tool/`](../backend/app/agent/review_tool/)
+- **standalone fixture와 실행 진입점:** [`fixtures.py`](../backend/app/agent/fixtures.py), [`cli.py`](../backend/app/agent/cli.py)
+- **추적 경계:** [`tracing.py`](../backend/app/agent/tracing.py)
+- **테스트:** [`backend/tests/agent/`](../backend/tests/agent/)
+
+현재 구현 사실은 코드와 테스트가 Markdown보다 우선한다. 목표 구조를 현재 구현 완료 상태와 섞어 표시하지 않는다.
