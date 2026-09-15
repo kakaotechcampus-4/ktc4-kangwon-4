@@ -37,14 +37,21 @@ Case 생성 → Blocker 1개 판정 → Next Action 1개 제시
    요청이 성공하기 전에 화면 값을 미리 바꾸지 않는다(낙관적 업데이트 금지).
    후보(candidate)와 `CONFLICT`는 확정 상태로 그리지 않는다.
 
-3. **후보와 충돌 결과는 사용자 확인을 거친 뒤 반영한다.**
+3. **충돌(`CONFLICT`)은 사용자 확인을 거친 뒤 반영한다.**
    확인 전에는 Case 화면의 값을 바꾸지 않고, 기존 값과 새 값을 함께 보여준다.
-   *(어떤 입력까지 확인을 받을지는 아직 팀에서 확정되지 않았다. 확정 전까지는
-   위와 같이 보수적으로 — 모든 후보에 확인을 받는 쪽으로 — 처리한다.)*
+   어느 쪽도 기본 선택으로 두지 않는다.
 
-4. **`result` 6종을 전부 분기한다. 미처리 분기를 남기지 않는다.**
-   `UPDATED` / `NO_CHANGE` / `NEEDS_MORE_INFO` / `CONFLICT` / `REPLAN_FAILED` / `CASE_NOT_FOUND`
+   *(정상 경로에는 확인 단계가 없다. `UPDATED` 응답은 서버가 이미 반영을 마친
+   결과이므로 프론트가 되물을 수 있는 시점이 아니다. "후보 제시 → 확인 → 반영"
+   2단계로 갈지는 BE 계약 확인이 필요하다 — `docs/interface-spec.md` §5 참고.)*
+
+4. **`result` 7종을 전부 분기한다. 미처리 분기를 남기지 않는다.**
+   `UPDATED` / `NO_CHANGE` / `NEEDS_MORE_INFO` / `CONFLICT` /
+   `INVALID_TRANSITION` / `REPLAN_FAILED` / `CASE_NOT_FOUND`
    응답 타입은 discriminated union으로 정의해 컴파일 단계에서 누락이 잡히게 한다.
+
+   **`res.ok`가 아니라 본문의 `result`로 분기한다.** 검증 실패도 HTTP 200으로
+   오고, 404는 `CASE_NOT_FOUND`뿐이다.
 
 5. **한 화면에서 강하게 강조하는 것은 Next Action 하나다.**
    Blocker는 그 이유를 설명하는 보조 정보로 둔다. 주요 버튼도 화면당 하나다.
