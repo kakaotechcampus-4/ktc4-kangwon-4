@@ -15,9 +15,8 @@ config.py
     python config.py
 ─────────────────────────────────────────────────────────────
 """
-from __future__ import annotations
 
-from typing import Optional
+from __future__ import annotations
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -31,41 +30,50 @@ class Settings(BaseSettings):
     )
 
     # 1. LLM / Foundation Model (mlapi.run 프록시 경유, OpenAI 직접 호출 아님)
-    proxy_token: Optional[str] = Field(default=None, alias="PROXY_TOKEN")
-    chat_proxy_url: Optional[str] = Field(default=None, alias="CHAT_PROXY_URL")
-    embedding_proxy_url: Optional[str] = Field(default=None, alias="EMBEDDING_PROXY_URL")
-    openai_model: Optional[str] = Field(default="openai/gpt-5.6-luna", alias="OPENAI_MODEL")
-    # GPT-5.6 Luna가 지원하는 값: none / low / medium / high. 각 Agent 노드가 "bounded 단일 LLM 호출"이라
-    # 기본은 low로 두고, 필요한 노드만 호출 시점에 override.
-    openai_reasoning_effort: Optional[str] = Field(default="low", alias="OPENAI_REASONING_EFFORT")
-    openai_embedding_model: Optional[str] = Field(
+    proxy_token: str | None = Field(default=None, alias="PROXY_TOKEN")
+    chat_proxy_url: str | None = Field(default=None, alias="CHAT_PROXY_URL")
+    embedding_proxy_url: str | None = Field(default=None, alias="EMBEDDING_PROXY_URL")
+    openai_model: str | None = Field(
+        default="openai/gpt-4.1-mini", alias="OPENAI_MODEL"
+    )
+    # 현재 팀 endpoint의 gpt-4.1-mini에는 reasoning_effort를 보내지 않습니다.
+    # 이를 지원하는 endpoint/model로 바꿀 때만 명시합니다.
+    openai_reasoning_effort: str | None = Field(
+        default=None, alias="OPENAI_REASONING_EFFORT"
+    )
+    openai_embedding_model: str | None = Field(
         default="openai/text-embedding-3-small", alias="OPENAI_EMBEDDING_MODEL"
     )
 
     # 2. 공용 (정보분석 · 행정 · 철거 · 지원금)
-    data_go_kr_service_key: Optional[str] = Field(default=None, alias="DATA_GO_KR_SERVICE_KEY")
+    data_go_kr_service_key: str | None = Field(
+        default=None, alias="DATA_GO_KR_SERVICE_KEY"
+    )
 
     # 3. 지원금
-    bizinfo_api_key: Optional[str] = Field(default=None, alias="BIZINFO_API_KEY")
+    bizinfo_api_key: str | None = Field(default=None, alias="BIZINFO_API_KEY")
 
     # 4. 인프라
-    database_url: Optional[str] = Field(default=None, alias="DATABASE_URL")
-    redis_url: Optional[str] = Field(default=None, alias="REDIS_URL")
+    database_url: str | None = Field(default=None, alias="DATABASE_URL")
+    redis_url: str | None = Field(default=None, alias="REDIS_URL")
 
     # 5. 인증 — 카카오 OAuth + 자체 발급 JWT (pyjwt, 2026-09 BE 확정. BE기술스택.html §1 참고)
-    kakao_client_id: Optional[str] = Field(default=None, alias="KAKAO_CLIENT_ID")
-    kakao_client_secret: Optional[str] = Field(default=None, alias="KAKAO_CLIENT_SECRET")
-    kakao_redirect_uri: Optional[str] = Field(default=None, alias="KAKAO_REDIRECT_URI")
-    jwt_secret_key: Optional[str] = Field(default=None, alias="JWT_SECRET_KEY")
+    kakao_client_id: str | None = Field(default=None, alias="KAKAO_CLIENT_ID")
+    kakao_client_secret: str | None = Field(default=None, alias="KAKAO_CLIENT_SECRET")
+    kakao_redirect_uri: str | None = Field(default=None, alias="KAKAO_REDIRECT_URI")
+    jwt_secret_key: str | None = Field(default=None, alias="JWT_SECRET_KEY")
 
     # 6. Observability — Langfuse (셀프호스팅, EC2에 함께 배포)
-    langfuse_public_key: Optional[str] = Field(default=None, alias="LANGFUSE_PUBLIC_KEY")
-    langfuse_secret_key: Optional[str] = Field(default=None, alias="LANGFUSE_SECRET_KEY")
-    langfuse_host: Optional[str] = Field(default="http://localhost:3000", alias="LANGFUSE_HOST")
+    langfuse_public_key: str | None = Field(default=None, alias="LANGFUSE_PUBLIC_KEY")
+    langfuse_secret_key: str | None = Field(default=None, alias="LANGFUSE_SECRET_KEY")
+    langfuse_host: str | None = Field(
+        default="http://localhost:3000", alias="LANGFUSE_HOST"
+    )
 
 
-# agent별로 반드시 있어야 동작하는 키 매핑
-# (여기 없는 키는 전부 선택사항: 없어도 서버는 뜨지만 해당 기능만 비활성화됨)
+# 독립적으로 실행하는 현재 경로별 필수 키 매핑입니다.
+# 공식 절차 registry는 credential 없이 동작하고, data.go.kr/Law/Kakao/Google 키는
+# 해당 resolver 또는 fallback을 실제 연결할 때만 필요합니다.
 # CODEF/POPBILL(세무), WORK24(재취업·재창업), UPSTAGE(OCR), LANGSMITH, ANTHROPIC_API_KEY,
 # VOYAGE_API_KEY는 삭제함.
 # - CODEF·POPBILL: 유료 API 배제 원칙에 따라 애초에 신청하지 않기로 함
@@ -76,15 +84,17 @@ class Settings(BaseSettings):
 # - ANTHROPIC_API_KEY·VOYAGE_API_KEY: LLM/임베딩 모두 OpenAI(mlapi.run 경유)로 확정되어
 #   (docs/tech-stack.md §3) 실제로 어느 코드에서도 참조하지 않는 죽은 설정이라 제거(2026-09)
 REQUIRED_BY_AGENT: dict[str, list[str]] = {
-    "LLM (전체 공통)": ["proxy_token", "chat_proxy_url"],
-    "정보분석 / 행정": ["data_go_kr_service_key"],
-    "철거 보조": ["data_go_kr_service_key"],
-    "지원금": ["bizinfo_api_key", "data_go_kr_service_key"],
-    "인증 (카카오 로그인)": ["kakao_client_id", "kakao_client_secret", "jwt_secret_key"],
+    "Standalone Agent Graph": ["proxy_token", "chat_proxy_url"],
+    "지원 공고 discovery": ["bizinfo_api_key"],
+    "인증 (카카오 로그인)": [
+        "kakao_client_id",
+        "kakao_client_secret",
+        "jwt_secret_key",
+    ],
 }
 
 
-def check_settings(s: "Settings") -> bool:
+def check_settings(s: Settings) -> bool:
     """agent별 필수 키가 채워졌는지 콘솔에 출력. 전부 채워졌으면 True 반환."""
     print("\n[.env 설정 확인]")
     all_ok = True
