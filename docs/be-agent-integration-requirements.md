@@ -4,13 +4,15 @@
 >
 > 현재 상태: **공동 계약 미승인 · BE 연동 미구현**
 >
-> 공동 확정된 DTO, endpoint, DB 계약: **0개**
+> Agent 외부 연동에 공동 확정된 DTO, endpoint, persistence mapping: **0개**
 
 ## 먼저 읽어주세요
 
 현재 AI에는 standalone Agent 코어와 AI 내부 schema가 있습니다. 하지만 실제 사용자 Case를 읽고 Agent 결과를 DB에 저장하는 BE 연동은 아직 없습니다.
 
 이 문서는 BE에 전달할 **요청서이자 공동 검토안**입니다. 바로 구현해야 하는 확정 명세가 아닙니다.
+
+`develop`에는 DB 팀의 현재 설계 문서인 [`schema/schema_table.md`](./schema/schema_table.md)와 [`schema/ERD.png`](./schema/ERD.png)가 있습니다. 이 요청서는 해당 설계를 폐기하거나 대신하지 않습니다. DB 설계와 AI 내부 schema 사이의 이름·enum·version 차이를 실제 연동 전에 함께 닫기 위한 문서입니다.
 
 ### BE에게 요청하는 것
 
@@ -21,9 +23,10 @@
 
 ### 이 문서의 사용 방법
 
-- 다른 문서의 예전 JSON이나 DB 초안을 조합해 계약을 추정하지 맙니다.
+- AI의 내부 JSON과 DB 설계 문서를 임의로 조합해 외부 연동 계약을 추정하지 맙니다.
 - 먼저 핵심 결정을 합의한 뒤, BE가 생성한 DTO·OpenAPI·migration을 실제 구현 기준으로 삼습니다.
 - AI 내부 schema의 상세는 [`agent-tool-io-schema.md`](./agent-tool-io-schema.md), AI 실행 구조는 [`architecture.md`](./architecture.md)에서 확인합니다.
+- DB 팀의 현재 설계는 [`schema/schema_table.md`](./schema/schema_table.md)와 [`schema/ERD.png`](./schema/ERD.png)에서 확인합니다.
 - 공식 데이터, 크롤링, RAG 계획은 [`agent-official-data-source-strategy.md`](./agent-official-data-source-strategy.md)에서 확인합니다.
 
 ## 0. 이 문서의 상태
@@ -48,7 +51,7 @@
 
 ### 아직 공동 확정된 계약
 
-현재는 **0개**다. 승인자, 승인일, 계약 version과 근거 PR 또는 ADR이 모두 기록돼야 공동 확정으로 본다.
+Agent 외부 연동용 shared DTO, endpoint와 persistence mapping은 현재 **0개**다. DB 설계 문서가 `develop`에 병합된 사실과, AI가 그 DB를 읽고 쓰는 연동 계약이 확정된 것은 서로 다른 상태다. 승인자, 승인일, 계약 version과 근거 PR 또는 ADR이 모두 기록돼야 공동 확정으로 본다.
 
 특정 날짜에 외부 API 호출을 성공한 기록은 해당 원천에 접근할 수 있었다는 뜻일 뿐, 실제 Case 연동 완료를 뜻하지 않는다.
 
@@ -197,9 +200,9 @@ BE는 Agent 하위 구성요소를 개별 HTTP endpoint로 만들 필요가 없�
 ### Case 값과 절차 단계
 
 - **미확인과 삭제 구분:** `UNKNOWN`은 `value=null`, 명시적 삭제는 별도 operation으로 표현하는 안을 제안한다. `null`, 미확인, 해당 없음과 삭제를 어떻게 구분할지 정해야 한다.
-- **공식 field와 enum:** version이 있는 registry와 이전 값 mapping을 제안한다. v1 field·enum과 폐기 값을 정해야 한다.
+- **공식 field와 enum:** DB 설계와 AI 내부 값이 현재 다르다. 예를 들어 DB의 `lease_status`는 `LEASED_PAID | LEASED_FREE | OWNED`, AI는 `ACTIVE | TERMINATION_NOTIFIED | TERMINATED | OWNED`를 사용한다. DB의 `restoration_scope`는 `UNKNOWN | PARTIAL | FULL | NOT_REQUIRED`, AI는 `AGREEMENT_REQUIRED | TENANT_ALL | LANDLORD_ALL | SHARED | NOT_REQUIRED`를 사용한다. 어느 값을 공통 기준으로 삼을지와 이전 값 mapping을 합의해야 하며, adapter에서 임의 변환하면 안 된다.
 - **Case fact 범위:** 지원 판단에 필요한 사업체 형태, 건축물 용도와 과거 지원 이력 등의 포함 범위와 저장 원천을 정해야 한다.
-- **절차 registry:** 변하지 않는 ID·code, 표시명, 별칭과 registry version을 제안한다. 소유자, 적용 조건과 변경·폐기 정책을 정해야 한다.
+- **절차 registry:** AI 입력에는 변하지 않는 ID·code뿐 아니라 사용자에게 보여줄 `stepName`, 발화 매칭용 alias와 registry version이 필요하다. 현재 DB의 `PROCEDURE_STEP`에는 `step_code`는 있지만 표시명·alias가 없으므로 컬럼, 별도 registry 또는 resolver 중 제공 방식을 정해야 한다. 소유자, 적용 조건과 변경·폐기 정책도 함께 합의해야 한다.
 - **진행 상태 초기화:** Case에 적용되는 모든 절차 단계를 한 transaction에서 만들고 개수를 검증하는 방식을 제안한다. 초기화 시점과 registry 변경 시 처리를 정해야 한다.
 
 ### 지원사업과 Evidence
@@ -391,11 +394,11 @@ Case route는 항상 BE가 token과 Case owner를 검증한 뒤 snapshot을 조�
 
 ## 7. persistence 논리 요구사항
 
-이 절은 **논리 불변식**이며 물리 테이블·컬럼·ORM·DDL을 제안하지 않는다. BE가 기술 스택과 현재 데이터에 맞는 data dictionary와 migration으로 구현안을 제시해야 한다.
+이 절은 AI 연동에 필요한 **논리 불변식과 현재 DB 설계의 확인 항목**이다. [`schema/schema_table.md`](./schema/schema_table.md)와 `ERD.png`의 테이블·컬럼을 덮어쓰는 물리 설계가 아니다. 실제 migration·ORM이 생기기 전에는 DB 문서와 아래 요구사항의 차이를 함께 확인해야 한다.
 
-1. 핵심 업무 aggregate의 논리명은 `CASES`로 사용한다. `CASE`는 MySQL keyword와 충돌할 수 있으므로 새 schema·query·문서에서 사용하지 않는다. 정확한 물리 rename 절차는 BE migration에서 정한다.
+1. 현재 DB 설계 문서는 테이블명을 `CASE`로 사용한다. `CASE`는 MySQL keyword이므로 `CASES`로 바꿀지, quoting 규칙을 강제할지 migration 전에 결정해야 한다. AI adapter는 결정된 물리명에 맞추되 내부 `case_id` 의미는 유지한다.
 2. Case의 변경 가능한 상태에는 단조 증가하는 version 또는 동등하게 강한 field-level CAS가 있어야 한다. 저장은 snapshot의 `expectedCaseVersion`과 현재 상태가 일치할 때만 성공한다.
-3. Case별 canonical procedure step의 current progress는 `(caseId, procedureStepId)`당 **최대 1개**여야 한다. DB unique constraint 또는 동등한 강제 수단이 필요하다.
+3. Case별 canonical procedure step의 current progress는 `(caseId, procedureStepId)`당 **최대 1개**여야 한다. 현재 DB 문서는 `UNIQUE (case_id, procedure_step_id)`를 명시했으며, 실제 migration에도 같은 제약이 포함되는지 검증해야 한다.
 4. 최대 1개만으로는 **적용 단계마다 정확히 1개**를 보장하지 못한다. Case 생성 또는 registry 적용 transaction에서 적용 단계 집합을 고정하고 전부 초기화한 뒤 예상 개수와 실제 개수를 검증하며, 하나라도 실패하면 Case/progress 초기화를 전부 rollback한다.
 5. current progress와 progress history는 분리한다. current는 덮어쓰되 상태 변경마다 append-only history를 남긴다. 인터넷 조회 결과는 progress identity나 row 존재를 만들지 않는다.
 6. Case field history는 Review·guardrail 뒤 **실제로 반영된 변경만** before/after, canonical field, source, reason, resulting Case version과 함께 append한다. 후보, stale write, no-op, rollback은 history를 남기지 않는다.
@@ -523,6 +526,7 @@ P0 합의 뒤 BE PR에는 다음이 함께 있어야 한다.
 - **현재 구조와 목표 구조:** [`architecture.md`](./architecture.md)
 - **Agent·Tool의 정확한 공개 호출 계약:** [`agent-tool-io-schema.md`](./agent-tool-io-schema.md)
 - **공식 API 관찰과 crawler·RAG 계획:** [`agent-official-data-source-strategy.md`](./agent-official-data-source-strategy.md)
-- **DB 리뷰 의견:** `CASES` 명명, 절차 진행 row 개수, Case field 이력, 완료 상태와 Blocker의 정합성 요구
+- **DB 팀의 현재 설계:** [`schema/schema_table.md`](./schema/schema_table.md), [`schema/ERD.png`](./schema/ERD.png)
+- **남은 연동 차이:** `CASE` 예약어 처리, DB·AI enum mapping, Case version/CAS, Case field 이력, 완료 상태와 Blocker의 정합성
 
 이 문서가 확정하는 것은 **구현 방향이 아니라 검토할 단일 계약안**이다. 승인 전 공동 계약은 0개이며, 실제 BE migration·OpenAPI·통합 test가 생기기 전에는 생산 연동 완료로 보고하지 않는다.

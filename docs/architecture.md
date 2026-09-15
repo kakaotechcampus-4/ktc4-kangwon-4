@@ -272,8 +272,9 @@ HTTP 200, 검색 성공, Agent 실행 성공, 실제 Case 연동 성공은 서�
 - **공식 API, crawler, RAG:** [`agent-official-data-source-strategy.md`](./agent-official-data-source-strategy.md)
 - **외부 연동 공동 검토 요청:** [`be-agent-integration-requirements.md`](./be-agent-integration-requirements.md)
 - **라이브러리 선언과 실제 사용 여부:** [`tech-stack.md`](./tech-stack.md)
+- **DB 팀의 현재 스키마 설계:** [`schema/schema_table.md`](./schema/schema_table.md), [`schema/ERD.png`](./schema/ERD.png)
 
-`interface-spec.md`와 `schema/schema_table.md`는 이전 링크를 위한 안내 파일이며 같은 계약을 다시 정의하지 않는다.
+`interface-spec.md`는 이전 링크를 위한 안내 파일이다. `schema/schema_table.md`와 `ERD.png`는 `develop`에서 관리하는 DB 설계 문서이며, 실제 migration·ORM 구현 완료나 AI 내부 schema와의 필드 mapping 확정을 뜻하지 않는다. AI와 DB 사이의 차이는 외부 연동 공동 검토 요청서에서 합의한다.
 
 ### 구현 근거
 
