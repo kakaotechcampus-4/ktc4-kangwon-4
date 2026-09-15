@@ -25,13 +25,10 @@ from app.agent.schemas import (
     InvocationMeta,
     MutationSet,
     NextAction,
-    ProcedureApplicability,
     ProcedureCompletionStatus,
     ProcedureLookupResult,
-    ProcedureReadiness,
-    ProcedureStepEvaluation,
-    ProcedureStepRef,
-    ProcedureUnavailableReason,
+    ProcedureSearchSummary,
+    ProcedureSourceDocument,
     RedactedInput,
     ReviewedPlanOutcome,
     ReviewIssue,
@@ -57,6 +54,7 @@ NOW = datetime(2026, 9, 14, 3, 0, tzinfo=timezone.utc)
 SNAPSHOT_ID = UUID("00000000-0000-4000-8000-000000000001")
 RUN_ID = UUID("00000000-0000-4000-8000-000000000002")
 INFO_CALL_ID = UUID("00000000-0000-4000-8000-000000000003")
+PROCEDURE_CALL_ID = UUID("00000000-0000-4000-8000-000000000007")
 REVIEW_CALL_ID = UUID("00000000-0000-4000-8000-000000000004")
 SUBJECT_ID = UUID("00000000-0000-4000-8000-000000000005")
 DRAFT_ID = UUID("00000000-0000-4000-8000-000000000006")
@@ -117,6 +115,7 @@ def info_result() -> InfoAnalysisResult:
         completion_status=InfoCompletionStatus.COMPLETE,
         fact_candidates=[],
         procedure_progress_observations=[],
+        procedure_findings=[],
         conflicts=[],
         missing_fields=[],
         uncertainties=[],
@@ -124,12 +123,14 @@ def info_result() -> InfoAnalysisResult:
         evidence_records=[],
         parser_version="info/1.0",
         based_on_snapshot_id=SNAPSHOT_ID,
+        based_on_procedure_lookup_call_id=PROCEDURE_CALL_ID,
+        based_on_procedure_lookup_digest="sha256:" + "a" * 64,
     )
 
 
 def invocation(component: Component, call_id: UUID) -> InvocationMeta:
     return InvocationMeta(
-        schema_version="agent-io/1.0",
+        schema_version="agent-io/2.0",
         run_id=RUN_ID,
         call_id=call_id,
         parent_call_id=None,
@@ -179,7 +180,13 @@ def supervisor_draft() -> SupervisorDraft:
             title="임대인에게 원상복구 범위를 확인하세요",
             reason="철거와 이후 절차 범위를 정하려면 먼저 확인해야 합니다.",
             questions_to_ask=["어느 시설까지 철거해야 하나요?"],
-            target_procedure=None,
+            target={
+                "target_kind": "PROCEDURE",
+                "procedure_step": {
+                    "procedure_step_id": 1,
+                    "step_code": "RESTORATION_SCOPE_CHECK",
+                },
+            },
             evidence_refs=["ev-user-1"],
         ),
         questions_for_user=[],
@@ -205,7 +212,7 @@ def review_subject() -> ReviewSubject:
         output=output,
     )
     return ReviewSubject.create(
-        schema_version="agent-io/1.0",
+        schema_version="agent-io/2.0",
         review_subject_id=SUBJECT_ID,
         review_attempt=1,
         run_id=RUN_ID,
@@ -342,70 +349,98 @@ def test_support_completion_discriminator_is_consistent() -> None:
         )
 
 
-def procedure_step(**overrides: object) -> ProcedureStepEvaluation:
-    values: dict[str, object] = {
-        "procedure_step": ProcedureStepRef(
-            procedure_step_id=1,
-            step_code="CONFIRM_RESTORATION_SCOPE",
-        ),
-        "step_name": "원상복구 범위 확인",
-        "is_active": True,
-        "applicability": ProcedureApplicability.APPLICABLE,
-        "readiness": ProcedureReadiness.READY,
-        "current_status": None,
-        "conditions": [],
-        "prerequisites": [],
-        "unavailable_reasons": [],
-        "requires_professional": False,
-        "professional_type": None,
-        "decision_authority": "LANDLORD",
-        "evidence_refs": ["ev-procedure-1"],
-    }
-    values.update(overrides)
-    return ProcedureStepEvaluation.model_validate(values)
-
-
-def test_procedure_decision_table_and_conservative_unknown_override() -> None:
-    assert procedure_step().readiness == ProcedureReadiness.READY
-
-    safe_unknown = procedure_step(
-        applicability="UNDETERMINED",
-        readiness="UNDETERMINED",
-        unavailable_reasons=[
-            ProcedureUnavailableReason(
-                code="CONDITION_UNKNOWN",
-                message="절차 자료 최신성을 확인할 수 없습니다.",
-                evidence_refs=["ev-procedure-1"],
-            )
-        ],
-    )
-    assert safe_unknown.readiness == ProcedureReadiness.UNDETERMINED
-
-    with pytest.raises(ValidationError, match="decision table"):
-        procedure_step(readiness="BLOCKED")
-
-
 def test_procedure_result_produces_json_schema() -> None:
+    official = EvidenceRecord(
+        evidence_id="procedure:web:1",
+        source_type="OFFICIAL_DOCUMENT",
+        source_ref="https://www.gov.kr/closure",
+        source_version=None,
+        locator="body:text",
+        excerpt="사업자 폐업 신고 절차 안내",
+        parent_evidence_refs=[],
+        published_at=None,
+        retrieved_at=NOW,
+        freshness_status="UNKNOWN",
+        content_hash="sha256:" + "b" * 64,
+    )
+    document = ProcedureSourceDocument(
+        document_id=UUID("00000000-0000-4000-8000-000000000030"),
+        title="사업자 폐업 신고",
+        authority_name="정부24",
+        canonical_url=official.source_ref,
+        source_domain="www.gov.kr",
+        excerpt=official.excerpt,
+        published_at=None,
+        retrieved_at=NOW,
+        freshness_status="UNKNOWN",
+        content_hash=official.content_hash,
+        evidence_ref=official.evidence_id,
+        search_query="사업자 폐업 신고 절차",
+    )
     result = ProcedureLookupResult(
         completion_status=ProcedureCompletionStatus.COMPLETE,
-        procedure_data_version="procedure/2026-09-14",
-        step_evaluations=[procedure_step()],
-        evidence_records=[],
+        lookup_id=UUID("00000000-0000-4000-8000-000000000031"),
+        documents=[document],
+        search_summary=ProcedureSearchSummary(
+            provider="KAKAO_DAUM_WEB",
+            requested_query_count=1,
+            successful_query_count=1,
+            failed_query_count=0,
+            provider_result_count=1,
+            official_candidate_count=1,
+            fetched_document_count=1,
+            rejected_result_count=0,
+            fetch_failure_count=0,
+            searched_at=NOW,
+        ),
+        warnings=[],
+        evidence_records=[official],
         based_on_snapshot_id=SNAPSHOT_ID,
-        based_on_candidate_ids=[],
+        as_of=NOW.date(),
     )
-    assert result.step_evaluations[0].procedure_step.step_code
+    assert result.documents[0].canonical_url == official.source_ref
     assert ProcedureLookupResult.model_json_schema()["type"] == "object"
 
+    unsafe_document = document.model_dump(mode="python")
+    unsafe_document["canonical_url"] = "https://user:pass@GOV.KR:444/closure#x"
+    unsafe_document["source_domain"] = "GOV.KR"
+    with pytest.raises(ValidationError, match="credentials|canonical"):
+        ProcedureSourceDocument.model_validate(unsafe_document)
+
     no_match = ProcedureLookupResult(
-        completion_status=ProcedureCompletionStatus.PARTIAL,
-        procedure_data_version="procedure/2026-09-14",
-        step_evaluations=[],
+        completion_status=ProcedureCompletionStatus.NO_RESULTS,
+        lookup_id=UUID("00000000-0000-4000-8000-000000000032"),
+        documents=[],
+        search_summary=ProcedureSearchSummary(
+            provider="KAKAO_DAUM_WEB",
+            requested_query_count=1,
+            successful_query_count=1,
+            failed_query_count=0,
+            provider_result_count=0,
+            official_candidate_count=0,
+            fetched_document_count=0,
+            rejected_result_count=0,
+            fetch_failure_count=0,
+            searched_at=NOW,
+        ),
+        warnings=[],
         evidence_records=[],
         based_on_snapshot_id=SNAPSHOT_ID,
-        based_on_candidate_ids=[],
+        as_of=NOW.date(),
     )
-    assert no_match.step_evaluations == []
+    assert no_match.documents == []
+
+    impossible_no_match = no_match.model_dump(mode="python")
+    impossible_no_match["search_summary"]["provider_result_count"] = 1
+    impossible_no_match["search_summary"]["official_candidate_count"] = 1
+    with pytest.raises(ValidationError, match="NO_RESULTS"):
+        ProcedureLookupResult.model_validate(impossible_no_match)
+
+    all_queries_failed = no_match.search_summary.model_dump(mode="python")
+    all_queries_failed["successful_query_count"] = 0
+    all_queries_failed["failed_query_count"] = 1
+    with pytest.raises(ValidationError, match="successful query"):
+        ProcedureSearchSummary.model_validate(all_queries_failed)
 
 
 def test_action_decision_contains_exactly_one_blocker_and_next_action() -> None:
@@ -422,6 +457,47 @@ def test_action_decision_contains_exactly_one_blocker_and_next_action() -> None:
     payload["blockers"] = [payload["blocker"]]
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
         ActionDecisionDraft.model_validate(payload)
+
+
+def test_next_action_requires_exactly_one_typed_target() -> None:
+    payload = supervisor_draft().decision.next_action.model_dump(mode="python")
+
+    missing_target = {key: value for key, value in payload.items() if key != "target"}
+    with pytest.raises(ValidationError, match="target"):
+        NextAction.model_validate(missing_target)
+
+    with pytest.raises(ValidationError, match="target"):
+        NextAction.model_validate({**payload, "target": None})
+
+    support_target = {
+        "target_kind": "SUPPORT_PROGRAM",
+        "support_program": {
+            "support_program_id": 501,
+            "wiki_uuid": UUID("00000000-0000-4000-8000-000000000501"),
+        },
+    }
+    action = NextAction.model_validate({**payload, "target": support_target})
+    assert action.target.target_kind == "SUPPORT_PROGRAM"
+
+    malformed_support_target = {
+        "target_kind": "SUPPORT_PROGRAM",
+        "procedure_step": {
+            "procedure_step_id": 1,
+            "step_code": "RESTORATION_SCOPE_CHECK",
+        },
+    }
+    with pytest.raises(ValidationError):
+        NextAction.model_validate({**payload, "target": malformed_support_target})
+
+    both_target_payloads = {
+        **support_target,
+        "procedure_step": {
+            "procedure_step_id": 1,
+            "step_code": "RESTORATION_SCOPE_CHECK",
+        },
+    }
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        NextAction.model_validate({**payload, "target": both_target_payloads})
 
 
 def test_review_pass_gate_rejects_blocking_issue() -> None:

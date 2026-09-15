@@ -10,12 +10,6 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from uuid import UUID
 
-from app.agent.procedure_tool import (
-    ProcedureConditionDefinition,
-    ProcedureMaster,
-    ProcedurePrerequisiteDefinition,
-    ProcedureStepDefinition,
-)
 from app.agent.schemas import (
     CaseCreatedTrigger,
     CaseFact,
@@ -39,7 +33,6 @@ DEMO_NOW = datetime(2026, 9, 14, 6, 0, tzinfo=timezone.utc)
 @dataclass(frozen=True, slots=True)
 class StandaloneFixture:
     request: SupervisorRunInput
-    procedure_master: ProcedureMaster
     support_catalog: ReviewedSupportCatalog
     known_procedure_steps: tuple[KnownProcedureStep, ...]
 
@@ -161,71 +154,45 @@ def build_standalone_fixture() -> StandaloneFixture:
         case_snapshot=snapshot,
     )
 
-    procedure_evidence = _evidence(
-        "fixture:procedure:master",
-        source_type="PROCEDURE_MASTER",
-        source_ref="fixture-procedure-master",
-        excerpt="데모 절차 순서와 조건입니다. 실제 행정·법률 정보가 아닙니다.",
-    )
-    restoration_step = ProcedureStepDefinition(
+    restoration_step = KnownProcedureStep(
         procedure_step={
             "procedure_step_id": 1,
             "step_code": "CONFIRM_RESTORATION_SCOPE",
         },
         step_name="원상복구 범위 확인",
-        is_active=True,
-        effective_from=None,
-        effective_until=None,
-        conditions=(
-            ProcedureConditionDefinition(
-                condition_id=1,
-                field_path="lease_status",
-                operator="IN",
-                expected_values=("ACTIVE", "TERMINATION_NOTIFIED"),
-                evidence_refs=(procedure_evidence.evidence_id,),
-            ),
-        ),
-        prerequisites=(),
-        requires_professional=False,
-        professional_type=None,
-        decision_authority="LANDLORD",
-        evidence_refs=(procedure_evidence.evidence_id,),
+        utterance_aliases=["원상복구 범위", "임대인 확인"],
     )
-    support_check_step = ProcedureStepDefinition(
+    support_check_step = KnownProcedureStep(
         procedure_step={
             "procedure_step_id": 2,
             "step_code": "CHECK_DEMOLITION_SUPPORT",
         },
         step_name="철거 전 지원조건 확인",
-        is_active=True,
-        effective_from=None,
-        effective_until=None,
-        conditions=(
-            ProcedureConditionDefinition(
-                condition_id=2,
-                field_path="demolition_required",
-                operator="EQ",
-                expected_values=("REQUIRED",),
-                evidence_refs=(procedure_evidence.evidence_id,),
-            ),
-        ),
-        prerequisites=(
-            ProcedurePrerequisiteDefinition(
-                procedure_step=restoration_step.procedure_step,
-                dependency_type="REQUIRED",
-                evidence_refs=(procedure_evidence.evidence_id,),
-            ),
-        ),
-        requires_professional=False,
-        professional_type=None,
-        decision_authority="OFFICIAL_AGENCY",
-        evidence_refs=(procedure_evidence.evidence_id,),
+        utterance_aliases=["철거 지원", "지원조건 확인"],
     )
-    procedure_master = ProcedureMaster(
-        data_version="standalone-procedure/1.0",
-        freshness_status="CURRENT",
-        steps=(restoration_step, support_check_step),
-        evidence_records=(procedure_evidence,),
+    tax_closure_step = KnownProcedureStep(
+        procedure_step={
+            "procedure_step_id": 3,
+            "step_code": "FILE_TAX_BUSINESS_CLOSURE",
+        },
+        step_name="사업자 폐업 신고",
+        utterance_aliases=["사업자 폐업", "세무서 폐업", "홈택스 폐업"],
+    )
+    food_service_closure_step = KnownProcedureStep(
+        procedure_step={
+            "procedure_step_id": 4,
+            "step_code": "FILE_FOOD_SERVICE_CLOSURE",
+        },
+        step_name="식품영업 폐업 신고",
+        utterance_aliases=["카페 폐업", "휴게음식점 폐업", "영업 폐업"],
+    )
+    insurance_closure_step = KnownProcedureStep(
+        procedure_step={
+            "procedure_step_id": 5,
+            "step_code": "REPORT_WORKPLACE_INSURANCE_CLOSURE",
+        },
+        step_name="4대보험 사업장 탈퇴 신고",
+        utterance_aliases=["4대보험 탈퇴", "사업장 소멸", "직원 보험 정리"],
     )
 
     support_official = _evidence(
@@ -290,21 +257,15 @@ def build_standalone_fixture() -> StandaloneFixture:
         evidence_records=(support_official, support_wiki),
     )
 
-    known_steps = tuple(
-        KnownProcedureStep(
-            procedure_step=step.procedure_step,
-            step_name=step.step_name,
-            utterance_aliases=(
-                ["원상복구 범위", "임대인 확인"]
-                if step is restoration_step
-                else ["철거 지원", "지원조건 확인"]
-            ),
-        )
-        for step in procedure_master.steps
+    known_steps = (
+        restoration_step,
+        support_check_step,
+        tax_closure_step,
+        food_service_closure_step,
+        insurance_closure_step,
     )
     return StandaloneFixture(
         request=request,
-        procedure_master=procedure_master,
         support_catalog=support_catalog,
         known_procedure_steps=known_steps,
     )

@@ -12,11 +12,13 @@ LLM.  Callers must construct them after validating the semantic LLM payload.
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import re
 from datetime import date, datetime, timezone
 from enum import Enum
 from typing import Annotated, Any, Generic, Literal, TypeAlias, TypeVar
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from pydantic import (
@@ -152,7 +154,6 @@ class SupportMatchStatus(StrEnum):
 class EvidenceSourceType(StrEnum):
     USER_INPUT = "USER_INPUT"
     EXPERT_CONFIRMATION = "EXPERT_CONFIRMATION"
-    PROCEDURE_MASTER = "PROCEDURE_MASTER"
     REVIEWED_WIKI = "REVIEWED_WIKI"
     OFFICIAL_DOCUMENT = "OFFICIAL_DOCUMENT"
     OFFICIAL_API = "OFFICIAL_API"
@@ -273,7 +274,7 @@ def _ensure_unique(values: list[Any], key: Any, label: str) -> None:
 
 
 class InvocationMeta(AgentSchema):
-    schema_version: Literal["agent-io/1.0"]
+    schema_version: Literal["agent-io/2.0"]
     run_id: RuntimeUUID
     call_id: RuntimeUUID
     parent_call_id: RuntimeUUID | None
@@ -795,6 +796,8 @@ class InfoAnalysisInput(AgentSchema):
     case_snapshot: CaseSnapshot
     allowed_field_paths: Annotated[list[CaseFieldKey], Field(min_length=1)]
     known_procedure_steps: list[KnownProcedureStep]
+    procedure_lookup_call_id: RuntimeUUID
+    procedure_lookup_result: ProcedureLookupResult
     review_feedback: list[ReviewIssue]
 
     @model_validator(mode="after")
@@ -806,6 +809,27 @@ class InfoAnalysisInput(AgentSchema):
             lambda item: item.procedure_step.procedure_step_id,
             "known procedure_step_id",
         )
+        _ensure_unique(
+            self.known_procedure_steps,
+            lambda item: item.procedure_step.step_code,
+            "known procedure step_code",
+        )
+        _ensure_unique(
+            self.known_procedure_steps,
+            lambda item: item.step_name.casefold().strip(),
+            "known procedure step_name",
+        )
+        phrases: list[str] = []
+        for item in self.known_procedure_steps:
+            phrases.append(item.step_name.casefold().strip())
+            phrases.extend(alias.casefold().strip() for alias in item.utterance_aliases)
+        if len(set(phrases)) != len(phrases):
+            raise ValueError("known procedure names and aliases must be unique")
+        if (
+            self.procedure_lookup_result.based_on_snapshot_id
+            != self.case_snapshot.snapshot_id
+        ):
+            raise ValueError("procedure lookup snapshot must match Info snapshot")
         return self
 
 
@@ -813,6 +837,7 @@ class InfoAnalysisResult(AgentSchema):
     completion_status: InfoCompletionStatus
     fact_candidates: list[FactCandidate]
     procedure_progress_observations: list[ProcedureProgressObservation]
+    procedure_findings: list[ProcedureFinding]
     conflicts: list[ConflictCandidate]
     missing_fields: list[MissingField]
     uncertainties: list[Uncertainty]
@@ -823,6 +848,8 @@ class InfoAnalysisResult(AgentSchema):
         Field(json_schema_extra={"x-runtime-injected": True}),
     ]
     based_on_snapshot_id: RuntimeUUID
+    based_on_procedure_lookup_call_id: RuntimeUUID
+    based_on_procedure_lookup_digest: Digest
 
     @model_validator(mode="after")
     def validate_result(self) -> InfoAnalysisResult:
@@ -832,6 +859,16 @@ class InfoAnalysisResult(AgentSchema):
             self.procedure_progress_observations,
             lambda item: item.observation_id,
             "observation_id",
+        )
+        _ensure_unique(
+            self.procedure_findings,
+            lambda item: item.procedure_step.procedure_step_id,
+            "procedure finding procedure_step_id",
+        )
+        _ensure_unique(
+            self.procedure_findings,
+            lambda item: item.finding_id,
+            "procedure finding_id",
         )
         _ensure_unique(
             self.question_candidates, lambda item: item.question_id, "question_id"
@@ -1034,120 +1071,6 @@ class SupportAnalysisResult(AgentSchema):
         return self
 
 
-class ProcedureLookupScope(StrEnum):
-    ALL_STEPS = "ALL_STEPS"
-    SPECIFIC_STEPS = "SPECIFIC_STEPS"
-
-
-class AllProcedureLookupInput(AgentSchema):
-    lookup_scope: Literal[ProcedureLookupScope.ALL_STEPS]
-    planning_context: PlanningContext
-    as_of: date
-
-
-class SpecificProcedureLookupInput(AgentSchema):
-    lookup_scope: Literal[ProcedureLookupScope.SPECIFIC_STEPS]
-    planning_context: PlanningContext
-    as_of: date
-    step_codes: Annotated[list[UpperSnakeCode], Field(min_length=1)]
-
-    @field_validator("step_codes")
-    @classmethod
-    def unique_step_codes(cls, value: list[str]) -> list[str]:
-        if len(set(value)) != len(value):
-            raise ValueError("step_codes must be unique")
-        return value
-
-
-ProcedureLookupInput: TypeAlias = Annotated[
-    AllProcedureLookupInput | SpecificProcedureLookupInput,
-    Field(discriminator="lookup_scope"),
-]
-
-
-class ProcedureConditionResult(AgentSchema):
-    condition_id: PositiveStrictInt
-    field_path: CaseFieldKey
-    operator: Literal["EQ", "IN", "GT", "GTE", "LT", "LTE"]
-    expected_values: Annotated[list[NonNullStrictScalar], Field(min_length=1)]
-    actual_value: StrictScalar
-    status: CriterionStatus
-    evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
-
-    @model_validator(mode="after")
-    def validate_unknown(self) -> ProcedureConditionResult:
-        if (self.actual_value is None) != (self.status == CriterionStatus.UNKNOWN):
-            raise ValueError("actual_value is null iff condition status is UNKNOWN")
-        value_type = CASE_FIELD_SPECS[self.field_path][0]
-        for expected in self.expected_values:
-            validate_case_field_value(
-                self.field_path,
-                value_type,
-                expected,
-                allow_null=False,
-            )
-        validate_case_field_value(
-            self.field_path,
-            value_type,
-            self.actual_value,
-            allow_null=self.status == CriterionStatus.UNKNOWN,
-        )
-        return self
-
-
-class PrerequisiteSatisfaction(StrEnum):
-    SATISFIED = "SATISFIED"
-    NOT_SATISFIED = "NOT_SATISFIED"
-    UNKNOWN = "UNKNOWN"
-
-
-class ProcedurePrerequisiteResult(AgentSchema):
-    procedure_step: ProcedureStepRef
-    dependency_type: Literal["REQUIRED", "RECOMMENDED"]
-    current_status: ProcedureProgressStatus | None
-    satisfaction: PrerequisiteSatisfaction
-    reason_summary: NonEmptyStr
-
-    @model_validator(mode="after")
-    def validate_satisfaction(self) -> ProcedurePrerequisiteResult:
-        if self.current_status is None:
-            expected = PrerequisiteSatisfaction.UNKNOWN
-        elif self.current_status == ProcedureProgressStatus.COMPLETED:
-            expected = PrerequisiteSatisfaction.SATISFIED
-        else:
-            expected = PrerequisiteSatisfaction.NOT_SATISFIED
-        if self.satisfaction != expected:
-            raise ValueError(
-                f"prerequisite satisfaction must be {expected.value} for current status"
-            )
-        return self
-
-
-class ProcedureUnavailableCode(StrEnum):
-    STEP_INACTIVE = "STEP_INACTIVE"
-    CONDITION_NOT_MET = "CONDITION_NOT_MET"
-    CONDITION_UNKNOWN = "CONDITION_UNKNOWN"
-    PREREQUISITE_INCOMPLETE = "PREREQUISITE_INCOMPLETE"
-
-
-class ProcedureUnavailableReason(AgentSchema):
-    code: ProcedureUnavailableCode
-    message: NonEmptyStr
-    evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
-
-
-class ProcedureApplicability(StrEnum):
-    APPLICABLE = "APPLICABLE"
-    NOT_APPLICABLE = "NOT_APPLICABLE"
-    UNDETERMINED = "UNDETERMINED"
-
-
-class ProcedureReadiness(StrEnum):
-    READY = "READY"
-    BLOCKED = "BLOCKED"
-    UNDETERMINED = "UNDETERMINED"
-
-
 class DecisionAuthority(StrEnum):
     USER = "USER"
     LANDLORD = "LANDLORD"
@@ -1156,102 +1079,233 @@ class DecisionAuthority(StrEnum):
     UNKNOWN = "UNKNOWN"
 
 
-class ProcedureStepEvaluation(AgentSchema):
-    procedure_step: ProcedureStepRef
-    step_name: NonEmptyStr
-    is_active: StrictBool
-    applicability: ProcedureApplicability
-    readiness: ProcedureReadiness
-    current_status: ProcedureProgressStatus | None
-    conditions: list[ProcedureConditionResult]
-    prerequisites: list[ProcedurePrerequisiteResult]
-    unavailable_reasons: list[ProcedureUnavailableReason]
-    requires_professional: StrictBool
-    professional_type: NonEmptyStr | None
-    decision_authority: DecisionAuthority
-    evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
+class ProcedureCompletionStatus(StrEnum):
+    COMPLETE = "COMPLETE"
+    PARTIAL = "PARTIAL"
+    NO_RESULTS = "NO_RESULTS"
+
+
+class ProcedureLookupGoal(StrEnum):
+    BUSINESS_CLOSURE = "BUSINESS_CLOSURE"
+
+
+class ProcedureSourcePolicy(StrEnum):
+    OFFICIAL_ONLY = "OFFICIAL_ONLY"
+
+
+class ProcedureLookupInput(AgentSchema):
+    lookup_goal: Literal[ProcedureLookupGoal.BUSINESS_CLOSURE]
+    search_queries: Annotated[list[NonEmptyStr], Field(min_length=1, max_length=4)]
+    as_of: date
+    locale: Literal["ko-KR"]
+    source_policy: Literal[ProcedureSourcePolicy.OFFICIAL_ONLY]
+    max_results_per_query: Annotated[StrictInt, Field(ge=1, le=10)]
+    based_on_snapshot_id: RuntimeUUID
+    review_feedback: list[ReviewIssue]
+
+    @field_validator("search_queries")
+    @classmethod
+    def unique_search_queries(cls, value: list[str]) -> list[str]:
+        normalized = [item.strip() for item in value]
+        if any(not item for item in normalized):
+            raise ValueError("search queries must not be blank")
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("search_queries must be unique")
+        return normalized
+
+
+class ProcedureLookupWarning(AgentSchema):
+    code: UpperSnakeCode
+    message: NonEmptyStr
+
+
+class ProcedureSourceDocument(AgentSchema):
+    document_id: RuntimeUUID
+    title: NonEmptyStr
+    authority_name: NonEmptyStr
+    canonical_url: NonEmptyStr
+    source_domain: NonEmptyStr
+    excerpt: Annotated[StrictStr, Field(min_length=1, max_length=6000)]
+    published_at: AwareDatetime | None
+    retrieved_at: RuntimeDateTime
+    freshness_status: FreshnessStatus
+    content_hash: Digest
+    evidence_ref: NonEmptyStr
+    search_query: NonEmptyStr
 
     @model_validator(mode="after")
-    def validate_decision_table(self) -> ProcedureStepEvaluation:
-        if self.requires_professional != (self.professional_type is not None):
+    def validate_source_identity(self) -> ProcedureSourceDocument:
+        parsed = urlsplit(self.canonical_url)
+        if parsed.scheme != "https" or not parsed.hostname:
+            raise ValueError("procedure document URL must be absolute HTTPS")
+        if parsed.username or parsed.password or parsed.fragment:
             raise ValueError(
-                "professional_type is present iff requires_professional is true"
+                "procedure document URL must not contain credentials or fragment"
             )
-
-        reason_codes = {item.code for item in self.unavailable_reasons}
-        statuses = {item.status for item in self.conditions}
-        safe_unknown_override = (
-            self.is_active
-            and CriterionStatus.NOT_MET not in statuses
-            and ProcedureUnavailableCode.CONDITION_UNKNOWN in reason_codes
-            and self.applicability == ProcedureApplicability.UNDETERMINED
-            and self.readiness == ProcedureReadiness.UNDETERMINED
-        )
-        if safe_unknown_override:
-            return self
-
-        required = [
-            item for item in self.prerequisites if item.dependency_type == "REQUIRED"
-        ]
-        if not self.is_active or CriterionStatus.NOT_MET in statuses:
-            expected = (
-                ProcedureApplicability.NOT_APPLICABLE,
-                ProcedureReadiness.BLOCKED,
+        try:
+            port = parsed.port
+        except ValueError as exc:
+            raise ValueError("procedure document URL has an invalid port") from exc
+        if port is not None:
+            raise ValueError("canonical procedure document URL must omit its port")
+        try:
+            hostname = (
+                parsed.hostname.encode("idna").decode("ascii").lower().rstrip(".")
             )
-        elif CriterionStatus.UNKNOWN in statuses:
-            expected = (
-                ProcedureApplicability.UNDETERMINED,
-                ProcedureReadiness.UNDETERMINED,
-            )
-        elif any(
-            item.satisfaction == PrerequisiteSatisfaction.NOT_SATISFIED
-            for item in required
-        ):
-            expected = (
-                ProcedureApplicability.APPLICABLE,
-                ProcedureReadiness.BLOCKED,
-            )
-        elif any(
-            item.satisfaction == PrerequisiteSatisfaction.UNKNOWN for item in required
-        ):
-            expected = (
-                ProcedureApplicability.APPLICABLE,
-                ProcedureReadiness.UNDETERMINED,
-            )
+        except UnicodeError as exc:
+            raise ValueError("procedure document hostname is invalid") from exc
+        try:
+            ipaddress.ip_address(hostname)
+        except ValueError:
+            pass
         else:
-            expected = (
-                ProcedureApplicability.APPLICABLE,
-                ProcedureReadiness.READY,
-            )
-        if (self.applicability, self.readiness) != expected:
+            raise ValueError("procedure document URL must not use an IP literal")
+        if (
+            self.source_domain != hostname
+            or parsed.netloc != hostname
+            or not parsed.path
+        ):
             raise ValueError(
-                "applicability/readiness violate the procedure decision table"
+                "source_domain and canonical URL must use one lowercase canonical host"
             )
         return self
 
 
-class ProcedureCompletionStatus(StrEnum):
-    COMPLETE = "COMPLETE"
-    PARTIAL = "PARTIAL"
+class ProcedureSearchSummary(AgentSchema):
+    provider: Literal["KAKAO_DAUM_WEB"]
+    requested_query_count: PositiveStrictInt
+    successful_query_count: NonNegativeStrictInt
+    failed_query_count: NonNegativeStrictInt
+    provider_result_count: NonNegativeStrictInt
+    official_candidate_count: NonNegativeStrictInt
+    fetched_document_count: NonNegativeStrictInt
+    rejected_result_count: NonNegativeStrictInt
+    fetch_failure_count: NonNegativeStrictInt
+    searched_at: RuntimeDateTime
+
+    @model_validator(mode="after")
+    def validate_counts(self) -> ProcedureSearchSummary:
+        if (
+            self.successful_query_count + self.failed_query_count
+            != self.requested_query_count
+        ):
+            raise ValueError("query outcome counts must match requested_query_count")
+        if self.fetched_document_count > self.official_candidate_count:
+            raise ValueError("fetched documents cannot exceed official candidates")
+        if self.successful_query_count == 0:
+            raise ValueError(
+                "a procedure result requires at least one successful query"
+            )
+        if (
+            self.official_candidate_count + self.rejected_result_count
+            != self.provider_result_count
+        ):
+            raise ValueError(
+                "official and rejected result counts must cover provider results"
+            )
+        if (
+            self.fetched_document_count + self.fetch_failure_count
+            > self.official_candidate_count
+        ):
+            raise ValueError("fetch outcomes cannot exceed official candidate count")
+        return self
 
 
 class ProcedureLookupResult(AgentSchema):
     completion_status: ProcedureCompletionStatus
-    procedure_data_version: NonEmptyStr
-    step_evaluations: list[ProcedureStepEvaluation]
+    lookup_id: RuntimeUUID
+    documents: list[ProcedureSourceDocument]
+    search_summary: ProcedureSearchSummary
+    warnings: list[ProcedureLookupWarning]
     evidence_records: list[EvidenceRecord]
     based_on_snapshot_id: RuntimeUUID
-    based_on_candidate_ids: list[RuntimeUUID]
+    as_of: date
 
     @model_validator(mode="after")
     def validate_result(self) -> ProcedureLookupResult:
+        _ensure_unique(self.documents, lambda item: item.document_id, "document_id")
+        _ensure_unique(self.documents, lambda item: item.canonical_url, "canonical_url")
         _ensure_unique(
-            self.step_evaluations,
-            lambda item: item.procedure_step.procedure_step_id,
-            "procedure_step_id",
+            self.evidence_records, lambda item: item.evidence_id, "evidence_id"
         )
-        if len(set(self.based_on_candidate_ids)) != len(self.based_on_candidate_ids):
-            raise ValueError("based_on_candidate_ids must be unique")
+        if self.search_summary.fetched_document_count != len(self.documents):
+            raise ValueError("fetched_document_count must match documents")
+        if len(self.documents) != len(self.evidence_records):
+            raise ValueError("each document must have exactly one evidence record")
+        evidence_by_id = {item.evidence_id: item for item in self.evidence_records}
+        for document in self.documents:
+            evidence = evidence_by_id.get(document.evidence_ref)
+            if evidence is None:
+                raise ValueError("procedure document has unresolved evidence_ref")
+            if (
+                evidence.source_type != EvidenceSourceType.OFFICIAL_DOCUMENT
+                or evidence.source_ref != document.canonical_url
+                or evidence.excerpt != document.excerpt
+                or evidence.published_at != document.published_at
+                or evidence.retrieved_at != document.retrieved_at
+                or evidence.freshness_status != document.freshness_status
+                or evidence.content_hash != document.content_hash
+            ):
+                raise ValueError(
+                    "procedure document and evidence must describe one source"
+                )
+        failures = (
+            self.search_summary.failed_query_count
+            + self.search_summary.fetch_failure_count
+        )
+        if self.completion_status == ProcedureCompletionStatus.COMPLETE:
+            if not self.documents or failures:
+                raise ValueError("COMPLETE requires documents and no request failures")
+        elif self.completion_status == ProcedureCompletionStatus.NO_RESULTS:
+            if (
+                self.documents
+                or failures
+                or self.search_summary.official_candidate_count != 0
+            ):
+                raise ValueError(
+                    "NO_RESULTS requires successful lookup with no official candidates"
+                )
+        elif failures == 0:
+            raise ValueError("PARTIAL requires at least one query or fetch failure")
+        return self
+
+
+class ProcedureRelevance(StrEnum):
+    RELEVANT = "RELEVANT"
+    POSSIBLY_RELEVANT = "POSSIBLY_RELEVANT"
+    UNDETERMINED = "UNDETERMINED"
+
+
+class ProcedureFinding(AgentSchema):
+    finding_id: RuntimeUUID
+    procedure_step: ProcedureStepRef
+    step_name: NonEmptyStr
+    summary: SourcedText
+    relevance: ProcedureRelevance
+    current_status: ProcedureProgressStatus | None
+    decision_authority: DecisionAuthority
+    requires_confirmation: Literal[True]
+    required_actions: list[SourcedText]
+    required_documents: list[RequiredDocument]
+    application_channel: SourcedText | None
+    application_url: SourcedText | None
+    deadline: SourcedText | None
+    evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
+
+    @model_validator(mode="after")
+    def validate_evidence_refs(self) -> ProcedureFinding:
+        refs = [*self.summary.evidence_refs]
+        refs.extend(ref for item in self.required_actions for ref in item.evidence_refs)
+        refs.extend(
+            ref for item in self.required_documents for ref in item.evidence_refs
+        )
+        for item in (self.application_channel, self.application_url, self.deadline):
+            if item is not None:
+                refs.extend(item.evidence_refs)
+        if set(refs) != set(self.evidence_refs):
+            raise ValueError(
+                "procedure finding evidence_refs must equal its detail evidence union"
+            )
         return self
 
 
@@ -1265,13 +1319,29 @@ class Blocker(AgentSchema):
 BlockerDraft = Blocker
 
 
+class ProcedureActionTarget(AgentSchema):
+    target_kind: Literal["PROCEDURE"]
+    procedure_step: ProcedureStepRef
+
+
+class SupportActionTarget(AgentSchema):
+    target_kind: Literal["SUPPORT_PROGRAM"]
+    support_program: SupportProgramRef
+
+
+NextActionTarget: TypeAlias = Annotated[
+    ProcedureActionTarget | SupportActionTarget,
+    Field(discriminator="target_kind"),
+]
+
+
 class NextAction(AgentSchema):
     action_code: UpperSnakeCode
     sequence: PositiveStrictInt
     title: NonEmptyStr
     reason: NonEmptyStr
     questions_to_ask: list[NonEmptyStr]
-    target_procedure: ProcedureStepRef | None
+    target: NextActionTarget
     evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
 
 
@@ -1353,7 +1423,7 @@ class ProcedureProgressChangeCandidate(AgentSchema):
     proposed_status: ProcedureProgressStatus
     reason_summary: NonEmptyStr
     execution_evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
-    procedure_evaluation_call_id: RuntimeUUID
+    procedure_analysis_call_id: RuntimeUUID
 
     @model_validator(mode="after")
     def validate_forward_transition(self) -> ProcedureProgressChangeCandidate:
@@ -1601,7 +1671,7 @@ class ReviewSourceResult(AgentSchema):
 
 
 class ReviewSubject(AgentSchema):
-    schema_version: Literal["agent-io/1.0"]
+    schema_version: Literal["agent-io/2.0"]
     review_subject_id: RuntimeUUID
     review_attempt: Annotated[StrictInt, Field(ge=1, le=3)]
     run_id: RuntimeUUID
@@ -1889,6 +1959,8 @@ def canonical_digest(value: BaseModel, *, exclude: set[str] | None = None) -> st
 
 # Resolve feedback/result forward references after ReviewIssue exists.
 InfoAnalysisInput.model_rebuild()
+InfoAnalysisResult.model_rebuild()
+ProcedureLookupInput.model_rebuild()
 DiscoverSupportInput.model_rebuild()
 CheckSpecificSupportInput.model_rebuild()
 RefreshSupportInput.model_rebuild()
@@ -1900,7 +1972,6 @@ __all__ = [
     "ActionDecisionDraft",
     "AgentRunOutcome",
     "AgentSchema",
-    "AllProcedureLookupInput",
     "Blocker",
     "BlockerDraft",
     "CaseCompleteDecisionDraft",
@@ -1951,24 +2022,25 @@ __all__ = [
     "NeedsMoreInfoDecisionDraft",
     "NextAction",
     "NextActionDraft",
+    "NextActionTarget",
     "NonNullStrictScalar",
     "PlanningContext",
-    "ProcedureApplicability",
+    "ProcedureActionTarget",
     "ProcedureCompletionStatus",
-    "ProcedureConditionResult",
+    "ProcedureFinding",
+    "ProcedureLookupGoal",
     "ProcedureLookupInput",
     "ProcedureLookupResult",
-    "ProcedureLookupScope",
-    "ProcedurePrerequisiteResult",
+    "ProcedureLookupWarning",
     "ProcedureProgress",
     "ProcedureProgressChangeCandidate",
     "ProcedureProgressObservation",
     "ProcedureProgressStatus",
-    "ProcedureReadiness",
-    "ProcedureStepEvaluation",
+    "ProcedureRelevance",
+    "ProcedureSearchSummary",
+    "ProcedureSourceDocument",
+    "ProcedureSourcePolicy",
     "ProcedureStepRef",
-    "ProcedureUnavailableCode",
-    "ProcedureUnavailableReason",
     "QuestionCandidate",
     "RedactedInput",
     "Redaction",
@@ -1990,10 +2062,10 @@ __all__ = [
     "RuntimeUUID",
     "SafeFailureOutcome",
     "SourcedText",
-    "SpecificProcedureLookupInput",
     "StrictScalar",
     "SupervisorDraft",
     "SupervisorRunInput",
+    "SupportActionTarget",
     "SupportAnalysisInput",
     "SupportAnalysisResult",
     "SupportCheck",

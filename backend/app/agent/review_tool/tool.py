@@ -10,8 +10,11 @@ from uuid import UUID
 from app.agent.claim_safety import (
     expand_evidence,
     has_explicit_eligibility_language,
+    has_procedure_language,
+    has_support_action_language,
     high_risk_metadata,
     is_overconfident,
+    references_other_known_label,
     required_sources_for_claim,
 )
 from app.agent.guardrails import GuardrailViolation, ensure_no_sensitive_text
@@ -28,17 +31,17 @@ from app.agent.schemas import (
     FreshnessStatus,
     InfoAnalysisResult,
     MissingEvidence,
-    ProcedureApplicability,
-    ProcedureCompletionStatus,
+    ProcedureActionTarget,
+    ProcedureFinding,
     ProcedureLookupResult,
-    ProcedureProgressStatus,
-    ProcedureReadiness,
-    ProcedureStepEvaluation,
     ReviewIssue,
     ReviewResult,
     ReviewSubject,
     ReviewVerdict,
+    SupportActionTarget,
     SupportAnalysisResult,
+    SupportCheck,
+    SupportMatchStatus,
     canonical_digest,
 )
 from pydantic import BaseModel, ValidationError
@@ -75,7 +78,8 @@ class _ReviewContext:
     evidence_by_id: dict[str, EvidenceRecord]
     calls_by_id: dict[UUID, Component]
     sources_by_call_id: dict[UUID, Any]
-    procedure_evaluations: tuple[tuple[UUID, ProcedureStepEvaluation], ...]
+    procedure_findings: tuple[tuple[UUID, ProcedureFinding], ...]
+    support_checks: tuple[tuple[UUID, SupportCheck], ...]
     support_program_names: frozenset[str]
 
 
@@ -219,7 +223,8 @@ def _validate_integrity(subject: ReviewSubject) -> _ReviewContext:
 
     calls_by_id: dict[UUID, Component] = {}
     sources_by_call_id: dict[UUID, Any] = {}
-    procedure_evaluations: list[tuple[UUID, ProcedureStepEvaluation]] = []
+    procedure_findings: list[tuple[UUID, ProcedureFinding]] = []
+    support_checks: list[tuple[UUID, SupportCheck]] = []
     support_program_names: set[str] = set()
     for source in subject.source_results:
         if source.output_digest != canonical_digest(source.output):
@@ -233,12 +238,15 @@ def _validate_integrity(subject: ReviewSubject) -> _ReviewContext:
             raise ReviewIntegrityError("review source snapshot does not match")
         calls_by_id[source.meta.call_id] = source.meta.component
         sources_by_call_id[source.meta.call_id] = source
-        if source.meta.component == Component.PROCEDURE_TOOL:
-            procedure_evaluations.extend(
-                (source.meta.call_id, evaluation)
-                for evaluation in source.output.step_evaluations
+        if source.meta.component == Component.INFO_AGENT:
+            procedure_findings.extend(
+                (source.meta.call_id, finding)
+                for finding in source.output.procedure_findings
             )
         if source.meta.component == Component.SUPPORT_AGENT:
+            support_checks.extend(
+                (source.meta.call_id, check) for check in source.output.support_checks
+            )
             support_program_names.update(
                 check.program_name for check in source.output.support_checks
             )
@@ -261,13 +269,15 @@ def _validate_integrity(subject: ReviewSubject) -> _ReviewContext:
             + ", ".join(unknown_evidence)
         )
 
+    _validate_procedure_analysis_provenance(sources_by_call_id)
     _validate_mutation_provenance(subject, sources_by_call_id)
     _validate_action_shape(subject, sources_by_call_id)
     return _ReviewContext(
         evidence_by_id=evidence_by_id,
         calls_by_id=calls_by_id,
         sources_by_call_id=sources_by_call_id,
-        procedure_evaluations=tuple(procedure_evaluations),
+        procedure_findings=tuple(procedure_findings),
+        support_checks=tuple(support_checks),
         support_program_names=frozenset(support_program_names),
     )
 
@@ -335,21 +345,21 @@ def _validate_mutation_provenance(
 
     for candidate in mutations.procedure_progress_changes:
         source = _require_source_output(
-            candidate.procedure_evaluation_call_id,
-            ProcedureLookupResult,
+            candidate.procedure_analysis_call_id,
+            InfoAnalysisResult,
             sources_by_call_id,
             "procedure mutation",
         )
-        evaluations = [
-            evaluation
-            for evaluation in source.output.step_evaluations
-            if evaluation.procedure_step == candidate.procedure_step
+        findings = [
+            finding
+            for finding in source.output.procedure_findings
+            if finding.procedure_step == candidate.procedure_step
         ]
-        if len(evaluations) != 1:
+        if len(findings) != 1:
             raise ReviewIntegrityError(
-                "procedure mutation does not resolve to one procedure evaluation"
+                "procedure mutation does not resolve to one Info procedure finding"
             )
-        evaluation = evaluations[0]
+        finding = findings[0]
         snapshot_progress = next(
             (
                 progress
@@ -361,17 +371,15 @@ def _validate_mutation_provenance(
         before_status = snapshot_progress.status if snapshot_progress else None
         if (
             candidate.before_status != before_status
-            or evaluation.current_status != before_status
+            or finding.current_status != before_status
         ):
             raise ReviewIntegrityError(
-                "procedure mutation before state differs from snapshot/evaluation"
+                "procedure mutation before state differs from snapshot/finding"
             )
 
         matching_observations = [
             observation
-            for review_source in sources_by_call_id.values()
-            if isinstance(review_source.output, InfoAnalysisResult)
-            for observation in review_source.output.procedure_progress_observations
+            for observation in source.output.procedure_progress_observations
             if (
                 observation.procedure_step == candidate.procedure_step
                 and observation.observed_status == candidate.proposed_status
@@ -408,6 +416,38 @@ def _validate_mutation_provenance(
             )
 
 
+def _validate_procedure_analysis_provenance(
+    sources_by_call_id: dict[UUID, Any],
+) -> None:
+    """Verify that Info procedure findings only interpret supplied raw lookup data."""
+
+    for source in sources_by_call_id.values():
+        if not isinstance(source.output, InfoAnalysisResult):
+            continue
+        info = source.output
+        lookup_source = _require_source_output(
+            info.based_on_procedure_lookup_call_id,
+            ProcedureLookupResult,
+            sources_by_call_id,
+            "Info procedure analysis",
+        )
+        if info.based_on_procedure_lookup_digest != lookup_source.output_digest:
+            raise ReviewIntegrityError(
+                "Info procedure analysis digest does not match its raw lookup"
+            )
+
+        lookup_evidence = {
+            record.evidence_id: record
+            for record in lookup_source.output.evidence_records
+        }
+        for finding in info.procedure_findings:
+            for evidence_ref in finding.evidence_refs:
+                if evidence_ref not in lookup_evidence:
+                    raise ReviewIntegrityError(
+                        "Info procedure finding evidence is not from its raw lookup"
+                    )
+
+
 def _require_source_output(
     call_id: UUID,
     expected_type: type[Any],
@@ -440,10 +480,13 @@ _PROMPT_EXCLUDED_KEYS = {
     "conflict_ref",
     "content_hash",
     "created_at",
+    "document_id",
     "draft_id",
+    "finding_id",
     "history_id",
     "input_event_id",
     "locator",
+    "lookup_id",
     "observation_id",
     "parent_call_id",
     "published_at",
@@ -456,6 +499,7 @@ _PROMPT_EXCLUDED_KEYS = {
     "snapshot_id",
     "source_fact_candidate_id",
     "source_ref",
+    "searched_at",
     "submitted_at",
     "trace_id",
     "updated_at",
@@ -584,35 +628,9 @@ def _validate_action_shape(
     else:
         if decision.blocker is not None or decision.next_action is not None:
             raise ReviewIntegrityError("CASE_COMPLETE cannot contain blocker/action")
-        procedure_results = [
-            source.output
-            for source in sources_by_call_id.values()
-            if isinstance(source.output, ProcedureLookupResult)
-        ]
-        if len(procedure_results) != 1:
-            raise ReviewIntegrityError(
-                "CASE_COMPLETE requires one authoritative procedure result"
-            )
-        procedure_result = procedure_results[0]
-        if (
-            procedure_result.completion_status != ProcedureCompletionStatus.COMPLETE
-            or not procedure_result.step_evaluations
-        ):
-            raise ReviewIntegrityError(
-                "CASE_COMPLETE lacks complete procedure-master coverage"
-            )
-        if any(
-            evaluation.applicability == ProcedureApplicability.UNDETERMINED
-            or (
-                evaluation.is_active
-                and evaluation.applicability == ProcedureApplicability.APPLICABLE
-                and evaluation.current_status != ProcedureProgressStatus.COMPLETED
-            )
-            for evaluation in procedure_result.step_evaluations
-        ):
-            raise ReviewIntegrityError(
-                "CASE_COMPLETE has an incomplete applicable procedure"
-            )
+        raise ReviewIntegrityError(
+            "CASE_COMPLETE is unavailable without authoritative procedure coverage"
+        )
 
 
 def _deterministic_safety_review(
@@ -677,7 +695,7 @@ def _deterministic_safety_review(
                 MissingEvidence(
                     claim_path=claim.target_path,
                     required_source_types=sorted(required_sources),
-                    reason_summary="고위험 주장은 공식 원문 또는 절차 마스터 근거가 필요합니다.",
+                    reason_summary="고위험 주장은 공식 문서 또는 공식 API 근거가 필요합니다.",
                 )
             )
 
@@ -745,14 +763,14 @@ def _deterministic_safety_review(
                 )
             )
 
-    issues.extend(_procedure_action_findings(subject, context))
+    issues.extend(_action_target_findings(subject, context))
     return _SafetyFindings(
         issues=tuple(_deduplicate_models(issues)),
         missing_evidence=tuple(_deduplicate_models(missing)),
     )
 
 
-def _procedure_action_findings(
+def _action_target_findings(
     subject: ReviewSubject,
     context: _ReviewContext,
 ) -> list[ReviewIssue]:
@@ -760,68 +778,214 @@ def _procedure_action_findings(
     if decision.decision_type != DecisionType.ACTION:
         return []
     action = decision.next_action
-    if action.target_procedure is None:
-        return []
+    action_path = "/supervisor_draft/decision/next_action"
+    if isinstance(action.target, SupportActionTarget):
+        target = action.target.support_program
+        matches = [
+            (call_id, check)
+            for call_id, check in context.support_checks
+            if check.support_program == target
+        ]
+        if not matches:
+            return [
+                _issue(
+                    code="CONTRACT_VIOLATION",
+                    category="CONTRACT",
+                    path=f"{action_path}/target",
+                    reason="Next Action의 지원사업 target이 지원금 분석 결과에 없습니다.",
+                    evidence_refs=action.evidence_refs,
+                )
+            ]
 
+        if len(matches) != 1:
+            return [
+                _issue(
+                    code="CONTRACT_VIOLATION",
+                    category="CONTRACT",
+                    path=f"{action_path}/target",
+                    reason="Next Action의 지원사업 target은 정확히 한 분석 결과와 연결되어야 합니다.",
+                    evidence_refs=action.evidence_refs,
+                )
+            ]
+
+        _, check = matches[0]
+        findings: list[ReviewIssue] = []
+        if check.match_status == SupportMatchStatus.NOT_RELEVANT:
+            findings.append(
+                _issue(
+                    code="INFEASIBLE_ACTION",
+                    category="ACTIONABILITY",
+                    path=action_path,
+                    reason="관련 없음으로 확인된 지원사업을 다음 행동으로 선택했습니다.",
+                    evidence_refs=action.evidence_refs,
+                )
+            )
+        check_refs = set(check.evidence_refs)
+        if not check_refs or not set(action.evidence_refs).intersection(check_refs):
+            findings.append(
+                _issue(
+                    code="MISSING_EVIDENCE",
+                    category="EVIDENCE",
+                    path=f"{action_path}/evidence_refs",
+                    reason="Next Action 근거가 대상 지원사업 분석 결과와 연결되지 않습니다.",
+                    evidence_refs=action.evidence_refs,
+                )
+            )
+
+        cleaned_values = [
+            value.replace(check.program_name, " ")
+            for value in (
+                action.action_code,
+                action.title,
+                action.reason,
+                *action.questions_to_ask,
+            )
+        ]
+        support_names = {other.program_name for _, other in context.support_checks}
+        procedure_labels = {
+            label
+            for _, procedure_finding in context.procedure_findings
+            for label in (
+                procedure_finding.step_name,
+                procedure_finding.procedure_step.step_code,
+            )
+        }
+        cleaned_text = " ".join(cleaned_values)
+        if (
+            has_procedure_language(*cleaned_values)
+            or references_other_known_label(
+                " ".join(
+                    (
+                        action.action_code,
+                        action.title,
+                        action.reason,
+                        *action.questions_to_ask,
+                    )
+                ),
+                selected_labels={check.program_name},
+                known_labels=support_names,
+            )
+            or any(label in cleaned_text for label in procedure_labels)
+        ):
+            findings.append(
+                _issue(
+                    code="PROCEDURE_CONFLICT",
+                    category="PROCEDURE",
+                    path=f"{action_path}/target",
+                    reason="하나의 Next Action이 여러 canonical 대상을 함께 지시합니다.",
+                    evidence_refs=action.evidence_refs,
+                )
+            )
+        if not decision.requires_human or not action.questions_to_ask:
+            findings.append(
+                _issue(
+                    code="HUMAN_CONFIRMATION_OMITTED",
+                    category="SAFETY",
+                    path=action_path,
+                    reason="지원사업 행동에 기관 확인 질문이 포함되지 않았습니다.",
+                    evidence_refs=action.evidence_refs,
+                )
+            )
+        return findings
+
+    if not isinstance(action.target, ProcedureActionTarget):
+        return [
+            _issue(
+                code="CONTRACT_VIOLATION",
+                category="CONTRACT",
+                path=f"{action_path}/target",
+                reason="알 수 없는 Next Action target 종류입니다.",
+                evidence_refs=action.evidence_refs,
+            )
+        ]
+
+    procedure_target = action.target.procedure_step
     target = (
-        action.target_procedure.procedure_step_id,
-        action.target_procedure.step_code,
+        procedure_target.procedure_step_id,
+        procedure_target.step_code,
     )
     matches = [
-        (call_id, evaluation)
-        for call_id, evaluation in context.procedure_evaluations
+        (call_id, finding)
+        for call_id, finding in context.procedure_findings
         if (
-            evaluation.procedure_step.procedure_step_id,
-            evaluation.procedure_step.step_code,
+            finding.procedure_step.procedure_step_id,
+            finding.procedure_step.step_code,
         )
         == target
     ]
-    action_path = "/supervisor_draft/decision/next_action"
     if not matches:
         return [
             _issue(
                 code="PROCEDURE_CONFLICT",
                 category="PROCEDURE",
-                path=f"{action_path}/target_procedure",
-                reason="Next Action의 대상 절차가 절차조회 결과에 없습니다.",
+                path=f"{action_path}/target",
+                reason="Next Action의 대상 절차가 정보분석 결과에 없습니다.",
                 evidence_refs=action.evidence_refs,
             )
         ]
 
-    _, evaluation = matches[0]
-    findings: list[ReviewIssue] = []
-    if any(other != evaluation for _, other in matches[1:]):
-        findings.append(
+    if len(matches) != 1:
+        return [
             _issue(
                 code="CONTRACT_VIOLATION",
                 category="CONTRACT",
-                path=f"{action_path}/target_procedure",
-                reason="같은 절차에 서로 다른 조회 결과가 함께 사용되었습니다.",
+                path=f"{action_path}/target",
+                reason="Next Action의 절차 target은 정확히 한 정보분석 결과와 연결되어야 합니다.",
                 evidence_refs=action.evidence_refs,
             )
-        )
+        ]
 
-    evaluation_refs = set(_walk_named_evidence_refs(evaluation))
-    if not set(action.evidence_refs).intersection(evaluation_refs):
+    _, finding = matches[0]
+    findings: list[ReviewIssue] = []
+
+    finding_refs = set(finding.evidence_refs)
+    if not set(action.evidence_refs).intersection(finding_refs):
         findings.append(
             _issue(
                 code="MISSING_EVIDENCE",
                 category="EVIDENCE",
                 path=f"{action_path}/evidence_refs",
-                reason="Next Action 근거가 대상 절차조회 결과와 연결되지 않습니다.",
+                reason="Next Action 근거가 대상 절차 정보분석 결과와 연결되지 않습니다.",
                 evidence_refs=action.evidence_refs,
             )
         )
 
-    action_and_evaluation_refs = set(action.evidence_refs) | evaluation_refs
+    combined = " ".join(
+        [action.action_code, action.title, action.reason, *action.questions_to_ask]
+    )
+    procedure_labels = {
+        label
+        for _, other in context.procedure_findings
+        for label in (other.step_name, other.procedure_step.step_code)
+    }
+    if (
+        any(name in combined for name in context.support_program_names)
+        or has_support_action_language(combined)
+        or references_other_known_label(
+            combined,
+            selected_labels={finding.step_name, finding.procedure_step.step_code},
+            known_labels=procedure_labels,
+        )
+    ):
+        findings.append(
+            _issue(
+                code="CONTRACT_VIOLATION",
+                category="CONTRACT",
+                path=f"{action_path}/target",
+                reason="하나의 Next Action이 여러 canonical 대상을 함께 지시합니다.",
+                evidence_refs=action.evidence_refs,
+            )
+        )
+
+    action_and_finding_refs = set(action.evidence_refs) | finding_refs
     unverified_evidence = [
         context.evidence_by_id[evidence_ref]
-        for evidence_ref in action_and_evaluation_refs
+        for evidence_ref in action_and_finding_refs
         if context.evidence_by_id[evidence_ref].freshness_status
         != FreshnessStatus.CURRENT
     ]
     confirmation_only_action = (
-        evaluation.readiness == ProcedureReadiness.UNDETERMINED
+        finding.requires_confirmation
         and decision.requires_human
         and bool(action.questions_to_ask)
     )
@@ -838,17 +1002,7 @@ def _procedure_action_findings(
             )
         )
 
-    if not evaluation.is_active or evaluation.readiness == ProcedureReadiness.BLOCKED:
-        findings.append(
-            _issue(
-                code="INFEASIBLE_ACTION",
-                category="ACTIONABILITY",
-                path=action_path,
-                reason="절차조회에서 현재 실행 불가로 확인된 절차를 행동으로 제시했습니다.",
-                evidence_refs=action.evidence_refs,
-            )
-        )
-    elif evaluation.readiness == ProcedureReadiness.UNDETERMINED and (
+    if finding.requires_confirmation and (
         not decision.requires_human or not action.questions_to_ask
     ):
         findings.append(
@@ -1087,6 +1241,9 @@ def _walk_named_evidence_refs(value: Any) -> list[str]:
                 if str(key).endswith("evidence_refs"):
                     if isinstance(child, (list, tuple)):
                         refs.extend(str(ref) for ref in child)
+                    continue
+                if str(key) == "evidence_ref" and isinstance(child, str):
+                    refs.append(child)
                     continue
                 walk(child)
             return

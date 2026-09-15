@@ -16,15 +16,22 @@ from app.agent.schemas import (
     AgentSchema,
     CaseFact,
     CaseSnapshot,
+    EvidenceRecord,
     InfoAnalysisInput,
+    InfoAnalysisResult,
     KnownProcedureStep,
+    ProcedureLookupResult,
+    ProcedureSearchSummary,
+    ProcedureSourceDocument,
     ProcedureStepRef,
     RedactedInput,
+    canonical_digest,
 )
 from pydantic import ValidationError
 
 NOW = datetime(2026, 9, 14, 3, 0, tzinfo=timezone.utc)
 SNAPSHOT_ID = UUID("00000000-0000-4000-8000-000000000101")
+PROCEDURE_CALL_ID = UUID("00000000-0000-4000-8000-000000000102")
 
 
 class FakeLLM:
@@ -105,6 +112,64 @@ def snapshot(*, demolition_value: str | None = None) -> CaseSnapshot:
     )
 
 
+def procedure_result() -> ProcedureLookupResult:
+    excerpt = (
+        "사업자는 폐업 신고서를 제출합니다. 폐업 신고는 정부24에서 확인할 수 "
+        "있습니다. 참고 문자열 https://external.example/apply"
+    )
+    source_url = "https://www.gov.kr/mw/closure"
+    source_hash = "sha256:" + "b" * 64
+    evidence = EvidenceRecord(
+        evidence_id="procedure:web:gov-closure",
+        source_type="OFFICIAL_DOCUMENT",
+        source_ref=source_url,
+        source_version=None,
+        locator="body:text",
+        excerpt=excerpt,
+        parent_evidence_refs=[],
+        published_at=None,
+        retrieved_at=NOW,
+        freshness_status="UNKNOWN",
+        content_hash=source_hash,
+    )
+    return ProcedureLookupResult(
+        completion_status="COMPLETE",
+        lookup_id=UUID("00000000-0000-4000-8000-000000000103"),
+        documents=[
+            ProcedureSourceDocument(
+                document_id=UUID("00000000-0000-4000-8000-000000000104"),
+                title="폐업 신고 안내",
+                authority_name="정부24",
+                canonical_url=source_url,
+                source_domain="www.gov.kr",
+                excerpt=excerpt,
+                published_at=None,
+                retrieved_at=NOW,
+                freshness_status="UNKNOWN",
+                content_hash=source_hash,
+                evidence_ref=evidence.evidence_id,
+                search_query="사업자 폐업 신고 절차",
+            )
+        ],
+        search_summary=ProcedureSearchSummary(
+            provider="KAKAO_DAUM_WEB",
+            requested_query_count=1,
+            successful_query_count=1,
+            failed_query_count=0,
+            provider_result_count=1,
+            official_candidate_count=1,
+            fetched_document_count=1,
+            rejected_result_count=0,
+            fetch_failure_count=0,
+            searched_at=NOW,
+        ),
+        warnings=[],
+        evidence_records=[evidence],
+        based_on_snapshot_id=SNAPSHOT_ID,
+        as_of=NOW.date(),
+    )
+
+
 def request(*, existing: str | None = None) -> InfoAnalysisInput:
     text = "임대인에게 확인했는데 철거가 필요하다고 합니다."
     return InfoAnalysisInput(
@@ -127,6 +192,8 @@ def request(*, existing: str | None = None) -> InfoAnalysisInput:
                 utterance_aliases=["임대인 확인"],
             )
         ],
+        procedure_lookup_call_id=PROCEDURE_CALL_ID,
+        procedure_lookup_result=procedure_result(),
         review_feedback=[],
     )
 
@@ -147,6 +214,7 @@ def extraction_payload(*, source_text: str = "철거가 필요") -> dict[str, An
             }
         ],
         "procedure_observations": [],
+        "procedure_findings": [],
         "missing_fields": [],
         "uncertainties": [],
     }
@@ -165,6 +233,250 @@ def test_extracts_only_grounded_canonical_fact_and_runtime_evidence() -> None:
     assert result.evidence_records[0].excerpt == "철거가 필요"
     assert candidate.source_evidence_refs == [result.evidence_records[0].evidence_id]
     assert llm.calls == 1
+    assert result.based_on_procedure_lookup_call_id == PROCEDURE_CALL_ID
+    assert result.based_on_procedure_lookup_digest == canonical_digest(
+        procedure_result()
+    )
+
+
+def test_info_input_rejects_duplicate_canonical_step_codes_and_aliases() -> None:
+    payload = request().model_dump(mode="python")
+    payload["known_procedure_steps"].append(
+        {
+            "procedure_step": {
+                "procedure_step_id": 2,
+                "step_code": "CONFIRM_RESTORATION_SCOPE",
+            },
+            "step_name": "다른 이름",
+            "utterance_aliases": ["다른 별칭"],
+        }
+    )
+    with pytest.raises(ValidationError, match="step_code"):
+        InfoAnalysisInput.model_validate(payload)
+
+    payload = request().model_dump(mode="python")
+    payload["known_procedure_steps"].append(
+        {
+            "procedure_step": {
+                "procedure_step_id": 2,
+                "step_code": "OTHER_STEP",
+            },
+            "step_name": "다른 이름",
+            "utterance_aliases": ["임대인 확인"],
+        }
+    )
+    with pytest.raises(ValidationError, match="aliases"):
+        InfoAnalysisInput.model_validate(payload)
+
+
+def test_incomplete_procedure_lookup_cannot_be_erased_by_info_complete() -> None:
+    base = request()
+    empty_lookup = ProcedureLookupResult(
+        completion_status="NO_RESULTS",
+        lookup_id=UUID("00000000-0000-4000-8000-000000000105"),
+        documents=[],
+        search_summary=ProcedureSearchSummary(
+            provider="KAKAO_DAUM_WEB",
+            requested_query_count=1,
+            successful_query_count=1,
+            failed_query_count=0,
+            provider_result_count=0,
+            official_candidate_count=0,
+            fetched_document_count=0,
+            rejected_result_count=0,
+            fetch_failure_count=0,
+            searched_at=NOW,
+        ),
+        warnings=[],
+        evidence_records=[],
+        based_on_snapshot_id=SNAPSHOT_ID,
+        as_of=NOW.date(),
+    )
+    incomplete_request = base.model_copy(
+        update={"procedure_lookup_result": empty_lookup}
+    )
+
+    result = asyncio.run(
+        InfoAnalysisAgent(FakeLLM(extraction_payload())).analyze(incomplete_request)
+    )
+
+    assert result.completion_status == "PARTIAL"
+    assert any(item.code == "SOURCE_UNAVAILABLE" for item in result.uncertainties)
+
+
+def test_analyzes_fetched_procedure_evidence_and_binds_known_step() -> None:
+    payload = extraction_payload()
+    payload["facts"] = []
+    payload["procedure_findings"] = [
+        {
+            "step_code": "CONFIRM_RESTORATION_SCOPE",
+            "summary": {
+                "text": "공식 안내에서 폐업 신고서 제출을 설명합니다.",
+                "evidence_refs": ["procedure:web:gov-closure"],
+            },
+            "relevance": "UNDETERMINED",
+            "decision_authority": "OFFICIAL_AGENCY",
+            "requires_confirmation": True,
+            "required_actions": [
+                {
+                    "text": "폐업 신고서를 제출합니다",
+                    "evidence_refs": ["procedure:web:gov-closure"],
+                }
+            ],
+            "required_documents": [],
+            "application_channel": None,
+            "application_url": {
+                "text": "https://www.gov.kr/mw/closure",
+                "evidence_refs": ["procedure:web:gov-closure"],
+            },
+            "deadline": None,
+            "evidence_refs": ["procedure:web:gov-closure"],
+        }
+    ]
+    llm = FakeLLM(payload)
+
+    result = asyncio.run(InfoAnalysisAgent(llm).analyze(request()))
+
+    assert result.procedure_findings[0].procedure_step.step_code == (
+        "CONFIRM_RESTORATION_SCOPE"
+    )
+    assert result.procedure_findings[0].requires_confirmation is True
+    assert "사업자는 폐업 신고서를 제출합니다" in llm.messages[0][1]["content"]
+    assert "untrusted data" in llm.messages[0][0]["content"]
+
+    duplicate_payload = result.model_dump(mode="python")
+    duplicate_finding = dict(duplicate_payload["procedure_findings"][0])
+    duplicate_finding["procedure_step"] = {
+        "procedure_step_id": 2,
+        "step_code": "OTHER_STEP",
+    }
+    duplicate_finding["step_name"] = "다른 절차"
+    duplicate_payload["procedure_findings"].append(duplicate_finding)
+    with pytest.raises(ValidationError, match="finding_id"):
+        InfoAnalysisResult.model_validate(duplicate_payload)
+
+
+def test_rejects_procedure_detail_not_present_in_official_excerpt() -> None:
+    payload = extraction_payload()
+    payload["facts"] = []
+    payload["procedure_findings"] = [
+        {
+            "step_code": "CONFIRM_RESTORATION_SCOPE",
+            "summary": {
+                "text": "공식 안내 요약",
+                "evidence_refs": ["procedure:web:gov-closure"],
+            },
+            "relevance": "UNDETERMINED",
+            "decision_authority": "OFFICIAL_AGENCY",
+            "requires_confirmation": True,
+            "required_actions": [
+                {
+                    "text": "존재하지 않는 수수료를 납부합니다",
+                    "evidence_refs": ["procedure:web:gov-closure"],
+                }
+            ],
+            "required_documents": [],
+            "application_channel": None,
+            "application_url": None,
+            "deadline": None,
+            "evidence_refs": ["procedure:web:gov-closure"],
+        }
+    ]
+
+    with pytest.raises(InfoAnalysisGuardrailError, match="grounding checks"):
+        asyncio.run(InfoAnalysisAgent(FakeLLM(payload)).analyze(request()))
+
+
+def test_unknown_freshness_cannot_be_promoted_to_relevant() -> None:
+    payload = extraction_payload()
+    payload["facts"] = []
+    payload["procedure_findings"] = [
+        {
+            "step_code": "CONFIRM_RESTORATION_SCOPE",
+            "summary": {
+                "text": "공식 안내 요약",
+                "evidence_refs": ["procedure:web:gov-closure"],
+            },
+            "relevance": "RELEVANT",
+            "decision_authority": "OFFICIAL_AGENCY",
+            "requires_confirmation": True,
+            "required_actions": [
+                {
+                    "text": "폐업 신고서를 제출합니다",
+                    "evidence_refs": ["procedure:web:gov-closure"],
+                }
+            ],
+            "required_documents": [],
+            "application_channel": None,
+            "application_url": None,
+            "deadline": None,
+            "evidence_refs": ["procedure:web:gov-closure"],
+        }
+    ]
+
+    with pytest.raises(InfoAnalysisGuardrailError, match="grounding checks"):
+        asyncio.run(InfoAnalysisAgent(FakeLLM(payload)).analyze(request()))
+
+
+def test_required_document_submission_stage_must_exist_in_official_excerpt() -> None:
+    payload = extraction_payload()
+    payload["facts"] = []
+    payload["procedure_findings"] = [
+        {
+            "step_code": "CONFIRM_RESTORATION_SCOPE",
+            "summary": {
+                "text": "공식 안내 요약",
+                "evidence_refs": ["procedure:web:gov-closure"],
+            },
+            "relevance": "UNDETERMINED",
+            "decision_authority": "OFFICIAL_AGENCY",
+            "requires_confirmation": True,
+            "required_actions": [],
+            "required_documents": [
+                {
+                    "name": "폐업 신고서",
+                    "submission_stage": "폐업 후 30일 이내",
+                    "evidence_refs": ["procedure:web:gov-closure"],
+                }
+            ],
+            "application_channel": None,
+            "application_url": None,
+            "deadline": None,
+            "evidence_refs": ["procedure:web:gov-closure"],
+        }
+    ]
+
+    with pytest.raises(InfoAnalysisGuardrailError, match="grounding checks"):
+        asyncio.run(InfoAnalysisAgent(FakeLLM(payload)).analyze(request()))
+
+
+def test_application_url_must_be_a_fetched_canonical_source_url() -> None:
+    payload = extraction_payload()
+    payload["facts"] = []
+    payload["procedure_findings"] = [
+        {
+            "step_code": "CONFIRM_RESTORATION_SCOPE",
+            "summary": {
+                "text": "공식 안내 요약",
+                "evidence_refs": ["procedure:web:gov-closure"],
+            },
+            "relevance": "UNDETERMINED",
+            "decision_authority": "OFFICIAL_AGENCY",
+            "requires_confirmation": True,
+            "required_actions": [],
+            "required_documents": [],
+            "application_channel": None,
+            "application_url": {
+                "text": "https://external.example/apply",
+                "evidence_refs": ["procedure:web:gov-closure"],
+            },
+            "deadline": None,
+            "evidence_refs": ["procedure:web:gov-closure"],
+        }
+    ]
+
+    with pytest.raises(InfoAnalysisGuardrailError, match="grounding checks"):
+        asyncio.run(InfoAnalysisAgent(FakeLLM(payload)).analyze(request()))
 
 
 def test_rejects_free_form_value_for_enum_field() -> None:

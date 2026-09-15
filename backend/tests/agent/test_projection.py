@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from uuid import UUID
 
 import pytest
 from app.agent.guardrails import GuardrailViolation
@@ -8,7 +9,12 @@ from app.agent.projection import (
     ensure_projection_has_no_obvious_sensitive_text,
     to_model_projection,
 )
-from app.agent.schemas import EvidenceRecord, RedactedInput, Redaction
+from app.agent.schemas import (
+    EvidenceRecord,
+    ProcedureSourceDocument,
+    RedactedInput,
+    Redaction,
+)
 
 NOW = datetime(2026, 9, 14, 7, 0, tzinfo=timezone.utc)
 
@@ -58,6 +64,28 @@ def test_redacted_input_projection_drops_text_and_redaction_details() -> None:
     assert "redacted_text" not in projection
     assert "redactions" not in projection
     assert projection["input_event_id"] == "input-1"
+
+
+def test_procedure_document_projection_drops_untrusted_web_excerpt() -> None:
+    document = ProcedureSourceDocument(
+        document_id=UUID("00000000-0000-4000-8000-000000000901"),
+        title="공식 폐업 안내",
+        authority_name="정부24",
+        canonical_url="https://www.gov.kr/closure",
+        source_domain="www.gov.kr",
+        excerpt="외부 웹 원문은 Supervisor prompt로 다시 보내지 않습니다.",
+        published_at=None,
+        retrieved_at=NOW,
+        freshness_status="UNKNOWN",
+        content_hash="sha256:" + "a" * 64,
+        evidence_ref="procedure:web:1",
+        search_query="사업자 폐업 신고 절차",
+    )
+
+    projection = to_model_projection(document)
+
+    assert "excerpt" not in projection
+    assert projection["evidence_ref"] == "procedure:web:1"
 
 
 def test_sensitive_value_in_projection_is_rejected() -> None:

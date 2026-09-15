@@ -22,13 +22,14 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Run the RE:BORN Agent graph without BE persistence. "
-            "This command accepts no real Case input and uses synthetic data only."
+            "It uses a synthetic Case/support catalog, but retrieves closure "
+            "procedure sources from the real internet."
         )
     )
     parser.add_argument(
         "--live",
         action="store_true",
-        help="allow billable calls to the configured chat proxy",
+        help="allow configured LLM calls and real procedure web requests",
     )
     parser.add_argument(
         "--trace-id", default=None, help="metadata-only trace identifier"
@@ -41,11 +42,14 @@ async def _run(args: argparse.Namespace) -> int:
     fixture = build_standalone_fixture()
     request = fixture.request
 
-    client = StructuredLLMClient.from_env()
+    client: StructuredLLMClient | None = None
+    procedure_tool: ProcedureLookupTool | None = None
     try:
+        client = StructuredLLMClient.from_env()
+        procedure_tool = ProcedureLookupTool.from_env()
         runtime = AgentGraph(
             info_agent=InfoAnalysisAgent(client),
-            procedure_tool=ProcedureLookupTool(fixture.procedure_master),
+            procedure_tool=procedure_tool,
             support_agent=SupportAgent(client, fixture.support_catalog),
             supervisor=SupervisorAgent(client),
             review_tool=ReviewTool(client),
@@ -53,7 +57,10 @@ async def _run(args: argparse.Namespace) -> int:
         )
         outcome = await runtime.run(request, trace_id=args.trace_id)
     finally:
-        await client.aclose()
+        if procedure_tool is not None:
+            await procedure_tool.aclose()
+        if client is not None:
+            await client.aclose()
 
     data = outcome.model_dump(mode="json")
     print(

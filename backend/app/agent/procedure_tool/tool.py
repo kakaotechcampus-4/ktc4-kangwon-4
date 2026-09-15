@@ -1,536 +1,986 @@
-"""Deterministic lookup and evaluation over an injected procedure master."""
+"""Live Kakao web search and official-source retrieval for closure procedures.
+
+Kakao search snippets are discovery hints only.  This tool emits evidence only
+after it has fetched an allowlisted official HTTPS document itself, bounded its
+size, accepted its content type, and extracted non-empty text.  It does not
+interpret the documents, decide applicability, or select the next action.
+"""
 
 from __future__ import annotations
 
+import asyncio
+import codecs
+import hashlib
+import html
+import ipaddress
+import json
+import re
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from datetime import date
-from typing import Any
-from uuid import UUID
+from datetime import datetime, timezone
+from html.parser import HTMLParser
+from typing import Any, Self
+from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
+from uuid import UUID, uuid4
 
+import httpx
+from app.agent.guardrails import GuardrailViolation, ensure_no_sensitive_text
 from app.agent.schemas import (
-    CaseFact,
     EvidenceRecord,
-    ProcedureConditionResult,
     ProcedureLookupInput,
     ProcedureLookupResult,
-    ProcedurePrerequisiteResult,
-    ProcedureStepEvaluation,
-    ProcedureUnavailableReason,
+    ProcedureLookupWarning,
+    ProcedureSearchSummary,
+    ProcedureSourceDocument,
 )
 
-from .models import (
-    MasterScalar,
-    ProcedureConditionDefinition,
-    ProcedureMaster,
-    ProcedureStepDefinition,
+from .models import ProcedureSearchConfig, SearchHit
+
+SleepCallable = Callable[[float], Awaitable[None]]
+ClockCallable = Callable[[], datetime]
+UuidFactory = Callable[[], UUID]
+
+_TRANSIENT_STATUS_CODES = frozenset({408, 409, 425, 429})
+_REDIRECT_STATUS_CODES = frozenset({301, 302, 303, 307, 308})
+_ACCEPTED_CONTENT_TYPES = frozenset(
+    {"text/html", "application/xhtml+xml", "text/plain"}
+)
+_IGNORED_HTML_TAGS = frozenset(
+    {
+        "canvas",
+        "iframe",
+        "noscript",
+        "object",
+        "script",
+        "style",
+        "svg",
+        "template",
+    }
+)
+_BLOCK_HTML_TAGS = frozenset(
+    {
+        "address",
+        "article",
+        "aside",
+        "blockquote",
+        "br",
+        "dd",
+        "div",
+        "dl",
+        "dt",
+        "footer",
+        "form",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "header",
+        "li",
+        "main",
+        "nav",
+        "ol",
+        "p",
+        "section",
+        "table",
+        "td",
+        "th",
+        "tr",
+        "ul",
+    }
+)
+_VOID_HTML_TAGS = frozenset(
+    {
+        "area",
+        "base",
+        "br",
+        "col",
+        "embed",
+        "hr",
+        "img",
+        "input",
+        "link",
+        "meta",
+        "param",
+        "source",
+        "track",
+        "wbr",
+    }
+)
+_TRACKING_QUERY_KEYS = frozenset(
+    {"fbclid", "gclid", "dclid", "mc_cid", "mc_eid", "ref", "referrer"}
+)
+_SECRET_QUERY_KEY_PARTS = (
+    "apikey",
+    "api_key",
+    "servicekey",
+    "service_key",
+    "access_token",
+    "auth_token",
+    "credential",
+    "signature",
+    "secret",
+)
+_MAX_URL_CHARS = 4_096
+_MAX_TITLE_CHARS = 300
+_MAX_EXCERPT_CHARS = 4_000
+_MAX_FOCUS_OCCURRENCES_PER_TERM = 256
+_PROCEDURE_FOCUS_TERMS = (
+    "폐업",
+    "휴업",
+    "철거",
+    "원상복구",
+    "신고",
+    "신청",
+    "접수",
+    "제출",
+    "반납",
+    "서류",
+    "허가",
+    "등록",
+    "세무",
+    "홈택스",
+    "정부24",
+)
+
+_AUTHORITY_NAMES: tuple[tuple[str, str], ...] = (
+    ("hometax.go.kr", "국세청 홈택스"),
+    ("nts.go.kr", "국세청"),
+    ("easylaw.go.kr", "찾기쉬운 생활법령정보"),
+    ("law.go.kr", "국가법령정보센터"),
+    ("gov.kr", "정부24"),
+    ("4insure.or.kr", "4대사회보험 정보연계센터"),
+    ("semas.or.kr", "소상공인시장진흥공단"),
+    ("sbiz24.kr", "소상공인24"),
+    ("bizinfo.go.kr", "기업마당"),
 )
 
 
 class ProcedureLookupError(RuntimeError):
-    """Base class for deterministic procedure lookup failures."""
+    """Base exception that carries only safe operational metadata."""
+
+    def __init__(self, message: str, *, code: str, retryable: bool) -> None:
+        super().__init__(message)
+        self.code = code
+        self.retryable = retryable
 
 
-class ProcedureMasterUnavailableError(ProcedureLookupError):
-    """Raised when no reviewed procedure master was injected."""
+class ProcedureLookupRequestError(ProcedureLookupError):
+    """Raised when no Kakao search query can be completed."""
 
 
 class ProcedureLookupInputError(ProcedureLookupError):
-    """Raised when cross-object references in otherwise valid input conflict."""
+    """Raised for a cross-field request violation at the tool boundary."""
 
 
 @dataclass(frozen=True, slots=True)
-class _ResolvedFact:
-    status: str
-    value: Any
-    evidence_refs: tuple[str, ...]
+class _QueryOutcome:
+    hits: tuple[SearchHit, ...]
+    provider_result_count: int
+    rejected_result_count: int
 
 
-def _text(value: Any) -> str:
-    """Return a Literal/Enum value without relying on permissive coercion."""
-
-    enum_value = getattr(value, "value", value)
-    return str(enum_value)
-
-
-def _strictly_equal(left: MasterScalar, right: MasterScalar) -> bool:
-    """Compare values without Python's ``True == 1`` coercion."""
-
-    return type(left) is type(right) and left == right
+@dataclass(frozen=True, slots=True)
+class _FetchedDocument:
+    canonical_url: str
+    source_domain: str
+    title: str
+    excerpt: str
+    content_hash: str
+    retrieved_at: datetime
 
 
-def _strictly_equal_nullable(left: Any, right: Any) -> bool:
-    if left is None or right is None:
-        return left is right
-    return _strictly_equal(left, right)
+class _UpstreamFailure(RuntimeError):
+    def __init__(self, code: str, *, retryable: bool) -> None:
+        super().__init__(code)
+        self.code = code
+        self.retryable = retryable
 
 
-def _evaluate_condition(
-    condition: ProcedureConditionDefinition,
-    actual_value: MasterScalar | None,
-) -> bool | None:
-    """Return True/False, or None when a comparison cannot be verified."""
+class _DocumentFailure(RuntimeError):
+    def __init__(self, code: str, *, retryable: bool = False) -> None:
+        super().__init__(code)
+        self.code = code
+        self.retryable = retryable
 
-    if actual_value is None:
-        return None
 
-    expected_values = condition.expected_values
-    if condition.operator == "EQ":
-        return _strictly_equal(actual_value, expected_values[0])
-    if condition.operator == "IN":
-        return any(
-            _strictly_equal(actual_value, expected) for expected in expected_values
-        )
-
-    expected = expected_values[0]
-    if type(actual_value) is not type(expected):
-        return None
-    if isinstance(actual_value, bool) or not isinstance(actual_value, (int, date)):
-        return None
-
-    if condition.operator == "GT":
-        return actual_value > expected
-    if condition.operator == "GTE":
-        return actual_value >= expected
-    if condition.operator == "LT":
-        return actual_value < expected
-    if condition.operator == "LTE":
-        return actual_value <= expected
-    return None
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 class ProcedureLookupTool:
-    """Evaluate procedure facts without selecting a blocker or next action.
+    """Search the web and retrieve official business-closure source documents."""
 
-    The tool is intentionally synchronous and side-effect free.  Its master is
-    immutable, and Case data is supplied entirely through ``ProcedureLookupInput``.
-    """
-
-    def __init__(self, master: ProcedureMaster | None) -> None:
-        self._master = master.model_copy(deep=True) if master is not None else None
-
-    def lookup(self, request: ProcedureLookupInput) -> ProcedureLookupResult:
-        master = self._master
-        if master is None:
-            raise ProcedureMasterUnavailableError(
-                "a reviewed procedure master must be injected before lookup"
-            )
-
-        selected_steps, has_missing_codes = self._select_steps(request)
-        facts, used_candidate_ids = self._resolve_facts(request, selected_steps)
-        progress = self._resolve_progress(request)
-        evidence_by_id = {
-            evidence.evidence_id: evidence for evidence in master.evidence_records
-        }
-
-        evaluations: list[ProcedureStepEvaluation] = []
-        selected_evidence_refs: set[str] = set()
-        dataset_is_current = master.freshness_status == "CURRENT"
-        all_selected_sources_current = dataset_is_current
-
-        for step in selected_steps:
-            step_refs = self._step_evidence_refs(step)
-            step_lineage_refs = self._evidence_lineage_refs(
-                step_refs,
-                evidence_by_id,
-            )
-            selected_evidence_refs.update(step_lineage_refs)
-            step_source_is_current = dataset_is_current and all(
-                _text(evidence_by_id[evidence_ref].freshness_status) == "CURRENT"
-                for evidence_ref in step_lineage_refs
-            )
-            if not step_source_is_current:
-                all_selected_sources_current = False
-
-            evaluations.append(
-                self._evaluate_step(
-                    step=step,
-                    as_of=request.as_of,
-                    facts=facts,
-                    progress=progress,
-                    source_is_current=step_source_is_current,
-                )
-            )
-
-        output_evidence = []
-        emitted_evidence_ids: set[str] = set()
-        for evidence in master.evidence_records:
-            if (
-                evidence.evidence_id in selected_evidence_refs
-                and evidence.evidence_id not in emitted_evidence_ids
-            ):
-                output_evidence.append(evidence)
-                emitted_evidence_ids.add(evidence.evidence_id)
-        is_complete = (
-            bool(selected_steps)
-            and not has_missing_codes
-            and all_selected_sources_current
-        )
-
-        return ProcedureLookupResult(
-            completion_status="COMPLETE" if is_complete else "PARTIAL",
-            procedure_data_version=master.data_version,
-            step_evaluations=evaluations,
-            evidence_records=output_evidence,
-            based_on_snapshot_id=request.planning_context.case_snapshot.snapshot_id,
-            based_on_candidate_ids=used_candidate_ids,
-        )
-
-    def _select_steps(
+    def __init__(
         self,
-        request: ProcedureLookupInput,
-    ) -> tuple[list[ProcedureStepDefinition], bool]:
-        assert self._master is not None
-        if request.lookup_scope == "ALL_STEPS":
-            return list(self._master.steps), False
-
-        requested_codes = list(dict.fromkeys(request.step_codes))
-        steps_by_code = {
-            step.procedure_step.step_code: step for step in self._master.steps
-        }
-        selected = [
-            steps_by_code[code] for code in requested_codes if code in steps_by_code
-        ]
-        return selected, len(selected) != len(requested_codes)
-
-    def _resolve_facts(
-        self,
-        request: ProcedureLookupInput,
-        selected_steps: list[ProcedureStepDefinition],
-    ) -> tuple[dict[str, _ResolvedFact], list[UUID]]:
-        snapshot = request.planning_context.case_snapshot
-        facts: dict[str, _ResolvedFact] = {}
-        for fact in snapshot.facts:
-            field_path = _text(fact.field_path)
-            if field_path in facts:
-                raise ProcedureLookupInputError(
-                    f"snapshot has duplicate fact field_path: {field_path}"
-                )
-            facts[field_path] = self._resolved_snapshot_fact(fact)
-
-        relevant_fields = {
-            _text(condition.field_path)
-            for step in selected_steps
-            for condition in step.conditions
-        }
-        used_candidate_ids: list[UUID] = []
-        applied_fields: set[str] = set()
-        for candidate in request.planning_context.fact_overlays:
-            field_path = _text(candidate.field_path)
-            if field_path not in relevant_fields:
-                continue
-            if field_path in applied_fields:
-                raise ProcedureLookupInputError(
-                    f"fact overlay has duplicate field_path: {field_path}"
-                )
-            applied_fields.add(field_path)
-            snapshot_fact = facts.get(
-                field_path,
-                _ResolvedFact(status="UNKNOWN", value=None, evidence_refs=()),
-            )
-            if _text(
-                candidate.before_status
-            ) != snapshot_fact.status or not _strictly_equal_nullable(
-                candidate.before_value, snapshot_fact.value
-            ):
-                raise ProcedureLookupInputError(
-                    f"fact overlay before state does not match snapshot: {field_path}"
-                )
-            facts[field_path] = _ResolvedFact(
-                status=_text(candidate.proposed_status),
-                value=candidate.proposed_value,
-                evidence_refs=tuple(candidate.source_evidence_refs),
-            )
-            used_candidate_ids.append(candidate.candidate_id)
-        return facts, used_candidate_ids
-
-    @staticmethod
-    def _resolved_snapshot_fact(fact: CaseFact) -> _ResolvedFact:
-        return _ResolvedFact(
-            status=_text(fact.status),
-            value=fact.value,
-            evidence_refs=tuple(fact.evidence_refs),
-        )
-
-    def _resolve_progress(
-        self, request: ProcedureLookupInput
-    ) -> dict[tuple[int, str], str]:
-        assert self._master is not None
-        progress_by_ref: dict[tuple[int, str], str] = {}
-        ids_to_codes: dict[int, str] = {}
-        codes_to_ids: dict[str, int] = {}
-        master_ids_to_codes = {
-            int(step.procedure_step.procedure_step_id): _text(
-                step.procedure_step.step_code
-            )
-            for step in self._master.steps
-        }
-        master_codes_to_ids = {
-            _text(step.procedure_step.step_code): int(
-                step.procedure_step.procedure_step_id
-            )
-            for step in self._master.steps
-        }
-        for progress in request.planning_context.case_snapshot.procedure_progress:
-            step_ref = progress.procedure_step
-            step_id = int(step_ref.procedure_step_id)
-            step_code = _text(step_ref.step_code)
-
-            previous_code = ids_to_codes.setdefault(step_id, step_code)
-            previous_id = codes_to_ids.setdefault(step_code, step_id)
-            if previous_code != step_code or previous_id != step_id:
-                raise ProcedureLookupInputError(
-                    "procedure progress contains inconsistent stable references"
-                )
-            if (
-                step_id in master_ids_to_codes
-                and master_ids_to_codes[step_id] != step_code
-            ) or (
-                step_code in master_codes_to_ids
-                and master_codes_to_ids[step_code] != step_id
-            ):
-                raise ProcedureLookupInputError(
-                    "procedure progress reference conflicts with the procedure master"
-                )
-
-            key = (step_id, step_code)
-            if key in progress_by_ref:
-                raise ProcedureLookupInputError(
-                    f"duplicate procedure progress for {step_code}"
-                )
-            progress_by_ref[key] = _text(progress.status)
-        return progress_by_ref
-
-    def _evaluate_step(
-        self,
+        config: ProcedureSearchConfig,
         *,
-        step: ProcedureStepDefinition,
-        as_of: date,
-        facts: dict[str, _ResolvedFact],
-        progress: dict[tuple[int, str], str],
-        source_is_current: bool,
-    ) -> ProcedureStepEvaluation:
-        step_key = (
-            int(step.procedure_step.procedure_step_id),
-            _text(step.procedure_step.step_code),
+        client: httpx.AsyncClient | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
+        sleep: SleepCallable = asyncio.sleep,
+        clock: ClockCallable = _utc_now,
+        uuid_factory: UuidFactory = uuid4,
+    ) -> None:
+        if client is not None and transport is not None:
+            raise ValueError("Pass either an HTTP client or a transport, not both")
+        self.config = config
+        self._sleep = sleep
+        self._clock = clock
+        self._uuid = uuid_factory
+        self._owns_client = client is None
+        self._client = client or httpx.AsyncClient(
+            timeout=config.timeout_seconds,
+            follow_redirects=False,
+            transport=transport,
         )
-        current_status = progress.get(step_key)
-        is_active = self._is_active_on(step, as_of)
 
-        condition_results = [
-            self._condition_result(
-                condition,
-                facts.get(_text(condition.field_path)),
-                source_is_current=source_is_current,
-            )
-            for condition in step.conditions
-        ]
-        prerequisite_results = [
-            self._prerequisite_result(prerequisite, progress)
-            for prerequisite in step.prerequisites
-        ]
-        unavailable_reasons: list[ProcedureUnavailableReason] = []
+    @classmethod
+    def from_env(
+        cls,
+        *,
+        client: httpx.AsyncClient | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
+        sleep: SleepCallable = asyncio.sleep,
+        clock: ClockCallable = _utc_now,
+        uuid_factory: UuidFactory = uuid4,
+        **config_kwargs: Any,
+    ) -> ProcedureLookupTool:
+        """Construct a lookup tool from ``ProcedureSearchConfig.from_env``."""
 
-        if not is_active:
-            applicability = "NOT_APPLICABLE"
-            readiness = "BLOCKED"
-            unavailable_reasons.append(
-                ProcedureUnavailableReason(
-                    code="STEP_INACTIVE",
-                    message="기준일에 사용할 수 없는 절차입니다.",
-                    evidence_refs=list(step.evidence_refs),
-                )
-            )
-        elif not source_is_current:
-            applicability = "UNDETERMINED"
-            readiness = "UNDETERMINED"
-            unavailable_reasons.append(
-                ProcedureUnavailableReason(
-                    code="CONDITION_UNKNOWN",
-                    message="절차 자료가 최신인지 공식 출처에서 확인해야 합니다.",
-                    evidence_refs=list(self._step_evidence_refs(step)),
-                )
-            )
-        elif any(result.status == "NOT_MET" for result in condition_results):
-            applicability = "NOT_APPLICABLE"
-            readiness = "BLOCKED"
-            not_met_refs = self._condition_refs_with_status(
-                condition_results, "NOT_MET"
-            )
-            unavailable_reasons.append(
-                ProcedureUnavailableReason(
-                    code="CONDITION_NOT_MET",
-                    message="현재 확인된 정보가 이 절차의 조건과 맞지 않습니다.",
-                    evidence_refs=not_met_refs,
-                )
-            )
-        elif any(result.status == "UNKNOWN" for result in condition_results):
-            applicability = "UNDETERMINED"
-            readiness = "UNDETERMINED"
-            unknown_refs = self._condition_refs_with_status(
-                condition_results, "UNKNOWN"
-            )
-            unavailable_reasons.append(
-                ProcedureUnavailableReason(
-                    code="CONDITION_UNKNOWN",
-                    message="절차 적용 여부를 판단할 정보가 더 필요합니다.",
-                    evidence_refs=unknown_refs,
-                )
-            )
-        else:
-            applicability = "APPLICABLE"
-            required = [
-                result
-                for result in prerequisite_results
-                if result.dependency_type == "REQUIRED"
-            ]
-            if any(result.satisfaction == "NOT_SATISFIED" for result in required):
-                readiness = "BLOCKED"
-            elif any(result.satisfaction == "UNKNOWN" for result in required):
-                readiness = "UNDETERMINED"
-            else:
-                readiness = "READY"
+        return cls(
+            ProcedureSearchConfig.from_env(**config_kwargs),
+            client=client,
+            transport=transport,
+            sleep=sleep,
+            clock=clock,
+            uuid_factory=uuid_factory,
+        )
 
-        for prerequisite, result in zip(
-            step.prerequisites, prerequisite_results, strict=True
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(self, *_: object) -> None:
+        await self.aclose()
+
+    async def aclose(self) -> None:
+        """Close only the HTTP client created by this tool."""
+
+        if self._owns_client:
+            await self._client.aclose()
+
+    async def lookup(self, request: ProcedureLookupInput) -> ProcedureLookupResult:
+        """Run one bounded lookup or raise a typed, fail-closed timeout."""
+
+        try:
+            return await asyncio.wait_for(
+                self._lookup(request),
+                timeout=self.config.total_timeout_seconds,
+            )
+        except TimeoutError:
+            raise ProcedureLookupRequestError(
+                "procedure lookup exceeded its total time limit",
+                code="LOOKUP_TIMEOUT",
+                retryable=True,
+            ) from None
+
+    async def _lookup(self, request: ProcedureLookupInput) -> ProcedureLookupResult:
+        """Return fetched official documents without interpreting their contents."""
+
+        if request.lookup_goal != "BUSINESS_CLOSURE":
+            raise ProcedureLookupInputError(
+                "unsupported procedure lookup goal",
+                code="INVALID_INPUT",
+                retryable=False,
+            )
+        if request.source_policy != "OFFICIAL_ONLY":
+            raise ProcedureLookupInputError(
+                "unsupported procedure source policy",
+                code="INVALID_INPUT",
+                retryable=False,
+            )
+        queries = [str(query) for query in request.search_queries]
+        if any(
+            len(query) > 200 or any(ord(character) < 32 for character in query)
+            for query in queries
         ):
-            if result.satisfaction == "SATISFIED":
-                continue
-            dependency_label = (
-                "필수" if result.dependency_type == "REQUIRED" else "권고"
+            raise ProcedureLookupInputError(
+                "procedure search query is invalid",
+                code="INVALID_INPUT",
+                retryable=False,
             )
-            unavailable_reasons.append(
-                ProcedureUnavailableReason(
-                    code="PREREQUISITE_INCOMPLETE",
-                    message=f"{dependency_label} 선행 절차의 완료 여부를 확인해야 합니다.",
-                    evidence_refs=list(prerequisite.evidence_refs),
+        try:
+            ensure_no_sensitive_text(queries)
+        except GuardrailViolation:
+            raise ProcedureLookupInputError(
+                "procedure search query failed sensitive-data preflight",
+                code="INVALID_INPUT",
+                retryable=False,
+            ) from None
+
+        searched_at = self._aware_now()
+        query_outcomes: list[_QueryOutcome] = []
+        failed_queries = 0
+        query_failures: list[_UpstreamFailure] = []
+        for query in queries:
+            try:
+                query_outcomes.append(
+                    await self._search_query(
+                        query,
+                        size=int(request.max_results_per_query),
+                    )
+                )
+            except _UpstreamFailure as exc:
+                failed_queries += 1
+                query_failures.append(exc)
+
+        if not query_outcomes:
+            retryable = bool(query_failures) and all(
+                failure.retryable for failure in query_failures
+            )
+            raise ProcedureLookupRequestError(
+                "procedure search provider is unavailable",
+                code="SEARCH_UNAVAILABLE",
+                retryable=retryable,
+            )
+
+        provider_result_count = sum(
+            item.provider_result_count for item in query_outcomes
+        )
+        rejected_result_count = sum(
+            item.rejected_result_count for item in query_outcomes
+        )
+        candidates: list[SearchHit] = []
+        seen_candidate_urls: set[str] = set()
+        official_candidate_count = 0
+        for outcome in query_outcomes:
+            for hit in outcome.hits:
+                try:
+                    canonical_url, _ = self._canonical_official_url(hit.url)
+                except ValueError:
+                    rejected_result_count += 1
+                    continue
+                official_candidate_count += 1
+                if canonical_url in seen_candidate_urls:
+                    continue
+                seen_candidate_urls.add(canonical_url)
+                candidates.append(
+                    SearchHit(title=hit.title, url=canonical_url, query=hit.query)
+                )
+
+        documents: list[ProcedureSourceDocument] = []
+        evidence_records: list[EvidenceRecord] = []
+        fetch_failure_count = 0
+        seen_final_urls: set[str] = set()
+        for hit in candidates:
+            try:
+                fetched = await self._fetch_document(hit)
+            except _DocumentFailure:
+                fetch_failure_count += 1
+                continue
+            if fetched.canonical_url in seen_final_urls:
+                continue
+            seen_final_urls.add(fetched.canonical_url)
+
+            document_id = self._uuid()
+            evidence_id = f"procedure:web:{document_id}"
+            evidence = EvidenceRecord(
+                evidence_id=evidence_id,
+                source_type="OFFICIAL_DOCUMENT",
+                source_ref=fetched.canonical_url,
+                source_version=fetched.content_hash,
+                locator=fetched.canonical_url,
+                excerpt=fetched.excerpt,
+                parent_evidence_refs=[],
+                published_at=None,
+                retrieved_at=fetched.retrieved_at,
+                freshness_status="UNKNOWN",
+                content_hash=fetched.content_hash,
+            )
+            document = ProcedureSourceDocument(
+                document_id=document_id,
+                title=fetched.title,
+                authority_name=self._authority_name(fetched.source_domain),
+                canonical_url=fetched.canonical_url,
+                source_domain=fetched.source_domain,
+                excerpt=fetched.excerpt,
+                published_at=None,
+                retrieved_at=fetched.retrieved_at,
+                freshness_status="UNKNOWN",
+                content_hash=fetched.content_hash,
+                evidence_ref=evidence_id,
+                search_query=hit.query,
+            )
+            evidence_records.append(evidence)
+            documents.append(document)
+
+        warnings = self._warnings(
+            failed_queries=failed_queries,
+            rejected_result_count=rejected_result_count,
+            fetch_failure_count=fetch_failure_count,
+            official_candidate_count=official_candidate_count,
+            document_count=len(documents),
+        )
+        if documents and failed_queries == 0 and fetch_failure_count == 0:
+            completion_status = "COMPLETE"
+        elif not documents and failed_queries == 0 and official_candidate_count == 0:
+            completion_status = "NO_RESULTS"
+        else:
+            completion_status = "PARTIAL"
+
+        summary = ProcedureSearchSummary(
+            provider="KAKAO_DAUM_WEB",
+            requested_query_count=len(request.search_queries),
+            successful_query_count=len(query_outcomes),
+            failed_query_count=failed_queries,
+            provider_result_count=provider_result_count,
+            official_candidate_count=official_candidate_count,
+            fetched_document_count=len(documents),
+            rejected_result_count=rejected_result_count,
+            fetch_failure_count=fetch_failure_count,
+            searched_at=searched_at,
+        )
+        return ProcedureLookupResult(
+            completion_status=completion_status,
+            lookup_id=self._uuid(),
+            documents=documents,
+            search_summary=summary,
+            warnings=warnings,
+            evidence_records=evidence_records,
+            based_on_snapshot_id=request.based_on_snapshot_id,
+            as_of=request.as_of,
+        )
+
+    async def _search_query(self, query: str, *, size: int) -> _QueryOutcome:
+        total_attempts = self.config.max_retries + 1
+        last_failure = _UpstreamFailure("SEARCH_UNAVAILABLE", retryable=True)
+        for attempt_index in range(total_attempts):
+            response: httpx.Response | None = None
+            try:
+                request = self._isolated_get_request(
+                    self.config.endpoint,
+                    headers={
+                        "Authorization": f"KakaoAK {self.config.api_key}",
+                        "Accept": "application/json",
+                    },
+                    params={
+                        "query": query,
+                        "size": size,
+                        "page": 1,
+                        "sort": "accuracy",
+                    },
+                )
+                response = await self._client.send(
+                    request,
+                    stream=True,
+                    auth=None,
+                    follow_redirects=False,
+                )
+                if response.status_code in _REDIRECT_STATUS_CODES:
+                    raise _UpstreamFailure("SEARCH_REDIRECT_REJECTED", retryable=False)
+                if not response.is_success:
+                    raise _UpstreamFailure(
+                        "SEARCH_HTTP_ERROR",
+                        retryable=_is_transient_status(response.status_code),
+                    )
+                if _media_type(response.headers.get("content-type")) != (
+                    "application/json"
+                ):
+                    raise _UpstreamFailure(
+                        "SEARCH_CONTENT_TYPE_INVALID", retryable=False
+                    )
+                body = await self._read_search_body(response)
+                return self._parse_search_response(
+                    body,
+                    query,
+                    result_limit=size,
+                )
+            except _UpstreamFailure as exc:
+                last_failure = exc
+            except (httpx.TimeoutException, httpx.TransportError):
+                last_failure = _UpstreamFailure(
+                    "SEARCH_TRANSPORT_ERROR", retryable=True
+                )
+            except (json.JSONDecodeError, UnicodeDecodeError, TypeError, ValueError):
+                last_failure = _UpstreamFailure(
+                    "SEARCH_RESPONSE_INVALID", retryable=True
+                )
+            finally:
+                if response is not None:
+                    await response.aclose()
+
+            if not last_failure.retryable or attempt_index + 1 >= total_attempts:
+                raise last_failure
+            await self._backoff(attempt_index)
+        raise last_failure
+
+    @staticmethod
+    def _parse_search_response(
+        body: bytes,
+        query: str,
+        *,
+        result_limit: int,
+    ) -> _QueryOutcome:
+        payload = json.loads(body)
+        if not isinstance(payload, Mapping):
+            raise TypeError("Kakao search response must be an object")
+        raw_documents = payload.get("documents")
+        if not isinstance(raw_documents, list):
+            raise TypeError("Kakao search response documents must be a list")
+        hits: list[SearchHit] = []
+        rejected = max(0, len(raw_documents) - result_limit)
+        for item in raw_documents[:result_limit]:
+            if not isinstance(item, Mapping):
+                rejected += 1
+                continue
+            title = item.get("title")
+            url = item.get("url")
+            if not isinstance(title, str) or not isinstance(url, str):
+                rejected += 1
+                continue
+            clean_title = _clean_title(title)
+            if not clean_title or not url.strip():
+                rejected += 1
+                continue
+            hits.append(SearchHit(title=clean_title, url=url.strip(), query=query))
+        return _QueryOutcome(
+            hits=tuple(hits),
+            provider_result_count=len(raw_documents),
+            rejected_result_count=rejected,
+        )
+
+    async def _read_search_body(self, response: httpx.Response) -> bytes:
+        content_length = response.headers.get("content-length")
+        if content_length is not None:
+            try:
+                declared_length = int(content_length)
+            except ValueError:
+                raise _UpstreamFailure(
+                    "SEARCH_CONTENT_LENGTH_INVALID", retryable=False
+                ) from None
+            if declared_length > self.config.max_response_bytes:
+                raise _UpstreamFailure("SEARCH_RESPONSE_TOO_LARGE", retryable=False)
+        body = bytearray()
+        async for chunk in response.aiter_bytes():
+            body.extend(chunk)
+            if len(body) > self.config.max_response_bytes:
+                raise _UpstreamFailure("SEARCH_RESPONSE_TOO_LARGE", retryable=False)
+        return bytes(body)
+
+    async def _fetch_document(self, hit: SearchHit) -> _FetchedDocument:
+        total_attempts = self.config.max_retries + 1
+        last_failure = _DocumentFailure("SOURCE_UNAVAILABLE", retryable=True)
+        for attempt_index in range(total_attempts):
+            try:
+                (
+                    final_url,
+                    source_domain,
+                    content_type,
+                    body,
+                ) = await self._fetch_with_redirects(hit.url)
+                title, excerpt = _extract_document_text(
+                    body,
+                    content_type=content_type,
+                    # Kakao title/snippet fields are discovery metadata only.
+                    # A missing source-page title falls back to the verified host.
+                    fallback_title="",
+                    focus_query=hit.query,
+                )
+                if not excerpt:
+                    raise _DocumentFailure("SOURCE_TEXT_EMPTY")
+                return _FetchedDocument(
+                    canonical_url=final_url,
+                    source_domain=source_domain,
+                    title=title or source_domain,
+                    excerpt=excerpt,
+                    content_hash="sha256:" + hashlib.sha256(body).hexdigest(),
+                    retrieved_at=self._aware_now(),
+                )
+            except _DocumentFailure as exc:
+                last_failure = exc
+            except (httpx.TimeoutException, httpx.TransportError):
+                last_failure = _DocumentFailure(
+                    "SOURCE_TRANSPORT_ERROR", retryable=True
+                )
+
+            if not last_failure.retryable or attempt_index + 1 >= total_attempts:
+                raise last_failure
+            await self._backoff(attempt_index)
+        raise last_failure
+
+    async def _fetch_with_redirects(
+        self,
+        initial_url: str,
+    ) -> tuple[str, str, str, bytes]:
+        current_url, current_domain = self._canonical_official_url(initial_url)
+        visited: set[str] = set()
+        for redirect_count in range(self.config.max_redirects + 1):
+            if current_url in visited:
+                raise _DocumentFailure("SOURCE_REDIRECT_LOOP")
+            visited.add(current_url)
+            request = self._isolated_get_request(
+                current_url,
+                headers={
+                    "Accept": "text/html,application/xhtml+xml,text/plain;q=0.9",
+                    "User-Agent": "REBORN-ProcedureLookup/1.0",
+                },
+            )
+            response = await self._client.send(
+                request,
+                stream=True,
+                auth=None,
+                follow_redirects=False,
+            )
+            try:
+                if response.status_code in _REDIRECT_STATUS_CODES:
+                    location = response.headers.get("location")
+                    if not location:
+                        raise _DocumentFailure("SOURCE_REDIRECT_INVALID")
+                    if redirect_count >= self.config.max_redirects:
+                        raise _DocumentFailure("SOURCE_REDIRECT_LIMIT")
+                    next_url = urljoin(current_url, location)
+                    try:
+                        current_url, current_domain = self._canonical_official_url(
+                            next_url
+                        )
+                    except ValueError as exc:
+                        raise _DocumentFailure("SOURCE_REDIRECT_REJECTED") from exc
+                    continue
+                if not response.is_success:
+                    raise _DocumentFailure(
+                        "SOURCE_HTTP_ERROR",
+                        retryable=_is_transient_status(response.status_code),
+                    )
+                content_type = _media_type(response.headers.get("content-type"))
+                if content_type not in _ACCEPTED_CONTENT_TYPES:
+                    raise _DocumentFailure("SOURCE_CONTENT_TYPE_REJECTED")
+                content_length = response.headers.get("content-length")
+                if content_length is not None:
+                    try:
+                        declared_length = int(content_length)
+                    except ValueError:
+                        raise _DocumentFailure(
+                            "SOURCE_CONTENT_LENGTH_INVALID"
+                        ) from None
+                    if declared_length > self.config.max_response_bytes:
+                        raise _DocumentFailure("SOURCE_RESPONSE_TOO_LARGE")
+                body = bytearray()
+                async for chunk in response.aiter_bytes():
+                    body.extend(chunk)
+                    if len(body) > self.config.max_response_bytes:
+                        raise _DocumentFailure("SOURCE_RESPONSE_TOO_LARGE")
+                return current_url, current_domain, content_type, bytes(body)
+            finally:
+                await response.aclose()
+        raise _DocumentFailure("SOURCE_REDIRECT_LIMIT")
+
+    def _canonical_official_url(self, value: str) -> tuple[str, str]:
+        if (
+            not isinstance(value, str)
+            or not value.strip()
+            or len(value) > _MAX_URL_CHARS
+        ):
+            raise ValueError("source URL is invalid")
+        raw = value.strip()
+        if any(ord(character) < 32 for character in raw):
+            raise ValueError("source URL contains control characters")
+        parsed = urlsplit(raw)
+        if parsed.scheme.lower() != "https" or not parsed.hostname:
+            raise ValueError("source URL must use HTTPS")
+        if parsed.username or parsed.password:
+            raise ValueError("source URL must not contain credentials")
+        try:
+            port = parsed.port
+        except ValueError as exc:
+            raise ValueError("source URL has an invalid port") from exc
+        if port not in {None, 443}:
+            raise ValueError("source URL must use the standard HTTPS port")
+        try:
+            host = parsed.hostname.encode("idna").decode("ascii").lower().rstrip(".")
+        except UnicodeError as exc:
+            raise ValueError("source hostname is invalid") from exc
+        try:
+            ipaddress.ip_address(host)
+        except ValueError:
+            pass
+        else:
+            raise ValueError("IP-literal source URLs are not allowed")
+        if not any(
+            host == domain or host.endswith("." + domain)
+            for domain in self.config.allowed_domains
+        ):
+            raise ValueError("source hostname is outside the official allowlist")
+
+        safe_query: list[tuple[str, str]] = []
+        for key, item in parse_qsl(parsed.query, keep_blank_values=True):
+            lowered = key.lower()
+            if lowered.startswith("utm_") or lowered in _TRACKING_QUERY_KEYS:
+                continue
+            if any(part in lowered for part in _SECRET_QUERY_KEY_PARTS):
+                raise ValueError("source URL query may contain a credential")
+            safe_query.append((key, item))
+        safe_query.sort()
+        path = parsed.path or "/"
+        # The only accepted explicit port is the default HTTPS port, so omit it
+        # from canonical identity to deduplicate ``:443`` and implicit forms.
+        netloc = host
+        canonical = urlunsplit(
+            ("https", netloc, path, urlencode(safe_query, doseq=True), "")
+        )
+        if len(canonical) > _MAX_URL_CHARS:
+            raise ValueError("canonical source URL is too long")
+        return canonical, host
+
+    def _authority_name(self, domain: str) -> str:
+        for suffix, name in _AUTHORITY_NAMES:
+            if domain == suffix or domain.endswith("." + suffix):
+                return name
+        return domain
+
+    @staticmethod
+    def _warnings(
+        *,
+        failed_queries: int,
+        rejected_result_count: int,
+        fetch_failure_count: int,
+        official_candidate_count: int,
+        document_count: int,
+    ) -> list[ProcedureLookupWarning]:
+        warnings: list[ProcedureLookupWarning] = []
+        if failed_queries:
+            warnings.append(
+                ProcedureLookupWarning(
+                    code="SEARCH_QUERY_FAILED",
+                    message="일부 폐업 절차 검색 요청을 완료하지 못했습니다.",
                 )
             )
-
-        return ProcedureStepEvaluation(
-            procedure_step=step.procedure_step,
-            step_name=step.step_name,
-            is_active=is_active,
-            applicability=applicability,
-            readiness=readiness,
-            current_status=current_status,
-            conditions=condition_results,
-            prerequisites=prerequisite_results,
-            unavailable_reasons=unavailable_reasons,
-            requires_professional=step.requires_professional,
-            professional_type=step.professional_type,
-            decision_authority=step.decision_authority,
-            evidence_refs=list(self._step_evidence_refs(step)),
-        )
-
-    @staticmethod
-    def _is_active_on(step: ProcedureStepDefinition, as_of: date) -> bool:
-        if not step.is_active:
-            return False
-        if step.effective_from is not None and as_of < step.effective_from:
-            return False
-        return step.effective_until is None or as_of <= step.effective_until
-
-    @staticmethod
-    def _condition_result(
-        condition: ProcedureConditionDefinition,
-        fact: _ResolvedFact | None,
-        *,
-        source_is_current: bool,
-    ) -> ProcedureConditionResult:
-        actual_value: MasterScalar | None = None
-        if source_is_current and fact is not None and fact.status == "CONFIRMED":
-            actual_value = fact.value
-
-        evaluated = (
-            _evaluate_condition(condition, actual_value) if source_is_current else None
-        )
-        status = "UNKNOWN" if evaluated is None else "MET" if evaluated else "NOT_MET"
-        evidence_refs = list(condition.evidence_refs)
-        if fact is not None:
-            evidence_refs.extend(
-                evidence_ref
-                for evidence_ref in fact.evidence_refs
-                if evidence_ref not in evidence_refs
+        if rejected_result_count:
+            warnings.append(
+                ProcedureLookupWarning(
+                    code="RESULT_REJECTED",
+                    message="공식 출처 정책을 통과하지 못한 검색 결과를 제외했습니다.",
+                )
             )
-        return ProcedureConditionResult(
-            condition_id=condition.condition_id,
-            field_path=condition.field_path,
-            operator=condition.operator,
-            expected_values=list(condition.expected_values),
-            actual_value=actual_value,
-            status=status,
-            evidence_refs=evidence_refs,
+        if fetch_failure_count:
+            warnings.append(
+                ProcedureLookupWarning(
+                    code="SOURCE_FETCH_FAILED",
+                    message="일부 공식 출처의 원문을 가져오지 못했습니다.",
+                )
+            )
+        if official_candidate_count == 0:
+            warnings.append(
+                ProcedureLookupWarning(
+                    code="NO_OFFICIAL_RESULTS",
+                    message="검색 결과에서 검증 가능한 공식 출처를 찾지 못했습니다.",
+                )
+            )
+        elif document_count == 0:
+            warnings.append(
+                ProcedureLookupWarning(
+                    code="NO_FETCHED_DOCUMENTS",
+                    message="분석에 사용할 수 있는 공식 원문이 없습니다.",
+                )
+            )
+        return warnings
+
+    async def _backoff(self, attempt_index: int) -> None:
+        delay = self.config.retry_backoff_seconds * (2**attempt_index)
+        if delay > 0:
+            await self._sleep(delay)
+
+    def _isolated_get_request(
+        self,
+        url: str,
+        *,
+        headers: Mapping[str, str],
+        params: Mapping[str, Any] | None = None,
+    ) -> httpx.Request:
+        """Create a request without inheriting client headers, cookies, or auth."""
+
+        return httpx.Request(
+            "GET",
+            url,
+            headers=headers,
+            params=params,
+            extensions={
+                "timeout": httpx.Timeout(self.config.timeout_seconds).as_dict()
+            },
         )
 
-    @staticmethod
-    def _prerequisite_result(
-        prerequisite: Any,
-        progress: dict[tuple[int, str], str],
-    ) -> ProcedurePrerequisiteResult:
-        step_ref = prerequisite.procedure_step
-        key = (int(step_ref.procedure_step_id), _text(step_ref.step_code))
-        current_status = progress.get(key)
-        if current_status == "COMPLETED":
-            satisfaction = "SATISFIED"
-            reason = "선행 절차의 완료 기록이 확인되었습니다."
-        elif current_status in {"NOT_STARTED", "IN_PROGRESS"}:
-            satisfaction = "NOT_SATISFIED"
-            reason = "선행 절차가 아직 완료되지 않았습니다."
+    def _aware_now(self) -> datetime:
+        value = self._clock()
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("procedure lookup clock must return an aware datetime")
+        return value
+
+
+class _VisibleTextParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._ignored_stack: list[str] = []
+        self._in_title = False
+        self._primary_content_depth = 0
+        self.title_parts: list[str] = []
+        self.text_parts: list[str] = []
+        self.primary_text_parts: list[str] = []
+
+    def handle_starttag(
+        self,
+        tag: str,
+        attrs: list[tuple[str, str | None]],
+    ) -> None:
+        del attrs
+        normalized = tag.lower()
+        if self._ignored_stack:
+            if normalized not in _VOID_HTML_TAGS:
+                self._ignored_stack.append(normalized)
+            return
+        if normalized in _IGNORED_HTML_TAGS:
+            self._ignored_stack.append(normalized)
+            return
+        if normalized == "title":
+            self._in_title = True
+        if normalized in {"article", "main"}:
+            self._primary_content_depth += 1
+        if normalized in _BLOCK_HTML_TAGS:
+            self.text_parts.append(" ")
+            if self._primary_content_depth:
+                self.primary_text_parts.append(" ")
+
+    def handle_endtag(self, tag: str) -> None:
+        normalized = tag.lower()
+        if self._ignored_stack:
+            if normalized in self._ignored_stack:
+                matching_index = (
+                    len(self._ignored_stack)
+                    - 1
+                    - self._ignored_stack[::-1].index(normalized)
+                )
+                del self._ignored_stack[matching_index:]
+            return
+        if normalized == "title":
+            self._in_title = False
+        if normalized in _BLOCK_HTML_TAGS:
+            self.text_parts.append(" ")
+            if self._primary_content_depth:
+                self.primary_text_parts.append(" ")
+        if normalized in {"article", "main"} and self._primary_content_depth:
+            self._primary_content_depth -= 1
+
+    def handle_data(self, data: str) -> None:
+        if self._ignored_stack:
+            return
+        if self._in_title:
+            self.title_parts.append(data)
         else:
-            satisfaction = "UNKNOWN"
-            reason = "선행 절차의 진행 기록을 확인할 수 없습니다."
-        return ProcedurePrerequisiteResult(
-            procedure_step=step_ref,
-            dependency_type=prerequisite.dependency_type,
-            current_status=current_status,
-            satisfaction=satisfaction,
-            reason_summary=reason,
+            self.text_parts.append(data)
+            if self._primary_content_depth:
+                self.primary_text_parts.append(data)
+
+
+def _extract_document_text(
+    body: bytes,
+    *,
+    content_type: str,
+    fallback_title: str,
+    focus_query: str,
+) -> tuple[str, str]:
+    text = _decode_body(body)
+    title = _clean_title(fallback_title)
+    if content_type in {"text/html", "application/xhtml+xml"}:
+        parser = _VisibleTextParser()
+        try:
+            parser.feed(text)
+            parser.close()
+        except (AssertionError, ValueError):
+            return "", ""
+        parsed_title = _collapse_text(" ".join(parser.title_parts))
+        if parsed_title:
+            title = parsed_title[:_MAX_TITLE_CHARS]
+        primary_text = _collapse_text(" ".join(parser.primary_text_parts))
+        text = primary_text or " ".join(parser.text_parts)
+    excerpt = _focused_excerpt(_collapse_text(text), focus_query=focus_query)
+    return title[:_MAX_TITLE_CHARS], excerpt
+
+
+def _focused_excerpt(text: str, *, focus_query: str) -> str:
+    """Keep a bounded source substring around the densest relevant term window."""
+
+    if len(text) <= _MAX_EXCERPT_CHARS:
+        return text
+    terms = list(
+        dict.fromkeys(
+            term.casefold()
+            for term in re.findall(r"[0-9A-Za-z가-힣]+", focus_query)
+            if len(term) >= 2
         )
+    )
+    normalized_text = text.casefold()
+    candidate_positions = {0}
+    for term in terms:
+        position = normalized_text.find(term)
+        occurrence_count = 0
+        while position >= 0 and occurrence_count < _MAX_FOCUS_OCCURRENCES_PER_TERM:
+            candidate_positions.add(position)
+            occurrence_count += 1
+            position = normalized_text.find(term, position + len(term))
 
-    @staticmethod
-    def _step_evidence_refs(step: ProcedureStepDefinition) -> tuple[str, ...]:
-        refs: list[str] = list(step.evidence_refs)
-        for condition in step.conditions:
-            refs.extend(ref for ref in condition.evidence_refs if ref not in refs)
-        for prerequisite in step.prerequisites:
-            refs.extend(ref for ref in prerequisite.evidence_refs if ref not in refs)
-        return tuple(refs)
+        last_position = normalized_text.rfind(term)
+        if last_position >= 0:
+            candidate_positions.add(last_position)
 
-    @staticmethod
-    def _evidence_lineage_refs(
-        evidence_refs: tuple[str, ...],
-        evidence_by_id: dict[str, EvidenceRecord],
-    ) -> tuple[str, ...]:
-        """Return direct evidence and every transitive parent exactly once."""
+    def score(position: int) -> tuple[int, int, int, int]:
+        start = max(0, position - 400)
+        window = normalized_text[start : start + _MAX_EXCERPT_CHARS]
+        query_coverage = sum(term in window for term in terms)
+        procedure_coverage = sum(term in window for term in _PROCEDURE_FOCUS_TERMS)
+        specificity = sum(len(term) for term in terms if term in window)
+        # A later equally relevant window is more likely to be article content
+        # than a repeated site-wide navigation menu near the document start.
+        return query_coverage, procedure_coverage, specificity, start
 
-        lineage: list[str] = []
-        seen: set[str] = set()
-        pending = list(evidence_refs)
-        while pending:
-            evidence_ref = pending.pop()
-            if evidence_ref in seen:
-                continue
-            seen.add(evidence_ref)
-            lineage.append(evidence_ref)
-            pending.extend(evidence_by_id[evidence_ref].parent_evidence_refs)
-        return tuple(lineage)
+    focus_at = max(candidate_positions, key=score)
+    excerpt_start = max(0, focus_at - 400)
+    return text[excerpt_start : excerpt_start + _MAX_EXCERPT_CHARS].strip()
 
-    @staticmethod
-    def _condition_refs_with_status(
-        condition_results: list[ProcedureConditionResult],
-        status: str,
-    ) -> list[str]:
-        refs: list[str] = []
-        for result in condition_results:
-            if result.status != status:
-                continue
-            refs.extend(ref for ref in result.evidence_refs if ref not in refs)
-        return refs
+
+def _decode_body(body: bytes) -> str:
+    # UTF-8 is by far the most common encoding for current official pages.  A
+    # strict decode first avoids silently corrupting valid text, while the
+    # Korean legacy fallback keeps EUC-KR pages readable without trusting an
+    # unbounded or executable charset declaration.
+    for encoding in ("utf-8", "euc-kr"):
+        try:
+            codecs.lookup(encoding)
+            return body.decode(encoding)
+        except (LookupError, UnicodeDecodeError):
+            continue
+    return body.decode("utf-8", errors="replace")
+
+
+def _clean_title(value: str) -> str:
+    without_tags = re.sub(r"<[^>]*>", " ", value)
+    return _collapse_text(html.unescape(without_tags))[:_MAX_TITLE_CHARS]
+
+
+def _collapse_text(value: str) -> str:
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def _media_type(value: str | None) -> str:
+    if value is None:
+        return ""
+    return value.split(";", 1)[0].strip().lower()
+
+
+def _is_transient_status(status_code: int) -> bool:
+    return status_code in _TRANSIENT_STATUS_CODES or status_code >= 500
 
 
 __all__ = [
     "ProcedureLookupError",
     "ProcedureLookupInputError",
+    "ProcedureLookupRequestError",
     "ProcedureLookupTool",
-    "ProcedureMasterUnavailableError",
 ]

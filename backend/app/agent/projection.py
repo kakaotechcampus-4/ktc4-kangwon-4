@@ -25,6 +25,12 @@ def to_model_projection(value: BaseModel | dict[str, Any] | list[Any]) -> Any:
         return value
 
     keys = set(value)
+    if {"canonical_url", "evidence_ref", "excerpt", "authority_name"}.issubset(keys):
+        return {
+            key: to_model_projection(item)
+            for key, item in value.items()
+            if key != "excerpt"
+        }
     if {"evidence_id", "source_type", "freshness_status"}.issubset(keys):
         return {
             "evidence_id": value["evidence_id"],

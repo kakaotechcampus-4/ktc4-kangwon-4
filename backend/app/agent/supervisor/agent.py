@@ -10,8 +10,11 @@ from uuid import UUID, uuid4
 from app.agent.claim_safety import (
     expand_evidence,
     has_explicit_eligibility_language,
+    has_procedure_language,
+    has_support_action_language,
     high_risk_metadata,
     is_overconfident,
+    references_other_known_label,
     required_sources_for_claim,
 )
 from app.agent.enrichment import build_fact_overlays
@@ -41,17 +44,19 @@ from app.agent.schemas import (
     MutationSet,
     NeedsMoreInfoDecisionDraft,
     NextAction,
-    ProcedureApplicability,
-    ProcedureCompletionStatus,
+    NextActionTarget,
+    ProcedureActionTarget,
+    ProcedureFinding,
     ProcedureLookupResult,
     ProcedureProgressChangeCandidate,
-    ProcedureProgressStatus,
-    ProcedureStepRef,
     ReviewIssue,
     ReviewSourceResult,
     SupervisorDraft,
     SupervisorRunInput,
+    SupportActionTarget,
     SupportAnalysisResult,
+    SupportCheck,
+    SupportMatchStatus,
     SupportMatchUpdateCandidate,
 )
 from pydantic import Field, StrictBool, StrictInt, StrictStr, model_validator
@@ -75,7 +80,7 @@ class NextActionSemantic(AgentSchema):
     title: Annotated[StrictStr, Field(min_length=1)]
     reason: Annotated[StrictStr, Field(min_length=1)]
     questions_to_ask: list[Annotated[StrictStr, Field(min_length=1)]]
-    target_procedure: ProcedureStepRef | None
+    target: NextActionTarget
     evidence_refs: Annotated[
         list[Annotated[StrictStr, Field(min_length=1)]], Field(min_length=1)
     ]
@@ -209,6 +214,11 @@ class SupervisorAgent:
         for source in source_results:
             if source.meta.case_id != request.case_snapshot.case_id:
                 raise SupervisorGuardrailError("component case does not match snapshot")
+            if source.output.based_on_snapshot_id != request.case_snapshot.snapshot_id:
+                raise SupervisorGuardrailError(
+                    "component result does not match the Supervisor snapshot"
+                )
+        self._validate_procedure_analysis_sources(source_results)
 
         prompt_input = {
             "trigger": to_model_projection(request.trigger),
@@ -244,6 +254,9 @@ class SupervisorAgent:
                 ],
                 "claim_text_and_path_are_runtime_injected": True,
                 "support_eligibility_is_final": False,
+                "case_complete_is_allowed": False,
+                "action_target_kinds": ["PROCEDURE", "SUPPORT_PROGRAM"],
+                "action_requires_exactly_one_target": True,
                 "high_risk_visible_text_requires_exact_grounded_claim": [
                     "support program",
                     "amount",
@@ -253,11 +266,7 @@ class SupervisorAgent:
                     "tax",
                 ],
                 "claim_source_rules": {
-                    "procedure_or_date": [
-                        "PROCEDURE_MASTER",
-                        "OFFICIAL_DOCUMENT",
-                        "OFFICIAL_API",
-                    ],
+                    "procedure_or_date": ["OFFICIAL_DOCUMENT", "OFFICIAL_API"],
                     "all_other_high_risk_claims": [
                         "OFFICIAL_DOCUMENT",
                         "OFFICIAL_API",
@@ -303,13 +312,18 @@ class SupervisorAgent:
                             "For ACTION, return one blocker, one next_action, and an empty "
                             "questions_for_user list. For NEEDS_MORE_INFO, return a blocker, "
                             "no next_action, requires_human=true, and at least one question. "
-                            "For CASE_COMPLETE, return neither blocker nor action or question. "
+                            "Do not return CASE_COMPLETE: bounded internet lookup cannot prove "
+                            "complete procedure coverage. "
+                            "Every ACTION must select exactly one canonical target. Use "
+                            "target_kind=PROCEDURE with a procedure_step from an Info finding, "
+                            "or target_kind=SUPPORT_PROGRAM with a support_program from a "
+                            "Support check. Never mix both kinds in one action. "
                             "Every ELIGIBILITY claim must use NEEDS_CONFIRMATION. Select only "
                             "an available grounded-claim target_kind and use target_index only "
                             "for an existing question. Every visible support-program name, amount, "
                             "date/deadline, eligibility, legal, or tax statement needs an exact "
-                            "GroundedClaim selector backed by an allowed official source (a "
-                            "procedure/date claim may also use PROCEDURE_MASTER). Never use "
+                            "GroundedClaim selector backed by an allowed official document or "
+                            "official API source. Never use "
                             "overconfident wording such as guaranteed or unconditional outcomes. "
                             "Use only IDs, facts, procedure references and evidence in INPUT_JSON."
                         ),
@@ -352,9 +366,7 @@ class SupervisorAgent:
                 "title": decision.next_action.title,
                 "reason": decision.next_action.reason,
                 "questions_to_ask": list(decision.next_action.questions_to_ask),
-                "target_procedure": to_model_projection(
-                    decision.next_action.target_procedure
-                ),
+                "target": to_model_projection(decision.next_action.target),
                 "evidence_refs": list(decision.next_action.evidence_refs),
             }
         blocker = None
@@ -407,23 +419,142 @@ class SupervisorAgent:
             refs.extend(claim.evidence_refs)
         ensure_known_refs(refs, known_evidence, label="evidence")
 
-        known_steps = {
-            (
-                output.procedure_step.procedure_step_id,
-                output.procedure_step.step_code,
-            ): output
-            for source in sources
-            if isinstance(source.output, ProcedureLookupResult)
-            for output in source.output.step_evaluations
-        }
-        target_evaluation = None
-        if semantic.next_action and semantic.next_action.target_procedure:
-            target = semantic.next_action.target_procedure
-            target_evaluation = known_steps.get(
-                (target.procedure_step_id, target.step_code)
-            )
-            if target_evaluation is None:
-                raise SupervisorGuardrailError("unknown target procedure")
+        findings_by_step: dict[
+            tuple[int, str], list[tuple[UUID, ProcedureFinding]]
+        ] = {}
+        for source in sources:
+            if not isinstance(source.output, InfoAnalysisResult):
+                continue
+            for finding in source.output.procedure_findings:
+                key = (
+                    finding.procedure_step.procedure_step_id,
+                    finding.procedure_step.step_code,
+                )
+                findings_by_step.setdefault(key, []).append(
+                    (source.meta.call_id, finding)
+                )
+
+        target_finding: ProcedureFinding | None = None
+        target_support_check: SupportCheck | None = None
+        if semantic.next_action is not None:
+            action = semantic.next_action
+            if isinstance(action.target, ProcedureActionTarget):
+                target = action.target.procedure_step
+                matches = findings_by_step.get(
+                    (target.procedure_step_id, target.step_code), []
+                )
+                if len(matches) != 1:
+                    raise SupervisorGuardrailError("unknown target procedure")
+                _, target_finding = matches[0]
+                if target_finding.requires_confirmation and (
+                    not semantic.requires_human or not action.questions_to_ask
+                ):
+                    raise SupervisorGuardrailError(
+                        "procedure action requires an explicit confirmation question"
+                    )
+
+                support_names = {
+                    check.program_name
+                    for source in sources
+                    if isinstance(source.output, SupportAnalysisResult)
+                    for check in source.output.support_checks
+                }
+                combined = " ".join(
+                    [
+                        action.action_code,
+                        action.title,
+                        action.reason,
+                        *action.questions_to_ask,
+                    ]
+                )
+                procedure_labels = {
+                    label
+                    for matches_for_step in findings_by_step.values()
+                    for _, finding in matches_for_step
+                    for label in (finding.step_name, finding.procedure_step.step_code)
+                }
+                if (
+                    any(name in combined for name in support_names)
+                    or has_support_action_language(combined)
+                    or references_other_known_label(
+                        combined,
+                        selected_labels={
+                            target_finding.step_name,
+                            target_finding.procedure_step.step_code,
+                        },
+                        known_labels=procedure_labels,
+                    )
+                ):
+                    raise SupervisorGuardrailError(
+                        "one action cannot mix multiple canonical targets"
+                    )
+            elif isinstance(action.target, SupportActionTarget):
+                target = action.target.support_program
+                matches = [
+                    check
+                    for source in sources
+                    if isinstance(source.output, SupportAnalysisResult)
+                    for check in source.output.support_checks
+                    if check.support_program == target
+                ]
+                if len(matches) != 1:
+                    raise SupervisorGuardrailError("unknown target support program")
+                target_support_check = matches[0]
+                if target_support_check.match_status == SupportMatchStatus.NOT_RELEVANT:
+                    raise SupervisorGuardrailError(
+                        "a not-relevant support program cannot be the next action target"
+                    )
+                if not target_support_check.evidence_refs:
+                    raise SupervisorGuardrailError(
+                        "support action target requires source evidence"
+                    )
+                if not semantic.requires_human or not action.questions_to_ask:
+                    raise SupervisorGuardrailError(
+                        "support action requires an explicit confirmation question"
+                    )
+                cleaned_values = [
+                    value.replace(target_support_check.program_name, " ")
+                    for value in (
+                        action.action_code,
+                        action.title,
+                        action.reason,
+                        *action.questions_to_ask,
+                    )
+                ]
+                support_names = {
+                    check.program_name
+                    for source in sources
+                    if isinstance(source.output, SupportAnalysisResult)
+                    for check in source.output.support_checks
+                }
+                procedure_labels = {
+                    label
+                    for matches_for_step in findings_by_step.values()
+                    for _, finding in matches_for_step
+                    for label in (finding.step_name, finding.procedure_step.step_code)
+                }
+                cleaned_text = " ".join(cleaned_values)
+                if (
+                    has_procedure_language(*cleaned_values)
+                    or references_other_known_label(
+                        " ".join(
+                            (
+                                action.action_code,
+                                action.title,
+                                action.reason,
+                                *action.questions_to_ask,
+                            )
+                        ),
+                        selected_labels={target_support_check.program_name},
+                        known_labels=support_names,
+                    )
+                    or any(label in cleaned_text for label in procedure_labels)
+                ):
+                    raise SupervisorGuardrailError(
+                        "one action cannot mix multiple canonical targets"
+                    )
+            else:  # pragma: no cover - discriminated schema makes this unreachable
+                raise SupervisorGuardrailError("unknown next-action target kind")
 
         now = self._clock()
         call_ids = [item.meta.call_id for item in sources]
@@ -439,12 +570,17 @@ class SupervisorAgent:
         if semantic.decision_type == DecisionType.ACTION:
             assert semantic.blocker is not None and semantic.next_action is not None
             action_values = semantic.next_action.model_dump(mode="python")
-            if target_evaluation is not None:
+            target_evidence_refs: list[str] = []
+            if target_finding is not None:
+                target_evidence_refs.extend(target_finding.evidence_refs)
+            if target_support_check is not None:
+                target_evidence_refs.extend(target_support_check.evidence_refs)
+            if target_evidence_refs:
                 action_values["evidence_refs"] = list(
                     dict.fromkeys(
                         [
                             *action_values["evidence_refs"],
-                            *target_evaluation.evidence_refs,
+                            *target_evidence_refs,
                         ]
                     )
                 )
@@ -586,16 +722,6 @@ class SupervisorAgent:
         fact_changes: list[FactChangeCandidate] = list(fact_overlays or [])
         progress_changes: list[ProcedureProgressChangeCandidate] = []
         support_updates: list[SupportMatchUpdateCandidate] = []
-        procedure_sources = {
-            (
-                evaluation.procedure_step.procedure_step_id,
-                evaluation.procedure_step.step_code,
-            ): (source.meta.call_id, evaluation)
-            for source in sources
-            if isinstance(source.output, ProcedureLookupResult)
-            for evaluation in source.output.step_evaluations
-        }
-
         for source in sources:
             output = source.output
             if isinstance(output, InfoAnalysisResult):
@@ -608,16 +734,27 @@ class SupervisorAgent:
                             uuid_factory=self._uuid,
                         )
                     )
+                findings = {
+                    (
+                        finding.procedure_step.procedure_step_id,
+                        finding.procedure_step.step_code,
+                    ): finding
+                    for finding in output.procedure_findings
+                }
                 for observation in output.procedure_progress_observations:
                     key = (
                         observation.procedure_step.procedure_step_id,
                         observation.procedure_step.step_code,
                     )
-                    procedure_source = procedure_sources.get(key)
-                    if observation.requires_confirmation or procedure_source is None:
+                    finding = findings.get(key)
+                    if observation.requires_confirmation or finding is None:
                         continue
                     prior = progress.get(key)
                     before_status = prior.status if prior else None
+                    if finding.current_status != before_status:
+                        raise SupervisorGuardrailError(
+                            "procedure finding current status differs from snapshot"
+                        )
                     if before_status == observation.observed_status:
                         continue
                     progress_changes.append(
@@ -628,7 +765,7 @@ class SupervisorAgent:
                             proposed_status=observation.observed_status,
                             reason_summary=observation.reason_summary,
                             execution_evidence_refs=observation.source_evidence_refs,
-                            procedure_evaluation_call_id=procedure_source[0],
+                            procedure_analysis_call_id=source.meta.call_id,
                         )
                     )
             elif isinstance(output, SupportAnalysisResult):
@@ -674,44 +811,50 @@ class SupervisorAgent:
         return result
 
     @staticmethod
+    def _validate_procedure_analysis_sources(
+        sources: Sequence[ReviewSourceResult],
+    ) -> None:
+        """Bind every Info procedure interpretation to one raw lookup result."""
+
+        sources_by_call_id = {source.meta.call_id: source for source in sources}
+        for source in sources:
+            if not isinstance(source.output, InfoAnalysisResult):
+                continue
+            info = source.output
+            lookup_source = sources_by_call_id.get(
+                info.based_on_procedure_lookup_call_id
+            )
+            if lookup_source is None or not isinstance(
+                lookup_source.output, ProcedureLookupResult
+            ):
+                raise SupervisorGuardrailError(
+                    "Info result references an unknown procedure lookup"
+                )
+            if info.based_on_procedure_lookup_digest != lookup_source.output_digest:
+                raise SupervisorGuardrailError(
+                    "Info result procedure lookup digest does not match"
+                )
+
+            lookup_evidence = {
+                record.evidence_id: record
+                for record in lookup_source.output.evidence_records
+            }
+            for finding in info.procedure_findings:
+                for evidence_ref in finding.evidence_refs:
+                    if evidence_ref not in lookup_evidence:
+                        raise SupervisorGuardrailError(
+                            "procedure finding evidence is not from its raw lookup"
+                        )
+
+    @staticmethod
     def _ensure_complete_is_supported(
         request: SupervisorRunInput,
         sources: Sequence[ReviewSourceResult],
     ) -> None:
-        snapshot = request.case_snapshot
-        if snapshot.case_status != CaseStatus.IN_PROGRESS:
-            raise SupervisorGuardrailError(
-                "Case is not eligible for a completion transition"
-            )
-        procedure_results = [
-            source.output
-            for source in sources
-            if isinstance(source.output, ProcedureLookupResult)
-        ]
-        if len(procedure_results) != 1:
-            raise SupervisorGuardrailError(
-                "CASE_COMPLETE requires one authoritative procedure result"
-            )
-        procedure_result = procedure_results[0]
-        if (
-            procedure_result.completion_status != ProcedureCompletionStatus.COMPLETE
-            or not procedure_result.step_evaluations
-        ):
-            raise SupervisorGuardrailError(
-                "CASE_COMPLETE requires complete procedure-master coverage"
-            )
-        if any(
-            evaluation.applicability == ProcedureApplicability.UNDETERMINED
-            or (
-                evaluation.is_active
-                and evaluation.applicability == ProcedureApplicability.APPLICABLE
-                and evaluation.current_status != ProcedureProgressStatus.COMPLETED
-            )
-            for evaluation in procedure_result.step_evaluations
-        ):
-            raise SupervisorGuardrailError(
-                "CASE_COMPLETE requires every applicable procedure to be completed"
-            )
+        del request, sources
+        raise SupervisorGuardrailError(
+            "CASE_COMPLETE is unavailable without authoritative procedure coverage"
+        )
 
     @staticmethod
     def _validate_claim_targets(draft: SupervisorDraft) -> None:

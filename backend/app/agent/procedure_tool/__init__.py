@@ -1,25 +1,25 @@
-"""Agent-owned deterministic procedure lookup."""
+"""Internet-backed, official-source procedure lookup."""
 
 from .models import (
-    ProcedureConditionDefinition,
-    ProcedureMaster,
-    ProcedurePrerequisiteDefinition,
-    ProcedureStepDefinition,
+    DEFAULT_OFFICIAL_DOMAINS,
+    DEFAULT_SEARCH_ENDPOINT,
+    ProcedureSearchConfig,
+    ProcedureSearchConfigurationError,
 )
 from .tool import (
     ProcedureLookupError,
     ProcedureLookupInputError,
+    ProcedureLookupRequestError,
     ProcedureLookupTool,
-    ProcedureMasterUnavailableError,
 )
 
 __all__ = [
-    "ProcedureConditionDefinition",
+    "DEFAULT_OFFICIAL_DOMAINS",
+    "DEFAULT_SEARCH_ENDPOINT",
     "ProcedureLookupError",
     "ProcedureLookupInputError",
+    "ProcedureLookupRequestError",
     "ProcedureLookupTool",
-    "ProcedureMaster",
-    "ProcedureMasterUnavailableError",
-    "ProcedurePrerequisiteDefinition",
-    "ProcedureStepDefinition",
+    "ProcedureSearchConfig",
+    "ProcedureSearchConfigurationError",
 ]

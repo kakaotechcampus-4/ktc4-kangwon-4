@@ -18,8 +18,8 @@ from app.agent.schemas import (
     MutationSet,
     NextAction,
     ProcedureLookupResult,
-    ProcedureStepEvaluation,
-    ProcedureStepRef,
+    ProcedureSearchSummary,
+    ProcedureSourceDocument,
     RedactedInput,
     ReviewIssue,
     ReviewResult,
@@ -27,6 +27,7 @@ from app.agent.schemas import (
     SupervisorRunInput,
     SupportAnalysisResult,
     SupportSearchSummary,
+    canonical_digest,
 )
 from app.agent.support_agent import SupportAnalysisGuardrailError
 
@@ -92,6 +93,7 @@ class FakeInfo:
     def __init__(self, *, conflict: bool = False) -> None:
         self.conflict = conflict
         self.calls = 0
+        self.inputs: list[Any] = []
 
     async def analyze(
         self,
@@ -100,6 +102,7 @@ class FakeInfo:
         source_call_id: UUID | None = None,
     ) -> InfoAnalysisResult:
         self.calls += 1
+        self.inputs.append(component_input)
         conflicts = []
         records = []
         if self.conflict:
@@ -143,6 +146,7 @@ class FakeInfo:
             completion_status="NEEDS_USER_INPUT" if conflicts else "COMPLETE",
             fact_candidates=[],
             procedure_progress_observations=[],
+            procedure_findings=[],
             conflicts=conflicts,
             missing_fields=missing_fields,
             uncertainties=[],
@@ -150,6 +154,12 @@ class FakeInfo:
             evidence_records=records,
             parser_version="fake/1",
             based_on_snapshot_id=component_input.case_snapshot.snapshot_id,
+            based_on_procedure_lookup_call_id=(
+                component_input.procedure_lookup_call_id
+            ),
+            based_on_procedure_lookup_digest=canonical_digest(
+                component_input.procedure_lookup_result
+            ),
         )
 
 
@@ -157,38 +167,64 @@ class FakeProcedure:
     def __init__(self, *, fail: bool = False) -> None:
         self.fail = fail
         self.calls = 0
+        self.inputs: list[Any] = []
 
-    def lookup(self, component_input: Any) -> ProcedureLookupResult:
+    async def lookup(self, component_input: Any) -> ProcedureLookupResult:
         self.calls += 1
+        self.inputs.append(component_input)
         if self.fail:
             raise RuntimeError("private upstream detail")
-        master_evidence = evidence("ev-procedure", "PROCEDURE_MASTER")
+        source_url = "https://www.gov.kr/closure"
+        excerpt = "공식 폐업 신고 절차 안내"
+        content_hash = "sha256:" + "b" * 64
+        official_evidence = EvidenceRecord(
+            evidence_id="ev-procedure",
+            source_type="OFFICIAL_DOCUMENT",
+            source_ref=source_url,
+            source_version=None,
+            locator="body:text",
+            excerpt=excerpt,
+            parent_evidence_refs=[],
+            published_at=None,
+            retrieved_at=NOW,
+            freshness_status="UNKNOWN",
+            content_hash=content_hash,
+        )
         return ProcedureLookupResult(
             completion_status="COMPLETE",
-            procedure_data_version="fixture-v1",
-            step_evaluations=[
-                ProcedureStepEvaluation(
-                    procedure_step=ProcedureStepRef(
-                        procedure_step_id=1,
-                        step_code="CONFIRM_RESTORATION_SCOPE",
-                    ),
-                    step_name="원상복구 범위 확인",
-                    is_active=True,
-                    applicability="APPLICABLE",
-                    readiness="READY",
-                    current_status=None,
-                    conditions=[],
-                    prerequisites=[],
-                    unavailable_reasons=[],
-                    requires_professional=False,
-                    professional_type=None,
-                    decision_authority="LANDLORD",
-                    evidence_refs=[master_evidence.evidence_id],
+            lookup_id=UUID("00000000-0000-4000-8000-000000000304"),
+            documents=[
+                ProcedureSourceDocument(
+                    document_id=UUID("00000000-0000-4000-8000-000000000305"),
+                    title="폐업 신고 안내",
+                    authority_name="정부24",
+                    canonical_url=source_url,
+                    source_domain="www.gov.kr",
+                    excerpt=excerpt,
+                    published_at=None,
+                    retrieved_at=NOW,
+                    freshness_status="UNKNOWN",
+                    content_hash=content_hash,
+                    evidence_ref=official_evidence.evidence_id,
+                    search_query=component_input.search_queries[0],
                 )
             ],
-            evidence_records=[master_evidence],
-            based_on_snapshot_id=component_input.planning_context.case_snapshot.snapshot_id,
-            based_on_candidate_ids=[],
+            search_summary=ProcedureSearchSummary(
+                provider="KAKAO_DAUM_WEB",
+                requested_query_count=len(component_input.search_queries),
+                successful_query_count=len(component_input.search_queries),
+                failed_query_count=0,
+                provider_result_count=1,
+                official_candidate_count=1,
+                fetched_document_count=1,
+                rejected_result_count=0,
+                fetch_failure_count=0,
+                searched_at=NOW,
+            ),
+            warnings=[],
+            evidence_records=[official_evidence],
+            based_on_snapshot_id=component_input.based_on_snapshot_id,
+            as_of=component_input.as_of,
         )
 
 
@@ -270,7 +306,13 @@ class FakeSupervisor:
                 title=title,
                 reason="철거 범위를 정하기 전에 확인이 필요합니다.",
                 questions_to_ask=["어느 시설까지 원상복구해야 하나요?"],
-                target_procedure=None,
+                target={
+                    "target_kind": "PROCEDURE",
+                    "procedure_step": {
+                        "procedure_step_id": 1,
+                        "step_code": "RESTORATION_SCOPE_CHECK",
+                    },
+                },
                 evidence_refs=["ev-system"],
             ),
             questions_for_user=[],
@@ -433,6 +475,17 @@ def test_full_graph_returns_only_reviewed_plan_with_pass_proof() -> None:
         == review.calls
         == 1
     )
+    components = [
+        item.meta.component.value for item in outcome.review_subject.source_results
+    ]
+    assert components == ["PROCEDURE_TOOL", "INFO_AGENT", "SUPPORT_AGENT"]
+    assert info.inputs[0].procedure_lookup_result == (
+        outcome.review_subject.source_results[0].output
+    )
+    assert procedure.inputs[0].search_queries == [
+        "사업자 폐업 신고 절차 국세청",
+        "휴게음식점 폐업 신고 절차 정부24",
+    ]
 
 
 def test_review_revise_routes_back_to_supervisor_then_passes() -> None:
@@ -524,7 +577,19 @@ def test_info_review_target_rebuilds_every_dependent_result() -> None:
     outcome = asyncio.run(runtime.run(request()))
 
     assert outcome.outcome_type == "REVIEWED_PLAN"
-    assert info.calls == procedure.calls == support.calls == supervisor.calls == 2
+    assert procedure.calls == 1
+    assert info.calls == support.calls == supervisor.calls == 2
+    assert review.calls == 2
+
+
+def test_procedure_review_target_rebuilds_lookup_and_all_dependents() -> None:
+    review = FakeReview(["REVISE", "PASS"], target="PROCEDURE_TOOL")
+    runtime, info, procedure, support, supervisor, _ = graph(review=review)
+
+    outcome = asyncio.run(runtime.run(request()))
+
+    assert outcome.outcome_type == "REVIEWED_PLAN"
+    assert procedure.calls == info.calls == support.calls == supervisor.calls == 2
     assert review.calls == 2
 
 
@@ -567,7 +632,7 @@ def test_unexpected_finalize_integrity_error_is_converted_to_safe_outcome() -> N
     assert outcome.failed_component is None
 
 
-def test_fact_conflict_stops_before_lookup_and_returns_structured_conflict() -> None:
+def test_fact_conflict_stops_after_lookup_and_returns_structured_conflict() -> None:
     info = FakeInfo(conflict=True)
     runtime, _, procedure, support, supervisor, review = graph(info=info)
 
@@ -576,4 +641,5 @@ def test_fact_conflict_stops_before_lookup_and_returns_structured_conflict() -> 
     assert outcome.outcome_type == "CONFLICT"
     assert outcome.message_code == "CONFIRM_CONFLICT"
     assert len(outcome.conflicts) == 1
-    assert procedure.calls == support.calls == supervisor.calls == review.calls == 0
+    assert procedure.calls == 1
+    assert support.calls == supervisor.calls == review.calls == 0

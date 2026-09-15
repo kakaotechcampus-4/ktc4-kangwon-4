@@ -17,7 +17,6 @@ from app.agent.enrichment import build_fact_overlays
 from app.agent.schemas import (
     CASE_FIELD_SPECS,
     AgentRunOutcome,
-    AllProcedureLookupInput,
     Component,
     ConflictOutcome,
     DiscoverSupportInput,
@@ -25,6 +24,7 @@ from app.agent.schemas import (
     InvocationMeta,
     KnownProcedureStep,
     PlanningContext,
+    ProcedureLookupInput,
     RefreshSupportInput,
     ReviewedPlanOutcome,
     ReviewIssue,
@@ -54,7 +54,7 @@ class InfoRunner(Protocol):
 
 
 class ProcedureRunner(Protocol):
-    def lookup(self, request: Any) -> Any: ...
+    async def lookup(self, request: ProcedureLookupInput) -> Any: ...
 
 
 class SupportRunner(Protocol):
@@ -165,22 +165,26 @@ class AgentGraph:
         builder.add_node("finalize", self._finalize_node)
         builder.add_node("safe_failure", self._safe_failure_node)
 
-        builder.add_edge(START, "info_analysis")
+        builder.add_conditional_edges(
+            START,
+            self._route_start,
+            {"procedure": "procedure_lookup", "support": "support_analysis"},
+        )
+        builder.add_conditional_edges(
+            "procedure_lookup",
+            self._route_after_component,
+            {"continue": "info_analysis", "failure": "safe_failure"},
+        )
         builder.add_conditional_edges(
             "info_analysis",
             self._route_after_info,
             {
-                "continue": "procedure_lookup",
+                "continue": "support_analysis",
                 "conflict": "conflict",
                 "failure": "safe_failure",
             },
         )
         builder.add_edge("conflict", END)
-        builder.add_conditional_edges(
-            "procedure_lookup",
-            self._route_after_component,
-            {"continue": "support_analysis", "failure": "safe_failure"},
-        )
         builder.add_conditional_edges(
             "support_analysis",
             self._route_after_component,
@@ -213,6 +217,15 @@ class AgentGraph:
         if trigger_input is None:
             return {"phase": "INFO_ANALYSIS", "fact_overlays": []}
 
+        procedure_sources = [
+            item
+            for item in state.get("source_results", [])
+            if item.meta.component == Component.PROCEDURE_TOOL
+        ]
+        if len(procedure_sources) != 1:
+            raise RuntimeError("Info analysis requires one procedure lookup result")
+        procedure_source = procedure_sources[0]
+
         meta = self._meta(
             state,
             Component.INFO_AGENT,
@@ -223,6 +236,8 @@ class AgentGraph:
             case_snapshot=request.case_snapshot,
             allowed_field_paths=list(CASE_FIELD_SPECS),
             known_procedure_steps=self._known_procedure_steps,
+            procedure_lookup_call_id=procedure_source.meta.call_id,
+            procedure_lookup_result=procedure_source.output,
             review_feedback=state.get("review_feedback", []),
         )
         started = time.monotonic()
@@ -248,12 +263,19 @@ class AgentGraph:
         self._emit(meta, started, "SUCCESS")
         return {
             "phase": "INFO_ANALYSIS",
-            "source_results": [source],
+            "source_results": [*state.get("source_results", []), source],
             "fact_overlays": overlays,
         }
 
     def _conflict_node(self, state: AgentGraphState) -> dict[str, Any]:
-        info = state["source_results"][0].output
+        info_sources = [
+            item
+            for item in state["source_results"]
+            if item.meta.component == Component.INFO_AGENT
+        ]
+        if len(info_sources) != 1:
+            raise RuntimeError("conflict outcome requires one Info result")
+        info = info_sources[0].output
         outcome = ConflictOutcome(
             outcome_type="CONFLICT",
             run_id=state["run_id"],
@@ -273,17 +295,19 @@ class AgentGraph:
             Component.PROCEDURE_TOOL,
             attempt=state.get("revision_count", 0) + 1,
         )
-        component_input = AllProcedureLookupInput(
-            lookup_scope="ALL_STEPS",
-            planning_context=PlanningContext(
-                case_snapshot=request.case_snapshot,
-                fact_overlays=state.get("fact_overlays", []),
-            ),
+        component_input = ProcedureLookupInput(
+            lookup_goal="BUSINESS_CLOSURE",
+            search_queries=self._procedure_queries(request),
             as_of=self._as_of(request),
+            locale="ko-KR",
+            source_policy="OFFICIAL_ONLY",
+            max_results_per_query=5,
+            based_on_snapshot_id=request.case_snapshot.snapshot_id,
+            review_feedback=state.get("review_feedback", []),
         )
         started = time.monotonic()
         try:
-            output = self._procedure_tool.lookup(component_input)
+            output = await self._procedure_tool.lookup(component_input)
             source = ReviewSourceResult(
                 meta=meta,
                 output_digest=canonical_digest(output),
@@ -312,8 +336,9 @@ class AgentGraph:
         procedure_steps = [
             item.procedure_step
             for source in state.get("source_results", [])
-            if source.meta.component == Component.PROCEDURE_TOOL
-            for item in source.output.step_evaluations
+            if source.meta.component == Component.INFO_AGENT
+            for item in source.output.procedure_findings
+            if item.relevance.value in {"RELEVANT", "POSSIBLY_RELEVANT"}
         ]
         if isinstance(request.trigger, SupportRefreshTrigger):
             component_input: Any = RefreshSupportInput(
@@ -382,7 +407,7 @@ class AgentGraph:
         try:
             meta = self._meta(state, Component.REVIEW_TOOL, attempt=attempt)
             subject = ReviewSubject.create(
-                schema_version="agent-io/1.0",
+                schema_version="agent-io/2.0",
                 review_subject_id=self._uuid(),
                 review_attempt=attempt,
                 run_id=state["run_id"],
@@ -498,6 +523,12 @@ class AgentGraph:
         return "continue"
 
     @staticmethod
+    def _route_start(state: AgentGraphState) -> Literal["procedure", "support"]:
+        if isinstance(state["request"].trigger, SupportRefreshTrigger):
+            return "support"
+        return "procedure"
+
+    @staticmethod
     def _route_after_component(
         state: AgentGraphState,
     ) -> Literal["continue", "failure"]:
@@ -513,10 +544,10 @@ class AgentGraph:
         if result is not None and result.verdict == ReviewVerdict.PASS:
             return "pass"
         targets = state.get("rework_targets", [Component.SUPERVISOR])
-        if Component.INFO_AGENT in targets:
-            return "info"
         if Component.PROCEDURE_TOOL in targets:
             return "procedure"
+        if Component.INFO_AGENT in targets:
+            return "info"
         if Component.SUPPORT_AGENT in targets:
             return "support"
         return "supervisor"
@@ -524,8 +555,8 @@ class AgentGraph:
     @staticmethod
     def _earliest_rework_target(targets: Sequence[Component]) -> Component:
         for component in (
-            Component.INFO_AGENT,
             Component.PROCEDURE_TOOL,
+            Component.INFO_AGENT,
             Component.SUPPORT_AGENT,
             Component.SUPERVISOR,
         ):
@@ -538,18 +569,20 @@ class AgentGraph:
         sources: Sequence[ReviewSourceResult],
         earliest: Component,
     ) -> list[ReviewSourceResult]:
-        if earliest == Component.INFO_AGENT:
-            return []
         if earliest == Component.PROCEDURE_TOOL:
+            return []
+        if earliest == Component.INFO_AGENT:
             return [
-                item for item in sources if item.meta.component == Component.INFO_AGENT
+                item
+                for item in sources
+                if item.meta.component == Component.PROCEDURE_TOOL
             ]
         if earliest == Component.SUPPORT_AGENT:
             return [
                 item
                 for item in sources
                 if item.meta.component
-                in {Component.INFO_AGENT, Component.PROCEDURE_TOOL}
+                in {Component.PROCEDURE_TOOL, Component.INFO_AGENT}
             ]
         return list(sources)
 
@@ -579,7 +612,7 @@ class AgentGraph:
         attempt: int = 1,
     ) -> InvocationMeta:
         return InvocationMeta(
-            schema_version="agent-io/1.0",
+            schema_version="agent-io/2.0",
             run_id=state["run_id"],
             call_id=self._uuid(),
             parent_call_id=None,
@@ -623,7 +656,8 @@ class AgentGraph:
         unavailable_like = name in {
             "LLMConfigurationError",
             "LLMRequestError",
-            "ProcedureMasterUnavailableError",
+            "ProcedureSearchConfigurationError",
+            "ProcedureLookupRequestError",
             "SupportCatalogUnavailableError",
         }
         if response_like and not unavailable_like:
@@ -639,6 +673,64 @@ class AgentGraph:
             "failed_component": component,
             "retryable": bool(getattr(exc, "retryable", unavailable_like)),
         }
+
+    @staticmethod
+    def _procedure_queries(request: SupervisorRunInput) -> list[str]:
+        """Build bounded PII-free queries from canonical values and safe hints.
+
+        Redacted user text is never copied into a provider query.  A small,
+        deterministic keyword map may only select one of the static queries
+        below, which lets the first natural-language turn discover an
+        industry-specific official procedure before Info analysis has produced
+        a Case fact candidate.
+        """
+
+        confirmed = {
+            fact.field_path.value: fact.value
+            for fact in request.case_snapshot.facts
+            if fact.status.value == "CONFIRMED"
+        }
+        trigger_input = getattr(request.trigger, "input", None)
+        redacted_text = trigger_input.redacted_text if trigger_input is not None else ""
+
+        queries = ["사업자 폐업 신고 절차 국세청"]
+        entity_type = confirmed.get("entity_type")
+        if entity_type is None:
+            if "법인" in redacted_text:
+                entity_type = "CORPORATION"
+            elif any(
+                keyword in redacted_text
+                for keyword in ("개인사업자", "자영업", "소상공인")
+            ):
+                entity_type = "SOLE_PROPRIETOR"
+        if entity_type == "SOLE_PROPRIETOR":
+            queries.append("개인사업자 폐업 신고 절차 국세청")
+        elif entity_type == "CORPORATION":
+            queries.append("법인 사업자 폐업 신고 절차 국세청")
+
+        business_type = confirmed.get("business_type")
+        if business_type is None:
+            if any(keyword in redacted_text for keyword in ("카페", "휴게음식점")):
+                business_type = "CAFE"
+            elif any(
+                keyword in redacted_text for keyword in ("식당", "음식점", "일반음식점")
+            ):
+                business_type = "RESTAURANT"
+        business_queries = {
+            "CAFE": "휴게음식점 폐업 신고 절차 정부24",
+            "RESTAURANT": "일반음식점 폐업 신고 절차 정부24",
+        }
+        business_query = business_queries.get(business_type)
+        if business_query is not None:
+            queries.append(business_query)
+        employee_count = confirmed.get("employee_count")
+        employee_hint = any(
+            keyword in redacted_text
+            for keyword in ("직원", "근로자", "4대보험", "사업장 소멸")
+        )
+        if (type(employee_count) is int and employee_count > 0) or employee_hint:
+            queries.append("4대보험 사업장 폐업 신고 절차")
+        return list(dict.fromkeys(queries))[:4]
 
     def _emit(
         self,

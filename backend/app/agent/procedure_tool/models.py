@@ -1,301 +1,313 @@
-"""Trusted, read-only procedure-master models.
+"""Configuration and provider-neutral internals for live procedure lookup.
 
-These models describe data injected by a reviewed resolver.  The lookup tool does
-not fetch or persist procedure data itself.
+The public request/result contracts live in :mod:`app.agent.schemas`. This
+module deliberately contains no procedure master or rule-evaluation model:
+``ProcedureLookupTool`` discovers official source documents on the internet and
+leaves their interpretation to the information-analysis Agent.
 """
 
 from __future__ import annotations
 
-from datetime import date
-from typing import Annotated, Literal
+import math
+import os
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Final
+from urllib.parse import urlsplit, urlunsplit
 
-from app.agent.schemas import (
-    CASE_FIELD_SPECS,
-    CaseFieldKey,
-    EvidenceRecord,
-    FactValueType,
-    ProcedureStepRef,
-    validate_case_field_value,
+from dotenv import dotenv_values
+
+DEFAULT_SEARCH_ENDPOINT: Final[str] = "https://dapi.kakao.com/v2/search/web"
+DEFAULT_OFFICIAL_DOMAINS: Final[tuple[str, ...]] = (
+    "go.kr",
+    "gov.kr",
+    "nts.go.kr",
+    "hometax.go.kr",
+    "law.go.kr",
+    "easylaw.go.kr",
+    "4insure.or.kr",
+    "semas.or.kr",
+    "sbiz24.kr",
+    "bizinfo.go.kr",
 )
-from pydantic import (
-    BaseModel,
-    ConfigDict,
-    Field,
-    StrictBool,
-    StrictInt,
-    StrictStr,
-    StringConstraints,
-    model_validator,
+
+_DEFAULT_TIMEOUT_SECONDS = 8.0
+_DEFAULT_TOTAL_TIMEOUT_SECONDS = 30.0
+_DEFAULT_MAX_RETRIES = 1
+_DEFAULT_RETRY_BACKOFF_SECONDS = 0.25
+_DEFAULT_MAX_RESPONSE_BYTES = 1_000_000
+_DEFAULT_MAX_REDIRECTS = 3
+_MAX_ALLOWED_RETRIES = 4
+_BROAD_PUBLIC_SUFFIXES: Final[frozenset[str]] = frozenset(
+    {
+        "ac.kr",
+        "co.kr",
+        "ne.kr",
+        "or.kr",
+        "pe.kr",
+        "re.kr",
+    }
 )
 
-NonEmptyString = Annotated[
-    StrictStr,
-    StringConstraints(strip_whitespace=True, min_length=1),
-]
-MasterScalar = StrictStr | StrictInt | StrictBool | date
-PositiveStrictInt = Annotated[StrictInt, Field(gt=0)]
+
+class ProcedureSearchConfigurationError(ValueError):
+    """Raised when procedure-search configuration is absent or unsafe."""
 
 
-class ProcedureMasterModel(BaseModel):
-    """Base class that rejects accidental, unsupported master fields."""
+@dataclass(frozen=True, slots=True)
+class ProcedureSearchConfig:
+    """Validated Kakao search and official-document fetch configuration.
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-
-class ProcedureConditionDefinition(ProcedureMasterModel):
-    """A deterministic predicate backed by reviewed procedure evidence."""
-
-    condition_id: PositiveStrictInt
-    field_path: CaseFieldKey
-    operator: Literal["EQ", "IN", "GT", "GTE", "LT", "LTE"]
-    expected_values: tuple[MasterScalar, ...] = Field(min_length=1)
-    evidence_refs: tuple[NonEmptyString, ...] = Field(min_length=1)
-
-    @model_validator(mode="after")
-    def validate_operator_arity(self) -> ProcedureConditionDefinition:
-        if self.operator != "IN" and len(self.expected_values) != 1:
-            raise ValueError(f"{self.operator} requires exactly one expected value")
-
-        unique_values = {(type(item), item) for item in self.expected_values}
-        if len(unique_values) != len(self.expected_values):
-            raise ValueError("expected_values must be unique with strict types")
-
-        value_type, _ = CASE_FIELD_SPECS[self.field_path]
-        for expected_value in self.expected_values:
-            validate_case_field_value(
-                self.field_path,
-                value_type,
-                expected_value,
-                allow_null=False,
-            )
-        if self.operator in {"GT", "GTE", "LT", "LTE"} and value_type not in {
-            FactValueType.INTEGER,
-            FactValueType.DATE,
-        }:
-            raise ValueError(
-                "ordered comparisons are supported only for INTEGER and DATE fields"
-            )
-        return self
-
-
-class ProcedurePrerequisiteDefinition(ProcedureMasterModel):
-    """A stable reference to an earlier procedure step."""
-
-    procedure_step: ProcedureStepRef
-    dependency_type: Literal["REQUIRED", "RECOMMENDED"]
-    evidence_refs: tuple[NonEmptyString, ...] = Field(min_length=1)
-
-
-class ProcedureStepDefinition(ProcedureMasterModel):
-    """One reviewed procedure-master row and its evaluation metadata."""
-
-    procedure_step: ProcedureStepRef
-    step_name: NonEmptyString
-    is_active: StrictBool
-    effective_from: date | None = None
-    effective_until: date | None = None
-    conditions: tuple[ProcedureConditionDefinition, ...] = ()
-    prerequisites: tuple[ProcedurePrerequisiteDefinition, ...] = ()
-    requires_professional: StrictBool
-    professional_type: NonEmptyString | None
-    decision_authority: Literal[
-        "USER",
-        "LANDLORD",
-        "OFFICIAL_AGENCY",
-        "PROFESSIONAL",
-        "UNKNOWN",
-    ]
-    evidence_refs: tuple[NonEmptyString, ...] = Field(min_length=1)
-
-    @model_validator(mode="after")
-    def validate_step(self) -> ProcedureStepDefinition:
-        if (
-            self.effective_from
-            and self.effective_until
-            and self.effective_from > self.effective_until
-        ):
-            raise ValueError("effective_from must not be after effective_until")
-
-        if self.requires_professional != (self.professional_type is not None):
-            raise ValueError(
-                "professional_type must be present exactly when "
-                "requires_professional is true"
-            )
-
-        condition_ids = [condition.condition_id for condition in self.conditions]
-        if len(condition_ids) != len(set(condition_ids)):
-            raise ValueError("condition_id must be unique within a procedure step")
-
-        prerequisite_refs = [
-            (
-                item.procedure_step.procedure_step_id,
-                item.procedure_step.step_code,
-            )
-            for item in self.prerequisites
-        ]
-        if len(prerequisite_refs) != len(set(prerequisite_refs)):
-            raise ValueError("a prerequisite step must not be duplicated")
-
-        own_ref = (
-            self.procedure_step.procedure_step_id,
-            self.procedure_step.step_code,
-        )
-        if own_ref in prerequisite_refs:
-            raise ValueError("a procedure step cannot depend on itself")
-        return self
-
-
-class ProcedureMaster(ProcedureMasterModel):
-    """Immutable dataset injected into :class:`ProcedureLookupTool`.
-
-    ``freshness_status`` is supplied by the trusted resolver.  The lookup tool
-    never infers freshness from the current date.
+    ``api_key`` is excluded from ``repr`` so diagnostics cannot accidentally
+    disclose it. Process-environment values take precedence over repository
+    ``.env`` values, matching the rest of the Agent runtime.
     """
 
-    data_version: NonEmptyString
-    freshness_status: Literal["CURRENT", "STALE", "UNKNOWN"]
-    steps: tuple[ProcedureStepDefinition, ...]
-    evidence_records: tuple[EvidenceRecord, ...]
+    api_key: str = field(repr=False)
+    endpoint: str = DEFAULT_SEARCH_ENDPOINT
+    allowed_domains: tuple[str, ...] = DEFAULT_OFFICIAL_DOMAINS
+    timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS
+    total_timeout_seconds: float = _DEFAULT_TOTAL_TIMEOUT_SECONDS
+    max_retries: int = _DEFAULT_MAX_RETRIES
+    retry_backoff_seconds: float = _DEFAULT_RETRY_BACKOFF_SECONDS
+    max_response_bytes: int = _DEFAULT_MAX_RESPONSE_BYTES
+    max_redirects: int = _DEFAULT_MAX_REDIRECTS
 
-    @model_validator(mode="after")
-    def validate_dataset_integrity(self) -> ProcedureMaster:
-        ids = [step.procedure_step.procedure_step_id for step in self.steps]
-        codes = [step.procedure_step.step_code for step in self.steps]
-        if len(ids) != len(set(ids)):
-            raise ValueError("procedure_step_id must be unique in the master")
-        if len(codes) != len(set(codes)):
-            raise ValueError("step_code must be unique in the master")
-
-        evidence_by_id: dict[str, EvidenceRecord] = {}
-        for evidence in self.evidence_records:
-            existing = evidence_by_id.get(evidence.evidence_id)
-            if existing is not None and existing != evidence:
-                raise ValueError(
-                    f"duplicate evidence_id has different content: "
-                    f"{evidence.evidence_id}"
-                )
-            evidence_by_id[evidence.evidence_id] = evidence
-
-        parent_refs = {
-            parent_ref
-            for evidence in self.evidence_records
-            for parent_ref in evidence.parent_evidence_refs
-        }
-        missing_parent_refs = sorted(parent_refs - evidence_by_id.keys())
-        if missing_parent_refs:
-            raise ValueError(
-                "procedure master evidence references unknown parents: "
-                + ", ".join(missing_parent_refs)
+    def __post_init__(self) -> None:
+        normalized_key = self.api_key.strip()
+        if not normalized_key:
+            raise ProcedureSearchConfigurationError(
+                "PROCEDURE_SEARCH_API_KEY or KAKAO_CLIENT_ID is required"
             )
-
-        referenced_evidence: set[str] = set()
-        condition_ids: set[int] = set()
-        for step in self.steps:
-            referenced_evidence.update(step.evidence_refs)
-            for condition in step.conditions:
-                if condition.condition_id in condition_ids:
-                    raise ValueError(
-                        "condition_id must be unique across the procedure master"
-                    )
-                condition_ids.add(condition.condition_id)
-                referenced_evidence.update(condition.evidence_refs)
-            for prerequisite in step.prerequisites:
-                referenced_evidence.update(prerequisite.evidence_refs)
-
-        missing_evidence = sorted(referenced_evidence - evidence_by_id.keys())
-        if missing_evidence:
-            raise ValueError(
-                "procedure master references unknown evidence: "
-                + ", ".join(missing_evidence)
-            )
-
-        allowed_source_types = {
-            "PROCEDURE_MASTER",
-            "OFFICIAL_DOCUMENT",
-            "OFFICIAL_API",
-        }
-        invalid_source_types: set[str] = set()
-        for evidence_ref in referenced_evidence:
-            source_type = evidence_by_id[evidence_ref].source_type
-            source_type_text = str(getattr(source_type, "value", source_type))
-            if source_type_text not in allowed_source_types:
-                invalid_source_types.add(source_type_text)
-        invalid_sources = sorted(invalid_source_types)
-        if invalid_sources:
-            raise ValueError(
-                "procedure definitions require procedure-master or official evidence; "
-                "found: " + ", ".join(invalid_sources)
-            )
-
-        steps_by_ref = {
-            (
-                step.procedure_step.procedure_step_id,
-                step.procedure_step.step_code,
-            ): step
-            for step in self.steps
-        }
-        missing_prerequisites = sorted(
-            {
-                (
-                    prerequisite.procedure_step.procedure_step_id,
-                    prerequisite.procedure_step.step_code,
-                )
-                for step in self.steps
-                for prerequisite in step.prerequisites
-                if (
-                    prerequisite.procedure_step.procedure_step_id,
-                    prerequisite.procedure_step.step_code,
-                )
-                not in steps_by_ref
-            },
-            key=lambda item: (item[0], item[1]),
+        object.__setattr__(self, "api_key", normalized_key)
+        object.__setattr__(self, "endpoint", _validate_search_endpoint(self.endpoint))
+        normalized_domains = tuple(
+            dict.fromkeys(_normalize_domain(item) for item in self.allowed_domains)
         )
-        if missing_prerequisites:
-            missing_codes = ", ".join(code for _, code in missing_prerequisites)
-            raise ValueError(
-                "procedure master references unknown prerequisite steps: "
-                + missing_codes
+        if not normalized_domains:
+            raise ProcedureSearchConfigurationError(
+                "at least one official procedure source domain is required"
+            )
+        object.__setattr__(self, "allowed_domains", normalized_domains)
+        if not math.isfinite(self.timeout_seconds) or self.timeout_seconds <= 0:
+            raise ProcedureSearchConfigurationError(
+                "PROCEDURE_SEARCH_TIMEOUT_SECONDS must be finite and positive"
+            )
+        if (
+            not math.isfinite(self.total_timeout_seconds)
+            or self.total_timeout_seconds <= 0
+        ):
+            raise ProcedureSearchConfigurationError(
+                "PROCEDURE_SEARCH_TOTAL_TIMEOUT_SECONDS must be finite and positive"
+            )
+        if not 0 <= self.max_retries <= _MAX_ALLOWED_RETRIES:
+            raise ProcedureSearchConfigurationError(
+                f"PROCEDURE_SEARCH_MAX_RETRIES must be between 0 and "
+                f"{_MAX_ALLOWED_RETRIES}"
+            )
+        if (
+            not math.isfinite(self.retry_backoff_seconds)
+            or self.retry_backoff_seconds < 0
+        ):
+            raise ProcedureSearchConfigurationError(
+                "PROCEDURE_SEARCH_RETRY_BACKOFF_SECONDS must be finite and not negative"
+            )
+        if not 1_024 <= self.max_response_bytes <= 10_000_000:
+            raise ProcedureSearchConfigurationError(
+                "PROCEDURE_SEARCH_MAX_RESPONSE_BYTES must be between 1024 and 10000000"
+            )
+        if not 0 <= self.max_redirects <= 10:
+            raise ProcedureSearchConfigurationError(
+                "PROCEDURE_SEARCH_MAX_REDIRECTS must be between 0 and 10"
             )
 
-        prerequisite_graph = {
-            step_ref: {
-                (
-                    prerequisite.procedure_step.procedure_step_id,
-                    prerequisite.procedure_step.step_code,
-                )
-                for prerequisite in step.prerequisites
-            }
-            for step_ref, step in steps_by_ref.items()
-        }
-        _ensure_acyclic_prerequisites(prerequisite_graph)
-        return self
+    @classmethod
+    def from_env(
+        cls,
+        *,
+        env_file: str | Path | None = None,
+        environ: Mapping[str, str] | None = None,
+    ) -> ProcedureSearchConfig:
+        environment = os.environ if environ is None else environ
+        dotenv_path = Path(env_file) if env_file is not None else _repo_root() / ".env"
+        file_values: Mapping[str, str | None]
+        if dotenv_path.is_file():
+            try:
+                file_values = dotenv_values(dotenv_path)
+            except (OSError, ValueError) as exc:
+                raise ProcedureSearchConfigurationError(
+                    "procedure-search environment file could not be read"
+                ) from exc
+        else:
+            file_values = {}
+
+        def value(key: str) -> str | None:
+            raw = environment.get(key)
+            if raw is None:
+                raw = file_values.get(key)
+            if raw is None:
+                return None
+            normalized = str(raw).strip()
+            return normalized or None
+
+        api_key = value("PROCEDURE_SEARCH_API_KEY") or value("KAKAO_CLIENT_ID")
+        if api_key is None:
+            raise ProcedureSearchConfigurationError(
+                "PROCEDURE_SEARCH_API_KEY or KAKAO_CLIENT_ID is required"
+            )
+
+        allowed_domains_raw = value("PROCEDURE_SEARCH_ALLOWED_DOMAINS")
+        allowed_domains = (
+            tuple(
+                item.strip() for item in allowed_domains_raw.split(",") if item.strip()
+            )
+            if allowed_domains_raw is not None
+            else DEFAULT_OFFICIAL_DOMAINS
+        )
+        return cls(
+            api_key=api_key,
+            endpoint=value("PROCEDURE_SEARCH_ENDPOINT") or DEFAULT_SEARCH_ENDPOINT,
+            allowed_domains=allowed_domains,
+            timeout_seconds=_parse_float(
+                value("PROCEDURE_SEARCH_TIMEOUT_SECONDS"),
+                default=_DEFAULT_TIMEOUT_SECONDS,
+                name="PROCEDURE_SEARCH_TIMEOUT_SECONDS",
+            ),
+            total_timeout_seconds=_parse_float(
+                value("PROCEDURE_SEARCH_TOTAL_TIMEOUT_SECONDS"),
+                default=_DEFAULT_TOTAL_TIMEOUT_SECONDS,
+                name="PROCEDURE_SEARCH_TOTAL_TIMEOUT_SECONDS",
+            ),
+            max_retries=_parse_int(
+                value("PROCEDURE_SEARCH_MAX_RETRIES"),
+                default=_DEFAULT_MAX_RETRIES,
+                name="PROCEDURE_SEARCH_MAX_RETRIES",
+            ),
+            retry_backoff_seconds=_parse_float(
+                value("PROCEDURE_SEARCH_RETRY_BACKOFF_SECONDS"),
+                default=_DEFAULT_RETRY_BACKOFF_SECONDS,
+                name="PROCEDURE_SEARCH_RETRY_BACKOFF_SECONDS",
+            ),
+            max_response_bytes=_parse_int(
+                value("PROCEDURE_SEARCH_MAX_RESPONSE_BYTES"),
+                default=_DEFAULT_MAX_RESPONSE_BYTES,
+                name="PROCEDURE_SEARCH_MAX_RESPONSE_BYTES",
+            ),
+            max_redirects=_parse_int(
+                value("PROCEDURE_SEARCH_MAX_REDIRECTS"),
+                default=_DEFAULT_MAX_REDIRECTS,
+                name="PROCEDURE_SEARCH_MAX_REDIRECTS",
+            ),
+        )
 
 
-def _ensure_acyclic_prerequisites(
-    graph: dict[tuple[int, str], set[tuple[int, str]]],
-) -> None:
-    visiting: set[tuple[int, str]] = set()
-    visited: set[tuple[int, str]] = set()
+@dataclass(frozen=True, slots=True)
+class SearchHit:
+    """Untrusted discovery result returned by Kakao search."""
 
-    def visit(step_ref: tuple[int, str]) -> None:
-        if step_ref in visiting:
-            raise ValueError("procedure prerequisite graph must not contain a cycle")
-        if step_ref in visited:
-            return
-        visiting.add(step_ref)
-        for prerequisite_ref in graph[step_ref]:
-            visit(prerequisite_ref)
-        visiting.remove(step_ref)
-        visited.add(step_ref)
+    title: str
+    url: str
+    query: str
 
-    for step_ref in graph:
-        visit(step_ref)
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[4]
+
+
+def _normalize_domain(value: str) -> str:
+    candidate = value.strip().lower().rstrip(".")
+    if (
+        not candidate
+        or candidate.startswith("*.")
+        or ":" in candidate
+        or "/" in candidate
+    ):
+        raise ProcedureSearchConfigurationError(
+            "official source domains must be bare host suffixes"
+        )
+    try:
+        normalized = candidate.encode("idna").decode("ascii")
+    except UnicodeError as exc:
+        raise ProcedureSearchConfigurationError(
+            "official source domain is invalid"
+        ) from exc
+    labels = normalized.split(".")
+    if not all(
+        part
+        and len(part) <= 63
+        and not part.startswith("-")
+        and not part.endswith("-")
+        and part.replace("-", "a").isalnum()
+        for part in labels
+    ):
+        raise ProcedureSearchConfigurationError("official source domain is invalid")
+    if "." not in normalized or normalized in _BROAD_PUBLIC_SUFFIXES:
+        raise ProcedureSearchConfigurationError(
+            "official source domains must not be a top-level or broad public suffix"
+        )
+    if not any(
+        normalized == approved or normalized.endswith(f".{approved}")
+        for approved in DEFAULT_OFFICIAL_DOMAINS
+    ):
+        raise ProcedureSearchConfigurationError(
+            "official source domains must be within the code-reviewed registry"
+        )
+    return normalized
+
+
+def _validate_search_endpoint(value: str) -> str:
+    raw = value.strip()
+    parsed = urlsplit(raw)
+    if parsed.scheme != "https" or not parsed.hostname:
+        raise ProcedureSearchConfigurationError(
+            "PROCEDURE_SEARCH_ENDPOINT must be an absolute HTTPS URL"
+        )
+    if parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise ProcedureSearchConfigurationError(
+            "PROCEDURE_SEARCH_ENDPOINT must not contain credentials, query, or fragment"
+        )
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ProcedureSearchConfigurationError(
+            "PROCEDURE_SEARCH_ENDPOINT has an invalid port"
+        ) from exc
+    if port not in {None, 443}:
+        raise ProcedureSearchConfigurationError(
+            "PROCEDURE_SEARCH_ENDPOINT must use the standard HTTPS port"
+        )
+    hostname = parsed.hostname.encode("idna").decode("ascii").lower().rstrip(".")
+    if hostname != "dapi.kakao.com" or parsed.path.rstrip("/") != "/v2/search/web":
+        raise ProcedureSearchConfigurationError(
+            "PROCEDURE_SEARCH_ENDPOINT must be the Kakao Daum web-search endpoint"
+        )
+    netloc = hostname
+    return urlunsplit(("https", netloc, parsed.path or "/", "", ""))
+
+
+def _parse_int(raw: str | None, *, default: int, name: str) -> int:
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise ProcedureSearchConfigurationError(f"{name} must be an integer") from exc
+
+
+def _parse_float(raw: str | None, *, default: float, name: str) -> float:
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except ValueError as exc:
+        raise ProcedureSearchConfigurationError(f"{name} must be numeric") from exc
 
 
 __all__ = [
-    "MasterScalar",
-    "ProcedureConditionDefinition",
-    "ProcedureMaster",
-    "ProcedurePrerequisiteDefinition",
-    "ProcedureStepDefinition",
+    "DEFAULT_OFFICIAL_DOMAINS",
+    "DEFAULT_SEARCH_ENDPOINT",
+    "ProcedureSearchConfig",
+    "ProcedureSearchConfigurationError",
+    "SearchHit",
 ]

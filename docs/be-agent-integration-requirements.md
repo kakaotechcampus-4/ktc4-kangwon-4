@@ -1,6 +1,6 @@
 # RE:BORN BE → Agent 연동 요구사항
 
-> 상태: **v1.0 제안 — BE 계약 합의 및 구현 전**
+> 상태: **v2.0 제안 — `agent-io/2.0`·인터넷 절차조회 반영 / BE 계약 합의 및 구현 전**
 >
 > 수신: BE
 >
@@ -10,17 +10,18 @@
 
 ## 1. 먼저 합의할 결론
 
-Agent 내부 입출력 schema와 standalone 실행만으로 실제 Case 연동은 완료되지 않습니다. 생산 동작에는 BE가 인증된 Case snapshot과 stable master/catalog 참조를 제공하고, Review 이후 결과를 현재 DB 상태에 대해 재검증한 뒤 원자적으로 저장해야 합니다.
+Agent 내부 입출력 schema와 standalone 실행만으로 실제 Case 연동은 완료되지 않습니다. 생산 동작에는 BE가 인증된 Case snapshot, canonical procedure step registry와 support catalog를 제공하고, Review 이후 결과를 현재 DB 상태에 대해 재검증한 뒤 원자적으로 저장해야 합니다. 폐업 절차 **내용**은 BE master가 아니라 AI 소유 ProcedureLookupTool이 실제 인터넷에서 조회합니다.
 
 BE가 이 문서를 “테이블을 그대로 추가하라는 확정 명세”로 해석해서는 안 됩니다. 먼저 §4의 P0 결정을 AI와 합의하고, 합의한 shared DTO를 코드와 OpenAPI로 고정한 뒤 구현해야 합니다.
 
 완료 상태는 다음을 모두 만족할 때입니다.
 
 1. BE가 소유권 검증을 거친 immutable `SharedCaseSnapshotDTO`를 만들고 AI adapter가 이를 `CaseSnapshot`으로 검증할 수 있습니다.
-2. Agent가 사용하는 Case field, procedure step, support program, Evidence ID가 BE의 canonical row와 안정적으로 매핑됩니다.
-3. 정상 결과는 Review, Output Guardrail, State Transition Guardrail을 모두 통과해야 저장됩니다.
-4. snapshot 이후 DB가 바뀌면 version 또는 field-level CAS가 저장을 거부합니다.
-5. 실제 개발 Case로 read → plan → review → guardrail → persist → read-back 통합 테스트가 통과합니다.
+2. Agent가 사용하는 Case field, canonical procedure progress ID, support program, Evidence ID가 BE의 canonical row와 안정적으로 매핑됩니다.
+3. ProcedureLookupTool이 Kakao 웹검색으로 발견한 URL을 HTTPS·공식기관 allowlist로 검증한 뒤 실제 원문을 fetch하고, Info Agent가 그 raw 결과를 canonical step에만 결합합니다.
+4. 정상 결과는 Review, Output Guardrail, State Transition Guardrail을 모두 통과해야 저장됩니다.
+5. snapshot 이후 DB가 바뀌면 version 또는 field-level CAS가 저장을 거부합니다.
+6. 실제 개발 Case로 read → plan → review → guardrail → persist → read-back 통합 테스트가 통과합니다.
 
 근거는 `docs/architecture.md` §3·§10·§11, `backend/CLAUDE.md`의 Agent↔DB 경계, `agent-tool-io-schema.md` §14·§18~§21입니다.
 
@@ -30,7 +31,7 @@ BE가 이 문서를 “테이블을 그대로 추가하라는 확정 명세”�
 |---|---|---|
 | `interface-spec.md` §11의 `FactCandidate`, `SupportCheckResult` JSON | **구형 검토 예시, 구현 금지** | 현재 strict 모델에는 candidate ID, operation, value type, Evidence, structured span 등이 추가됐고 장비 항목은 v1에서 보류됐습니다. |
 | `interface-spec.md` §11.3의 Supervisor·절차·Review `TBD` | **Agent 내부 계약은 해소됨** | 현재 계약은 `agent-tool-io-schema.md` §10~§12와 실행 코드에 있습니다. 외부 HTTP 매핑만 BE 합의 전입니다. |
-| `architecture.md`의 Supervisor 선택 호출 | **AI 소유 목표 구조** | 현재 standalone Graph는 정보분석→절차조회→지원금→Supervisor 고정 순서입니다. BE 연결과 별개로 AI가 구현하거나 MVP 예외를 공동 승인해야 합니다. |
+| `architecture.md`의 Supervisor 선택 호출 | **AI 소유 목표 구조** | 자연어 Case 생성·결과 제출의 v2 first-pass dependency는 절차조회→정보분석→지원금→Supervisor입니다. 하위 구성요소가 직접 호출하는 것이 아니라 Supervisor Graph가 앞 결과를 다음 입력에 전달합니다. 새 사용자 입력·절차 해석이 없는 `SUPPORT_REFRESH`는 Support부터 시작하는 현재의 명시적 예외입니다. |
 | `architecture.md`의 Safe Failure schema `TBD` | **현재 Agent 내부는 해소됨** | 현재 `SafeFailureOutcome`은 구현됐지만 외부 HTTP `REPLAN_FAILED` 매핑과 저장 정책은 BE 합의 전입니다. |
 
 BE는 위 구형 예시를 복사하지 말고 `agent-tool-io-schema.md`의 현재 계약과 이 문서의 shared 경계부터 검토해야 합니다.
@@ -44,9 +45,9 @@ BE는 위 구형 예시를 복사하지 말고 `agent-tool-io-schema.md`의 현�
 | Planning Coordinator | application/service layer에서 인증, input guardrail, snapshot, Agent Graph 호출, 저장 순서를 조정 | AI 소유 `AgentGraph` callable과 outcome 제공 | LLM이 권한·transaction·HTTP 상태를 직접 결정하지 않게 합니다. |
 | DB 접근 | `app/shared/functions/`의 단일 구현과 ADR로 합의한 atomic boundary | SQL/ORM 직접 호출 금지 | API와 Agent용 DB 로직이 두 벌로 갈라지는 것을 막습니다. |
 | Agent/Tool 내부 | 호출하지 않음 | Graph, prompt, 내부 schema, retry, Review | provider 세부 모델을 BE 저장 계약으로 결합하지 않습니다. |
-| 절차 master | repository/read service에서 canonical ID/code/version과 승인된 Evidence DTO 공급 | runtime adapter, 결정론적 조회 Tool과 조건 평가 | 같은 step ID가 다른 의미로 재사용되면 판단을 재현할 수 없습니다. |
+| 절차 조회와 진행 ID | canonical step ID/code/name/alias와 Case progress 저장·복원. Kakao key/network/Evidence 보존 운영 지원 | Kakao 웹검색, 공식 URL 검증, 원문 fetch, Info 의미 분석과 canonical mapping | BE가 검색 내용을 작성하지 않으면서도 웹 제목을 DB ID로 오인하거나 progress를 유실하지 않아야 합니다. |
 | 지원사업 | repository/read service에서 canonical ID/Wiki UUID와 승인 metadata·Evidence DTO 공급 | 원문을 승인 후보로 만드는 ingestion/catalog builder, runtime adapter와 비교 | 실제 API 공고와 내부 검수 지식 사이에 LLM 자기승인이 아닌 독립 승인 단계가 필요합니다. |
-| Evidence | 사용자 입력·시스템 record·인증 확인 Evidence 발급, 승인 pipeline 결과의 canonical ID 발급, 전체 source 저장·복원·보존 | 승인 후보 생성, runtime claim 선택과 lineage 검사 | 운영 Evidence ID 발급을 한 경계로 고정하고 source type별 신뢰 주체를 분리해야 합니다. |
+| Evidence | 사용자 입력·시스템 record·인증 확인 Evidence 발급, AI runtime이 만든 공식 URL/hash Evidence 저장·복원·보존 | 절차조회 Evidence ID 생성, 승인 후보 생성, runtime claim 선택과 lineage 검사 | 생성 주체는 source별로 달라도 같은 ID의 내용과 hash가 바뀌지 않아야 합니다. |
 | Review 이후 저장 | Guardrail, CAS, idempotency, transaction, History | `ReviewSubject`와 proof 생성 | Review PASS만으로 현재 DB 상태나 권한을 보장할 수 없습니다. |
 | 외부 HTTP 응답 | status, camelCase DTO, 오류 및 viewState | Agent outcome을 shared DTO로 전달 | 내부 snake_case와 FE 계약을 분리해야 합니다. |
 
@@ -68,7 +69,8 @@ Supervisor와 하위 Agent/Tool 사이의 provider schema와 내부 호출은 AI
 | 동시성·idempotency ADR | version 또는 field CAS, `client_event_id` 의미·보존, retry 정책 | schema 문서 §14·§19 | LLM 실행 중 Case가 바뀔 수 있고 같은 요청이 재전송될 수 있습니다. | 중복 요청은 중복 이력을 만들지 않고 stale snapshot 저장은 거부됩니다. |
 | transaction ADR | 변경, Evidence, decision, History 저장 순서와 rollback/`REPLAN_FAILED` 정책 | `architecture.md` §3·§10, schema 문서 §14 | 일부만 저장되면 Review한 상태와 사용자에게 보인 상태가 달라집니다. | fault injection에서 허용되지 않은 부분 저장이 없습니다. |
 | Evidence·개인정보 정책 | source type별 생성 주체, ID/locator, lineage, hash, 보존, 삭제, 외부 공개, trace redaction | schema 문서 §5·§19, `architecture.md` §6·§8 | 근거 재현성과 개인정보 최소화를 동시에 만족해야 합니다. | 모든 ref가 resolve되고 인증 token 값과 raw PII가 log·trace에 없으며 집계 token count만 허용됩니다. |
-| procedure master 명세 | step ID/code/name, 발화 alias와 locale/version, 조건 operator, dependency, authority, Evidence | `schema_table.md` §3, schema 문서 §10·§19 | 현재 DB 초안에는 stable `step_code`, alias version, 공식 Evidence가 없습니다. | DAG·unknown ref·cycle 테스트와 ID/code/alias 동일 version 검증을 통과합니다. |
+| canonical procedure registry 명세 | step ID/code/name, 발화 alias와 registry version, deprecated mapping | `schema_table.md` §3, schema 문서 §6·§8·§19 | 인터넷 제목은 안정 ID가 아니며 Case progress FK는 계속 canonical ID가 필요합니다. | ID/code/name/alias가 unique하고 미매핑 web finding은 DB ID를 만들지 않습니다. |
+| 절차 인터넷 조회 운영 명세 | Kakao key secret·rotation·호출 허용 IP, quota/rate limit, 공식 domain allowlist 변경 승인, redirect/SSRF, timeout·MIME·byte 상한, cache와 장애 대응 | schema 문서 §10, Kakao 공식 문서 | 실제 조회는 외부 provider와 공식기관 서버에 의존하며 credential·보안·지연이 production endpoint에 영향을 줍니다. | key 없이 fail closed하고 비공식/private URL·unsafe redirect를 거부하는 통합 테스트와 runbook이 있습니다. |
 | support catalog 명세 | DB ID, Wiki UUID, 외부 공고 ID, version, freshness, source, 검수 상태·주체·시각·hash | `schema_table.md` §5, 실제 기업마당 호환성 결과 | 실제 공고 payload는 Agent 판정용 구조화 조건을 직접 제공하지 않습니다. | 검수되지 않은 version을 주입할 수 없고 외부 ID가 canonical row와 reviewed catalog에 안정 매핑됩니다. |
 | conflict lifecycle 명세 | `conflict_ref` 발급·복원·만료, digest/version 결합, 확인 audit | schema 문서 §6·§18·§19 | standalone ref는 운영 endpoint에서 신뢰할 수 없습니다. | 변조·만료·다른 Case·stale version 확인 요청을 거부합니다. |
 | digest 고정 test vector | canonical JSON bytes와 SHA-256 결과, timezone/UUID/enum 예시 | schema 문서 §12·§18 | Python Agent와 BE 구현의 직렬화 차이는 proof 불일치를 만듭니다. | 두 구현에서 동일 vector가 byte-for-byte 같은 digest를 만듭니다. |
@@ -84,7 +86,7 @@ Supervisor와 하위 Agent/Tool 사이의 provider schema와 내부 호출은 AI
 | Case/result/subsidy/history router와 외부 DTO adapter | OpenAPI, `interface-spec.md` | FE wire 계약과 내부 Agent 계약을 분리합니다. | 생성 OpenAPI 및 정상·오류 response fixture가 일치합니다. |
 | JWT/auth dependency와 ownership query | `backend/CLAUDE.md` | 권한 없는 Case가 snapshot이나 오류 차이로 노출되면 안 됩니다. | 타 사용자 Case read/write 부정 테스트가 통과합니다. |
 | versioned shared DTO 코드와 snapshot assembler | schema 문서 §7·§14·§21 | 공개 GET projection만으로는 Agent 입력을 만들 수 없습니다. | 한 읽기 시점에서 만든 DTO가 AI adapter와 strict schema를 통과합니다. |
-| procedure/support/Evidence repository와 read service | schema 문서 §5·§9·§10 | stable ID, version, freshness, 승인된 근거를 AI adapter에 공급합니다. | unknown·stale·삭제·새 revision fixture를 안전하게 처리합니다. |
+| canonical procedure registry, support/Evidence repository와 read service | schema 문서 §5·§6·§8·§9 | 안정 progress ID, support metadata, 인터넷 조회 Evidence를 저장·복원합니다. | unknown·stale·삭제·새 revision fixture와 미매핑 web finding을 안전하게 처리합니다. |
 | Planning Coordinator와 Graph 호출 경계 | architecture §3, schema 문서 §2·§4 | BE가 request/run/trace/deadline context를 만들고 AI entrypoint가 이를 받아 한 실행에 결합합니다. | 공통 fixture가 양쪽 경계를 통과하고 구성요소 실패도 tagged outcome으로 닫힙니다. |
 | Output/State Transition Guardrail | architecture §5·§11, schema 문서 §14 | Review PASS만으로 권한·현재 DB 상태·전이를 보장할 수 없습니다. | tamper, stale version, invalid transition을 저장 전에 거부합니다. |
 | idempotency registry와 production conflict ref 함수 | schema 문서 §6·§14·§19 | 중복 실행과 변조 가능한 standalone ref 노출을 막습니다. | 동시 replay는 한 번만 실행되고 ref 변조·재사용·만료를 거부합니다. |
@@ -100,7 +102,8 @@ Supervisor와 하위 Agent/Tool 사이의 provider schema와 내부 호출은 AI
 | Case field 저장 위치 | `entity_type`, `building_use_type`, `previous_support_history`가 목표 입력에는 있고 CASE table에는 없음 | 실제 지원조건 비교에 필요한 값을 snapshot에서 복원할 수 없습니다. | column/별도 fact table/스코프아웃 중 하나와 migration |
 | v1 field 범위 | Hero Scenario의 `lease_end_date`, `transfer_status`, `tax_status`가 현재 API/DB에 없음 | 없는 필드로 Agent가 판단하면 저장·재조회 시 정보가 사라집니다. | v1 포함 여부와 포함 시 canonical type |
 | enum 정합성 | lease는 DB `LEASED`, API `LEASED_PAID`, standalone `ACTIVE`; restoration scope도 값이 다름 | adapter에서 임의 해석하면 Case 의미가 바뀝니다. | canonical enum과 legacy mapping/deprecation 표 |
-| procedure identity/version | DB 초안은 name 중심이고 Agent는 ID+`step_code`+version+Evidence를 요구 | 이름 변경에도 stable ref와 과거 판단 재현이 필요합니다. | step code, master version, authority, source contract |
+| procedure identity/registry | DB 초안은 name 중심이고 Agent progress는 ID+`step_code`, Info mapping은 name+alias+registry version을 요구 | 웹 제목이나 모델이 DB ID를 만들지 않고 이름 변경 뒤에도 과거 진행상태를 복원해야 합니다. | stable step code, registry version, alias/deprecation contract. 절차 내용·조건·Evidence master는 요구하지 않음 |
+| 절차검색 운영 | Kakao key와 일반 login client ID의 의미가 기존 env에서 혼동될 수 있고 외부 fetch는 SSRF·latency·quota 위험이 있음 | 잘못된 credential fallback이나 무제한 fetch는 장애·보안사고를 만듭니다. | `PROCEDURE_SEARCH_API_KEY` 우선, `KAKAO_CLIENT_ID` fallback의 실제 값 의미 확인, secret rotation, egress/allowlist, timeout·cache·quota ownership |
 | support identity | DB `id/uuid`, API 문서 `supportItemId`, Agent `support_program_id/wiki_uuid`, 기업마당 `PBLN_...` | 외부 공고와 내부 검수 노트·신청 row를 같은 사업으로 연결해야 합니다. | canonical 이름과 external ID mapping table/resolver |
 | match/application 분리 | DB `application_status`에 `ELIGIBLE/NOT_ELIGIBLE`가 섞여 있고 Agent는 비교와 실제 신청을 분리 | 조회만으로 신청 row를 만들거나 자격을 확정하면 안 됩니다. | 별도 support match 저장 모델과 application lifecycle |
 | 자연어 신청상태 변경 | `/results`가 신청 완료 표현도 저장할지 PATCH만 사용할지 미정 | 이중 write 경로는 상태 전이와 idempotency를 깨뜨립니다. | 단일 권한 경로와 허용 전이 |
@@ -110,10 +113,10 @@ Supervisor와 하위 Agent/Tool 사이의 provider schema와 내부 호출은 AI
 | production conflict ref 결합 | 현재 Info Agent는 `standalone:` simulation ref를 생성 | 운영 응답에 simulation ref를 노출하거나 확인 API에서 신뢰할 수 없습니다. | pending conflict 저장 후 BE가 ref를 결합할지 `ConflictRefFactory`를 Graph에 주입할지와 관련 DTO 확정 |
 | idempotency | `client_event_id`는 제안됐으나 uniqueness와 보존기간 미정 | 모바일·네트워크 retry가 중복 계획과 중복 History를 만들 수 있습니다. | scope, unique constraint, replay response, retention |
 | result 우선순위 | 한 요청에 변경 후보와 추가 질문이 함께 생길 수 있음 | 하나의 외부 discriminator로 어떤 상태를 노출할지 필요합니다. | outcome mapping 표와 예제 |
-| decision cardinality | Blocker 1개·Next Action 1개는 `ACTION`에만 적용하고 `NEEDS_MORE_INFO`, `CASE_COMPLETE`는 구조가 다름 | 외부 DTO nullability, DB 저장, FE `viewState`가 decision별로 달라집니다. | decision별 필수·금지 필드와 표시 mapping |
+| decision cardinality | Blocker 1개·Next Action 1개는 `ACTION`에만 적용하고, Next Action은 required `PROCEDURE | SUPPORT_PROGRAM` target tagged union을 가짐. `NEEDS_MORE_INFO`, `CASE_COMPLETE`는 구조가 다름 | nullable target이나 문자열 추정은 source provenance를 잃고 외부 DTO/DB/FE `viewState`도 decision별로 달라집니다. | decision별 필수·금지 필드, target discriminator와 canonical ID resolver, 표시 mapping |
 | catalog 승인 주체 | 자연어 공고 구조화와 검수 완료 승격 주체가 아직 없음 | LLM 자기검수만으로 trusted catalog를 만들 수 없습니다. | 도메인 담당자 또는 승인된 deterministic rule, audit metadata와 배포 gate |
 | Graph invocation envelope | 목표 문서는 Coordinator가 run ID/deadline을 만들지만 현재 Graph가 run ID를 생성 | 양쪽이 ID를 만들면 trace·idempotency·proof 연결이 갈라집니다. | BE가 run/trace를 생성하고 AI entrypoint가 소비하는 방식, deadline을 DTO 필드 또는 별도 execution context로 전달할지 확정 |
-| Graph 호출 선택 | architecture는 Supervisor 선택 호출, 현재 runtime은 고정 순서 | MVP 완료 정의와 비용·source completeness가 달라집니다. | AI 후속 구현 또는 고정 흐름 MVP 예외 공동 승인 |
+| Graph 호출 선택 | v2 first pass는 Procedure→Info→Support 고정 dependency이고 이후 Supervisor가 Review 재작업을 조정 | lookup 없이 Info가 절차를 만들거나 오래된 raw 결과를 재사용하면 provenance가 끊깁니다. | first-pass 고정 dependency와 trigger별 생략 가능 조건 공동 승인 |
 | timeout/retry | standalone에는 상한이 있으나 BE request timeout과 재시도 정책 미정 | BE timeout과 Agent retry가 겹치면 중복 실행·비용이 커집니다. | 전체 deadline, 구성요소 budget, retry ownership |
 | transaction/실패 | Case 변경 뒤 재계획 실패 시 rollback/유지 정책 미정 | DB 상태와 latest decision이 서로 다른 시점을 가리킬 수 있습니다. | 원자성 경계와 `REPLAN_FAILED` 응답/재처리 정책 |
 | redaction/audit | runtime/model/telemetry별 전달 범위와 보존 정책 미정 | 실제 사용자 원문과 인증정보가 외부 LLM·trace로 유출될 수 있습니다. | `input_event_id`, source type, placeholder, Unicode code-point offset, 시각, 원문 보존·삭제, 단계별 allowlist와 access audit |
@@ -127,7 +130,7 @@ P0가 닫히기 전에는 BE 또는 AI 어느 쪽도 임의 enum, default, 저�
 | 순서 | DTO | 생성·검증 주체 | 이유 |
 |---:|---|---|---|
 | 1 | `SharedCaseSnapshotDTO`와 nested fact/procedure/support/decision/history DTO | BE 생성, AI adapter가 `CaseSnapshot`으로 변환·strict 검증 | 나머지 모든 판단의 기준 입력이며 공개 GET response와 구분됩니다. |
-| 2 | `EvidenceRecord`와 resolver 계약 | BE 또는 승인 pipeline이 canonical ID 발급·저장, AI가 후보 생성·runtime 검증 | 사실·절차·지원·결정의 근거를 닫힌 집합으로 만듭니다. |
+| 2 | `EvidenceRecord`와 resolver 계약 | source별 신뢰 주체가 ID 발급, BE가 저장·복원, AI가 runtime 검증 | 절차조회 runtime의 URL/hash Evidence를 포함해 사실·절차·지원·결정의 근거를 닫힌 집합으로 만듭니다. |
 | 3 | `RedactedInput`과 원문 보존 계약 | BE input guardrail 생성, Agent offset 검증 | 인증정보를 제거하면서 선택 span을 원 입력에 대조할 수 있어야 합니다. |
 | 4 | `ComponentRequest[SupervisorRunInput]`, trigger variants, `ConfirmedConflictResolution` | BE Coordinator가 top-level run/call/trace context 생성, AI entrypoint 소비 | schema/run/call/case/trace와 실행 원인·idempotency·확인 proof를 결합합니다. 내부 component call ID는 Agent runtime이 만들고 deadline은 DTO 필드 또는 별도 execution context 중 §4 결정에 따릅니다. |
 | 5 | `ReviewSubject`, `ReviewProof`, `MutationSet` | Agent 생성, BE 무결성 재검증 | 검토된 내용과 저장 후보를 정확히 고정합니다. |
@@ -169,10 +172,32 @@ BE는 소유권 확인 뒤 한 시점의 일관된 read view에서 `SharedCaseSn
 | 공개 Case view 조회 | 같은 read service를 FE projection으로 변환 | `GET /cases/{caseId}` | 없음 | 공개 응답을 내부 `CaseSnapshot`과 동일시하지 않고도 상태 drift를 막습니다. |
 | 지원 상태 조회 | Case의 match와 실제 application을 분리 반환 | `GET /cases/{caseId}/subsidies` | 없음 | 조회만으로 application row를 생성하지 않습니다. |
 | bounded history 조회 | 최근 이력과 active decision 관련 이력 반환 | `GET /cases/{caseId}/history` | 없음 | raw history 전체를 LLM에 넘기지 않습니다. |
-| procedure master 조회 | versioned active step/dependency/condition/Evidence 반환 | 내부 shared function 또는 versioned GET | 없음 | 절차 Tool이 DB를 직접 읽지 않고 재현 가능한 master를 받습니다. |
+| canonical procedure registry 조회 | stable step ID/code/name/alias/deprecated mapping 반환 | 내부 shared function 또는 versioned GET | 없음 | Info가 웹자료를 기존 progress ID에만 결합하고 새 DB ID를 만들지 않습니다. 절차 내용은 반환하지 않습니다. |
 | support registry 조회 | canonical ID/Wiki UUID/external ID/source version 반환 | 내부 shared function 또는 versioned GET | 없음 | 실제 공고, Wiki, application row를 안정적으로 연결합니다. |
 
 실제 Case를 검증할 때는 내부 snapshot assembler와 위 GET/read 경로만 먼저 연결하고 각각의 DTO를 따로 검증합니다. `POST /cases`, `POST /results`, `POST /results/confirm`, `PATCH /subsidy-applications/...`는 통합 저장 계약과 테스트가 끝나기 전에 실데이터 smoke test에 사용하지 않습니다.
+
+### 절차 인터넷 조회 운영 경계
+
+ProcedureLookupTool의 검색·원문 fetch·raw schema는 AI 소유이며 BE가 `ProcedureMaster`나 검색 결과 내용을 작성하는 API를 만들 필요가 없습니다. 다만 같은 backend process 또는 AI service가 production에서 외부 요청을 수행할 수 있도록 다음 운영 경계를 공동 확정해야 합니다.
+
+| 항목 | AI 책임 | BE/인프라 책임 | 이유와 승인 기준 |
+|---|---|---|---|
+| Kakao credential | `PROCEDURE_SEARCH_API_KEY` 우선, `KAKAO_CLIENT_ID` fallback 로딩과 header 비노출 | 올바른 REST API 키 secret 주입·rotation·호출 허용 IP | key 없음/401/403을 빈 결과로 숨기지 않고 fail closed합니다. |
+| Kakao 호출 | `PROCEDURE_SEARCH_ENDPOINT`를 고정 `https://dapi.kakao.com/v2/search/web`로 검증하고 page/size 상한·strict parse 적용 | outbound HTTPS, quota/rate-limit 관측 | provider 결과 수와 실패를 `ProcedureSearchSummary`에 기록합니다. 임의 endpoint나 query가 붙은 override는 거부합니다. |
+| URL 안전성 | `PROCEDURE_SEARCH_ALLOWED_DOMAINS`는 코드 검토 root/하위 host로만 축소, HTTPS·표준 port·IP-literal 금지·redirect/MIME/byte/time 제한 | 새 공식 domain root의 코드·보안 승인, hostname DNS 해석 결과의 private range 차단·DNS rebinding 방어와 egress 정책 | 현재 application 검증만으로 해결되지 않는 DNS 목적지까지 차단하고, allowlist는 환경변수나 사용자 입력만으로 trust root를 확장하지 않습니다. |
+| 원문 Evidence | fetch 본문의 excerpt/hash/retrieved_at/freshness 생성 | Evidence 저장·resolver·보존/삭제 | 검색 snippet이 아니라 당시 읽은 실제 공식 원문을 복원할 수 있어야 합니다. |
+| cache | canonical URL/hash 기반 재검증과 stale/unknown 처리 | TTL, 용량, 장애 시 stale 사용 정책 승인 | 캐시를 최신 원문으로 오인하거나 과거 판단을 덮어쓰지 않습니다. |
+| deadline·응답 상한 | 요청별 `PROCEDURE_SEARCH_TIMEOUT_SECONDS`, 전체 `PROCEDURE_SEARCH_TOTAL_TIMEOUT_SECONDS`, retry/backoff, response byte, redirect 및 provider 결과 수의 로컬 상한 검증과 취소 전파 | gateway/Coordinator 전체 budget | Kakao·공식 사이트·LLM 최악 시간을 긴 DB transaction 안에 두지 않고 대형/무한·과다 결과 응답을 차단합니다. |
+
+Kakao 공식 근거:
+
+- [Daum 검색 REST API 개발 가이드](https://developers.kakao.com/docs/ko/daum-search/dev-guide): `GET https://dapi.kakao.com/v2/search/web`, REST API 키, query/page/size와 title/contents/url/datetime 응답
+- [Kakao REST API 시작하기](https://developers.kakao.com/docs/ko/rest-api/getting-started): 서버 환경의 REST API 사용
+- [Kakao 앱 키 설정](https://developers.kakao.com/docs/ko/app-setting/app): REST API 키·호출 허용 IP 관리
+- [Kakao 쿼터 안내](https://developers.kakao.com/docs/ko/getting-started/quota): 검색 quota와 사용량 관측
+
+Kakao의 `contents`는 검색 결과 일부일 뿐 공식 원문이 아니므로 Evidence로 저장하지 않습니다. Tool은 allowlist를 통과한 URL을 직접 fetch하고, 발행·수정일을 검증하지 못하면 `freshness_status=UNKNOWN`으로 둡니다.
 
 ## 8. 실제 기업마당 데이터와 support catalog 경계
 
@@ -267,7 +292,10 @@ HTTP 응답은 내부 `AgentRunOutcome`을 그대로 노출하지 말고, `resul
 - [ ] 공개 `GET /cases/{caseId}`는 같은 read service의 FE projection이며 내부 Evidence/history를 과다 노출하지 않습니다.
 - [ ] 모든 confirmed fact와 completed procedure의 Evidence가 resolve됩니다.
 - [ ] DB/API/Agent canonical enum fixture가 동일하게 해석됩니다.
-- [ ] procedure master version은 `ProcedureLookupResult`/Review source result에 기록되고 각 `SupportCheck`에는 source version/freshness가 기록됩니다. catalog 전체 version을 감사해야 하면 shared provenance 필드를 추가합니다.
+- [ ] 각 `ProcedureLookupResult` document가 실제 공식 HTTPS `canonical_url`, `authority_name`, `source_domain`, `excerpt`, `retrieved_at`, `freshness_status`, `content_hash`와 1:1 Evidence를 갖고 Review source result에 포함됩니다.
+- [ ] Info `procedure_findings`는 canonical registry step에만 결합되고 `based_on_procedure_lookup_call_id`/digest가 정확한 raw lookup을 가리킵니다.
+- [ ] Kakao snippet, 비공식 domain, unsafe redirect는 Evidence가 되지 않고 unknown freshness로 기한·서류·의무를 확정하지 않습니다.
+- [ ] 웹문서만으로 procedure progress나 `CASE_COMPLETE`를 저장하지 않습니다.
 - [ ] 실제 기업마당 external ID가 canonical support ID/Wiki UUID에 안정 매핑됩니다.
 - [ ] `pblancId` 없이 `seq`만 있는 item도 정책대로 매핑되고 공고 수정·종료·삭제는 새 catalog version/freshness로 처리됩니다.
 - [ ] 자연어 공고만으로 자격을 확정하지 않고 unknown/confirmation을 유지합니다.
@@ -283,7 +311,7 @@ HTTP 응답은 내부 `AgentRunOutcome`을 그대로 노출하지 말고, `resul
 - [ ] provider timeout과 Review 소진이 `SAFE_FAILURE`이며 기존 판단을 새 판단처럼 반환하지 않습니다.
 - [ ] 저장 성공 후 read-back snapshot의 값과 persisted candidate가 일치합니다.
 - [ ] prompt 원문, 인증 token 값, credential, 실제 주소와 raw input이 일반 log·trace에 남지 않습니다. 집계 prompt/completion token count는 허용합니다.
-- [ ] source API pagination, key 보관, rate limit, retry/cache, sync 주기와 장애 runbook이 검증됩니다.
+- [ ] Kakao search와 공식 원문 fetch의 pagination/상한, key 보관, allowlist, redirect/SSRF, rate limit, retry/cache, timeout과 장애 runbook이 검증됩니다.
 
 ## 13. BE 구현 뒤 필요한 AI 후속 작업
 
@@ -293,15 +321,15 @@ BE 구현만으로 생산 연동이 자동 완성되지는 않습니다. BE 산�
 |---|---|---|
 | BE shared snapshot DTO → `CaseSnapshot` adapter | shared DTO, canonical registry, 정상/오류 fixture | DB/HTTP shape와 공개 FE response를 모델 prompt에 직접 결합하지 않습니다. |
 | runtime `CaseSnapshot` 확장 | applications, matches, latest decision, history 계약 | 현재 strict 모델은 목표 필드를 extra로 거부합니다. |
-| `KnownProcedureStep[]`와 master 교차검증 | versioned master/alias DTO | fixture 밖 입력에서도 ID/code/alias가 같은 master version인지 보장합니다. |
-| 실제 procedure master adapter | versioned master DTO와 Evidence | 합성 step ID와 조건을 운영에 사용하지 않습니다. |
+| `KnownProcedureStep[]` canonical registry adapter | versioned ID/code/name/alias DTO | Info가 웹 제목이나 모델 출력으로 DB step을 만들지 않고 기존 progress에만 finding을 연결합니다. |
+| Kakao procedure search/fetch production adapter | secret/network/allowlist/deadline runbook | 실제 URL discovery와 원문 Evidence를 수행하고 key·unsafe URL·검색 snippet을 노출하지 않습니다. 검색 내용은 BE가 만들지 않습니다. |
 | 기업마당/Wiki ingestion/catalog builder와 runtime adapter | canonical support registry, 승인·source 저장 계약 | 승인 후보와 trusted catalog를 분리하고 외부 공고의 누락 조건·서류·step을 임의 생성하지 않습니다. |
 | Graph entrypoint의 외부 run context 수용 | BE가 생성한 `ComponentRequest`, deadline/trace 규칙 | 현재 Graph 내부 생성 ID를 Coordinator의 provenance와 맞추되 BE Coordinator 구현을 중복하지 않습니다. |
 | 목표 mutation 필드 | persistence DTO | 절차의 `execution_input_event_id`·`source_observation_id`·`source_observation_call_id`, 지원의 `before_match`를 저장 명령까지 보존합니다. |
 | `FactCandidate` SET/CLEAR tagged union | canonical fact/clear 계약 | 현재 단일 모델을 목표 mutation 의미와 맞추고 null/clear 혼동을 막습니다. |
 | self-contained conflict Evidence와 production `CONFLICT_CONFIRMED` 경로 | BE pending conflict/ref/TTL/CAS·Evidence resolver 계약 | 모든 conflict ref를 복원하고 simulation ref가 노출되지 않으며 확인이 원 conflict에 결합되게 합니다. |
 | `NO_CHANGE`와 외부 outcome adapter | 외부 result/viewState 계약 | 현재 runtime의 세 variant와 목표 API variant가 다릅니다. |
-| 동적 구성요소 선택 또는 MVP 예외 | 공동 P0 결정 | 현재 고정 순서와 architecture의 Supervisor 선택 호출 차이를 닫습니다. |
+| trigger별 선택 호출 최적화 | first-pass Procedure→Info dependency 승인 | 기본 순서는 유지하되 절차자료가 불필요한 trigger에서만 안전하게 생략할 조건을 정합니다. |
 | Review rework routing 결정 | issue target/호출권한 합의 | 현재 Review Tool 계산+Graph dependency routing과 목표 Supervisor 소유 모델의 차이를 닫습니다. |
 | Coordinator integration test | auth, snapshot, guardrail, persistence 함수 | Agent 내부 성공과 실제 저장 성공을 분리 검증합니다. |
 
@@ -311,7 +339,7 @@ BE 구현만으로 생산 연동이 자동 완성되지는 않습니다. BE 산�
 2. BE는 §4 P0 표의 각 행에 `채택 / 대안 / 제외`와 근거를 회신합니다.
 3. 양측이 canonical registry와 shared DTO version을 확정합니다.
 4. BE가 OpenAPI, shared DTO, migrations, ADR, contract fixture를 PR로 제공합니다.
-5. AI가 §13의 runtime schema·Case/procedure/support adapter와 Graph 경계를 구현합니다.
+5. AI가 §13의 runtime schema, Case/canonical procedure registry/support adapter, Kakao search/fetch와 Graph 경계를 구현합니다.
 6. 양측 CI에서 같은 contract fixture와 digest vector를 실행합니다.
 7. 개발용 사용자·Case로 GET/read-only 통합 smoke test를 먼저 수행합니다.
 8. Guardrail·CAS·합의된 atomicity 테스트가 끝난 뒤에만 POST/PATCH persistence를 연결합니다.

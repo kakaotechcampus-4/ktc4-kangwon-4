@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 
 from app.agent.schemas import ClaimType, EvidenceRecord, EvidenceSourceType
 
@@ -24,6 +24,33 @@ _OVERCONFIDENT_PATTERN = re.compile(
     r"지원(?:금)?\s*가능합니다|지원\s*대상입니다|"
     r"법적으로\s+문제없습니다)"
 )
+_PROCEDURE_PATTERN = re.compile(
+    r"(?:폐업(?!\s*(?:지원|보조|장려|융자|컨설팅))|"
+    r"휴업(?!\s*(?:지원|보조|장려|융자|컨설팅))|"
+    r"철거(?!\s*(?:비|지원|보조|장려|융자))|"
+    r"원상복구(?!\s*(?:비|지원|보조|장려|융자))|"
+    r"사업자\s*등록|신고서|구비\s*서류|"
+    r"관할\s*기관|허가\s*관청|신고\s*관청|홈택스|세무서|4대\s*보험|"
+    r"사업장\s*소멸|행정\s*절차|"
+    r"CLOSURE|DEMOLITION|RESTORATION|REPORT_CLOSURE|FILE_CLOSURE)"
+)
+_STRONG_PROCEDURE_ACTION_PATTERN = re.compile(
+    r"(?:정부\s*24|민원\s*(?:신청|접수)|"
+    r"(?:영업\s*)?(?:허가증|신고증|등록증)(?:을|를)?\s*(?:제출|반납)?|"
+    r"(?:영업|사업)?\s*(?:허가|면허)(?:증)?(?:을|를)?\s*"
+    r"(?:취소|해지|폐기|반납|말소|변경|신고|신청|접수|제출)|"
+    r"(?:영업\s*)?신고(?:를|을)?\s*(?:취소|폐지|변경|접수|제출)|"
+    r"(?:다음\s*)?(?:행정\s*)?(?:단계|절차)(?:를|을)?\s*"
+    r"(?:진행|완료|끝내|이행)|"
+    r"(?:CANCEL|CLOSE|TERMINATE|FILE|SUBMIT|RETURN)_"
+    r"(?:BUSINESS_)?(?:REPORT|LICENSE|PERMIT|REGISTRATION))"
+)
+_WEAK_PROCEDURE_ACTION_PATTERN = re.compile(
+    r"(?:온라인(?:으로)?\s*(?:신청|접수)|ONLINE_(?:FILE|SUBMIT))"
+)
+_SUPPORT_ACTION_CONTEXT_PATTERN = re.compile(
+    r"(?:지원금|지원\s*사업|보조금|융자|장려금|SUPPORT_(?:PROGRAM|GRANT)|GRANT)"
+)
 
 
 def required_sources_for_claim(
@@ -37,8 +64,6 @@ def required_sources_for_claim(
             EvidenceSourceType.OFFICIAL_API,
         }
     )
-    if claim_type in {ClaimType.PROCEDURE, ClaimType.DATE_OR_DEADLINE}:
-        return frozenset({EvidenceSourceType.PROCEDURE_MASTER, *official})
     return official
 
 
@@ -59,7 +84,7 @@ def high_risk_metadata(
         required.update(official)
     if _DATE_PATTERN.search(text):
         risk_types.add(ClaimType.DATE_OR_DEADLINE)
-        required.update({EvidenceSourceType.PROCEDURE_MASTER, *official})
+        required.update(official)
     if _LEGAL_PATTERN.search(text):
         risk_types.add(ClaimType.LEGAL)
         required.update(official)
@@ -91,6 +116,56 @@ def has_explicit_eligibility_language(text: str) -> bool:
     return _ELIGIBILITY_PATTERN.search(text) is not None
 
 
+def has_procedure_language(*values: str) -> bool:
+    """Return whether user-visible action text describes a closure procedure."""
+
+    combined = " ".join(values)
+    if (
+        _PROCEDURE_PATTERN.search(combined) is not None
+        or _STRONG_PROCEDURE_ACTION_PATTERN.search(combined) is not None
+    ):
+        return True
+    if _SUPPORT_ACTION_CONTEXT_PATTERN.search(combined) is not None:
+        return False
+    return _WEAK_PROCEDURE_ACTION_PATTERN.search(combined) is not None
+
+
+def has_support_action_language(*values: str) -> bool:
+    """Return whether action text contains an explicit support-program signal.
+
+    This is a deterministic defense-in-depth check for free text.  The typed
+    action target remains the machine-authoritative scope, while independent
+    Review handles meanings that cannot be proven from lexical signals alone.
+    """
+
+    return _SUPPORT_ACTION_CONTEXT_PATTERN.search(" ".join(values)) is not None
+
+
+def references_other_known_label(
+    text: str,
+    *,
+    selected_labels: Iterable[str],
+    known_labels: Iterable[str],
+) -> bool:
+    """Detect an explicit known label other than the selected target labels.
+
+    Labels are matched longest-first so overlapping names are unambiguous.  For
+    example, selecting ``희망리턴패키지`` does not hide an explicit mention of
+    ``희망리턴패키지 원스톱폐업지원``, while selecting the longer name does not
+    falsely report its shorter substring as another target.
+    """
+
+    selected = {label for label in selected_labels if label}
+    labels = sorted(
+        {label for label in known_labels if label},
+        key=lambda label: (-len(label), label),
+    )
+    if not labels:
+        return False
+    pattern = re.compile("|".join(re.escape(label) for label in labels))
+    return any(match.group(0) not in selected for match in pattern.finditer(text))
+
+
 def expand_evidence(
     evidence_records: Sequence[EvidenceRecord],
     evidence_by_id: Mapping[str, EvidenceRecord],
@@ -117,7 +192,10 @@ def expand_evidence(
 __all__ = [
     "expand_evidence",
     "has_explicit_eligibility_language",
+    "has_procedure_language",
+    "has_support_action_language",
     "high_risk_metadata",
     "is_overconfident",
+    "references_other_known_label",
     "required_sources_for_claim",
 ]
