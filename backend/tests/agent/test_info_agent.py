@@ -377,7 +377,57 @@ def test_analyzes_fetched_procedure_evidence_and_binds_known_step() -> None:
         InfoAnalysisResult.model_validate(duplicate_payload)
 
 
-def test_rejects_procedure_detail_not_present_in_official_excerpt() -> None:
+def test_query_alias_exposes_and_enforces_candidate_procedure_step() -> None:
+    component_input = request().model_copy(
+        update={
+            "known_procedure_steps": [
+                *request().known_procedure_steps,
+                KnownProcedureStep(
+                    procedure_step=ProcedureStepRef(
+                        procedure_step_id=2,
+                        step_code="FILE_TAX_BUSINESS_CLOSURE",
+                    ),
+                    step_name="사업자 폐업 신고",
+                    utterance_aliases=["사업자 폐업"],
+                ),
+            ]
+        }
+    )
+    prompt_input = InfoAnalysisAgent._prompt_input(component_input)
+    document = prompt_input["procedure_lookup"]["documents"][0]
+    assert document["candidate_step_codes"] == ["FILE_TAX_BUSINESS_CLOSURE"]
+    assert document["permitted_relevance"] == ["UNDETERMINED"]
+
+    payload = extraction_payload()
+    payload["facts"] = []
+    payload["procedure_findings"] = [
+        {
+            "step_code": "CONFIRM_RESTORATION_SCOPE",
+            "summary": {
+                "text": "공식 안내에서 폐업 신고서 제출을 설명합니다.",
+                "evidence_refs": ["procedure:web:gov-closure"],
+            },
+            "relevance": "UNDETERMINED",
+            "decision_authority": "OFFICIAL_AGENCY",
+            "requires_confirmation": True,
+            "required_actions": [],
+            "required_documents": [],
+            "application_channel": None,
+            "application_url": None,
+            "deadline": None,
+            "evidence_refs": ["procedure:web:gov-closure"],
+        }
+    ]
+
+    with pytest.raises(InfoAnalysisGuardrailError, match="grounding checks"):
+        asyncio.run(
+            InfoAnalysisAgent(FakeLLM(payload), max_local_attempts=1).analyze(
+                component_input
+            )
+        )
+
+
+def test_omits_procedure_detail_not_present_in_official_excerpt() -> None:
     payload = extraction_payload()
     payload["facts"] = []
     payload["procedure_findings"] = [
@@ -404,8 +454,9 @@ def test_rejects_procedure_detail_not_present_in_official_excerpt() -> None:
         }
     ]
 
-    with pytest.raises(InfoAnalysisGuardrailError, match="grounding checks"):
-        asyncio.run(InfoAnalysisAgent(FakeLLM(payload)).analyze(request()))
+    result = asyncio.run(InfoAnalysisAgent(FakeLLM(payload)).analyze(request()))
+
+    assert result.procedure_findings[0].required_actions == []
 
 
 def test_unknown_freshness_cannot_be_promoted_to_relevant() -> None:
@@ -439,7 +490,7 @@ def test_unknown_freshness_cannot_be_promoted_to_relevant() -> None:
         asyncio.run(InfoAnalysisAgent(FakeLLM(payload)).analyze(request()))
 
 
-def test_required_document_submission_stage_must_exist_in_official_excerpt() -> None:
+def test_omits_required_document_with_unsupported_submission_stage() -> None:
     payload = extraction_payload()
     payload["facts"] = []
     payload["procedure_findings"] = [
@@ -467,11 +518,12 @@ def test_required_document_submission_stage_must_exist_in_official_excerpt() -> 
         }
     ]
 
-    with pytest.raises(InfoAnalysisGuardrailError, match="grounding checks"):
-        asyncio.run(InfoAnalysisAgent(FakeLLM(payload)).analyze(request()))
+    result = asyncio.run(InfoAnalysisAgent(FakeLLM(payload)).analyze(request()))
+
+    assert result.procedure_findings[0].required_documents == []
 
 
-def test_application_url_must_be_a_fetched_canonical_source_url() -> None:
+def test_omits_application_url_that_is_not_the_fetched_canonical_source() -> None:
     payload = extraction_payload()
     payload["facts"] = []
     payload["procedure_findings"] = [
@@ -496,8 +548,9 @@ def test_application_url_must_be_a_fetched_canonical_source_url() -> None:
         }
     ]
 
-    with pytest.raises(InfoAnalysisGuardrailError, match="grounding checks"):
-        asyncio.run(InfoAnalysisAgent(FakeLLM(payload)).analyze(request()))
+    result = asyncio.run(InfoAnalysisAgent(FakeLLM(payload)).analyze(request()))
+
+    assert result.procedure_findings[0].application_url is None
 
 
 def test_rejects_free_form_value_for_enum_field() -> None:
@@ -535,7 +588,7 @@ def test_semantic_failure_exhausts_bounded_local_retry() -> None:
         InfoAnalysisGuardrailError,
         match="semantic or grounding checks",
     ):
-        asyncio.run(InfoAnalysisAgent(llm).analyze(request()))
+        asyncio.run(InfoAnalysisAgent(llm, max_local_attempts=2).analyze(request()))
 
     assert llm.calls == 2
     assert llm.response_models == [InfoProviderOutput, InfoProviderOutput]
@@ -545,9 +598,178 @@ def test_hallucinated_source_span_retries_bounded_then_fails() -> None:
     llm = FakeLLM(extraction_payload(source_text="계약서에 철거 조항이 있습니다"))
 
     with pytest.raises(InfoAnalysisGuardrailError, match="grounding checks"):
-        asyncio.run(InfoAnalysisAgent(llm).analyze(request()))
+        asyncio.run(InfoAnalysisAgent(llm, max_local_attempts=2).analyze(request()))
 
     assert llm.calls == 2
+
+
+def test_fact_value_must_be_explicit_in_exact_source_span() -> None:
+    payload = extraction_payload(source_text="임대인에게 확인했는데")
+    payload["facts"][0].update(
+        {
+            "field_path": "restoration_scope",
+            "value": "NOT_REQUIRED",
+        }
+    )
+
+    with pytest.raises(InfoAnalysisGuardrailError, match="grounding checks"):
+        asyncio.run(
+            InfoAnalysisAgent(FakeLLM(payload), max_local_attempts=1).analyze(request())
+        )
+
+
+def test_procedure_completion_must_be_explicit_in_exact_source_span() -> None:
+    payload = extraction_payload()
+    payload["facts"] = []
+    payload["procedure_observations"] = [
+        {
+            "step_code": "CONFIRM_RESTORATION_SCOPE",
+            "observed_status": "COMPLETED",
+            "source_text": "철거가 필요",
+            "requires_confirmation": False,
+            "reason_summary": "원상복구 범위를 확인했습니다.",
+        }
+    ]
+
+    with pytest.raises(InfoAnalysisGuardrailError, match="grounding checks"):
+        asyncio.run(
+            InfoAnalysisAgent(FakeLLM(payload), max_local_attempts=1).analyze(request())
+        )
+
+
+def test_explicit_fact_value_and_procedure_completion_are_accepted() -> None:
+    component_input = request()
+    component_input.input.redacted_text = (
+        "임대인에게 원상복구가 필요하지 않다고 확인했습니다."
+    )
+    payload = extraction_payload(source_text="원상복구가 필요하지 않")
+    payload["facts"][0].update(
+        {
+            "field_path": "restoration_scope",
+            "value": "NOT_REQUIRED",
+        }
+    )
+    payload["procedure_observations"] = [
+        {
+            "step_code": "CONFIRM_RESTORATION_SCOPE",
+            "observed_status": "COMPLETED",
+            "source_text": "원상복구가 필요하지 않다고 확인했습니다",
+            "requires_confirmation": False,
+            "reason_summary": "사용자가 원상복구 범위 확인 완료를 명시했습니다.",
+        }
+    ]
+
+    result = asyncio.run(
+        InfoAnalysisAgent(FakeLLM(payload), max_local_attempts=1).analyze(
+            component_input
+        )
+    )
+
+    assert result.fact_candidates[0].value == "NOT_REQUIRED"
+    assert result.procedure_progress_observations[0].observed_status == "COMPLETED"
+
+
+def test_planned_closure_date_requires_field_context_in_exact_source_span() -> None:
+    component_input = request()
+    component_input.input.redacted_text = "임대인 일정은 2026-09-30입니다."
+    component_input.allowed_field_paths = [
+        *component_input.allowed_field_paths,
+        "planned_closure_date",
+    ]
+    payload = extraction_payload(source_text="2026-09-30")
+    payload["facts"][0].update(
+        {
+            "field_path": "planned_closure_date",
+            "value_type": "DATE",
+            "value": "2026-09-30",
+        }
+    )
+
+    with pytest.raises(InfoAnalysisGuardrailError, match="grounding checks"):
+        asyncio.run(
+            InfoAnalysisAgent(FakeLLM(payload), max_local_attempts=1).analyze(
+                component_input
+            )
+        )
+
+
+def test_explicit_planned_closure_date_is_accepted() -> None:
+    component_input = request()
+    component_input.input.redacted_text = "폐업 예정일은 2026년 9월 30일입니다."
+    component_input.allowed_field_paths = [
+        *component_input.allowed_field_paths,
+        "planned_closure_date",
+    ]
+    payload = extraction_payload(source_text="폐업 예정일은 2026년 9월 30일")
+    payload["facts"][0].update(
+        {
+            "field_path": "planned_closure_date",
+            "value_type": "DATE",
+            "value": "2026-09-30",
+        }
+    )
+
+    result = asyncio.run(
+        InfoAnalysisAgent(FakeLLM(payload), max_local_attempts=1).analyze(
+            component_input
+        )
+    )
+
+    assert result.fact_candidates[0].value == "2026-09-30"
+
+
+@pytest.mark.parametrize(
+    "source_text",
+    [
+        "원상복구 범위 확인은 진행 중이 아닙니다",
+        "원상복구 범위 확인은 진행 중이지 않습니다",
+    ],
+)
+def test_negated_procedure_in_progress_is_rejected(source_text: str) -> None:
+    component_input = request()
+    component_input.input.redacted_text = source_text + "."
+    payload = extraction_payload()
+    payload["facts"] = []
+    payload["procedure_observations"] = [
+        {
+            "step_code": "CONFIRM_RESTORATION_SCOPE",
+            "observed_status": "IN_PROGRESS",
+            "source_text": source_text,
+            "requires_confirmation": False,
+            "reason_summary": "사용자가 진행 상태를 언급했습니다.",
+        }
+    ]
+
+    with pytest.raises(InfoAnalysisGuardrailError, match="grounding checks"):
+        asyncio.run(
+            InfoAnalysisAgent(FakeLLM(payload), max_local_attempts=1).analyze(
+                component_input
+            )
+        )
+
+
+def test_explicit_procedure_in_progress_is_accepted() -> None:
+    component_input = request()
+    component_input.input.redacted_text = "원상복구 범위 확인을 진행 중입니다."
+    payload = extraction_payload()
+    payload["facts"] = []
+    payload["procedure_observations"] = [
+        {
+            "step_code": "CONFIRM_RESTORATION_SCOPE",
+            "observed_status": "IN_PROGRESS",
+            "source_text": "원상복구 범위 확인을 진행 중입니다",
+            "requires_confirmation": False,
+            "reason_summary": "사용자가 현재 진행 중이라고 명시했습니다.",
+        }
+    ]
+
+    result = asyncio.run(
+        InfoAnalysisAgent(FakeLLM(payload), max_local_attempts=1).analyze(
+            component_input
+        )
+    )
+
+    assert result.procedure_progress_observations[0].observed_status == "IN_PROGRESS"
 
 
 def test_unredacted_sensitive_input_is_rejected_before_model_call() -> None:
@@ -575,3 +797,30 @@ def test_existing_confirmed_value_is_not_overwritten_and_becomes_conflict() -> N
     assert result.conflicts[0].proposed_value == "REQUIRED"
     assert result.completion_status == "NEEDS_USER_INPUT"
     assert len(result.question_candidates) == 1
+
+
+def test_repeated_snapshot_fact_does_not_require_a_user_source_span() -> None:
+    payload = extraction_payload(source_text="snapshot confirmed")
+    payload["facts"][0]["value"] = "NOT_REQUIRED"
+
+    result = asyncio.run(
+        InfoAnalysisAgent(FakeLLM(payload)).analyze(request(existing="NOT_REQUIRED"))
+    )
+
+    assert result.fact_candidates == []
+    assert result.conflicts == []
+
+
+def test_clearing_an_already_unknown_fact_is_ignored() -> None:
+    payload = extraction_payload(source_text="not present in user text")
+    payload["facts"][0].update(
+        {
+            "operation": "CLEAR",
+            "value": None,
+        }
+    )
+
+    result = asyncio.run(InfoAnalysisAgent(FakeLLM(payload)).analyze(request()))
+
+    assert result.fact_candidates == []
+    assert result.conflicts == []

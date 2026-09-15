@@ -24,6 +24,12 @@ _OVERCONFIDENT_PATTERN = re.compile(
     r"지원(?:금)?\s*가능합니다|지원\s*대상입니다|"
     r"법적으로\s+문제없습니다)"
 )
+_CONFIRMATION_CAVEAT_PATTERN = re.compile(
+    r"(?:확인(?:이|을|해|하|해야|하세요|할|할지|필요)|문의|검토|"
+    r"(?:인지|여부)|가능성|추정|예상|변경될\s*수|달라질\s*수|"
+    r"정확한|최신\s*(?:공고|정보|기준)|confirm|verify|may|might)",
+    re.IGNORECASE,
+)
 _PROCEDURE_PATTERN = re.compile(
     r"(?:폐업(?!\s*(?:지원|보조|장려|융자|컨설팅))|"
     r"휴업(?!\s*(?:지원|보조|장려|융자|컨설팅))|"
@@ -103,6 +109,12 @@ def is_overconfident(text: str) -> bool:
     """Return whether text uses language Review always rejects."""
 
     return _OVERCONFIDENT_PATTERN.search(text) is not None
+
+
+def has_confirmation_caveat(text: str) -> bool:
+    """Return whether non-current high-risk text visibly signals uncertainty."""
+
+    return _CONFIRMATION_CAVEAT_PATTERN.search(text) is not None
 
 
 def has_explicit_eligibility_language(text: str) -> bool:
@@ -191,6 +203,7 @@ def expand_evidence(
 
 __all__ = [
     "expand_evidence",
+    "has_confirmation_caveat",
     "has_explicit_eligibility_language",
     "has_procedure_language",
     "has_support_action_language",

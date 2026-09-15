@@ -476,17 +476,17 @@ def test_procedure_result_produces_json_schema() -> None:
     failed_provider_with_results = no_match.search_summary.model_dump(mode="python")
     failed_provider_with_results.update(
         {
-            "provider_order": ["GOOGLE_AGENT_SEARCH", "KAKAO_DAUM_WEB"],
+            "provider_order": ["KAKAO_DAUM_WEB", "GOOGLE_AGENT_SEARCH"],
             "provider_summaries": [
                 {
-                    "provider": "GOOGLE_AGENT_SEARCH",
+                    "provider": "KAKAO_DAUM_WEB",
                     "attempted_query_count": 1,
                     "successful_query_count": 0,
                     "failed_query_count": 1,
                     "provider_result_count": 1,
                 },
                 {
-                    "provider": "KAKAO_DAUM_WEB",
+                    "provider": "GOOGLE_AGENT_SEARCH",
                     "attempted_query_count": 1,
                     "successful_query_count": 1,
                     "failed_query_count": 0,
@@ -502,12 +502,12 @@ def test_procedure_result_produces_json_schema() -> None:
         ProcedureSearchSummary.model_validate(failed_provider_with_results)
 
 
-def test_procedure_search_summary_preserves_google_fallback_history() -> None:
+def test_procedure_search_summary_preserves_official_first_fallback_history() -> None:
     summary = ProcedureSearchSummary(
-        provider_order=["GOOGLE_AGENT_SEARCH", "KAKAO_DAUM_WEB"],
+        provider_order=["OFFICIAL_SOURCE_REGISTRY", "KAKAO_DAUM_WEB"],
         provider_summaries=[
             {
-                "provider": "GOOGLE_AGENT_SEARCH",
+                "provider": "OFFICIAL_SOURCE_REGISTRY",
                 "attempted_query_count": 1,
                 "successful_query_count": 1,
                 "failed_query_count": 0,
@@ -537,8 +537,22 @@ def test_procedure_search_summary_preserves_google_fallback_history() -> None:
     invalid_order = summary.model_dump(mode="python")
     invalid_order["provider_order"].reverse()
     invalid_order["provider_summaries"].reverse()
-    with pytest.raises(ValidationError, match="Google-first"):
+    with pytest.raises(ValidationError, match="official-registry"):
         ProcedureSearchSummary.model_validate(invalid_order)
+
+    without_registry = summary.model_dump(mode="python")
+    without_registry["provider_order"] = [
+        "KAKAO_DAUM_WEB",
+        "GOOGLE_AGENT_SEARCH",
+    ]
+    without_registry["provider_summaries"][0]["provider"] = "KAKAO_DAUM_WEB"
+    without_registry["provider_summaries"][1]["provider"] = "GOOGLE_AGENT_SEARCH"
+    ProcedureSearchSummary.model_validate(without_registry)
+
+    without_registry["provider_order"].reverse()
+    without_registry["provider_summaries"].reverse()
+    with pytest.raises(ValidationError, match="official-registry"):
+        ProcedureSearchSummary.model_validate(without_registry)
 
     invalid_fallback = summary.model_dump(mode="python")
     invalid_fallback["fallback_query_count"] = 0

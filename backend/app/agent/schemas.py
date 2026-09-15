@@ -1094,6 +1094,7 @@ class ProcedureSourcePolicy(StrEnum):
 
 
 class ProcedureSearchProvider(StrEnum):
+    OFFICIAL_SOURCE_REGISTRY = "OFFICIAL_SOURCE_REGISTRY"
     GOOGLE_AGENT_SEARCH = "GOOGLE_AGENT_SEARCH"
     KAKAO_DAUM_WEB = "KAKAO_DAUM_WEB"
 
@@ -1197,10 +1198,10 @@ class ProcedureProviderSearchSummary(AgentSchema):
 
 class ProcedureSearchSummary(AgentSchema):
     provider_order: Annotated[
-        list[ProcedureSearchProvider], Field(min_length=1, max_length=2)
+        list[ProcedureSearchProvider], Field(min_length=1, max_length=3)
     ]
     provider_summaries: Annotated[
-        list[ProcedureProviderSearchSummary], Field(min_length=1, max_length=2)
+        list[ProcedureProviderSearchSummary], Field(min_length=1, max_length=3)
     ]
     fallback_query_count: NonNegativeStrictInt
     requested_query_count: PositiveStrictInt
@@ -1218,15 +1219,31 @@ class ProcedureSearchSummary(AgentSchema):
         if len(set(self.provider_order)) != len(self.provider_order):
             raise ValueError("provider_order must be unique")
         allowed_orders = {
+            (ProcedureSearchProvider.OFFICIAL_SOURCE_REGISTRY,),
+            (
+                ProcedureSearchProvider.OFFICIAL_SOURCE_REGISTRY,
+                ProcedureSearchProvider.KAKAO_DAUM_WEB,
+            ),
+            (
+                ProcedureSearchProvider.OFFICIAL_SOURCE_REGISTRY,
+                ProcedureSearchProvider.GOOGLE_AGENT_SEARCH,
+            ),
+            (
+                ProcedureSearchProvider.OFFICIAL_SOURCE_REGISTRY,
+                ProcedureSearchProvider.KAKAO_DAUM_WEB,
+                ProcedureSearchProvider.GOOGLE_AGENT_SEARCH,
+            ),
             (ProcedureSearchProvider.GOOGLE_AGENT_SEARCH,),
             (ProcedureSearchProvider.KAKAO_DAUM_WEB,),
             (
-                ProcedureSearchProvider.GOOGLE_AGENT_SEARCH,
                 ProcedureSearchProvider.KAKAO_DAUM_WEB,
+                ProcedureSearchProvider.GOOGLE_AGENT_SEARCH,
             ),
         }
         if tuple(self.provider_order) not in allowed_orders:
-            raise ValueError("provider_order must preserve Google-first policy")
+            raise ValueError(
+                "provider_order must preserve official-registry, Kakao, Google policy"
+            )
         summary_providers = [item.provider for item in self.provider_summaries]
         if summary_providers != self.provider_order:
             raise ValueError(
@@ -1248,31 +1265,27 @@ class ProcedureSearchSummary(AgentSchema):
             for item in self.provider_summaries
         ):
             raise ValueError("provider attempts cannot exceed requested queries")
-        summaries = {item.provider: item for item in self.provider_summaries}
-        google = summaries.get(ProcedureSearchProvider.GOOGLE_AGENT_SEARCH)
-        kakao = summaries.get(ProcedureSearchProvider.KAKAO_DAUM_WEB)
-        if google is not None and google.attempted_query_count != (
-            self.requested_query_count
+        first = self.provider_summaries[0]
+        if first.attempted_query_count != self.requested_query_count:
+            raise ValueError("the first source provider must attempt every query")
+        for previous, current in zip(
+            self.provider_summaries,
+            self.provider_summaries[1:],
+            strict=False,
         ):
+            if current.attempted_query_count > previous.attempted_query_count:
+                raise ValueError(
+                    "a fallback provider cannot attempt more queries than its predecessor"
+                )
+        expected_fallbacks = (
+            self.provider_summaries[1].attempted_query_count
+            if len(self.provider_summaries) > 1
+            else 0
+        )
+        if self.fallback_query_count != expected_fallbacks:
             raise ValueError(
-                "configured Google provider must attempt every query first"
+                "fallback count must match queries passed beyond the first provider"
             )
-        if google is None:
-            if (
-                kakao is None
-                or kakao.attempted_query_count != self.requested_query_count
-            ):
-                raise ValueError(
-                    "the only configured provider must attempt every query"
-                )
-            if self.fallback_query_count != 0:
-                raise ValueError("Kakao-only lookup does not count as fallback")
-        else:
-            expected_fallbacks = kakao.attempted_query_count if kakao is not None else 0
-            if self.fallback_query_count != expected_fallbacks:
-                raise ValueError(
-                    "fallback count must match Kakao attempts after Google"
-                )
         if self.provider_result_count != sum(
             item.provider_result_count for item in self.provider_summaries
         ):

@@ -25,12 +25,12 @@
 | 구분 | 기술 |
 |---|---|
 | API 서버 | FastAPI |
-| Agent ↔ DB 연동 | 백엔드와 동일 DB를 공유하며, Agent가 DB 접근을 **함수 호출(tool/function-calling)** 형태로 수행 (별도 데이터 레이어 없음) |
+| Agent ↔ DB 연동 | **생산 목표:** BE `shared/functions`를 통해서만 같은 DB에 접근. 현재 standalone Agent는 DB 함수·persistence 미연결 |
 | DB / ORM | **MySQL 8.0 + SQLAlchemy 2.0 + pymysql** (2026-09 BE 확정) + **Alembic**(마이그레이션) |
 | 인증 | **카카오 OAuth + 자체 발급 Access/Refresh JWT**(PyJWT, 2026-09 BE 확정). 비밀번호 해싱 라이브러리 없음(카카오 OAuth만 사용, 자체 비밀번호 인증 없음) |
 | 카카오 API 호출 | httpx (토큰 교환·사용자정보 조회) |
 | 패키지 관리 | **plain pip + `backend/requirements.txt`**(정확 버전 고정, `==`) — BE가 실제 설치·`pip check`·import까지 검증 완료. `uv`/`pyproject.toml`은 쓰지 않음(이전 계획에서 변경) |
-| 배포 | **Docker** — `backend/Dockerfile`(`python:3.12-slim` + `pip install`), 루트 `docker-compose.yml`로 로컬/배포 실행. 호스팅 플랫폼(EC2 등)은 AWS 크레딧 활용 예정이나 구체 서비스는 추가 확인 필요 |
+| 로컬 인프라/배포 | 루트 `docker-compose.yml`은 **MySQL만** 실행. backend+agent는 로컬 Python 프로세스 또는 별도 배포 runtime으로 실행하며 Compose에 포함하지 않음. `backend/Dockerfile`의 배포 사용 여부와 호스팅 플랫폼은 별도 확정 필요 |
 | 테스트 | `testcontainers[mysql]`로 격리된 MySQL 컨테이너 실행 + pytest. LLM 호출은 `unittest.mock`으로 목 처리. 커버리지 측정 도입 안 함 |
 | 스케줄러 | 미정 (APScheduler 내장 vs 외부 cron) |
 | Python 버전 | 3.12 |
@@ -42,8 +42,8 @@ Redis는 이 확정 스택에 포함되어 있지 않습니다 — `config.py`/`
 | 구분 | 기술 | 비고 |
 |---|---|---|
 | LLM Provider | OpenAI API (mlapi.run 프록시 경유, `OPENAI_API_KEY` 직접 호출 아님 — §6 참고) | |
-| 모델 | **GPT-5.6 Luna**(`openai/gpt-5.6-luna`, 2026-09 확정) | `config.py`의 `OPENAI_MODEL`/`OPENAI_REASONING_EFFORT`로 설정. 구성요소별로 다른 모델을 강제하지 않고 실행 컨텍스트를 분리 |
-| 에이전트 프레임워크 | LangChain | LLM 체인·툴 연동 |
+| 모델 | **현재 팀 proxy 제공: GPT-4.1 mini**(`openai/gpt-4.1-mini`, 2026-09-15 `/models` 확인) | 복잡한 schema에서 간헐적 safe failure가 있어 생산 모델/endpoint는 재확정 필요. `gpt-5.6-luna` 요청은 현 endpoint에서 HTTP 400 |
+| 에이전트 프레임워크 | LangChain 패키지 설치, 현재 runtime 미사용 | 현재 LLM 호출은 `httpx` 직접 구현 |
 | 에이전트 오케스트레이션 | LangGraph | 멀티스텝/상태 기반 워크플로우 |
 | 관측성(Observability) | Langfuse | 실제 구현 착수 시점에 연동 예정 (아직 미연동). LLM·Tool 호출 수, token·비용, 지연, 오류와 Review 반송을 관찰 |
 | 지원금(정책) 도메인 지식베이스 | LLM Wiki + Obsidian | Obsidian 볼트에 지식 축적 + LLM Wiki 패턴으로 질의. 검증된 지원사업 항목에 없는 사업명·조건은 생성하지 않음 |
@@ -68,7 +68,7 @@ ktc4-kangwon-4/
 ├─ README.md
 ├─ .gitignore
 ├─ .github/
-├─ docker-compose.yml       # 로컬/배포 공용 — db(MySQL) + app(backend+agent)
+├─ docker-compose.yml       # 로컬 개발 — db(MySQL)만 실행
 │
 ├─ docs/
 │  ├─ hero-scenario.md      # 사용자 시나리오 / Hero Loop 상세

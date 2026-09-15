@@ -1065,6 +1065,219 @@ def test_provider_semantic_gate_failure_is_retried_then_succeeds() -> None:
     assert "PASS must have no blocking issue" in correction
 
 
+def test_provider_target_identity_is_derived_from_canonical_pointer() -> None:
+    subject = review_subject()
+    provider_output = ReviewProviderOutput(
+        verdict="PASS",
+        issues=[
+            {
+                "issue_code": "AMBIGUOUS_LANGUAGE",
+                "category": "LANGUAGE",
+                "severity": "WARNING",
+                "target_component": "PROCEDURE_TOOL",
+                "target_call_id": INVENTED_CALL_ID,
+                "target_path": "/supervisor_draft/decision/next_action/reason",
+                "reason_summary": "문장을 조금 더 명확히 표현할 수 있습니다.",
+                "evidence_refs": [],
+            }
+        ],
+        missing_evidence=[],
+        recommended_rework_targets=["PROCEDURE_TOOL"],
+        resolution_reason="필수 수정 없이 표현만 확인했습니다.",
+    )
+    client = FakeStructuredClient([provider_output])
+
+    result = asyncio.run(ReviewTool(client).review(subject))
+
+    assert result.verdict == "PASS"
+    assert result.issues[0].target_component == "SUPERVISOR"
+    assert result.issues[0].target_call_id is None
+    assert result.recommended_rework_targets == []
+
+
+def test_provider_does_not_require_evidence_for_an_information_question() -> None:
+    subject = review_subject()
+    question_path = "/supervisor_draft/decision/next_action/questions_to_ask/0"
+    provider_output = ReviewProviderOutput(
+        verdict="REVISE",
+        issues=[
+            {
+                "issue_code": "MISSING_EVIDENCE",
+                "category": "EVIDENCE",
+                "severity": "BLOCKING",
+                "target_component": "SUPERVISOR",
+                "target_call_id": INVENTED_CALL_ID,
+                "target_path": question_path,
+                "reason_summary": "질문에 별도 근거가 필요합니다.",
+                "evidence_refs": [],
+            }
+        ],
+        missing_evidence=[
+            {
+                "claim_path": question_path,
+                "required_source_types": ["OFFICIAL_DOCUMENT"],
+                "reason_summary": "질문에 별도 근거가 필요합니다.",
+            }
+        ],
+        recommended_rework_targets=["SUPERVISOR"],
+        resolution_reason="정보 질문은 사실 주장과 구분합니다.",
+    )
+    client = FakeStructuredClient([provider_output])
+
+    result = asyncio.run(ReviewTool(client).review(subject))
+
+    assert result.verdict == "PASS"
+    assert result.issues == []
+    assert result.missing_evidence == []
+    assert result.recommended_rework_targets == []
+
+
+def test_provider_does_not_require_evidence_for_an_information_request() -> None:
+    original = review_subject()
+    subject = replace_action(
+        original,
+        action_updates={
+            "questions_to_ask": ["원상복구 범위와 철거 필요 여부를 확인해 주세요."]
+        },
+    )
+    question_path = "/supervisor_draft/decision/next_action/questions_to_ask/0"
+    provider_output = ReviewProviderOutput(
+        verdict="REVISE",
+        issues=[
+            {
+                "issue_code": "MISSING_EVIDENCE",
+                "category": "EVIDENCE",
+                "severity": "BLOCKING",
+                "target_component": "SUPERVISOR",
+                "target_call_id": None,
+                "target_path": question_path,
+                "reason_summary": "정보 요청에 별도 근거가 필요합니다.",
+                "evidence_refs": [],
+            }
+        ],
+        missing_evidence=[
+            {
+                "claim_path": question_path,
+                "required_source_types": ["USER_INPUT"],
+                "reason_summary": "정보 요청에 별도 근거가 필요합니다.",
+            }
+        ],
+        recommended_rework_targets=["SUPERVISOR"],
+        resolution_reason="정보 요청은 사실 주장과 구분합니다.",
+    )
+    client = FakeStructuredClient([provider_output])
+
+    result = asyncio.run(ReviewTool(client).review(subject))
+
+    assert result.verdict == "PASS"
+    assert result.issues == []
+    assert result.missing_evidence == []
+
+
+def test_provider_does_not_require_evidence_for_a_safe_question_list() -> None:
+    original = review_subject()
+    subject = replace_action(
+        original,
+        action_updates={
+            "questions_to_ask": [
+                "원상복구 진행 상태가 어떻게 되나요? 예) 완료, 진행중, 시작전",
+                "철거 필요 여부를 확인하셨나요?",
+            ]
+        },
+    )
+    question_path = "/supervisor_draft/decision/next_action/questions_to_ask"
+    provider_output = ReviewProviderOutput(
+        verdict="REVISE",
+        issues=[
+            {
+                "issue_code": "MISSING_EVIDENCE",
+                "category": "EVIDENCE",
+                "severity": "BLOCKING",
+                "target_component": "SUPERVISOR",
+                "target_call_id": None,
+                "target_path": question_path,
+                "reason_summary": "질문 목록에 별도 근거가 필요합니다.",
+                "evidence_refs": [],
+            }
+        ],
+        missing_evidence=[
+            {
+                "claim_path": question_path,
+                "required_source_types": ["USER_INPUT"],
+                "reason_summary": "질문 목록에 별도 근거가 필요합니다.",
+            }
+        ],
+        recommended_rework_targets=["SUPERVISOR"],
+        resolution_reason="질문 목록은 사실 주장과 구분합니다.",
+    )
+    client = FakeStructuredClient([provider_output])
+
+    result = asyncio.run(ReviewTool(client).review(subject))
+
+    assert result.verdict == "PASS"
+    assert result.issues == []
+    assert result.missing_evidence == []
+
+
+@pytest.mark.parametrize(
+    ("questions", "question_path"),
+    [
+        (
+            ["보증금은 이미 전액 돌려받으셨죠?"],
+            "/supervisor_draft/decision/next_action/questions_to_ask/0",
+        ),
+        (
+            [
+                "원상복구 범위가 어떻게 되나요?",
+                "보증금은 이미 전액 돌려받으셨죠?",
+            ],
+            "/supervisor_draft/decision/next_action/questions_to_ask",
+        ),
+    ],
+)
+def test_provider_missing_evidence_is_retained_for_assumptive_question(
+    questions: list[str],
+    question_path: str,
+) -> None:
+    original = review_subject()
+    subject = replace_action(
+        original,
+        action_updates={"questions_to_ask": questions},
+    )
+    provider_output = ReviewProviderOutput(
+        verdict="REVISE",
+        issues=[
+            {
+                "issue_code": "MISSING_EVIDENCE",
+                "category": "EVIDENCE",
+                "severity": "BLOCKING",
+                "target_component": "SUPERVISOR",
+                "target_call_id": None,
+                "target_path": question_path,
+                "reason_summary": "질문이 보증금 반환 완료를 전제로 합니다.",
+                "evidence_refs": [],
+            }
+        ],
+        missing_evidence=[
+            {
+                "claim_path": question_path,
+                "required_source_types": ["USER_INPUT"],
+                "reason_summary": "보증금 반환 여부를 먼저 확인해야 합니다.",
+            }
+        ],
+        recommended_rework_targets=["SUPERVISOR"],
+        resolution_reason="전제 없는 질문으로 고쳐야 합니다.",
+    )
+    client = FakeStructuredClient([provider_output])
+
+    result = asyncio.run(ReviewTool(client).review(subject))
+
+    assert result.verdict == "REVISE"
+    assert any(issue.issue_code == "MISSING_EVIDENCE" for issue in result.issues)
+    assert result.missing_evidence[0].claim_path == question_path
+    assert result.recommended_rework_targets == ["SUPERVISOR"]
+
+
 def test_provider_semantic_gate_failure_exhausts_bounded_retry() -> None:
     subject = review_subject()
     invalid = ReviewProviderOutput(
@@ -1150,6 +1363,22 @@ def test_unverified_claim_forces_revise_even_when_model_passes(
     assert result.verdict == "REVISE"
     assert any(issue.issue_code == "STALE_EVIDENCE" for issue in result.issues)
     assert "SUPERVISOR" in result.recommended_rework_targets
+
+
+def test_unverified_confirmation_claim_requires_visible_caveat() -> None:
+    subject = review_subject(
+        procedure_freshness="UNKNOWN",
+        action_reason="부가세는 100만원입니다.",
+        claim_type="TAX",
+        claim_assertion_level="NEEDS_CONFIRMATION",
+        claim_evidence_refs=["procedure:file-report"],
+    )
+    client = FakeStructuredClient([pass_output()])
+
+    result = asyncio.run(ReviewTool(client).review(subject))
+
+    assert result.verdict == "REVISE"
+    assert any(issue.issue_code == "STALE_EVIDENCE" for issue in result.issues)
 
 
 @pytest.mark.parametrize(

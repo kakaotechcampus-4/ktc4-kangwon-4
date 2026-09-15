@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import os
 import re
 from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -28,7 +29,11 @@ SleepCallable = Callable[[float], Awaitable[None]]
 _DEFAULT_TIMEOUT_SECONDS = 45.0
 _DEFAULT_MAX_RETRIES = 2
 _DEFAULT_RETRY_BACKOFF_SECONDS = 0.25
+_DEFAULT_MAX_RESPONSE_BYTES = 1_000_000
 _MAX_ALLOWED_RETRIES = 4
+_MAX_RETRY_BACKOFF_SECONDS = 60.0
+_MIN_RESPONSE_BYTES = 1_024
+_MAX_RESPONSE_BYTES = 10_000_000
 _TRANSIENT_STATUS_CODES = frozenset({408, 409, 425, 429})
 _UNSUPPORTED_SCHEMA_KEYWORDS = frozenset(
     {
@@ -88,6 +93,7 @@ class LLMConfig:
     timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS
     max_retries: int = _DEFAULT_MAX_RETRIES
     retry_backoff_seconds: float = _DEFAULT_RETRY_BACKOFF_SECONDS
+    max_response_bytes: int = _DEFAULT_MAX_RESPONSE_BYTES
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "base_url", _validate_base_url(self.base_url))
@@ -96,14 +102,40 @@ class LLMConfig:
             raise _configuration_error("PROXY_TOKEN is required")
         if not self.model.strip():
             raise _configuration_error("OPENAI_MODEL is required")
-        if self.timeout_seconds <= 0:
-            raise _configuration_error("Agent LLM timeout must be positive")
-        if not 0 <= self.max_retries <= _MAX_ALLOWED_RETRIES:
+        if (
+            type(self.timeout_seconds) not in {int, float}
+            or isinstance(self.timeout_seconds, bool)
+            or not math.isfinite(self.timeout_seconds)
+            or self.timeout_seconds <= 0
+        ):
+            raise _configuration_error("Agent LLM timeout must be finite and positive")
+        if (
+            type(self.max_retries) is not int
+            or not 0 <= self.max_retries <= _MAX_ALLOWED_RETRIES
+        ):
             raise _configuration_error(
                 f"Agent LLM retries must be between 0 and {_MAX_ALLOWED_RETRIES}"
             )
-        if self.retry_backoff_seconds < 0:
-            raise _configuration_error("Agent LLM retry backoff cannot be negative")
+        if (
+            type(self.retry_backoff_seconds) not in {int, float}
+            or isinstance(self.retry_backoff_seconds, bool)
+            or not math.isfinite(self.retry_backoff_seconds)
+            or self.retry_backoff_seconds < 0
+            or self.retry_backoff_seconds > _MAX_RETRY_BACKOFF_SECONDS
+            or not math.isfinite(
+                self.retry_backoff_seconds * (2 ** (_MAX_ALLOWED_RETRIES - 1))
+            )
+        ):
+            raise _configuration_error(
+                "Agent LLM retry backoff must be finite and between 0 and 60 seconds"
+            )
+        if (
+            type(self.max_response_bytes) is not int
+            or not _MIN_RESPONSE_BYTES <= self.max_response_bytes <= _MAX_RESPONSE_BYTES
+        ):
+            raise _configuration_error(
+                "Agent LLM response limit must be between 1024 and 10000000 bytes"
+            )
 
     @classmethod
     def from_env(
@@ -172,6 +204,11 @@ class LLMConfig:
             default=_DEFAULT_RETRY_BACKOFF_SECONDS,
             setting_name="AGENT_LLM_RETRY_BACKOFF_SECONDS",
         )
+        max_response_bytes = _parse_int(
+            value("AGENT_LLM_MAX_RESPONSE_BYTES"),
+            default=_DEFAULT_MAX_RESPONSE_BYTES,
+            setting_name="AGENT_LLM_MAX_RESPONSE_BYTES",
+        )
 
         return cls(
             base_url=base_url or "",
@@ -181,6 +218,7 @@ class LLMConfig:
             timeout_seconds=timeout_seconds,
             max_retries=max_retries,
             retry_backoff_seconds=retry_backoff_seconds,
+            max_response_bytes=max_response_bytes,
         )
 
 
@@ -254,7 +292,7 @@ class StructuredLLMClient:
         _validate_response_model(response_model)
         normalized_messages = _normalize_messages(messages)
         retries = self.config.max_retries if max_retries is None else max_retries
-        if not 0 <= retries <= _MAX_ALLOWED_RETRIES:
+        if type(retries) is not int or not 0 <= retries <= _MAX_ALLOWED_RETRIES:
             raise ValueError(
                 f"max_retries must be between 0 and {_MAX_ALLOWED_RETRIES}"
             )
@@ -271,57 +309,73 @@ class StructuredLLMClient:
 
         for attempt_index in range(total_attempts):
             attempt = attempt_index + 1
+            response: httpx.Response | None = None
+            should_retry = False
             try:
-                response = await self._client.post(
-                    _chat_completions_url(self.config.base_url),
-                    headers={
-                        "Authorization": f"Bearer {self.config.api_token}",
-                        "Content-Type": "application/json",
-                    },
-                    json=payload,
-                )
-            except (httpx.TimeoutException, httpx.TransportError):
+                async with asyncio.timeout(self.config.timeout_seconds):
+                    request = self._client.build_request(
+                        "POST",
+                        _chat_completions_url(self.config.base_url),
+                        headers={
+                            "Authorization": f"Bearer {self.config.api_token}",
+                            "Content-Type": "application/json",
+                            "Accept-Encoding": "identity",
+                        },
+                        json=payload,
+                        timeout=self.config.timeout_seconds,
+                    )
+                    response = await self._client.send(request, stream=True)
+                    last_status_code = response.status_code
+                    if not response.is_success:
+                        retryable = _is_transient_status(response.status_code)
+                        if retryable and attempt < total_attempts:
+                            should_retry = True
+                        else:
+                            raise LLMRequestError(
+                                f"LLM provider returned HTTP {response.status_code} after "
+                                f"{attempt} attempt(s)",
+                                code="UPSTREAM_HTTP_ERROR",
+                                retryable=retryable,
+                                attempts=attempt,
+                                status_code=response.status_code,
+                            )
+                    else:
+                        body = await _read_bounded_response_body(
+                            response,
+                            max_bytes=self.config.max_response_bytes,
+                        )
+                        return _parse_response(body, response_model)
+            except (TimeoutError, httpx.TimeoutException, httpx.TransportError):
                 last_failure_code = "UPSTREAM_UNAVAILABLE"
                 if attempt < total_attempts:
-                    await self._backoff(attempt_index)
-                    continue
-                raise LLMRequestError(
-                    f"LLM provider request failed after {attempt} attempt(s)",
-                    code=last_failure_code,
-                    retryable=True,
-                    attempts=attempt,
-                ) from None
-
-            last_status_code = response.status_code
-            if not response.is_success:
-                retryable = _is_transient_status(response.status_code)
-                if retryable and attempt < total_attempts:
-                    await self._backoff(attempt_index)
-                    continue
-                raise LLMRequestError(
-                    f"LLM provider returned HTTP {response.status_code} after "
-                    f"{attempt} attempt(s)",
-                    code="UPSTREAM_HTTP_ERROR",
-                    retryable=retryable,
-                    attempts=attempt,
-                    status_code=response.status_code,
-                )
-
-            try:
-                return _parse_response(response, response_model)
+                    should_retry = True
+                else:
+                    raise LLMRequestError(
+                        f"LLM provider request failed after {attempt} attempt(s)",
+                        code=last_failure_code,
+                        retryable=True,
+                        attempts=attempt,
+                    ) from None
             except _InvalidStructuredResponse as exc:
                 last_failure_code = exc.code
-                if attempt < total_attempts:
-                    await self._backoff(attempt_index)
-                    continue
-                raise LLMResponseError(
-                    f"LLM structured response failed local validation after "
-                    f"{attempt} attempt(s)",
-                    code=last_failure_code,
-                    retryable=True,
-                    attempts=attempt,
-                    status_code=last_status_code,
-                ) from None
+                if exc.retryable and attempt < total_attempts:
+                    should_retry = True
+                else:
+                    raise LLMResponseError(
+                        "LLM structured response failed local validation after "
+                        f"{attempt} attempt(s)",
+                        code=last_failure_code,
+                        retryable=exc.retryable,
+                        attempts=attempt,
+                        status_code=last_status_code,
+                    ) from None
+            finally:
+                if response is not None:
+                    await response.aclose()
+
+            if should_retry:
+                await self._backoff(attempt_index)
+                continue
 
         # The bounded loop always returns or raises. Keep a safe defensive error
         # in case future refactoring changes that invariant.
@@ -409,6 +463,13 @@ def sanitize_json_schema(schema: Mapping[str, Any]) -> dict[str, Any]:
         for key, item in value.items():
             if key in _UNSUPPORTED_SCHEMA_KEYWORDS or key.startswith("x-"):
                 continue
+            if key == "oneOf":
+                # Pydantic emits ``oneOf`` for discriminated unions, while the
+                # configured OpenAI-compatible strict schema accepts nested
+                # unions only as ``anyOf``. Local Pydantic validation still
+                # enforces the discriminator and exactly one matching variant.
+                cleaned["anyOf"] = sanitize(item)
+                continue
             cleaned[key] = sanitize(item)
 
         properties = cleaned.get("properties")
@@ -424,17 +485,18 @@ def sanitize_json_schema(schema: Mapping[str, Any]) -> dict[str, Any]:
 
 
 class _InvalidStructuredResponse(ValueError):
-    def __init__(self, code: str) -> None:
+    def __init__(self, code: str, *, retryable: bool = True) -> None:
         super().__init__(code)
         self.code = code
+        self.retryable = retryable
 
 
 def _parse_response(
-    response: httpx.Response,
+    response_body: bytes,
     response_model: type[ResponseModelT],
 ) -> ResponseModelT:
     try:
-        body = response.json()
+        body = json.loads(response_body)
     except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
         raise _InvalidStructuredResponse("INVALID_PROVIDER_JSON") from None
 
@@ -469,6 +531,49 @@ def _parse_response(
     except (ValidationError, ValueError, TypeError, json.JSONDecodeError):
         raise _InvalidStructuredResponse("SCHEMA_VALIDATION_FAILED") from None
     raise _InvalidStructuredResponse("EMPTY_PROVIDER_CONTENT")
+
+
+async def _read_bounded_response_body(
+    response: httpx.Response,
+    *,
+    max_bytes: int,
+) -> bytes:
+    content_encoding = response.headers.get("content-encoding")
+    if content_encoding is not None and content_encoding.strip().lower() != "identity":
+        raise _InvalidStructuredResponse(
+            "UNSUPPORTED_PROVIDER_CONTENT_ENCODING",
+            retryable=False,
+        )
+
+    declared = response.headers.get("content-length")
+    if declared is not None:
+        try:
+            declared_length = int(declared)
+        except ValueError:
+            raise _InvalidStructuredResponse(
+                "INVALID_PROVIDER_CONTENT_LENGTH",
+                retryable=False,
+            ) from None
+        if declared_length < 0:
+            raise _InvalidStructuredResponse(
+                "INVALID_PROVIDER_CONTENT_LENGTH",
+                retryable=False,
+            )
+        if declared_length > max_bytes:
+            raise _InvalidStructuredResponse(
+                "PROVIDER_RESPONSE_TOO_LARGE",
+                retryable=False,
+            )
+
+    body = bytearray()
+    async for chunk in response.aiter_bytes():
+        if len(chunk) > max_bytes - len(body):
+            raise _InvalidStructuredResponse(
+                "PROVIDER_RESPONSE_TOO_LARGE",
+                retryable=False,
+            )
+        body.extend(chunk)
+    return bytes(body)
 
 
 def _extract_message_content(content: Any) -> Any:

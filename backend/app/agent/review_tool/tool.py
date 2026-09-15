@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -9,6 +10,7 @@ from uuid import UUID
 
 from app.agent.claim_safety import (
     expand_evidence,
+    has_confirmation_caveat,
     has_explicit_eligibility_language,
     has_procedure_language,
     has_support_action_language,
@@ -35,6 +37,7 @@ from app.agent.schemas import (
     ProcedureFinding,
     ProcedureLookupResult,
     ReviewIssue,
+    ReviewIssueCode,
     ReviewResult,
     ReviewSubject,
     ReviewVerdict,
@@ -138,6 +141,9 @@ class ReviewTool:
             "derives final rework targets; do not use that list to change severity. "
             "UNSUPPORTED_CLAIM, MISSING_EVIDENCE, STALE_EVIDENCE, "
             "PROCEDURE_CONFLICT, and CONTRACT_VIOLATION issues must be BLOCKING."
+            " A question that only asks the user to supply an explicitly unknown "
+            "field is not a factual claim and must not receive MISSING_EVIDENCE. "
+            "Only flag a question when its own wording asserts an unsupported fact."
         )
         last_violation: ReviewOutputViolation | None = None
 
@@ -161,7 +167,9 @@ class ReviewTool:
                             "findings must use PASS with no rework target. The runtime "
                             "derives final rework targets. UNSUPPORTED_CLAIM, "
                             "MISSING_EVIDENCE, STALE_EVIDENCE, PROCEDURE_CONFLICT, and "
-                            "CONTRACT_VIOLATION issues must be BLOCKING. Do not output "
+                            "CONTRACT_VIOLATION issues must be BLOCKING. A question "
+                            "that only requests an explicitly unknown field is not a "
+                            "claim and must not receive MISSING_EVIDENCE. Do not output "
                             "subject IDs or digests."
                         ),
                     }
@@ -174,7 +182,7 @@ class ReviewTool:
                 temperature=0,
             )
             try:
-                model_output = _coerce_model_output(raw_output)
+                model_output = _coerce_model_output(raw_output, subject)
                 _validate_model_output(
                     model_output,
                     subject,
@@ -194,15 +202,170 @@ class ReviewTool:
         )
 
 
-def _coerce_model_output(value: BaseModel | Mapping[str, Any]) -> ReviewModelOutput:
+def _coerce_model_output(
+    value: BaseModel | Mapping[str, Any],
+    subject: ReviewSubject,
+) -> ReviewModelOutput:
     try:
         if isinstance(value, ReviewModelOutput):
             return value
+        if isinstance(value, ReviewProviderOutput):
+            payload = value.model_dump(mode="python")
+            # Asking for an explicitly unknown value is not itself a factual
+            # claim.  Provider reviewers repeatedly classified these question
+            # strings as unsupported claims even though deterministic review
+            # separately catches factual assertions embedded in questions.
+            original_issue_count = len(payload["issues"])
+            original_missing_count = len(payload["missing_evidence"])
+            payload["issues"] = [
+                issue
+                for issue in payload["issues"]
+                if not (
+                    issue["issue_code"] == ReviewIssueCode.MISSING_EVIDENCE
+                    and _is_unassertive_information_question(
+                        subject, issue["target_path"]
+                    )
+                )
+            ]
+            payload["missing_evidence"] = [
+                item
+                for item in payload["missing_evidence"]
+                if not _is_unassertive_information_question(subject, item["claim_path"])
+            ]
+            dropped_question_finding = (
+                len(payload["issues"]) != original_issue_count
+                or len(payload["missing_evidence"]) != original_missing_count
+            )
+            derived_targets: set[Component] = set()
+            for issue in payload["issues"]:
+                owner_component, owner_call_id = _issue_owner_for_path(
+                    subject, issue["target_path"]
+                )
+                # Component/call ownership is a deterministic property of the
+                # canonical JSON Pointer.  Provider-authored copies are redundant
+                # and frequently confuse a run UUID with a call UUID, so the
+                # runtime replaces them with the authoritative values.
+                issue["target_component"] = owner_component
+                issue["target_call_id"] = owner_call_id
+                if issue["severity"] == "BLOCKING":
+                    derived_targets.add(owner_component)
+            if payload["missing_evidence"]:
+                derived_targets.add(Component.SUPERVISOR)
+            payload["recommended_rework_targets"] = [
+                component
+                for component in (
+                    Component.INFO_AGENT,
+                    Component.PROCEDURE_TOOL,
+                    Component.SUPPORT_AGENT,
+                    Component.SUPERVISOR,
+                )
+                if component in derived_targets
+            ]
+            if (
+                dropped_question_finding
+                and not any(
+                    issue["severity"] == "BLOCKING" for issue in payload["issues"]
+                )
+                and not payload["missing_evidence"]
+            ):
+                payload["verdict"] = ReviewVerdict.PASS
+            return ReviewModelOutput.model_validate(payload)
         if isinstance(value, BaseModel):
             value = value.model_dump(mode="python")
         return ReviewModelOutput.model_validate(value)
     except (ValidationError, TypeError, ValueError) as exc:
         raise ReviewOutputViolation("review model output violates its schema") from exc
+
+
+def _is_question_path(path: str) -> bool:
+    tokens = _json_pointer_tokens(path)
+    return (
+        (
+            len(tokens) == 3
+            and tokens == ["supervisor_draft", "decision", "questions_for_user"]
+        )
+        or (
+            len(tokens) == 4
+            and tokens[:3] == ["supervisor_draft", "decision", "questions_for_user"]
+            and tokens[3].isdigit()
+        )
+        or (
+            len(tokens) == 4
+            and tokens
+            == [
+                "supervisor_draft",
+                "decision",
+                "next_action",
+                "questions_to_ask",
+            ]
+        )
+        or (
+            len(tokens) == 5
+            and tokens[:4]
+            == [
+                "supervisor_draft",
+                "decision",
+                "next_action",
+                "questions_to_ask",
+            ]
+            and tokens[4].isdigit()
+        )
+    )
+
+
+_ASSUMPTIVE_QUESTION_PATTERN = re.compile(
+    r"(?:이미|벌써|당연|확실|분명|받으셨죠|하셨죠|했죠|됐죠|맞죠|"
+    r"완료했(?:다고|으니)|완료됐(?:다고|으니))",
+    re.IGNORECASE,
+)
+_INFORMATION_QUESTION_PATTERN = re.compile(
+    r"(?:무엇|어떤|언제|어디|어떻게|왜|누구|몇|얼마|여부|내용|상태|범위|사항|"
+    r"확인|알려|입력|제공|필요|"
+    r"what|which|when|where|how|who)",
+    re.IGNORECASE,
+)
+_INFORMATION_REQUEST_ENDING_PATTERN = re.compile(
+    r"(?:알려|입력해|제공해|답변해|확인해)\s*(?:주(?:세요|십시오|시겠습니까)|달라)\s*[.!]?$",
+    re.IGNORECASE,
+)
+_QUESTION_WITH_OPTIONAL_EXAMPLE_PATTERN = re.compile(
+    r"\?(?:\s*예(?:시)?\)?\s*[:.)]?\s*[^?]{0,200})?$",
+    re.IGNORECASE,
+)
+
+
+def _is_unassertive_information_text(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    text = value.strip()
+    return (
+        (
+            _QUESTION_WITH_OPTIONAL_EXAMPLE_PATTERN.search(text) is not None
+            or _INFORMATION_REQUEST_ENDING_PATTERN.search(text) is not None
+        )
+        and _INFORMATION_QUESTION_PATTERN.search(text) is not None
+        and _ASSUMPTIVE_QUESTION_PATTERN.search(text) is None
+        and not is_overconfident(text)
+    )
+
+
+def _is_unassertive_information_question(
+    subject: ReviewSubject,
+    path: str,
+) -> bool:
+    """Recognize only plainly interrogative, non-presuppositional questions."""
+
+    if not _is_question_path(path):
+        return False
+    try:
+        value = _resolve_json_pointer(subject, path)
+    except ReviewOutputViolation:
+        return False
+    if isinstance(value, list):
+        return bool(value) and all(
+            _is_unassertive_information_text(item) for item in value
+        )
+    return _is_unassertive_information_text(value)
 
 
 def _validate_integrity(subject: ReviewSubject) -> _ReviewContext:
@@ -662,19 +825,34 @@ def _deterministic_safety_review(
         expanded_claim_evidence = expand_evidence(
             claim_evidence, context.evidence_by_id
         )
-        if claim.assertion_level == "INFORMATION" and any(
+        has_non_current_evidence = any(
             evidence.freshness_status != FreshnessStatus.CURRENT
             for evidence in expanded_claim_evidence
-        ):
-            issues.append(
-                _issue(
-                    code="STALE_EVIDENCE",
-                    category="EVIDENCE",
-                    path=claim_path,
-                    reason="최신성이 확인되지 않은 근거로 확정형 정보를 제시했습니다.",
-                    evidence_refs=claim.evidence_refs,
+        )
+        if has_non_current_evidence:
+            if claim.assertion_level == "INFORMATION":
+                issues.append(
+                    _issue(
+                        code="STALE_EVIDENCE",
+                        category="EVIDENCE",
+                        path=claim_path,
+                        reason="최신성이 확인되지 않은 근거로 확정형 정보를 제시했습니다.",
+                        evidence_refs=claim.evidence_refs,
+                    )
                 )
-            )
+            elif not has_confirmation_caveat(claim.text):
+                issues.append(
+                    _issue(
+                        code="STALE_EVIDENCE",
+                        category="EVIDENCE",
+                        path=claim.target_path,
+                        reason=(
+                            "최신성이 확인되지 않은 근거의 주장이 사용자 문장에 "
+                            "확인 필요 또는 불확실성을 명시하지 않았습니다."
+                        ),
+                        evidence_refs=claim.evidence_refs,
+                    )
+                )
 
         required_sources = required_sources_for_claim(claim.claim_type)
         has_required_source = any(

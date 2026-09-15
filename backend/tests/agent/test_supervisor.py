@@ -439,6 +439,56 @@ def test_supervisor_builds_one_action_and_runtime_owned_mutation() -> None:
     assert llm.calls == 1
 
 
+def test_supervisor_falls_back_to_validated_info_questions_after_model_failure() -> (
+    None
+):
+    info_source = source(include_finding=False)
+    output_payload = info_source.output.model_dump(mode="python")
+    question_id = UUID("00000000-0000-4000-8000-000000000210")
+    output_payload.update(
+        {
+            "completion_status": "NEEDS_USER_INPUT",
+            "missing_fields": [
+                {
+                    "field_path": "restoration_scope",
+                    "reason_summary": "원상복구 범위를 확인하지 못했습니다.",
+                    "blocks": ["SUPERVISOR_DECISION"],
+                    "question_candidate_id": question_id,
+                }
+            ],
+            "question_candidates": [
+                {
+                    "question_id": question_id,
+                    "text": "임대인에게 원상복구 범위를 확인했나요?",
+                    "resolves_field_paths": ["restoration_scope"],
+                    "reason_summary": "다음 판단 전에 확인이 필요합니다.",
+                }
+            ],
+        }
+    )
+    info_output = InfoAnalysisResult.model_validate(output_payload)
+    info_source = info_source.model_copy(
+        update={
+            "output": info_output,
+            "output_digest": canonical_digest(info_output),
+        }
+    )
+    invalid = semantic_payload(evidence_id="not-an-evidence-id")
+
+    draft = asyncio.run(
+        SupervisorAgent(FakeLLM(invalid), max_local_attempts=1).draft(
+            run_input(),
+            [info_source, procedure_source()],
+        )
+    )
+
+    assert draft.decision.decision_type == "NEEDS_MORE_INFO"
+    assert draft.decision.questions_for_user == [
+        "임대인에게 원상복구 범위를 확인했나요?"
+    ]
+    assert draft.grounded_claims == []
+
+
 def test_action_cannot_omit_a_canonical_target() -> None:
     payload = semantic_payload()
     del payload["next_action"]["target"]
@@ -986,6 +1036,35 @@ def test_confirmation_only_eligibility_claim_accepts_nonfinal_wording() -> None:
     assert llm.calls == 1
     assert draft.grounded_claims[0].claim_type == "ELIGIBILITY"
     assert draft.grounded_claims[0].assertion_level == "NEEDS_CONFIRMATION"
+
+
+def test_non_current_confirmation_claim_requires_visible_caveat() -> None:
+    payload = semantic_payload(evidence_id="ev-procedure")
+    payload["next_action"]["reason"] = "부가세는 100만원입니다."
+    payload["grounded_claims"] = [
+        {
+            "claim_type": "TAX",
+            "target_kind": "NEXT_ACTION_REASON",
+            "target_index": None,
+            "assertion_level": "NEEDS_CONFIRMATION",
+            "evidence_refs": ["ev-procedure"],
+        }
+    ]
+    sources = [source(), procedure_source()]
+    draft = asyncio.run(SupervisorAgent(FakeLLM(payload)).draft(run_input(), sources))
+    non_current = procedure_evidence().model_copy(
+        update={"freshness_status": "UNKNOWN"}
+    )
+
+    with pytest.raises(
+        SupervisorGuardrailError,
+        match="explicit confirmation caveat",
+    ):
+        SupervisorAgent._validate_pre_review_claim_safety(
+            draft,
+            {"ev-procedure": non_current},
+            sources,
+        )
 
 
 def test_overconfident_eligibility_wording_remains_blocked() -> None:

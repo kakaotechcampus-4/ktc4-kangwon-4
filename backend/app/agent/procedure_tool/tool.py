@@ -1,10 +1,11 @@
-"""Google-first web search and official-source retrieval for closure procedures.
+"""Official-first source retrieval for business-closure procedures.
 
-Search-provider snippets are discovery hints only. This tool emits evidence
-only after it has fetched an allowlisted official HTTPS document itself,
-bounded its size, accepted its content type, and extracted non-empty text. It
-does not interpret the documents, decide applicability, or select the next
-action.
+A code-reviewed registry resolves the common tax, food-business, and employee
+offboarding sources without a search credential. Kakao and Google search are
+URL-discovery fallbacks only. The tool emits evidence after it has fetched an
+allowlisted official HTTPS document itself, bounded its size, accepted its
+content type, and extracted non-empty text. It does not interpret the documents,
+decide applicability, or select the next action.
 """
 
 from __future__ import annotations
@@ -147,15 +148,59 @@ _PROCEDURE_FOCUS_TERMS = (
 )
 
 _AUTHORITY_NAMES: tuple[tuple[str, str], ...] = (
-    ("hometax.go.kr", "국세청 홈택스"),
-    ("nts.go.kr", "국세청"),
     ("easylaw.go.kr", "찾기쉬운 생활법령정보"),
     ("law.go.kr", "국가법령정보센터"),
-    ("gov.kr", "정부24"),
-    ("4insure.or.kr", "4대사회보험 정보연계센터"),
-    ("semas.or.kr", "소상공인시장진흥공단"),
-    ("sbiz24.kr", "소상공인24"),
-    ("bizinfo.go.kr", "기업마당"),
+    ("nps.or.kr", "국민연금공단"),
+)
+
+
+@dataclass(frozen=True, slots=True)
+class _OfficialSource:
+    title: str
+    url: str
+    required_terms: tuple[str, ...] = ()
+    any_terms: tuple[str, ...] = ()
+
+    def matches(self, query: str) -> bool:
+        normalized = query.casefold()
+        return all(term.casefold() in normalized for term in self.required_terms) and (
+            not self.any_terms
+            or any(term.casefold() in normalized for term in self.any_terms)
+        )
+
+
+# These are stable public information pages, not transaction endpoints. Each
+# URL was checked against the publisher's robots policy and fetched successfully
+# on 2026-09-15. New entries require a code/security review because this registry
+# is also a network egress allowlist input.
+_OFFICIAL_SOURCES: tuple[_OfficialSource, ...] = (
+    _OfficialSource(
+        title="사업자등록 휴업·폐업신고 안내",
+        url=(
+            "https://www.easylaw.go.kr/CSP/CnpClsMain.laf"
+            "?ccfNo=2&cciNo=1&cnpClsNo=2&csmSeq=25&popMenu=ov"
+        ),
+        required_terms=("폐업",),
+        any_terms=("사업자", "국세청", "세무", "홈택스"),
+    ),
+    _OfficialSource(
+        title="커피전문점 폐업 신고",
+        url=(
+            "https://www.easylaw.go.kr/CSP/CnpClsMainBtr.laf"
+            "?ccfNo=5&cciNo=1&cnpClsNo=1&csmSeq=706&popMenu=ov"
+        ),
+        required_terms=("폐업",),
+        any_terms=("카페", "음식점", "식품", "휴게음식점", "일반음식점"),
+    ),
+    _OfficialSource(
+        title="국민연금 사업장 탈퇴 안내",
+        url=(
+            "https://www.nps.or.kr/pnsinfo/ntpsklg/getOHAF0006M0.do"
+            "?menuId=MN24001107&tab=tab10"
+        ),
+        required_terms=("폐업",),
+        any_terms=("4대보험", "근로자", "직원", "사업장", "국민연금"),
+    ),
 )
 
 
@@ -332,10 +377,19 @@ class ProcedureLookupTool:
 
         searched_at = self._aware_now()
         provider_order: list[str] = []
-        if self.config.google_enabled:
-            provider_order.append("GOOGLE_AGENT_SEARCH")
-        if self.config.kakao_enabled:
-            provider_order.append("KAKAO_DAUM_WEB")
+        if self.config.official_source_registry_enabled:
+            provider_order.append("OFFICIAL_SOURCE_REGISTRY")
+            if self.config.kakao_enabled:
+                provider_order.append("KAKAO_DAUM_WEB")
+            if self.config.google_enabled:
+                provider_order.append("GOOGLE_AGENT_SEARCH")
+        else:
+            # Disabling the credential-free registry does not change the search
+            # provider policy: Kakao remains ahead of the optional Google fallback.
+            if self.config.kakao_enabled:
+                provider_order.append("KAKAO_DAUM_WEB")
+            if self.config.google_enabled:
+                provider_order.append("GOOGLE_AGENT_SEARCH")
         provider_counters = {
             provider: _ProviderCounters() for provider in provider_order
         }
@@ -347,57 +401,39 @@ class ProcedureLookupTool:
         query_failures: list[_UpstreamFailure] = []
         for query in queries:
             query_resolved = False
-            use_kakao = not self.config.google_enabled
-
-            if self.config.google_enabled:
-                google_counters = provider_counters["GOOGLE_AGENT_SEARCH"]
-                google_counters.attempted_query_count += 1
-                try:
-                    google_outcome = await self._search_query(
-                        query,
-                        size=int(request.max_results_per_query),
-                        provider="GOOGLE_AGENT_SEARCH",
-                    )
-                except _UpstreamFailure as exc:
-                    google_counters.failed_query_count += 1
-                    query_failures.append(exc)
-                    use_kakao = self.config.kakao_enabled
-                else:
-                    google_counters.successful_query_count += 1
-                    google_counters.provider_result_count += (
-                        google_outcome.provider_result_count
-                    )
-                    provider_outcomes.append(google_outcome)
-                    if google_outcome.official_candidate_count:
-                        selected_hits.extend(google_outcome.hits)
-                        query_resolved = True
-                    else:
-                        use_kakao = self.config.kakao_enabled
-                        query_resolved = not use_kakao
-
-            if use_kakao:
-                if self.config.google_enabled:
+            for provider_index, provider in enumerate(provider_order):
+                if provider_index == 1:
                     fallback_query_count += 1
-                kakao_counters = provider_counters["KAKAO_DAUM_WEB"]
-                kakao_counters.attempted_query_count += 1
+                counters = provider_counters[provider]
+                counters.attempted_query_count += 1
                 try:
-                    kakao_outcome = await self._search_query(
-                        query,
-                        size=int(request.max_results_per_query),
-                        provider="KAKAO_DAUM_WEB",
+                    outcome = (
+                        self._official_registry_query(
+                            query,
+                            size=int(request.max_results_per_query),
+                        )
+                        if provider == "OFFICIAL_SOURCE_REGISTRY"
+                        else await self._search_query(
+                            query,
+                            size=int(request.max_results_per_query),
+                            provider=provider,
+                        )
                     )
                 except _UpstreamFailure as exc:
-                    kakao_counters.failed_query_count += 1
+                    counters.failed_query_count += 1
                     query_failures.append(exc)
-                    query_resolved = False
                 else:
-                    kakao_counters.successful_query_count += 1
-                    kakao_counters.provider_result_count += (
-                        kakao_outcome.provider_result_count
-                    )
-                    provider_outcomes.append(kakao_outcome)
-                    selected_hits.extend(kakao_outcome.hits)
-                    query_resolved = True
+                    counters.successful_query_count += 1
+                    counters.provider_result_count += outcome.provider_result_count
+                    provider_outcomes.append(outcome)
+                    if outcome.official_candidate_count:
+                        selected_hits.extend(outcome.hits)
+                        query_resolved = True
+                        break
+                    if provider_index + 1 == len(provider_order):
+                        # A well-formed empty response is a completed lookup, not
+                        # a technical provider failure.
+                        query_resolved = True
 
             if query_resolved:
                 successful_queries += 1
@@ -526,6 +562,24 @@ class ProcedureLookupTool:
             evidence_records=evidence_records,
             based_on_snapshot_id=request.based_on_snapshot_id,
             as_of=request.as_of,
+        )
+
+    def _official_registry_query(self, query: str, *, size: int) -> _QueryOutcome:
+        matched = [source for source in _OFFICIAL_SOURCES if source.matches(query)]
+        hits = [
+            SearchHit(
+                title=source.title,
+                url=source.url,
+                query=query,
+                provider="OFFICIAL_SOURCE_REGISTRY",
+            )
+            for source in matched[:size]
+        ]
+        return self._filter_official_hits(
+            provider="OFFICIAL_SOURCE_REGISTRY",
+            hits=hits,
+            provider_result_count=len(matched),
+            rejected_result_count=max(0, len(matched) - size),
         )
 
     async def _search_query(
@@ -973,7 +1027,7 @@ class ProcedureLookupTool:
             warnings.append(
                 ProcedureLookupWarning(
                     code="SEARCH_PROVIDER_FALLBACK",
-                    message="일부 검색어에 Google 다음 순위인 Kakao 검색을 사용했습니다.",
+                    message="일부 검색어에 다음 순위의 검색 provider를 사용했습니다.",
                 )
             )
         if provider_failure_count:
@@ -994,7 +1048,10 @@ class ProcedureLookupTool:
             warnings.append(
                 ProcedureLookupWarning(
                     code="RESULT_REJECTED",
-                    message="공식 출처 정책을 통과하지 못한 검색 결과를 제외했습니다.",
+                    message=(
+                        "형식 오류, 결과 수 상한 또는 공식 출처 URL 정책으로 "
+                        "일부 조회 후보를 제외했습니다."
+                    ),
                 )
             )
         if fetch_failure_count:
@@ -1008,7 +1065,7 @@ class ProcedureLookupTool:
             warnings.append(
                 ProcedureLookupWarning(
                     code="NO_OFFICIAL_RESULTS",
-                    message="검색 결과에서 검증 가능한 공식 출처를 찾지 못했습니다.",
+                    message="검증 가능한 공식 출처를 찾지 못했습니다.",
                 )
             )
         elif document_count == 0:

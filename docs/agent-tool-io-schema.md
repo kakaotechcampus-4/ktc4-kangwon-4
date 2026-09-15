@@ -1,21 +1,36 @@
 # RE:BORN Agent/Tool 입출력 schema 제안
 
-> 상태: **v0.4 — `agent-io/2.0` breaking change / AI standalone 구현 / BE 계약 합의 전**
+> 상태: **v0.5 — `agent-io/2.0` breaking change / AI standalone 실행 계약 감사 완료 / BE 계약 합의 전**
 > 기준일: 2026-09-15
-> 기준 구조: `docs/architecture.md`의 Supervisor Global Loop, 정보분석/지원금 Local Loop, 절차조회 Tool, 필수 Review Tool
+> 기준 구조: `docs/architecture.md`의 현재 AgentGraph 소유 Global Loop와 목표 Supervisor 계획/Graph router 구조, 정보분석·지원금 Local Loop, 절차조회 Tool, 필수 Review Tool
 > 문서 분리: Agent 독립 실행 조건은 [`agent-standalone-runtime-requirements.md`](./agent-standalone-runtime-requirements.md), BE 구현·회신 요구사항은 [`be-agent-integration-requirements.md`](./be-agent-integration-requirements.md)를 따릅니다.
 
-이 문서는 Agent 런타임과 BE 사이, Supervisor와 하위 Agent/Tool 사이의 데이터 계약을 먼저 합의하기 위한 문서입니다. v2에서 절차조회 Tool은 **각 query마다 Google Agent Search `searchLite`로 공식 URL을 먼저 발견하고 정해진 경우 Kakao Daum 검색으로 fallback한 뒤, 원문을 직접 fetch해 raw document와 Evidence만 반환**하며, 정보분석 Agent가 그 결과를 사용자 입력·CaseSnapshot과 함께 분석합니다. Google 검색결과 HTML은 scraping하지 않습니다. v1의 주입형 절차 master 평가 계약과 wire schema는 폐기된 과거 설계이며 v2와 호환되지 않습니다. BE adapter·인증/소유권 확인·DB migration·저장 API는 아직 구현되지 않았습니다. 현재 구현 범위와 목표 BE 계약의 차이는 §18에 정리합니다.
+이 문서는 Agent 런타임과 BE 사이, 그리고 AgentGraph router를 통해 Supervisor와 하위 Agent/Tool이 주고받는 데이터 계약을 먼저 합의하기 위한 문서입니다. v2에서 절차조회 Tool은 **각 query마다 코드 검토된 공식 출처 registry를 먼저 확인하고, miss일 때 Kakao→Google 순서로 공식 URL을 발견한 뒤, 원문을 직접 fetch해 raw document와 Evidence만 반환**하며, 정보분석 Agent가 그 결과를 사용자 입력·CaseSnapshot과 함께 분석합니다. 검색결과 HTML과 snippet은 Evidence가 아닙니다. v1의 주입형 절차 master 평가 계약과 wire schema는 폐기된 과거 설계이며 v2와 호환되지 않습니다. BE adapter·인증/소유권 확인·DB migration·저장 API는 아직 구현되지 않았습니다. 현재 구현 범위와 목표 BE 계약의 차이는 §18에 정리합니다.
 
 역할과 호출 방향은 `docs/architecture.md`가 기준입니다. 현재 standalone 실행의 최종 권한은 `backend/app/agent/schemas.py`와 자동 테스트에 있습니다. 이 문서에서 **현재 구현**으로 표시한 항목은 실행 계약이고, **목표 BE 계약**으로 표시한 항목은 AI/BE 공동 승인 전 제안입니다. `docs/interface-spec.md` §11의 기존 Agent 예시는 deprecated이며 구현 기준으로 사용하지 않습니다.
 
+지원 공고 discovery의 현재 실행 계약은 `backend/app/agent/support_agent/discovery_models.py`와 `discovery_tool.py`도 함께 권위 소스입니다. 아래 외부 상태·법령 resolver는 아직 코드가 없는 목표 계약이므로 같은 수준의 구현 완료로 해석하지 않습니다.
+
+### 이 문서를 읽는 기준: 네 계약 층
+
+같은 이름이 provider 출력, Agent 내부 의미 모델, standalone 공개 결과, 목표 BE DTO에 반복되므로 다음 층을 섞어 읽으면 안 됩니다.
+
+| 계약 층 | 현재 권위 소스 | 실행 여부 | BE가 그대로 구현하는 wire DTO인가 |
+|---|---|---:|---:|
+| LLM provider 형식 | `info_agent/agent.py`, `support_agent/models.py`, `supervisor/agent.py`, `review_tool/models.py`의 `*ProviderOutput`, `*ModelOutput` | O | X |
+| AI local 의미·provenance | 위 파일의 `*Draft`와 결정론적 validator/guardrail | O | X |
+| standalone 공개 runtime | `schemas.py`, `procedure_tool/tool.py`, `support_agent/discovery_models.py`, `state.py`, `graph.py` | O | 일부만 shared 후보 |
+| 목표 BE/shared 계약 | 이 문서에서 **목표 BE 계약**으로 표시한 확장 snapshot, trigger, mutation, outcome, Guardrail/persistence/resolver DTO | X | O, 공동 승인 후 |
+
+현재 코드와 문서가 다르면 **현재 실행 사실은 코드와 자동 테스트가 우선**합니다. 반대로 코드에 없는 목표 DTO는 이 문서가 요구사항의 권위 소스이지만, 구현·배포 완료를 의미하지 않습니다. 이후 절에서 `현재 standalone`과 `목표 BE`를 따로 적고, 표에 별도 표시가 없으면 해당 절의 직전 상태 표기를 따릅니다.
+
 ## 1. 먼저 합의할 결론
 
-| 항목 | v0.4 / `agent-io/2.0` 제안 |
+| 항목 | v0.5 / `agent-io/2.0` 제안 |
 |---|---|
 | 실행 주체 | 비-LLM `PlanningCoordinator`가 인증, Guardrail, Agent Graph 호출, 저장, HTTP 변환을 조정 |
-| Supervisor 권한 | 필요한 하위 Agent/Tool 선택, 결과 충분성 판단, 정상 `ACTION`이면 Blocker 1개와 Next Action 1개 초안 결정 |
-| 하위 구성요소 권한 | 읽기·분석 결과만 반환. 서로 호출하거나 DB를 쓰거나 최종 우선순위를 결정하지 않음. 절차조회 결과는 Supervisor가 정보분석 입력으로 전달 |
+| Supervisor 권한 | 현재는 전달받은 결과의 충분성·전역 판단과 초안 작성을 담당. 목표에서는 필요한 하위 Agent/Tool의 호출 계획까지 제안하며, 실제 호출은 Graph router가 집행 |
+| 하위 구성요소 권한 | 읽기·분석 결과만 반환. 서로 호출하거나 DB를 쓰거나 최종 우선순위를 결정하지 않음. 절차조회 결과는 Graph router가 정보분석 입력으로 전달 |
 | Review | 정상 초안과 LLM이 만든 사용자 확인 질문은 전부 필수 Review |
 | 저장 | 어떤 Agent/Tool에도 쓰기 함수를 Tool로 등록하지 않음. BE `shared/functions`만 수행 |
 | 직렬화 | Agent 내부 `snake_case`, 외부 HTTP API `camelCase`, DB 컬럼 `snake_case` |
@@ -31,11 +46,13 @@ FastAPI / PlanningCoordinator (코드)
   1. Input Guardrail + 인증/소유권 확인
   2. SharedCaseSnapshotDTO 조립 → AI adapter의 CaseSnapshot 검증
   3. shared 실행 context로 Agent Graph 실행
-       Supervisor
-         1. 절차조회 Tool — Google 우선/Kakao query별 fallback → 공식 URL 검증 → 원문 fetch
+       현재: 고정 dependency / 목표: Supervisor의 검증된 호출 계획
+       Graph router
+         1. 절차조회 Tool — 공식 registry 우선/Kakao→Google fallback → 공식 URL 검증 → 원문 fetch
          2. 정보분석 Agent-as-Tool — 사용자/Case/ProcedureLookupResult 분석
          3. 지원금 Agent-as-Tool
-       SupervisorDraft → Review Tool
+         4. 수집 결과를 Supervisor에 전달해 SupervisorDraft 생성
+         5. SupervisorDraft를 Review Tool에 제출
   4. Review PASS 결과와 ReviewSubject digest 검증
   5. Output Guardrail
   6. State Transition Guardrail — 변경 후보 전체를 승인하거나 전체 거부
@@ -47,20 +64,21 @@ Supervisor나 Agent Graph가 DB 저장 Tool을 호출하지 않습니다. Graph�
 
 ### 목표 shared/내부 호출 계약 (adapter 미구현)
 
-현재 standalone 공개 진입점은 envelope 없이 `AgentGraph.run(SupervisorRunInput, trace_id=None) -> AgentRunOutcome`이며, 하위 구성요소도 payload/result 또는 안전한 예외를 직접 주고받습니다. 아래 표에서 PlanningCoordinator→Graph와 PlanningCoordinator→저장 함수만 BE/shared 경계입니다. Supervisor→하위 Agent/Tool envelope는 AI 내부 목표 계약이며 BE HTTP API나 BE 구현 산출물이 아닙니다.
+현재 standalone 공개 진입점은 envelope 없이 `AgentGraph.run(SupervisorRunInput, trace_id=None) -> AgentRunOutcome`이며, 하위 구성요소도 payload/result 또는 안전한 예외를 직접 주고받습니다. 아래 표에서 PlanningCoordinator→Graph와 PlanningCoordinator→저장 함수만 BE/shared 경계입니다. Graph router→하위 Agent/Tool envelope는 AI 내부 목표 계약이며 BE HTTP API나 BE 구현 산출물이 아닙니다.
 
 | 호출자 | 수신자 | 입력 payload | 출력 payload |
 |---|---|---|---|
-| PlanningCoordinator | Supervisor Graph | `ComponentRequest[SupervisorRunInput]` | `AgentRunOutcome` |
-| Supervisor | 절차조회 Tool | `ComponentRequest[ProcedureLookupInput]` | `ComponentResult[ProcedureLookupResult]` |
-| Supervisor | 정보분석 Agent | `ComponentRequest[InfoAnalysisInput]` | `ComponentResult[InfoAnalysisResult]` |
-| Supervisor | 지원금 Agent | `ComponentRequest[SupportAnalysisInput]` | `ComponentResult[SupportAnalysisResult]` |
-| Supervisor | Review Tool | `ComponentRequest[ReviewSubject]` | `ComponentResult[ReviewResult]` |
+| PlanningCoordinator | AgentGraph | `ComponentRequest[SupervisorRunInput]` | `AgentRunOutcome` |
+| AgentGraph router | 절차조회 Tool | `ComponentRequest[ProcedureLookupInput]` | `ComponentResult[ProcedureLookupResult]` |
+| AgentGraph router | 정보분석 Agent | `ComponentRequest[InfoAnalysisInput]` | `ComponentResult[InfoAnalysisResult]` |
+| AgentGraph router | 지원금 Agent | `ComponentRequest[SupportAnalysisInput]` | `ComponentResult[SupportAnalysisResult]` |
+| AgentGraph router | Supervisor | 검증된 source results와 실행 context | `SupervisorDraft` |
+| AgentGraph router | Review Tool | `ComponentRequest[ReviewSubject]` | `ComponentResult[ReviewResult]` |
 | PlanningCoordinator | BE 저장 함수 | `PersistReviewedPlanCommand` | `PersistResult` |
 
 지원금 Agent 내부의 Wiki/Chroma/S3 adapter는 지원금 Agent 전용 read-only 구현입니다. 이 문서에서는 BE 공용 계약을 만들지 않고, 모든 조회 결과가 공통 `EvidenceRecord`로 정규화되어야 한다는 경계만 정합니다.
 
-위 표는 호출 권한을 나타내며 임의 병렬 호출을 뜻하지 않습니다. 자연어 Case 생성·결과 제출의 v2 첫 계획 데이터 의존 순서는 `PROCEDURE_TOOL → INFO_AGENT → SUPPORT_AGENT → SUPERVISOR → REVIEW_TOOL`입니다. Tool과 Agent가 서로 직접 호출하지 않고 Supervisor Graph가 앞 결과와 call ID를 다음 입력에 결합합니다. 새 사용자 입력·절차 해석 없이 검수된 지원정보만 갱신하는 `SUPPORT_REFRESH`는 현재 Support부터 시작하는 명시적 예외입니다.
+위 표는 호출 권한을 나타내며 임의 병렬 호출을 뜻하지 않습니다. 자연어 Case 생성·결과 제출의 v2 첫 계획 데이터 의존 순서는 `PROCEDURE_TOOL → INFO_AGENT → SUPPORT_AGENT → SUPERVISOR → REVIEW_TOOL`입니다. Tool과 Agent가 서로 직접 호출하지 않고 AgentGraph router가 앞 결과와 call ID를 다음 입력에 결합합니다. 새 사용자 입력·절차 해석 없이 검수된 지원정보만 갱신하는 `SUPPORT_REFRESH`는 현재 Support부터 시작하는 명시적 예외입니다.
 
 ## 3. 공통 표기와 생성 주체
 
@@ -104,7 +122,7 @@ LLM은 의미 필드만 구조화해서 반환합니다. ID, 시각, digest, 출
 
 ## 4. 공통 실행 envelope
 
-이 절의 `ComponentRequest[T]`와 `ComponentResult[T]`는 목표 typed envelope입니다. PlanningCoordinator→Graph envelope만 BE/shared 계약이고, Supervisor→하위 구성요소 envelope는 AI 내부 계약입니다. standalone 런타임에는 아직 이 adapter가 없으며, 런타임이 생성한 `InvocationMeta`는 Review provenance와 내부 실행 경계에서 사용합니다.
+이 절의 `ComponentRequest[T]`와 `ComponentResult[T]`는 목표 typed envelope입니다. PlanningCoordinator→Graph envelope만 BE/shared 계약이고, Graph router→하위 구성요소 envelope는 AI 내부 계약입니다. standalone 런타임에는 아직 이 adapter가 없으며, 런타임이 생성한 `InvocationMeta`는 Review provenance와 내부 실행 경계에서 사용합니다.
 
 ### `InvocationMeta`
 
@@ -254,22 +272,22 @@ runtime은 `target_path`가 `ReviewSubject.supervisor_draft` 안의 사용자 �
 
 ### `CaseFieldKey`와 `CaseFact`
 
-v1 정보분석 화이트리스트 제안입니다. `case_status`와 절차 진행상태는 LLM이 직접 바꾸는 사실 필드가 아닙니다.
+아래 12개 key와 값 제약은 **현재 standalone `CASE_FIELD_SPECS` 실행 계약**입니다. BE canonical registry는 아직 합의되지 않았으므로 이 값을 곧바로 DB enum으로 확정하지 않습니다. `case_status`와 절차 진행상태는 LLM이 직접 바꾸는 사실 필드가 아닙니다.
 
-| `field_path` | `value_type` | 비고 |
-|---|---|---|
-| `business_type` | `STRING` | 값 사전은 BE canonical registry 사용 |
-| `franchise_status` | `BOOLEAN` | |
-| `employee_count` | `INTEGER` | |
-| `lease_status` | `ENUM` | 현 API/DB enum 불일치 해결 필요 |
-| `entity_type` | `ENUM` | 지원 비교에 필요, 현 CASE 테이블에는 없음 |
-| `building_use_type` | `ENUM` | 지원 비교에 필요, 현 CASE 테이블에는 없음 |
-| `previous_support_history` | `ENUM` | 지원 비교에 필요, 현 CASE 테이블에는 없음 |
-| `restoration_status` | `ENUM` | |
-| `restoration_scope` | `ENUM` | 현 API/DB enum 불일치 해결 필요 |
-| `restoration_scope_detail` | `STRING` | nullable |
-| `demolition_required` | `ENUM` | 현 API/DB `UNKNOWN` 처리 불일치 해결 필요 |
-| `planned_closure_date` | `DATE` | 사용자가 제시한 날짜만 허용 |
+| `field_path` | `value_type` | 현재 standalone 허용값/제약 | BE 합의 상태 |
+|---|---|---|---|
+| `business_type` | `STRING` | non-blank string | 값 사전 필요 |
+| `franchise_status` | `BOOLEAN` | strict boolean | 타입만 잠정 일치 |
+| `employee_count` | `INTEGER` | strict integer, `>=0`; boolean 금지 | 타입만 잠정 일치 |
+| `lease_status` | `ENUM` | `ACTIVE | TERMINATION_NOTIFIED | TERMINATED | OWNED` | 현 API/DB enum 불일치 해결 필요 |
+| `entity_type` | `ENUM` | `SOLE_PROPRIETOR | CORPORATION` | 현 `CASES` 테이블에는 없음 |
+| `building_use_type` | `ENUM` | `NEIGHBORHOOD_LIVING | OTHER` | 현 `CASES` 테이블에는 없음 |
+| `previous_support_history` | `ENUM` | `NONE | RECEIVED` | 현 `CASES` 테이블에는 없음 |
+| `restoration_status` | `ENUM` | `NOT_STARTED | IN_PROGRESS | COMPLETED` | 저장 enum 확인 필요 |
+| `restoration_scope` | `ENUM` | `AGREEMENT_REQUIRED | TENANT_ALL | LANDLORD_ALL | SHARED | NOT_REQUIRED` | 현 API/DB enum 불일치 해결 필요 |
+| `restoration_scope_detail` | `STRING` | confirmed 값은 non-blank string | nullable/CLEAR 저장 표현 합의 필요 |
+| `demolition_required` | `ENUM` | `REQUIRED | NOT_REQUIRED` | 현 API/DB `UNKNOWN` 처리 불일치 해결 필요 |
+| `planned_closure_date` | `DATE` | 실제 유효한 `YYYY-MM-DD`; 사용자가 명시한 날짜만 | 저장 타입·timezone 의미 확인 필요 |
 
 `CaseFact`:
 
@@ -283,6 +301,8 @@ v1 정보분석 화이트리스트 제안입니다. `case_status`와 절차 진�
 | `updated_at` | datetime \| null | O | 미확인 초기값은 `null` 가능 |
 
 `CONFIRMED`는 non-null value, `UNKNOWN`은 null value여야 합니다. nullable 필드를 사용자가 명시적으로 비우는 동작은 `FactChangeCandidate.operation=CLEAR`로 표현하며 “필요 없음”으로 해석하지 않습니다.
+
+현재 validator는 `field_path → value_type → value` 세 관계를 함께 검사합니다. 따라서 enum 자유 문자열, 문자열 숫자, 숫자형 boolean, 잘못된 달력 날짜는 거부합니다. BE adapter도 coercion 전에 같은 strict 규칙을 적용해야 하며, 합의된 canonical registry가 달라지면 AI와 BE schema version을 함께 올립니다.
 
 ### 안정 참조
 
@@ -359,11 +379,23 @@ Blocker 1개 + Next Action 1개 불변식은 실행 가능한 정상 계획인 `
 
 `NEEDS_MORE_INFO`는 항상 `requires_human=true`, `CASE_COMPLETE`는 항상 `requires_human=false`입니다. `ACTION`은 실제 확인 주체에 따라 true/false가 가능합니다.
 
-Supervisor는 `CASE_COMPLETE`를 제안할 수 있지만 외부 전달·저장은 State Transition Guardrail이 완료 조건을 확인한 뒤에만 가능합니다.
+목표 계약에서는 Supervisor가 `CASE_COMPLETE`를 제안하고 State Transition Guardrail이 완료 조건을 다시 확인합니다. **현재 standalone Supervisor는 bounded 웹 조회만으로 전체 절차 coverage를 증명할 수 없다는 이유로 `CASE_COMPLETE`를 항상 거부**합니다. 즉 Pydantic variant가 존재한다는 사실과 현재 Graph에서 도달 가능하다는 뜻은 다릅니다.
 
 ### 변경 후보
 
 이 절의 변경 후보는 **목표 BE 저장 계약**입니다. 현재 standalone `ProcedureProgressChangeCandidate`에는 `execution_input_event_id`, `source_observation_id`, `source_observation_call_id`, `procedure_lookup_call_id`가 없고 `SupportMatchUpdateCandidate`에는 `before_match`가 없습니다. 현재 구현을 소비할 때 이 필드가 있다고 가정하지 말고, 생산 persistence 연결 전에 §18의 차이를 구현·검증해야 합니다.
+
+현재/목표 shape 차이는 다음과 같습니다. 이 표의 current key 집합은 `schemas.py`의 실제 model field와 정확히 일치합니다.
+
+| 모델 | 현재 standalone key | 목표 BE 추가/의미 차이 |
+|---|---|---|
+| `FactChangeCandidate` | 아래 상세 표와 동일한 15개 key | shape는 동일하나 `CONFIRMED_CONFLICT`를 만드는 생산 trigger/resolver는 미구현 |
+| `ProcedureProgressChangeCandidate` | `candidate_id`, `procedure_step`, `before_status`, `proposed_status`, `reason_summary`, `execution_evidence_refs`, `procedure_analysis_call_id` | `execution_input_event_id`, `source_observation_id`, `source_observation_call_id`, `procedure_lookup_call_id` 추가 |
+| `SupportMatchUpdateCandidate` | `candidate_id`, `support_check`, `source_call_id` | `before_match` 추가 |
+| `CaseStatusChangeCandidate` | 아래 상세 표와 동일한 5개 key | shape는 동일하나 현재 Supervisor가 생성 경로를 차단 |
+| `MutationSet` | `fact_changes`, `procedure_progress_changes`, `support_match_updates`, `case_status_change` | 동일 key; BE가 CAS/transaction/History를 추가 수행 |
+
+현재 model의 `FactChangeCandidate.source_type` enum에는 `CONFIRMED_CONFLICT`가 있고 ref/call nullable 조합도 검증하지만, 현재 `RunTrigger`와 Graph에는 conflict-confirmed 재진입 경로가 없습니다. 따라서 이는 “부분 구현된 schema”이지 사용 가능한 production round trip이 아닙니다.
 
 `FactChangeCandidate`:
 
@@ -493,7 +525,26 @@ runtime이 하위 결과와 다른 값으로 mutation을 재작성하는 것은 
 
 ## 7. `CaseSnapshot`
 
-BE가 인증·소유권 확인 후 한 읽기 시점에 만든 `SharedCaseSnapshotDTO`를 AI adapter가 아래 목표 필드로 변환·strict 검증한 읽기 전용 snapshot입니다. adapter는 누락값이나 Evidence를 합성할 수 없습니다. 두 DTO를 같은 코드 생성 schema로 통일하기로 공동 승인하면 별도 변환 없이 동일 shape를 사용할 수 있습니다.
+### 현재 standalone 실행 shape
+
+현재 `schemas.py`의 `CaseSnapshot`은 다음 8개 key만 허용합니다. CLI/test fixture가 직접 만들며 BE 인증·소유권 확인이나 DB read가 결합된 결과가 아닙니다.
+
+| 필드 | 타입 | 필수 | 현재 불변식 |
+|---|---|---:|---|
+| `snapshot_id` | UUID | O | runtime 생성, 한 run 동안 immutable |
+| `case_id` | positive integer | O | Graph가 모든 component meta/outcome의 Case ID로 사용 |
+| `case_version` | positive integer \| null | O | standalone은 저장/CAS를 수행하지 않음 |
+| `case_status` | `IN_PROGRESS` \| `COMPLETED` | O | 입력 상태 |
+| `facts` | `CaseFact[]` | O | `field_path` unique |
+| `procedure_progress` | `ProcedureProgress[]` | O | `procedure_step_id` unique |
+| `evidence_records` | `EvidenceRecord[]` | O | `evidence_id` unique, fact/progress ref 전체 해석 |
+| `captured_at` | aware datetime | O | runtime/fixture 생성 |
+
+현재 model은 `case_id`와 `step_code` 조합의 canonical registry 정합성, Evidence parent의 재귀 closure, Case 완료 조건까지 단독으로 확인하지 않습니다. Graph/Supervisor/Review가 run·snapshot·source 연결을 추가 검증하지만, 생산 DB 소유권·동시성 검증은 BE 경계가 필요합니다.
+
+### 목표 BE/shared 확장 shape
+
+BE가 인증·소유권 확인 후 한 읽기 시점에 만든 `SharedCaseSnapshotDTO`를 AI adapter가 아래 목표 필드로 변환·strict 검증한 읽기 전용 snapshot입니다. adapter는 누락값이나 Evidence를 합성할 수 없습니다. 두 DTO를 같은 코드 생성 schema로 통일하기로 공동 승인하면 별도 변환 없이 동일 shape를 사용할 수 있습니다. 아래 표의 `support_applications`, `support_matches`, `latest_decision`, `history_window`는 **현재 `CaseSnapshot` 코드에는 없습니다**.
 
 | 필드 | 타입 | 필수 | 설명 |
 |---|---|---:|---|
@@ -622,6 +673,36 @@ Snapshot 안의 모든 `evidence_refs`는 같은 snapshot의 `evidence_records`�
 | `based_on_procedure_lookup_digest` | `sha256:<hex>` | O | runtime이 입력 `ProcedureLookupResult` 전체로 계산·주입 |
 
 `completion_status=NEEDS_USER_INPUT`이면 `missing_fields`와 `question_candidates`가 모두 min 1이어야 합니다. 질문할 누락 필드나 실제 질문 없이 이 상태를 반환할 수 없습니다.
+
+### 현재 provider → local → runtime 변환 계약
+
+정보분석의 모델 응답은 `InfoAnalysisResult`가 아닙니다. 다음 세 층을 거치므로 LLM이 runtime ID, span offset, Evidence ID, digest를 작성할 수 없습니다.
+
+| 층 | 모델 | 정확한 top-level key | 핵심 권한 |
+|---|---|---|---|
+| provider 형식 | `InfoProviderOutput` | `completion_status`, `facts`, `procedure_observations`, `procedure_findings`, `missing_fields`, `uncertainties` | 타입/enum/extra field만 우선 검사 |
+| local 의미 | `InfoAnalysisDraft` | provider와 동일 | fact operation/value/field registry, `NEEDS_USER_INPUT → missing_fields min 1` 검사 |
+| runtime 공개 | `InfoAnalysisResult` | 위 출력 표의 13개 key | ID/span/Evidence/parser version/snapshot·lookup call·digest 주입 |
+
+provider nested shape는 다음과 같습니다.
+
+| 모델 | provider가 반환하는 key | local/runtime 변환 |
+|---|---|---|
+| `ExtractedFactModelOutput` | `operation`, `field_path`, `value_type`, `value`, `source_text`, `confidence_bps`, `requires_confirmation`, `reason_summary` | `ExtractedFactDraft`가 registry와 SET/CLEAR를 검사한 뒤 `FactCandidate` 또는 `ConflictCandidate`로 변환 |
+| `ProcedureObservationDraft` | `step_code`, `observed_status`, `source_text`, `requires_confirmation`, `reason_summary` | known step과 정확한 사용자 발화 span에 결합해 `ProcedureProgressObservation` 생성 |
+| `ProcedureFindingDraft` | `step_code`, `summary`, `relevance`, `decision_authority`, `requires_confirmation`, `required_actions`, `required_documents`, `application_channel`, `application_url`, `deadline`, `evidence_refs` | known step, lookup Evidence, query-derived candidate step, freshness를 확인해 `ProcedureFinding` 생성 |
+| `MissingFieldDraft` | `field_path`, `reason_summary`, `blocks`, `question` | 하나의 runtime `question_id`로 `MissingField.question_candidate_id`와 `QuestionCandidate`를 쌍으로 생성 |
+
+결정론적 grounding 불변식은 다음과 같습니다.
+
+- `source_text`는 현재 `RedactedInput.redacted_text`에 그대로 존재해야 하며 offset은 Unicode code point 기준 첫 exact match로 계산합니다.
+- fact는 span에 해당 field 문맥과 제안 value/operation cue가 함께 명시돼야 합니다. 날짜는 폐업 예정일 문맥과 실제 달력 날짜, 인원은 같은 숫자와 직원 문맥이 필요하고, 상충 cue나 “모름/미확인”을 임의 SET/CLEAR로 바꾸는 출력은 거부합니다.
+- 절차 진행 관측은 canonical step 이름/alias와 `IN_PROGRESS | COMPLETED` 상태 표현이 같은 span에 있어야 하며 부정 표현은 거부합니다. 웹문서 문장은 현실 수행 관측의 source span으로 사용할 수 없습니다.
+- 동일 입력 span Evidence ID는 `input:{input_event_id}:{start}:{end}:{hash-prefix}` 형식으로 runtime이 만들고, `source_ref=input_event_id`, `locator=text:{start}-{end}`, `excerpt=source_text`, `freshness_status=CURRENT`, `content_hash=SHA-256(source_text)`로 결합합니다.
+- `ProcedureFinding.summary`는 lookup Evidence가 뒷받침하는 보수적 요약일 수 있지만 exact substring일 필요는 없습니다. 반면 action/channel/deadline과 문서명·제출시점은 인용 Evidence excerpt에 실제 존재할 때만 남고, `application_url`은 fetched canonical URL과 같을 때만 남습니다. 근거 없는 선택 필드는 runtime이 제거합니다.
+- `based_on_procedure_lookup_digest=canonical_digest(procedure_lookup_result)`이고, Supervisor/Review는 같은 `procedure_lookup_call_id`의 `ReviewSourceResult.output_digest`와 다시 대조합니다.
+
+Info Agent는 최초 시도를 포함해 constructor의 `max_local_attempts=1..3` 안에서만 수정 요청을 반복합니다. 소진 시 `InfoAnalysisGuardrailError`를 던지며 빈/추정 결과를 만들지 않고 Graph가 `SAFE_FAILURE/STRUCTURED_OUTPUT_FAILED`로 닫습니다.
 
 `SourcedText`:
 
@@ -766,6 +847,18 @@ Snapshot 안의 모든 `evidence_refs`는 같은 snapshot의 `evidence_records`�
 | `based_on_snapshot_id` | UUID | O | 입력 snapshot과 같아야 함 |
 | `based_on_candidate_ids` | UUID[] | O | 실제 overlay한 READY 후보의 부분집합 |
 
+### 현재 provider → local → runtime 변환 계약
+
+지원금 모델 응답도 공개 `SupportAnalysisResult`가 아닙니다. 현재 세 층의 정확한 top-level key와 생성 권한은 다음과 같습니다.
+
+| 층 | 모델 | 정확한 top-level key | 핵심 권한 |
+|---|---|---|---|
+| provider 형식 | `SupportProviderOutput` | `completion_status`, `support_checks`, `no_candidate_reason_code`, `uncertainties` | 타입/enum/extra field만 우선 검사 |
+| local 의미 | `SupportAnalysisDraft` | provider와 동일 | completion 조건, program/criterion 중복과 catalog 관계 검사 |
+| runtime 공개 | `SupportAnalysisResult` | `completion_status`, `support_checks`, `no_candidate_reason_code`, `uncertainties`, `search_summary`, `evidence_records`, `based_on_snapshot_id`, `based_on_candidate_ids` | catalog 원문·시각·Evidence·snapshot/candidate provenance 주입 |
+
+provider의 `SupportCheckModelOutput`은 `support_program`, `match_status`, `criteria`, `unknown_field_paths`, `reason_summary`, `evidence_refs`만 반환하고, 각 `SupportCriterionModelOutput`은 `criterion_code`, `status`, `reason_summary`, `evidence_refs`만 반환합니다. local `SupportCheckDraft`/`SupportCriterionDraft`도 같은 key 집합에 의미 검증만 더합니다. `program_name`, `related_steps`, required document/application 정보, `case_value`, `required_values`, `source_version`, `freshness_status`, `checked_at`은 모델이 쓰지 않고 검수된 immutable catalog와 snapshot/overlay에서 runtime이 복사·계산합니다. 선택된 검수 catalog 항목이 없으면 모델을 호출하지 않고 runtime이 직접 `NO_CANDIDATE`를 반환합니다. 모델을 호출한 경우 최초 포함 최대 3회의 bounded local 검증만 허용합니다.
+
 `SupportMatchStatus`:
 
 `POSSIBLY_RELEVANT | NEEDS_CONFIRMATION | NOT_RELEVANT | STALE | UNVERIFIABLE`
@@ -842,16 +935,86 @@ Snapshot 안의 모든 `evidence_refs`는 같은 snapshot의 `evidence_records`�
 - 조회만으로 신청 row를 생성·변경하지 않습니다.
 - 금액 필드는 v1 `SupportCheck`에 두지 않습니다. 추후 추가 시 CURRENT 공식 Evidence를 가진 별도 `GroundedClaim`이 필수입니다.
 
+### 9.1 지원 공고 discovery adapter — `BizInfoSupportDiscoveryTool`
+
+이 adapter는 Support Agent의 자격 비교 Tool이 아니라 검수 catalog를 만들기 전의 AI 소유 read-only ingestion 경계입니다. 기업마당 공식 API가 실제 반환한 공고를 strict raw candidate와 `OFFICIAL_API` Evidence로 정규화합니다. Graph, `SupportAnalysisInput`, `ReviewedSupportCatalog`와 자동 연결되지 않습니다.
+
+입력 `SupportNoticeDiscoveryInput`:
+
+| 필드 | 타입 | 필수 | 설명 |
+|---|---|---:|---|
+| `keywords` | string tuple, 1..8 | O | 기업마당 hashtag query. 항목당 1..80자, comma/control character·중복·민감정보 금지 |
+| `max_results` | strict integer, 1..100 | O | caller가 허용하는 최대 raw 후보 수, 기본 20 |
+
+출력 `SupportNoticeDiscoveryResult`:
+
+| 필드 | 타입 | 필수 | 설명 |
+|---|---|---:|---|
+| `provider` | literal `BIZINFO` | O | 공식 API 식별자 |
+| `keywords` | 입력과 같은 tuple | O | 외부에 전송한 bounded hashtag |
+| `applied_result_limit` | integer | O | input과 runtime config 중 작은 상한 |
+| `provider_total_count` | non-negative integer \| null | O | 응답 item의 `totCnt`; 빈 결과처럼 확인 불가면 null |
+| `provider_returned_count` | non-negative integer | O | API response item 수 |
+| `duplicate_count` | non-negative integer | O | `pblancId` 중복으로 제거한 수 |
+| `result_count` | non-negative integer | O | 최종 후보 수 |
+| `truncated` | boolean | O | 전체/반환 수가 최종 수보다 많아 잘렸는지 여부 |
+| `retrieved_at` | aware datetime | O | runtime UTC 조회시각 |
+| `candidates` | `SupportNoticeCandidate[]`, max 100 | O | 정규화했지만 아직 검수되지 않은 공식 공고 |
+| `evidence_records` | `EvidenceRecord[]`, max 100 | O | candidate마다 정확히 하나인 `OFFICIAL_API` Evidence |
+
+`SupportNoticeCandidate` 주요 필드:
+
+| 필드 | 원 API 필드 | 설명 |
+|---|---|---|
+| `notice_id` | `pblancId` | 외부 공고 ID. internal `support_program_id`가 아님 |
+| `title`, `detail_url` | `pblancNm`, `pblancUrl` | HTML 제거 제목과 검증된 기업마당 상세 URL |
+| `summary`, `target` | `bsnsSumryCn`, `trgetNm` | 공고 자연어. 구조화 criterion이나 자격 판정이 아님 |
+| `application_period`, `application_method` | `reqstBeginEndDe`, `reqstMthPapersCn` | 원문 의미를 보존한 text. 임의 날짜/서류 배열로 바꾸지 않음 |
+| `application_url` | `rceptEngnHmpgUrl` | 비실행 metadata URL. adapter가 후속 fetch하지 않음 |
+| `jurisdiction_institution`, `executing_institution` | `jrsdInsttNm`, `excInsttNm` | 주관·수행기관 text |
+| `support_area_major`, `support_area_middle` | 지원분야 코드명 | 분류 text |
+| `reference_contact` | `refrncNm` | 공식 공고의 문의처 text. Evidence excerpt에는 자동 포함하지 않음 |
+| `hashtags` | `hashtags` | trim·dedupe한 hashtag tuple |
+| attachment name/url 4개 | `fileNm`, `flpthNm`, `printFileNm`, `printFlpthNm` | 기업마당 host로 검증된 첨부 metadata. 자동 parsing 없음 |
+| `provider_created_at`, `provider_updated_at` | `creatPnttm`, `updtPnttm` | Asia/Seoul aware datetime 또는 null |
+| `view_count` | `inqireCo` | non-negative integer |
+| `freshness_status` | runtime | 항상 `UNKNOWN`; API 조회시각만으로 정책 최신성을 확정하지 않음 |
+| `evidence_ref` | runtime | 같은 result의 정확히 한 `OFFICIAL_API` Evidence 참조 |
+
+고정 endpoint는 `GET https://www.bizinfo.go.kr/uss/rss/bizinfoApi.do`이고 `BIZINFO_API_KEY`를 `crtfcKey`로 전달합니다. endpoint override, redirect, non-JSON, 중복 JSON key, NaN, schema drift, 과대 응답은 거부합니다. key와 upstream body/URL/예외는 오류 문자열에 넣지 않습니다. 공고 ID 기준으로 dedupe하고 정규화 내용의 canonical SHA-256을 Evidence version/hash로 사용합니다.
+
+count/hash/Evidence 불변식은 다음과 같습니다.
+
+- `result_count=len(candidates)`, `len(evidence_records)=len(candidates)`, `result_count=min(provider_returned_count-duplicate_count, applied_result_limit)`이며 `duplicate_count <= provider_returned_count`입니다.
+- `provider_returned_count=0` iff `provider_total_count=null`이고, total이 있으면 `provider_total_count >= provider_returned_count`입니다. `truncated`는 total이 최종 수보다 크거나 dedupe 후 반환 수가 최종 수보다 클 때만 true입니다.
+- `notice_id`와 `evidence_ref`는 각각 unique이고 candidate의 ref와 Evidence ID 집합은 1:1로 같습니다.
+- hash projection은 candidate의 `provider`, `freshness_status`, `evidence_ref`, `view_count`만 제외하고 나머지 선언 필드를 null까지 포함합니다. datetime은 ISO 문자열, tuple은 JSON array로 바꾼 뒤 key 정렬·공백 없는 UTF-8 JSON의 SHA-256을 계산합니다.
+- Evidence ID는 `support:bizinfo:{notice_id}:{64-lowercase-hex}`이고 `source_type=OFFICIAL_API`, `source_ref`는 위 고정 endpoint, `locator=detail_url`, `source_version=content_hash`, `freshness_status=UNKNOWN`, `retrieved_at=result.retrieved_at`, `published_at=null`, `parent_evidence_refs=[]`입니다. excerpt는 title/summary/target/application period/application method의 non-null 값을 ` | `로 연결한 앞 4,000 code point입니다.
+
+현재 요청은 `pageIndex=1`인 단일 GET이며 input/runtime 상한 중 작은 `pageUnit`(최대 100)을 사용합니다. pagination·전체 동기화·자동 retry·상세/첨부 fetch·RAG fallback은 없습니다. 성공 결과가 0건인 것과 기술 실패를 구분합니다.
+
+오류는 `SupportNoticeDiscoveryError` 계열 예외의 다음 안전 metadata로 전달합니다.
+
+| 필드 | 타입 | 설명 |
+|---|---|---|
+| `code` | upper snake string | `BIZINFO_SENSITIVE_KEYWORD`, `BIZINFO_REDIRECT_REFUSED`, `BIZINFO_HTTP_ERROR`, `BIZINFO_TRANSPORT_ERROR`, `BIZINFO_*_INVALID`, `BIZINFO_RESPONSE_TOO_LARGE` 등 |
+| `retryable` | boolean | transport, HTTP 408/425/429/5xx만 true; 입력·redirect·schema/content 오류는 false |
+| `status_code` | integer \| null | HTTP 응답이 있었을 때만 상태코드. 응답 body·요청 URL·key는 포함하지 않음 |
+
+Graph에 연결할 때도 이 실패를 `NO_CANDIDATE`나 `NOT_RELEVANT`로 바꾸지 않고 기술 실패 envelope로 변환해야 합니다.
+
+다음 승격은 이 adapter의 책임이 아닙니다. 상세·첨부 원문 확보, external ID와 canonical support row 매핑, 조건·서류 구조화, source version 검증, 사람 또는 승인된 deterministic rule의 독립 검수를 거쳐야만 `ReviewedSupportCatalog`가 됩니다. 이 경계의 근거와 추가 API는 [`agent-official-data-source-strategy.md`](./agent-official-data-source-strategy.md)에 정리합니다.
+
 ## 10. 절차조회 Tool
 
 ### 입력 — `ProcedureLookupInput`
 
-v2는 하나의 strict model입니다. 검색 질의는 Supervisor/runtime이 허용된 Case projection과 고정 폐업 용어로 구성하며 사용자 원문, 주소, token, 계약서 본문을 그대로 넣지 않습니다. 첫 입력에서 아직 snapshot fact가 되지 않은 업종도 찾을 수 있도록 redacted 입력의 제한된 키워드는 `카페 → 휴게음식점 폐업 신고 절차 정부24`처럼 미리 정의된 정적 검색어를 선택하는 데만 사용합니다. 원문 문자열을 검색어에 결합하거나 이 선택을 Case 의미 분석 결과로 취급하지 않습니다.
+v2는 하나의 strict model입니다. 현재는 AgentGraph runtime이 허용된 Case projection과 고정 폐업 용어로 `search_queries`를 구성합니다. 목표에서는 Supervisor가 조회 필요성을 계획하고 Graph router가 같은 제한으로 질의를 검증·조립합니다. 어느 경우에도 사용자 원문, 주소, token, 계약서 본문을 그대로 넣지 않습니다. 첫 입력에서 아직 snapshot fact가 되지 않은 업종도 찾을 수 있도록 redacted 입력의 제한된 키워드는 `카페 → 휴게음식점 폐업 신고 절차 정부24`처럼 미리 정의된 정적 검색어를 선택하는 데만 사용합니다. 원문 문자열을 검색어에 결합하거나 이 선택을 Case 의미 분석 결과로 취급하지 않습니다.
 
 | 필드 | 타입 | 필수 | 설명 |
 |---|---|---:|---|
 | `lookup_goal` | literal `BUSINESS_CLOSURE` | O | 폐업 공식 절차 조회만 허용 |
-| `search_queries` | non-empty string[] (min 1, max 4) | O | Google 우선·Kakao fallback 검색에 사용할 중복 없는 비식별 논리 질의. 각 질의는 runtime에서 200자 이하로 제한 |
+| `search_queries` | non-empty string[] (min 1, max 4) | O | 공식 registry 선택과 선택적 검색 fallback에 사용할 중복 없는 비식별 논리 질의. 각 질의는 runtime에서 200자 이하로 제한 |
 | `as_of` | date | O | 조회·최신성 판단 기준일 |
 | `locale` | literal `ko-KR` | O | v2 지원 locale |
 | `source_policy` | literal `OFFICIAL_ONLY` | O | 공식기관 allowlist만 원문 fetch |
@@ -859,9 +1022,9 @@ v2는 하나의 strict model입니다. 검색 질의는 Supervisor/runtime이 �
 | `based_on_snapshot_id` | UUID | O | 검색 문맥을 만든 Case snapshot ID |
 | `review_feedback` | `ReviewIssue[]` | O | 최초 호출은 `[]`; 재작업에서는 Graph가 검증한 Review issue를 전달 |
 
-`search_queries`는 검색 명령이지 Evidence가 아닙니다. 각 query는 설정된 provider 중 Google Agent Search `searchLite`를 먼저 시도하고, Google의 기술 실패·0건·공식 allowlist 후보 0건일 때만 Kakao Daum 검색으로 fallback합니다. Google이 공식 후보를 반환한 뒤 원문 fetch가 실패한 경우에는 같은 query를 Kakao로 다시 검색하지 않습니다. Google이 미설정이고 Kakao만 설정됐다면 Kakao가 이번 실행의 첫 provider이므로 `provider_order=[KAKAO_DAUM_WEB]`, `fallback_query_count=0`이며 Google을 시도한 것처럼 경고하지 않습니다.
+`search_queries`는 source 선택 명령이지 Evidence가 아닙니다. 기본값에서는 각 query가 `OFFICIAL_SOURCE_REGISTRY`를 먼저 시도합니다. registry가 공식 후보를 선택하지 못한 query만 Kakao Daum 검색으로 넘기고, Kakao도 기술 실패·0건·공식 allowlist 후보 0건이면 Google Agent Search `searchLite`로 넘깁니다. 어떤 provider든 공식 후보를 반환한 뒤 원문 fetch가 실패한 경우에는 현재 구현상 같은 query를 다음 provider로 다시 검색하지 않습니다. registry를 명시적으로 끈 구성도 사용자 정책과 동일하게 Kakao→Google 순서를 유지합니다.
 
-Google 호출은 공개 공식사이트만 포함한 Agent Search 앱을 대상으로 `POST https://{api-host}/v1/projects/{project}/locations/{location}/collections/default_collection/engines/{engine}/servingConfigs/default_search:searchLite`와 `X-Goog-Api-Key`를 사용합니다. `global`은 `discoveryengine.googleapis.com`, `us | eu`는 `{location}-discoveryengine.googleapis.com`만 허용합니다. Kakao는 `GET https://dapi.kakao.com/v2/search/web`와 `Authorization: KakaoAK ${REST_API_KEY}`를 사용합니다. Google/Kakao 검색결과 HTML, 특히 `google.com/search` SERP는 요청하거나 parsing하지 않습니다. credential은 input/output/log/trace에 넣지 않습니다. Google runtime 설정은 `PROCEDURE_GOOGLE_API_KEY`, `PROCEDURE_GOOGLE_PROJECT_ID`, `PROCEDURE_GOOGLE_ENGINE_ID`, 선택 `PROCEDURE_GOOGLE_LOCATION`입니다. Kakao는 `PROCEDURE_KAKAO_REST_API_KEY`를 우선하고 기존 `PROCEDURE_SEARCH_API_KEY`, `KAKAO_CLIENT_ID`는 deprecated alias로만 읽습니다. 두 provider가 모두 미설정이면 빈 성공이나 fixture로 대체하지 않고 configuration failure로 fail closed합니다. provider가 요청한 `max_results_per_query`보다 많은 document를 반환해도 runtime은 로컬 상한까지만 검증·fetch하고 초과분을 rejected count에 포함합니다.
+registry는 credential 없이 코드에 고정된 EasyLaw·공식기관 URL 후보만 냅니다. Kakao는 `GET https://dapi.kakao.com/v2/search/web`와 `Authorization: KakaoAK ${REST_API_KEY}`를 사용하고, Google은 공개 공식사이트만 포함한 Agent Search 앱을 대상으로 `POST https://{api-host}/v1/projects/{project}/locations/{location}/collections/default_collection/engines/{engine}/servingConfigs/default_search:searchLite`와 `X-Goog-Api-Key`를 사용합니다. Kakao/Google 검색결과 HTML, 특히 `google.com/search` SERP는 요청하거나 parsing하지 않으며 Naver 검색 결과는 현행 이용조건상 AI 입력에 사용하지 않습니다. credential은 input/output/log/trace에 넣지 않습니다. registry가 켜진 기본 구성은 검색 key가 없어도 동작합니다. registry를 끈 경우에는 Kakao 또는 완전한 Google 설정 중 하나가 없으면 configuration failure입니다. provider가 요청한 `max_results_per_query`보다 많은 document를 반환해도 runtime은 로컬 상한까지만 검증·fetch하고 초과분을 rejected count에 포함합니다.
 
 ### 출력 — `ProcedureLookupResult`
 
@@ -892,7 +1055,7 @@ Google 호출은 공개 공식사이트만 포함한 Agent Search 앱을 대상�
 | `content_hash` | `sha256:<hex>` | O | 실제 fetch 응답 body bytes 기준 |
 | `evidence_ref` | opaque string | O | 같은 result의 정확히 한 Evidence ID |
 | `search_query` | string | O | 이 URL을 발견한 입력 질의 중 하나 |
-| `discovery_provider` | `GOOGLE_AGENT_SEARCH` \| `KAKAO_DAUM_WEB` | O | 이 URL을 실제 발견한 search provider. 검색 metadata provenance이며 Evidence 출처 유형은 아님 |
+| `discovery_provider` | `OFFICIAL_SOURCE_REGISTRY` \| `KAKAO_DAUM_WEB` \| `GOOGLE_AGENT_SEARCH` | O | 이 URL을 선택·발견한 provider. discovery provenance이며 Evidence 출처 유형은 아님 |
 
 DTO 자체는 HTTPS, credential/fragment/port/IP-literal 금지, lowercase canonical host와 `source_domain` 일치를 검증합니다. 공식기관 domain allowlist는 wire field가 아니며 신뢰된 Procedure Tool/resolver가 결과를 만들 때 runtime config로 추가 검증합니다. 환경변수는 코드에서 검토된 root와 그 하위 host로만 범위를 좁힐 수 있고, 새 trust root 추가는 코드 변경·보안 승인이 필요합니다. BE가 임의 document를 조립해 이 출력으로 취급해서는 안 됩니다.
 
@@ -900,34 +1063,34 @@ DTO 자체는 HTTPS, credential/fragment/port/IP-literal 금지, lowercase canon
 
 | 필드 | 타입 | 필수 | 설명 |
 |---|---|---:|---|
-| `provider_order` | `ProcedureSearchProvider[]` (min 1, max 2) | O | 이번 실행에 설정된 provider의 실제 우선순위. 둘 다 설정되면 `[GOOGLE_AGENT_SEARCH, KAKAO_DAUM_WEB]`; 하나만 설정되면 해당 provider만 포함 |
-| `provider_summaries` | `ProcedureProviderSearchSummary[]` (min 1, max 2) | O | `provider_order`와 같은 길이·순서의 provider별 호출 counter. 설정됐지만 호출하지 않은 fallback도 0 counter로 포함 |
-| `fallback_query_count` | non-negative integer | O | Google을 실제 시도한 뒤 기술 실패·0건·공식 후보 0건으로 Kakao에 넘긴 논리 query 수. Kakao-only direct 실행은 0 |
+| `provider_order` | `ProcedureSearchProvider[]` (min 1, max 3) | O | 정상 기본 순서 `[OFFICIAL_SOURCE_REGISTRY, KAKAO_DAUM_WEB?, GOOGLE_AGENT_SEARCH?]`; 미설정 fallback은 생략 |
+| `provider_summaries` | `ProcedureProviderSearchSummary[]` (min 1, max 3) | O | `provider_order`와 같은 길이·순서의 provider별 counter. 설정됐지만 호출하지 않은 fallback도 0 counter로 포함 |
+| `fallback_query_count` | non-negative integer | O | 첫 provider가 해결하지 못해 두 번째 provider에 실제로 넘긴 논리 query 수. registry-only 실행은 0 |
 | `requested_query_count` | positive integer | O | 요청 질의 수 |
-| `successful_query_count` | non-negative integer | O | provider chain을 거쳐 성공한 논리 질의 수. Google 실패 뒤 Kakao 성공도 1회 성공으로 계산 |
+| `successful_query_count` | non-negative integer | O | provider chain을 거쳐 성공한 논리 질의 수. fallback 성공도 논리 질의 1회 성공으로 계산 |
 | `failed_query_count` | non-negative integer | O | 모든 허용 provider 시도 뒤에도 실패한 논리 질의 수 |
 | `provider_result_count` | non-negative integer | O | 모든 provider가 반환한 후보 수 합계 |
 | `official_candidate_count` | non-negative integer | O | URL 정규화·HTTPS·allowlist를 통과한 후보 수 |
 | `fetched_document_count` | non-negative integer | O | 원문 fetch·본문 검증을 통과한 문서 수 |
-| `rejected_result_count` | non-negative integer | O | provider 결과 중 URL parse·HTTPS·초기 domain 정책을 통과하지 못한 수 |
+| `rejected_result_count` | non-negative integer | O | provider 결과 중 필수 형식·URL parse·HTTPS·domain 정책을 통과하지 못했거나 caller 결과 상한을 넘어 fetch 대상에서 제외된 수 |
 | `fetch_failure_count` | non-negative integer | O | 허용 후보 중 URL/redirect·HTTP·MIME·size·본문 검증 또는 fetch가 실패한 수 |
 | `searched_at` | timezone-aware datetime | O | 조회 실행 시각 |
 
-`ProcedureSearchProvider`는 `GOOGLE_AGENT_SEARCH | KAKAO_DAUM_WEB`입니다.
+`ProcedureSearchProvider`는 `OFFICIAL_SOURCE_REGISTRY | KAKAO_DAUM_WEB | GOOGLE_AGENT_SEARCH`입니다.
 
 `ProcedureProviderSearchSummary`:
 
 | 필드 | 타입 | 필수 | 설명 |
 |---|---|---:|---|
 | `provider` | `ProcedureSearchProvider` | O | 이 summary가 집계하는 provider |
-| `attempted_query_count` | non-negative integer | O | 실제 API 요청을 시도한 논리 query 수 |
-| `successful_query_count` | non-negative integer | O | well-formed HTTP/JSON 응답을 받은 query 수. 0건 응답도 provider-level success |
+| `attempted_query_count` | non-negative integer | O | registry 선택 또는 실제 API 요청을 시도한 논리 query 수 |
+| `successful_query_count` | non-negative integer | O | registry 평가 또는 well-formed HTTP/JSON 응답에 성공한 query 수. 0건도 provider-level success |
 | `failed_query_count` | non-negative integer | O | retry 상한 뒤 기술 실패한 provider query 수 |
 | `provider_result_count` | non-negative integer | O | 이 provider가 반환한 후보 수 |
 
 각 provider summary에서 `successful_query_count + failed_query_count = attempted_query_count`이고, `successful_query_count=0`이면 `provider_result_count=0`이어야 하며, `provider_result_count` 합은 aggregate `provider_result_count`와 같습니다. 각 document의 `discovery_provider` summary에는 성공 응답과 반환 결과가 실제로 있어야 하고, 그 provider로 표시된 document 수는 해당 `provider_result_count`를 넘을 수 없습니다.
 
-aggregate counter는 음수가 아니며 `successful_query_count + failed_query_count = requested_query_count`, `fallback_query_count <= requested_query_count`, `official_candidate_count + rejected_result_count = provider_result_count`, `fetched_document_count = len(documents) = len(evidence_records)`, `fetched_document_count + fetch_failure_count <= official_candidate_count`를 만족해야 합니다. 논리 query 성공 수가 0인 `PARTIAL`도 가능하지만, 결과 객체가 생성되려면 `provider_summaries` 중 적어도 하나의 provider-level `successful_query_count >= 1`이어야 합니다. `provider_summaries`의 provider는 `provider_order`와 1:1·같은 순서여야 합니다. 둘 다 설정되면 Google의 `attempted_query_count=requested_query_count`, Kakao의 `attempted_query_count=fallback_query_count`입니다. 설정됐지만 호출하지 않은 Kakao fallback summary는 네 counter가 모두 0입니다. Google-only와 Kakao-only 실행은 해당 provider만 포함하고 `fallback_query_count=0`이며, Kakao-only의 `attempted_query_count=requested_query_count`입니다. provider를 넘나드는 중복 canonical URL은 한 문서로 합치고 최초로 채택한 후보의 `discovery_provider`를 유지합니다.
+aggregate counter는 음수가 아니며 `successful_query_count + failed_query_count = requested_query_count`, `fallback_query_count <= requested_query_count`, `official_candidate_count + rejected_result_count = provider_result_count`, `fetched_document_count = len(documents) = len(evidence_records)`, `fetched_document_count + fetch_failure_count <= official_candidate_count`를 만족해야 합니다. 결과 객체가 생성되려면 provider-level success가 하나 이상 있어야 합니다. `provider_summaries`는 `provider_order`와 1:1·같은 순서이고, 첫 provider는 모든 query를 시도하며 뒤 provider의 attempt 수는 바로 앞 provider보다 많을 수 없습니다. `fallback_query_count`는 두 번째 provider의 attempt 수와 같습니다. 설정됐지만 호출하지 않은 fallback summary는 네 counter가 모두 0입니다. provider를 넘나드는 중복 canonical URL은 한 문서로 합치고 최초 채택 provider를 유지합니다.
 
 `ProcedureLookupWarning`:
 
@@ -936,20 +1099,23 @@ aggregate counter는 음수가 아니며 `successful_query_count + failed_query_
 | `code` | upper snake code | O | 비차단 부분 실패·거부·최신성 경고 코드 |
 | `message` | string | O | credential·원문·내부 예외를 포함하지 않는 운영 요약 |
 
-현재 runtime이 발급하는 provider-chain code에는 Kakao fallback이 실제 실행됐음을 나타내는 `SEARCH_PROVIDER_FALLBACK`과 provider 기술 실패를 나타내는 `SEARCH_PROVIDER_FAILED`가 있습니다. 그 밖의 code는 `SEARCH_QUERY_FAILED`, `RESULT_REJECTED`, `SOURCE_FETCH_FAILED`, `NO_OFFICIAL_RESULTS`, `NO_FETCHED_DOCUMENTS`입니다. 원 질의·거부 URL·내부 예외는 Warning에 복사하지 않으며 상세 원인은 민감정보가 제거된 운영 telemetry로만 집계합니다.
+현재 runtime이 발급하는 provider-chain code에는 첫 provider 다음 fallback이 실제 실행됐음을 나타내는 `SEARCH_PROVIDER_FALLBACK`과 외부 provider 기술 실패를 나타내는 `SEARCH_PROVIDER_FAILED`가 있습니다. 그 밖의 code는 `SEARCH_QUERY_FAILED`, `RESULT_REJECTED`, `SOURCE_FETCH_FAILED`, `NO_OFFICIAL_RESULTS`, `NO_FETCHED_DOCUMENTS`입니다. 원 질의·거부 URL·내부 예외는 Warning에 복사하지 않으며 상세 원인은 민감정보가 제거된 운영 telemetry로만 집계합니다.
 
-`COMPLETE`는 provider chain 기준 모든 논리 질의가 성공하고 공식문서가 1개 이상이며 fetch 실패가 없을 때입니다. Google 기술 실패 뒤 Kakao가 해당 query를 해결해도 `SEARCH_PROVIDER_FALLBACK` warning과 attempt 이력을 남긴 채 `COMPLETE`가 될 수 있습니다. `PARTIAL`은 chain 종료 후 적어도 한 논리 질의 또는 fetch가 실패했고 검색 실행 일부는 성립했을 때이며, 허용 후보 fetch가 모두 실패하면 문서가 0개일 수도 있습니다. Google이 정상 0건 또는 비공식 후보만 반환한 뒤 Kakao가 기술 실패한 경우도 `PARTIAL`입니다. `NO_RESULTS`는 모든 논리 query가 chain 안의 적어도 한 well-formed provider 응답으로 해결됐지만 전체 공식 후보가 0개일 때 허용합니다. 앞선 Google 기술 실패가 Kakao의 정상 0건 응답으로 복구된 경우에는 provider warning을 보존한 `NO_RESULTS`일 수 있습니다. 두 provider가 모두 미설정이거나 전체 lookup에서 모든 실제 provider attempt가 기술 실패하면 `SEARCH_UNAVAILABLE` `ComponentFailure`입니다. Info Agent는 `PARTIAL | NO_RESULTS`를 `completion_status=COMPLETE`로 소거하지 않습니다. 누락/충돌 때문에 `NEEDS_USER_INPUT`이어야 하는 경우는 그 상태를 유지하고, 그렇지 않으면 최소 `PARTIAL`과 `SOURCE_UNAVAILABLE` uncertainty로 전달합니다.
+`COMPLETE`는 provider chain 기준 모든 논리 질의가 성공하고 공식문서가 1개 이상이며 fetch 실패가 없을 때입니다. registry miss 뒤 fallback이 query를 해결해도 warning과 attempt 이력을 남긴 채 `COMPLETE`가 될 수 있습니다. `PARTIAL`은 chain 종료 후 적어도 한 논리 질의 또는 fetch가 실패했고 실행 일부는 성립했을 때입니다. `NO_RESULTS`는 모든 논리 query가 적어도 한 정상 provider 결과로 해결됐지만 전체 공식 후보가 0개일 때 허용합니다. registry가 켜져 있으면 검색 provider credential이 없어도 구성 실패가 아닙니다. registry를 끄고 어떤 외부 provider도 없거나 전체 실제 외부 attempt가 기술 실패하면 `SEARCH_UNAVAILABLE`입니다. Info Agent는 `PARTIAL | NO_RESULTS`를 `COMPLETE`로 소거하지 않습니다.
 
 각 document의 `evidence_ref`는 같은 result에서 유일한 `EvidenceRecord`를 가리키고, Evidence는 `source_type=OFFICIAL_DOCUMENT`, `source_ref=canonical_url`, 같은 excerpt/published_at/retrieved_at/freshness/content_hash를 가져야 합니다. 검색 snippet은 이 집합에 들어갈 수 없습니다.
 
-현재 runtime은 Google/Kakao 검색 metadata의 날짜를 공식 원문의 발행·수정시각으로 신뢰하지 않고 별도의 공식 page-date verifier도 없으므로 `published_at=null`, `freshness_status=UNKNOWN`으로 반환합니다. 향후 이 값을 채우려면 fetched page 자체에서 날짜를 검증하는 resolver와 회귀 fixture를 추가해야 합니다. finding이 참조한 Evidence 중 하나라도 `UNKNOWN | STALE`이면 Info local Guardrail이 `relevance=UNDETERMINED` 외 값을 거부하며, provider prompt와 Review도 검증되지 않은 기한·서류·의무를 확정하지 못하게 합니다.
+현재 runtime은 registry metadata나 Kakao/Google 검색 metadata의 날짜를 공식 원문의 발행·수정시각으로 신뢰하지 않고 별도의 공식 page-date verifier도 없으므로 `published_at=null`, `freshness_status=UNKNOWN`으로 반환합니다. 향후 이 값을 채우려면 fetched page 자체에서 날짜를 검증하는 resolver와 회귀 fixture를 추가해야 합니다. finding이 참조한 Evidence 중 하나라도 `UNKNOWN | STALE`이면 Info local Guardrail이 `relevance=UNDETERMINED` 외 값을 거부하며, provider prompt와 Review도 검증되지 않은 기한·서류·의무를 확정하지 못하게 합니다.
 
-Tool은 HTML을 data로만 처리하고 script/style 등 실행·비가시 subtree와 form/input의 markup·속성을 제거하며 prompt injection 문구를 실행하지 않습니다. 공식 사이트가 form으로 본문을 감싸는 경우에는 form 안의 보이는 텍스트를 보존합니다. `main`/`article`의 visible text를 우선하고, 긴 문서는 반복 메뉴 횟수가 아니라 서로 다른 정적 검색어 token이 가장 많이 모인 bounded window를 선택합니다. 이는 LLM 의미 판정이 아닌 excerpt 위치 선택일 뿐이며 `content_hash`는 excerpt가 아니라 fetch한 전체 body bytes를 기준으로 합니다. 현재 요청 전과 redirect마다 HTTPS, 표준 port, hostname allowlist와 IP-literal 금지를 검사하고 허용 MIME·본문 byte 상한·요청별 timeout을 적용합니다. `PROCEDURE_SEARCH_TOTAL_TIMEOUT_SECONDS`는 검색과 모든 원문 fetch의 전체 시간을 기본 30초로 제한합니다. 외부 HTTP client를 주입해도 요청마다 redirect 자동 추적과 client auth를 끄고 client 기본 header/cookie를 상속하지 않습니다. hostname의 DNS 해석 결과가 private/loopback/link-local로 바뀌는 경우까지 막는 resolver pinning·egress 정책은 생산 연동 전에 추가해야 하는 보안 경계입니다.
+Tool은 HTML을 data로만 처리하고 script/style 등 실행·비가시 subtree와 form/input의 markup·속성을 제거하며 prompt injection 문구를 실행하지 않습니다. 공식 사이트가 form으로 본문을 감싸는 경우에는 form 안의 보이는 텍스트를 보존합니다. `main`/`article`의 visible text를 우선하고, 긴 문서는 반복 메뉴 횟수가 아니라 서로 다른 정적 검색어 token이 가장 많이 모인 bounded window를 선택합니다. 이는 LLM 의미 판정이 아닌 excerpt 위치 선택일 뿐이며 `content_hash`는 excerpt가 아니라 fetch한 전체 body bytes를 기준으로 합니다. 현재 요청 전과 redirect마다 HTTPS, 표준 port, hostname allowlist와 IP-literal 금지를 검사하고 허용 MIME·본문 byte 상한·요청별 timeout을 적용합니다. `PROCEDURE_SEARCH_TOTAL_TIMEOUT_SECONDS`는 검색과 모든 원문 fetch의 전체 시간을 기본 60초로 제한합니다. 공식 registry의 여러 문서를 순차 검증할 때 30초가 실제 smoke에서 소진된 근거를 반영하되 요청별 8초 상한은 유지합니다. 외부 HTTP client를 주입해도 요청마다 redirect 자동 추적과 client auth를 끄고 client 기본 header/cookie를 상속하지 않습니다. hostname의 DNS 해석 결과가 private/loopback/link-local로 바뀌는 경우까지 막는 resolver pinning·egress 정책은 생산 연동 전에 추가해야 하는 보안 경계입니다.
 
 절차조회 출력에는 canonical step ID, `procedure_findings`, 적용성, 준비상태, 완료상태, 조건 판정, priority, rank, selected, blocker, next action을 두지 않습니다. 이 의미 분석은 §8 정보분석 Agent, 최종 선택은 Supervisor의 책임입니다.
 
-### Search provider API 근거
+### 공식 source와 검색 provider 근거
 
+- [공식 API·크롤링·RAG 데이터 소스 조사](./agent-official-data-source-strategy.md)는 고정 공식 문서, API 실호출 상태와 수집 제한을 정리합니다.
+- [찾기쉬운 생활법령 저작권 정책](https://www.easylaw.go.kr/CSP/AboutCopyright.laf?topMenu=introUl3)은 registry 원문의 출처·원 URL 보존 근거입니다.
+- [네이버 검색 API 이용약관 변경 공지](https://developers.naver.com/notice/article/33400)는 검색 결과를 AI 입력에 사용하지 않는 근거입니다.
 - [Google Agent Search `searchLite` REST API](https://docs.cloud.google.com/generative-ai-app-builder/docs/reference/rest/v1/projects.locations.collections.engines.servingConfigs/searchLite)는 공개 웹사이트 검색 앱에서 API key 인증을 허용하는 `POST ...:searchLite`와 query/pageSize/SearchResponse 계약을 정의합니다. Google은 보안상 OAuth/IAM 기반 `search`를 더 권장하지만 v2의 공개 공식사이트 URL discovery에는 제한된 API key와 `X-Goog-Api-Key` header를 사용합니다.
 - [Google Agent Search 웹사이트 데이터 준비](https://docs.cloud.google.com/generative-ai-app-builder/docs/prepare-data)는 검색할 공개 웹사이트 URL pattern을 사전에 포함·제외해 Google이 해당 범위만 crawl/index하도록 구성하는 근거입니다. 이는 Google 검색결과 화면 scraping이 아닙니다.
 - [Google Cloud API key 인증](https://docs.cloud.google.com/docs/authentication/api-keys-use)은 URL query보다 `X-Goog-Api-Key` header 사용을 권장합니다.
@@ -958,11 +1124,282 @@ Tool은 HTML을 data로만 처리하고 script/style 등 실행·비가시 subtr
 - [앱 키 설정](https://developers.kakao.com/docs/ko/app-setting/app)은 REST API 키 관리와 호출 허용 IP 설정의 근거입니다.
 - [쿼터 안내](https://developers.kakao.com/docs/ko/getting-started/quota)는 Daum 검색 사용량에 한도가 있고 값이 변경될 수 있음을 명시하므로 quota 오류, retry, cache와 관측을 계약에 포함합니다.
 
+## 10.1 목표 BE/AI 외부 공식 resolver 계약 (현재 미구현)
+
+이 절은 NTS 사업자 상태, 행안부 지방행정 인허가, 국가법령정보를 실제 Case에 연결할 때 사용할 **목표 wire 계약**이며 현재 구현 완료를 뜻하지 않습니다. 서비스 승인·실호출 성공 여부는 schema 상수가 아니라 배포 시점에 바뀌는 운영 상태입니다. BE는 versioned dataset registry로 이를 판정하고, 최신 상태·근거·확인 시각은 [공식 API·크롤링·RAG 데이터 소스 조사](./agent-official-data-source-strategy.md)에만 기록합니다. registry에서 사용할 수 없는 dataset은 provider를 호출하지 않고 `SERVICE_NOT_APPROVED`로 닫습니다.
+
+`BusinessStatusLookup`과 `FoodBusinessLicenseLookup`은 인증·Case 소유권·동의를 확인한 BE read-only resolver가 raw 식별자를 복호화해 provider를 호출합니다. 사업자등록번호·인허가 관리번호 자체는 Agent/LLM payload, 검색 query, 일반 log, Langfuse, Evidence에 절대 넣지 않습니다. 법령 검색은 식별자가 없는 AI read-only Tool로 구현할 수 있지만 운영 credential과 egress는 BE/인프라 경계에 둡니다.
+
+### wire 공통 규칙과 입력 context
+
+이 절의 object는 strict object입니다. 선언하지 않은 field를 거부하고 enum/literal은 대소문자를 포함해 정확히 비교합니다. 별도 표기가 없는 non-empty string은 앞뒤 공백과 공백만 있는 값을 거부하며 자동 trim·Unicode normalization을 하지 않습니다. 길이는 Unicode code point 기준입니다. opaque ID/ref와 `source_document_id/source_version`은 `1..255`, provider code는 `1..100`, 표시명·제목은 `1..500`, locator는 `1..500`, excerpt는 `1..4000`, HTTPS URL은 최대 `2048`입니다. integer에는 JSON boolean이나 소수를 허용하지 않고, aware datetime은 offset이 있는 RFC 3339 값이어야 합니다.
+
+`OfficialResolverContext`:
+
+| 필드 | 타입 | 필수 | 설명 |
+|---|---|---:|---|
+| `request_id` | UUID | O | runtime이 생성하는 조회·재시도·감사 ID |
+| `case_id` | integer `1..2^63-1` | O | 인증된 Case ID |
+| `based_on_snapshot_id` | UUID | O | 결과가 결합될 snapshot |
+| `as_of` | date | O | 판단 기준일 |
+| `consent_ref` | opaque ref `1..255` | O | 해당 provider 외부 전송의 동의·법적 근거 참조 |
+
+`consent_ref`는 동의 원문이나 token이 아닙니다. Agent는 consent/identifier ref를 만들거나 해석하지 않습니다. NTS와 MOIS는 현재 상태 API이므로 **idempotency miss로 신규 provider 호출할 때** `as_of`는 resolver 시작 시각을 `Asia/Seoul`로 변환한 날짜와 같아야 하며, 과거 상태 조회로 오해할 날짜는 HTTP 422로 거부합니다. Law는 신규 조회할 `as_of` version이 resolver 시작 시각의 `Asia/Seoul` 날짜보다 미래이면 HTTP 422로 거부합니다.
+
+idempotency key는 `(case_id, operation, request_id)`이고 `operation`은 `BUSINESS_STATUS_LOOKUP | FOOD_BUSINESS_LICENSE_LOOKUP | LAW_DOCUMENT_LOOKUP` 중 하나입니다. input digest는 NTS/MOIS의 `context.request_id` 또는 Law의 최상위 `request_id`만 제외한 **검증 완료 input 전체**를 §12 `subject_digest`의 canonical serializer로 직렬화해 같은 SHA-256 형식으로 계산합니다. secret ref 문자열은 포함하지만 ref가 가리키는 raw 값은 포함하지 않습니다. 처리 순서는 (1) JSON/field/type/format/bounds 구조 검증, (2) 인증·Case/ref 소유권 검증, (3) idempotency key/digest 조회, (4) miss일 때만 temporal `as_of`와 현재 consent/ref 유효성 검증 및 provider 호출입니다. hit·같은 digest는 자정이 지나도 최초 저장한 timestamp/Evidence ID까지 동일한 outcome을 provider 재호출 없이 반환하고, hit·다른 digest는 HTTP 409입니다. BE는 coordinator와 gateway의 최대 retry horizon보다 짧지 않게 outcome과 replay에 필요한 ref 소유권 audit metadata를 보관해야 하며, 정확한 기간과 정책 version을 공동 ADR에 고정하기 전에는 배포할 수 없습니다. 모든 success/failure correlation field는 input과 byte-for-byte 또는 typed-value 기준으로 정확히 같아야 합니다.
+
+### 사업자 상태 — `BusinessStatusLookupInput/Result`
+
+`BusinessStatusLookupInput`:
+
+| 필드 | 타입 | 필수 | 설명 |
+|---|---|---:|---|
+| `context` | `OfficialResolverContext` | O | 공통 context |
+| `business_identifier_ref` | opaque secret ref `1..255` | O | 같은 Case의 BE vault/암호화 컬럼에 있는 사업자등록번호 참조 |
+
+`BusinessStatusLookupResult`:
+
+| 필드 | 타입 | 필수 | 설명 |
+|---|---|---:|---|
+| `outcome_type` | literal `SUCCESS` | O | endpoint별 outcome discriminator |
+| `request_id`, `case_id`, `based_on_snapshot_id`, `as_of` | input과 동일 | O | correlation closure |
+| `provider` | literal `NTS_BUSINESS_STATUS` | O | data.go.kr NTS 상태조회 |
+| `record_status` | `FOUND` \| `NOT_REGISTERED` | O | 공식 등록 상태 응답 유무; 폐업 여부와 별개 |
+| `business_status_code` | string `1..100` \| null | O | provider 사업자 상태 code |
+| `business_status_name` | string `1..500` \| null | O | provider 사업자 상태 표시값 |
+| `tax_type_code` | string `1..100` \| null | O | provider 과세유형 code |
+| `tax_type_name` | string `1..500` \| null | O | provider 과세유형 표시값 |
+| `closure_date` | date \| null | O | 공식 응답에 있을 때만 |
+| `tax_type_change_date`, `invoice_apply_date` | date \| null | O | 원 field 의미 그대로 보존 |
+| `retrieved_at` | aware datetime | O | provider 응답 검증 완료 시각 |
+| `freshness_status` | `CURRENT` \| `UNKNOWN` | O | 아래 TTL 규칙의 결과 |
+| `fresh_until` | aware datetime \| null | O | CURRENT의 배타적 만료 시각 |
+| `freshness_policy_version` | string `1..100` \| null | O | TTL 정책 version |
+| `evidence_record` | `EvidenceRecord` | O | 아래 NTS Evidence profile 하나 |
+
+`FOUND`이면 `business_status_code/name`이 모두 non-null이고, `tax_type_code/name`은 모두 null이거나 모두 non-null입니다. `NOT_REGISTERED`이면 사업자·과세 code/name과 세 provider 날짜가 모두 null입니다. 번호 일부, 상호, 대표자, 주소와 provider message/body는 결과에서 제외하며 `NOT_REGISTERED`를 폐업으로 해석하지 않습니다.
+
+### 음식점 인허가 — `FoodBusinessLicenseLookupInput/Result`
+
+`FoodBusinessLicenseLookupInput`:
+
+| 필드 | 타입 | 필수 | 설명 |
+|---|---|---:|---|
+| `context` | `OfficialResolverContext` | O | 공통 context |
+| `license_identifier_ref` | opaque secret ref `1..255` | O | 같은 Case에 저장된 **정확히 한 인허가 관리번호** 참조; 다건 discovery handle 금지 |
+| `license_kind` | `REST_CAFE` \| `GENERAL_RESTAURANT` \| `BAKERY` | O | 각각 data.go.kr `15154921`, `15154916`, `15155252` |
+| `include_history` | boolean | O | history 전체 수집 요청 여부 |
+
+`FoodBusinessLicenseLookupResult`:
+
+| 필드 | 타입 | 필수 | 설명 |
+|---|---|---:|---|
+| `outcome_type` | literal `SUCCESS` | O | endpoint별 outcome discriminator |
+| `request_id`, `case_id`, `based_on_snapshot_id`, `as_of` | input과 동일 | O | correlation closure |
+| `provider` | literal `MOIS_LOCAL_LICENSE` | O | 행안부 지방행정 인허가 데이터 |
+| `license_kind`, `include_history` | input과 동일 | O | 서비스·history 범위 결합 |
+| `record_status` | `FOUND` \| `NO_MATCH` | O | exact ref의 조회 결과 |
+| `matched_license_ref` | opaque ref `1..255` \| null | O | 단일 record의 비밀값 없는 내부 참조 |
+| `license_status_code` | string `1..100` \| null | O | 공식 영업/상세 상태 code |
+| `license_status_name` | string `1..500` \| null | O | 공식 영업/상세 상태 표시값 |
+| `permit_date`, `closure_date` | date \| null | O | 공식 응답에 있을 때만 |
+| `authority_code` | string `1..100` \| null | O | 관할기관 code |
+| `authority_name` | string `1..500` \| null | O | 관할기관 표시명 |
+| `provider_updated_at` | aware datetime \| null | O | 원 데이터 수정시각 |
+| `history_status` | `NOT_REQUESTED` \| `NOT_APPLICABLE` \| `COMPLETE` | O | 미요청, record 없음, 전체 수집 완료 |
+| `history_entries` | `FoodLicenseHistoryEntry[]`, max 100 | O | provider 순서로 완전히 수집한 변경 |
+| `history_pages` | `FoodLicenseHistoryPageSummary[]`, max 100 | O | 실제 조회한 page와 Evidence 연결 |
+| `retrieved_at` | aware datetime | O | 모든 Evidence `retrieved_at`의 최댓값 |
+| `freshness_status` | `CURRENT` \| `UNKNOWN` | O | 아래 TTL 규칙의 집계값 |
+| `fresh_until` | aware datetime \| null | O | CURRENT의 배타적 만료 시각 |
+| `freshness_policy_version` | string `1..100` \| null | O | TTL 정책 version |
+| `info_evidence_ref` | opaque ID `1..255` | O | `/info` Evidence ID |
+| `evidence_records` | `EvidenceRecord[]`, `1..101` | O | info 1개와 실제 조회한 history page Evidence |
+
+`FoodLicenseHistoryEntry`:
+
+| 필드 | 타입 | 필수 | 설명 |
+|---|---|---:|---|
+| `sequence` | integer `1..100` | O | 배열에서 `1..len(history_entries)`로 연속 |
+| `status_code` | string `1..100` | O | 공식 상태 code |
+| `status_name` | string `1..500` | O | 공식 상태 표시값 |
+| `changed_at` | aware datetime \| null | O | provider가 상태 변경시각을 줄 때만 |
+| `permit_date`, `closure_date` | date \| null | O | 원 field 의미 그대로 |
+| `provider_updated_at` | aware datetime \| null | O | 원 데이터 수정시각 |
+| `evidence_ref` | opaque ID `1..255` | O | 이 entry가 포함된 history page Evidence |
+
+`FoodLicenseHistoryPageSummary`:
+
+| 필드 | 타입 | 필수 | 설명 |
+|---|---|---:|---|
+| `page_number` | integer `1..100` | O | 1-based 요청 page |
+| `returned_count` | integer `0..100` | O | 이 page에서 검증된 entry 수 |
+| `provider_total_count` | integer `0..9007199254740991` \| null | O | 동일 filter에 대한 provider total; JSON safe integer 상한(`2^53-1`), 미제공이면 null |
+| `terminal_page` | boolean | O | provider의 next-page/total 규칙으로 마지막임을 확인 |
+| `evidence_ref` | opaque ID `1..255` | O | 이 page의 Evidence ID |
+
+음식점 성공 결과는 다음 조합만 허용합니다.
+
+| 조건 | 필수 결과 |
+|---|---|
+| `record_status=FOUND, include_history=false` | matched ref와 license status pair가 non-null, `history_status=NOT_REQUESTED`, entries/pages 모두 빈 배열 |
+| `record_status=FOUND, include_history=true` | matched ref와 license status pair가 non-null, `history_status=COMPLETE`, pages가 `1..100`개 |
+| `record_status=NO_MATCH` | matched ref, status/authority pair, 세 날짜가 모두 null, `history_status=NOT_APPLICABLE`, entries/pages 모두 빈 배열 |
+
+`authority_code/name`은 항상 둘 다 null이거나 둘 다 non-null입니다. `COMPLETE`이면 page number가 정확히 `1..N`이고 앞 page의 `terminal_page=false`, 마지막 page만 `true`입니다. total은 모든 page에서 모두 null이거나 같은 정수여야 하며, 정수이면 `provider_total_count=len(history_entries)`입니다. 각 page의 `returned_count`는 해당 `evidence_ref`를 가진 entry 수와 같고 그 합은 `len(history_entries)`입니다. 빈 history도 terminal empty page 하나를 보존합니다. entry `sequence`는 배열 위치와 같고 page 내·page 간 provider 순서를 유지합니다.
+
+`info_evidence_ref`는 pages의 Evidence ref와 겹치지 않고 모든 ref는 unique합니다. `{info_evidence_ref} ∪ {history_pages[*].evidence_ref}`는 `evidence_records[*].evidence_id` 집합과 정확히 같습니다. 미요청 또는 `NO_MATCH`는 info Evidence 하나만 가집니다. exact ref가 2개 이상 매칭되면 `AMBIGUOUS_MATCH`이고, info/history가 서로 다른 record를 가리키거나 page/entry/total 불변식을 검증할 수 없으면 `SCHEMA_DRIFT`입니다. page 또는 entry가 상한을 넘거나 page 일부가 실패하면 축소 success가 아니라 `RESPONSE_TOO_LARGE` 또는 해당 기술 failure입니다. 상호·주소 다건 검색은 이 exact lookup과 별도 discovery 계약입니다.
+
+Agent 결과에서는 사업장명, 전화번호, 전체 주소, 좌표, raw 관리번호를 제외하고 `NO_MATCH`를 폐업·말소로 간주하지 않습니다. 서비스 사용 가능 여부는 이 문서에 고정하지 않고 앞서 링크한 운영 조사와 versioned registry를 따릅니다.
+
+### 법령·서식 — `LawDocumentLookupInput/Result`
+
+`LawDocumentLookupInput`:
+
+| 필드 | 타입 | 필수 | 설명 |
+|---|---|---:|---|
+| `request_id` | UUID | O | runtime 생성 |
+| `case_id` | integer `1..2^63-1` | O | 결과를 소비할 인증된 Case |
+| `based_on_snapshot_id` | UUID | O | 결과가 결합될 snapshot |
+| `query` | string `1..200` | O | 식별자를 포함하지 않은 폐업 법령·조문·서식 질의 |
+| `document_kinds` | unique array `1..5` of `LAW` \| `ARTICLE` \| `ADDENDUM` \| `FORM` \| `LOCAL_ORDINANCE` | O | wire에서는 array 순서를 보존 |
+| `as_of` | date | O | 조회할 유효 version 기준일 |
+| `locale` | literal `ko-KR` | O | 현재 범위 |
+| `max_results` | integer `1..20` | O | 반환 상한 |
+
+`LawDocumentLookupResult`:
+
+| 필드 | 타입 | 필수 | 설명 |
+|---|---|---:|---|
+| `outcome_type` | literal `SUCCESS` | O | endpoint별 outcome discriminator |
+| `request_id`, `case_id`, `based_on_snapshot_id`, `query`, `document_kinds`, `as_of`, `locale`, `max_results` | input과 동일 | O | 전체 query correlation |
+| `provider` | literal `KOREA_LAW_OPEN_API` | O | 국가법령정보 API |
+| `provider_total_count` | integer `0..9007199254740991` \| null | O | 같은 query/filter의 total; JSON safe integer 상한(`2^53-1`), 미제공이면 null |
+| `returned_count` | integer `0..20` | O | 검증해 반환한 document 수 |
+| `terminal_page_reached` | boolean | O | provider next-page/total 규칙으로 전체 소비 여부 확인 |
+| `truncated` | boolean | O | 결과 상한 때문에 미반환 결과가 있는지 |
+| `retrieved_at` | aware datetime | O | Evidence가 있으면 그 조회시각 최댓값, 없으면 조회 완료 시각 |
+| `documents` | `LawDocument[]`, `0..max_results` | O | 검증된 공식 문서 |
+| `evidence_records` | `EvidenceRecord[]`, `0..max_results` | O | documents와 1:1인 Evidence |
+
+`LawDocument`:
+
+| 필드 | 타입 | 필수 | 설명 |
+|---|---|---:|---|
+| `source_document_id` | string `1..255` | O | 법령/자치법규 공식 ID |
+| `title` | string `1..500` | O | 공식 명칭 |
+| `document_kind` | input의 enum 중 하나 | O | 결과 종류 |
+| `authority_name` | string `1..500` \| null | O | 소관기관 |
+| `article_or_form_locator` | string `1..500` \| null | O | 조·항·호 또는 별표/서식 locator |
+| `promulgation_date`, `effective_date`, `revision_date` | date \| null | O | 서로 다른 의미로 보존 |
+| `canonical_url` | official HTTPS URL, max 2048 | O | host가 `law.go.kr`, `www.law.go.kr`, `open.law.go.kr` 중 하나 |
+| `excerpt` | string `1..4000` | O | 원문에서 검증된 최소 구간 |
+| `content_hash` | `sha256:<64 lowercase hex>` | O | 아래 document projection hash |
+| `source_version` | `sha256:<64 lowercase hex>` | O | v1에서는 `content_hash`와 정확히 같은 content-addressed version |
+| `retrieved_at` | aware datetime | O | 이 document 원문 검증 완료 시각 |
+| `freshness_basis` | `EFFECTIVE_ON_AS_OF` \| `NOT_EFFECTIVE_ON_AS_OF` \| `VERSION_UNVERIFIED` | O | freshness 판정 근거 |
+| `freshness_status` | `CURRENT` \| `STALE` \| `UNKNOWN` | O | basis와 아래 표대로 결합 |
+| `evidence_ref` | opaque ID `1..255` | O | 같은 result의 정확히 한 Evidence |
+
+`returned_count=len(documents)=len(evidence_records)<=max_results`이고 Evidence ID와 `(source_document_id, document_kind, article_or_form_locator)` tuple은 각각 unique합니다. `documents[*].evidence_ref` 집합은 `evidence_records[*].evidence_id` 집합과 정확히 같고 각 ID는 양쪽에서 한 번만 나옵니다. `provider_total_count`가 있으면 `returned_count` 이상입니다. `terminal_page_reached=true`이면서 total이 있으면 둘은 같고, false이면서 total이 있으면 total이 returned count보다 커야 합니다. `truncated = (not terminal_page_reached) or (provider_total_count != null and provider_total_count > returned_count)`이고, non-terminal success는 `returned_count=max_results`여야 합니다. 정상 0건은 documents/Evidence가 빈 배열, returned count 0, terminal true, total null 또는 0, truncated false입니다.
+
+Law resolver는 provider page 순서와 각 page의 item 순서를 그대로 이어 붙이고, 검증 완료 document가 `max_results`개가 되는 즉시 그 prefix를 반환합니다. client-side 정렬이나 dedupe를 하지 않습니다. 소비한 prefix 안에서 같은 tuple이 반복되거나 결과 하나라도 kind/field/date/URL/hash schema를 위반하면 제거·축소하지 않고 `SCHEMA_DRIFT`입니다. 따라서 같은 provider 응답에 대해 어느 구현도 다른 subset이나 순서를 선택할 수 없습니다.
+
+| `freshness_basis` | 허용 `freshness_status` | 조건 |
+|---|---|---|
+| `EFFECTIVE_ON_AS_OF` | `CURRENT` | provider version metadata로 해당 version이 `as_of`에 유효함을 확인했고, effective date가 있으면 `effective_date<=as_of` |
+| `NOT_EFFECTIVE_ON_AS_OF` | `STALE` | provider가 해당 version이 `as_of`에 미시행·실효임을 명시했거나 `effective_date>as_of` |
+| `VERSION_UNVERIFIED` | `UNKNOWN` | version/effective 상태를 위 두 조건으로 검증하지 못함 |
+
+법령정보는 참고 정보이며 유권해석을 대신하지 않습니다. `UNKNOWN` 또는 `STALE` 문서만으로 현재 의무·기한을 확정하지 않습니다.
+
+### resolver Evidence profile과 hash
+
+공통 field 의미는 위에서 다시 정의하지 않고 §3 `EvidenceRecord`를 사용합니다. 이 절의 `content_hash`는 아래 **정규화 projection object**를 §12 `subject_digest`와 같은 canonical serializer로 직렬화한 UTF-8 bytes의 SHA-256이며, `sha256:` 뒤에 64자리 lowercase hex를 붙입니다. 표의 field는 null도 생략하지 않고 정확한 key로 포함하며, 목록 순서를 보존합니다. result correlation, secret/internal ref, Evidence ID, 조회시각, freshness와 `content_hash` 자체는 projection에서 제외합니다.
+
+| profile | `source_ref` / `locator` | hash projection object |
+|---|---|---|
+| NTS status | `https://api.odcloud.kr/api/nts-businessman/v1/status` / `data:0` | `record_status`, `business_status_code`, `business_status_name`, `tax_type_code`, `tax_type_name`, `closure_date`, `tax_type_change_date`, `invoice_apply_date` |
+| MOIS info | 아래 kind별 `/info` / `info:result` | `license_kind`, `record_status`, `license_status_code`, `license_status_name`, `permit_date`, `closure_date`, `authority_code`, `authority_name`, `provider_updated_at` |
+| MOIS history page | 아래 kind별 `/history` / `history:page:<page_number>` | `page_number`, `returned_count`, `provider_total_count`, `terminal_page`, `entries`. 각 ordered entry에는 `sequence`, `status_code`, `status_name`, `changed_at`, `permit_date`, `closure_date`, `provider_updated_at`만 포함 |
+| Law document | document의 `canonical_url` / non-null `article_or_form_locator`, 없으면 `document:<source_document_id>` | `source_document_id`, `title`, `document_kind`, `authority_name`, `article_or_form_locator`, `promulgation_date`, `effective_date`, `revision_date`, `canonical_url`, `excerpt` |
+
+MOIS endpoint mapping은 다음과 같고 query string은 `source_ref`에 넣지 않습니다.
+
+| `license_kind` | info endpoint | history endpoint |
+|---|---|---|
+| `REST_CAFE` | `https://apis.data.go.kr/1741000/rest_cafes/info` | `https://apis.data.go.kr/1741000/rest_cafes/history` |
+| `GENERAL_RESTAURANT` | `https://apis.data.go.kr/1741000/general_restaurants/info` | `https://apis.data.go.kr/1741000/general_restaurants/history` |
+| `BAKERY` | `https://apis.data.go.kr/1741000/bakeries/info` | `https://apis.data.go.kr/1741000/bakeries/history` |
+
+모든 resolver Evidence는 `source_type=OFFICIAL_API`, non-null `content_hash`, `parent_evidence_refs=[]`입니다. NTS/MOIS `excerpt`는 전체 projection canonical JSON의 앞 4000 code point이고, Law Evidence의 excerpt는 document excerpt와 같습니다. `published_at`은 세 profile 모두 null입니다. 공포일·시행일을 datetime 공개시각으로 합성하지 않습니다. v1 세 profile의 `source_version`은 provider raw version field를 선택·정규화하지 않고 항상 같은 Evidence의 `content_hash`와 정확히 같습니다. 공식 provider version을 별도로 쓰려면 dataset별 raw field와 정규화 규칙을 다음 schema version에 추가합니다. `source_ref`에는 credential이나 검색 질의·raw 식별자 query parameter를 넣지 않습니다. Law 공식 canonical URL에 필요한 비밀값 없는 문서 ID parameter는 허용합니다. locator/excerpt에는 raw 식별자·주소·전화번호를 넣지 않습니다.
+
+NTS `evidence_record.content_hash`는 NTS projection hash이고 Evidence의 `retrieved_at/freshness_status`는 result와 같습니다. MOIS info/page Evidence의 `retrieved_at`은 각 응답 검증 완료 시각이고 result `retrieved_at`은 그 최댓값입니다. 모든 MOIS Evidence freshness는 result freshness와 같습니다. Law document와 대응 Evidence는 `source_ref=canonical_url`이고 source version, excerpt, retrieved time, freshness, content hash가 각각 같습니다. 각 success 내부 Evidence ID는 unique하며 앞서 정의한 ref 집합 밖의 Evidence를 추가할 수 없습니다.
+
+NTS/MOIS의 versioned TTL 정책이 있으면 `freshness_policy_version`은 non-null, `fresh_until>retrieved_at`이고 result와 모든 Evidence의 `freshness_status=CURRENT`입니다. 정책이 없으면 두 TTL field가 모두 null이고 모두 `UNKNOWN`입니다. 다른 조합은 거부합니다. 소비 시각이 `fresh_until` 이상이면 저장된 `CURRENT`를 현재 사실로 사용하지 않고 재조회하거나 UNKNOWN으로 취급합니다.
+
+### 공통 실패와 endpoint별 outcome
+
+`ExternalResolverFailure`는 input schema와 인증·Case 소유권을 검증한 뒤 생성하므로 correlation field를 신뢰할 수 있어야 합니다.
+
+| 필드 | 타입 | 필수 | 설명 |
+|---|---|---:|---|
+| `outcome_type` | literal `FAILURE` | O | discriminator |
+| `request_id`, `case_id`, `based_on_snapshot_id`, `as_of` | input과 동일 | O | 실패한 요청 correlation |
+| `provider` | `NTS_BUSINESS_STATUS` \| `MOIS_LOCAL_LICENSE` \| `KOREA_LAW_OPEN_API` | O | 실패 provider |
+| `license_kind` | `REST_CAFE` \| `GENERAL_RESTAURANT` \| `BAKERY` \| null | O | MOIS는 input 값, 나머지는 null |
+| `code` | 아래 enum | O | 안정 오류 code |
+| `retryable` | boolean | O | 아래 표에서 결정 |
+| `status_code` | integer `100..599` \| null | O | 외부 HTTP status를 실제로 받았을 때만 그 값 |
+| `occurred_at` | aware datetime | O | failure 확정 시각 |
+
+| `code` | 정확한 조건 | `retryable` |
+|---|---|---:|
+| `IDENTIFIER_NOT_RESOLVED` | 같은 Case의 ref가 없거나 만료·폐기되어 raw 값을 해석하지 못함 | false |
+| `CONSENT_REQUIRED` | 같은 Case의 동의가 없거나 만료되었거나 provider/목적 범위를 포함하지 않음 | false |
+| `ACCESS_DENIED` | provider가 credential 또는 provider 권한을 401/403이나 문서화된 동등 code로 거부 | false |
+| `SERVICE_NOT_APPROVED` | local dataset registry가 비활성/미승인이거나 provider가 dataset 미등록을 문서화된 code로 응답 | false |
+| `AMBIGUOUS_MATCH` | MOIS exact ref에 검증 가능한 record가 2개 이상 | false |
+| `RATE_LIMITED` | HTTP 429 또는 provider의 문서화된 quota 초과 code | true |
+| `UPSTREAM_UNAVAILABLE` | DNS/connect/read timeout, network 오류 또는 HTTP 408/425/5xx | true |
+| `RESPONSE_TOO_LARGE` | response byte, page 또는 entry의 local hard cap 초과 | false |
+| `SCHEMA_DRIFT` | 성공 HTTP 응답의 JSON parse/type/필수 key/중복/조건부 불변식 검증 실패 | false |
+| `UPSTREAM_REJECTED` | 위 code에 해당하지 않는 non-retryable provider 3xx/4xx 또는 provider error code | false |
+
+오류 분류는 provider의 문서화된 body code를 먼저 해석해 `SERVICE_NOT_APPROVED` → `RATE_LIMITED` → `ACCESS_DENIED` 순으로 적용하고, 그 어느 것도 아니면 HTTP/transport 조건을 적용합니다. 따라서 dataset 미등록을 뜻하는 403은 일반 `ACCESS_DENIED`보다 `SERVICE_NOT_APPROVED`가 우선합니다. HTTP status를 받았으면 domain code가 local 판단이어도 그 실제 `status_code`를 보존하고, provider 응답 전 local/transport 실패만 null입니다. 2xx body의 문서화된 error code도 의미에 따라 위 표로 분류하고 status는 실제 2xx를 보존합니다. 분류되지 않는 3xx/4xx와 redirect 정책 위반·redirect 횟수 상한 초과는 `UPSTREAM_REJECTED`, 분류되지 않는 5xx는 `UPSTREAM_UNAVAILABLE`로 닫아 어떤 provider 실패도 정상 0건이나 임의 code로 바꾸지 않습니다.
+
+| provider | 허용 failure code |
+|---|---|
+| `NTS_BUSINESS_STATUS` | `IDENTIFIER_NOT_RESOLVED`, `CONSENT_REQUIRED`, `ACCESS_DENIED`, `SERVICE_NOT_APPROVED`, `RATE_LIMITED`, `UPSTREAM_UNAVAILABLE`, `RESPONSE_TOO_LARGE`, `SCHEMA_DRIFT`, `UPSTREAM_REJECTED` |
+| `MOIS_LOCAL_LICENSE` | `IDENTIFIER_NOT_RESOLVED`, `CONSENT_REQUIRED`, `ACCESS_DENIED`, `SERVICE_NOT_APPROVED`, `AMBIGUOUS_MATCH`, `RATE_LIMITED`, `UPSTREAM_UNAVAILABLE`, `RESPONSE_TOO_LARGE`, `SCHEMA_DRIFT`, `UPSTREAM_REJECTED` |
+| `KOREA_LAW_OPEN_API` | `ACCESS_DENIED`, `SERVICE_NOT_APPROVED`, `RATE_LIMITED`, `UPSTREAM_UNAVAILABLE`, `RESPONSE_TOO_LARGE`, `SCHEMA_DRIFT`, `UPSTREAM_REJECTED` |
+
+endpoint별 wire alias는 다음 세 개뿐입니다.
+
+- `BusinessStatusLookupOutcome = BusinessStatusLookupResult | ExternalResolverFailure(provider=NTS_BUSINESS_STATUS, license_kind=null)`
+- `FoodBusinessLicenseLookupOutcome = FoodBusinessLicenseLookupResult | ExternalResolverFailure(provider=MOIS_LOCAL_LICENSE, license_kind=input.license_kind)`
+- `LawDocumentLookupOutcome = LawDocumentLookupResult | ExternalResolverFailure(provider=KOREA_LAW_OPEN_API, license_kind=null)`
+
+각 endpoint의 OpenAPI `oneOf`는 `outcome_type`으로 success/failure를 구분합니다. success 세 종류가 모두 `SUCCESS`이므로 별도 `operation` discriminator 없이 세 endpoint outcome을 하나의 전역 union으로 합치지 않습니다.
+
+malformed JSON, extra/missing field, 잘못된 UUID/date/bounds는 idempotency 조회 전 공통 HTTP 422입니다. 미인증, Case 미소유, 다른 Case에 속한 identifier/consent ref는 resolver outcome이 아니라 HTTP 403이며 이 인증·소유권 preflight는 저장 outcome replay에도 매번 적용합니다. 구조·소유권 검증 뒤 idempotency hit이면 위 replay/409 규칙을 먼저 적용하고, miss일 때만 NTS/MOIS의 당일이 아닌 `as_of`와 Law의 미래 `as_of`를 HTTP 422로 거부합니다. miss에서 같은 Case ref의 미존재·만료는 각각 `IDENTIFIER_NOT_RESOLVED` 또는 `CONSENT_REQUIRED`입니다. `ACCESS_DENIED`는 사용자/Case 권한 오류가 아니라 upstream credential/권한 오류에만 씁니다. failure에는 provider message/body, raw ID, credential, query URL, 내부 stack을 넣지 않습니다. Law가 `max_results`에 도달한 것은 `truncated` success이고, `RESPONSE_TOO_LARGE`는 response byte cap이나 전체 수집이 필수인 MOIS history의 page/entry cap에만 사용합니다.
+
+정상 0건은 NTS `NOT_REGISTERED`, MOIS `NO_MATCH`, Law의 빈 documents success입니다. 자동 retry는 같은 idempotency key의 `RATE_LIMITED` 또는 `UPSTREAM_UNAVAILABLE`에만 bounded backoff로 허용합니다. 최종 failure의 `occurred_at`은 마지막 attempt의 failure 확정 시각이고, retry 뒤 success의 조회시각은 마지막 성공 응답을 검증한 시각입니다.
+
+### BE가 이 계약으로 구현해야 하는 경계
+
+- NTS/MOIS 식별자 vault와 exact resolver, 동의·인증·Case/ref 소유권 검증, 최소 field projection, 외부전송 audit
+- dataset별 versioned availability registry, credential rotation, quota/rate limit, response-byte/page/entry cap, timeout/retry와 schema-version runbook
+- idempotency input digest/outcome 저장, HTTP 403/409/422 preflight, success Evidence 저장·복원과 TTL 재검증
+- raw identifier·주소·provider body가 LLM/log/trace/Evidence로 유출되지 않는 contract test
+
+AI는 이 typed outcome만 소비하고 resolver별 strict validator, 법령 read-only adapter, Evidence/Agent 연결을 구현합니다. NTS/MOIS의 raw provider adapter가 어느 repository에 있더라도 raw 식별자 경계와 이 wire schema를 우회할 수 없습니다. AI/BE는 success, 정상 0건, history empty/다중 page, ambiguous, 승인없음, quota, timeout, oversized, schema drift, request replay/conflict의 cross-language fixture와 canonical hash test vector를 공동 확정한 뒤 Graph에 연결합니다.
+
 ## 11. Supervisor Agent
 
 ### 입력 — `SupervisorRunInput`
 
-`RunTrigger`는 `trigger_type` discriminator를 쓰는 다음 네 variant의 tagged union입니다. 아래에 적지 않은 variant 전용 필드는 extra field로 거부합니다.
+`RunTrigger`는 `trigger_type` discriminator를 씁니다. **현재 standalone `schemas.py`가 허용하는 실행 variant는 정확히 3개**(`CASE_CREATED | RESULT_SUBMITTED | SUPPORT_REFRESH`)입니다. 아래 `CONFLICT_CONFIRMED`는 생산 충돌 확인 round trip을 위한 **목표 BE/shared 네 번째 variant**이며 현재 Pydantic/Graph에는 없습니다. 아래에 적지 않은 variant 전용 필드는 extra field로 거부합니다.
 
 - `CaseCreatedTrigger`: `trigger_type=CASE_CREATED`, `input_event_id: opaque string`, `client_event_id: opaque string | null`, `input: RedactedInput`, `submitted_at: datetime`
 - `ResultSubmittedTrigger`: `trigger_type=RESULT_SUBMITTED`; 나머지 필드는 `CaseCreatedTrigger`와 동일
@@ -1009,7 +1446,17 @@ v2의 정상 첫 계획은 ProcedureLookupResult를 먼저 만들고 그 call ID
 
 runtime은 `source_call_ids`가 같은 run/case/snapshot의 `ComponentSuccess`인지 검증합니다. 이 집합은 `decision.based_on_call_ids`, 각 mutation의 non-null current-run source call, 그리고 decision·mutation·claim이 참조한 새 Evidence를 소유한 source result call의 합집합과 정확히 같아야 합니다. `CONFIRMED_CONFLICT` provenance는 digest로 보호된 trigger에서 닫히므로 이전 run의 call을 이 집합에 넣지 않습니다. 사용하지 않은 호출을 끼워 넣거나 사용한 호출을 생략할 수 없습니다. 모든 `ACTION`은 required `target`을 하나 가집니다. Procedure target이면 Info 결과의 정확히 한 `ProcedureFinding`과 그 finding의 Evidence를 소유한 `ProcedureLookupResult`/digest 연결이 함께 있어야 하고, Support target이면 정확히 한 `SupportCheck`와 Evidence가 있어야 합니다. 자연어 keyword는 이 권한 경계를 대신하지 않습니다.
 
-Supervisor는 전문 Evidence를 새로 만들거나 하위 결과를 고쳐 쓰지 않습니다. 결과가 부족하면 호출을 반복하고, 충분할 때만 `SupervisorDraft`를 만듭니다.
+Supervisor는 전문 Evidence를 새로 만들거나 하위 결과를 고쳐 쓰지 않습니다. 현재는 Graph가 Review issue에 따라 재호출하고, 목표에서는 Supervisor가 부족한 구성요소의 재호출 계획을 제안합니다. 충분한 결과가 있을 때만 `SupervisorDraft`를 만듭니다.
+
+### 현재 provider → local → runtime 변환 계약
+
+| 층 | 모델 | 정확한 top-level key | 핵심 권한 |
+|---|---|---|---|
+| provider 형식 | `SupervisorModelOutput` | `decision_type`, `selection_summary`, `requires_human`, `evidence_refs`, `blocker`, `next_action`, `questions_for_user`, `grounded_claims` | 의미 초안과 claim target selector만 작성 |
+| local 의미 | `SupervisorSemanticDraft` | provider와 동일 | decision variant, 단일 target, 사람이 필요한 분기, claim의 실제 path/text를 검증 |
+| runtime 공개 | `SupervisorDraft` | `decision`, `mutations`, `grounded_claims`, `source_call_ids` | draft/candidate/claim ID·시각·source provenance와 결정론적 mutation 주입 |
+
+provider의 `GroundedClaimModelOutput`은 `claim_type`, `target_kind`, `target_index`, `assertion_level`, `evidence_refs`만 반환합니다. runtime이 selector를 실제 사용자 노출 필드에 결합해 `target_path`와 그 위치의 정확한 `text`를 주입하므로 모델이 임의 path/text를 증명할 수 없습니다. `SupervisorSemanticDraft` 타입 자체는 `CASE_COMPLETE` shape를 표현하지만, 현재 `SupervisorAgent`는 전체 필수 절차 coverage가 없는 bounded 웹 조회에서 이 값을 결정론적으로 거부하므로 현재 Graph의 정상 outcome으로 도달할 수 없습니다.
 
 ## 12. Review Tool
 
@@ -1059,6 +1506,16 @@ Evidence ID가 중복되면 내용과 content hash가 완전히 같아야 합니
 Review 모델은 verdict와 검토 내용만 생성합니다. wrapper가 요청에서 검증한 `reviewed_subject_id`와 `reviewed_subject_digest`를 결과에 주입하므로 모델이 ID/digest를 복사하거나 임의 생성하지 않습니다.
 
 현재 runtime은 모델이 제안한 `recommended_rework_targets`를 최종 라우팅 근거로 신뢰하지 않습니다. 모든 `BLOCKING` issue의 검증된 `target_component`와 `missing_evidence → SUPERVISOR` 규칙으로 목록을 고정 순서 재계산합니다. `MissingEvidence.claim_path`는 non-null `/supervisor_draft/...` 경로만 허용합니다. `REVISE`는 `BLOCKING` issue 또는 `missing_evidence`가 있을 때만 유효하고, warning-only 결과는 `PASS`와 빈 rework target이어야 합니다.
+
+### 현재 provider → local → runtime 변환 계약
+
+| 층 | 모델 | 정확한 top-level key | 핵심 권한 |
+|---|---|---|---|
+| provider 형식 | `ReviewProviderOutput` | `verdict`, `issues`, `missing_evidence`, `recommended_rework_targets`, `resolution_reason` | 형식에 맞는 독립 검토 의견 작성 |
+| local 의미 | `ReviewModelOutput` | provider와 동일 | verdict/차단 severity/누락 근거 조건과 package 내부 ref/path 검증 |
+| runtime 공개 | `ReviewResult` | `reviewed_subject_id`, `reviewed_subject_digest`, `verdict`, `issues`, `missing_evidence`, `recommended_rework_targets`, `resolution_reason` | subject ID/digest 주입, issue 소유 call/component와 rework 순서 재계산, 결정론적 안전 finding 병합 |
+
+provider nested `ReviewIssueModelOutput`과 `MissingEvidenceModelOutput`은 아래 `ReviewIssue`/`MissingEvidence`와 같은 의미 key를 쓰지만, runtime이 JSON Pointer에서 `target_component`/`target_call_id`를 다시 계산하고 안전한 단순 정보 질문에 대한 잘못된 missing-evidence 판정을 제거한 뒤 local schema를 통과시킵니다. 이 정규화와 결정론적 안전 검사는 모델 `PASS`로 우회할 수 없습니다.
 
 `ReviewIssue`:
 
@@ -1110,7 +1567,7 @@ runtime은 Review의 `ComponentSuccess.meta`가 subject의 run/case 및 요청 c
 
 ## 13. Agent Graph의 최종 출력
 
-`AgentRunOutcome`은 `outcome_type`으로 구분하는 tagged union입니다.
+`AgentRunOutcome`은 `outcome_type`으로 구분하는 tagged union입니다. **현재 standalone union은 정확히 3개**(`REVIEWED_PLAN | CONFLICT | SAFE_FAILURE`)이고, **목표 BE/shared union은 `NO_CHANGE`를 더한 4개**입니다. 아래 `NoChangeOutcome`은 아직 코드에 없으며, `ConflictOutcome.evidence_records`도 목표 production 추가 필드입니다.
 
 ### `ReviewedPlanOutcome`
 
@@ -1133,12 +1590,13 @@ runtime은 Review의 `ComponentSuccess.meta`가 subject의 run/case 및 요청 c
 | `snapshot_id` | UUID | O | 충돌 기준 |
 | `case_version` | positive integer \| null | O | 동시성 버전 |
 | `conflicts` | `ConflictCandidate[]` (min 1) | O | 구조화 충돌 |
-| `evidence_records` | `EvidenceRecord[]` | O | 모든 conflict `source_evidence_refs`를 해석하는 닫힌 최소 집합 |
 | `message_code` | literal `CONFIRM_CONFLICT` | O | BE 고정 문구 key |
 
-모든 conflict Evidence ref는 trigger/snapshot 또는 이 `evidence_records`에서 해석되어야 하며 같은 ID의 내용 충돌을 거부합니다. LLM이 만든 자유 문장은 넣지 않습니다. 충돌 안내를 새로 생성해야 한다면 `NeedsMoreInfoDecisionDraft`로 만들어 Review를 거칩니다.
+위 8개가 현재 standalone의 정확한 key입니다. 현재는 Info 결과의 새 Evidence를 outcome에 싣지 않아 outcome 단독 closure가 성립하지 않습니다. 목표 production `ConflictOutcome`은 `evidence_records: EvidenceRecord[]`를 추가하고, 모든 conflict ref를 trigger/snapshot/이 목록에서 해석하며 같은 ID의 내용 충돌을 거부해야 합니다. LLM이 만든 자유 문장은 넣지 않습니다. 충돌 안내를 새로 생성해야 한다면 `NeedsMoreInfoDecisionDraft`로 만들어 Review를 거칩니다.
 
 ### `NoChangeOutcome`
+
+> 목표 BE/shared 전용: 현재 standalone `AgentRunOutcome`과 Graph에는 이 variant가 없습니다.
 
 | 필드 | 타입 | 필수 | 설명 |
 |---|---|---:|---|
@@ -1338,14 +1796,18 @@ Agent 내부 결과와 HTTP `result`는 같은 enum이 아닙니다.
 
 `CaseFact.status`의 `CONFIRMED/UNKNOWN`과 FE의 `CONFIRMED/IN_PROGRESS/UNKNOWN`, fact label 제공 주체도 외부 adapter 계약에서 맞춰야 합니다. 기존 API 예시의 flat Blocker/Next Action 문자열은 code/title/description/reason/questions 구조와 함께 재검토해야 합니다.
 
-## 16. 구성요소별 capability allowlist
+## 16. 생산 목표 capability allowlist
+
+이 표는 생산 연결 시 허용할 권한입니다. 현재 첫 호출과 Review 재작업 routing은 `AgentGraph`에 고정돼 있고 Supervisor가 하위 구성요소를 직접 호출하지 않습니다. 목표에서도 Supervisor는 호출 계획만 제안하며 실제 Python/네트워크 호출은 Graph router가 검증·집행합니다.
 
 | 구성요소 | 허용 | 금지 |
 |---|---|---|
-| Supervisor | 정보분석·지원금·절차조회 호출, Review 제출 | DB/Case write, Review 생략, Evidence 생성 |
+| Supervisor | 정보분석·지원금·절차조회 호출 계획, 결과 충분성 판단, 초안·Review 재작업 계획 | 하위 구성요소 직접 호출, DB/Case write, Review 생략, Evidence 생성 |
+| AgentGraph router | 허용된 dependency 안에서 Agent/Tool/Supervisor/Review 호출, 결과 전달, 반복 상한·safe failure 집행 | 업무 근거·결정 생성, 인증·DB write, Supervisor/Review 우회 |
 | 정보분석 Agent | 제공된 redacted input, snapshot, raw `ProcedureLookupResult` 분석과 canonical finding 생성 | 외부 Tool 호출, 웹문서 지시 실행, DB ID 생성, DB write, 최종 결정 |
 | 지원금 Agent | read-only catalog/Wiki/Chroma/S3 조회 | 신청 상태 변경, Wiki 자동 수정, 자격 확정 |
-| 절차조회 Tool | Google 우선·Kakao query별 fallback 검색, provider attempt 기록, URL·redirect·allowlist 검증, 공식 원문 fetch, raw document/Evidence 정규화 | Google SERP HTML scraping, 검색 snippet의 Evidence 승격, 문서 의미 해석, Case 적용·완료·우선순위·Next Action 결정, DB ID 생성·write |
+| 지원 공고 discovery adapter | 기업마당 fixed endpoint read, strict raw candidate와 `OFFICIAL_API` Evidence 생성 | Support Agent 자동 주입, eligibility 판정, reviewed catalog 자기승격, 신청 상태 변경 |
+| 절차조회 Tool | 공식 registry 우선, miss 시 Kakao→Google fallback, provider attempt 기록, URL·redirect·allowlist 검증, 공식 원문 fetch, raw document/Evidence 정규화 | 검색 SERP HTML scraping, 검색 snippet의 Evidence 승격, 문서 의미 해석, Case 적용·완료·우선순위·Next Action 결정, DB ID 생성·write |
 | Review Tool | ReviewSubject만 읽기 | 검색 Tool, DB resolver, 초안 수정, 재호출 결정 |
 | PlanningCoordinator | Guardrail, runtime enrichment, Graph 호출, BE 저장 함수 호출 | 도메인 판단 문장 생성 |
 
@@ -1354,7 +1816,7 @@ BE persistence 함수와 SQL/ORM/session/command handle은 어떤 Agent Tool reg
 ## 17. 재시도 규칙
 
 - 목표 BE envelope 계약에서는 정보분석·지원금 Local Loop 상한을 설정값으로 강제하고, 소진을 빈 성공이 아닌 `PARTIAL` output 또는 `LOOP_LIMIT_REACHED` 실패로 구분합니다. 현재 standalone은 정보분석/Supervisor의 constructor 상한과 지원금의 고정 상한을 사용하며, deterministic 검증 소진 시 예외를 Graph 경계에서 `STRUCTURED_OUTPUT_FAILED`로 변환합니다.
-- Google/Kakao 검색과 공식 원문 fetch retry는 각각 전체 deadline 안의 작은 고정 상한을 갖습니다. provider별 `401/403`, credential 없음, quota 소진, 전 질의 실패는 fallback 또는 retry 대상이며, chain의 모든 실제 provider attempt가 실패하면 `NO_RESULTS`가 아니라 retry 가능 여부가 명시된 기술 실패입니다.
+- Kakao/Google 검색과 공식 원문 fetch retry는 각각 전체 deadline 안의 작은 고정 상한을 갖습니다. registry 자체는 네트워크 검색을 하지 않습니다. 외부 provider의 `401/403`, quota 소진, 전 질의 실패는 다음 provider fallback 또는 retry 대상이며, chain의 모든 실제 외부 attempt가 실패하면 `NO_RESULTS`로 숨기지 않습니다.
 - 일부 질의·fetch만 실패하고 공식문서가 남으면 `PARTIAL`, 모든 검색이 정상이나 검증된 문서가 없으면 `NO_RESULTS`입니다. 이 두 업무 결과를 fixture나 모델 지식으로 채우지 않습니다.
 - Review `REVISE` 후 재작성은 최대 2회이므로 Review 호출은 최초를 포함해 최대 3회입니다.
 - Review 권고는 명령이 아닙니다. 현재 Review runtime은 모든 blocking issue의 `target_component`를 `recommended_rework_targets`에 포함하고, Graph는 그 전체 목록에서 dependency 순서상 가장 앞선 구성요소부터 결정론적으로 재실행합니다. BE 통합 후에도 동일 정책을 유지할지는 계약으로 확정합니다.
@@ -1372,7 +1834,8 @@ BE persistence 함수와 SQL/ORM/session/command handle은 어떤 Agent Tool reg
 | 공통 계약 | `backend/app/agent/schemas.py`의 `agent-io/2.0` strict Pydantic schema, Review digest/proof, standalone field registry |
 | 정보분석 Agent | provider/로컬 의미 schema 분리, redacted 입력 span 검증, raw 절차 문서의 untrusted-data projection, canonical `procedure_findings`, 충돌 분리, bounded local retry |
 | 지원금 Agent | provider 형식과 로컬 의미 schema 분리, 주입된 reviewed catalog 기반 조회/판정, 최소 prompt projection, Evidence 연결 |
-| 절차조회 Tool | Google Agent Search 우선·Kakao query별 fallback으로 URL 발견, provider attempt와 `discovery_provider` 기록, HTTPS·공식 domain 검증, 직접 fetch, sanitized raw document와 `OFFICIAL_DOCUMENT` Evidence 생성 |
+| 지원 공고 discovery | 기존 `BIZINFO_API_KEY`로 fixed 공식 API를 읽어 bounded raw candidate와 `OFFICIAL_API` Evidence 생성. reviewed catalog와 의도적으로 분리 |
+| 절차조회 Tool | 공식 source registry 우선, miss 시 Kakao→Google로 URL 발견, provider attempt와 `discovery_provider` 기록, HTTPS·공식 domain 검증, 직접 fetch, sanitized raw document와 `OFFICIAL_DOCUMENT` Evidence 생성 |
 | Supervisor Agent | 전달된 하위 결과 전체를 기반으로 `ACTION`일 때 정확히 1개 Blocker/Next Action 조립, 직전 초안 기반 Review 수정, 고위험 claim 사전검증, mutation/provenance 검증, bounded rewrite |
 | Review Tool | provider 형식 출력과 로컬 의미 검증 분리, bounded corrective retry, ReviewSubject digest·독립 규칙 재검사, `PASS`/`REVISE` ReviewResult 반환 |
 | Graph | LangGraph 기반 절차조회→정보분석→지원금 순차 실행, raw lookup의 call/digest를 Info에 전달, Review dependency rerouting, 최대 2회 재작성, fail closed |
@@ -1401,19 +1864,19 @@ PYTHONPATH=backend backend/.venv/bin/python -m pytest -q backend/tests/agent
 PYTHONPATH=backend backend/.venv/bin/python -m app.agent.cli --live --compact --trace-id local-smoke
 ```
 
-CLI는 임의의 실제 Case 입력을 받지 않고 repository의 비식별 합성 Case와 지원 catalog를 사용합니다. 다만 `--live` 절차 경로는 실제 Google Agent Search를 먼저 사용하고 query별 조건을 충족하면 Kakao로 fallback한 뒤 공식 원문을 fetch하며, unit test의 mock 검색 응답이나 과거 절차 fixture로 fallback하지 않습니다. BE API·DB·persistence에는 접근하지 않습니다.
+CLI는 임의의 실제 Case 입력을 받지 않고 repository의 비식별 합성 Case와 지원 catalog를 사용합니다. 다만 `--live` 절차 경로는 공식 source registry를 먼저 사용하고 miss일 때만 Kakao→Google로 fallback한 뒤 공식 원문을 fetch하며, unit test의 mock 응답이나 과거 절차 fixture로 대체하지 않습니다. BE API·DB·persistence에는 접근하지 않습니다.
 
-필수 LLM 환경변수는 `CHAT_PROXY_URL`, `PROXY_TOKEN`, `OPENAI_MODEL`입니다. Google primary에는 `PROCEDURE_GOOGLE_API_KEY`, `PROCEDURE_GOOGLE_PROJECT_ID`, `PROCEDURE_GOOGLE_ENGINE_ID`가 필요하고 `PROCEDURE_GOOGLE_LOCATION` 기본값은 `global`입니다. Kakao fallback은 `PROCEDURE_KAKAO_REST_API_KEY`를 우선하며 기존 `PROCEDURE_SEARCH_API_KEY`, `KAKAO_CLIENT_ID`는 deprecated alias입니다. Google이 미설정이어도 Kakao-only 실행은 가능하며 `provider_order=[KAKAO_DAUM_WEB]`, `fallback_query_count=0`으로 기록합니다. 두 provider 모두 미설정이면 `ProcedureSearchConfigurationError` 또는 Graph/CLI의 설정·component failure로 fail closed하며 빈 `NO_RESULTS`나 fixture로 대체하지 않습니다. `CHAT_PROXY_URL`은 loopback 개발 서버를 제외하면 HTTPS여야 하고 credential/query/fragment를 포함할 수 없습니다.
+필수 LLM 환경변수는 `CHAT_PROXY_URL`, `PROXY_TOKEN`, `OPENAI_MODEL`입니다. 절차조회 registry는 `PROCEDURE_OFFICIAL_REGISTRY_ENABLED=true`가 기본이며 검색 key가 필요 없습니다. 선택 2순위 Kakao는 `PROCEDURE_KAKAO_REST_API_KEY`를 우선하며 기존 `PROCEDURE_SEARCH_API_KEY`, `KAKAO_CLIENT_ID`는 deprecated alias입니다. 선택 3순위 Google은 `PROCEDURE_GOOGLE_API_KEY`, `PROCEDURE_GOOGLE_PROJECT_ID`, `PROCEDURE_GOOGLE_ENGINE_ID` 세 값이 모두 필요합니다. registry를 명시적으로 끈 경우에만 외부 provider가 하나도 없으면 구성 오류입니다. `CHAT_PROXY_URL`은 loopback 개발 서버를 제외하면 HTTPS여야 하고 credential/query/fragment를 포함할 수 없습니다.
 
-선택 LLM 설정은 `OPENAI_REASONING_EFFORT`, `AGENT_LLM_TIMEOUT_SECONDS`, `AGENT_LLM_MAX_RETRIES`, `AGENT_LLM_RETRY_BACKOFF_SECONDS`입니다. 절차조회 공통 설정은 `PROCEDURE_SEARCH_ALLOWED_DOMAINS`, `PROCEDURE_SEARCH_TIMEOUT_SECONDS`, `PROCEDURE_SEARCH_TOTAL_TIMEOUT_SECONDS`, `PROCEDURE_SEARCH_MAX_RETRIES`, `PROCEDURE_SEARCH_RETRY_BACKOFF_SECONDS`, `PROCEDURE_SEARCH_MAX_RESPONSE_BYTES`, `PROCEDURE_SEARCH_MAX_REDIRECTS`입니다. Google endpoint는 검증된 project/location/engine과 `global | us | eu`에 대응하는 승인된 Discovery Engine API host로 조립하고 Kakao endpoint는 `dapi.kakao.com/v2/search/web`로 고정하며 임의 endpoint override를 허용하지 않습니다. allowlist 환경변수는 코드에서 검토된 공식 root와 하위 host로만 좁힐 수 있고 사용자 요청으로 동적 확장하지 않습니다. 정확한 범위·기본값은 `agent-standalone-runtime-requirements.md` §8을 따릅니다. 모든 credential 값과 실제 내부 endpoint는 문서·출력·trace에 남기지 않습니다.
+선택 LLM 설정은 `OPENAI_REASONING_EFFORT`, `AGENT_LLM_TIMEOUT_SECONDS`, `AGENT_LLM_MAX_RETRIES`, `AGENT_LLM_RETRY_BACKOFF_SECONDS`, `AGENT_LLM_MAX_RESPONSE_BYTES`입니다. LLM timeout은 한 번의 provider 시도 전체에 적용되고, 응답은 기본 1,000,000 bytes에서 중단합니다. 절차조회 공통 설정은 `PROCEDURE_SEARCH_ALLOWED_DOMAINS`, `PROCEDURE_SEARCH_TIMEOUT_SECONDS`, `PROCEDURE_SEARCH_TOTAL_TIMEOUT_SECONDS`, `PROCEDURE_SEARCH_MAX_RETRIES`, `PROCEDURE_SEARCH_RETRY_BACKOFF_SECONDS`, `PROCEDURE_SEARCH_MAX_RESPONSE_BYTES`, `PROCEDURE_SEARCH_MAX_REDIRECTS`입니다. Google endpoint는 검증된 project/location/engine과 `global | us | eu`에 대응하는 승인된 Discovery Engine API host로 조립하고 Kakao endpoint는 `dapi.kakao.com/v2/search/web`로 고정하며 임의 endpoint override를 허용하지 않습니다. allowlist 환경변수는 코드에서 검토된 공식 root와 하위 host로만 좁힐 수 있고 사용자 요청으로 동적 확장하지 않습니다. 정확한 범위·기본값은 `agent-standalone-runtime-requirements.md` §8을 따릅니다. 모든 credential 값과 실제 내부 endpoint는 문서·출력·trace에 남기지 않습니다.
 
 검증 결과는 자동 검증과 opt-in live smoke를 분리해 기록합니다.
 
-- CI/unit test는 mock Google/Kakao provider와 mock fetcher를 사용하며 외부 네트워크·quota·credential을 요구하지 않습니다.
+- CI/unit test는 공식 registry와 mock Kakao/Google provider·mock fetcher를 사용하며 외부 네트워크·quota·credential을 요구하지 않습니다.
 - Tool contract test는 검색 snippet 비신뢰, HTTPS/allowlist/redirect, fetch 실패, no-results/partial/technical failure, Evidence 1:1, dedup과 counter를 검사합니다.
 - Graph test는 Procedure→Info→Support 순서, lookup call/digest 전달, 재작업 dependency를 검사합니다.
 - live smoke는 명시적 `--live`와 credential이 있을 때만 수행하고 실제 공식 URL, 조회시각, 문서 수, outcome만 민감정보 없이 PR에 기록합니다.
-- 한 번의 live 호출이 항상 `PASS`하는 것은 아닙니다. Google/Kakao·원문 서버·LLM 응답이 제한 내 해결되지 않으면 미검토 결과나 fixture 대신 `SAFE_FAILURE`를 반환합니다.
+- 한 번의 live 호출이 항상 `PASS`하는 것은 아닙니다. 공식 원문 서버·선택 검색 provider·LLM 응답이 제한 내 해결되지 않으면 미검토 결과나 fixture 대신 `SAFE_FAILURE`를 반환합니다.
 
 ### BE 연동 전에 남은 경계
 
@@ -1441,14 +1904,14 @@ standalone 정상 실행은 아래 생산 연동 기능의 완료를 뜻하지 �
 
 ### P0 — schema 구현을 막는 항목
 
-- [ ] `case_version`을 채택할지, 아니면 field-level atomic compare-and-set을 사용할지
+- [ ] 논리 schema에서 채택한 `CASES.version`을 실제 migration과 원자적 compare-and-set으로 구현하고 충돌 응답을 확정
 - [ ] DB 미확인을 enum `UNKNOWN`으로 둘지 별도 fact status로 둘지. Agent snapshot 표현은 `status=UNKNOWN, value=null`
 - [ ] API에 있지만 CASE에 없는 `entity_type`, `building_use_type`, `previous_support_history` 저장 위치
 - [ ] Hero Scenario에 있지만 현재 API/DB에 없는 `lease_end_date`, `transfer_status`, `tax_status`의 v1 포함 여부. 합의 전 판단에 사용 금지
 - [ ] `lease_status`, `restoration_scope`, `demolition_required`의 canonical enum
 - [ ] BE canonical procedure registry의 stable `procedure_step_id`/`step_code`/표시명/alias와 인터넷 finding 매핑 정책. BE는 검색 내용이나 조건을 작성하지 않음
-- [ ] Google 공개 공식사이트 Agent Search app/engine 생성·URL pattern 승인, API key 제한·secret 주입·rotation과 quota/비용 운영 주체
-- [ ] Kakao fallback REST API 키의 secret 주입·rotation·호출 허용 IP와 quota/rate-limit 운영 주체. deprecated alias 제거 일정
+- [ ] 공식 source registry URL 추가·삭제의 업무/보안/이용조건 승인 주체
+- [ ] 선택 Kakao/Google fallback을 운영할 경우 key·app/engine·secret rotation·호출 허용 IP·quota/비용 운영 주체와 deprecated alias 제거 일정
 - [ ] 공식기관 domain allowlist 승인·변경 절차, redirect/SSRF 방어, fetch timeout·MIME·본문 byte 상한
 - [ ] fetched Evidence의 URL/hash/retrieved_at 보존, 재조회/cache TTL과 원문 삭제·변경 시 감사 정책
 - [ ] `support_program_id`/`wiki_uuid`/기존 `support_item_id` 명칭과 resolver
@@ -1484,9 +1947,9 @@ standalone 정상 실행은 아래 생산 연동 기능의 완료를 뜻하지 �
 
 - [ ] 모든 하위 결과의 run/case/snapshot이 현재 실행과 같다.
 - [ ] schema version은 `agent-io/2.0`이고 v1 Procedure lookup payload를 거부한다.
-- [ ] Procedure lookup은 query마다 Google Agent Search를 먼저 시도하고 기술 실패·0건·공식 후보 0건에만 Kakao로 fallback한다. Google 미설정 Kakao-only 실행, 미사용 fallback 0 counter와 provider attempt 불변식도 검증한다.
-- [ ] Google/Kakao 후보 URL을 HTTPS·공식 domain·IP-literal 금지 정책으로 검증하고 redirect마다 같은 검사를 반복한다. DNS public-address pinning은 생산 egress 완료 항목으로 별도 확인한다.
-- [ ] Google/Kakao snippet은 Evidence가 아니며 `google.com/search` HTML을 scraping하지 않는다. 직접 fetch한 공식 원문만 `OFFICIAL_DOCUMENT`가 된다.
+- [ ] Procedure lookup은 query마다 공식 registry를 먼저 시도하고 miss일 때만 Kakao→Google로 fallback한다. registry-only 실행, 미사용 fallback 0 counter와 provider attempt 불변식도 검증한다.
+- [ ] registry/Kakao/Google 후보 URL을 HTTPS·공식 domain·IP-literal 금지 정책으로 검증하고 redirect마다 같은 검사를 반복한다. DNS public-address pinning은 생산 egress 완료 항목으로 별도 확인한다.
+- [ ] Kakao/Google snippet은 Evidence가 아니며 `google.com/search` HTML과 Naver 검색 결과를 AI 입력에 쓰지 않는다. 직접 fetch한 공식 원문만 `OFFICIAL_DOCUMENT`가 된다.
 - [ ] 각 문서의 `discovery_provider`, `provider_order`, `provider_summaries`, `fallback_query_count`와 aggregate counter가 일치한다.
 - [ ] Procedure document와 Evidence가 URL/excerpt/retrieved_at/freshness/hash까지 1:1로 일치한다.
 - [ ] 검색 counter와 COMPLETE/PARTIAL/NO_RESULTS 불변식이 일치하고 credential·quota·전 질의 실패는 기술 실패다.
@@ -1531,4 +1994,4 @@ P0 합의 뒤 BE shared 경계에 우선 필요한 schema는 다음과 같습니
 6. `OutputGuardrailProof`, `StateGuardrailProof`, `GuardrailRejection`, `ConcurrencyConflictDetail`, `PersistReviewedPlanCommand`, `PersistResult`
 7. 외부 API 결과와 `viewState`용 discriminated response DTO
 
-정보분석·지원금·절차조회·Review의 provider/local 출력 schema와 Google 우선·Kakao query별 fallback 검색/원문 fetch 구현은 AI 내부 영역입니다. BE는 ProcedureMaster나 검색 내용을 작성하거나 이를 별도 HTTP DTO로 만들 필요가 없습니다. BE/인프라는 공개 공식사이트만 포함한 Google Agent Search app/engine과 제한된 API key를 생성·운영하고 Kakao fallback secret과 provider별 quota/비용·network 경계를 제공합니다. BE는 인증된 snapshot, canonical 절차 ID registry, support catalog, Evidence 저장·복원과 Coordinator→Guardrail/persistence shared 경계를 versioned 계약으로 확정합니다.
+정보분석·지원금·절차조회·Review의 provider/local 출력 schema와 공식 registry 우선·선택 Kakao→Google 검색/원문 fetch 구현은 AI 내부 영역입니다. BE는 ProcedureMaster나 검색 내용을 작성하거나 이를 별도 HTTP DTO로 만들 필요가 없습니다. BE/인프라는 registry 변경 승인과 안전한 network 경계를 제공하고, fallback을 켤 때만 Kakao/Google secret·app·quota/비용을 운영합니다. BE는 인증된 snapshot, canonical 절차 ID registry, support catalog, Evidence 저장·복원과 Coordinator→Guardrail/persistence shared 경계를 versioned 계약으로 확정합니다.

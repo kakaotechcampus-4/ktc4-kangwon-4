@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 
 from app.agent.claim_safety import (
     expand_evidence,
+    has_confirmation_caveat,
     has_explicit_eligibility_language,
     has_procedure_language,
     has_support_action_language,
@@ -219,6 +220,7 @@ class SupervisorAgent:
                     "component result does not match the Supervisor snapshot"
                 )
         self._validate_procedure_analysis_sources(source_results)
+        evidence_registry = self._evidence(source_results, request)
 
         prompt_input = {
             "trigger": to_model_projection(request.trigger),
@@ -273,6 +275,14 @@ class SupervisorAgent:
                     ],
                     "transitive_parent_evidence_counts": True,
                 },
+                "allowed_evidence_refs": [
+                    {
+                        "evidence_ref": evidence.evidence_id,
+                        "source_type": evidence.source_type.value,
+                        "freshness_status": evidence.freshness_status.value,
+                    }
+                    for evidence in evidence_registry.values()
+                ],
                 "overconfident_language_is_forbidden": True,
                 "runtime_injects_ids_and_timestamps": True,
                 "revision": {
@@ -319,8 +329,13 @@ class SupervisorAgent:
                             "or target_kind=SUPPORT_PROGRAM with a support_program from a "
                             "Support check. Never mix both kinds in one action. "
                             "Every ELIGIBILITY claim must use NEEDS_CONFIRMATION. Select only "
-                            "an available grounded-claim target_kind and use target_index only "
-                            "for an existing question. Every visible support-program name, amount, "
+                            "evidence_ref values listed in contract.allowed_evidence_refs; never "
+                            "use a call, candidate, finding, document, or question UUID as evidence. "
+                            "Select only an available grounded-claim target_kind and use a zero-based "
+                            "target_index only for an existing question. For NEEDS_MORE_INFO about "
+                            "missing Case facts, reuse Info question candidates, avoid eligibility "
+                            "wording, and omit grounded claims that lack official evidence. Every "
+                            "visible support-program name, amount, "
                             "date/deadline, eligibility, legal, or tax statement needs an exact "
                             "GroundedClaim selector backed by an allowed official document or "
                             "official API source. Never use "
@@ -350,9 +365,79 @@ class SupervisorAgent:
                 )
             except (GuardrailViolation, ValueError):
                 continue
+        fallback = self._missing_info_fallback(source_results, evidence_registry)
+        if fallback is not None:
+            return self._materialize(
+                request,
+                list(source_results),
+                fallback,
+                draft_version=draft_version,
+                fact_overlays=fact_overlays,
+            )
         raise SupervisorGuardrailError(
             "Supervisor failed deterministic provenance checks"
         ) from None
+
+    @staticmethod
+    def _missing_info_fallback(
+        sources: Sequence[ReviewSourceResult],
+        evidence_by_id: dict[str, EvidenceRecord],
+    ) -> SupervisorSemanticDraft | None:
+        """Build a conservative question-only draft after bounded model failure."""
+
+        questions: list[str] = []
+        missing_paths: set[str] = set()
+        for source in sources:
+            if not isinstance(source.output, InfoAnalysisResult):
+                continue
+            missing_paths.update(
+                item.field_path.value for item in source.output.missing_fields
+            )
+            questions.extend(item.text for item in source.output.question_candidates)
+        questions = list(dict.fromkeys(questions))
+        if not questions:
+            return None
+
+        preferred_refs = [
+            evidence.evidence_id
+            for evidence in evidence_by_id.values()
+            if evidence.source_type.value
+            in {
+                "USER_INPUT",
+                "EXPERT_CONFIRMATION",
+                "SYSTEM_RECORD",
+            }
+            and any(path in evidence.excerpt for path in missing_paths)
+        ]
+        if not preferred_refs:
+            preferred_refs = [
+                evidence.evidence_id
+                for evidence in evidence_by_id.values()
+                if evidence.source_type.value
+                in {
+                    "USER_INPUT",
+                    "EXPERT_CONFIRMATION",
+                    "SYSTEM_RECORD",
+                }
+            ]
+        if not preferred_refs:
+            return None
+        evidence_refs = list(dict.fromkeys(preferred_refs))
+        return SupervisorSemanticDraft(
+            decision_type="NEEDS_MORE_INFO",
+            selection_summary="누락된 정보를 먼저 확인해 주세요.",
+            requires_human=True,
+            evidence_refs=evidence_refs,
+            blocker=Blocker(
+                blocker_code="MISSING_CASE_INFORMATION",
+                title="확인할 정보가 있습니다",
+                description="입력에서 확인되지 않은 항목이 있어 다음 판단을 보류합니다.",
+                evidence_refs=evidence_refs,
+            ),
+            next_action=None,
+            questions_for_user=questions,
+            grounded_claims=[],
+        )
 
     @staticmethod
     def _previous_draft_projection(draft: SupervisorDraft) -> dict[str, Any]:
@@ -662,12 +747,18 @@ class SupervisorAgent:
                 [evidence_by_id[ref] for ref in claim.evidence_refs],
                 evidence_by_id,
             )
-            if claim.assertion_level == "INFORMATION" and any(
+            has_non_current_evidence = any(
                 item.freshness_status != "CURRENT" for item in expanded
-            ):
-                raise SupervisorGuardrailError(
-                    "non-current evidence cannot support an information assertion"
-                )
+            )
+            if has_non_current_evidence:
+                if claim.assertion_level == "INFORMATION":
+                    raise SupervisorGuardrailError(
+                        "non-current evidence cannot support an information assertion"
+                    )
+                if not has_confirmation_caveat(claim.text):
+                    raise SupervisorGuardrailError(
+                        "non-current evidence requires an explicit confirmation caveat"
+                    )
             allowed_sources = required_sources_for_claim(claim.claim_type)
             if not any(item.source_type in allowed_sources for item in expanded):
                 raise SupervisorGuardrailError(

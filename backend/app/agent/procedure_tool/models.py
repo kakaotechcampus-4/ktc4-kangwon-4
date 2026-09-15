@@ -23,21 +23,18 @@ DEFAULT_GOOGLE_SEARCH_ENDPOINT: Final[str] = "https://discoveryengine.googleapis
 DEFAULT_KAKAO_SEARCH_ENDPOINT: Final[str] = "https://dapi.kakao.com/v2/search/web"
 # Backwards-compatible import alias. New code should use the provider-specific name.
 DEFAULT_SEARCH_ENDPOINT: Final[str] = DEFAULT_KAKAO_SEARCH_ENDPOINT
-DEFAULT_OFFICIAL_DOMAINS: Final[tuple[str, ...]] = (
-    "go.kr",
-    "gov.kr",
-    "nts.go.kr",
-    "hometax.go.kr",
+# Environment configuration may only narrow these code-reviewed trust roots to
+# an exact root or one of its child hosts. Adding another trust root requires a
+# code/security review; an environment value must never broaden network egress.
+CODE_REVIEWED_OFFICIAL_DOMAINS: Final[tuple[str, ...]] = (
     "law.go.kr",
     "easylaw.go.kr",
-    "4insure.or.kr",
-    "semas.or.kr",
-    "sbiz24.kr",
-    "bizinfo.go.kr",
+    "nps.or.kr",
 )
+DEFAULT_OFFICIAL_DOMAINS: Final[tuple[str, ...]] = CODE_REVIEWED_OFFICIAL_DOMAINS
 
 _DEFAULT_TIMEOUT_SECONDS = 8.0
-_DEFAULT_TOTAL_TIMEOUT_SECONDS = 30.0
+_DEFAULT_TOTAL_TIMEOUT_SECONDS = 60.0
 _DEFAULT_MAX_RETRIES = 1
 _DEFAULT_RETRY_BACKOFF_SECONDS = 0.25
 _DEFAULT_MAX_RESPONSE_BYTES = 1_000_000
@@ -61,15 +58,16 @@ class ProcedureSearchConfigurationError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class ProcedureSearchConfig:
-    """Validated Google-first search and official-document fetch configuration.
+    """Validated official-first discovery and document-fetch configuration.
 
     Provider keys are excluded from ``repr`` so diagnostics cannot accidentally
-    disclose them. Google Agent Search is attempted first when its complete
-    three-field configuration is present; Kakao remains an optional per-query
-    fallback. Process-environment values take precedence over repository
-    ``.env`` values, matching the rest of the Agent runtime.
+    disclose them. A code-reviewed official-source registry needs no credential.
+    Kakao and Google are optional URL-discovery fallbacks for queries that the
+    registry cannot cover. Process-environment values take precedence over the
+    repository ``.env`` file, matching the rest of the Agent runtime.
     """
 
+    official_source_registry_enabled: bool = True
     google_api_key: str | None = field(default=None, repr=False)
     google_project_id: str | None = None
     google_engine_id: str | None = None
@@ -103,9 +101,13 @@ class ProcedureSearchConfig:
                 "PROCEDURE_GOOGLE_LOCATION must be global, us, or eu"
             )
         kakao_api_key = _normalize_optional(self.kakao_api_key)
-        if google_api_key is None and kakao_api_key is None:
+        if (
+            not self.official_source_registry_enabled
+            and google_api_key is None
+            and kakao_api_key is None
+        ):
             raise ProcedureSearchConfigurationError(
-                "at least one procedure search provider must be configured"
+                "at least one procedure source provider must be configured"
             )
         object.__setattr__(self, "google_api_key", google_api_key)
         object.__setattr__(self, "google_project_id", google_project_id)
@@ -227,6 +229,11 @@ class ProcedureSearchConfig:
             else DEFAULT_OFFICIAL_DOMAINS
         )
         return cls(
+            official_source_registry_enabled=_parse_bool(
+                value("PROCEDURE_OFFICIAL_REGISTRY_ENABLED"),
+                default=True,
+                name="PROCEDURE_OFFICIAL_REGISTRY_ENABLED",
+            ),
             google_api_key=google_api_key,
             google_project_id=google_project_id,
             google_engine_id=google_engine_id,
@@ -278,7 +285,11 @@ class SearchHit:
     title: str
     url: str
     query: str
-    provider: Literal["GOOGLE_AGENT_SEARCH", "KAKAO_DAUM_WEB"]
+    provider: Literal[
+        "OFFICIAL_SOURCE_REGISTRY",
+        "GOOGLE_AGENT_SEARCH",
+        "KAKAO_DAUM_WEB",
+    ]
 
 
 def _repo_root() -> Path:
@@ -318,7 +329,7 @@ def _normalize_domain(value: str) -> str:
         )
     if not any(
         normalized == approved or normalized.endswith(f".{approved}")
-        for approved in DEFAULT_OFFICIAL_DOMAINS
+        for approved in CODE_REVIEWED_OFFICIAL_DOMAINS
     ):
         raise ProcedureSearchConfigurationError(
             "official source domains must be within the code-reviewed registry"
@@ -384,6 +395,17 @@ def _parse_int(raw: str | None, *, default: int, name: str) -> int:
         return int(raw)
     except ValueError as exc:
         raise ProcedureSearchConfigurationError(f"{name} must be an integer") from exc
+
+
+def _parse_bool(raw: str | None, *, default: bool, name: str) -> bool:
+    if raw is None:
+        return default
+    normalized = raw.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ProcedureSearchConfigurationError(f"{name} must be true or false")
 
 
 def _parse_float(raw: str | None, *, default: float, name: str) -> float:

@@ -1,5 +1,7 @@
 # 스키마 (테이블 정의)
 
+> 상태: **논리 DB 설계 제안**입니다. 아래 `CASES` rename, `version`, `CASE_FIELD_HISTORY`, composite UNIQUE를 포함한 실제 migration은 아직 BE가 구현·검증하지 않았습니다. 표의 enum도 canonical Agent/API enum 합의 전 초안이므로 그대로 운영 DDL로 복사하지 않습니다. 구현 책임과 승인 기준은 [`../be-agent-integration-requirements.md`](../be-agent-integration-requirements.md)를 따릅니다.
+
 전체 구조는 5개 도메인으로 나뉩니다.
 
 ```
@@ -22,7 +24,7 @@
 Case 하나가 이 서비스의 핵심 작업 단위이고, 나머지 모든 테이블은 결국 Case를 중심으로 붙습니다.
 
 ```
-MEMBERS ──1:N──► CASE
+MEMBERS ──1:N──► CASES
 ```
 
 ### MEMBERS
@@ -36,14 +38,17 @@ MEMBERS ──1:N──► CASE
 | created_at | DATETIME | | |
 | updated_at | DATETIME | | |
 
-### CASE
+### CASES
 
 사용자 한 명이 진행하는 폐업 건 하나를 의미함.
+
+물리 테이블명은 MySQL 예약어인 `CASE`와 충돌하지 않도록 **`CASES`**를 사용합니다. 문서에서 대문자 `CASES`는 테이블을, 일반 표기인 Case는 서비스의 업무 단위를 뜻합니다.
 
 | 컬럼 | 타입 | 키 | 설명 |
 |---|---|---|---|
 | id | BIGINT | PK | |
 | member_id | BIGINT | FK | |
+| version | BIGINT | | NOT NULL, default `1`; 상태 변경 성공 시 1 증가하며 `expectedVersion` 비교에 사용 |
 | business_type | VARCHAR | | |
 | franchise_status | BOOLEAN | | |
 | employee_count | INT | | |
@@ -57,6 +62,35 @@ MEMBERS ──1:N──► CASE
 | completed_at | DATETIME | | nullable |
 | created_at | DATETIME | | |
 | updated_at | DATETIME | | |
+
+`CASES`라는 이름과 `version`은 이 문서에서 채택한 논리 제안입니다. BE 완료 판정은 실제 migration 뒤 (1) 기존 Case 데이터 보존, (2) 모든 FK/repository가 `CASES(id)` 사용, (3) 신규 `CASE` table 부재, (4) apply/rollback 테스트 통과로 합니다.
+
+### CASE_FIELD_HISTORY
+
+`CASES`의 업무 상태 컬럼이 언제, 무엇에서 무엇으로, 어떤 근거로 바뀌었는지를 남기는 append-only 감사 이력입니다. 한 요청에서 여러 필드가 바뀌면 필드마다 한 row를 추가합니다. `CASES` 갱신, `version` 증가, 관련 `CASE_FIELD_HISTORY` 삽입은 반드시 하나의 DB 트랜잭션으로 처리합니다.
+
+| 컬럼 | 타입 | 키 | 설명 |
+|---|---|---|---|
+| id | BIGINT | PK | |
+| case_id | BIGINT | FK | 변경된 `CASES.id` |
+| case_log_id | BIGINT | FK | nullable, 변경을 유발한 입력·판단 로그 |
+| case_version | BIGINT | | 변경이 반영된 뒤의 `CASES.version` |
+| field_name | VARCHAR | | 변경된 허용 컬럼명; 임의 JSON 경로 금지 |
+| previous_value | JSON | | nullable, 변경 전 typed 값을 JSON scalar로 보존 |
+| new_value | JSON | | nullable, 변경 후 typed 값을 JSON scalar로 보존 |
+| change_source | ENUM | | `USER_CONFIRMED` / `REVIEWED_AGENT` / `SYSTEM_BATCH` / `ADMIN` |
+| change_reason | VARCHAR | | 사람이 이해할 수 있는 변경 이유 또는 정책 코드 |
+| changed_by_member_id | BIGINT | FK | nullable, 사용자·관리자 변경일 때 actor |
+| created_at | DATETIME | | 변경 시각; row 수정 시각이 아니라 불변 생성 시각 |
+
+다음 제약을 DB와 서비스 계층이 함께 보장해야 합니다.
+
+- `(case_id, case_version, field_name)`에 `UNIQUE`를 두어 같은 버전의 같은 필드를 중복 기록하지 않습니다.
+- 서비스 계정에는 `CASE_FIELD_HISTORY`의 `UPDATE`/`DELETE` 권한을 주지 않아 이력을 불변으로 유지합니다.
+- `previous_value`와 `new_value`가 같은 변경은 기록하지 않고, 민감한 사용자 원문은 이 테이블에 복제하지 않습니다. 원문 근거는 `case_log_id`로 역추적합니다.
+- `REVIEWED_AGENT`는 Review와 Output Guardrail을 통과해 실제 저장된 변경에만 사용합니다. Agent 후보만으로 이력을 만들지 않습니다.
+
+`CASES.version` 갱신은 `UPDATE ... WHERE id = :case_id AND version = :expected_version`와 같은 원자적 CAS로 수행합니다. 영향 row가 0개이면 stale write이므로 업무 field, `CASE_FIELD_HISTORY`, decision/history를 하나도 commit하지 않습니다. 성공할 때만 version을 1 증가시키고 실제로 바뀐 field마다 before/after·source·reason row를 같은 transaction에 append합니다. enum의 최종 값, JSON scalar 직렬화와 실제 DDL은 BE·AI 공동 확정 후 migration으로 고정합니다.
 
 ---
 
@@ -159,8 +193,8 @@ CLOSURE_PROCEDURE_STEP ◄──┬── CLOSURE_PROCEDURE_STEP_DEPENDENCY  (�
 "그 상태가 어떻게 변해왔는지"를 기록합니다. PROGRESS는 현재 스냅샷, HISTORY는 변경 이력입니다.
 
 ```
-CASE ──1:N──► CASE_CLOSURE_PROCEDURE_STEP_PROGRESS   (현재 상태, 단계당 1 row)
-CASE ──1:N──► CASE_CLOSURE_PROCEDURE_STEP_HISTORY    (상태 변경마다 새 row 누적)
+CASES ──1:N──► CASE_CLOSURE_PROCEDURE_STEP_PROGRESS   (현재 상태, 단계당 1 row)
+CASES ──1:N──► CASE_CLOSURE_PROCEDURE_STEP_HISTORY    (상태 변경마다 새 row 누적)
                         │
                         └── case_log_id로 "이 변화가 어떤 판단 때문에 일어났는지" 역추적 가능
 ```
@@ -170,11 +204,15 @@ CASE ──1:N──► CASE_CLOSURE_PROCEDURE_STEP_HISTORY    (상태 변경마
 | 컬럼 | 타입 | 키 | 설명 |
 |---|---|---|---|
 | id | BIGINT | PK | |
-| case_id | BIGINT | FK | |
-| closure_procedure_step_id | BIGINT | FK | |
+| case_id | BIGINT | FK, UK(1) | `CASES.id`; `closure_procedure_step_id`와 복합 UNIQUE |
+| closure_procedure_step_id | BIGINT | FK, UK(1) | `case_id`와 복합 UNIQUE |
 | status | ENUM | | `NOT_STARTED` / `IN_PROGRESS` / `COMPLETED` (현재 상태) |
 | created_at | DATETIME | | |
 | updated_at | DATETIME | | |
+
+`UNIQUE (case_id, closure_procedure_step_id)`가 Case별·단계별 현재 row를 **최대 하나**로 강제합니다. UNIQUE만으로 row의 존재까지 강제할 수는 없습니다. **적용 단계마다 정확히 하나**라는 서비스 불변식은 BE가 versioned canonical registry/eligibility로 대상 집합을 먼저 고정하고, Case 생성 또는 registry 적용 transaction에서 대상마다 한 row를 insert한 뒤 대상 수와 저장 row 수를 대조해야 완성됩니다. 일부 insert가 실패하면 Case/progress 초기화 전체를 rollback합니다. 절차조회 Tool의 인터넷 결과는 canonical ID나 적용 단계 집합을 만들지 않습니다.
+
+이후 상태 변경은 새 PROGRESS row를 추가하지 않고 기존 row를 갱신하며, 같은 transaction에서 HISTORY row를 append합니다. 동시 갱신은 `CASES.version` 원자적 compare-and-set과 필요한 progress row lock으로 직렬화합니다. 승인 테스트는 동시 생성·retry·중복 insert·부분 실패를 포함하고, 적용 대상마다 정확히 1 row이며 비적용 단계 row가 없음을 확인해야 합니다.
 
 ### CASE_CLOSURE_PROCEDURE_STEP_HISTORY
 
@@ -197,7 +235,7 @@ CASE ──1:N──► CASE_CLOSURE_PROCEDURE_STEP_HISTORY    (상태 변경마
 LLM Wiki(Obsidian) 노트에서 관리합니다 — 판정은 LLM+Wiki가 담당하는 구조입니다.
 
 ```
-SUPPORT_PROGRAM ──1:N──► SUPPORT_PROGRAM_APPLICATION ◄──N:1── CASE
+SUPPORT_PROGRAM ──1:N──► SUPPORT_PROGRAM_APPLICATION ◄──N:1── CASES
        │
        └── uuid로 Wiki 노트와 매핑 (자격조건/금액 등 서술형 정보는 Wiki에 있음)
 ```

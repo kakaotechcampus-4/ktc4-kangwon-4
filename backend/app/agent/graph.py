@@ -729,7 +729,7 @@ class AgentGraph:
             for keyword in ("직원", "근로자", "4대보험", "사업장 소멸")
         )
         if (type(employee_count) is int and employee_count > 0) or employee_hint:
-            queries.append("4대보험 사업장 폐업 신고 절차")
+            queries.append("4대보험 탈퇴 사업장 폐업 신고 절차")
         return list(dict.fromkeys(queries))[:4]
 
     def _emit(

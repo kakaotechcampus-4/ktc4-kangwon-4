@@ -5,6 +5,8 @@
 > Agent·Tool 책임과 실행 순서는 `docs/architecture.md`를 따릅니다. 물리 DB 초안은 `docs/schema/schema_table.md`를 참고하되, 외부 API와 DB의 정확한 매핑은 FE·BE 합의로 확정합니다.
 >
 > **주의:** 아래 JSON의 `caseVersion`·`expectedVersion`과 enum 예시는 기존 제안이며 아직 BE 물리 schema와 일치하지 않습니다. 동시성 제어 방식과 enum 계약이 확정되기 전에는 구현 기준으로 사용하지 않습니다.
+>
+> 상태 구분: Agent 내부 `agent-io/2.0` schema와 strict runtime 모델은 구현돼 있습니다. 반면 이 문서의 외부 HTTP DTO, `docs/schema/schema_table.md`의 DDL·enum·migration은 합의용 제안이며 아직 BE 구현 완료 상태가 아닙니다. 규범적인 Agent 내부 필드는 [`agent-tool-io-schema.md`](./agent-tool-io-schema.md), BE 구현 경계와 승인 기준은 [`be-agent-integration-requirements.md`](./be-agent-integration-requirements.md)를 따릅니다.
 
 ## 1. 엔드포인트 목록
 
@@ -92,7 +94,7 @@ GET /auth/kakao/callback?code=...
 }
 ```
 
-**`stepProgress` 초기화 대상은 절차조회 Tool이 반환한 적용 가능 후보를 기준으로 합니다.** 정확한 절차 목록과 적용 조건은 Agent/Tool 계약 및 BE 절차 데이터가 확정된 뒤 이 예시와 함께 갱신합니다.
+**`stepProgress` 초기화 대상은 BE의 versioned canonical 절차 registry와 적용 조건으로 계산합니다.** 절차조회 Tool은 인터넷에서 공식 절차 내용을 조회할 뿐 DB step ID나 적용 단계 집합을 만들지 않습니다. BE 초기화 transaction은 적용 단계마다 progress row를 하나씩 만들고 완료 후 대상 수와 row 수를 대조해야 합니다. `UNIQUE (case_id, closure_procedure_step_id)`는 중복을 막아 최대 1개를 보장하고, 이 초기화·검증이 누락 row를 막아 정확히 1개를 보장합니다. 정확한 registry/적용 조건과 migration은 BE·AI 합의 후 이 예시와 함께 갱신합니다.
 
 ## 4. `GET /cases/{caseId}` — 현재 Case 조회 (AI 호출 없음)
 
@@ -120,21 +122,21 @@ GET /auth/kakao/callback?code=...
   ],
   "latestDecision": {
     "historyId": 15,
-    "blocker": "원상복구 범위가 아직 확인되지 않았습니다.",
-    "nextAction": "임대인에게 원상복구 범위를 확인하세요.",
+    "blocker": "철거 관련 지원조건이 아직 확인되지 않았습니다.",
+    "nextAction": "관련 지원항목의 조건과 필요한 증빙을 확인하세요.",
     "requiresHuman": false,
     "evidenceRefs": []
   }
 }
 ```
 
-`caseVersion`/`expectedVersion`은 동시 변경 방지를 위한 기존 제안이며 최종 채택 전입니다. FE는 Blocker/Next Action을 직접 계산하지 않고, `latestDecision`은 BE가 확정할 최신 판단 이력 저장소의 값을 반환합니다.
+이 예시에서 `RESTORATION_CHECK=COMPLETED`이므로 `latestDecision`은 이미 끝난 원상복구 확인을 다시 blocker로 제시하지 않습니다. `historyId=15`의 입력으로 새로 드러난 철거 단계의 지원조건 확인을 blocker/next action으로 반환합니다. FE는 Blocker/Next Action을 직접 계산하지 않고, `latestDecision`은 BE가 확정할 최신 판단 이력 저장소의 값을 반환합니다. `caseVersion`/`expectedVersion`은 `schema_table.md`의 `CASES.version`과 연결하며, 실제 migration·원자적 compare-and-set 방식은 BE 구현에서 확정합니다.
 
 ## 5. `POST /cases/{caseId}/results` (핵심)
 
 ### 처리 흐름
 
-`docs/architecture.md`를 따릅니다. 입력 Guardrail과 CaseSnapshot 조회 후 Supervisor가 필요한 Agent-as-Tool·절차조회 Tool을 선택 호출하고, Blocker·Next Action 초안은 필수 Review와 Output Guardrail을 모두 통과해야 저장·전달됩니다.
+`docs/architecture.md`를 따릅니다. BE Coordinator가 입력 Guardrail과 인증된 CaseSnapshot 조회를 수행한 뒤 AI Graph를 호출합니다. 현재 first pass는 `ProcedureLookupTool → Info Agent → Support Agent → Supervisor → Review Tool` 순서이며, Review를 통과한 Blocker·Next Action 초안도 BE의 Output/State Transition Guardrail과 version CAS를 통과해야 저장·전달됩니다. trigger별 선택 호출 최적화는 목표 구조이며 현재 외부 계약으로 확정하지 않습니다.
 
 ### Request
 
@@ -266,7 +268,7 @@ MVP에서 별도 History 화면이 없다면 구현 우선순위는 낮습니다
 
 ## 11. Agent/Tool JSON 계약
 
-> 아래 예시는 기존 설계에서 가져온 **검토용 초안**이며 구현 계약이 아닙니다. Agent/Tool 입출력 schema는 AI가 확정해 BE에 전달합니다. 외부 API 계약은 FE·BE 합의 후 갱신하며, 그 전에는 필드를 임의로 구현하지 않습니다.
+> 아래 §11.1·§11.2·§11.4 예시는 기존 설계에서 가져온 **구형 검토용 초안**이며 구현 계약이 아닙니다. Agent/Tool 내부 입출력은 AI가 이미 [`agent-tool-io-schema.md`](./agent-tool-io-schema.md)와 strict runtime 모델로 정의했습니다. BE는 provider/local 내부 DTO를 복사하지 말고 `SharedCaseSnapshotDTO`·`AgentRunOutcome`·Guardrail·persistence shared 경계만 공동 확정해야 합니다. 외부 HTTP DTO는 FE·BE·AI 합의 후 갱신하며 그 전에는 아래 예시 필드를 임의로 구현하지 않습니다.
 
 ### 11.1 `FactCandidate` (정보분석 Agent-as-Tool 출력 초안)
 
@@ -337,15 +339,16 @@ REPLAN_FAILED
 }
 ```
 
-### 11.3 Supervisor·절차조회·Review 계약 — TBD
+### 11.3 Supervisor·절차조회·Review 내부 계약 — Agent 구현 완료, 외부 매핑 TBD
 
-기존 `RuleDecision` 계약은 Rule 엔진 제거와 함께 폐기합니다. 대체 schema는 AI가 정의해 BE에 전달하며, 최소 의미 요구사항만 다음처럼 확정합니다.
+기존 `RuleDecision` 계약은 Rule 엔진 제거와 함께 폐기합니다. 정확한 현재 계약은 `agent-tool-io-schema.md` §4~§14와 `backend/app/agent/schemas.py`이며, 핵심 타입은 다음과 같습니다.
 
-- 절차조회 Tool: 절차 후보, 필요 조건, 불가능 사유
-- Supervisor: Blocker 1개, Next Action 1개, 선택 이유, 사용자 확인 필요 여부, Evidence 참조
-- Review Tool: `PASS` 또는 `REVISE`, 문제와 사유, 누락 Evidence, 재작업 권고 대상
+- 절차조회 Tool: `ProcedureLookupInput` → 공식 원문·Evidence·provider 시도 내역을 포함한 `ProcedureLookupResult`
+- Info Agent: 사용자 입력과 raw lookup 결과를 분석하고 caller가 제공한 `KnownProcedureStep`에만 `ProcedureFinding`을 결합
+- Supervisor: `ACTION | NEEDS_MORE_INFO | CASE_COMPLETE` tagged decision, typed target, `MutationSet`, `GroundedClaim`
+- Review Tool: immutable `ReviewSubject`와 digest를 검증하고 `PASS | REVISE`, 문제·누락 Evidence·재작업 권고 대상을 반환
 
-정확한 필드명·타입·필수 여부는 아직 구현 계약이 아닙니다.
+이 내부 schema는 BE HTTP endpoint를 뜻하지 않습니다. 현재 runtime outcome은 `REVIEWED_PLAN | CONFLICT | SAFE_FAILURE`이고 목표 계약의 `NO_CHANGE`, 외부 `UPDATED | NEEDS_MORE_INFO | ...` 변환, persistence DTO와 HTTP status/viewState는 아직 공동 확정 대상입니다.
 
 ### 11.4 `SupportCheckResult` (지원금 Agent-as-Tool 출력 초안)
 
@@ -396,7 +399,7 @@ REPLAN_FAILED
 
 ## 13. 명시적 TBD
 
-- **동시성 제어**: 현행 물리 schema에는 `case.version`이 없습니다. `caseVersion`/`expectedVersion`을 추가할지 다른 방식을 쓸지, `/results/confirm`까지 어떻게 보호할지 BE가 확정해야 합니다.
+- **동시성 제어 구현**: 논리 schema는 `CASES.version`을 채택했습니다. BE는 실제 migration, `expectedVersion` 불일치 시 응답, `/results/confirm`까지 포함한 원자적 compare-and-set 트랜잭션을 확정해야 합니다.
 - **enum 정합성**: 이 문서 예시의 `UNKNOWN`·`LEASED_PAID`·`DEMOLITION_REQUIRED` 등이 현행 `schema_table.md`와 다릅니다. 예시를 구현하기 전에 BE schema와 외부 API 값을 하나로 맞춰야 합니다.
 - **`REPLAN_FAILED` 응답 형태**: Case 변경 후 재계획만 실패했을 때 변경 상태를 유지할지 전체 요청을 실패 처리할지 확정되지 않았습니다. **BE 트랜잭션 계약에서 정합니다**.
 - **Conflict 임시 저장 방식**: `/results/confirm` 호출 시 충돌 후보를 서버에 `conflict_id`로 임시 저장할지, 클라이언트가 후보값을 다시 전송할지 미정 (`BE_AI_역할분담_및_연동스펙.md` §7 `[확인 필요]`).
@@ -421,9 +424,9 @@ REPLAN_FAILED
 | §8 `subsidy-applications` PATCH | 사용자가 공유한 Notion 인터페이스 명세 §5-7 |
 | §9 `history` 조회 | 사용자가 공유한 Notion 인터페이스 명세 §5-8 |
 | §10 BE/AI 책임 분담 | `BE_AI_역할분담_및_연동스펙.md` §7 |
-| §11.1 `FactCandidate` | `RE_BORN_AI리드_설계안.md` §5.1 (필드가 더 상세한 버전 채택), 금지 예시는 `BE_AI_역할분담_및_연동스펙.md` §6.1 |
-| §11.2 `ValidationResult` | `RE_BORN_AI리드_설계안.md` §5.2 + `BE_AI_역할분담_및_연동스펙.md` §6.2 (enum 통합), `STALE_SUPPORT_DATA`/`STALE` 매핑은 검증 워크플로우에서 지적된 불일치 해소 |
-| §11.3 Supervisor·절차조회·Review 계약 | 2026-09-13 Agent 구조 합의. 정확한 schema는 AI 확정 대기 |
-| §11.4 `SupportCheckResult` | `RE_BORN_AI리드_설계안.md` §5.4에서 가져온 검토용 초안. 정확한 schema는 AI 확정 대기 |
+| §11.1 `FactCandidate` | 구형 예시 출처는 `RE_BORN_AI리드_설계안.md` §5.1. 현재 구현 계약은 `agent-tool-io-schema.md` §8과 `backend/app/agent/schemas.py` |
+| §11.2 `ValidationResult` | 구형 외부 결과 제안은 `RE_BORN_AI리드_설계안.md` §5.2 + `BE_AI_역할분담_및_연동스펙.md` §6.2. 현재 Agent outcome과 외부 mapping 차이는 `agent-tool-io-schema.md` §13·§15 |
+| §11.3 Supervisor·절차조회·Review 계약 | `agent-tool-io-schema.md` §4~§14와 `backend/app/agent/schemas.py`. Agent 내부 schema는 구현됐고 외부 HTTP/shared mapping은 합의 대기 |
+| §11.4 `SupportCheckResult` | `RE_BORN_AI리드_설계안.md` §5.4에서 가져온 구형 검토용 초안. 현재 구현 계약은 `agent-tool-io-schema.md` §9이며 외부 HTTP/shared mapping은 합의 대기 |
 | §12 에러/상태 표 | `RE_BORN_AI리드_설계안.md` §9.5, HTTP 상태 열은 검증 워크플로우 지적사항 반영 신규 추가 |
 | §13 TBD | `RE_BORN_AI리드_설계안.md` §9.5, §12 / `BE_AI_역할분담_및_연동스펙.md` §7, §12 / `todo.md` §5 — 인증 방식은 §2에서 해소되어 이 목록에서 제거 |
