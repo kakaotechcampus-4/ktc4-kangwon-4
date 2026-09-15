@@ -27,6 +27,10 @@ function stepDelay(index: number): number {
  * 고장으로 읽힌다. 사용자가 새로고침하면 요청이 두 번 나간다.
  *
  * 문구가 바뀌면 진행 중이라는 것이 전해진다. 그래서 넓이가 필요하다.
+ *
+ * `aria-atomic="false"`는 문구가 바뀔 때 그 문장만 읽히게 한다. `role="status"`는
+ * 기본값이 `true`라, 두면 한 번 바뀔 때마다 카드 전체를 다시 읽어 같은 안내가
+ * 반복된다 — 진행 중임을 알리려던 장치가 화면을 못 보는 사용자에게는 소음이 된다.
  */
 export function PendingCard({ messages }: PendingCardProps) {
   const [index, setIndex] = useState(0)
@@ -45,6 +49,7 @@ export function PendingCard({ messages }: PendingCardProps) {
       className="rounded-2xl border border-gray-200 bg-white p-5"
       role="status"
       aria-live="polite"
+      aria-atomic="false"
     >
       <div className="flex items-center gap-3">
         <span
