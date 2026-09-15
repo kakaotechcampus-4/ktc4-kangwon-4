@@ -58,6 +58,12 @@ export function ResultInputPage() {
 
     // TODO(API): 계약이 확정되면 POST /cases/{caseId}/results 로 바꾼다.
     // 진행 중인 요청 자체를 끊는 것은 그때 AbortController로 처리한다.
+    //
+    // 함께 챙길 것:
+    // - 대기 중 이탈해도 서버에는 이미 반영됐을 수 있다. /로 돌아왔을 때 그 변경이
+    //   보이도록 현재 Case를 다시 불러와야 한다.
+    // - "다시 시도"는 같은 clientEventId로 재전송한다(interface-spec.md §5).
+    //   새 값으로 보내면, 첫 요청이 반영됐는데 응답만 실패한 경우 같은 내용이 두 번 들어간다.
     // 그때 실패 처리도 함께 넣는다 — 오류가 나면 PENDING에서 빠져나오지 못해
     // 입력창이 잠긴 채로 남는다. FAILED 상태가 그 자리다.
     const outcome = await simulateSubmit(readMockKey(search), text)
