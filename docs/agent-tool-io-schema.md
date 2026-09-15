@@ -1,6 +1,6 @@
-# RE:BORN Agent/Tool 입출력 schema 제안
+# RE:BORN Agent/Tool 현재 입출력 계약과 BE 연동 schema 제안
 
-> 상태: **v0.5 — `agent-io/2.0` breaking change / AI standalone 실행 계약 감사 완료 / BE 계약 합의 전**
+> 상태: **v0.5 — `[CURRENT_AI]`로 표시한 standalone 계약은 구현·검증 완료 / BE·FE shared 계약은 제안·합의 전**
 > 기준일: 2026-09-15
 > 기준 구조: `docs/architecture.md`의 현재 AgentGraph 소유 Global Loop와 목표 Supervisor 계획/Graph router 구조, 정보분석·지원금 Local Loop, 절차조회 Tool, 필수 Review Tool
 > 문서 분리: Agent 독립 실행 조건은 [`agent-standalone-runtime-requirements.md`](./agent-standalone-runtime-requirements.md), BE 구현·회신 요구사항은 [`be-agent-integration-requirements.md`](./be-agent-integration-requirements.md)를 따릅니다.
@@ -11,6 +11,31 @@
 
 지원 공고 discovery의 현재 실행 계약은 `backend/app/agent/support_agent/discovery_models.py`와 `discovery_tool.py`도 함께 권위 소스입니다. 아래 외부 상태·법령 resolver는 아직 코드가 없는 목표 계약이므로 같은 수준의 구현 완료로 해석하지 않습니다.
 
+### 계약 상태와 구현 상태 표기
+
+이 문서는 계약의 **승인 상태**와 코드의 **구현 상태**를 별개로 표시합니다. "확정"은 아래 범위를 붙이지 않고 단독으로 쓰지 않습니다.
+
+| 표기 | 정확한 의미 | 구현 기준으로 사용 가능 여부 |
+|---|---|---:|
+| **`[CURRENT_AI]`** | 현재 브랜치의 Python 모델·validator·Graph·테스트가 일치하는 AI 소유 확정 계약 | O. 현재 standalone 구현 기준 |
+| **`[TYPE_ONLY]`** | Python 타입·variant·validator는 있지만 현재 Graph의 허용된 공개 입력·정상 출력·구성요소 호출 계약으로는 사용할 수 없음. 파싱 뒤 결정적으로 거부되는 variant도 포함 | 타입 참고만 가능. 도달 가능한 기능이나 연동 완료로 해석 금지 |
+| **`[PROPOSED_SHARED]`** | BE/FE/shared 경계 후보. P0 결정과 공동 승인 전에는 필드·enum·default가 바뀔 수 있음 | X. 그대로 구현 금지 |
+| **`[TARGET_UNIMPLEMENTED]`** | 방향성 또는 후속 capability. 승인된 wire 계약이나 실행 기능이 아님 | X |
+| **`[DEPRECATED]`** | v1 또는 구형 예시. 신규 구현에 사용하지 않음 | X |
+
+`[AGREED_SHARED]`는 승인자·승인일·ADR 또는 공동 계약 PR이 남은 뒤에만 사용할 라벨입니다. **현재 이 문서에는 `[AGREED_SHARED]` 항목이 0개입니다.** 표나 절 제목에 별도 표기가 없으면 가장 가까운 상위 상태를 따릅니다. 날짜가 붙은 외부 API 결과는 계약 확정이 아니라 `[OBSERVED_2026-09-15]` 실측 사실이며 재검증될 수 있습니다.
+
+| schema 범위 | 계약 상태 | 구현 상태 | 권위 소스 또는 다음 결정 |
+|---|---|---|---|
+| 현재 `CaseSnapshot` 8개 key, 세 현재 trigger, Procedure·Info·Support·Supervisor·Review 입출력, 세 현재 outcome | `[CURRENT_AI]` | 구현·349개 Agent 테스트 통과 | `backend/app/agent/schemas.py`와 구성요소별 모델/validator |
+| `InvocationMeta` | `[CURRENT_AI]` | 현재 Graph/Review provenance에 사용 | `schemas.py`, `graph.py` |
+| `ComponentRequest`·`ComponentSuccess`·`ComponentFailure` | `[TYPE_ONLY]`; shared 사용은 `[PROPOSED_SHARED]` | 타입만 구현, 현재 호출은 bare payload/result | envelope adapter와 run/deadline 소유권 합의 |
+| 확장 `CaseSnapshot`, `CONFLICT_CONFIRMED`, `NO_CHANGE`, production `ConflictOutcome.evidence_records` | `[PROPOSED_SHARED]` | 문서만 존재, 현재 strict model에는 없음 | BE snapshot/conflict/outcome 계약 승인 |
+| NTS·행안부·법령 resolver wire schema | `[PROPOSED_SHARED]` | 문서만 존재 | 식별정보·credential·dataset version·Evidence 계약 승인 |
+| Output/State Guardrail, `PersistReviewedPlanCommand`·`PersistResult`, 외부 HTTP mapping | `[PROPOSED_SHARED]` | 문서만 존재 | BE transaction/OpenAPI/공통 fixture 승인 |
+| Supervisor 호출 계획과 동적 Graph router, Wiki/Chroma/S3, Langfuse adapter | `[TARGET_UNIMPLEMENTED]` | 미구현 | 별도 설계 승인과 구현 필요 |
+| v1 Procedure master wire schema와 `interface-spec.md` §11.1·§11.2·§11.4 예시 | `[DEPRECATED]` | 신규 구현 대상 아님 | 현재 v2 schema 사용 |
+
 ### 이 문서를 읽는 기준: 네 계약 층
 
 같은 이름이 provider 출력, Agent 내부 의미 모델, standalone 공개 결과, 목표 BE DTO에 반복되므로 다음 층을 섞어 읽으면 안 됩니다.
@@ -20,29 +45,46 @@
 | LLM provider 형식 | `info_agent/agent.py`, `support_agent/models.py`, `supervisor/agent.py`, `review_tool/models.py`의 `*ProviderOutput`, `*ModelOutput` | O | X |
 | AI local 의미·provenance | 위 파일의 `*Draft`와 결정론적 validator/guardrail | O | X |
 | standalone 공개 runtime | `schemas.py`, `procedure_tool/tool.py`, `support_agent/discovery_models.py`, `state.py`, `graph.py` | O | 일부만 shared 후보 |
-| 목표 BE/shared 계약 | 이 문서에서 **목표 BE 계약**으로 표시한 확장 snapshot, trigger, mutation, outcome, Guardrail/persistence/resolver DTO | X | O, 공동 승인 후 |
+| 목표 BE/shared 계약 | 이 문서에서 `[PROPOSED_SHARED]`로 표시한 확장 snapshot, trigger, mutation, outcome, Guardrail/persistence/resolver DTO | X | 승인 전 X. 공동 승인 후 `[AGREED_SHARED]`로 고정한 version만 O |
 
-현재 코드와 문서가 다르면 **현재 실행 사실은 코드와 자동 테스트가 우선**합니다. 반대로 코드에 없는 목표 DTO는 이 문서가 요구사항의 권위 소스이지만, 구현·배포 완료를 의미하지 않습니다. 이후 절에서 `현재 standalone`과 `목표 BE`를 따로 적고, 표에 별도 표시가 없으면 해당 절의 직전 상태 표기를 따릅니다.
+현재 코드와 문서가 다르면 **현재 실행 사실은 코드와 자동 테스트가 우선**합니다. 코드에 없는 목표 DTO는 공동 검토용 proposal의 기준 초안일 뿐 승인된 요구사항이나 구현·배포 완료를 의미하지 않습니다. 이후 절에서 `현재 standalone`과 `목표 BE`를 따로 적고, 표에 별도 표시가 없으면 해당 절의 직전 상태 표기를 따릅니다.
 
-## 1. 먼저 합의할 결론
+## 1. 상태별 핵심 결론
 
-| 항목 | v0.5 / `agent-io/2.0` 제안 |
-|---|---|
-| 실행 주체 | 비-LLM `PlanningCoordinator`가 인증, Guardrail, Agent Graph 호출, 저장, HTTP 변환을 조정 |
-| Supervisor 권한 | 현재는 전달받은 결과의 충분성·전역 판단과 초안 작성을 담당. 목표에서는 필요한 하위 Agent/Tool의 호출 계획까지 제안하며, 실제 호출은 Graph router가 집행 |
-| 하위 구성요소 권한 | 읽기·분석 결과만 반환. 서로 호출하거나 DB를 쓰거나 최종 우선순위를 결정하지 않음. 절차조회 결과는 Graph router가 정보분석 입력으로 전달 |
-| Review | 정상 초안과 LLM이 만든 사용자 확인 질문은 전부 필수 Review |
-| 저장 | 어떤 Agent/Tool에도 쓰기 함수를 Tool로 등록하지 않음. BE `shared/functions`만 수행 |
-| 직렬화 | Agent 내부 `snake_case`, 외부 HTTP API `camelCase`, DB 컬럼 `snake_case` |
-| 응답 방식 | v1은 non-streaming 완결 응답. SSE/WebSocket schema는 만들지 않음 |
-| 미확인 | Agent 내부는 `status=UNKNOWN`, `value=null`로 명시. `NOT_REQUIRED`와 구분 |
-| 오류 | 기술 실행 실패와 업무 판단 결과를 서로 다른 discriminator로 표현 |
-| Review 증명 | 결정뿐 아니라 snapshot, 모든 변경 후보, 사용한 하위 결과, Evidence 전체를 하나의 digest로 묶음 |
+| 항목 | 상태 | 현재 확정 사실 또는 제안 |
+|---|---|---|
+| 실행 주체 | `[PROPOSED_SHARED]` | 비-LLM `PlanningCoordinator`가 인증, Guardrail, Agent Graph 호출, 저장, HTTP 변환을 조정하는 생산 경계를 제안. 현재 클래스 없음 |
+| Supervisor 현재 권한 | `[CURRENT_AI]` | 전달받은 결과의 충분성·전역 판단과 초안 작성 |
+| Supervisor 동적 계획 권한 | `[TARGET_UNIMPLEMENTED]` | 하위 호출 계획을 제안하고 실제 호출은 Graph router가 집행하는 목표. 현재 계획 schema/router 없음 |
+| 하위 구성요소 권한 | `[CURRENT_AI]` | 읽기·분석 결과만 반환. 서로 호출하거나 DB를 쓰거나 최종 우선순위를 결정하지 않음. 절차조회 결과는 Graph가 Info 입력으로 전달 |
+| Review | `[CURRENT_AI]` | 정상 Supervisor 초안과 LLM이 만든 사용자 확인 질문은 전부 Review 필수 |
+| Agent/Tool 저장 권한 | `[CURRENT_AI]` | 현재 Agent/Tool에는 쓰기 함수가 없음 |
+| 생산 저장 경계 | `[PROPOSED_SHARED]` | BE `shared/functions`만 저장하게 하는 공동 승인 전 제안 |
+| 내부 직렬화 | `[CURRENT_AI]` | 현재 Agent 내부는 `snake_case` |
+| 외부 직렬화 | `[PROPOSED_SHARED]` | HTTP `camelCase`와 DB 매핑은 공동 승인 전 |
+| 응답 방식 | `[CURRENT_AI]` | 현재 standalone은 non-streaming 완결 응답. 외부 SSE/WebSocket 계약은 없음 |
+| 미확인 | `[CURRENT_AI]` | Agent 내부는 `status=UNKNOWN`, `value=null`로 명시하고 `NOT_REQUIRED`와 구분 |
+| 내부 오류 | `[CURRENT_AI]` | 기술 실패와 업무 outcome을 discriminator로 구분 |
+| 외부 오류 | `[PROPOSED_SHARED]` | HTTP status/result 매핑은 공동 승인 전 |
+| Review 증명 | `[CURRENT_AI]` | snapshot, 변경 후보, 사용한 하위 결과와 Evidence를 `ReviewSubject` digest로 묶고 PASS에만 proof 발급 |
 
 ## 2. 실행 및 저장 경계
 
+### `[CURRENT_AI]` 현재 standalone 경계
+
 ```text
-FastAPI / PlanningCoordinator (코드)
+schema-valid SupervisorRunInput
+  → AgentGraph가 내부 call/run provenance 생성
+  → Procedure · Info · Support · Supervisor · Review 실행
+  → REVIEWED_PLAN | CONFLICT | SAFE_FAILURE 반환
+```
+
+현재 경계에는 FastAPI, `PlanningCoordinator`, 인증·소유권 확인, BE snapshot adapter, Output/State Guardrail, DB 저장이 없습니다. `AgentGraph.run(...)`은 bare `SupervisorRunInput`을 받고 결과만 반환합니다.
+
+### `[PROPOSED_SHARED]` 생산 실행·저장 경계 — 미구현
+
+```text
+FastAPI / PlanningCoordinator (제안, 현재 코드 없음)
   1. Input Guardrail + 인증/소유권 확인
   2. SharedCaseSnapshotDTO 조립 → AI adapter의 CaseSnapshot 검증
   3. shared 실행 context로 Agent Graph 실행
@@ -60,25 +102,25 @@ FastAPI / PlanningCoordinator (코드)
   8. 외부 HTTP 응답으로 변환
 ```
 
-Supervisor나 Agent Graph가 DB 저장 Tool을 호출하지 않습니다. Graph는 `AgentRunOutcome`을 `PlanningCoordinator`에 반환하고, Coordinator가 코드 Guardrail과 transaction을 소유합니다.
+생산 제안에서도 Supervisor나 Agent Graph가 DB 저장 Tool을 호출하지 않습니다. Graph가 `AgentRunOutcome`을 `PlanningCoordinator`에 반환하고 Coordinator가 코드 Guardrail과 transaction을 소유하는 경계는 공동 승인·구현이 필요합니다.
 
-### 목표 shared/내부 호출 계약 (adapter 미구현)
+### `[PROPOSED_SHARED]` shared/내부 호출 계약 — adapter 미구현
 
 현재 standalone 공개 진입점은 envelope 없이 `AgentGraph.run(SupervisorRunInput, trace_id=None) -> AgentRunOutcome`이며, 하위 구성요소도 payload/result 또는 안전한 예외를 직접 주고받습니다. 아래 표에서 PlanningCoordinator→Graph와 PlanningCoordinator→저장 함수만 BE/shared 경계입니다. Graph router→하위 Agent/Tool envelope는 AI 내부 목표 계약이며 BE HTTP API나 BE 구현 산출물이 아닙니다.
 
 | 호출자 | 수신자 | 입력 payload | 출력 payload |
 |---|---|---|---|
 | PlanningCoordinator | AgentGraph | `ComponentRequest[SupervisorRunInput]` | `AgentRunOutcome` |
-| AgentGraph router | 절차조회 Tool | `ComponentRequest[ProcedureLookupInput]` | `ComponentResult[ProcedureLookupResult]` |
-| AgentGraph router | 정보분석 Agent | `ComponentRequest[InfoAnalysisInput]` | `ComponentResult[InfoAnalysisResult]` |
-| AgentGraph router | 지원금 Agent | `ComponentRequest[SupportAnalysisInput]` | `ComponentResult[SupportAnalysisResult]` |
+| AgentGraph router | 절차조회 Tool | `ComponentRequest[ProcedureLookupInput]` | `ComponentSuccess[ProcedureLookupResult] \| ComponentFailure` |
+| AgentGraph router | 정보분석 Agent | `ComponentRequest[InfoAnalysisInput]` | `ComponentSuccess[InfoAnalysisResult] \| ComponentFailure` |
+| AgentGraph router | 지원금 Agent | `ComponentRequest[SupportAnalysisInput]` | `ComponentSuccess[SupportAnalysisResult] \| ComponentFailure` |
 | AgentGraph router | Supervisor | 검증된 source results와 실행 context | `SupervisorDraft` |
-| AgentGraph router | Review Tool | `ComponentRequest[ReviewSubject]` | `ComponentResult[ReviewResult]` |
+| AgentGraph router | Review Tool | `ComponentRequest[ReviewSubject]` | `ComponentSuccess[ReviewResult] \| ComponentFailure` |
 | PlanningCoordinator | BE 저장 함수 | `PersistReviewedPlanCommand` | `PersistResult` |
 
-지원금 Agent 내부의 Wiki/Chroma/S3 adapter는 지원금 Agent 전용 read-only 구현입니다. 이 문서에서는 BE 공용 계약을 만들지 않고, 모든 조회 결과가 공통 `EvidenceRecord`로 정규화되어야 한다는 경계만 정합니다.
+Wiki/Chroma/S3 adapter는 `[TARGET_UNIMPLEMENTED]`이며 현재 존재하지 않습니다. 구현할 경우 지원금 Agent 전용 read-only 경계로 두고, BE 공용 Tool로 만들지 않으며 모든 결과를 공통 `EvidenceRecord`로 정규화하는 안을 제안합니다.
 
-위 표는 호출 권한을 나타내며 임의 병렬 호출을 뜻하지 않습니다. 자연어 Case 생성·결과 제출의 v2 첫 계획 데이터 의존 순서는 `PROCEDURE_TOOL → INFO_AGENT → SUPPORT_AGENT → SUPERVISOR → REVIEW_TOOL`입니다. Tool과 Agent가 서로 직접 호출하지 않고 AgentGraph router가 앞 결과와 call ID를 다음 입력에 결합합니다. 새 사용자 입력·절차 해석 없이 검수된 지원정보만 갱신하는 `SUPPORT_REFRESH`는 현재 Support부터 시작하는 명시적 예외입니다.
+위 `[PROPOSED_SHARED]` 표는 호출 권한을 나타내며 임의 병렬 호출을 뜻하지 않습니다. `[CURRENT_AI]` 자연어 Case 생성·결과 제출의 첫 실행 순서는 `PROCEDURE_TOOL → INFO_AGENT → SUPPORT_AGENT → SUPERVISOR → REVIEW_TOOL`이고, AgentGraph가 앞 결과와 call ID를 다음 입력에 결합합니다. 새 사용자 입력·절차 해석 없이 검수된 지원정보만 갱신하는 `[CURRENT_AI]` `SUPPORT_REFRESH`는 Support부터 시작하는 명시적 예외입니다. `[TARGET_UNIMPLEMENTED]` 동적 Graph에서도 Tool과 Agent가 서로 직접 호출하지 않고 Graph router가 검증한 계획만 집행합니다.
 
 ## 3. 공통 표기와 생성 주체
 
@@ -92,37 +134,37 @@ Supervisor나 Agent Graph가 DB 저장 Tool을 호출하지 않습니다. Graph�
 
 ### 공통 값 타입
 
-`StrictScalar`는 `strict string | strict integer | strict boolean | date | null`이고, `NonNullStrictScalar`는 여기서 `null`을 제외한 타입입니다. `boolean`을 `0/1`로, 숫자를 문자열로 자동 변환하지 않습니다. 필드별 허용 타입과 enum은 §6의 `CaseFieldKey` 표를 구현한 BE canonical field registry로 다시 검증합니다.
+`StrictScalar`는 `strict string | strict integer | strict boolean | date | null`이고, `NonNullStrictScalar`는 여기서 `null`을 제외한 타입입니다. `boolean`을 `0/1`로, 숫자를 문자열로 자동 변환하지 않습니다. `[CURRENT_AI]` 필드별 허용 타입과 enum은 §6의 local `CASE_FIELD_SPECS`로 검증합니다. `[PROPOSED_SHARED]` 생산 adapter가 같은 값을 BE canonical field registry로 다시 검증하는 방식은 공동 승인 전입니다.
 
-날짜는 `YYYY-MM-DD`, 시각은 timezone을 포함한 RFC 3339 문자열입니다. 내부 저장 시각 기준(UTC 권장)과 외부 표시 timezone은 BE가 확정해야 합니다.
+날짜는 `YYYY-MM-DD`, 시각은 timezone을 포함한 RFC 3339 문자열입니다. `[PROPOSED_SHARED]` 내부 저장 시각 기준(UTC 권장)과 외부 표시 timezone은 BE/AI가 공동 승인해야 합니다.
 
-### ID와 runtime 생성값
+### ID와 runtime 생성값 — 현재/목표 주체 분리
 
-| 이름 | 타입 | 생성/검증 주체 | LLM 생성 허용 |
-|---|---|---|---:|
-| `case_id` | positive integer | DB/BE | X |
-| `case_version` | positive integer | DB/BE | X |
-| `snapshot_id` | UUID | PlanningCoordinator | X |
-| `run_id` | UUID | PlanningCoordinator | X |
-| `call_id` | UUID | top-level Graph 호출은 PlanningCoordinator, 내부 구성요소 호출은 Agent runtime | X |
-| `input_event_id` | opaque string | BE | X |
-| `candidate_id` | UUID | 구조화 출력 검증 후 runtime | X |
-| `draft_id` | UUID | Supervisor output 검증 후 runtime | X |
-| `review_subject_id` | UUID | runtime | X |
-| `evidence_id` | opaque string | BE, 승인된 ingestion pipeline 또는 절차조회 runtime; BE가 저장·복원 | X |
-| `conflict_ref` | opaque string | BE. 저장 ID 또는 서명된 token | X |
-| `procedure_step_id` | positive integer | DB/BE canonical procedure registry | X |
-| `support_program_id` | positive integer | DB/BE catalog | X |
-| `wiki_uuid` | UUID string | DB/BE catalog와 Wiki 매핑 | X |
-| `history_id` | positive integer | DB/BE | X |
-| 모든 `*_at` | date/datetime | BE/runtime/resolver | X |
-| 모든 digest | `sha256:<hex>` | runtime | X |
+| 이름 | 타입 | `[CURRENT_AI]` 현재 주체 | `[PROPOSED_SHARED]` 생산 주체 | LLM 생성 |
+|---|---|---|---|---:|
+| `case_id` | positive integer | standalone fixture/caller | DB/BE | X |
+| `case_version` | positive integer | standalone fixture/caller, nullable 허용 | DB/BE CAS | X |
+| `snapshot_id` | UUID | standalone fixture/caller | PlanningCoordinator | X |
+| `run_id` | UUID | `AgentGraph` | PlanningCoordinator가 주입하는 안 | X |
+| `call_id` | UUID | Agent runtime | top-level은 Coordinator, 내부는 Agent runtime인 안 | X |
+| `input_event_id` | opaque string | standalone fixture/caller | BE | X |
+| `candidate_id` | UUID | 구조화 출력 검증 후 runtime | 동일 제안 | X |
+| `draft_id` | UUID | Supervisor output 검증 후 runtime | 동일 제안 | X |
+| `review_subject_id` | UUID | runtime | 동일 제안 | X |
+| `evidence_id` | opaque string | fixture, discovery/절차조회 runtime | BE·승인 ingestion·AI runtime별 namespace와 저장/resolver 합의 | X |
+| `conflict_ref` | opaque string | `standalone:` simulation ref | BE 저장 ID 또는 서명 token 제안 | X |
+| `procedure_step_id` | positive integer | standalone fixture/caller | DB/BE canonical registry | X |
+| `support_program_id` | positive integer | reviewed catalog fixture/caller | DB/BE catalog | X |
+| `wiki_uuid` | UUID string | reviewed catalog fixture/caller | DB/BE catalog↔Wiki mapping | X |
+| `history_id` | positive integer | 사용하지 않음 | DB/BE | X |
+| 모든 `*_at` | date/datetime | runtime/fixture/source adapter | BE/runtime/resolver별 합의 | X |
+| 모든 digest | `sha256:<hex>` | Agent runtime | cross-language serializer 승인 필요 | X |
 
 LLM은 의미 필드만 구조화해서 반환합니다. ID, 시각, digest, 출처 최신성은 runtime이나 신뢰된 resolver가 검증 후 주입합니다.
 
-## 4. 공통 실행 envelope
+## 4. 공통 실행 envelope — `[CURRENT_AI]` InvocationMeta / `[TYPE_ONLY]` request·result wrapper
 
-이 절의 `ComponentRequest[T]`와 `ComponentResult[T]`는 목표 typed envelope입니다. PlanningCoordinator→Graph envelope만 BE/shared 계약이고, Graph router→하위 구성요소 envelope는 AI 내부 계약입니다. standalone 런타임에는 아직 이 adapter가 없으며, 런타임이 생성한 `InvocationMeta`는 Review provenance와 내부 실행 경계에서 사용합니다.
+`InvocationMeta`는 `[CURRENT_AI]`입니다. `ComponentRequest[T]`, `ComponentSuccess[T]`, `ComponentFailure` Python 타입은 `[TYPE_ONLY]`이고, 이를 실제 호출 envelope로 채택하는 것은 `[PROPOSED_SHARED]`입니다. 코드에는 `ComponentResult`라는 별도 type alias가 없으며, 이 문서에서 결과 union은 `ComponentSuccess[T] | ComponentFailure`로 직접 표기합니다. PlanningCoordinator→Graph envelope만 BE/shared 후보이고, Graph router→하위 구성요소 envelope는 AI 내부 목표 계약입니다. standalone 런타임에는 아직 이 adapter가 없으며, 런타임이 생성한 `InvocationMeta`만 Review provenance와 내부 실행 경계에서 사용합니다.
 
 ### `InvocationMeta`
 
@@ -134,7 +176,7 @@ LLM은 의미 필드만 구조화해서 반환합니다. ID, 시각, digest, 출
 | `run_id` | UUID | O | Global Loop 한 번의 ID |
 | `call_id` | UUID | O | 구성요소 호출 한 번의 ID |
 | `parent_call_id` | UUID \| null | O | 상위 호출 ID |
-| `case_id` | positive integer | O | 인가가 끝난 Case ID |
+| `case_id` | positive integer | O | `[CURRENT_AI]` 입력 snapshot의 caller 제공 ID. `[PROPOSED_SHARED]` 생산에서는 인가가 끝난 Case ID만 허용 |
 | `component` | `SUPERVISOR` \| `INFO_AGENT` \| `SUPPORT_AGENT` \| `PROCEDURE_TOOL` \| `REVIEW_TOOL` | O | 실행 구성요소 |
 | `attempt` | positive integer | O | 같은 목적의 호출 시도 번호 |
 | `requested_at` | datetime | O | 호출 시각 |
@@ -149,9 +191,9 @@ LLM은 의미 필드만 구조화해서 반환합니다. ID, 시각, digest, 출
 
 runtime은 모델에게 필요한 최소 필드만 투영하며 `trace_id`, 내부 인증·인가 정보, digest는 모델 입력에서 제외합니다.
 
-### `ComponentResult[T]`
+### 개념적 결과 union — `ComponentSuccess[T] | ComponentFailure`
 
-Pydantic 구현 시 한 모델의 nullable 조합이 아니라 `execution_status`로 구분하는 tagged union을 사용합니다.
+`[TYPE_ONLY]` 현재 두 Pydantic class를 `execution_status`로 구분해 union으로 사용할 수 있지만, 코드에 `ComponentResult[T]` alias는 없습니다. runtime envelope adoption도 아직 없습니다.
 
 `ComponentSuccess[T]`:
 
@@ -185,24 +227,26 @@ Pydantic 구현 시 한 모델의 nullable 조합이 아니라 `execution_status
 | 필드 | 타입 | 필수 | 설명 |
 |---|---|---:|---|
 | `code` | `INVALID_INPUT` \| `SCHEMA_VALIDATION_FAILED` \| `SNAPSHOT_UNAVAILABLE` \| `SOURCE_UNAVAILABLE` \| `TIMEOUT` \| `RATE_LIMITED` \| `UPSTREAM_ERROR` \| `LOOP_LIMIT_REACHED` \| `INTERNAL_ERROR` | O | 기술 실패 코드 |
-| `message_code` | upper snake case string | O | 사용자 노출 문구가 아닌 내부 고정 코드 |
+| `message_code` | upper snake case string | O | `[TYPE_ONLY]` 형식만 검증하는 내부 code. `[PROPOSED_SHARED]` catalog·문구 mapping은 미승인 |
 | `retryable` | boolean | O | 동일 조건으로 재시도 가능한지 |
 | `failed_dependency` | string \| null | O | 실패한 외부 저장소/API |
 | `retry_after_ms` | non-negative integer \| null | O | 알려진 경우에만 |
 
 인증·소유권·version conflict는 Agent 호출 전후의 BE 코드 결과이므로 `ComponentError`에 넣지 않습니다.
 
-## 5. 개인정보 입력과 Evidence
+## 5. 개인정보 입력과 Evidence — `[CURRENT_AI]` 모델 / `[PROPOSED_SHARED]` BE 발급·저장 경계
+
+`RedactedInput`, `EvidenceRecord`, `GroundedClaim` 타입과 AI runtime 검증은 `[CURRENT_AI]`입니다. 인증된 `EXPERT_CONFIRMATION` 발급, 영속 Evidence resolver, production redaction과 Output Guardrail은 `[PROPOSED_SHARED]`이며 현재 구현돼 있지 않습니다.
 
 ### `RedactedInput`
 
 | 필드 | 타입 | 필수 | 설명 |
 |---|---|---:|---|
 | `input_event_id` | opaque string | O | 원본 입력 식별자 |
-| `source_type` | `USER_INPUT` \| `EXPERT_CONFIRMATION` | O | `EXPERT_CONFIRMATION`은 인증된 BE 흐름만 발급 |
-| `redacted_text` | string | O | Input Guardrail을 거친 모델 입력 |
-| `redactions` | `Redaction[]` | O | 원문을 포함하지 않는 마스킹 정보 |
-| `submitted_at` | datetime | O | 서버 수신 시각 |
+| `source_type` | `USER_INPUT` \| `EXPERT_CONFIRMATION` | O | `[CURRENT_AI]` 두 값을 타입으로 허용. `[PROPOSED_SHARED]` 생산에서는 인증된 BE 흐름만 `EXPERT_CONFIRMATION` 발급 |
+| `redacted_text` | string | O | `[CURRENT_AI]` caller가 제공하는 비식별 입력. `[PROPOSED_SHARED]` 생산에서는 Input Guardrail 결과 |
+| `redactions` | `Redaction[]` | O | 원문을 포함하지 않는 마스킹 정보. 현재 Graph가 직접 마스킹하지 않음 |
+| `submitted_at` | datetime | O | `[CURRENT_AI]` fixture/caller 제공. `[PROPOSED_SHARED]` 생산에서는 서버 수신 시각 |
 
 `Redaction`:
 
@@ -230,7 +274,7 @@ Pydantic 구현 시 한 모델의 nullable 조합이 아니라 `execution_status
 
 | 필드 | 타입 | 필수 | 설명 |
 |---|---|---:|---|
-| `evidence_id` | opaque string | O | 신뢰된 resolver가 발급한 ID |
+| `evidence_id` | opaque string | O | `[CURRENT_AI]` fixture 또는 Agent/Tool runtime 발급. `[PROPOSED_SHARED]` 생산 namespace·resolver는 공동 승인 필요 |
 | `source_type` | `USER_INPUT` \| `EXPERT_CONFIRMATION` \| `REVIEWED_WIKI` \| `OFFICIAL_DOCUMENT` \| `OFFICIAL_API` \| `CALCULATION_RESULT` \| `SYSTEM_RECORD` | O | 출처 종류. v1의 `PROCEDURE_MASTER` 값은 v2 wire enum에서 제거됨 |
 | `source_ref` | opaque string | O | credential 없는 원본 참조. 절차조회 `OFFICIAL_DOCUMENT`이면 `ProcedureSourceDocument.canonical_url`과 같은 HTTPS URL |
 | `source_version` | string \| null | O | 문서 또는 계산 규칙 버전. 절차조회는 공식 version이 없으면 `content_hash`를 content-addressed version으로 함께 사용 |
@@ -264,11 +308,11 @@ runtime은 `target_path`가 `ReviewSubject.supervisor_draft` 안의 사용자 �
 ### 개인정보와 trace
 
 - `redacted_text`, span text, Evidence excerpt, 이유·질문 문구는 기본 `no_trace` 대상입니다.
-- 향후 Langfuse adapter에는 run/call ID, component, latency, prompt/completion token **개수**, status, digest만 허용합니다. 현재 Graph는 model/token count를 수집하지 않고 `NullTraceSink` 또는 metadata-only test sink만 사용합니다.
-- 모델에 전달한 Evidence ID와 시각은 감사 이력으로 남기되 원문은 기록하지 않습니다.
-- Output Guardrail은 모든 자유 문자열의 개인정보 유출을 검사하고 탐지 시 전체 거부합니다. Review 뒤 문자열을 마스킹·재작성하지 않습니다.
+- `[TARGET_UNIMPLEMENTED]` 향후 Langfuse adapter에는 run/call ID, component, latency, prompt/completion token **개수**, status, digest만 허용하는 방향입니다. `[CURRENT_AI]` Graph는 model/token count를 수집하지 않고 기본 `NullTraceSink` 또는 metadata-only test sink만 사용합니다.
+- `[PROPOSED_SHARED]` 생산 감사 이력에 모델이 사용한 Evidence ID와 시각을 남기되 원문을 기록하지 않는 정책은 저장 위치·보존 기간과 함께 공동 승인해야 합니다. 현재 `TraceEvent`에는 Evidence ID가 없고 기본 `NullTraceSink`는 event를 저장하지 않습니다.
+- `[PROPOSED_SHARED]` production Output Guardrail은 모든 자유 문자열의 개인정보 유출을 검사하고 탐지 시 전체 거부해야 합니다. Review 뒤 문자열을 마스킹·재작성하지 않는 계약도 공동 승인 대상이며 현재 standalone에는 이 Guardrail이 없습니다.
 
-## 6. 공통 도메인 schema
+## 6. 공통 도메인 schema — `[CURRENT_AI]` 실행 shape / `[PROPOSED_SHARED]` 저장 확장
 
 ### `CaseFieldKey`와 `CaseFact`
 
@@ -302,7 +346,7 @@ runtime은 `target_path`가 `ReviewSubject.supervisor_draft` 안의 사용자 �
 
 `CONFIRMED`는 non-null value, `UNKNOWN`은 null value여야 합니다. nullable 필드를 사용자가 명시적으로 비우는 동작은 `FactChangeCandidate.operation=CLEAR`로 표현하며 “필요 없음”으로 해석하지 않습니다.
 
-현재 validator는 `field_path → value_type → value` 세 관계를 함께 검사합니다. 따라서 enum 자유 문자열, 문자열 숫자, 숫자형 boolean, 잘못된 달력 날짜는 거부합니다. BE adapter도 coercion 전에 같은 strict 규칙을 적용해야 하며, 합의된 canonical registry가 달라지면 AI와 BE schema version을 함께 올립니다.
+`[CURRENT_AI]` validator는 `field_path → value_type → value` 세 관계를 함께 검사합니다. 따라서 enum 자유 문자열, 문자열 숫자, 숫자형 boolean, 잘못된 달력 날짜는 거부합니다. `[PROPOSED_SHARED]` BE adapter도 coercion 전에 같은 strict 규칙을 적용하고, 합의된 canonical registry가 달라지면 AI와 BE schema version을 함께 올리는 안입니다.
 
 ### 안정 참조
 
@@ -310,17 +354,17 @@ runtime은 `target_path`가 `ReviewSubject.supervisor_draft` 안의 사용자 �
 
 | 필드 | 타입 | 필수 | 설명 |
 |---|---|---:|---|
-| `procedure_step_id` | positive integer | O | DB PK |
-| `step_code` | upper snake case string | O | 안정 코드. 두 값이 같은 canonical registry row인지 runtime 검증 |
+| `procedure_step_id` | positive integer | O | 현재 caller fixture ID; 생산에서는 DB canonical PK 제안 |
+| `step_code` | upper snake case string | O | 현재 caller fixture 코드; 생산에서는 같은 canonical row인지 resolver 검증 제안 |
 
 `SupportProgramRef`:
 
 | 필드 | 타입 | 필수 | 설명 |
 |---|---|---:|---|
-| `support_program_id` | positive integer | O | canonical DB ID |
-| `wiki_uuid` | UUID string | O | Wiki exact lookup ID. DB ID와 같은 catalog row인지 resolver 검증 |
+| `support_program_id` | positive integer | O | 현재 reviewed catalog fixture ID; 생산에서는 canonical DB ID 제안 |
+| `wiki_uuid` | UUID string | O | 현재 catalog fixture 값; 생산 Wiki exact lookup과 DB row resolver는 미구현 제안 |
 
-표시명은 식별자로 사용하지 않습니다. 인터넷에서 찾은 제목·URL도 `ProcedureStepRef`가 아닙니다. 정보분석 Agent는 caller가 제공한 `KnownProcedureStep`에 일치하는 경우에만 finding을 만들며, 검색 결과나 LLM이 DB PK·`step_code`를 새로 만들 수 없습니다. 기존 `support_item_id` 명칭은 위 canonical ID로 통일할지 BE 확인이 필요합니다.
+표시명은 식별자로 사용하지 않습니다. 인터넷에서 찾은 제목·URL도 `ProcedureStepRef`가 아닙니다. 정보분석 Agent는 caller가 제공한 `KnownProcedureStep`에 일치하는 경우에만 finding을 만들며, 검색 결과나 LLM이 DB PK·`step_code`를 새로 만들 수 없습니다. `[PROPOSED_SHARED]` 기존 `support_item_id` 명칭을 위 canonical ID로 통일할지는 공동 승인 대상입니다.
 
 ### 최종 판단 구조
 
@@ -328,7 +372,7 @@ runtime은 `target_path`가 `ReviewSubject.supervisor_draft` 안의 사용자 �
 
 | 필드 | 타입 | 필수 | 설명 |
 |---|---|---:|---|
-| `blocker_code` | upper snake case string | O | versioned code catalog 값 |
+| `blocker_code` | upper snake case string | O | `[CURRENT_AI]` 형식만 검증. `[PROPOSED_SHARED]` 생산 versioned code catalog 연결은 미구현 |
 | `title` | string | O | 한 줄 설명 |
 | `description` | string | O | 쉬운 설명 |
 | `evidence_refs` | opaque string[] (min 1) | O | Blocker 근거 |
@@ -337,7 +381,7 @@ runtime은 `target_path`가 `ReviewSubject.supervisor_draft` 안의 사용자 �
 
 | 필드 | 타입 | 필수 | 설명 |
 |---|---|---:|---|
-| `action_code` | upper snake case string | O | versioned code catalog 값 |
+| `action_code` | upper snake case string | O | `[CURRENT_AI]` 형식만 검증. `[PROPOSED_SHARED]` 생산 versioned code catalog 연결은 미구현 |
 | `sequence` | positive integer | O | Case 안의 표시 순서 |
 | `title` | string | O | 현실에서 할 일 하나 |
 | `reason` | string | O | 지금 먼저 해야 하는 이유 |
@@ -349,7 +393,7 @@ runtime은 `target_path`가 `ReviewSubject.supervisor_draft` 안의 사용자 �
 
 Supervisor는 Procedure target을 같은 run의 정확히 한 Info `ProcedureFinding`에, Support target을 정확히 한 `SupportCheck`에 결합합니다. 최종 `NextAction.evidence_refs`는 선택한 finding/check의 Evidence와 교집합이 있어야 합니다. `NOT_RELEVANT` 지원사업은 Action target이 될 수 없고, 지원사업 Action은 자격 확정이 아니라 기관 확인 질문을 포함한 confirmation-only 행동이어야 합니다. 알려진 다른 procedure step/program 이름·코드나 공통 절차/지원 행동 신호가 한 Action 문구에 함께 있으면 Supervisor와 Review가 결정적으로 거부합니다.
 
-단, tagged union은 **machine target을 정확히 하나로 고정하는 계약**이지 임의의 자연어 문장 전체 의미를 형식적으로 증명하는 장치가 아닙니다. 어휘로 판정할 수 없는 우회 표현은 독립 LLM Review가 문맥으로 검사합니다. 따라서 BE는 `title`·`reason`에서 대상을 역추론하거나 그 문장을 자동 실행하면 안 되며, 검수된 `target`과 `ReviewProof`만 라우팅·저장 권한으로 사용해야 합니다. 새로운 도메인 용어가 생기면 AI의 방어용 신호 목록과 회귀 테스트도 함께 갱신합니다.
+단, tagged union은 **machine target을 정확히 하나로 고정하는 계약**이지 임의의 자연어 문장 전체 의미를 형식적으로 증명하는 장치가 아닙니다. `[CURRENT_AI]` 어휘로 판정할 수 없는 우회 표현은 독립 LLM Review가 문맥으로 검사합니다. `[PROPOSED_SHARED]` 생산에서는 BE가 `title`·`reason`에서 대상을 역추론하거나 그 문장을 자동 실행하지 않고, 검수된 `target`과 `ReviewProof`만 라우팅·저장 권한으로 사용하는 안입니다. 새로운 도메인 용어가 생기면 AI의 방어용 신호 목록과 회귀 테스트도 함께 갱신합니다.
 
 `DecisionDraft`는 `decision_type`으로 구분하는 tagged union입니다.
 
@@ -379,11 +423,11 @@ Blocker 1개 + Next Action 1개 불변식은 실행 가능한 정상 계획인 `
 
 `NEEDS_MORE_INFO`는 항상 `requires_human=true`, `CASE_COMPLETE`는 항상 `requires_human=false`입니다. `ACTION`은 실제 확인 주체에 따라 true/false가 가능합니다.
 
-목표 계약에서는 Supervisor가 `CASE_COMPLETE`를 제안하고 State Transition Guardrail이 완료 조건을 다시 확인합니다. **현재 standalone Supervisor는 bounded 웹 조회만으로 전체 절차 coverage를 증명할 수 없다는 이유로 `CASE_COMPLETE`를 항상 거부**합니다. 즉 Pydantic variant가 존재한다는 사실과 현재 Graph에서 도달 가능하다는 뜻은 다릅니다.
+`CaseCompleteDecisionDraft`는 `[TYPE_ONLY]`입니다. `[PROPOSED_SHARED]` 목표 계약에서는 Supervisor가 `CASE_COMPLETE`를 제안하고 State Transition Guardrail이 완료 조건을 다시 확인합니다. **현재 standalone Supervisor는 bounded 웹 조회만으로 전체 절차 coverage를 증명할 수 없다는 이유로 `CASE_COMPLETE`를 항상 거부**합니다. 즉 Pydantic variant가 존재한다는 사실과 현재 Graph에서 도달 가능하다는 뜻은 다릅니다.
 
-### 변경 후보
+### `[CURRENT_AI]` 현재 변경 후보 / `[PROPOSED_SHARED]` 저장 확장 비교
 
-이 절의 변경 후보는 **목표 BE 저장 계약**입니다. 현재 standalone `ProcedureProgressChangeCandidate`에는 `execution_input_event_id`, `source_observation_id`, `source_observation_call_id`, `procedure_lookup_call_id`가 없고 `SupportMatchUpdateCandidate`에는 `before_match`가 없습니다. 현재 구현을 소비할 때 이 필드가 있다고 가정하지 말고, 생산 persistence 연결 전에 §18의 차이를 구현·검증해야 합니다.
+아래 비교표의 현재 key는 `[CURRENT_AI]`, 목표 추가 key와 저장 의미는 `[PROPOSED_SHARED]`입니다. 현재 standalone `ProcedureProgressChangeCandidate`에는 `execution_input_event_id`, `source_observation_id`, `source_observation_call_id`, `procedure_lookup_call_id`가 없고 `SupportMatchUpdateCandidate`에는 `before_match`가 없습니다. 현재 구현을 소비할 때 목표 필드가 있다고 가정하지 말고, 생산 persistence 연결 전에 §18의 차이를 공동 승인·구현·검증해야 합니다.
 
 현재/목표 shape 차이는 다음과 같습니다. 이 표의 current key 집합은 `schemas.py`의 실제 model field와 정확히 일치합니다.
 
@@ -395,9 +439,9 @@ Blocker 1개 + Next Action 1개 불변식은 실행 가능한 정상 계획인 `
 | `CaseStatusChangeCandidate` | 아래 상세 표와 동일한 5개 key | shape는 동일하나 현재 Supervisor가 생성 경로를 차단 |
 | `MutationSet` | `fact_changes`, `procedure_progress_changes`, `support_match_updates`, `case_status_change` | 동일 key; BE가 CAS/transaction/History를 추가 수행 |
 
-현재 model의 `FactChangeCandidate.source_type` enum에는 `CONFIRMED_CONFLICT`가 있고 ref/call nullable 조합도 검증하지만, 현재 `RunTrigger`와 Graph에는 conflict-confirmed 재진입 경로가 없습니다. 따라서 이는 “부분 구현된 schema”이지 사용 가능한 production round trip이 아닙니다.
+`[TYPE_ONLY]` 현재 model의 `FactChangeCandidate.source_type` enum에는 `CONFIRMED_CONFLICT`가 있고 ref/call nullable 조합도 검증하지만, 현재 `RunTrigger`와 Graph에는 conflict-confirmed 재진입 경로가 없습니다. 따라서 이는 validator가 표현할 수 있는 branch이지 사용 가능한 production round trip이 아닙니다.
 
-`FactChangeCandidate`:
+#### `[CURRENT_AI]` `FactChangeCandidate` exact shape
 
 | 필드 | 타입 | 필수 | 설명 |
 |---|---|---:|---|
@@ -417,9 +461,11 @@ Blocker 1개 + Next Action 1개 불변식은 실행 가능한 정상 계획인 `
 | `source_call_id` | UUID \| null | O | 일반 정보분석 후보면 원 호출 |
 | `confirmed_conflict_ref` | opaque string \| null | O | 충돌 확인 후보면 원 conflict ref |
 
-`INFO_ANALYSIS`는 `source_call_id`만, `CONFIRMED_CONFLICT`는 `confirmed_conflict_ref`만 non-null이어야 합니다. 후자는 원 conflict Evidence와 confirmation Evidence를 `source_evidence_refs`에 모두 포함합니다. `SET`은 `proposed_status=CONFIRMED`와 non-null value, `CLEAR`는 `proposed_status=UNKNOWN`과 null value여야 합니다. `CLEAR`는 `USER_INPUT` 또는 인증된 `EXPERT_CONFIRMATION` Evidence가 직접 연결된 명시적 철회일 때만 허용합니다.
+`[CURRENT_AI]` 실행 경로는 `source_type=INFO_ANALYSIS`와 non-null `source_call_id`를 사용합니다. `SET`은 `proposed_status=CONFIRMED`와 non-null value, `CLEAR`는 `proposed_status=UNKNOWN`과 null value여야 합니다. `[TYPE_ONLY]` `source_type=CONFIRMED_CONFLICT`와 `confirmed_conflict_ref` 조건은 Python validator에는 있지만 이를 만드는 trigger와 Graph 재진입 경로가 없습니다. 원 conflict Evidence와 confirmation Evidence를 함께 묶는 규칙과 인증된 `EXPERT_CONFIRMATION` 기반 철회는 `[PROPOSED_SHARED]` 생산 계약입니다.
 
-`ProcedureProgressChangeCandidate`:
+#### `[PROPOSED_SHARED]` `ProcedureProgressChangeCandidate` 목표 확장 shape
+
+현재 `[CURRENT_AI]` exact 7개 key는 위 비교표에 적은 값이며, 아래 표의 `execution_input_event_id`, `source_observation_id`, `source_observation_call_id`, `procedure_lookup_call_id`는 현재 Python 모델에 없습니다.
 
 | 필드 | 타입 | 필수 | 설명 |
 |---|---|---:|---|
@@ -435,9 +481,11 @@ Blocker 1개 + Next Action 1개 불변식은 실행 가능한 정상 계획인 `
 | `procedure_analysis_call_id` | UUID | O | 같은 step의 finding과 현실 관측을 만든 정보분석 호출 |
 | `procedure_lookup_call_id` | UUID | O | finding이 근거로 사용한 공식 원문 조회 호출 |
 
-`COMPLETED`는 `USER_INPUT`, `EXPERT_CONFIRMATION`, `OFFICIAL_API`, `OFFICIAL_DOCUMENT`, `SYSTEM_RECORD` 중 현실 실행을 증명하는 Evidence가 있어야 합니다. 사용자/전문가 입력 Evidence이면 `execution_input_event_id`가 그 Evidence의 source event와 같아야 합니다.
+`[PROPOSED_SHARED]` `COMPLETED`는 `USER_INPUT`, `EXPERT_CONFIRMATION`, `OFFICIAL_API`, `OFFICIAL_DOCUMENT`, `SYSTEM_RECORD` 중 현실 실행을 증명하는 Evidence가 있어야 합니다. 사용자/전문가 입력 Evidence이면 `execution_input_event_id`가 그 Evidence의 source event와 같아야 합니다.
 
-`SupportMatchUpdateCandidate`:
+#### `[PROPOSED_SHARED]` `SupportMatchUpdateCandidate` 목표 확장 shape
+
+현재 `[CURRENT_AI]` exact 3개 key는 `candidate_id`, `support_check`, `source_call_id`이며 아래 `before_match`는 현재 Python 모델에 없습니다.
 
 | 필드 | 타입 | 필수 | 설명 |
 |---|---|---:|---|
@@ -446,7 +494,9 @@ Blocker 1개 + Next Action 1개 불변식은 실행 가능한 정상 계획인 `
 | `support_check` | `SupportCheck` | O | Review할 비교 결과 전체 |
 | `source_call_id` | UUID | O | 지원금 Agent 호출 |
 
-`CaseStatusChangeCandidate`:
+#### `[TYPE_ONLY]` `CaseStatusChangeCandidate` current type
+
+아래 5개 key의 Python 타입은 존재하지만 현재 Supervisor가 `CASE_COMPLETE`를 거부하므로 정상 Graph outcome에서는 생성되지 않습니다. 생산 저장 의미는 `[PROPOSED_SHARED]`입니다.
 
 | 필드 | 타입 | 필수 | 설명 |
 |---|---|---:|---|
@@ -456,7 +506,9 @@ Blocker 1개 + Next Action 1개 불변식은 실행 가능한 정상 계획인 `
 | `reason_summary` | string | O | 완료 판단 이유 |
 | `evidence_refs` | opaque string[] (min 1) | O | 완료 조건 근거 |
 
-`MutationSet`은 다음 네 key를 항상 갖습니다.
+#### `[CURRENT_AI]` `MutationSet` container shape
+
+현재 Python `MutationSet`은 다음 네 key를 항상 갖습니다. 이 객체를 DB에 반영하는 CAS·transaction·History 계약은 `[PROPOSED_SHARED]`입니다.
 
 | 필드 | 타입 | 필수 |
 |---|---|---:|
@@ -465,30 +517,31 @@ Blocker 1개 + Next Action 1개 불변식은 실행 가능한 정상 계획인 `
 | `support_match_updates` | `SupportMatchUpdateCandidate[]` | O |
 | `case_status_change` | `CaseStatusChangeCandidate` \| null | O |
 
-`SupportApplicationChangeCandidate`는 v1 `MutationSet`에 넣지 않습니다. 실제 신청상태는 명시적 신청상태 변경 API가 소유합니다. 자연어 `RESULT_SUBMITTED`로도 이를 바꿀 UX를 채택한다면 `application_id`, before/proposed status, 입력 event와 Evidence, 허용 전이를 가진 별도 candidate를 계약 버전 상향 후 추가해야 합니다.
+`[TARGET_UNIMPLEMENTED]` `SupportApplicationChangeCandidate`는 v1 `MutationSet`에 넣지 않는 보류 항목입니다. 실제 신청상태를 명시적 신청상태 변경 API가 소유하게 하는 방안도 공동 승인 전입니다. 자연어 `RESULT_SUBMITTED`로 이를 바꾸는 UX를 채택한다면 `application_id`, before/proposed status, 입력 event와 Evidence, 허용 전이를 가진 별도 candidate를 계약 버전 상향 후 추가해야 합니다.
 
 한 `MutationSet` 안의 모든 `candidate_id`는 전역 unique입니다. 같은 `field_path`, `procedure_step_id`, `support_program_id`에는 각각 최대 1개의 변경만 허용하며 저장 순서로 충돌을 해소하지 않습니다.
 
-runtime 조립 시 다음 deep-equality provenance를 강제합니다.
+`[CURRENT_AI]` runtime 조립은 현재 shape에서 다음 provenance를 강제합니다.
 
 - `INFO_ANALYSIS` fact 변경의 operation/path/type/proposed value/Evidence는 참조한 `FactCandidate`와 같고 그 후보의 `requires_confirmation=false`여야 합니다.
-- `CONFIRMED_CONFLICT` fact 변경은 trigger의 같은 candidate/ref/digest를 가리켜야 합니다. `ACCEPT_PROPOSED`일 때만 mutation을 만들고 operation/status/value를 원 충돌의 proposed 값과 같게 합니다. `KEEP_COMMITTED`이면 fact mutation을 만들지 않습니다.
-- 절차 변경의 step/status/Evidence는 참조한 `ProcedureProgressObservation`과 같고 그 관측의 `requires_confirmation=false`여야 합니다. `procedure_analysis_call_id`의 정보분석 결과에는 같은 canonical step의 finding이, 그 결과의 `based_on_procedure_lookup_call_id`에는 `procedure_lookup_call_id`가 있어야 합니다. 웹문서 finding만으로는 현실 실행을 증명할 수 없으므로 진행상태 mutation을 만들지 않습니다.
-- 지원 비교 변경의 `support_check`는 `source_call_id` 결과의 한 항목과 deep-equal이고, `before_match`는 같은 program의 snapshot 값 또는 null과 같아야 합니다.
+- 절차 변경의 step/status/Evidence는 같은 Info 결과의 `ProcedureProgressObservation`과 같고 그 관측의 `requires_confirmation=false`여야 합니다. 같은 canonical step의 `ProcedureFinding`이 없으면 변경을 만들지 않으며, Info 결과 자체는 원 `ProcedureLookupResult` call/digest에 결합됩니다. 웹문서 finding만으로는 현실 실행을 증명할 수 없습니다.
+- 지원 비교 변경의 `support_check`는 `source_call_id` 결과의 한 항목을 그대로 사용합니다.
 
-runtime이 하위 결과와 다른 값으로 mutation을 재작성하는 것은 금지합니다.
+`[TYPE_ONLY]` `CONFIRMED_CONFLICT` fact branch는 validator shape만 존재하고 현재 trigger/Graph가 mutation을 만들지 않습니다. `[PROPOSED_SHARED]`에서는 trigger의 같은 candidate/ref/digest에 결합하고 `ACCEPT_PROPOSED`일 때만 원 proposed 값과 같은 mutation을 만들며, `KEEP_COMMITTED`이면 만들지 않는 안입니다. 목표 절차 source ID 네 개와 지원 `before_match`의 교차검증도 `[PROPOSED_SHARED]`입니다.
 
-`DecisionDraft.decision_type=CASE_COMPLETE`이면 `case_status_change.proposed_status=COMPLETED`가 반드시 존재하고, `ACTION` 또는 `NEEDS_MORE_INFO`이면 `case_status_change=null`이어야 합니다. 완료 mutation은 모든 필수 절차와 종료 조건이 충족됐는지 State Transition Guardrail이 다시 확인합니다.
+현재 runtime과 생산 제안 모두 하위 결과와 다른 값으로 mutation을 재작성하지 않는 경계를 유지합니다.
 
-절차 진행은 v1에서 `NOT_STARTED(또는 row 없음) → IN_PROGRESS → COMPLETED` 순방향을 기본으로 하며, 현실 실행 Evidence가 있으면 `NOT_STARTED → COMPLETED` 단축만 허용합니다. 동일 상태는 mutation을 만들지 않고, 역행·완료 취소는 별도의 인증된 정정 계약을 만들기 전까지 거부합니다.
+`[TYPE_ONLY]` 현재 schema는 `DecisionDraft.decision_type=CASE_COMPLETE`이면 `case_status_change.proposed_status=COMPLETED`가 반드시 존재하고, `ACTION` 또는 `NEEDS_MORE_INFO`이면 `case_status_change=null`이도록 검증하지만, 성공 runtime은 `CASE_COMPLETE`를 반환하지 않습니다. 모든 필수 절차와 종료 조건을 State Transition Guardrail이 다시 확인하는 단계는 `[PROPOSED_SHARED]`입니다.
 
-### 충돌과 사용자 확인
+`[CURRENT_AI]` 절차 변경 타입은 순방향만 허용하고 같은 상태에는 mutation을 만들지 않습니다. 사용자 발화에서 검증한 현실 수행 Evidence가 있으면 `NOT_STARTED(또는 row 없음) → COMPLETED` 단축도 현재 허용합니다. `[PROPOSED_SHARED]` BE 저장 시 같은 전이를 허용할 Evidence profile과 역행·완료 취소를 다룰 인증된 정정 계약은 공동 승인해야 합니다.
+
+### 충돌과 사용자 확인 — `[CURRENT_AI]` 후보 / `[PROPOSED_SHARED]` 확인 재진입
 
 `ConflictCandidate`:
 
 | 필드 | 타입 | 필수 | 설명 |
 |---|---|---:|---|
-| `conflict_ref` | opaque string | O | BE가 발급한 pending conflict 참조 |
+| `conflict_ref` | opaque string | O | `[CURRENT_AI]` `standalone:` simulation ref. `[PROPOSED_SHARED]` 생산에서는 BE pending-conflict ref 후보 |
 | `conflict_digest` | `sha256:<hex>` | O | 아래 충돌 내용 전체의 runtime digest |
 | `candidate_id` | UUID | O | runtime 생성 |
 | `snapshot_id` | UUID | O | 충돌 검출 기준 |
@@ -502,9 +555,9 @@ runtime이 하위 결과와 다른 값으로 mutation을 재작성하는 것은 
 | `source_evidence_refs` | opaque string[] (min 1) | O | 신규 입력 근거 |
 | `source_call_id` | UUID | O | 정보분석 호출 |
 
-`SET`은 `proposed_status=CONFIRMED`/non-null 값, `CLEAR`는 `proposed_status=UNKNOWN`/null 값이어야 합니다. `conflict_digest`는 자기 자신과 `conflict_ref`만 제외한 나머지 충돌 필드를 §12와 같은 canonical serializer로 묶고, `conflict_ref`는 이 digest와 Case 소유권에 결합되어야 합니다.
+`SET`은 `proposed_status=CONFIRMED`/non-null 값, `CLEAR`는 `proposed_status=UNKNOWN`/null 값이어야 합니다. `[CURRENT_AI]` `conflict_digest`는 자기 자신과 `conflict_ref`만 제외한 나머지 충돌 필드를 §12와 같은 canonical serializer로 묶고 runtime이 simulation ref를 만듭니다. `[PROPOSED_SHARED]` BE ref를 이 digest와 Case 소유권에 결합하는 방식은 공동 승인 전입니다.
 
-`ConfirmedConflictResolution`:
+`[PROPOSED_SHARED]` `ConfirmedConflictResolution`은 현재 코드에 없는 production 확인 재진입 계약입니다.
 
 | 필드 | 타입 | 필수 | 설명 |
 |---|---|---:|---|
@@ -519,30 +572,30 @@ runtime이 하위 결과와 다른 값으로 mutation을 재작성하는 것은 
 | `expected_case_version` | positive integer \| null | O | version 미채택 시 field-level compare-and-set 필수 |
 | `confirmed_at` | datetime | O | BE 수신 시각 |
 
-`CONFLICT_CONFIRMED`는 클라이언트가 임의로 붙이는 source type이 아닙니다. BE가 유효한 `conflict_ref`, 현재 값/version, 확인 event를 검증한 뒤에만 Supervisor 입력을 만듭니다.
+`[PROPOSED_SHARED]` `CONFLICT_CONFIRMED`는 클라이언트가 임의로 붙이는 source type이 아니라, BE가 유효한 `conflict_ref`, 현재 값/version, 확인 event를 검증한 뒤에만 Supervisor 입력을 만드는 안입니다.
 
 정보분석 모델은 `conflict_ref`나 digest를 만들지 않습니다. 현재 standalone runtime은 구조화 검증 뒤 simulation 전용 `standalone:` ref를 만듭니다. 생산 방식은 P0 결정 사항으로, ref 없는 충돌을 Coordinator가 pending row/서명 token에 결합하거나 BE-backed `ConflictRefFactory`를 runtime에 주입하는 방법 중 하나를 합의해야 합니다. 어느 방식이든 BE는 소유권·snapshot/version·digest에 결합된 ref만 저장·복원합니다.
 
-## 7. `CaseSnapshot`
+## 7. `CaseSnapshot` — `[CURRENT_AI]` 현재 shape / `[PROPOSED_SHARED]` 확장안
 
-### 현재 standalone 실행 shape
+### `[CURRENT_AI]` 현재 standalone 실행 shape
 
 현재 `schemas.py`의 `CaseSnapshot`은 다음 8개 key만 허용합니다. CLI/test fixture가 직접 만들며 BE 인증·소유권 확인이나 DB read가 결합된 결과가 아닙니다.
 
 | 필드 | 타입 | 필수 | 현재 불변식 |
 |---|---|---:|---|
-| `snapshot_id` | UUID | O | runtime 생성, 한 run 동안 immutable |
+| `snapshot_id` | UUID | O | fixture/caller 제공, Graph가 한 run 동안 변경하지 않음 |
 | `case_id` | positive integer | O | Graph가 모든 component meta/outcome의 Case ID로 사용 |
 | `case_version` | positive integer \| null | O | standalone은 저장/CAS를 수행하지 않음 |
 | `case_status` | `IN_PROGRESS` \| `COMPLETED` | O | 입력 상태 |
 | `facts` | `CaseFact[]` | O | `field_path` unique |
 | `procedure_progress` | `ProcedureProgress[]` | O | `procedure_step_id` unique |
 | `evidence_records` | `EvidenceRecord[]` | O | `evidence_id` unique, fact/progress ref 전체 해석 |
-| `captured_at` | aware datetime | O | runtime/fixture 생성 |
+| `captured_at` | aware datetime | O | fixture/caller 제공, Graph가 입력값을 사용 |
 
 현재 model은 `case_id`와 `step_code` 조합의 canonical registry 정합성, Evidence parent의 재귀 closure, Case 완료 조건까지 단독으로 확인하지 않습니다. Graph/Supervisor/Review가 run·snapshot·source 연결을 추가 검증하지만, 생산 DB 소유권·동시성 검증은 BE 경계가 필요합니다.
 
-### 목표 BE/shared 확장 shape
+### `[PROPOSED_SHARED]` 목표 BE/shared 확장 shape — 미구현
 
 BE가 인증·소유권 확인 후 한 읽기 시점에 만든 `SharedCaseSnapshotDTO`를 AI adapter가 아래 목표 필드로 변환·strict 검증한 읽기 전용 snapshot입니다. adapter는 누락값이나 Evidence를 합성할 수 없습니다. 두 DTO를 같은 코드 생성 schema로 통일하기로 공동 승인하면 별도 변환 없이 동일 shape를 사용할 수 있습니다. 아래 표의 `support_applications`, `support_matches`, `latest_decision`, `history_window`는 **현재 `CaseSnapshot` 코드에는 없습니다**.
 
@@ -561,11 +614,13 @@ BE가 인증·소유권 확인 후 한 읽기 시점에 만든 `SharedCaseSnapsh
 | `evidence_records` | `EvidenceRecord[]` | O | snapshot의 참조 중 이번 실행에 필요한 최소 근거 |
 | `captured_at` | datetime | O | BE 생성 시각 |
 
+`[CURRENT_AI]`에서 사용하는 `ProcedureProgress` exact shape를 `[PROPOSED_SHARED]` 확장 snapshot도 그대로 재사용하는 안입니다.
+
 `ProcedureProgress`:
 
 | 필드 | 타입 | 필수 | 설명 |
 |---|---|---:|---|
-| `procedure_step` | `ProcedureStepRef` | O | BE canonical procedure registry 참조 |
+| `procedure_step` | `ProcedureStepRef` | O | `[CURRENT_AI]` fixture/caller 참조. `[PROPOSED_SHARED]` 생산에서는 BE canonical registry 참조 후보 |
 | `status` | `NOT_STARTED` \| `IN_PROGRESS` \| `COMPLETED` | O | 현재 진행 상태 |
 | `evidence_refs` | opaque string[] | O | 완료 상태면 min 1 |
 | `updated_at` | datetime | O | 마지막 변경 시각 |
@@ -622,21 +677,21 @@ BE가 인증·소유권 확인 후 한 읽기 시점에 만든 `SharedCaseSnapsh
 
 과거 raw input 전체는 snapshot에 반복 포함하지 않습니다.
 
-Snapshot 안의 모든 `evidence_refs`는 같은 snapshot의 `evidence_records`에서 해석되어야 합니다. 이후 구성요소가 새로 만든 Evidence는 해당 `ComponentSuccess` output에 포함합니다.
+`[CURRENT_AI]` Snapshot 안의 모든 `evidence_refs`는 같은 snapshot의 `evidence_records`에서 해석되어야 합니다. 현재 구성요소가 새로 만든 Evidence는 bare result의 `evidence_records`에 포함합니다. `[PROPOSED_SHARED]` envelope를 채택한 뒤에는 같은 결과가 `ComponentSuccess.output`에 들어갑니다.
 
-`UNKNOWN` fact 자체는 Evidence가 없을 수 있습니다. 다만 “정보가 없다”는 사실을 Blocker나 질문의 근거로 사용할 가능성이 있으면 PlanningCoordinator가 snapshot 생성 시 해당 JSON Pointer와 captured time을 가리키는 `SYSTEM_RECORD` Evidence를 `snapshot.evidence_records`에 포함합니다.
+`[CURRENT_AI]` `UNKNOWN` fact 자체는 Evidence가 없을 수 있습니다. `[PROPOSED_SHARED]` 생산에서 “정보가 없다”는 사실을 Blocker나 질문의 근거로 사용할 가능성이 있으면, 아직 없는 `PlanningCoordinator`가 snapshot 생성 시 해당 JSON Pointer와 captured time을 가리키는 `SYSTEM_RECORD` Evidence를 `snapshot.evidence_records`에 포함하는 안입니다.
 
-## 8. 정보분석 Agent-as-Tool
+## 8. `[CURRENT_AI]` 정보분석 Agent-as-Tool
 
 정보분석 Agent는 사용자 자연어와 Case를 분석하는 동시에, 절차조회 Tool이 가져온 **신뢰하지 않는 raw 웹문서 데이터**를 업무 의미로 변환합니다. 외부 문서의 문장은 prompt instruction이 아니며 문서 안의 지시, credential 요청, 추가 Tool 호출 요청을 실행하지 않습니다.
 
-`KnownProcedureStep`은 인터넷 자료와 사용자 진행 발화를 DB canonical 절차 ID에 연결하기 위한 입력 전용 타입입니다. 이 목록은 BE canonical registry에서 오며 웹검색이나 LLM이 생성하지 않습니다.
+`KnownProcedureStep`은 인터넷 자료와 사용자 진행 발화를 canonical 절차 ID에 연결하기 위한 입력 전용 타입입니다. `[CURRENT_AI]` standalone에서는 fixture/caller가 제공하고 웹검색이나 LLM이 생성하지 않습니다. `[PROPOSED_SHARED]` 생산에서는 BE versioned canonical registry가 제공하는 안입니다.
 
 | 필드 | 타입 | 필수 | 설명 |
 |---|---|---:|---|
 | `procedure_step` | `ProcedureStepRef` | O | 안정 참조 |
 | `step_name` | string | O | 현재 표시명 |
-| `utterance_aliases` | string[] | O | BE canonical registry에서 관리하는 동의 표현 |
+| `utterance_aliases` | string[] | O | 현재 fixture/caller 제공; 생산에서는 BE canonical registry 관리 제안 |
 
 한 입력 안에서 `procedure_step_id`, `step_code`, 대소문자와 양끝 공백을 정규화한 `step_name`은 각각 전역 유일해야 합니다. 정규화한 모든 `step_name`과 `utterance_aliases`도 서로 중복될 수 없습니다. 같은 표현이 둘 이상의 canonical 절차를 가리키면 Info Agent가 안정적으로 매핑할 수 없기 때문입니다.
 
@@ -740,9 +795,7 @@ Info Agent는 최초 시도를 포함해 constructor의 `max_local_attempts=1..3
 
 `ProcedureFinding`의 모든 Evidence는 같은 입력 `ProcedureLookupResult`에서 해석되어야 합니다. 한 canonical step에는 최대 한 finding만 허용합니다. 인터넷에서 관련 자료를 찾았지만 canonical `KnownProcedureStep`에 안전하게 매핑할 수 없으면 새 ID를 만들지 않고 `uncertainties`에 `CONTEXT_MISSING`을 반환합니다. `freshness_status=UNKNOWN | STALE`인 Evidence로는 기한·서류·의무를 확정하지 않으며 `relevance=UNDETERMINED`, `requires_confirmation=true`를 유지합니다.
 
-`FactCandidate`는 `operation`으로 구분하는 `SetFactCandidate | ClearFactCandidate` tagged union입니다. 공통 필드는 다음과 같습니다.
-
-현재 standalone 구현은 같은 조건부 불변식을 단일 `FactCandidate` 모델과 validator로 강제합니다. 위 tagged union은 BE shared DTO의 목표 형태이며, wire schema를 확정할 때 둘 중 한 표현으로 통일해야 합니다.
+`[PROPOSED_SHARED]` wire 후보는 `operation`으로 구분하는 `SetFactCandidate | ClearFactCandidate` tagged union입니다. `[CURRENT_AI]` standalone은 같은 조건부 불변식을 단일 `FactCandidate` 모델과 validator로 강제합니다. 아래 표는 양쪽의 공통 의미 필드이며, shared wire schema를 승인할 때 한 표현으로 통일해야 합니다.
 
 | 필드 | 타입 | 필수 | 설명 |
 |---|---|---:|---|
@@ -802,9 +855,9 @@ Info Agent는 최초 시도를 포함해 constructor의 `max_local_attempts=1..3
 
 정보분석 Agent는 Case를 바꾸거나 Blocker/Next Action을 반환하지 않습니다. 문장이나 실제 fetch 원문에 없는 값, whitelist 밖 field, canonical registry에 없는 절차, 자격 확정, 추정 세금, 최적 폐업일도 반환하지 않습니다. 웹문서만으로 `ProcedureProgressObservation`을 생성하거나 `COMPLETED`를 판단할 수 없습니다.
 
-기존 초안의 `equipment_items`는 저장 모델이 없으므로 v1에서 제외합니다. 필요하면 별도 후보/저장 schema 합의 후 계약 버전을 올립니다.
+`[TARGET_UNIMPLEMENTED]` 기존 초안의 `equipment_items`는 저장 모델이 없어 v1에서 보류합니다. 필요하면 별도 후보/저장 schema 합의 후 계약 버전을 올립니다.
 
-## 9. 지원금 Agent-as-Tool
+## 9. `[CURRENT_AI]` 지원금 Agent-as-Tool
 
 ### 공통 입력 — `PlanningContext`
 
@@ -933,9 +986,9 @@ provider의 `SupportCheckModelOutput`은 `support_program`, `match_status`, `cri
 - 기관 심사 전에 `ELIGIBLE`, “지원 가능 확정”, “수령 확정”을 반환하지 않습니다.
 - `match_status`는 조건 비교, `application_status`는 실제 신청 결과입니다.
 - 조회만으로 신청 row를 생성·변경하지 않습니다.
-- 금액 필드는 v1 `SupportCheck`에 두지 않습니다. 추후 추가 시 CURRENT 공식 Evidence를 가진 별도 `GroundedClaim`이 필수입니다.
+- `[TARGET_UNIMPLEMENTED]` 금액 필드는 v1 `SupportCheck`에 두지 않는 보류 항목입니다. 추후 추가 시 CURRENT 공식 Evidence를 가진 별도 `GroundedClaim`이 필수입니다.
 
-### 9.1 지원 공고 discovery adapter — `BizInfoSupportDiscoveryTool`
+### 9.1 `[CURRENT_AI]` 지원 공고 discovery adapter — Graph 미연결
 
 이 adapter는 Support Agent의 자격 비교 Tool이 아니라 검수 catalog를 만들기 전의 AI 소유 read-only ingestion 경계입니다. 기업마당 공식 API가 실제 반환한 공고를 strict raw candidate와 `OFFICIAL_API` Evidence로 정규화합니다. Graph, `SupportAnalysisInput`, `ReviewedSupportCatalog`와 자동 연결되지 않습니다.
 
@@ -1001,15 +1054,15 @@ count/hash/Evidence 불변식은 다음과 같습니다.
 | `retryable` | boolean | transport, HTTP 408/425/429/5xx만 true; 입력·redirect·schema/content 오류는 false |
 | `status_code` | integer \| null | HTTP 응답이 있었을 때만 상태코드. 응답 body·요청 URL·key는 포함하지 않음 |
 
-Graph에 연결할 때도 이 실패를 `NO_CANDIDATE`나 `NOT_RELEVANT`로 바꾸지 않고 기술 실패 envelope로 변환해야 합니다.
+`[TARGET_UNIMPLEMENTED]` Graph에 연결할 때도 이 실패를 `NO_CANDIDATE`나 `NOT_RELEVANT`로 바꾸지 않고 기술 실패 envelope로 변환하는 방향입니다.
 
-다음 승격은 이 adapter의 책임이 아닙니다. 상세·첨부 원문 확보, external ID와 canonical support row 매핑, 조건·서류 구조화, source version 검증, 사람 또는 승인된 deterministic rule의 독립 검수를 거쳐야만 `ReviewedSupportCatalog`가 됩니다. 이 경계의 근거와 추가 API는 [`agent-official-data-source-strategy.md`](./agent-official-data-source-strategy.md)에 정리합니다.
+`[TARGET_UNIMPLEMENTED]` raw candidate를 `ReviewedSupportCatalog`로 승격하는 pipeline은 현재 없습니다. 구현할 경우 상세·첨부 원문 확보, external ID와 canonical support row 매핑, 조건·서류 구조화, source version 검증, 사람 또는 승인된 deterministic rule의 독립 검수를 거쳐야 한다는 방향이며, 이 adapter가 스스로 승격하지 않습니다. 이 경계의 근거와 추가 API는 [`agent-official-data-source-strategy.md`](./agent-official-data-source-strategy.md)에 정리합니다.
 
-## 10. 절차조회 Tool
+## 10. `[CURRENT_AI]` 절차조회 Tool
 
 ### 입력 — `ProcedureLookupInput`
 
-v2는 하나의 strict model입니다. 현재는 AgentGraph runtime이 허용된 Case projection과 고정 폐업 용어로 `search_queries`를 구성합니다. 목표에서는 Supervisor가 조회 필요성을 계획하고 Graph router가 같은 제한으로 질의를 검증·조립합니다. 어느 경우에도 사용자 원문, 주소, token, 계약서 본문을 그대로 넣지 않습니다. 첫 입력에서 아직 snapshot fact가 되지 않은 업종도 찾을 수 있도록 redacted 입력의 제한된 키워드는 `카페 → 휴게음식점 폐업 신고 절차 정부24`처럼 미리 정의된 정적 검색어를 선택하는 데만 사용합니다. 원문 문자열을 검색어에 결합하거나 이 선택을 Case 의미 분석 결과로 취급하지 않습니다.
+v2는 하나의 strict model입니다. `[CURRENT_AI]` AgentGraph가 허용된 Case projection과 고정 폐업 용어로 `search_queries`를 구성합니다. `[TARGET_UNIMPLEMENTED]` Supervisor가 조회 필요성만 계획하고 Graph router가 같은 제한으로 질의를 검증·조립하는 동적 routing은 후속 방향입니다. 어느 경우에도 사용자 원문, 주소, token, 계약서 본문을 그대로 넣지 않습니다. 첫 입력에서 아직 snapshot fact가 되지 않은 업종도 찾을 수 있도록 redacted 입력의 제한된 키워드는 `카페 → 휴게음식점 폐업 신고 절차 정부24`처럼 미리 정의된 정적 검색어를 선택하는 데만 사용합니다. 원문 문자열을 검색어에 결합하거나 이 선택을 Case 의미 분석 결과로 취급하지 않습니다.
 
 | 필드 | 타입 | 필수 | 설명 |
 |---|---|---:|---|
@@ -1057,7 +1110,7 @@ registry는 credential 없이 코드에 고정된 EasyLaw·공식기관 URL 후�
 | `search_query` | string | O | 이 URL을 발견한 입력 질의 중 하나 |
 | `discovery_provider` | `OFFICIAL_SOURCE_REGISTRY` \| `KAKAO_DAUM_WEB` \| `GOOGLE_AGENT_SEARCH` | O | 이 URL을 선택·발견한 provider. discovery provenance이며 Evidence 출처 유형은 아님 |
 
-DTO 자체는 HTTPS, credential/fragment/port/IP-literal 금지, lowercase canonical host와 `source_domain` 일치를 검증합니다. 공식기관 domain allowlist는 wire field가 아니며 신뢰된 Procedure Tool/resolver가 결과를 만들 때 runtime config로 추가 검증합니다. 환경변수는 코드에서 검토된 root와 그 하위 host로만 범위를 좁힐 수 있고, 새 trust root 추가는 코드 변경·보안 승인이 필요합니다. BE가 임의 document를 조립해 이 출력으로 취급해서는 안 됩니다.
+`[CURRENT_AI]` DTO 자체는 HTTPS, credential/fragment/port/IP-literal 금지, lowercase canonical host와 `source_domain` 일치를 검증합니다. 공식기관 domain allowlist는 wire field가 아니며 Procedure Tool이 runtime config로 추가 검증합니다. 환경변수는 코드에서 검토된 root와 그 하위 host로만 범위를 좁힐 수 있고, 새 trust root 추가는 코드 변경이 필요합니다. `[PROPOSED_SHARED]` 생산에서 보안 승인 절차를 적용하고 BE가 임의 document를 이 출력으로 조립하지 못하게 하는 경계는 공동 승인 대상입니다.
 
 `ProcedureSearchSummary`:
 
@@ -1105,9 +1158,9 @@ aggregate counter는 음수가 아니며 `successful_query_count + failed_query_
 
 각 document의 `evidence_ref`는 같은 result에서 유일한 `EvidenceRecord`를 가리키고, Evidence는 `source_type=OFFICIAL_DOCUMENT`, `source_ref=canonical_url`, 같은 excerpt/published_at/retrieved_at/freshness/content_hash를 가져야 합니다. 검색 snippet은 이 집합에 들어갈 수 없습니다.
 
-현재 runtime은 registry metadata나 Kakao/Google 검색 metadata의 날짜를 공식 원문의 발행·수정시각으로 신뢰하지 않고 별도의 공식 page-date verifier도 없으므로 `published_at=null`, `freshness_status=UNKNOWN`으로 반환합니다. 향후 이 값을 채우려면 fetched page 자체에서 날짜를 검증하는 resolver와 회귀 fixture를 추가해야 합니다. finding이 참조한 Evidence 중 하나라도 `UNKNOWN | STALE`이면 Info local Guardrail이 `relevance=UNDETERMINED` 외 값을 거부하며, provider prompt와 Review도 검증되지 않은 기한·서류·의무를 확정하지 못하게 합니다.
+`[CURRENT_AI]` runtime은 registry metadata나 Kakao/Google 검색 metadata의 날짜를 공식 원문의 발행·수정시각으로 신뢰하지 않고 별도의 공식 page-date verifier도 없으므로 `published_at=null`, `freshness_status=UNKNOWN`으로 반환합니다. finding이 참조한 Evidence 중 하나라도 `UNKNOWN | STALE`이면 Info local Guardrail이 `relevance=UNDETERMINED` 외 값을 거부하며, provider prompt와 Review도 검증되지 않은 기한·서류·의무를 확정하지 못하게 합니다. `[TARGET_UNIMPLEMENTED]` fetched page 자체에서 날짜를 검증하는 resolver와 회귀 fixture를 추가하기 전에는 이 값을 채우지 않습니다.
 
-Tool은 HTML을 data로만 처리하고 script/style 등 실행·비가시 subtree와 form/input의 markup·속성을 제거하며 prompt injection 문구를 실행하지 않습니다. 공식 사이트가 form으로 본문을 감싸는 경우에는 form 안의 보이는 텍스트를 보존합니다. `main`/`article`의 visible text를 우선하고, 긴 문서는 반복 메뉴 횟수가 아니라 서로 다른 정적 검색어 token이 가장 많이 모인 bounded window를 선택합니다. 이는 LLM 의미 판정이 아닌 excerpt 위치 선택일 뿐이며 `content_hash`는 excerpt가 아니라 fetch한 전체 body bytes를 기준으로 합니다. 현재 요청 전과 redirect마다 HTTPS, 표준 port, hostname allowlist와 IP-literal 금지를 검사하고 허용 MIME·본문 byte 상한·요청별 timeout을 적용합니다. `PROCEDURE_SEARCH_TOTAL_TIMEOUT_SECONDS`는 검색과 모든 원문 fetch의 전체 시간을 기본 60초로 제한합니다. 공식 registry의 여러 문서를 순차 검증할 때 30초가 실제 smoke에서 소진된 근거를 반영하되 요청별 8초 상한은 유지합니다. 외부 HTTP client를 주입해도 요청마다 redirect 자동 추적과 client auth를 끄고 client 기본 header/cookie를 상속하지 않습니다. hostname의 DNS 해석 결과가 private/loopback/link-local로 바뀌는 경우까지 막는 resolver pinning·egress 정책은 생산 연동 전에 추가해야 하는 보안 경계입니다.
+`[CURRENT_AI]` Tool은 HTML을 data로만 처리하고 script/style 등 실행·비가시 subtree와 form/input의 markup·속성을 제거하며 prompt injection 문구를 실행하지 않습니다. 공식 사이트가 form으로 본문을 감싸는 경우에는 form 안의 보이는 텍스트를 보존합니다. `main`/`article`의 visible text를 우선하고, 긴 문서는 반복 메뉴 횟수가 아니라 서로 다른 정적 검색어 token이 가장 많이 모인 bounded window를 선택합니다. 이는 LLM 의미 판정이 아닌 excerpt 위치 선택일 뿐이며 `content_hash`는 excerpt가 아니라 fetch한 전체 body bytes를 기준으로 합니다. 현재 요청 전과 redirect마다 HTTPS, 표준 port, hostname allowlist와 IP-literal 금지를 검사하고 허용 MIME·본문 byte 상한·요청별 timeout을 적용합니다. `PROCEDURE_SEARCH_TOTAL_TIMEOUT_SECONDS`는 검색과 모든 원문 fetch의 전체 시간을 기본 60초로 제한합니다. 공식 registry의 여러 문서를 순차 검증할 때 30초가 실제 smoke에서 소진된 근거를 반영하되 요청별 8초 상한은 유지합니다. 외부 HTTP client를 주입해도 요청마다 redirect 자동 추적과 client auth를 끄고 client 기본 header/cookie를 상속하지 않습니다. `[TARGET_UNIMPLEMENTED]` hostname DNS 해석 결과의 private/loopback/link-local 차단과 DNS rebinding 방어는 생산 egress/resolver 정책과 함께 추가해야 합니다.
 
 절차조회 출력에는 canonical step ID, `procedure_findings`, 적용성, 준비상태, 완료상태, 조건 판정, priority, rank, selected, blocker, next action을 두지 않습니다. 이 의미 분석은 §8 정보분석 Agent, 최종 선택은 Supervisor의 책임입니다.
 
@@ -1124,7 +1177,7 @@ Tool은 HTML을 data로만 처리하고 script/style 등 실행·비가시 subtr
 - [앱 키 설정](https://developers.kakao.com/docs/ko/app-setting/app)은 REST API 키 관리와 호출 허용 IP 설정의 근거입니다.
 - [쿼터 안내](https://developers.kakao.com/docs/ko/getting-started/quota)는 Daum 검색 사용량에 한도가 있고 값이 변경될 수 있음을 명시하므로 quota 오류, retry, cache와 관측을 계약에 포함합니다.
 
-## 10.1 목표 BE/AI 외부 공식 resolver 계약 (현재 미구현)
+## 10.1 `[PROPOSED_SHARED]` BE/AI 외부 공식 resolver 계약 — 미구현
 
 이 절은 NTS 사업자 상태, 행안부 지방행정 인허가, 국가법령정보를 실제 Case에 연결할 때 사용할 **목표 wire 계약**이며 현재 구현 완료를 뜻하지 않습니다. 서비스 승인·실호출 성공 여부는 schema 상수가 아니라 배포 시점에 바뀌는 운영 상태입니다. BE는 versioned dataset registry로 이를 판정하고, 최신 상태·근거·확인 시각은 [공식 API·크롤링·RAG 데이터 소스 조사](./agent-official-data-source-strategy.md)에만 기록합니다. registry에서 사용할 수 없는 dataset은 provider를 호출하지 않고 `SERVICE_NOT_APPROVED`로 닫습니다.
 
@@ -1386,25 +1439,25 @@ malformed JSON, extra/missing field, 잘못된 UUID/date/bounds는 idempotency �
 
 정상 0건은 NTS `NOT_REGISTERED`, MOIS `NO_MATCH`, Law의 빈 documents success입니다. 자동 retry는 같은 idempotency key의 `RATE_LIMITED` 또는 `UPSTREAM_UNAVAILABLE`에만 bounded backoff로 허용합니다. 최종 failure의 `occurred_at`은 마지막 attempt의 failure 확정 시각이고, retry 뒤 success의 조회시각은 마지막 성공 응답을 검증한 시각입니다.
 
-### BE가 이 계약으로 구현해야 하는 경계
+### `[PROPOSED_SHARED]` 공동 승인 시 BE가 구현할 경계
 
 - NTS/MOIS 식별자 vault와 exact resolver, 동의·인증·Case/ref 소유권 검증, 최소 field projection, 외부전송 audit
 - dataset별 versioned availability registry, credential rotation, quota/rate limit, response-byte/page/entry cap, timeout/retry와 schema-version runbook
 - idempotency input digest/outcome 저장, HTTP 403/409/422 preflight, success Evidence 저장·복원과 TTL 재검증
 - raw identifier·주소·provider body가 LLM/log/trace/Evidence로 유출되지 않는 contract test
 
-AI는 이 typed outcome만 소비하고 resolver별 strict validator, 법령 read-only adapter, Evidence/Agent 연결을 구현합니다. NTS/MOIS의 raw provider adapter가 어느 repository에 있더라도 raw 식별자 경계와 이 wire schema를 우회할 수 없습니다. AI/BE는 success, 정상 0건, history empty/다중 page, ambiguous, 승인없음, quota, timeout, oversized, schema drift, request replay/conflict의 cross-language fixture와 canonical hash test vector를 공동 확정한 뒤 Graph에 연결합니다.
+공동 승인되면 AI는 이 typed outcome만 소비하고 resolver별 strict validator, 법령 read-only adapter, Evidence/Agent 연결을 구현합니다. 현재 NTS/MOIS/Law production resolver와 Graph 연결은 없습니다. NTS/MOIS의 raw provider adapter가 어느 repository에 있더라도 raw 식별자 경계와 이 wire schema를 우회할 수 없다는 조건부터 AI/BE가 승인해야 합니다. success, 정상 0건, history empty/다중 page, ambiguous, 승인없음, quota, timeout, oversized, schema drift, request replay/conflict의 cross-language fixture와 canonical hash test vector도 공동 확정한 뒤 Graph에 연결합니다.
 
-## 11. Supervisor Agent
+## 11. Supervisor Agent — `[CURRENT_AI]` 실행 계약 / `[PROPOSED_SHARED]` trigger 확장
 
 ### 입력 — `SupervisorRunInput`
 
 `RunTrigger`는 `trigger_type` discriminator를 씁니다. **현재 standalone `schemas.py`가 허용하는 실행 variant는 정확히 3개**(`CASE_CREATED | RESULT_SUBMITTED | SUPPORT_REFRESH`)입니다. 아래 `CONFLICT_CONFIRMED`는 생산 충돌 확인 round trip을 위한 **목표 BE/shared 네 번째 variant**이며 현재 Pydantic/Graph에는 없습니다. 아래에 적지 않은 variant 전용 필드는 extra field로 거부합니다.
 
-- `CaseCreatedTrigger`: `trigger_type=CASE_CREATED`, `input_event_id: opaque string`, `client_event_id: opaque string | null`, `input: RedactedInput`, `submitted_at: datetime`
-- `ResultSubmittedTrigger`: `trigger_type=RESULT_SUBMITTED`; 나머지 필드는 `CaseCreatedTrigger`와 동일
-- `ConflictConfirmedTrigger`: `trigger_type=CONFLICT_CONFIRMED`, `input_event_id: opaque string`, `client_event_id: opaque string | null`, `confirmation_input: RedactedInput`, `confirmation_evidence_records: EvidenceRecord[]` (min 1), `referenced_conflicts: ConflictCandidate[]` (min 1), `referenced_conflict_evidence_records: EvidenceRecord[]` (min 1), `confirmed_conflicts: ConfirmedConflictResolution[]` (min 1), `submitted_at: datetime`
-- `SupportRefreshTrigger`: `trigger_type=SUPPORT_REFRESH`, `input_event_id: opaque string`, `client_event_id: opaque string | null`, `support_programs: SupportProgramRef[]` (min 1), `as_of: date`; 사용자 raw input 필드 없음
+- `[CURRENT_AI]` `CaseCreatedTrigger`: `trigger_type=CASE_CREATED`, `input_event_id: opaque string`, `client_event_id: opaque string | null`, `input: RedactedInput`, `submitted_at: datetime`
+- `[CURRENT_AI]` `ResultSubmittedTrigger`: `trigger_type=RESULT_SUBMITTED`; 나머지 필드는 `CaseCreatedTrigger`와 동일
+- `[CURRENT_AI]` `SupportRefreshTrigger`: `trigger_type=SUPPORT_REFRESH`, `input_event_id: opaque string`, `client_event_id: opaque string | null`, `support_programs: SupportProgramRef[]` (min 1), `as_of: date`; 사용자 raw input 필드 없음
+- `[PROPOSED_SHARED]` `ConflictConfirmedTrigger`: `trigger_type=CONFLICT_CONFIRMED`, `input_event_id: opaque string`, `client_event_id: opaque string | null`, `confirmation_input: RedactedInput`, `confirmation_evidence_records: EvidenceRecord[]` (min 1), `referenced_conflicts: ConflictCandidate[]` (min 1), `referenced_conflict_evidence_records: EvidenceRecord[]` (min 1), `confirmed_conflicts: ConfirmedConflictResolution[]` (min 1), `submitted_at: datetime`. 현재 Pydantic/Graph에는 없음
 
 `SupervisorRunInput`:
 
@@ -1413,11 +1466,11 @@ AI는 이 typed outcome만 소비하고 resolver별 strict validator, 법령 rea
 | `trigger` | `RunTrigger` | O | 실행 원인 |
 | `case_snapshot` | `CaseSnapshot` | O | 실행 기준 snapshot |
 
-trigger의 `input_event_id`, snapshot의 case ID, 바깥 `InvocationMeta`의 run/case는 runtime이 교차 검증합니다. `ConflictConfirmedTrigger`는 BE가 `conflict_ref`로 복원한 원 충돌과 resolution을 1:1로 포함해야 합니다. 원 충돌과 확인의 모든 Evidence 참조는 각각 같은 trigger의 Evidence 목록에서 해석되고, `confirmation_input.input_event_id`와 trigger의 ID가 같아야 합니다. 재호출은 새 외부 trigger가 아니라 같은 `run_id` 안의 Graph 제어입니다.
+`[CURRENT_AI]` `CASE_CREATED | RESULT_SUBMITTED` trigger는 자체 `input_event_id`와 nested `RedactedInput.input_event_id`가 같은지 검증하고, Graph가 snapshot의 case ID로 내부 `InvocationMeta`를 생성합니다. 현재 공개 호출에는 바깥 `InvocationMeta`가 없습니다. `[PROPOSED_SHARED]` envelope를 도입하면 trigger·snapshot·바깥 meta의 run/case를 교차검증해야 합니다. `ConflictConfirmedTrigger`는 BE가 `conflict_ref`로 복원한 원 충돌과 resolution을 1:1로 포함하고, 원 충돌·확인 Evidence closure와 confirmation event ID를 검증하는 제안입니다. 재호출은 새 외부 trigger가 아니라 같은 `run_id` 안의 Graph 제어로 유지합니다.
 
-v2의 정상 첫 계획은 ProcedureLookupResult를 먼저 만들고 그 call ID/result를 InfoAnalysisInput에 결합합니다. Info가 충돌을 반환하더라도 이미 끝난 조회 호출은 감사 trace에 남지만 Support·Supervisor 초안·Review는 실행하지 않습니다. Procedure 조회의 raw 문서, Info의 `procedure_findings`, Support 결과 중 실제 초안이 사용한 source는 모두 Review package에 포함되어야 합니다.
+`[CURRENT_AI]` 정상 첫 계획은 `ProcedureLookupResult`를 먼저 만들고 그 call ID/result를 `InfoAnalysisInput`에 결합합니다. Info가 충돌을 반환하면 Support·Supervisor 초안·Review는 실행하지 않습니다. 완료된 구성요소의 metadata는 설정된 `TraceSink`로 emit할 수 있지만 기본 `NullTraceSink`는 저장하지 않으며 영속 감사 이력은 없습니다. 정상 초안을 만들 때 Procedure raw 문서, Info `procedure_findings`, Support 결과 중 실제 사용한 source는 Review package에 포함됩니다.
 
-### 내부 상태 — `AgentGraphState`
+### `[PROPOSED_SHARED]` 목표 내부 상태 — 현재 `AgentGraphState`와 다름
 
 아래 표는 목표 상태 모델입니다. 현재 standalone의 실제 `TypedDict`는 `request`, `run_id`, `trace_id`, `phase`, source result, fact overlay, Review/rework 상태와 outcome/failure 필드를 사용하며, envelope 기반 `component_results`/`errors` 구조와 정확히 같지 않습니다. 현재 상태는 §18을 기준으로 봅니다.
 
@@ -1431,11 +1484,11 @@ v2의 정상 첫 계획은 ProcedureLookupResult를 먼저 만들고 그 call ID
 | `conflicts` | `ConflictCandidate[]` | 미해결 충돌 |
 | `mutations` | `MutationSet` | 미저장 후보 |
 | `current_draft` | `DecisionDraft` \| null | 현재 초안 |
-| `review_result` | `ComponentResult[ReviewResult]` \| null | 현재 subject 검토 |
+| `review_result` | (`ComponentSuccess[ReviewResult]` \| `ComponentFailure`) \| null | 현재 subject 검토 |
 | `revision_count` | integer `0..2` | Review 반송 후 재작성 횟수 |
 | `errors` | `ComponentError[]` | 기술 실패 |
 
-### 출력 — `SupervisorDraft`
+### `[CURRENT_AI]` 출력 — `SupervisorDraft`
 
 | 필드 | 타입 | 필수 | 설명 |
 |---|---|---:|---|
@@ -1444,9 +1497,9 @@ v2의 정상 첫 계획은 ProcedureLookupResult를 먼저 만들고 그 call ID
 | `grounded_claims` | `GroundedClaim[]` | O | 고위험 사용자 노출 주장 |
 | `source_call_ids` | UUID[] (min 1) | O | 사용한 하위 결과 |
 
-runtime은 `source_call_ids`가 같은 run/case/snapshot의 `ComponentSuccess`인지 검증합니다. 이 집합은 `decision.based_on_call_ids`, 각 mutation의 non-null current-run source call, 그리고 decision·mutation·claim이 참조한 새 Evidence를 소유한 source result call의 합집합과 정확히 같아야 합니다. `CONFIRMED_CONFLICT` provenance는 digest로 보호된 trigger에서 닫히므로 이전 run의 call을 이 집합에 넣지 않습니다. 사용하지 않은 호출을 끼워 넣거나 사용한 호출을 생략할 수 없습니다. 모든 `ACTION`은 required `target`을 하나 가집니다. Procedure target이면 Info 결과의 정확히 한 `ProcedureFinding`과 그 finding의 Evidence를 소유한 `ProcedureLookupResult`/digest 연결이 함께 있어야 하고, Support target이면 정확히 한 `SupportCheck`와 Evidence가 있어야 합니다. 자연어 keyword는 이 권한 경계를 대신하지 않습니다.
+`[CURRENT_AI]` runtime은 `source_call_ids`가 같은 run/case/snapshot의 성공한 `ReviewSourceResult.meta.call_id`인지 검증합니다. 이 집합은 `decision.based_on_call_ids`, 각 current-run mutation source call, 그리고 decision·mutation·claim이 참조한 새 Evidence를 소유한 source result call의 합집합과 정확히 같아야 합니다. 사용하지 않은 호출을 끼워 넣거나 사용한 호출을 생략할 수 없습니다. 모든 `ACTION`은 required `target`을 하나 가집니다. Procedure target이면 Info 결과의 정확히 한 `ProcedureFinding`과 그 finding의 Evidence를 소유한 `ProcedureLookupResult`/digest 연결이 함께 있어야 하고, Support target이면 정확히 한 `SupportCheck`와 Evidence가 있어야 합니다. 자연어 keyword는 이 권한 경계를 대신하지 않습니다. `[TYPE_ONLY]` `CONFIRMED_CONFLICT` provenance를 이전 run의 call 대신 digest로 보호된 trigger에 닫는 validator shape는 생산 재진입 경로가 생기기 전에는 실행 계약이 아닙니다.
 
-Supervisor는 전문 Evidence를 새로 만들거나 하위 결과를 고쳐 쓰지 않습니다. 현재는 Graph가 Review issue에 따라 재호출하고, 목표에서는 Supervisor가 부족한 구성요소의 재호출 계획을 제안합니다. 충분한 결과가 있을 때만 `SupervisorDraft`를 만듭니다.
+Supervisor는 전문 Evidence를 새로 만들거나 하위 결과를 고쳐 쓰지 않습니다. `[CURRENT_AI]` Graph가 Review issue에 따라 재호출합니다. `[TARGET_UNIMPLEMENTED]` Supervisor가 부족한 구성요소의 재호출 계획을 제안하는 동적 routing은 현재 없습니다. 충분한 결과가 있을 때만 `SupervisorDraft`를 만듭니다.
 
 ### 현재 provider → local → runtime 변환 계약
 
@@ -1458,7 +1511,7 @@ Supervisor는 전문 Evidence를 새로 만들거나 하위 결과를 고쳐 쓰
 
 provider의 `GroundedClaimModelOutput`은 `claim_type`, `target_kind`, `target_index`, `assertion_level`, `evidence_refs`만 반환합니다. runtime이 selector를 실제 사용자 노출 필드에 결합해 `target_path`와 그 위치의 정확한 `text`를 주입하므로 모델이 임의 path/text를 증명할 수 없습니다. `SupervisorSemanticDraft` 타입 자체는 `CASE_COMPLETE` shape를 표현하지만, 현재 `SupervisorAgent`는 전체 필수 절차 coverage가 없는 bounded 웹 조회에서 이 값을 결정론적으로 거부하므로 현재 Graph의 정상 outcome으로 도달할 수 없습니다.
 
-## 12. Review Tool
+## 12. `[CURRENT_AI]` Review Tool
 
 ### 입력 — `ReviewSubject`
 
@@ -1475,15 +1528,17 @@ provider의 `GroundedClaimModelOutput`은 `claim_type`, `target_kind`, `target_i
 | `supervisor_draft` | `SupervisorDraft` | O | 결정, 변경 후보, claim 목록 |
 | `subject_digest` | `sha256:<hex>` | O | 아래 전체 검토 대상 digest |
 
+이 `[CURRENT_AI]` `ReviewSubject.trigger`는 현재 세 variant(`CASE_CREATED | RESULT_SUBMITTED | SUPPORT_REFRESH`)만 허용합니다. `[PROPOSED_SHARED]` `CONFLICT_CONFIRMED`를 Review 입력에 추가하려면 trigger·Evidence closure·digest fixture를 함께 확정하고 코드를 확장해야 합니다.
+
 `ReviewSourceResult`:
 
 | 필드 | 타입 | 필수 | 설명 |
 |---|---|---:|---|
-| `meta` | `InvocationMeta` | O | 원 `ComponentSuccess.meta` 전체 |
+| `meta` | `InvocationMeta` | O | `[CURRENT_AI]` Graph가 해당 source 호출에 생성한 metadata. `[TYPE_ONLY]` `ComponentSuccess` 타입을 `[PROPOSED_SHARED]` 호출 envelope로 채택하면 원 `ComponentSuccess.meta`와 동일해야 함 |
 | `output_digest` | `sha256:<hex>` | O | runtime이 원 output 전체로 계산 |
 | `output` | `InfoAnalysisResult` \| `SupportAnalysisResult` \| `ProcedureLookupResult` | O | component에 대응하는 정확한 타입 |
 
-`meta.component`는 `INFO_AGENT | SUPPORT_AGENT | PROCEDURE_TOOL` 중 하나이며 output 타입과 반드시 일치해야 합니다. `ComponentFailure`나 사용하지 않은 결과는 넣지 않으며, `output_digest`는 `subject_digest`와 같은 canonical serializer 규칙으로 계산합니다. Info 결과가 절차 finding을 포함하면 그 `based_on_procedure_lookup_call_id`의 Procedure source result도 반드시 포함되고 digest가 일치해야 합니다.
+`meta.component`는 `INFO_AGENT | SUPPORT_AGENT | PROCEDURE_TOOL` 중 하나이며 output 타입과 반드시 일치해야 합니다. `[CURRENT_AI]` 실패했거나 사용하지 않은 bare 결과는 넣지 않으며, `output_digest`는 `subject_digest`와 같은 canonical serializer 규칙으로 계산합니다. `[PROPOSED_SHARED]` envelope를 연결한 뒤에는 `[TYPE_ONLY]` `ComponentFailure`도 같은 이유로 Review 입력에서 제외하는 안입니다. Info 결과가 절차 finding을 포함하면 그 `based_on_procedure_lookup_call_id`의 Procedure source result도 반드시 포함되고 digest가 일치해야 합니다.
 
 `source_results[*].meta.call_id` 집합은 `supervisor_draft.source_call_ids` 집합과 정확히 같아야 합니다. 각 meta의 run/case와 output의 snapshot ID도 `ReviewSubject`와 같아야 합니다.
 
@@ -1545,7 +1600,7 @@ Review 불변식:
 - `UNSUPPORTED_CLAIM`, `MISSING_EVIDENCE`, `STALE_EVIDENCE`, `PROCEDURE_CONFLICT`, `CONTRACT_VIOLATION`은 항상 `BLOCKING`입니다.
 - trigger, 초안, mutation, source result, Evidence, snapshot 중 하나라도 바뀌면 subject ID/digest를 새로 만들고 다시 Review합니다.
 - Review는 수정본, 새 Evidence, 확정 재호출 명령을 반환하지 않습니다.
-- timeout이나 malformed output은 `REVISE`가 아니라 `ComponentFailure`입니다.
+- `[CURRENT_AI]` timeout이나 malformed output은 `REVISE`가 아니라 기술 예외로 처리되고 Graph가 `SafeFailureOutcome`으로 닫습니다. `[PROPOSED_SHARED]` envelope를 채택한 뒤에는 `[TYPE_ONLY]` `ComponentFailure` 타입으로 표현하는 안입니다.
 
 ### `ReviewProof`
 
@@ -1563,13 +1618,13 @@ Review 모델이 직접 만드는 값이 아니라 runtime이 성공한 Review �
 | `verdict` | literal `PASS` | O | PASS만 proof 생성 |
 | `reviewed_at` | datetime | O | runtime 시각 |
 
-runtime은 Review의 `ComponentSuccess.meta`가 subject의 run/case 및 요청 call과 일치하고, 응답 subject ID/digest가 일치하며, `verdict=PASS` 불변식이 성립할 때만 proof를 발급합니다.
+`[CURRENT_AI]` runtime은 Graph가 Review 호출용으로 생성한 `review_meta`가 subject의 run/case 및 요청 call과 일치하고, 응답 subject ID/digest가 일치하며, `verdict=PASS` 불변식이 성립할 때만 proof를 발급합니다. `[PROPOSED_SHARED]` Review envelope를 연결한 뒤에는 `[TYPE_ONLY]` `ComponentSuccess.meta`가 같은 역할을 맡는 안입니다.
 
-## 13. Agent Graph의 최종 출력
+## 13. Agent Graph 최종 출력 — `[CURRENT_AI]` 3개 / `[PROPOSED_SHARED]` 1개
 
 `AgentRunOutcome`은 `outcome_type`으로 구분하는 tagged union입니다. **현재 standalone union은 정확히 3개**(`REVIEWED_PLAN | CONFLICT | SAFE_FAILURE`)이고, **목표 BE/shared union은 `NO_CHANGE`를 더한 4개**입니다. 아래 `NoChangeOutcome`은 아직 코드에 없으며, `ConflictOutcome.evidence_records`도 목표 production 추가 필드입니다.
 
-### `ReviewedPlanOutcome`
+### `[CURRENT_AI]` `ReviewedPlanOutcome`
 
 | 필드 | 타입 | 필수 |
 |---|---|---:|
@@ -1579,7 +1634,7 @@ runtime은 Review의 `ComponentSuccess.meta`가 subject의 run/case 및 요청 c
 
 두 객체의 run/case/snapshot/subject/digest가 전부 같아야 합니다.
 
-### `ConflictOutcome`
+### `[CURRENT_AI]` `ConflictOutcome` / `[PROPOSED_SHARED]` Evidence 확장
 
 | 필드 | 타입 | 필수 | 설명 |
 |---|---|---:|---|
@@ -1590,11 +1645,11 @@ runtime은 Review의 `ComponentSuccess.meta`가 subject의 run/case 및 요청 c
 | `snapshot_id` | UUID | O | 충돌 기준 |
 | `case_version` | positive integer \| null | O | 동시성 버전 |
 | `conflicts` | `ConflictCandidate[]` (min 1) | O | 구조화 충돌 |
-| `message_code` | literal `CONFIRM_CONFLICT` | O | BE 고정 문구 key |
+| `message_code` | literal `CONFIRM_CONFLICT` | O | `[CURRENT_AI]` 고정 code. `[PROPOSED_SHARED]` BE/FE 문구 mapping은 미승인 |
 
 위 8개가 현재 standalone의 정확한 key입니다. 현재는 Info 결과의 새 Evidence를 outcome에 싣지 않아 outcome 단독 closure가 성립하지 않습니다. 목표 production `ConflictOutcome`은 `evidence_records: EvidenceRecord[]`를 추가하고, 모든 conflict ref를 trigger/snapshot/이 목록에서 해석하며 같은 ID의 내용 충돌을 거부해야 합니다. LLM이 만든 자유 문장은 넣지 않습니다. 충돌 안내를 새로 생성해야 한다면 `NeedsMoreInfoDecisionDraft`로 만들어 Review를 거칩니다.
 
-### `NoChangeOutcome`
+### `[PROPOSED_SHARED]` `NoChangeOutcome` — 미구현
 
 > 목표 BE/shared 전용: 현재 standalone `AgentRunOutcome`과 Graph에는 이 variant가 없습니다.
 
@@ -1612,7 +1667,7 @@ runtime은 Review의 `ComponentSuccess.meta`가 subject의 run/case 및 요청 c
 
 기존 판단과 호환되는 같은 Case version에서 새 사용자 노출 문장을 만들지 않을 때만 Review 없이 사용합니다.
 
-### `SafeFailureOutcome`
+### `[CURRENT_AI]` `SafeFailureOutcome`
 
 | 필드 | 타입 | 필수 | 설명 |
 |---|---|---:|---|
@@ -1623,8 +1678,8 @@ runtime은 Review의 `ComponentSuccess.meta`가 subject의 run/case 및 요청 c
 | `snapshot_id` | UUID | O | 실패 기준 snapshot |
 | `case_version` | positive integer \| null | O | 현재 version |
 | `failure_code` | `REVIEW_RETRY_EXHAUSTED` \| `COMPONENT_UNAVAILABLE` \| `STRUCTURED_OUTPUT_FAILED` | O | Graph 내부 실패 원인 |
-| `message_code` | upper snake case string | O | BE allowlist 문구 key. 자유 문장 금지 |
-| `recovery_action_code` | `RETRY` \| `RESUBMIT_INPUT` \| `CONTACT_SUPPORT` \| `NONE` | O | BE allowlist 복구 행동 |
+| `message_code` | upper snake case string | O | `[CURRENT_AI]` 형식만 검증. `[PROPOSED_SHARED]` BE allowlist·문구 mapping은 미구현 |
+| `recovery_action_code` | `RETRY` \| `RESUBMIT_INPUT` \| `CONTACT_SUPPORT` \| `NONE` | O | `[CURRENT_AI]` 고정 enum. `[PROPOSED_SHARED]` 외부 행동 mapping은 미승인 |
 | `requested_field_paths` | `CaseFieldKey[]` | O | 재입력이 필요할 때의 구조화 목록, 그 외 `[]` |
 | `retryable` | boolean | O | 재시도 여부 |
 | `failed_component` | `SUPERVISOR` \| `INFO_AGENT` \| `SUPPORT_AGENT` \| `PROCEDURE_TOOL` \| `REVIEW_TOOL` \| null | O | 실패 지점 |
@@ -1632,7 +1687,7 @@ runtime은 Review의 `ComponentSuccess.meta`가 subject의 run/case 및 요청 c
 
 검토되지 않은 Blocker, Next Action, mutation, Evidence는 포함하지 않습니다.
 
-## 14. State Guardrail과 BE 저장 DTO
+## 14. `[PROPOSED_SHARED]` State Guardrail과 BE 저장 DTO — 미구현
 
 Agent Graph는 §13의 결과를 반환하면 끝납니다. 이후 Output/State Transition Guardrail은 PlanningCoordinator 단계이며 `AgentGraphState.phase`가 아닙니다.
 
@@ -1767,7 +1822,7 @@ BE는 필요한 원인 event/idempotency key, `EvidenceRecord`, fact changes, pr
 
 version을 채택하지 않으면 fact/status의 before 값, 절차의 before status, 지원 비교의 `before_match`, Case before status를 조건으로 한 원자적 compare-and-set이 필요합니다. `InvalidTransitionPersistResult`는 BE 함수의 방어적 재검증 결과이며, 저장 전 State Transition Guardrail을 대체하지 않습니다.
 
-## 15. 외부 API/FE 변환 경계
+## 15. `[PROPOSED_SHARED]` 외부 API/FE 변환 경계 — 미승인·미구현
 
 Agent 내부 결과와 HTTP `result`는 같은 enum이 아닙니다.
 
@@ -1796,42 +1851,49 @@ Agent 내부 결과와 HTTP `result`는 같은 enum이 아닙니다.
 
 `CaseFact.status`의 `CONFIRMED/UNKNOWN`과 FE의 `CONFIRMED/IN_PROGRESS/UNKNOWN`, fact label 제공 주체도 외부 adapter 계약에서 맞춰야 합니다. 기존 API 예시의 flat Blocker/Next Action 문자열은 code/title/description/reason/questions 구조와 함께 재검토해야 합니다.
 
-## 16. 생산 목표 capability allowlist
+## 16. 생산 capability allowlist — 행별 상태 구분
 
-이 표는 생산 연결 시 허용할 권한입니다. 현재 첫 호출과 Review 재작업 routing은 `AgentGraph`에 고정돼 있고 Supervisor가 하위 구성요소를 직접 호출하지 않습니다. 목표에서도 Supervisor는 호출 계획만 제안하며 실제 Python/네트워크 호출은 Graph router가 검증·집행합니다.
+이 표는 현재 지키는 권한 경계와 생산 연결 제안을 함께 비교하므로 각 행에 상태를 표시합니다. `[CURRENT_AI]` 첫 호출과 Review 재작업 routing은 `AgentGraph`에 고정돼 있고 Supervisor가 하위 구성요소를 직접 호출하지 않습니다. `[TARGET_UNIMPLEMENTED]` 동적 구조에서도 Supervisor는 호출 계획만 제안하고 실제 Python/네트워크 호출은 Graph router가 검증·집행하는 방향입니다.
 
-| 구성요소 | 허용 | 금지 |
-|---|---|---|
-| Supervisor | 정보분석·지원금·절차조회 호출 계획, 결과 충분성 판단, 초안·Review 재작업 계획 | 하위 구성요소 직접 호출, DB/Case write, Review 생략, Evidence 생성 |
-| AgentGraph router | 허용된 dependency 안에서 Agent/Tool/Supervisor/Review 호출, 결과 전달, 반복 상한·safe failure 집행 | 업무 근거·결정 생성, 인증·DB write, Supervisor/Review 우회 |
-| 정보분석 Agent | 제공된 redacted input, snapshot, raw `ProcedureLookupResult` 분석과 canonical finding 생성 | 외부 Tool 호출, 웹문서 지시 실행, DB ID 생성, DB write, 최종 결정 |
-| 지원금 Agent | read-only catalog/Wiki/Chroma/S3 조회 | 신청 상태 변경, Wiki 자동 수정, 자격 확정 |
-| 지원 공고 discovery adapter | 기업마당 fixed endpoint read, strict raw candidate와 `OFFICIAL_API` Evidence 생성 | Support Agent 자동 주입, eligibility 판정, reviewed catalog 자기승격, 신청 상태 변경 |
-| 절차조회 Tool | 공식 registry 우선, miss 시 Kakao→Google fallback, provider attempt 기록, URL·redirect·allowlist 검증, 공식 원문 fetch, raw document/Evidence 정규화 | 검색 SERP HTML scraping, 검색 snippet의 Evidence 승격, 문서 의미 해석, Case 적용·완료·우선순위·Next Action 결정, DB ID 생성·write |
-| Review Tool | ReviewSubject만 읽기 | 검색 Tool, DB resolver, 초안 수정, 재호출 결정 |
-| PlanningCoordinator | Guardrail, runtime enrichment, Graph 호출, BE 저장 함수 호출 | 도메인 판단 문장 생성 |
+| 구성요소 | 상태 | 허용 | 금지 |
+|---|---|---|---|
+| Supervisor | 결과 판단·초안은 `[CURRENT_AI]`; 호출 계획은 `[TARGET_UNIMPLEMENTED]` | 현재는 전달된 결과 충분성 판단과 초안 작성. 목표에서는 정보분석·지원금·절차조회 호출 및 Review 재작업 계획 제안 | 하위 구성요소 직접 호출, DB/Case write, Review 생략, Evidence 생성 |
+| AgentGraph router | 고정 dependency는 `[CURRENT_AI]`; 동적 계획 검증은 `[TARGET_UNIMPLEMENTED]` | 허용된 dependency 안에서 Agent/Tool/Supervisor/Review 호출, 결과 전달, 반복 상한·safe failure 집행 | 업무 근거·결정 생성, 인증·DB write, Supervisor/Review 우회 |
+| 정보분석 Agent | `[CURRENT_AI]` | 제공된 redacted input, snapshot, raw `ProcedureLookupResult` 분석과 canonical finding 생성 | 외부 Tool 호출, 웹문서 지시 실행, DB ID 생성, DB write, 최종 결정 |
+| 지원금 Agent | 주입형 reviewed catalog는 `[CURRENT_AI]`; Wiki/Chroma/S3는 `[TARGET_UNIMPLEMENTED]` | 현재는 주입형 read-only catalog 조회. 목표 adapter가 승인되면 Wiki/Chroma/S3 read-only 조회 | 신청 상태 변경, Wiki 자동 수정, 자격 확정 |
+| 지원 공고 discovery adapter | `[CURRENT_AI]`, Graph 미연결 | 기업마당 fixed endpoint read, strict raw candidate와 `OFFICIAL_API` Evidence 생성 | Support Agent 자동 주입, eligibility 판정, reviewed catalog 자기승격, 신청 상태 변경 |
+| 절차조회 Tool | `[CURRENT_AI]` | 공식 registry 우선, miss 시 Kakao→Google fallback, provider attempt 기록, URL·redirect·allowlist 검증, 공식 원문 fetch, raw document/Evidence 정규화 | 검색 SERP HTML scraping, 검색 snippet의 Evidence 승격, 문서 의미 해석, Case 적용·완료·우선순위·Next Action 결정, DB ID 생성·write |
+| Review Tool | `[CURRENT_AI]` | ReviewSubject만 읽기 | 검색 Tool, DB resolver, 초안 수정, 재호출 결정 |
+| PlanningCoordinator | `[PROPOSED_SHARED]` | Guardrail, runtime enrichment, Graph 호출, BE 저장 함수 호출 | 도메인 판단 문장 생성 |
 
-BE persistence 함수와 SQL/ORM/session/command handle은 어떤 Agent Tool registry에도 등록하지 않습니다.
+`[PROPOSED_SHARED]` BE persistence 함수와 SQL/ORM/session/command handle을 어떤 Agent Tool registry에도 등록하지 않는 경계는 공동 승인 대상입니다. `[CURRENT_AI]`에는 persistence 함수 자체가 없습니다.
 
-## 17. 재시도 규칙
+## 17. 재시도 규칙 — `[CURRENT_AI]`와 `[PROPOSED_SHARED]`를 항목별 명시
 
-- 목표 BE envelope 계약에서는 정보분석·지원금 Local Loop 상한을 설정값으로 강제하고, 소진을 빈 성공이 아닌 `PARTIAL` output 또는 `LOOP_LIMIT_REACHED` 실패로 구분합니다. 현재 standalone은 정보분석/Supervisor의 constructor 상한과 지원금의 고정 상한을 사용하며, deterministic 검증 소진 시 예외를 Graph 경계에서 `STRUCTURED_OUTPUT_FAILED`로 변환합니다.
+### `[CURRENT_AI]` 현재 standalone 규칙
+
+- 정보분석/Supervisor는 constructor 상한, 지원금은 고정 상한을 사용합니다. deterministic 검증 소진 시 예외를 Graph 경계에서 `STRUCTURED_OUTPUT_FAILED`로 변환합니다.
 - Kakao/Google 검색과 공식 원문 fetch retry는 각각 전체 deadline 안의 작은 고정 상한을 갖습니다. registry 자체는 네트워크 검색을 하지 않습니다. 외부 provider의 `401/403`, quota 소진, 전 질의 실패는 다음 provider fallback 또는 retry 대상이며, chain의 모든 실제 외부 attempt가 실패하면 `NO_RESULTS`로 숨기지 않습니다.
 - 일부 질의·fetch만 실패하고 공식문서가 남으면 `PARTIAL`, 모든 검색이 정상이나 검증된 문서가 없으면 `NO_RESULTS`입니다. 이 두 업무 결과를 fixture나 모델 지식으로 채우지 않습니다.
 - Review `REVISE` 후 재작성은 최대 2회이므로 Review 호출은 최초를 포함해 최대 3회입니다.
-- Review 권고는 명령이 아닙니다. 현재 Review runtime은 모든 blocking issue의 `target_component`를 `recommended_rework_targets`에 포함하고, Graph는 그 전체 목록에서 dependency 순서상 가장 앞선 구성요소부터 결정론적으로 재실행합니다. BE 통합 후에도 동일 정책을 유지할지는 계약으로 확정합니다.
+- Review 권고는 명령이 아닙니다. 현재 Review runtime은 모든 blocking issue의 `target_component`를 `recommended_rework_targets`에 포함하고, Graph는 그 전체 목록에서 dependency 순서상 가장 앞선 구성요소부터 결정론적으로 재실행합니다.
 - 초안이나 근거가 바뀌면 이전 Review proof를 재사용하지 않습니다.
 - Tool timeout/upstream 장애를 `NO_RESULTS`, `NOT_RELEVANT`, `UNKNOWN`, `CASE_COMPLETE`로 바꾸지 않습니다.
 - 상한을 넘으면 검토되지 않은 판단을 폐기하고 `SafeFailureOutcome`을 반환합니다.
+
+### `[PROPOSED_SHARED]` 생산 연동 시 결정할 규칙
+
+- BE envelope에서는 정보분석·지원금 Local Loop 상한을 설정값으로 강제하고, 소진을 빈 성공이 아닌 `PARTIAL` output 또는 `LOOP_LIMIT_REACHED` 실패로 구분하는 안을 제안합니다.
+- 현재 Review target 계산과 Graph dependency routing을 그대로 유지할지, 목표 Supervisor 호출 계획으로 옮길지는 공동 확정 전입니다.
 - `REPLAN_FAILED`에서 앞서 반영된 Case 변경을 유지할지 rollback할지는 BE transaction 계약에서 확정합니다. 이전 판단을 새 snapshot의 판단처럼 반환하지 않습니다.
 
-## 18. Standalone Agent 런타임 현황과 검증
+## 18. `[CURRENT_AI]` Standalone Agent 런타임 현황과 검증
 
 ### 현재 구현된 AI 범위
 
 | 범위 | 현재 구현 |
 |---|---|
-| 공통 계약 | `backend/app/agent/schemas.py`의 `agent-io/2.0` strict Pydantic schema, Review digest/proof, standalone field registry |
+| 공통 계약 | `backend/app/agent/schemas.py`의 `agent-io/2.0` strict Pydantic schema, Review digest/proof, standalone field registry. `ComponentRequest/Result`는 타입만 있고 호출에는 미사용 |
 | 정보분석 Agent | provider/로컬 의미 schema 분리, redacted 입력 span 검증, raw 절차 문서의 untrusted-data projection, canonical `procedure_findings`, 충돌 분리, bounded local retry |
 | 지원금 Agent | provider 형식과 로컬 의미 schema 분리, 주입된 reviewed catalog 기반 조회/판정, 최소 prompt projection, Evidence 연결 |
 | 지원 공고 discovery | 기존 `BIZINFO_API_KEY`로 fixed 공식 API를 읽어 bounded raw candidate와 `OFFICIAL_API` Evidence 생성. reviewed catalog와 의도적으로 분리 |
@@ -1882,7 +1944,7 @@ CLI는 임의의 실제 Case 입력을 받지 않고 repository의 비식별 합
 
 standalone 정상 실행은 아래 생산 연동 기능의 완료를 뜻하지 않습니다.
 
-- `ComponentRequest`/`ComponentResult` envelope와 HTTP adapter가 아직 없으며 현재 구성요소 호출은 bare payload/result입니다.
+- `ComponentRequest`와 `ComponentSuccess | ComponentFailure`를 사용하는 개념적 envelope adapter가 아직 없으며 현재 구성요소 호출은 bare payload/result입니다. 코드에는 `ComponentResult` alias가 없습니다.
 - 현재 `CaseSnapshot`은 목표 계약의 `support_applications`, `support_matches`, `latest_decision`, `history_window`를 아직 포함하지 않습니다.
 - 현재 mutation은 목표 저장 계약의 절차 `execution_input_event_id`, `source_observation_id`, `source_observation_call_id`와 지원 `before_match`를 아직 포함하지 않습니다.
 - `PlanningCoordinator`, 인증/소유권, idempotency, version/CAS, Output Guardrail, State Transition Guardrail, transaction, DB 저장 함수는 미구현입니다.
@@ -1900,11 +1962,11 @@ standalone 정상 실행은 아래 생산 연동 기능의 완료를 뜻하지 �
 
 따라서 현재 상태는 “BE 없이 비식별 합성 Case와 실제 인터넷 절차 근거로 Agent 의사결정·Review 루프를 opt-in 실행할 수 있음”이며, “실제 사용자 Case를 안전하게 읽고 저장할 수 있음”은 아닙니다. 생산 연동에서는 `ReviewedPlanOutcome + ReviewProof`만으로 저장하지 말고 §14의 Coordinator/Guardrail/persistence 계약을 먼저 구현해야 합니다.
 
-## 19. BE 통합 전에 확정할 항목
+## 19. `[PROPOSED_SHARED]` BE 통합 전에 공동 확정할 항목
 
 ### P0 — schema 구현을 막는 항목
 
-- [ ] 논리 schema에서 채택한 `CASES.version`을 실제 migration과 원자적 compare-and-set으로 구현하고 충돌 응답을 확정
+- [ ] 논리 DB **제안안**의 `CASES.version` 채택 여부를 공동 승인한 뒤 migration과 원자적 compare-and-set, 충돌 응답을 확정
 - [ ] DB 미확인을 enum `UNKNOWN`으로 둘지 별도 fact status로 둘지. Agent snapshot 표현은 `status=UNKNOWN, value=null`
 - [ ] API에 있지만 CASE에 없는 `entity_type`, `building_use_type`, `previous_support_history` 저장 위치
 - [ ] Hero Scenario에 있지만 현재 API/DB에 없는 `lease_end_date`, `transfer_status`, `tax_status`의 v1 포함 여부. 합의 전 판단에 사용 금지
@@ -1935,7 +1997,7 @@ standalone 정상 실행은 아래 생산 연동 기능의 완료를 뜻하지 �
 - [ ] 외부로 공개할 Evidence URL·설명 범위
 - [ ] offset 없는 기존 datetime 예시를 timezone 포함 계약으로 갱신
 
-### v1에서 보류
+### `[TARGET_UNIMPLEMENTED]` v1에서 보류
 
 - `equipment_item_candidates`와 집기 처리 저장 모델
 - 세무·철거 보조 Agent
@@ -1943,7 +2005,9 @@ standalone 정상 실행은 아래 생산 연동 기능의 완료를 뜻하지 �
 - Agent의 Wiki 자동 수정
 - 지원 금액 필드
 
-## 20. 최소 contract 검증 기준
+## 20. `[PROPOSED_SHARED]` 생산 통합 contract 승인 기준
+
+아래 체크박스는 **AI+BE 생산 통합 기준**이므로 현재 모두 미완료로 둡니다. standalone에서 이미 자동 검증된 부분집합은 §18과 `agent-standalone-runtime-requirements.md` §10의 `[CURRENT_AI]` 완료 목록에서만 `[x]`로 관리합니다.
 
 - [ ] 모든 하위 결과의 run/case/snapshot이 현재 실행과 같다.
 - [ ] schema version은 `agent-io/2.0`이고 v1 Procedure lookup payload를 거부한다.
@@ -1982,7 +2046,7 @@ standalone 정상 실행은 아래 생산 연동 기능의 완료를 뜻하지 �
 - [ ] 인증 토큰, 주소, 계약서 원문, 민감 입력이 trace에 남지 않는다.
 - [ ] 기술 실패를 도메인상 해당 없음이나 Case 완료로 바꾸지 않는다.
 
-## 21. BE에 우선 요청할 shared DTO
+## 21. `[PROPOSED_SHARED]` BE에 우선 제안할 shared DTO
 
 P0 합의 뒤 BE shared 경계에 우선 필요한 schema는 다음과 같습니다.
 
@@ -1994,4 +2058,4 @@ P0 합의 뒤 BE shared 경계에 우선 필요한 schema는 다음과 같습니
 6. `OutputGuardrailProof`, `StateGuardrailProof`, `GuardrailRejection`, `ConcurrencyConflictDetail`, `PersistReviewedPlanCommand`, `PersistResult`
 7. 외부 API 결과와 `viewState`용 discriminated response DTO
 
-정보분석·지원금·절차조회·Review의 provider/local 출력 schema와 공식 registry 우선·선택 Kakao→Google 검색/원문 fetch 구현은 AI 내부 영역입니다. BE는 ProcedureMaster나 검색 내용을 작성하거나 이를 별도 HTTP DTO로 만들 필요가 없습니다. BE/인프라는 registry 변경 승인과 안전한 network 경계를 제공하고, fallback을 켤 때만 Kakao/Google secret·app·quota/비용을 운영합니다. BE는 인증된 snapshot, canonical 절차 ID registry, support catalog, Evidence 저장·복원과 Coordinator→Guardrail/persistence shared 경계를 versioned 계약으로 확정합니다.
+`[CURRENT_AI]` 정보분석·지원금·절차조회·Review의 provider/local 출력 schema와 공식 registry 우선·선택 Kakao→Google 검색/원문 fetch 구현은 AI 내부 영역입니다. `[PROPOSED_SHARED]` 공동 승인 시 BE 책임 후보는 인증된 snapshot, canonical 절차 ID registry, support catalog, Evidence 저장·복원과 Coordinator→Guardrail/persistence 경계입니다. BE가 ProcedureMaster나 검색 내용을 작성하거나 이를 별도 HTTP DTO로 만드는 안은 제안 범위에 포함하지 않습니다. BE/인프라의 registry 변경 승인·안전한 network 경계와, fallback 운영 시 Kakao/Google secret·app·quota/비용 책임도 공동 합의 후 versioned 계약으로 고정해야 합니다.

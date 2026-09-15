@@ -1,24 +1,38 @@
-# 스키마 (테이블 정의)
+# `[PROPOSED_DB][NO_MIGRATION]` 논리 DB 스키마 제안
 
-> 상태: **논리 DB 설계 제안**입니다. 아래 `CASES` rename, `version`, `CASE_FIELD_HISTORY`, composite UNIQUE를 포함한 실제 migration은 아직 BE가 구현·검증하지 않았습니다. 표의 enum도 canonical Agent/API enum 합의 전 초안이므로 그대로 운영 DDL로 복사하지 않습니다. 구현 책임과 승인 기준은 [`../be-agent-integration-requirements.md`](../be-agent-integration-requirements.md)를 따릅니다.
+> 상태: **`[PROPOSED_DB][NOT_APPROVED][NO_MIGRATION]`**입니다. 아래 표는 실제 DB를 반영한 data dictionary가 아닙니다. `CASES` rename, `version`, `CASE_FIELD_HISTORY`, composite UNIQUE와 모든 enum은 BE·AI 공동 승인 및 migration 전이며 그대로 운영 DDL로 복사하지 않습니다. 승인자·승인일·migration/ADR가 기록된 `[AGREED_DB]` 항목은 현재 0개입니다. 구현 책임과 승인 기준은 [`../be-agent-integration-requirements.md`](../be-agent-integration-requirements.md)를 따릅니다.
 
-전체 구조는 5개 도메인으로 나뉩니다.
+상태 태그의 의미는 다음과 같습니다.
+
+- `[PROPOSED_DB]`: 논리 모델 후보입니다. 현재 repository의 물리 table/column을 설명하지 않습니다.
+- `[NOT_APPROVED]`: 승인자·승인일·ADR/공동 계약 PR이 없습니다.
+- `[NO_MIGRATION]`: 대응하는 실제 migration이 없습니다.
+- `[AGREED_DB]`: 공동 승인과 migration 근거가 생긴 항목에만 붙일 라벨이며 현재 0개입니다.
+- `[CURRENT_AI]`: Agent 코드에서 확인된 사실이며, 해당 이름의 DB adapter/table이 구현됐다는 뜻은 아닙니다.
+- `[REGISTRY_BLOCKED]`: canonical registry의 ID·version·적용 조건이 공동 승인되기 전에는 구현을 시작할 수 없습니다.
+- `[LEGACY_REDESIGN_REQUIRED][DO_NOT_IMPLEMENT]`: 과거 설계의 맥락만 보존한 것이며 그대로 구현하지 않습니다.
+- `[KNOWN_CONFLICT][DO_NOT_IMPLEMENT]`: 서로 다른 의미가 한 모델에 섞인 알려진 충돌이므로 해결 전에는 구현하지 않습니다.
+- `[PRIVACY_TBD]`: 원문 저장·암호화·접근·보존·삭제 정책이 결정되지 않았습니다.
+- `[TARGET_UNIMPLEMENTED]`: 장래 방향일 뿐 현재 코드·저장소·연동은 없습니다.
+- `[TBD]`: 선택이나 정책이 아직 결정되지 않았습니다.
+
+아래 그림은 확정된 물리 DB 구조가 아니라, 검토할 다섯 영역과 각 영역의 상태를 보여 줍니다.
 
 ```
-[1. 사용자/케이스]         서비스의 기본 단위 (누가, 어떤 폐업 건을)
+[1. 사용자/케이스] [PROPOSED_DB]
         │
-        ├──[2. 판단 로그 & 블로커]      에이전트가 뭘 판단했고, 지금 뭐가 막혔는지
+        ├──[2. 판단 로그 & 블로커] [PROPOSED_DB][PRIVACY_TBD]
         │
-        ├──[3. 절차 마스터 데이터]      폐업 절차 전체 목록과 순서/조건 규칙 (공통, Case 무관)
+        ├──[3. 절차 마스터 초안] [LEGACY_REDESIGN_REQUIRED][DO_NOT_IMPLEMENT]
         │        │
-        │        └──[4. Case별 절차 진행상황]   위 마스터를 Case마다 실제로 어디까지 했는지
+        │        └──[4. Case별 절차 진행] [PROPOSED_DB][REGISTRY_BLOCKED]
         │
-        └──[5. 지원사업]               희망리턴패키지 등 지원사업 신청 현황
+        └──[5. 지원사업 초안] [KNOWN_CONFLICT][DO_NOT_IMPLEMENT]
 ```
 
 ---
 
-## 1. 사용자/케이스
+## 1. `[PROPOSED_DB][NO_MIGRATION]` 사용자/케이스
 
 서비스에 로그인한 사용자와, 그 사용자가 진행 중인 폐업 건(Case) 하나를 표현합니다.
 Case 하나가 이 서비스의 핵심 작업 단위이고, 나머지 모든 테이블은 결국 Case를 중심으로 붙습니다.
@@ -27,7 +41,7 @@ Case 하나가 이 서비스의 핵심 작업 단위이고, 나머지 모든 테
 MEMBERS ──1:N──► CASES
 ```
 
-### MEMBERS
+### `[PROPOSED_DB]` MEMBERS
 
 | 컬럼 | 타입 | 키 | 설명 |
 |---|---|---|---|
@@ -38,11 +52,13 @@ MEMBERS ──1:N──► CASES
 | created_at | DATETIME | | |
 | updated_at | DATETIME | | |
 
-### CASES
+`refresh_token`의 저장 위치·암호화·회전 방식은 `[TBD]`입니다. 위 `VARCHAR` 행을 평문 저장 승인으로 해석하지 않습니다.
+
+### `[PROPOSED_DB][NO_MIGRATION]` CASES
 
 사용자 한 명이 진행하는 폐업 건 하나를 의미함.
 
-물리 테이블명은 MySQL 예약어인 `CASE`와 충돌하지 않도록 **`CASES`**를 사용합니다. 문서에서 대문자 `CASES`는 테이블을, 일반 표기인 Case는 서비스의 업무 단위를 뜻합니다.
+논리 테이블명 후보는 MySQL keyword인 `CASE`와 충돌하지 않도록 **`CASES`**로 제안합니다. 실제 물리 이름은 공동 승인된 data dictionary와 migration이 생기기 전까지 미확정입니다. 이 문서에서 대문자 `CASES`는 제안 테이블을, 일반 표기인 Case는 서비스의 업무 단위를 뜻합니다.
 
 | 컬럼 | 타입 | 키 | 설명 |
 |---|---|---|---|
@@ -63,11 +79,11 @@ MEMBERS ──1:N──► CASES
 | created_at | DATETIME | | |
 | updated_at | DATETIME | | |
 
-`CASES`라는 이름과 `version`은 이 문서에서 채택한 논리 제안입니다. BE 완료 판정은 실제 migration 뒤 (1) 기존 Case 데이터 보존, (2) 모든 FK/repository가 `CASES(id)` 사용, (3) 신규 `CASE` table 부재, (4) apply/rollback 테스트 통과로 합니다.
+`CASES`라는 이름과 `version`은 **승인되지 않은 논리 후보**입니다. 공동 승인으로 이 안을 선택한 경우에만, BE 완료 판정은 실제 migration 뒤 (1) 기존 Case 데이터 보존, (2) 모든 FK/repository가 `CASES(id)` 사용, (3) 신규 `CASE` table 부재, (4) apply/rollback 테스트 통과로 합니다.
 
-### CASE_FIELD_HISTORY
+### `[PROPOSED_DB][NO_MIGRATION]` CASE_FIELD_HISTORY
 
-`CASES`의 업무 상태 컬럼이 언제, 무엇에서 무엇으로, 어떤 근거로 바뀌었는지를 남기는 append-only 감사 이력입니다. 한 요청에서 여러 필드가 바뀌면 필드마다 한 row를 추가합니다. `CASES` 갱신, `version` 증가, 관련 `CASE_FIELD_HISTORY` 삽입은 반드시 하나의 DB 트랜잭션으로 처리합니다.
+`CASES`의 업무 상태 컬럼이 언제, 무엇에서 무엇으로, 어떤 근거로 바뀌었는지를 남기기 위한 append-only 감사 이력 **후보**입니다. 이 안이 승인되면 한 요청에서 여러 필드가 바뀔 때 필드마다 한 row를 추가하고, `CASES` 갱신·`version` 증가·관련 `CASE_FIELD_HISTORY` 삽입을 하나의 DB transaction으로 처리합니다.
 
 | 컬럼 | 타입 | 키 | 설명 |
 |---|---|---|---|
@@ -83,22 +99,20 @@ MEMBERS ──1:N──► CASES
 | changed_by_member_id | BIGINT | FK | nullable, 사용자·관리자 변경일 때 actor |
 | created_at | DATETIME | | 변경 시각; row 수정 시각이 아니라 불변 생성 시각 |
 
-다음 제약을 DB와 서비스 계층이 함께 보장해야 합니다.
+이 안이 공동 승인될 경우 다음 제약을 DB와 서비스 계층이 함께 보장해야 합니다.
 
 - `(case_id, case_version, field_name)`에 `UNIQUE`를 두어 같은 버전의 같은 필드를 중복 기록하지 않습니다.
 - 서비스 계정에는 `CASE_FIELD_HISTORY`의 `UPDATE`/`DELETE` 권한을 주지 않아 이력을 불변으로 유지합니다.
 - `previous_value`와 `new_value`가 같은 변경은 기록하지 않고, 민감한 사용자 원문은 이 테이블에 복제하지 않습니다. 원문 근거는 `case_log_id`로 역추적합니다.
 - `REVIEWED_AGENT`는 Review와 Output Guardrail을 통과해 실제 저장된 변경에만 사용합니다. Agent 후보만으로 이력을 만들지 않습니다.
 
-`CASES.version` 갱신은 `UPDATE ... WHERE id = :case_id AND version = :expected_version`와 같은 원자적 CAS로 수행합니다. 영향 row가 0개이면 stale write이므로 업무 field, `CASE_FIELD_HISTORY`, decision/history를 하나도 commit하지 않습니다. 성공할 때만 version을 1 증가시키고 실제로 바뀐 field마다 before/after·source·reason row를 같은 transaction에 append합니다. enum의 최종 값, JSON scalar 직렬화와 실제 DDL은 BE·AI 공동 확정 후 migration으로 고정합니다.
+승인 시 `CASES.version` 갱신은 `UPDATE ... WHERE id = :case_id AND version = :expected_version`와 같은 원자적 CAS로 수행하는 안입니다. 영향 row가 0개이면 stale write으로 처리해 업무 field, `CASE_FIELD_HISTORY`, decision/history를 commit하지 않습니다. 성공할 때만 version을 1 증가시키고 실제로 바뀐 field마다 before/after·source·reason row를 같은 transaction에 append합니다. enum의 최종 값, JSON scalar 직렬화와 실제 DDL은 BE·AI 공동 승인 후 migration으로 고정합니다.
 
 ---
 
-## 2. 판단 로그 & 블로커
+## 2. `[PROPOSED_DB][PRIVACY_TBD][NO_MIGRATION]` 판단 로그 & 블로커
 
-에이전트가 사용자 발화나 배치 작업을 처리하면서 내린 판단을 기록하고,
-그 판단으로 인해 "지금 막혀서 못 넘어가는 것(Blocker)"이 생기면 별도로 추적합니다.
-CASE_LOG와 BLOCKER는 서로를 생성/해소 관계로 참조합니다.
+에이전트가 사용자 발화나 배치 작업을 처리하면서 내린 판단과 Blocker를 기록하기 위한 논리 후보입니다. 아래 `CASE_LOG`와 `BLOCKER` 관계도 역시 물리 구현이 아닙니다.
 
 ```
 CASE_LOG ──created_from──► BLOCKER
@@ -110,19 +124,21 @@ CASE_LOG.priority_blocker_id ──► BLOCKER
    (이 판단이 어떤 blocker를 해결하려는 시도인지)
 ```
 
-### CASE_LOG
+### `[PROPOSED_DB][PRIVACY_TBD][NO_MIGRATION]` CASE_LOG
 
 | 컬럼 | 타입 | 키 | 설명 |
 |---|---|---|---|
 | id | BIGINT | PK | |
 | case_id | BIGINT | FK | |
-| raw_input | TEXT | | 입력 원문 (사용자 발화 또는 배치가 에이전트에 전달한 지시문) |
+| raw_input | TEXT 후보 | | `[PRIVACY_TBD]` 사용자 발화 원문 저장 자체와 암호화·접근·보존·삭제 정책이 공동 승인된 경우에만 사용 |
 | source | ENUM | | `USER_INPUT` / `SYSTEM_BATCH` |
 | next_action | VARCHAR | | nullable, 판단이 발생한 경우에만 |
 | priority_blocker_id | BIGINT | FK | nullable, 이 next_action이 해결하려는 blocker |
 | created_at | DATETIME | | |
 
-### BLOCKER
+`raw_input`은 현재 승인된 물리 컬럼이 아닙니다. 개인정보 정책이 닫히기 전에는 위 `TEXT 후보`를 평문 저장 허가로 해석하거나 migration에 포함하지 않습니다. 원문을 저장하지 않고 제한된 `input_event_id`/redacted span만 보존할지, 별도 암호화 저장소에 둘지도 P0 공동 결정 대상입니다.
+
+### `[PROPOSED_DB][NO_MIGRATION]` BLOCKER
 
 | 컬럼 | 타입 | 키 | 설명 |
 |---|---|---|---|
@@ -138,17 +154,18 @@ CASE_LOG.priority_blocker_id ──► BLOCKER
 
 ---
 
-## 3. 절차 마스터 데이터(현재 임시 단계입니다. 추후 더 고도화 필요성이 강함.)
+## 3. `[LEGACY_REDESIGN_REQUIRED][DO_NOT_IMPLEMENT]` 절차 마스터 초안
 
-특정 Case와 무관하게, "폐업 절차에는 어떤 단계들이 있고 서로 어떤 순서/조건으로 연결되는지"를
-정의하는 공통 데이터입니다. 모든 Case가 이 마스터 데이터를 공유해서 참조합니다.
+이 절의 dependency/eligibility rule table은 제거된 과거 Rule-engine 설계와 맞닿아 있으며 현재 v2 Agent 계약으로 승인되지 않았습니다. 아래 표는 실제 공통 master나 물리 table을 설명하지 않습니다. 생산에 필요한 것은 우선 stable step ID/code/name/alias를 가진 versioned canonical registry입니다. dependency·eligibility를 DB rule로 둘지는 P0 공동 결정 뒤 다시 설계해야 합니다.
+
+과거에는 특정 Case와 무관한 폐업 단계·순서·조건을 아래 공통 table로 표현하려 했습니다. 현재 Case가 이 table을 공유하거나 참조하는 구현은 없으며, 새 canonical registry 설계로 대체해야 합니다.
 
 ```
 CLOSURE_PROCEDURE_STEP ◄──┬── CLOSURE_PROCEDURE_STEP_DEPENDENCY  (단계 간 순서 규칙)
                            └── CLOSURE_PROCEDURE_STEP_ELIGIBILITY (단계 적용 조건 규칙)
 ```
 
-### CLOSURE_PROCEDURE_STEP
+### `[LEGACY_REDESIGN_REQUIRED][DO_NOT_IMPLEMENT]` CLOSURE_PROCEDURE_STEP
 
 | 컬럼 | 타입 | 키 | 설명 |
 |---|---|---|---|
@@ -160,7 +177,7 @@ CLOSURE_PROCEDURE_STEP ◄──┬── CLOSURE_PROCEDURE_STEP_DEPENDENCY  (�
 | created_at | DATETIME | | |
 | updated_at | DATETIME | | |
 
-### CLOSURE_PROCEDURE_STEP_DEPENDENCY
+### `[LEGACY_REDESIGN_REQUIRED][DO_NOT_IMPLEMENT]` CLOSURE_PROCEDURE_STEP_DEPENDENCY
 
 어떤 단계가 어떤 단계보다 먼저 끝나야 하는지 (선후관계).
 
@@ -173,7 +190,7 @@ CLOSURE_PROCEDURE_STEP ◄──┬── CLOSURE_PROCEDURE_STEP_DEPENDENCY  (�
 | description | VARCHAR | | |
 | created_at | DATETIME | | |
 
-### CLOSURE_PROCEDURE_STEP_ELIGIBILITY
+### `[LEGACY_REDESIGN_REQUIRED][DO_NOT_IMPLEMENT]` CLOSURE_PROCEDURE_STEP_ELIGIBILITY
 
 어떤 조건의 Case에서 이 단계가 적용되는지 (한 단계에 조건이 여러 개면 전부 AND로 해석).
 
@@ -187,19 +204,18 @@ CLOSURE_PROCEDURE_STEP ◄──┬── CLOSURE_PROCEDURE_STEP_DEPENDENCY  (�
 
 ---
 
-## 4. Case별 절차 진행상황
+## 4. `[PROPOSED_DB][REGISTRY_BLOCKED][NO_MIGRATION]` Case별 절차 진행상황
 
-위 마스터 데이터(3번)를 실제 Case 하나에 적용했을 때, "지금 어디까지 진행됐는지"와
-"그 상태가 어떻게 변해왔는지"를 기록합니다. PROGRESS는 현재 스냅샷, HISTORY는 변경 이력입니다.
+이 절은 향후 승인될 versioned canonical procedure registry의 단계를 Case에 적용했을 때, "지금 어디까지 진행됐는지"와 "그 상태가 어떻게 변해왔는지"를 기록하기 위한 논리 후보입니다. §3의 legacy table을 registry로 사용해서는 안 됩니다. canonical ID·version·적용 조건·초기화 책임이 공동 승인되기 전에는 `[REGISTRY_BLOCKED]`이며 migration 대상으로 삼지 않습니다.
 
 ```
-CASES ──1:N──► CASE_CLOSURE_PROCEDURE_STEP_PROGRESS   (현재 상태, 단계당 1 row)
-CASES ──1:N──► CASE_CLOSURE_PROCEDURE_STEP_HISTORY    (상태 변경마다 새 row 누적)
+CASES ──1:N──► CASE_CLOSURE_PROCEDURE_STEP_PROGRESS   (제안: 현재 상태, 단계당 최대 1 row)
+CASES ──1:N──► CASE_CLOSURE_PROCEDURE_STEP_HISTORY    (제안: 상태 변경마다 새 row 누적)
                         │
                         └── case_log_id로 "이 변화가 어떤 판단 때문에 일어났는지" 역추적 가능
 ```
 
-### CASE_CLOSURE_PROCEDURE_STEP_PROGRESS
+### `[PROPOSED_DB][REGISTRY_BLOCKED][NO_MIGRATION]` CASE_CLOSURE_PROCEDURE_STEP_PROGRESS
 
 | 컬럼 | 타입 | 키 | 설명 |
 |---|---|---|---|
@@ -210,11 +226,11 @@ CASES ──1:N──► CASE_CLOSURE_PROCEDURE_STEP_HISTORY    (상태 변경�
 | created_at | DATETIME | | |
 | updated_at | DATETIME | | |
 
-`UNIQUE (case_id, closure_procedure_step_id)`가 Case별·단계별 현재 row를 **최대 하나**로 강제합니다. UNIQUE만으로 row의 존재까지 강제할 수는 없습니다. **적용 단계마다 정확히 하나**라는 서비스 불변식은 BE가 versioned canonical registry/eligibility로 대상 집합을 먼저 고정하고, Case 생성 또는 registry 적용 transaction에서 대상마다 한 row를 insert한 뒤 대상 수와 저장 row 수를 대조해야 완성됩니다. 일부 insert가 실패하면 Case/progress 초기화 전체를 rollback합니다. 절차조회 Tool의 인터넷 결과는 canonical ID나 적용 단계 집합을 만들지 않습니다.
+공동 승인 후 제안하는 `UNIQUE (case_id, closure_procedure_step_id)`는 Case별·단계별 현재 row를 **최대 하나**로 제한합니다. UNIQUE만으로 row의 존재까지 강제할 수는 없습니다. **적용 단계마다 정확히 하나**라는 서비스 불변식은 BE가 승인된 versioned canonical registry/eligibility로 대상 집합을 먼저 고정하고, Case 생성 또는 registry 적용 transaction에서 대상마다 한 row를 insert한 뒤 대상 수와 저장 row 수를 대조해야 완성됩니다. 일부 insert가 실패하면 Case/progress 초기화 전체를 rollback하는 안도 transaction ADR 승인이 필요합니다. 절차조회 Tool의 인터넷 결과는 canonical ID나 적용 단계 집합을 만들지 않습니다.
 
-이후 상태 변경은 새 PROGRESS row를 추가하지 않고 기존 row를 갱신하며, 같은 transaction에서 HISTORY row를 append합니다. 동시 갱신은 `CASES.version` 원자적 compare-and-set과 필요한 progress row lock으로 직렬화합니다. 승인 테스트는 동시 생성·retry·중복 insert·부분 실패를 포함하고, 적용 대상마다 정확히 1 row이며 비적용 단계 row가 없음을 확인해야 합니다.
+이 안이 승인되면 이후 상태 변경은 새 PROGRESS row를 추가하지 않고 기존 row를 갱신하며, 같은 transaction에서 HISTORY row를 append합니다. 동시 갱신은 승인된 CAS/lock 방식으로 직렬화합니다. 승인 테스트는 동시 생성·retry·중복 insert·부분 실패를 포함하고, 적용 대상마다 정확히 1 row이며 비적용 단계 row가 없음을 확인해야 합니다.
 
-### CASE_CLOSURE_PROCEDURE_STEP_HISTORY
+### `[PROPOSED_DB][REGISTRY_BLOCKED][NO_MIGRATION]` CASE_CLOSURE_PROCEDURE_STEP_HISTORY
 
 | 컬럼 | 타입 | 키 | 설명 |
 |---|---|---|---|
@@ -228,19 +244,17 @@ CASES ──1:N──► CASE_CLOSURE_PROCEDURE_STEP_HISTORY    (상태 변경�
 
 ---
 
-## 5. 지원사업
+## 5. `[PROPOSED_DB][REGISTRY_BLOCKED][KNOWN_CONFLICT][DO_NOT_IMPLEMENT][NO_MIGRATION]` 지원사업
 
-희망리턴패키지 등 지원사업의 원본 메타데이터 정보와, Case별 신청 현황을 관리합니다.
-자격조건 등 세부 내용은 이 테이블에 구조화 컬럼으로 담지 않고, `uuid`로 매핑된
-LLM Wiki(Obsidian) 노트에서 관리합니다 — 판정은 LLM+Wiki가 담당하는 구조입니다.
+희망리턴패키지 등 지원사업 원본 메타데이터와 Case별 신청 현황을 관리하기 위한 과거 제안입니다. `[CURRENT_AI]` `BizInfoSupportDiscoveryTool`은 기업마당의 **미검수 discovery candidate**를 읽는 독립 adapter로 구현돼 있지만, canonical support registry·Wiki/S3 catalog·Graph runtime·DB persistence adapter는 아닙니다. Obsidian/Wiki/S3 연동은 `[TARGET_UNIMPLEMENTED]`입니다. 또한 아래 `application_status`는 지원조건 비교(`ELIGIBLE/NOT_ELIGIBLE`)와 실제 신청 생명주기를 한 enum에 섞은 알려진 P0 충돌입니다. support identity registry와 match/application 분리 모델이 승인되기 전에는 이 절 전체를 그대로 구현하지 않습니다.
 
 ```
 SUPPORT_PROGRAM ──1:N──► SUPPORT_PROGRAM_APPLICATION ◄──N:1── CASES
        │
-       └── uuid로 Wiki 노트와 매핑 (자격조건/금액 등 서술형 정보는 Wiki에 있음)
+       └── 과거 제안: uuid로 Wiki 노트와 매핑 ([TARGET_UNIMPLEMENTED])
 ```
 
-### SUPPORT_PROGRAM
+### `[KNOWN_CONFLICT][DO_NOT_IMPLEMENT]` SUPPORT_PROGRAM
 
 | 컬럼 | 타입 | 키 | 설명 |
 |---|---|---|---|
@@ -253,7 +267,7 @@ SUPPORT_PROGRAM ──1:N──► SUPPORT_PROGRAM_APPLICATION ◄──N:1─�
 | created_at | DATETIME | | |
 | updated_at | DATETIME | | |
 
-### SUPPORT_PROGRAM_APPLICATION
+### `[KNOWN_CONFLICT][DO_NOT_IMPLEMENT]` SUPPORT_PROGRAM_APPLICATION
 
 | 컬럼 | 타입 | 키 | 설명 |
 |---|---|---|---|
