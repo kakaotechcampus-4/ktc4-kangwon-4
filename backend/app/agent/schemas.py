@@ -1093,6 +1093,11 @@ class ProcedureSourcePolicy(StrEnum):
     OFFICIAL_ONLY = "OFFICIAL_ONLY"
 
 
+class ProcedureSearchProvider(StrEnum):
+    GOOGLE_AGENT_SEARCH = "GOOGLE_AGENT_SEARCH"
+    KAKAO_DAUM_WEB = "KAKAO_DAUM_WEB"
+
+
 class ProcedureLookupInput(AgentSchema):
     lookup_goal: Literal[ProcedureLookupGoal.BUSINESS_CLOSURE]
     search_queries: Annotated[list[NonEmptyStr], Field(min_length=1, max_length=4)]
@@ -1132,6 +1137,7 @@ class ProcedureSourceDocument(AgentSchema):
     content_hash: Digest
     evidence_ref: NonEmptyStr
     search_query: NonEmptyStr
+    discovery_provider: ProcedureSearchProvider
 
     @model_validator(mode="after")
     def validate_source_identity(self) -> ProcedureSourceDocument:
@@ -1171,8 +1177,32 @@ class ProcedureSourceDocument(AgentSchema):
         return self
 
 
+class ProcedureProviderSearchSummary(AgentSchema):
+    provider: ProcedureSearchProvider
+    attempted_query_count: NonNegativeStrictInt
+    successful_query_count: NonNegativeStrictInt
+    failed_query_count: NonNegativeStrictInt
+    provider_result_count: NonNegativeStrictInt
+
+    @model_validator(mode="after")
+    def validate_counts(self) -> ProcedureProviderSearchSummary:
+        if self.successful_query_count + self.failed_query_count != (
+            self.attempted_query_count
+        ):
+            raise ValueError("provider query outcomes must cover provider attempts")
+        if self.successful_query_count == 0 and self.provider_result_count != 0:
+            raise ValueError("provider results require a successful provider response")
+        return self
+
+
 class ProcedureSearchSummary(AgentSchema):
-    provider: Literal["KAKAO_DAUM_WEB"]
+    provider_order: Annotated[
+        list[ProcedureSearchProvider], Field(min_length=1, max_length=2)
+    ]
+    provider_summaries: Annotated[
+        list[ProcedureProviderSearchSummary], Field(min_length=1, max_length=2)
+    ]
+    fallback_query_count: NonNegativeStrictInt
     requested_query_count: PositiveStrictInt
     successful_query_count: NonNegativeStrictInt
     failed_query_count: NonNegativeStrictInt
@@ -1185,6 +1215,23 @@ class ProcedureSearchSummary(AgentSchema):
 
     @model_validator(mode="after")
     def validate_counts(self) -> ProcedureSearchSummary:
+        if len(set(self.provider_order)) != len(self.provider_order):
+            raise ValueError("provider_order must be unique")
+        allowed_orders = {
+            (ProcedureSearchProvider.GOOGLE_AGENT_SEARCH,),
+            (ProcedureSearchProvider.KAKAO_DAUM_WEB,),
+            (
+                ProcedureSearchProvider.GOOGLE_AGENT_SEARCH,
+                ProcedureSearchProvider.KAKAO_DAUM_WEB,
+            ),
+        }
+        if tuple(self.provider_order) not in allowed_orders:
+            raise ValueError("provider_order must preserve Google-first policy")
+        summary_providers = [item.provider for item in self.provider_summaries]
+        if summary_providers != self.provider_order:
+            raise ValueError(
+                "provider_summaries must match provider_order exactly and in order"
+            )
         if (
             self.successful_query_count + self.failed_query_count
             != self.requested_query_count
@@ -1192,10 +1239,44 @@ class ProcedureSearchSummary(AgentSchema):
             raise ValueError("query outcome counts must match requested_query_count")
         if self.fetched_document_count > self.official_candidate_count:
             raise ValueError("fetched documents cannot exceed official candidates")
-        if self.successful_query_count == 0:
+        if not any(item.successful_query_count for item in self.provider_summaries):
             raise ValueError(
-                "a procedure result requires at least one successful query"
+                "a procedure result requires at least one successful provider response"
             )
+        if any(
+            item.attempted_query_count > self.requested_query_count
+            for item in self.provider_summaries
+        ):
+            raise ValueError("provider attempts cannot exceed requested queries")
+        summaries = {item.provider: item for item in self.provider_summaries}
+        google = summaries.get(ProcedureSearchProvider.GOOGLE_AGENT_SEARCH)
+        kakao = summaries.get(ProcedureSearchProvider.KAKAO_DAUM_WEB)
+        if google is not None and google.attempted_query_count != (
+            self.requested_query_count
+        ):
+            raise ValueError(
+                "configured Google provider must attempt every query first"
+            )
+        if google is None:
+            if (
+                kakao is None
+                or kakao.attempted_query_count != self.requested_query_count
+            ):
+                raise ValueError(
+                    "the only configured provider must attempt every query"
+                )
+            if self.fallback_query_count != 0:
+                raise ValueError("Kakao-only lookup does not count as fallback")
+        else:
+            expected_fallbacks = kakao.attempted_query_count if kakao is not None else 0
+            if self.fallback_query_count != expected_fallbacks:
+                raise ValueError(
+                    "fallback count must match Kakao attempts after Google"
+                )
+        if self.provider_result_count != sum(
+            item.provider_result_count for item in self.provider_summaries
+        ):
+            raise ValueError("aggregate provider results must match provider summaries")
         if (
             self.official_candidate_count + self.rejected_result_count
             != self.provider_result_count
@@ -1233,7 +1314,23 @@ class ProcedureLookupResult(AgentSchema):
         if len(self.documents) != len(self.evidence_records):
             raise ValueError("each document must have exactly one evidence record")
         evidence_by_id = {item.evidence_id: item for item in self.evidence_records}
+        provider_summaries = {
+            item.provider: item for item in self.search_summary.provider_summaries
+        }
+        document_counts: dict[ProcedureSearchProvider, int] = {}
         for document in self.documents:
+            provider_summary = provider_summaries.get(document.discovery_provider)
+            if (
+                provider_summary is None
+                or provider_summary.successful_query_count == 0
+                or provider_summary.provider_result_count == 0
+            ):
+                raise ValueError(
+                    "procedure document provider must have a successful search result"
+                )
+            document_counts[document.discovery_provider] = (
+                document_counts.get(document.discovery_provider, 0) + 1
+            )
             evidence = evidence_by_id.get(document.evidence_ref)
             if evidence is None:
                 raise ValueError("procedure document has unresolved evidence_ref")
@@ -1248,6 +1345,11 @@ class ProcedureLookupResult(AgentSchema):
             ):
                 raise ValueError(
                     "procedure document and evidence must describe one source"
+                )
+        for provider, document_count in document_counts.items():
+            if document_count > provider_summaries[provider].provider_result_count:
+                raise ValueError(
+                    "procedure documents cannot exceed their provider result count"
                 )
         failures = (
             self.search_summary.failed_query_count
@@ -2036,7 +2138,9 @@ __all__ = [
     "ProcedureProgressChangeCandidate",
     "ProcedureProgressObservation",
     "ProcedureProgressStatus",
+    "ProcedureProviderSearchSummary",
     "ProcedureRelevance",
+    "ProcedureSearchProvider",
     "ProcedureSearchSummary",
     "ProcedureSourceDocument",
     "ProcedureSourcePolicy",

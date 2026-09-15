@@ -149,10 +149,21 @@ def procedure_result() -> ProcedureLookupResult:
                 content_hash=source_hash,
                 evidence_ref=evidence.evidence_id,
                 search_query="사업자 폐업 신고 절차",
+                discovery_provider="KAKAO_DAUM_WEB",
             )
         ],
         search_summary=ProcedureSearchSummary(
-            provider="KAKAO_DAUM_WEB",
+            provider_order=["KAKAO_DAUM_WEB"],
+            provider_summaries=[
+                {
+                    "provider": "KAKAO_DAUM_WEB",
+                    "attempted_query_count": 1,
+                    "successful_query_count": 1,
+                    "failed_query_count": 0,
+                    "provider_result_count": 1,
+                }
+            ],
+            fallback_query_count=0,
             requested_query_count=1,
             successful_query_count=1,
             failed_query_count=0,
@@ -276,7 +287,17 @@ def test_incomplete_procedure_lookup_cannot_be_erased_by_info_complete() -> None
         lookup_id=UUID("00000000-0000-4000-8000-000000000105"),
         documents=[],
         search_summary=ProcedureSearchSummary(
-            provider="KAKAO_DAUM_WEB",
+            provider_order=["KAKAO_DAUM_WEB"],
+            provider_summaries=[
+                {
+                    "provider": "KAKAO_DAUM_WEB",
+                    "attempted_query_count": 1,
+                    "successful_query_count": 1,
+                    "failed_query_count": 0,
+                    "provider_result_count": 0,
+                }
+            ],
+            fallback_query_count=0,
             requested_query_count=1,
             successful_query_count=1,
             failed_query_count=0,

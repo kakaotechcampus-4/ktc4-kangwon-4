@@ -180,10 +180,21 @@ def procedure_source() -> ReviewSourceResult:
                 content_hash=procedure_record.content_hash,
                 evidence_ref=procedure_record.evidence_id,
                 search_query="폐업 신고 공식 절차",
+                discovery_provider="KAKAO_DAUM_WEB",
             )
         ],
         search_summary=ProcedureSearchSummary(
-            provider="KAKAO_DAUM_WEB",
+            provider_order=["KAKAO_DAUM_WEB"],
+            provider_summaries=[
+                {
+                    "provider": "KAKAO_DAUM_WEB",
+                    "attempted_query_count": 1,
+                    "successful_query_count": 1,
+                    "failed_query_count": 0,
+                    "provider_result_count": 1,
+                }
+            ],
+            fallback_query_count=0,
             requested_query_count=1,
             successful_query_count=1,
             failed_query_count=0,

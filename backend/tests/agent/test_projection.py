@@ -80,6 +80,7 @@ def test_procedure_document_projection_drops_untrusted_web_excerpt() -> None:
         content_hash="sha256:" + "a" * 64,
         evidence_ref="procedure:web:1",
         search_query="사업자 폐업 신고 절차",
+        discovery_provider="KAKAO_DAUM_WEB",
     )
 
     projection = to_model_projection(document)

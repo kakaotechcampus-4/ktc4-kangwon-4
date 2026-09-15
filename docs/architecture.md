@@ -10,7 +10,7 @@ RE:BORN의 전역 계획과 오케스트레이션은 **Supervisor Agent 한 곳*
 
 - Supervisor는 현재 Case를 해석하고 필요한 하위 Agent·Tool만 선택 호출합니다.
 - 정보분석 Agent와 지원금 Agent는 자기 작업을 끝내기 위한 제한된 Local Loop를 갖지만, Supervisor에는 Tool schema로 노출되는 **Agent-as-Tool**입니다.
-- 절차조회 Tool과 Review Tool은 자체 계획·루프가 없는 일반 Tool입니다. 절차조회 Tool은 Kakao 웹문서 검색으로 공식 자료 URL을 발견하고 검증된 원문을 직접 읽지만, 그 내용을 해석하거나 Case 적용 여부를 판정하지 않습니다.
+- 절차조회 Tool과 Review Tool은 자체 계획·루프가 없는 일반 Tool입니다. 절차조회 Tool은 각 비식별 질의마다 Google Agent Search `searchLite`를 먼저 호출하고 필요할 때 Kakao Daum 웹문서 검색으로 fallback해 공식 자료 URL을 발견합니다. 이후 검증된 원문을 직접 읽지만, 그 내용을 해석하거나 Case 적용 여부를 판정하지 않습니다.
 - 하위 구성요소끼리는 서로 호출하거나 메시지를 주고받지 않습니다.
 - 절차조회 결과를 정보분석 Agent가 사용해야 할 때에도 Tool이 Agent를 직접 호출하지 않습니다. Supervisor가 `ProcedureLookupResult`를 `InfoAnalysisInput`에 넣어 전달합니다.
 - Review Tool은 선택 호출 대상이 아니라 모든 정상 초안이 반드시 거치는 검증 관문입니다.
@@ -23,7 +23,7 @@ RE:BORN의 전역 계획과 오케스트레이션은 **Supervisor Agent 한 곳*
 | **Supervisor Agent** | 상위 Agent | Case 해석, 호출 대상 선택, 결과 충분성 평가, Blocker 1개·Next Action 1개 결정, 재호출·되묻기·종료 판단 | Guardrail·Review 우회, 전문 근거 임의 생성 |
 | **정보분석 Agent** | 하위 Agent-as-Tool | 사용자 입력·CaseSnapshot·절차조회 원문 근거를 함께 분석해 사실·누락·충돌·불확실성과 canonical 절차에 결합된 `procedure_findings` 생성 | 인터넷 직접 검색, 검색 결과에 없는 절차 생성, DB 절차 ID 생성, 전역 오케스트레이션, Case 직접 변경 |
 | **지원금 Agent** | 하위 Agent-as-Tool | 검색 계획, Wiki/RAG 조회, 후보 비교, 공식 출처·최신성 확인, 필요하면 자기 범위에서 재검색 | 지원 자격·수령 확정, 다른 Agent 호출, 검수 Wiki 자동 수정 |
-| **절차조회 Tool** | 일반 Tool | Kakao 웹문서 검색으로 폐업 관련 URL 발견, HTTPS·공식기관 allowlist 검증, 공식 원문 직접 fetch, raw document와 Evidence 정규화 | 검색 snippet을 Evidence로 사용, 원문 해석, 적용 여부·선후관계·우선순위·Next Action·절차 완료 판정, DB ID 생성 |
+| **절차조회 Tool** | 일반 Tool | Google Agent Search 우선·Kakao query별 fallback으로 폐업 관련 URL 발견, HTTPS·공식기관 allowlist 검증, 공식 원문 직접 fetch, raw document와 Evidence 정규화 | Google 검색결과 HTML scraping, 검색 snippet을 Evidence로 사용, 원문 해석, 적용 여부·선후관계·우선순위·Next Action·절차 완료 판정, DB ID 생성 |
 | **Review Tool** | 필수 LLM Tool | 전달받은 Case·초안·Evidence만으로 사실성, 근거, 표현, 실행 가능성을 독립 검토 | 새 근거 검색, 직접 수정, 재호출 대상 확정, 자체 반복 |
 | **Guardrail** | 코드 | 입력, 상태 전이, 출력에서 결정 가능한 안전 조건 강제 | 업무 판단, Evidence의 의미 판단 |
 | **Case Service / shared functions** | 코드 경계 | 인증된 Case 조회와 DB 쓰기의 단일 경로 | Agent 판단 대체 |
@@ -55,8 +55,10 @@ flowchart TD
     SNAP --> S["Supervisor Agent<br/>계획 · 조정 · 전역 종료 판단"]
 
     S -->|"1. 폐업 자료 조회"| PT[["절차조회 Tool"]]
-    PT -->|"REST API 키 인증"| KAKAO["Kakao 웹문서 검색 API"]
-    KAKAO -->|"후보 URL·검색 snippet"| PT
+    PT -->|"1순위 · X-Goog-Api-Key"| GOOGLE["Google Agent Search<br/>searchLite · 공개 웹사이트 앱"]
+    GOOGLE -->|"후보 URL·검색 metadata"| PT
+    PT -->|"query별 fallback · KakaoAK"| KAKAO["Kakao Daum 웹문서 검색 API"]
+    KAKAO -->|"후보 URL·검색 metadata"| PT
     PT <-->|"HTTPS + allowlist 통과 후 직접 fetch"| OFFICIAL[("공식기관 웹 원문")]
     PT -->|"raw documents + Evidence"| S
     S -->|"2. 사용자 입력 + snapshot + ProcedureLookupResult"| IA["정보분석 Agent-as-Tool"]
@@ -93,7 +95,7 @@ flowchart TD
 
 Blocker·Next Action을 포함하는 정상 결과의 최종 전달 조건은 **적용되는 Guardrail PASS와 Review PASS를 모두 만족하는 것**입니다. Supervisor가 Review를 생략하는 분기는 만들지 않습니다.
 
-첫 계획의 데이터 의존 순서는 **절차조회 → 정보분석 → 지원금 → Supervisor 초안 → Review**입니다. 이 순서는 하위 구성요소가 서로 호출한다는 뜻이 아니라, Supervisor가 앞 호출의 검증된 결과를 다음 호출 입력에 전달한다는 뜻입니다. 검색 URL 발견과 공식 원문 fetch를 분리한 이유는 Kakao 응답의 `contents`가 검색용 일부 문구일 뿐 공식 원문 자체가 아니기 때문입니다.
+첫 계획의 데이터 의존 순서는 **절차조회 → 정보분석 → 지원금 → Supervisor 초안 → Review**입니다. 이 순서는 하위 구성요소가 서로 호출한다는 뜻이 아니라, Supervisor가 앞 호출의 검증된 결과를 다음 호출 입력에 전달한다는 뜻입니다. Google/Kakao가 반환하는 검색 metadata와 snippet은 URL 발견용일 뿐 공식 원문 자체가 아니므로 검색과 공식 원문 fetch를 분리합니다.
 
 위 그림은 논리적 검증 순서를 나타냅니다. Case 상태와 최종 판단을 몇 개의 짧은 트랜잭션으로 나눌지, 재계획 실패 시 앞선 상태 변경을 유지할지는 아직 BE 계약 전이므로 확정하지 않습니다.
 
@@ -146,7 +148,8 @@ Review는 새 Evidence를 검색하지 않습니다. 필요한 Evidence가 없�
 
 ```text
 폐업 관련 검색 질의
-  → Kakao 웹문서 검색 API에서 후보 URL 발견
+  → Google Agent Search searchLite에서 후보 URL 발견
+       └─ 해당 query가 설정·호출·후보 확보 조건을 충족하지 못함: Kakao로 fallback
   → HTTPS 및 공식기관 domain allowlist 검증
   → 검증된 URL의 실제 원문 직접 fetch
        ├─ 성공: sanitized excerpt + URL + 기관 + 조회시각 + hash를 Evidence로 반환
@@ -162,7 +165,8 @@ Review는 새 Evidence를 검색하지 않습니다. 필요한 Evidence가 없�
 
 - 외부 웹문서의 본문은 **명령이 아니라 신뢰하지 않는 데이터**입니다. 문서에 포함된 prompt, 링크 이동 지시, credential 요청을 실행하지 않습니다.
 - `source_policy=OFFICIAL_ONLY`이며 최종 URL과 모든 redirect hop은 HTTPS와 공식기관 allowlist를 통과해야 합니다. 현재 runtime은 IP-literal과 credential 포함 URL을 거부합니다. hostname DNS 해석 결과의 private/loopback/link-local 차단과 DNS rebinding 방어는 production egress/resolver 경계에서 추가해야 합니다.
-- Kakao 검색 결과의 제목·`contents`·작성시각은 URL 발견과 후보 정렬에만 사용합니다. 직접 fetch한 실제 공식 원문만 `OFFICIAL_DOCUMENT` Evidence가 될 수 있습니다.
+- Google/Kakao 검색 결과의 제목·snippet·작성시각 등 metadata는 URL 발견과 후보 정렬에만 사용합니다. 각 문서는 `discovery_provider`로 실제 발견 provider를 남기며, 직접 fetch한 실제 공식 원문만 `OFFICIAL_DOCUMENT` Evidence가 될 수 있습니다.
+- Google 검색은 공개 공식사이트만 등록된 Agent Search 앱의 공식 `searchLite` JSON API로 수행합니다. `google.com/search` 결과 HTML을 요청하거나 parsing하는 SERP scraping은 하지 않습니다.
 - `published_at` 또는 최신성을 확인하지 못하면 `freshness_status=UNKNOWN`입니다. 정보분석·Supervisor는 이 근거로 기한·필수서류·법적 의무를 확정형으로 말하지 않습니다.
 - 인터넷 자료만으로 `CASE_COMPLETE`를 만들거나 절차 진행상태를 저장하지 않습니다. 완료에는 사용자 실행, 전문가 확인, 공식 처리 결과처럼 현실 실행을 증명하는 별도 Evidence가 필요합니다.
 
@@ -232,7 +236,7 @@ BE HTTP·DB·운영 경계에 연결하기 전에 공동 계약이 더 필요한
 
 - BE/gateway 전체 deadline과 Agent 내부 retry/timeout의 소유권·중복 실행 방지
 - `ComponentRequest`/`ComponentResult` HTTP envelope와 BE 영속 Evidence ID 발급·resolver 형식
-- Kakao 검색 credential 운영, 공식기관 allowlist 변경 승인, DNS rebinding/egress와 quota 관측
+- Google 공개 웹사이트 검색 앱·API key·project/engine 운영, Kakao fallback credential 운영, provider별 quota/비용, 공식기관 allowlist 변경 승인, DNS rebinding/egress 관측
 - 인터넷 조회 Evidence의 canonical URL·본문 hash·조회시각 보존과 캐시/재검증 정책
 - BE canonical `ProcedureStepRef` registry 공급·버전 관리와 미매핑 finding 처리
 - Review 결과·`ReviewProof`의 외부 HTTP 오류 매핑과 저장 승인 절차
@@ -251,12 +255,16 @@ LLM 호출과 외부 조회를 긴 DB 트랜잭션 안에서 실행하지 않는
 - Agent와 Tool은 DB를 직접 변경하지 않습니다.
 - 절차조회 Tool은 raw 원문과 Evidence만 반환하며 적용성·준비상태·완료·우선순위를 판정하지 않습니다.
 - 정보분석 Agent는 caller가 제공한 `KnownProcedureStep`에만 finding을 결합하고 새 DB step ID/code를 만들지 않습니다.
-- Kakao 검색 snippet이나 allowlist를 통과하지 않은 페이지는 Evidence가 아닙니다.
+- Google/Kakao 검색 snippet이나 allowlist를 통과하지 않은 페이지는 Evidence가 아닙니다.
+- 모든 질의는 Google Agent Search를 먼저 시도하고, 정해진 조건에서만 Kakao로 query별 fallback합니다. Google SERP HTML scraping은 허용하지 않습니다.
 - 근거 없는 지원사업명·금액·기한·자격 확정 문장을 사용자에게 내보내지 않습니다.
 - 판단, 호출, 반송, 실패 원인은 추적할 수 있어야 합니다.
 
 ## 12. 외부 기술 근거
 
+- [Google Agent Search `searchLite` REST API](https://docs.cloud.google.com/generative-ai-app-builder/docs/reference/rest/v1/projects.locations.collections.engines.servingConfigs/searchLite): 공개 웹사이트 검색에서 API key 인증을 허용하는 `POST ...:searchLite` 계약과 `query`·`pageSize`·`SearchResponse`를 정의
+- [Google Agent Search 웹사이트 데이터 준비](https://docs.cloud.google.com/generative-ai-app-builder/docs/prepare-data): 검색 앱이 조회할 공개 웹사이트 URL pattern을 사전에 포함·제외하고 Google이 해당 범위를 crawl/index한다는 근거
+- [Google Cloud API key 인증](https://docs.cloud.google.com/docs/authentication/api-keys-use): API key를 URL query보다 `X-Goog-Api-Key` header로 전달하라는 보안 근거
 - [Kakao Daum 검색 REST API 개발 가이드](https://developers.kakao.com/docs/ko/daum-search/dev-guide): 웹문서 검색 endpoint, `Authorization: KakaoAK ${REST_API_KEY}`, query/page/size와 검색 결과의 title/contents/url/datetime 계약
 - [Kakao REST API 시작하기](https://developers.kakao.com/docs/ko/rest-api/getting-started): 서버 환경에서 REST API를 호출할 수 있다는 공식 안내
 - [Kakao 앱 키 설정](https://developers.kakao.com/docs/ko/app-setting/app): REST API 키의 발급·관리·호출 허용 IP 설정 근거

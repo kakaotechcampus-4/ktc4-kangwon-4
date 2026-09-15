@@ -376,13 +376,24 @@ def test_procedure_result_produces_json_schema() -> None:
         content_hash=official.content_hash,
         evidence_ref=official.evidence_id,
         search_query="사업자 폐업 신고 절차",
+        discovery_provider="KAKAO_DAUM_WEB",
     )
     result = ProcedureLookupResult(
         completion_status=ProcedureCompletionStatus.COMPLETE,
         lookup_id=UUID("00000000-0000-4000-8000-000000000031"),
         documents=[document],
         search_summary=ProcedureSearchSummary(
-            provider="KAKAO_DAUM_WEB",
+            provider_order=["KAKAO_DAUM_WEB"],
+            provider_summaries=[
+                {
+                    "provider": "KAKAO_DAUM_WEB",
+                    "attempted_query_count": 1,
+                    "successful_query_count": 1,
+                    "failed_query_count": 0,
+                    "provider_result_count": 1,
+                }
+            ],
+            fallback_query_count=0,
             requested_query_count=1,
             successful_query_count=1,
             failed_query_count=0,
@@ -412,7 +423,17 @@ def test_procedure_result_produces_json_schema() -> None:
         lookup_id=UUID("00000000-0000-4000-8000-000000000032"),
         documents=[],
         search_summary=ProcedureSearchSummary(
-            provider="KAKAO_DAUM_WEB",
+            provider_order=["KAKAO_DAUM_WEB"],
+            provider_summaries=[
+                {
+                    "provider": "KAKAO_DAUM_WEB",
+                    "attempted_query_count": 1,
+                    "successful_query_count": 1,
+                    "failed_query_count": 0,
+                    "provider_result_count": 0,
+                }
+            ],
+            fallback_query_count=0,
             requested_query_count=1,
             successful_query_count=1,
             failed_query_count=0,
@@ -433,14 +454,96 @@ def test_procedure_result_produces_json_schema() -> None:
     impossible_no_match = no_match.model_dump(mode="python")
     impossible_no_match["search_summary"]["provider_result_count"] = 1
     impossible_no_match["search_summary"]["official_candidate_count"] = 1
+    impossible_no_match["search_summary"]["provider_summaries"][0][
+        "provider_result_count"
+    ] = 1
     with pytest.raises(ValidationError, match="NO_RESULTS"):
         ProcedureLookupResult.model_validate(impossible_no_match)
 
     all_queries_failed = no_match.search_summary.model_dump(mode="python")
     all_queries_failed["successful_query_count"] = 0
     all_queries_failed["failed_query_count"] = 1
-    with pytest.raises(ValidationError, match="successful query"):
+    all_queries_failed["provider_summaries"][0]["successful_query_count"] = 0
+    all_queries_failed["provider_summaries"][0]["failed_query_count"] = 1
+    with pytest.raises(ValidationError, match="successful provider response"):
         ProcedureSearchSummary.model_validate(all_queries_failed)
+
+    mismatched_provider = result.model_dump(mode="python")
+    mismatched_provider["documents"][0]["discovery_provider"] = "GOOGLE_AGENT_SEARCH"
+    with pytest.raises(ValidationError, match="successful search result"):
+        ProcedureLookupResult.model_validate(mismatched_provider)
+
+    failed_provider_with_results = no_match.search_summary.model_dump(mode="python")
+    failed_provider_with_results.update(
+        {
+            "provider_order": ["GOOGLE_AGENT_SEARCH", "KAKAO_DAUM_WEB"],
+            "provider_summaries": [
+                {
+                    "provider": "GOOGLE_AGENT_SEARCH",
+                    "attempted_query_count": 1,
+                    "successful_query_count": 0,
+                    "failed_query_count": 1,
+                    "provider_result_count": 1,
+                },
+                {
+                    "provider": "KAKAO_DAUM_WEB",
+                    "attempted_query_count": 1,
+                    "successful_query_count": 1,
+                    "failed_query_count": 0,
+                    "provider_result_count": 0,
+                },
+            ],
+            "fallback_query_count": 1,
+            "provider_result_count": 1,
+            "rejected_result_count": 1,
+        }
+    )
+    with pytest.raises(ValidationError, match="successful provider response"):
+        ProcedureSearchSummary.model_validate(failed_provider_with_results)
+
+
+def test_procedure_search_summary_preserves_google_fallback_history() -> None:
+    summary = ProcedureSearchSummary(
+        provider_order=["GOOGLE_AGENT_SEARCH", "KAKAO_DAUM_WEB"],
+        provider_summaries=[
+            {
+                "provider": "GOOGLE_AGENT_SEARCH",
+                "attempted_query_count": 1,
+                "successful_query_count": 1,
+                "failed_query_count": 0,
+                "provider_result_count": 1,
+            },
+            {
+                "provider": "KAKAO_DAUM_WEB",
+                "attempted_query_count": 1,
+                "successful_query_count": 1,
+                "failed_query_count": 0,
+                "provider_result_count": 1,
+            },
+        ],
+        fallback_query_count=1,
+        requested_query_count=1,
+        successful_query_count=1,
+        failed_query_count=0,
+        provider_result_count=2,
+        official_candidate_count=1,
+        fetched_document_count=1,
+        rejected_result_count=1,
+        fetch_failure_count=0,
+        searched_at=NOW,
+    )
+    assert summary.fallback_query_count == 1
+
+    invalid_order = summary.model_dump(mode="python")
+    invalid_order["provider_order"].reverse()
+    invalid_order["provider_summaries"].reverse()
+    with pytest.raises(ValidationError, match="Google-first"):
+        ProcedureSearchSummary.model_validate(invalid_order)
+
+    invalid_fallback = summary.model_dump(mode="python")
+    invalid_fallback["fallback_query_count"] = 0
+    with pytest.raises(ValidationError, match="fallback count"):
+        ProcedureSearchSummary.model_validate(invalid_fallback)
 
 
 def test_action_decision_contains_exactly_one_blocker_and_next_action() -> None:

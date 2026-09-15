@@ -1,9 +1,10 @@
-"""Live Kakao web search and official-source retrieval for closure procedures.
+"""Google-first web search and official-source retrieval for closure procedures.
 
-Kakao search snippets are discovery hints only.  This tool emits evidence only
-after it has fetched an allowlisted official HTTPS document itself, bounded its
-size, accepted its content type, and extracted non-empty text.  It does not
-interpret the documents, decide applicability, or select the next action.
+Search-provider snippets are discovery hints only. This tool emits evidence
+only after it has fetched an allowlisted official HTTPS document itself,
+bounded its size, accepted its content type, and extracted non-empty text. It
+does not interpret the documents, decide applicability, or select the next
+action.
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ from app.agent.schemas import (
     ProcedureLookupInput,
     ProcedureLookupResult,
     ProcedureLookupWarning,
+    ProcedureProviderSearchSummary,
     ProcedureSearchSummary,
     ProcedureSourceDocument,
 )
@@ -167,7 +169,7 @@ class ProcedureLookupError(RuntimeError):
 
 
 class ProcedureLookupRequestError(ProcedureLookupError):
-    """Raised when no Kakao search query can be completed."""
+    """Raised when no configured provider search can be completed."""
 
 
 class ProcedureLookupInputError(ProcedureLookupError):
@@ -176,9 +178,19 @@ class ProcedureLookupInputError(ProcedureLookupError):
 
 @dataclass(frozen=True, slots=True)
 class _QueryOutcome:
+    provider: str
     hits: tuple[SearchHit, ...]
     provider_result_count: int
+    official_candidate_count: int
     rejected_result_count: int
+
+
+@dataclass(slots=True)
+class _ProviderCounters:
+    attempted_query_count: int = 0
+    successful_query_count: int = 0
+    failed_query_count: int = 0
+    provider_result_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -319,25 +331,81 @@ class ProcedureLookupTool:
             ) from None
 
         searched_at = self._aware_now()
-        query_outcomes: list[_QueryOutcome] = []
+        provider_order: list[str] = []
+        if self.config.google_enabled:
+            provider_order.append("GOOGLE_AGENT_SEARCH")
+        if self.config.kakao_enabled:
+            provider_order.append("KAKAO_DAUM_WEB")
+        provider_counters = {
+            provider: _ProviderCounters() for provider in provider_order
+        }
+        provider_outcomes: list[_QueryOutcome] = []
+        selected_hits: list[SearchHit] = []
+        successful_queries = 0
         failed_queries = 0
+        fallback_query_count = 0
         query_failures: list[_UpstreamFailure] = []
         for query in queries:
-            try:
-                query_outcomes.append(
-                    await self._search_query(
+            query_resolved = False
+            use_kakao = not self.config.google_enabled
+
+            if self.config.google_enabled:
+                google_counters = provider_counters["GOOGLE_AGENT_SEARCH"]
+                google_counters.attempted_query_count += 1
+                try:
+                    google_outcome = await self._search_query(
                         query,
                         size=int(request.max_results_per_query),
+                        provider="GOOGLE_AGENT_SEARCH",
                     )
-                )
-            except _UpstreamFailure as exc:
-                failed_queries += 1
-                query_failures.append(exc)
+                except _UpstreamFailure as exc:
+                    google_counters.failed_query_count += 1
+                    query_failures.append(exc)
+                    use_kakao = self.config.kakao_enabled
+                else:
+                    google_counters.successful_query_count += 1
+                    google_counters.provider_result_count += (
+                        google_outcome.provider_result_count
+                    )
+                    provider_outcomes.append(google_outcome)
+                    if google_outcome.official_candidate_count:
+                        selected_hits.extend(google_outcome.hits)
+                        query_resolved = True
+                    else:
+                        use_kakao = self.config.kakao_enabled
+                        query_resolved = not use_kakao
 
-        if not query_outcomes:
-            retryable = bool(query_failures) and all(
-                failure.retryable for failure in query_failures
-            )
+            if use_kakao:
+                if self.config.google_enabled:
+                    fallback_query_count += 1
+                kakao_counters = provider_counters["KAKAO_DAUM_WEB"]
+                kakao_counters.attempted_query_count += 1
+                try:
+                    kakao_outcome = await self._search_query(
+                        query,
+                        size=int(request.max_results_per_query),
+                        provider="KAKAO_DAUM_WEB",
+                    )
+                except _UpstreamFailure as exc:
+                    kakao_counters.failed_query_count += 1
+                    query_failures.append(exc)
+                    query_resolved = False
+                else:
+                    kakao_counters.successful_query_count += 1
+                    kakao_counters.provider_result_count += (
+                        kakao_outcome.provider_result_count
+                    )
+                    provider_outcomes.append(kakao_outcome)
+                    selected_hits.extend(kakao_outcome.hits)
+                    query_resolved = True
+
+            if query_resolved:
+                successful_queries += 1
+            else:
+                failed_queries += 1
+
+        if not provider_outcomes:
+            retryable = any(failure.retryable for failure in query_failures)
             raise ProcedureLookupRequestError(
                 "procedure search provider is unavailable",
                 code="SEARCH_UNAVAILABLE",
@@ -345,28 +413,21 @@ class ProcedureLookupTool:
             )
 
         provider_result_count = sum(
-            item.provider_result_count for item in query_outcomes
+            item.provider_result_count for item in provider_outcomes
         )
         rejected_result_count = sum(
-            item.rejected_result_count for item in query_outcomes
+            item.rejected_result_count for item in provider_outcomes
         )
         candidates: list[SearchHit] = []
         seen_candidate_urls: set[str] = set()
-        official_candidate_count = 0
-        for outcome in query_outcomes:
-            for hit in outcome.hits:
-                try:
-                    canonical_url, _ = self._canonical_official_url(hit.url)
-                except ValueError:
-                    rejected_result_count += 1
-                    continue
-                official_candidate_count += 1
-                if canonical_url in seen_candidate_urls:
-                    continue
-                seen_candidate_urls.add(canonical_url)
-                candidates.append(
-                    SearchHit(title=hit.title, url=canonical_url, query=hit.query)
-                )
+        official_candidate_count = sum(
+            item.official_candidate_count for item in provider_outcomes
+        )
+        for hit in selected_hits:
+            if hit.url in seen_candidate_urls:
+                continue
+            seen_candidate_urls.add(hit.url)
+            candidates.append(hit)
 
         documents: list[ProcedureSourceDocument] = []
         evidence_records: list[EvidenceRecord] = []
@@ -410,6 +471,7 @@ class ProcedureLookupTool:
                 content_hash=fetched.content_hash,
                 evidence_ref=evidence_id,
                 search_query=hit.query,
+                discovery_provider=hit.provider,
             )
             evidence_records.append(evidence)
             documents.append(document)
@@ -420,6 +482,10 @@ class ProcedureLookupTool:
             fetch_failure_count=fetch_failure_count,
             official_candidate_count=official_candidate_count,
             document_count=len(documents),
+            fallback_query_count=fallback_query_count,
+            provider_failure_count=sum(
+                item.failed_query_count for item in provider_counters.values()
+            ),
         )
         if documents and failed_queries == 0 and fetch_failure_count == 0:
             completion_status = "COMPLETE"
@@ -429,9 +495,20 @@ class ProcedureLookupTool:
             completion_status = "PARTIAL"
 
         summary = ProcedureSearchSummary(
-            provider="KAKAO_DAUM_WEB",
+            provider_order=provider_order,
+            provider_summaries=[
+                ProcedureProviderSearchSummary(
+                    provider=provider,
+                    attempted_query_count=counters.attempted_query_count,
+                    successful_query_count=counters.successful_query_count,
+                    failed_query_count=counters.failed_query_count,
+                    provider_result_count=counters.provider_result_count,
+                )
+                for provider, counters in provider_counters.items()
+            ],
+            fallback_query_count=fallback_query_count,
             requested_query_count=len(request.search_queries),
-            successful_query_count=len(query_outcomes),
+            successful_query_count=successful_queries,
             failed_query_count=failed_queries,
             provider_result_count=provider_result_count,
             official_candidate_count=official_candidate_count,
@@ -451,25 +528,19 @@ class ProcedureLookupTool:
             as_of=request.as_of,
         )
 
-    async def _search_query(self, query: str, *, size: int) -> _QueryOutcome:
+    async def _search_query(
+        self,
+        query: str,
+        *,
+        size: int,
+        provider: str,
+    ) -> _QueryOutcome:
         total_attempts = self.config.max_retries + 1
         last_failure = _UpstreamFailure("SEARCH_UNAVAILABLE", retryable=True)
         for attempt_index in range(total_attempts):
             response: httpx.Response | None = None
             try:
-                request = self._isolated_get_request(
-                    self.config.endpoint,
-                    headers={
-                        "Authorization": f"KakaoAK {self.config.api_key}",
-                        "Accept": "application/json",
-                    },
-                    params={
-                        "query": query,
-                        "size": size,
-                        "page": 1,
-                        "sort": "accuracy",
-                    },
-                )
+                request = self._search_request(provider, query=query, size=size)
                 response = await self._client.send(
                     request,
                     stream=True,
@@ -490,10 +561,29 @@ class ProcedureLookupTool:
                         "SEARCH_CONTENT_TYPE_INVALID", retryable=False
                     )
                 body = await self._read_search_body(response)
-                return self._parse_search_response(
-                    body,
-                    query,
-                    result_limit=size,
+                if provider == "GOOGLE_AGENT_SEARCH":
+                    hits, result_count, rejected_count = (
+                        self._parse_google_search_response(
+                            body,
+                            query,
+                            result_limit=size,
+                        )
+                    )
+                elif provider == "KAKAO_DAUM_WEB":
+                    hits, result_count, rejected_count = (
+                        self._parse_kakao_search_response(
+                            body,
+                            query,
+                            result_limit=size,
+                        )
+                    )
+                else:
+                    raise ValueError("unsupported procedure search provider")
+                return self._filter_official_hits(
+                    provider=provider,
+                    hits=hits,
+                    provider_result_count=result_count,
+                    rejected_result_count=rejected_count,
                 )
             except _UpstreamFailure as exc:
                 last_failure = exc
@@ -514,13 +604,108 @@ class ProcedureLookupTool:
             await self._backoff(attempt_index)
         raise last_failure
 
+    def _search_request(self, provider: str, *, query: str, size: int) -> httpx.Request:
+        if provider == "GOOGLE_AGENT_SEARCH":
+            if self.config.google_api_key is None:
+                raise ValueError("Google procedure search is not configured")
+            serving_config = (
+                f"projects/{self.config.google_project_id}"
+                f"/locations/{self.config.google_location}"
+                "/collections/default_collection"
+                f"/engines/{self.config.google_engine_id}"
+                "/servingConfigs/default_search"
+            )
+            return self._isolated_request(
+                "POST",
+                self.config.google_search_url,
+                headers={
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                    "X-Goog-Api-Key": self.config.google_api_key,
+                },
+                json_body={
+                    "servingConfig": serving_config,
+                    "query": query,
+                    "pageSize": size,
+                    "offset": 0,
+                    "languageCode": "ko-KR",
+                    "safeSearch": True,
+                },
+            )
+        if provider == "KAKAO_DAUM_WEB":
+            if self.config.kakao_api_key is None:
+                raise ValueError("Kakao procedure search is not configured")
+            return self._isolated_request(
+                "GET",
+                self.config.kakao_endpoint,
+                headers={
+                    "Authorization": f"KakaoAK {self.config.kakao_api_key}",
+                    "Accept": "application/json",
+                },
+                params={
+                    "query": query,
+                    "size": size,
+                    "page": 1,
+                    "sort": "accuracy",
+                },
+            )
+        raise ValueError("unsupported procedure search provider")
+
     @staticmethod
-    def _parse_search_response(
+    def _parse_google_search_response(
         body: bytes,
         query: str,
         *,
         result_limit: int,
-    ) -> _QueryOutcome:
+    ) -> tuple[list[SearchHit], int, int]:
+        payload = json.loads(body)
+        if not isinstance(payload, Mapping):
+            raise TypeError("Google Agent Search response must be an object")
+        raw_results = payload.get("results", [])
+        if not isinstance(raw_results, list):
+            raise TypeError("Google Agent Search results must be a list")
+        hits: list[SearchHit] = []
+        rejected = max(0, len(raw_results) - result_limit)
+        for item in raw_results[:result_limit]:
+            if not isinstance(item, Mapping):
+                rejected += 1
+                continue
+            document = item.get("document")
+            if not isinstance(document, Mapping):
+                rejected += 1
+                continue
+            derived = document.get("derivedStructData")
+            if not isinstance(derived, Mapping):
+                rejected += 1
+                continue
+            title = derived.get("title")
+            if not isinstance(title, str) or not title.strip():
+                title = derived.get("htmlTitle")
+            url = derived.get("link")
+            if not isinstance(title, str) or not isinstance(url, str):
+                rejected += 1
+                continue
+            clean_title = _clean_title(title)
+            if not clean_title or not url.strip():
+                rejected += 1
+                continue
+            hits.append(
+                SearchHit(
+                    title=clean_title,
+                    url=url.strip(),
+                    query=query,
+                    provider="GOOGLE_AGENT_SEARCH",
+                )
+            )
+        return hits, len(raw_results), rejected
+
+    @staticmethod
+    def _parse_kakao_search_response(
+        body: bytes,
+        query: str,
+        *,
+        result_limit: int,
+    ) -> tuple[list[SearchHit], int, int]:
         payload = json.loads(body)
         if not isinstance(payload, Mapping):
             raise TypeError("Kakao search response must be an object")
@@ -542,10 +727,45 @@ class ProcedureLookupTool:
             if not clean_title or not url.strip():
                 rejected += 1
                 continue
-            hits.append(SearchHit(title=clean_title, url=url.strip(), query=query))
+            hits.append(
+                SearchHit(
+                    title=clean_title,
+                    url=url.strip(),
+                    query=query,
+                    provider="KAKAO_DAUM_WEB",
+                )
+            )
+        return hits, len(raw_documents), rejected
+
+    def _filter_official_hits(
+        self,
+        *,
+        provider: str,
+        hits: list[SearchHit],
+        provider_result_count: int,
+        rejected_result_count: int,
+    ) -> _QueryOutcome:
+        official_hits: list[SearchHit] = []
+        rejected = rejected_result_count
+        for hit in hits:
+            try:
+                canonical_url, _ = self._canonical_official_url(hit.url)
+            except ValueError:
+                rejected += 1
+                continue
+            official_hits.append(
+                SearchHit(
+                    title=hit.title,
+                    url=canonical_url,
+                    query=hit.query,
+                    provider=hit.provider,
+                )
+            )
         return _QueryOutcome(
-            hits=tuple(hits),
-            provider_result_count=len(raw_documents),
+            provider=provider,
+            hits=tuple(official_hits),
+            provider_result_count=provider_result_count,
+            official_candidate_count=len(official_hits),
             rejected_result_count=rejected,
         )
 
@@ -581,7 +801,7 @@ class ProcedureLookupTool:
                 title, excerpt = _extract_document_text(
                     body,
                     content_type=content_type,
-                    # Kakao title/snippet fields are discovery metadata only.
+                    # Provider title/snippet fields are discovery metadata only.
                     # A missing source-page title falls back to the verified host.
                     fallback_title="",
                     focus_query=hit.query,
@@ -745,8 +965,24 @@ class ProcedureLookupTool:
         fetch_failure_count: int,
         official_candidate_count: int,
         document_count: int,
+        fallback_query_count: int,
+        provider_failure_count: int,
     ) -> list[ProcedureLookupWarning]:
         warnings: list[ProcedureLookupWarning] = []
+        if fallback_query_count:
+            warnings.append(
+                ProcedureLookupWarning(
+                    code="SEARCH_PROVIDER_FALLBACK",
+                    message="일부 검색어에 Google 다음 순위인 Kakao 검색을 사용했습니다.",
+                )
+            )
+        if provider_failure_count:
+            warnings.append(
+                ProcedureLookupWarning(
+                    code="SEARCH_PROVIDER_FAILED",
+                    message="일부 검색 provider 요청을 완료하지 못했습니다.",
+                )
+            )
         if failed_queries:
             warnings.append(
                 ProcedureLookupWarning(
@@ -798,11 +1034,25 @@ class ProcedureLookupTool:
     ) -> httpx.Request:
         """Create a request without inheriting client headers, cookies, or auth."""
 
+        return self._isolated_request("GET", url, headers=headers, params=params)
+
+    def _isolated_request(
+        self,
+        method: str,
+        url: str,
+        *,
+        headers: Mapping[str, str],
+        params: Mapping[str, Any] | None = None,
+        json_body: Mapping[str, Any] | None = None,
+    ) -> httpx.Request:
+        """Create a request without inheriting client headers, cookies, or auth."""
+
         return httpx.Request(
-            "GET",
+            method,
             url,
             headers=headers,
             params=params,
+            json=json_body,
             extensions={
                 "timeout": httpx.Timeout(self.config.timeout_seconds).as_dict()
             },

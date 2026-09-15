@@ -1,6 +1,8 @@
 """Internet-backed, official-source procedure lookup."""
 
 from .models import (
+    DEFAULT_GOOGLE_SEARCH_ENDPOINT,
+    DEFAULT_KAKAO_SEARCH_ENDPOINT,
     DEFAULT_OFFICIAL_DOMAINS,
     DEFAULT_SEARCH_ENDPOINT,
     ProcedureSearchConfig,
@@ -14,6 +16,8 @@ from .tool import (
 )
 
 __all__ = [
+    "DEFAULT_GOOGLE_SEARCH_ENDPOINT",
+    "DEFAULT_KAKAO_SEARCH_ENDPOINT",
     "DEFAULT_OFFICIAL_DOMAINS",
     "DEFAULT_SEARCH_ENDPOINT",
     "ProcedureLookupError",

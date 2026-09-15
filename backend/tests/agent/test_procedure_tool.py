@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -44,7 +45,7 @@ def lookup_request(
 
 def config(**updates: Any) -> ProcedureSearchConfig:
     values: dict[str, Any] = {
-        "api_key": "test-kakao-rest-key",
+        "kakao_api_key": "test-kakao-rest-key",
         "allowed_domains": ("gov.kr", "nts.go.kr"),
         "timeout_seconds": 2,
         "max_retries": 0,
@@ -75,6 +76,24 @@ def search_response(*documents: dict[str, Any], status: int = 200) -> httpx.Resp
     )
 
 
+def google_search_response(
+    *results: dict[str, Any], status: int = 200
+) -> httpx.Response:
+    return httpx.Response(status, json={"results": list(results)})
+
+
+def google_result(*, title: str, url: str) -> dict[str, Any]:
+    return {
+        "document": {
+            "derivedStructData": {
+                "title": title,
+                "link": url,
+                "snippets": [{"snippet": "검색 snippet은 Evidence가 아닙니다."}],
+            }
+        }
+    }
+
+
 def official_html(
     body: str = "사업자는 폐업 신고서를 제출하고 신고 사실을 확인해야 합니다.",
     *,
@@ -91,6 +110,209 @@ def official_html(
         ).encode(),
         headers={"content-type": "text/html; charset=utf-8"},
     )
+
+
+def test_google_agent_search_is_primary_and_kakao_is_not_called() -> None:
+    observed: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed.append(request)
+        if request.url.host == "discoveryengine.googleapis.com":
+            assert request.method == "POST"
+            assert "key" not in request.url.params
+            assert request.headers["x-goog-api-key"] == "test-google-key"
+            assert request.headers.get("authorization") is None
+            payload = json.loads(request.content)
+            assert payload == {
+                "servingConfig": (
+                    "projects/reborn-project/locations/global/collections/"
+                    "default_collection/engines/closure-search/servingConfigs/"
+                    "default_search"
+                ),
+                "query": "개인사업자 폐업 신고 절차",
+                "pageSize": 5,
+                "offset": 0,
+                "languageCode": "ko-KR",
+                "safeSearch": True,
+            }
+            return google_search_response(
+                {
+                    "document": {
+                        "derivedStructData": {
+                            "htmlTitle": "<b>Google</b> 검색 제목",
+                            "link": "https://www.gov.kr/google-guide",
+                            "snippets": [{"snippet": "근거로 쓰지 않는 검색 문구"}],
+                        }
+                    }
+                }
+            )
+        assert request.url.host == "www.gov.kr"
+        return official_html("Google이 발견한 공식 원문의 폐업 절차입니다.")
+
+    async def scenario() -> None:
+        async with ProcedureLookupTool(
+            config(
+                google_api_key="test-google-key",
+                google_project_id="reborn-project",
+                google_engine_id="closure-search",
+            ),
+            transport=httpx.MockTransport(handler),
+            clock=lambda: NOW,
+            uuid_factory=uuids(DOCUMENT_ID, LOOKUP_ID),
+        ) as tool:
+            result = await tool.lookup(lookup_request())
+
+        assert [request.url.host for request in observed] == [
+            "discoveryengine.googleapis.com",
+            "www.gov.kr",
+        ]
+        assert result.completion_status == "COMPLETE"
+        assert result.documents[0].discovery_provider == "GOOGLE_AGENT_SEARCH"
+        assert result.search_summary.provider_order == [
+            "GOOGLE_AGENT_SEARCH",
+            "KAKAO_DAUM_WEB",
+        ]
+        google, kakao = result.search_summary.provider_summaries
+        assert google.attempted_query_count == 1
+        assert google.successful_query_count == 1
+        assert google.failed_query_count == 0
+        assert google.provider_result_count == 1
+        assert kakao.attempted_query_count == 0
+        assert result.search_summary.fallback_query_count == 0
+        assert "검색 snippet은" not in result.documents[0].excerpt
+
+    asyncio.run(scenario())
+
+
+def test_google_without_official_candidate_falls_back_to_kakao_per_query() -> None:
+    observed_hosts: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed_hosts.append(request.url.host or "")
+        if request.url.host == "discoveryengine.googleapis.com":
+            return google_search_response(
+                google_result(
+                    title="비공식 검색 결과",
+                    url="https://blog.example.com/closure",
+                )
+            )
+        if request.url.host == "dapi.kakao.com":
+            return search_response(
+                {
+                    "title": "카카오가 발견한 공식 안내",
+                    "contents": "검색 snippet",
+                    "url": "https://www.gov.kr/fallback-guide",
+                }
+            )
+        return official_html("fallback으로 발견한 공식 폐업 안내입니다.")
+
+    async def scenario() -> None:
+        async with ProcedureLookupTool(
+            config(
+                google_api_key="test-google-key",
+                google_project_id="reborn-project",
+                google_engine_id="closure-search",
+            ),
+            transport=httpx.MockTransport(handler),
+            clock=lambda: NOW,
+            uuid_factory=uuids(DOCUMENT_ID, LOOKUP_ID),
+        ) as tool:
+            result = await tool.lookup(lookup_request())
+
+        assert observed_hosts == [
+            "discoveryengine.googleapis.com",
+            "dapi.kakao.com",
+            "www.gov.kr",
+        ]
+        assert result.completion_status == "COMPLETE"
+        assert result.documents[0].discovery_provider == "KAKAO_DAUM_WEB"
+        assert result.search_summary.fallback_query_count == 1
+        assert result.search_summary.successful_query_count == 1
+        assert [
+            item.successful_query_count
+            for item in result.search_summary.provider_summaries
+        ] == [1, 1]
+        assert {warning.code for warning in result.warnings} == {
+            "RESULT_REJECTED",
+            "SEARCH_PROVIDER_FALLBACK",
+        }
+
+    asyncio.run(scenario())
+
+
+def test_google_failure_recovered_by_kakao_can_still_be_complete() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "discoveryengine.googleapis.com":
+            return httpx.Response(503, json={"error": {"message": "temporary"}})
+        if request.url.host == "dapi.kakao.com":
+            return search_response(
+                {
+                    "title": "공식 안내",
+                    "contents": "",
+                    "url": "https://www.gov.kr/recovered-guide",
+                }
+            )
+        return official_html()
+
+    async def scenario() -> None:
+        async with ProcedureLookupTool(
+            config(
+                google_api_key="test-google-key",
+                google_project_id="reborn-project",
+                google_engine_id="closure-search",
+            ),
+            transport=httpx.MockTransport(handler),
+            clock=lambda: NOW,
+            uuid_factory=uuids(DOCUMENT_ID, LOOKUP_ID),
+        ) as tool:
+            result = await tool.lookup(lookup_request())
+
+        assert result.completion_status == "COMPLETE"
+        assert result.search_summary.successful_query_count == 1
+        assert result.search_summary.failed_query_count == 0
+        google, kakao = result.search_summary.provider_summaries
+        assert google.failed_query_count == 1
+        assert kakao.successful_query_count == 1
+        assert {warning.code for warning in result.warnings} == {
+            "SEARCH_PROVIDER_FAILED",
+            "SEARCH_PROVIDER_FALLBACK",
+        }
+
+    asyncio.run(scenario())
+
+
+def test_failed_fallback_after_empty_google_result_is_partial_not_unavailable() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "discoveryengine.googleapis.com":
+            return google_search_response()
+        assert request.url.host == "dapi.kakao.com"
+        return httpx.Response(503, json={"message": "temporary"})
+
+    async def scenario() -> None:
+        async with ProcedureLookupTool(
+            config(
+                google_api_key="test-google-key",
+                google_project_id="reborn-project",
+                google_engine_id="closure-search",
+            ),
+            transport=httpx.MockTransport(handler),
+            clock=lambda: NOW,
+            uuid_factory=uuids(LOOKUP_ID),
+        ) as tool:
+            result = await tool.lookup(lookup_request())
+
+        assert result.completion_status == "PARTIAL"
+        assert result.documents == []
+        assert result.search_summary.successful_query_count == 0
+        assert result.search_summary.failed_query_count == 1
+        assert {warning.code for warning in result.warnings} == {
+            "SEARCH_PROVIDER_FAILED",
+            "SEARCH_PROVIDER_FALLBACK",
+            "SEARCH_QUERY_FAILED",
+            "NO_OFFICIAL_RESULTS",
+        }
+
+    asyncio.run(scenario())
 
 
 def test_kakao_query_header_and_official_fetch_create_evidence() -> None:
@@ -485,7 +707,10 @@ def test_one_failed_query_and_one_fetched_document_is_partial() -> None:
         assert result.search_summary.successful_query_count == 1
         assert result.search_summary.failed_query_count == 1
         assert len(result.documents) == 1
-        assert {warning.code for warning in result.warnings} == {"SEARCH_QUERY_FAILED"}
+        assert {warning.code for warning in result.warnings} == {
+            "SEARCH_PROVIDER_FAILED",
+            "SEARCH_QUERY_FAILED",
+        }
 
     asyncio.run(scenario())
 
@@ -525,13 +750,17 @@ def test_provider_cannot_expand_fetches_beyond_requested_result_limit() -> None:
     asyncio.run(scenario())
 
 
-def test_all_search_queries_failing_is_typed_request_error() -> None:
+def test_all_providers_and_queries_failing_is_typed_request_error() -> None:
     def handler(_: httpx.Request) -> httpx.Response:
         return httpx.Response(503, json={"message": "temporary"})
 
     async def scenario() -> None:
         async with ProcedureLookupTool(
-            config(),
+            config(
+                google_api_key="test-google-key",
+                google_project_id="reborn-project",
+                google_engine_id="closure-search",
+            ),
             transport=httpx.MockTransport(handler),
             clock=lambda: NOW,
         ) as tool:
@@ -540,6 +769,7 @@ def test_all_search_queries_failing_is_typed_request_error() -> None:
         assert raised.value.code == "SEARCH_UNAVAILABLE"
         assert raised.value.retryable is True
         assert "test-kakao-rest-key" not in str(raised.value)
+        assert "test-google-key" not in str(raised.value)
 
     asyncio.run(scenario())
 
@@ -654,21 +884,36 @@ def test_unsupported_or_oversized_source_never_becomes_evidence(
     asyncio.run(scenario())
 
 
-def test_config_prefers_procedure_key_and_repr_hides_both_key_names(
+def test_config_prefers_new_kakao_key_and_repr_hides_all_key_values(
     tmp_path: Path,
 ) -> None:
     env_file = tmp_path / "missing.env"
     configured = ProcedureSearchConfig.from_env(
         env_file=env_file,
         environ={
-            "PROCEDURE_SEARCH_API_KEY": "primary-secret",
-            "KAKAO_CLIENT_ID": "fallback-secret",
+            "PROCEDURE_GOOGLE_API_KEY": "google-secret",
+            "PROCEDURE_GOOGLE_PROJECT_ID": "reborn-project",
+            "PROCEDURE_GOOGLE_ENGINE_ID": "closure-search",
+            "PROCEDURE_KAKAO_REST_API_KEY": "new-kakao-secret",
+            "PROCEDURE_SEARCH_API_KEY": "deprecated-secret",
+            "KAKAO_CLIENT_ID": "oldest-secret",
         },
     )
-    assert configured.api_key == "primary-secret"
-    assert configured.endpoint == DEFAULT_SEARCH_ENDPOINT
-    assert "primary-secret" not in repr(configured)
-    assert "fallback-secret" not in repr(configured)
+    assert configured.google_api_key == "google-secret"
+    assert configured.kakao_api_key == "new-kakao-secret"
+    assert configured.kakao_endpoint == DEFAULT_SEARCH_ENDPOINT
+    for secret in (
+        "google-secret",
+        "new-kakao-secret",
+        "deprecated-secret",
+        "oldest-secret",
+    ):
+        assert secret not in repr(configured)
+    assert configured.google_search_url == (
+        "https://discoveryengine.googleapis.com/v1/projects/reborn-project/"
+        "locations/global/collections/default_collection/engines/closure-search/"
+        "servingConfigs/default_search:searchLite"
+    )
 
 
 def test_config_falls_back_to_kakao_client_id(tmp_path: Path) -> None:
@@ -676,7 +921,8 @@ def test_config_falls_back_to_kakao_client_id(tmp_path: Path) -> None:
         env_file=tmp_path / "missing.env",
         environ={"KAKAO_CLIENT_ID": "fallback-key"},
     )
-    assert configured.api_key == "fallback-key"
+    assert configured.kakao_api_key == "fallback-key"
+    assert configured.google_enabled is False
 
 
 def test_config_rejects_missing_key_and_unsafe_endpoint(tmp_path: Path) -> None:
@@ -687,34 +933,34 @@ def test_config_rejects_missing_key_and_unsafe_endpoint(tmp_path: Path) -> None:
         )
     with pytest.raises(ProcedureSearchConfigurationError):
         ProcedureSearchConfig(
-            api_key="secret",
-            endpoint="http://dapi.kakao.com/v2/search/web",
+            kakao_api_key="secret",
+            kakao_endpoint="http://dapi.kakao.com/v2/search/web",
         )
     with pytest.raises(ProcedureSearchConfigurationError):
         ProcedureSearchConfig(
-            api_key="secret",
-            endpoint="https://attacker.example/v2/search/web",
+            kakao_api_key="secret",
+            kakao_endpoint="https://attacker.example/v2/search/web",
         )
     for unsafe_domain in ("localhost", "com", "co.kr", "or.kr"):
         with pytest.raises(ProcedureSearchConfigurationError, match="public suffix"):
             ProcedureSearchConfig(
-                api_key="secret",
+                kakao_api_key="secret",
                 allowed_domains=(unsafe_domain,),
             )
     with pytest.raises(ProcedureSearchConfigurationError, match="reviewed registry"):
         ProcedureSearchConfig(
-            api_key="secret",
+            kakao_api_key="secret",
             allowed_domains=("official-looking.example",),
         )
     for invalid_domain in ("*.gov.kr", "-bad.gov.kr", "bad-.gov.kr"):
         with pytest.raises(ProcedureSearchConfigurationError):
             ProcedureSearchConfig(
-                api_key="secret",
+                kakao_api_key="secret",
                 allowed_domains=(invalid_domain,),
             )
 
     narrowed = ProcedureSearchConfig(
-        api_key="secret",
+        kakao_api_key="secret",
         allowed_domains=("www.gov.kr", "custom.nts.go.kr"),
     )
     assert narrowed.allowed_domains == ("www.gov.kr", "custom.nts.go.kr")
@@ -725,7 +971,62 @@ def test_config_rejects_missing_key_and_unsafe_endpoint(tmp_path: Path) -> None:
         ("retry_backoff_seconds", float("nan")),
     ):
         with pytest.raises(ProcedureSearchConfigurationError, match="finite"):
-            ProcedureSearchConfig(api_key="secret", **{field: value})
+            ProcedureSearchConfig(kakao_api_key="secret", **{field: value})
+
+
+@pytest.mark.parametrize(
+    "environment",
+    [
+        {"PROCEDURE_GOOGLE_API_KEY": "secret"},
+        {
+            "PROCEDURE_GOOGLE_API_KEY": "secret",
+            "PROCEDURE_GOOGLE_PROJECT_ID": "reborn-project",
+        },
+        {
+            "PROCEDURE_GOOGLE_PROJECT_ID": "reborn-project",
+            "PROCEDURE_GOOGLE_ENGINE_ID": "closure-search",
+        },
+    ],
+)
+def test_partial_google_configuration_is_rejected(
+    tmp_path: Path,
+    environment: dict[str, str],
+) -> None:
+    with pytest.raises(ProcedureSearchConfigurationError, match="requires"):
+        ProcedureSearchConfig.from_env(
+            env_file=tmp_path / "missing.env",
+            environ=environment,
+        )
+
+
+def test_google_only_configuration_and_resource_identifiers_are_validated() -> None:
+    configured = ProcedureSearchConfig(
+        google_api_key="google-secret",
+        google_project_id="reborn-project",
+        google_engine_id="closure-search",
+    )
+    assert configured.google_enabled is True
+    assert configured.kakao_enabled is False
+
+    with pytest.raises(ProcedureSearchConfigurationError, match="PROJECT_ID"):
+        ProcedureSearchConfig(
+            google_api_key="google-secret",
+            google_project_id="../unsafe",
+            google_engine_id="closure-search",
+        )
+    with pytest.raises(ProcedureSearchConfigurationError, match="ENGINE_ID"):
+        ProcedureSearchConfig(
+            google_api_key="google-secret",
+            google_project_id="reborn-project",
+            google_engine_id="unsafe/engine",
+        )
+    with pytest.raises(ProcedureSearchConfigurationError, match="LOCATION"):
+        ProcedureSearchConfig(
+            google_api_key="google-secret",
+            google_project_id="reborn-project",
+            google_engine_id="closure-search",
+            google_location="unknown",
+        )
 
 
 def test_total_lookup_timeout_fails_closed_with_typed_error() -> None:

@@ -10,15 +10,19 @@ from __future__ import annotations
 
 import math
 import os
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Final
+from typing import Final, Literal
 from urllib.parse import urlsplit, urlunsplit
 
 from dotenv import dotenv_values
 
-DEFAULT_SEARCH_ENDPOINT: Final[str] = "https://dapi.kakao.com/v2/search/web"
+DEFAULT_GOOGLE_SEARCH_ENDPOINT: Final[str] = "https://discoveryengine.googleapis.com"
+DEFAULT_KAKAO_SEARCH_ENDPOINT: Final[str] = "https://dapi.kakao.com/v2/search/web"
+# Backwards-compatible import alias. New code should use the provider-specific name.
+DEFAULT_SEARCH_ENDPOINT: Final[str] = DEFAULT_KAKAO_SEARCH_ENDPOINT
 DEFAULT_OFFICIAL_DOMAINS: Final[tuple[str, ...]] = (
     "go.kr",
     "gov.kr",
@@ -57,15 +61,21 @@ class ProcedureSearchConfigurationError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class ProcedureSearchConfig:
-    """Validated Kakao search and official-document fetch configuration.
+    """Validated Google-first search and official-document fetch configuration.
 
-    ``api_key`` is excluded from ``repr`` so diagnostics cannot accidentally
-    disclose it. Process-environment values take precedence over repository
+    Provider keys are excluded from ``repr`` so diagnostics cannot accidentally
+    disclose them. Google Agent Search is attempted first when its complete
+    three-field configuration is present; Kakao remains an optional per-query
+    fallback. Process-environment values take precedence over repository
     ``.env`` values, matching the rest of the Agent runtime.
     """
 
-    api_key: str = field(repr=False)
-    endpoint: str = DEFAULT_SEARCH_ENDPOINT
+    google_api_key: str | None = field(default=None, repr=False)
+    google_project_id: str | None = None
+    google_engine_id: str | None = None
+    google_location: str = "global"
+    kakao_api_key: str | None = field(default=None, repr=False)
+    kakao_endpoint: str = DEFAULT_KAKAO_SEARCH_ENDPOINT
     allowed_domains: tuple[str, ...] = DEFAULT_OFFICIAL_DOMAINS
     timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS
     total_timeout_seconds: float = _DEFAULT_TOTAL_TIMEOUT_SECONDS
@@ -75,13 +85,36 @@ class ProcedureSearchConfig:
     max_redirects: int = _DEFAULT_MAX_REDIRECTS
 
     def __post_init__(self) -> None:
-        normalized_key = self.api_key.strip()
-        if not normalized_key:
+        google_api_key = _normalize_optional(self.google_api_key)
+        google_project_id = _normalize_optional(self.google_project_id)
+        google_engine_id = _normalize_optional(self.google_engine_id)
+        google_fields = (google_api_key, google_project_id, google_engine_id)
+        if any(google_fields) and not all(google_fields):
             raise ProcedureSearchConfigurationError(
-                "PROCEDURE_SEARCH_API_KEY or KAKAO_CLIENT_ID is required"
+                "Google procedure search requires API_KEY, PROJECT_ID, and ENGINE_ID"
             )
-        object.__setattr__(self, "api_key", normalized_key)
-        object.__setattr__(self, "endpoint", _validate_search_endpoint(self.endpoint))
+        if google_project_id is not None:
+            google_project_id = _validate_project_id(google_project_id)
+        if google_engine_id is not None:
+            google_engine_id = _validate_engine_id(google_engine_id)
+        location = self.google_location.strip().lower()
+        if location not in {"global", "us", "eu"}:
+            raise ProcedureSearchConfigurationError(
+                "PROCEDURE_GOOGLE_LOCATION must be global, us, or eu"
+            )
+        kakao_api_key = _normalize_optional(self.kakao_api_key)
+        if google_api_key is None and kakao_api_key is None:
+            raise ProcedureSearchConfigurationError(
+                "at least one procedure search provider must be configured"
+            )
+        object.__setattr__(self, "google_api_key", google_api_key)
+        object.__setattr__(self, "google_project_id", google_project_id)
+        object.__setattr__(self, "google_engine_id", google_engine_id)
+        object.__setattr__(self, "google_location", location)
+        object.__setattr__(self, "kakao_api_key", kakao_api_key)
+        object.__setattr__(
+            self, "kakao_endpoint", _validate_kakao_endpoint(self.kakao_endpoint)
+        )
         normalized_domains = tuple(
             dict.fromkeys(_normalize_domain(item) for item in self.allowed_domains)
         )
@@ -122,6 +155,31 @@ class ProcedureSearchConfig:
                 "PROCEDURE_SEARCH_MAX_REDIRECTS must be between 0 and 10"
             )
 
+    @property
+    def google_enabled(self) -> bool:
+        return self.google_api_key is not None
+
+    @property
+    def kakao_enabled(self) -> bool:
+        return self.kakao_api_key is not None
+
+    @property
+    def google_search_url(self) -> str:
+        if not self.google_enabled:
+            raise ProcedureSearchConfigurationError(
+                "Google procedure search is not configured"
+            )
+        host = (
+            "discoveryengine.googleapis.com"
+            if self.google_location == "global"
+            else f"{self.google_location}-discoveryengine.googleapis.com"
+        )
+        return (
+            f"https://{host}/v1/projects/{self.google_project_id}"
+            f"/locations/{self.google_location}/collections/default_collection"
+            f"/engines/{self.google_engine_id}/servingConfigs/default_search:searchLite"
+        )
+
     @classmethod
     def from_env(
         cls,
@@ -151,11 +209,14 @@ class ProcedureSearchConfig:
             normalized = str(raw).strip()
             return normalized or None
 
-        api_key = value("PROCEDURE_SEARCH_API_KEY") or value("KAKAO_CLIENT_ID")
-        if api_key is None:
-            raise ProcedureSearchConfigurationError(
-                "PROCEDURE_SEARCH_API_KEY or KAKAO_CLIENT_ID is required"
-            )
+        google_api_key = value("PROCEDURE_GOOGLE_API_KEY")
+        google_project_id = value("PROCEDURE_GOOGLE_PROJECT_ID")
+        google_engine_id = value("PROCEDURE_GOOGLE_ENGINE_ID")
+        kakao_api_key = (
+            value("PROCEDURE_KAKAO_REST_API_KEY")
+            or value("PROCEDURE_SEARCH_API_KEY")
+            or value("KAKAO_CLIENT_ID")
+        )
 
         allowed_domains_raw = value("PROCEDURE_SEARCH_ALLOWED_DOMAINS")
         allowed_domains = (
@@ -166,8 +227,16 @@ class ProcedureSearchConfig:
             else DEFAULT_OFFICIAL_DOMAINS
         )
         return cls(
-            api_key=api_key,
-            endpoint=value("PROCEDURE_SEARCH_ENDPOINT") or DEFAULT_SEARCH_ENDPOINT,
+            google_api_key=google_api_key,
+            google_project_id=google_project_id,
+            google_engine_id=google_engine_id,
+            google_location=value("PROCEDURE_GOOGLE_LOCATION") or "global",
+            kakao_api_key=kakao_api_key,
+            kakao_endpoint=(
+                value("PROCEDURE_KAKAO_SEARCH_ENDPOINT")
+                or value("PROCEDURE_SEARCH_ENDPOINT")
+                or DEFAULT_KAKAO_SEARCH_ENDPOINT
+            ),
             allowed_domains=allowed_domains,
             timeout_seconds=_parse_float(
                 value("PROCEDURE_SEARCH_TIMEOUT_SECONDS"),
@@ -204,11 +273,12 @@ class ProcedureSearchConfig:
 
 @dataclass(frozen=True, slots=True)
 class SearchHit:
-    """Untrusted discovery result returned by Kakao search."""
+    """Untrusted discovery result returned by a configured search provider."""
 
     title: str
     url: str
     query: str
+    provider: Literal["GOOGLE_AGENT_SEARCH", "KAKAO_DAUM_WEB"]
 
 
 def _repo_root() -> Path:
@@ -256,31 +326,52 @@ def _normalize_domain(value: str) -> str:
     return normalized
 
 
-def _validate_search_endpoint(value: str) -> str:
+def _normalize_optional(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def _validate_project_id(value: str) -> str:
+    if not re.fullmatch(r"[a-z][a-z0-9-]{4,28}[a-z0-9]", value):
+        raise ProcedureSearchConfigurationError(
+            "PROCEDURE_GOOGLE_PROJECT_ID is invalid"
+        )
+    return value
+
+
+def _validate_engine_id(value: str) -> str:
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,62}", value):
+        raise ProcedureSearchConfigurationError("PROCEDURE_GOOGLE_ENGINE_ID is invalid")
+    return value
+
+
+def _validate_kakao_endpoint(value: str) -> str:
     raw = value.strip()
     parsed = urlsplit(raw)
     if parsed.scheme != "https" or not parsed.hostname:
         raise ProcedureSearchConfigurationError(
-            "PROCEDURE_SEARCH_ENDPOINT must be an absolute HTTPS URL"
+            "Kakao search endpoint must be an absolute HTTPS URL"
         )
     if parsed.username or parsed.password or parsed.query or parsed.fragment:
         raise ProcedureSearchConfigurationError(
-            "PROCEDURE_SEARCH_ENDPOINT must not contain credentials, query, or fragment"
+            "Kakao search endpoint must not contain credentials, query, or fragment"
         )
     try:
         port = parsed.port
     except ValueError as exc:
         raise ProcedureSearchConfigurationError(
-            "PROCEDURE_SEARCH_ENDPOINT has an invalid port"
+            "Kakao search endpoint has an invalid port"
         ) from exc
     if port not in {None, 443}:
         raise ProcedureSearchConfigurationError(
-            "PROCEDURE_SEARCH_ENDPOINT must use the standard HTTPS port"
+            "Kakao search endpoint must use the standard HTTPS port"
         )
     hostname = parsed.hostname.encode("idna").decode("ascii").lower().rstrip(".")
     if hostname != "dapi.kakao.com" or parsed.path.rstrip("/") != "/v2/search/web":
         raise ProcedureSearchConfigurationError(
-            "PROCEDURE_SEARCH_ENDPOINT must be the Kakao Daum web-search endpoint"
+            "Kakao search endpoint must be the Daum web-search endpoint"
         )
     netloc = hostname
     return urlunsplit(("https", netloc, parsed.path or "/", "", ""))
@@ -305,6 +396,8 @@ def _parse_float(raw: str | None, *, default: float, name: str) -> float:
 
 
 __all__ = [
+    "DEFAULT_GOOGLE_SEARCH_ENDPOINT",
+    "DEFAULT_KAKAO_SEARCH_ENDPOINT",
     "DEFAULT_OFFICIAL_DOMAINS",
     "DEFAULT_SEARCH_ENDPOINT",
     "ProcedureSearchConfig",

@@ -207,10 +207,21 @@ class FakeProcedure:
                     content_hash=content_hash,
                     evidence_ref=official_evidence.evidence_id,
                     search_query=component_input.search_queries[0],
+                    discovery_provider="KAKAO_DAUM_WEB",
                 )
             ],
             search_summary=ProcedureSearchSummary(
-                provider="KAKAO_DAUM_WEB",
+                provider_order=["KAKAO_DAUM_WEB"],
+                provider_summaries=[
+                    {
+                        "provider": "KAKAO_DAUM_WEB",
+                        "attempted_query_count": len(component_input.search_queries),
+                        "successful_query_count": len(component_input.search_queries),
+                        "failed_query_count": 0,
+                        "provider_result_count": 1,
+                    }
+                ],
+                fallback_query_count=0,
                 requested_query_count=len(component_input.search_queries),
                 successful_query_count=len(component_input.search_queries),
                 failed_query_count=0,

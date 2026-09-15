@@ -5,7 +5,7 @@
 > 기준 구조: `docs/architecture.md`의 Supervisor Global Loop, 정보분석/지원금 Local Loop, 절차조회 Tool, 필수 Review Tool
 > 문서 분리: Agent 독립 실행 조건은 [`agent-standalone-runtime-requirements.md`](./agent-standalone-runtime-requirements.md), BE 구현·회신 요구사항은 [`be-agent-integration-requirements.md`](./be-agent-integration-requirements.md)를 따릅니다.
 
-이 문서는 Agent 런타임과 BE 사이, Supervisor와 하위 Agent/Tool 사이의 데이터 계약을 먼저 합의하기 위한 문서입니다. v2에서 절차조회 Tool은 **Kakao 웹검색으로 공식 URL을 발견하고 원문을 직접 fetch해 raw document와 Evidence만 반환**하며, 정보분석 Agent가 그 결과를 사용자 입력·CaseSnapshot과 함께 분석합니다. v1의 주입형 절차 master 평가 계약과 wire schema는 폐기된 과거 설계이며 v2와 호환되지 않습니다. BE adapter·인증/소유권 확인·DB migration·저장 API는 아직 구현되지 않았습니다. 현재 구현 범위와 목표 BE 계약의 차이는 §18에 정리합니다.
+이 문서는 Agent 런타임과 BE 사이, Supervisor와 하위 Agent/Tool 사이의 데이터 계약을 먼저 합의하기 위한 문서입니다. v2에서 절차조회 Tool은 **각 query마다 Google Agent Search `searchLite`로 공식 URL을 먼저 발견하고 정해진 경우 Kakao Daum 검색으로 fallback한 뒤, 원문을 직접 fetch해 raw document와 Evidence만 반환**하며, 정보분석 Agent가 그 결과를 사용자 입력·CaseSnapshot과 함께 분석합니다. Google 검색결과 HTML은 scraping하지 않습니다. v1의 주입형 절차 master 평가 계약과 wire schema는 폐기된 과거 설계이며 v2와 호환되지 않습니다. BE adapter·인증/소유권 확인·DB migration·저장 API는 아직 구현되지 않았습니다. 현재 구현 범위와 목표 BE 계약의 차이는 §18에 정리합니다.
 
 역할과 호출 방향은 `docs/architecture.md`가 기준입니다. 현재 standalone 실행의 최종 권한은 `backend/app/agent/schemas.py`와 자동 테스트에 있습니다. 이 문서에서 **현재 구현**으로 표시한 항목은 실행 계약이고, **목표 BE 계약**으로 표시한 항목은 AI/BE 공동 승인 전 제안입니다. `docs/interface-spec.md` §11의 기존 Agent 예시는 deprecated이며 구현 기준으로 사용하지 않습니다.
 
@@ -32,7 +32,7 @@ FastAPI / PlanningCoordinator (코드)
   2. SharedCaseSnapshotDTO 조립 → AI adapter의 CaseSnapshot 검증
   3. shared 실행 context로 Agent Graph 실행
        Supervisor
-         1. 절차조회 Tool — Kakao 검색 → 공식 URL 검증 → 원문 fetch
+         1. 절차조회 Tool — Google 우선/Kakao query별 fallback → 공식 URL 검증 → 원문 fetch
          2. 정보분석 Agent-as-Tool — 사용자/Case/ProcedureLookupResult 분석
          3. 지원금 Agent-as-Tool
        SupervisorDraft → Review Tool
@@ -224,7 +224,7 @@ Pydantic 구현 시 한 모델의 nullable 조합이 아니라 `execution_status
 | `freshness_status` | `CURRENT` \| `STALE` \| `UNKNOWN` | O | 최신성 |
 | `content_hash` | `sha256:<hex>` \| null | O | 원문 변경 감지 |
 
-`REVIEWED_WIKI`가 고위험 주장을 뒷받침하려면 `parent_evidence_refs`로 `OFFICIAL_DOCUMENT` 또는 `OFFICIAL_API`를 연결해야 합니다. `CALCULATION_RESULT`는 공식 규칙 Evidence, 계산 규칙 버전, 입력 사실 Evidence를 부모로 연결합니다. Kakao 검색 응답의 `contents`는 URL 발견용 snippet이므로 Evidence가 아닙니다. 절차조회 Tool이 allowlist·HTTPS 검증 후 직접 fetch한 원문만 `OFFICIAL_DOCUMENT`가 될 수 있습니다.
+`REVIEWED_WIKI`가 고위험 주장을 뒷받침하려면 `parent_evidence_refs`로 `OFFICIAL_DOCUMENT` 또는 `OFFICIAL_API`를 연결해야 합니다. `CALCULATION_RESULT`는 공식 규칙 Evidence, 계산 규칙 버전, 입력 사실 Evidence를 부모로 연결합니다. Google/Kakao 검색 응답의 title·snippet 등은 URL 발견용 metadata이므로 Evidence가 아닙니다. 절차조회 Tool이 allowlist·HTTPS 검증 후 직접 fetch한 원문만 `OFFICIAL_DOCUMENT`가 될 수 있습니다.
 
 ### `GroundedClaim`
 
@@ -851,15 +851,17 @@ v2는 하나의 strict model입니다. 검색 질의는 Supervisor/runtime이 �
 | 필드 | 타입 | 필수 | 설명 |
 |---|---|---:|---|
 | `lookup_goal` | literal `BUSINESS_CLOSURE` | O | 폐업 공식 절차 조회만 허용 |
-| `search_queries` | non-empty string[] (min 1, max 4) | O | Kakao 웹문서 검색에 사용할 중복 없는 비식별 질의. 각 질의는 runtime에서 200자 이하로 제한 |
+| `search_queries` | non-empty string[] (min 1, max 4) | O | Google 우선·Kakao fallback 검색에 사용할 중복 없는 비식별 논리 질의. 각 질의는 runtime에서 200자 이하로 제한 |
 | `as_of` | date | O | 조회·최신성 판단 기준일 |
 | `locale` | literal `ko-KR` | O | v2 지원 locale |
 | `source_policy` | literal `OFFICIAL_ONLY` | O | 공식기관 allowlist만 원문 fetch |
-| `max_results_per_query` | integer `1..10` | O | Kakao `size` 및 후속 fetch 비용 상한 |
+| `max_results_per_query` | integer `1..10` | O | provider별 결과와 후속 fetch 비용의 로컬 상한 |
 | `based_on_snapshot_id` | UUID | O | 검색 문맥을 만든 Case snapshot ID |
 | `review_feedback` | `ReviewIssue[]` | O | 최초 호출은 `[]`; 재작업에서는 Graph가 검증한 Review issue를 전달 |
 
-`search_queries`는 검색 명령이지 Evidence가 아닙니다. Kakao 웹문서 API에는 `Authorization: KakaoAK ${REST_API_KEY}`로 서버에서 요청하며, credential은 input/output/log/trace에 넣지 않습니다. runtime credential은 `PROCEDURE_SEARCH_API_KEY`를 우선하고 기존 배포 호환을 위해 `KAKAO_CLIENT_ID`를 fallback으로 읽습니다. 둘 다 없으면 빈 성공이나 fixture로 대체하지 않고 설정 또는 component failure로 fail closed합니다. provider가 요청한 `max_results_per_query`보다 많은 document를 반환해도 runtime은 로컬 상한까지만 검증·fetch하고 초과분을 rejected count에 포함합니다.
+`search_queries`는 검색 명령이지 Evidence가 아닙니다. 각 query는 설정된 provider 중 Google Agent Search `searchLite`를 먼저 시도하고, Google의 기술 실패·0건·공식 allowlist 후보 0건일 때만 Kakao Daum 검색으로 fallback합니다. Google이 공식 후보를 반환한 뒤 원문 fetch가 실패한 경우에는 같은 query를 Kakao로 다시 검색하지 않습니다. Google이 미설정이고 Kakao만 설정됐다면 Kakao가 이번 실행의 첫 provider이므로 `provider_order=[KAKAO_DAUM_WEB]`, `fallback_query_count=0`이며 Google을 시도한 것처럼 경고하지 않습니다.
+
+Google 호출은 공개 공식사이트만 포함한 Agent Search 앱을 대상으로 `POST https://{api-host}/v1/projects/{project}/locations/{location}/collections/default_collection/engines/{engine}/servingConfigs/default_search:searchLite`와 `X-Goog-Api-Key`를 사용합니다. `global`은 `discoveryengine.googleapis.com`, `us | eu`는 `{location}-discoveryengine.googleapis.com`만 허용합니다. Kakao는 `GET https://dapi.kakao.com/v2/search/web`와 `Authorization: KakaoAK ${REST_API_KEY}`를 사용합니다. Google/Kakao 검색결과 HTML, 특히 `google.com/search` SERP는 요청하거나 parsing하지 않습니다. credential은 input/output/log/trace에 넣지 않습니다. Google runtime 설정은 `PROCEDURE_GOOGLE_API_KEY`, `PROCEDURE_GOOGLE_PROJECT_ID`, `PROCEDURE_GOOGLE_ENGINE_ID`, 선택 `PROCEDURE_GOOGLE_LOCATION`입니다. Kakao는 `PROCEDURE_KAKAO_REST_API_KEY`를 우선하고 기존 `PROCEDURE_SEARCH_API_KEY`, `KAKAO_CLIENT_ID`는 deprecated alias로만 읽습니다. 두 provider가 모두 미설정이면 빈 성공이나 fixture로 대체하지 않고 configuration failure로 fail closed합니다. provider가 요청한 `max_results_per_query`보다 많은 document를 반환해도 runtime은 로컬 상한까지만 검증·fetch하고 초과분을 rejected count에 포함합니다.
 
 ### 출력 — `ProcedureLookupResult`
 
@@ -890,6 +892,7 @@ v2는 하나의 strict model입니다. 검색 질의는 Supervisor/runtime이 �
 | `content_hash` | `sha256:<hex>` | O | 실제 fetch 응답 body bytes 기준 |
 | `evidence_ref` | opaque string | O | 같은 result의 정확히 한 Evidence ID |
 | `search_query` | string | O | 이 URL을 발견한 입력 질의 중 하나 |
+| `discovery_provider` | `GOOGLE_AGENT_SEARCH` \| `KAKAO_DAUM_WEB` | O | 이 URL을 실제 발견한 search provider. 검색 metadata provenance이며 Evidence 출처 유형은 아님 |
 
 DTO 자체는 HTTPS, credential/fragment/port/IP-literal 금지, lowercase canonical host와 `source_domain` 일치를 검증합니다. 공식기관 domain allowlist는 wire field가 아니며 신뢰된 Procedure Tool/resolver가 결과를 만들 때 runtime config로 추가 검증합니다. 환경변수는 코드에서 검토된 root와 그 하위 host로만 범위를 좁힐 수 있고, 새 trust root 추가는 코드 변경·보안 승인이 필요합니다. BE가 임의 document를 조립해 이 출력으로 취급해서는 안 됩니다.
 
@@ -897,18 +900,34 @@ DTO 자체는 HTTPS, credential/fragment/port/IP-literal 금지, lowercase canon
 
 | 필드 | 타입 | 필수 | 설명 |
 |---|---|---:|---|
-| `provider` | literal `KAKAO_DAUM_WEB` | O | URL discovery provider |
+| `provider_order` | `ProcedureSearchProvider[]` (min 1, max 2) | O | 이번 실행에 설정된 provider의 실제 우선순위. 둘 다 설정되면 `[GOOGLE_AGENT_SEARCH, KAKAO_DAUM_WEB]`; 하나만 설정되면 해당 provider만 포함 |
+| `provider_summaries` | `ProcedureProviderSearchSummary[]` (min 1, max 2) | O | `provider_order`와 같은 길이·순서의 provider별 호출 counter. 설정됐지만 호출하지 않은 fallback도 0 counter로 포함 |
+| `fallback_query_count` | non-negative integer | O | Google을 실제 시도한 뒤 기술 실패·0건·공식 후보 0건으로 Kakao에 넘긴 논리 query 수. Kakao-only direct 실행은 0 |
 | `requested_query_count` | positive integer | O | 요청 질의 수 |
-| `successful_query_count` | non-negative integer | O | Kakao 응답 성공 질의 수 |
-| `failed_query_count` | non-negative integer | O | Kakao 오류 질의 수 |
-| `provider_result_count` | non-negative integer | O | provider가 돌려준 후보 수 |
+| `successful_query_count` | non-negative integer | O | provider chain을 거쳐 성공한 논리 질의 수. Google 실패 뒤 Kakao 성공도 1회 성공으로 계산 |
+| `failed_query_count` | non-negative integer | O | 모든 허용 provider 시도 뒤에도 실패한 논리 질의 수 |
+| `provider_result_count` | non-negative integer | O | 모든 provider가 반환한 후보 수 합계 |
 | `official_candidate_count` | non-negative integer | O | URL 정규화·HTTPS·allowlist를 통과한 후보 수 |
 | `fetched_document_count` | non-negative integer | O | 원문 fetch·본문 검증을 통과한 문서 수 |
 | `rejected_result_count` | non-negative integer | O | provider 결과 중 URL parse·HTTPS·초기 domain 정책을 통과하지 못한 수 |
 | `fetch_failure_count` | non-negative integer | O | 허용 후보 중 URL/redirect·HTTP·MIME·size·본문 검증 또는 fetch가 실패한 수 |
 | `searched_at` | timezone-aware datetime | O | 조회 실행 시각 |
 
-counter는 음수가 아니며 `successful_query_count >= 1`, `successful_query_count + failed_query_count = requested_query_count`, `official_candidate_count + rejected_result_count = provider_result_count`, `fetched_document_count = len(documents) = len(evidence_records)`, `fetched_document_count + fetch_failure_count <= official_candidate_count`를 만족해야 합니다. 중복 canonical URL은 한 문서로 합칩니다.
+`ProcedureSearchProvider`는 `GOOGLE_AGENT_SEARCH | KAKAO_DAUM_WEB`입니다.
+
+`ProcedureProviderSearchSummary`:
+
+| 필드 | 타입 | 필수 | 설명 |
+|---|---|---:|---|
+| `provider` | `ProcedureSearchProvider` | O | 이 summary가 집계하는 provider |
+| `attempted_query_count` | non-negative integer | O | 실제 API 요청을 시도한 논리 query 수 |
+| `successful_query_count` | non-negative integer | O | well-formed HTTP/JSON 응답을 받은 query 수. 0건 응답도 provider-level success |
+| `failed_query_count` | non-negative integer | O | retry 상한 뒤 기술 실패한 provider query 수 |
+| `provider_result_count` | non-negative integer | O | 이 provider가 반환한 후보 수 |
+
+각 provider summary에서 `successful_query_count + failed_query_count = attempted_query_count`이고, `successful_query_count=0`이면 `provider_result_count=0`이어야 하며, `provider_result_count` 합은 aggregate `provider_result_count`와 같습니다. 각 document의 `discovery_provider` summary에는 성공 응답과 반환 결과가 실제로 있어야 하고, 그 provider로 표시된 document 수는 해당 `provider_result_count`를 넘을 수 없습니다.
+
+aggregate counter는 음수가 아니며 `successful_query_count + failed_query_count = requested_query_count`, `fallback_query_count <= requested_query_count`, `official_candidate_count + rejected_result_count = provider_result_count`, `fetched_document_count = len(documents) = len(evidence_records)`, `fetched_document_count + fetch_failure_count <= official_candidate_count`를 만족해야 합니다. 논리 query 성공 수가 0인 `PARTIAL`도 가능하지만, 결과 객체가 생성되려면 `provider_summaries` 중 적어도 하나의 provider-level `successful_query_count >= 1`이어야 합니다. `provider_summaries`의 provider는 `provider_order`와 1:1·같은 순서여야 합니다. 둘 다 설정되면 Google의 `attempted_query_count=requested_query_count`, Kakao의 `attempted_query_count=fallback_query_count`입니다. 설정됐지만 호출하지 않은 Kakao fallback summary는 네 counter가 모두 0입니다. Google-only와 Kakao-only 실행은 해당 provider만 포함하고 `fallback_query_count=0`이며, Kakao-only의 `attempted_query_count=requested_query_count`입니다. provider를 넘나드는 중복 canonical URL은 한 문서로 합치고 최초로 채택한 후보의 `discovery_provider`를 유지합니다.
 
 `ProcedureLookupWarning`:
 
@@ -917,20 +936,23 @@ counter는 음수가 아니며 `successful_query_count >= 1`, `successful_query_
 | `code` | upper snake code | O | 비차단 부분 실패·거부·최신성 경고 코드 |
 | `message` | string | O | credential·원문·내부 예외를 포함하지 않는 운영 요약 |
 
-현재 runtime이 발급하는 code는 `SEARCH_QUERY_FAILED`, `RESULT_REJECTED`, `SOURCE_FETCH_FAILED`, `NO_OFFICIAL_RESULTS`, `NO_FETCHED_DOCUMENTS`입니다. 원 질의·거부 URL·내부 예외는 Warning에 복사하지 않으며 상세 원인은 민감정보가 제거된 운영 telemetry로만 집계합니다.
+현재 runtime이 발급하는 provider-chain code에는 Kakao fallback이 실제 실행됐음을 나타내는 `SEARCH_PROVIDER_FALLBACK`과 provider 기술 실패를 나타내는 `SEARCH_PROVIDER_FAILED`가 있습니다. 그 밖의 code는 `SEARCH_QUERY_FAILED`, `RESULT_REJECTED`, `SOURCE_FETCH_FAILED`, `NO_OFFICIAL_RESULTS`, `NO_FETCHED_DOCUMENTS`입니다. 원 질의·거부 URL·내부 예외는 Warning에 복사하지 않으며 상세 원인은 민감정보가 제거된 운영 telemetry로만 집계합니다.
 
-`COMPLETE`는 모든 질의가 성공하고 공식문서가 1개 이상이며 fetch 실패가 없을 때입니다. `PARTIAL`은 적어도 한 질의 또는 fetch가 실패했고 검색 실행 일부는 성립했을 때이며, 허용 후보 fetch가 모두 실패하면 문서가 0개일 수도 있습니다. `NO_RESULTS`는 질의/fetch 실패 없이 공식 후보가 0개일 때만 허용합니다. credential 없음, 전 질의 timeout, Kakao 인증·quota 오류처럼 조회 자체를 신뢰할 수 없는 상황은 `NO_RESULTS`가 아니라 `ComponentFailure`입니다. Info Agent는 `PARTIAL | NO_RESULTS`를 `completion_status=COMPLETE`로 소거하지 않습니다. 누락/충돌 때문에 `NEEDS_USER_INPUT`이어야 하는 경우는 그 상태를 유지하고, 그렇지 않으면 최소 `PARTIAL`과 `SOURCE_UNAVAILABLE` uncertainty로 전달합니다.
+`COMPLETE`는 provider chain 기준 모든 논리 질의가 성공하고 공식문서가 1개 이상이며 fetch 실패가 없을 때입니다. Google 기술 실패 뒤 Kakao가 해당 query를 해결해도 `SEARCH_PROVIDER_FALLBACK` warning과 attempt 이력을 남긴 채 `COMPLETE`가 될 수 있습니다. `PARTIAL`은 chain 종료 후 적어도 한 논리 질의 또는 fetch가 실패했고 검색 실행 일부는 성립했을 때이며, 허용 후보 fetch가 모두 실패하면 문서가 0개일 수도 있습니다. Google이 정상 0건 또는 비공식 후보만 반환한 뒤 Kakao가 기술 실패한 경우도 `PARTIAL`입니다. `NO_RESULTS`는 모든 논리 query가 chain 안의 적어도 한 well-formed provider 응답으로 해결됐지만 전체 공식 후보가 0개일 때 허용합니다. 앞선 Google 기술 실패가 Kakao의 정상 0건 응답으로 복구된 경우에는 provider warning을 보존한 `NO_RESULTS`일 수 있습니다. 두 provider가 모두 미설정이거나 전체 lookup에서 모든 실제 provider attempt가 기술 실패하면 `SEARCH_UNAVAILABLE` `ComponentFailure`입니다. Info Agent는 `PARTIAL | NO_RESULTS`를 `completion_status=COMPLETE`로 소거하지 않습니다. 누락/충돌 때문에 `NEEDS_USER_INPUT`이어야 하는 경우는 그 상태를 유지하고, 그렇지 않으면 최소 `PARTIAL`과 `SOURCE_UNAVAILABLE` uncertainty로 전달합니다.
 
 각 document의 `evidence_ref`는 같은 result에서 유일한 `EvidenceRecord`를 가리키고, Evidence는 `source_type=OFFICIAL_DOCUMENT`, `source_ref=canonical_url`, 같은 excerpt/published_at/retrieved_at/freshness/content_hash를 가져야 합니다. 검색 snippet은 이 집합에 들어갈 수 없습니다.
 
-현재 runtime은 Kakao `datetime`을 공식 원문의 발행·수정시각으로 신뢰하지 않고 별도의 공식 page-date verifier도 없으므로 `published_at=null`, `freshness_status=UNKNOWN`으로 반환합니다. 향후 이 값을 채우려면 fetched page 자체에서 날짜를 검증하는 resolver와 회귀 fixture를 추가해야 합니다. finding이 참조한 Evidence 중 하나라도 `UNKNOWN | STALE`이면 Info local Guardrail이 `relevance=UNDETERMINED` 외 값을 거부하며, provider prompt와 Review도 검증되지 않은 기한·서류·의무를 확정하지 못하게 합니다.
+현재 runtime은 Google/Kakao 검색 metadata의 날짜를 공식 원문의 발행·수정시각으로 신뢰하지 않고 별도의 공식 page-date verifier도 없으므로 `published_at=null`, `freshness_status=UNKNOWN`으로 반환합니다. 향후 이 값을 채우려면 fetched page 자체에서 날짜를 검증하는 resolver와 회귀 fixture를 추가해야 합니다. finding이 참조한 Evidence 중 하나라도 `UNKNOWN | STALE`이면 Info local Guardrail이 `relevance=UNDETERMINED` 외 값을 거부하며, provider prompt와 Review도 검증되지 않은 기한·서류·의무를 확정하지 못하게 합니다.
 
 Tool은 HTML을 data로만 처리하고 script/style 등 실행·비가시 subtree와 form/input의 markup·속성을 제거하며 prompt injection 문구를 실행하지 않습니다. 공식 사이트가 form으로 본문을 감싸는 경우에는 form 안의 보이는 텍스트를 보존합니다. `main`/`article`의 visible text를 우선하고, 긴 문서는 반복 메뉴 횟수가 아니라 서로 다른 정적 검색어 token이 가장 많이 모인 bounded window를 선택합니다. 이는 LLM 의미 판정이 아닌 excerpt 위치 선택일 뿐이며 `content_hash`는 excerpt가 아니라 fetch한 전체 body bytes를 기준으로 합니다. 현재 요청 전과 redirect마다 HTTPS, 표준 port, hostname allowlist와 IP-literal 금지를 검사하고 허용 MIME·본문 byte 상한·요청별 timeout을 적용합니다. `PROCEDURE_SEARCH_TOTAL_TIMEOUT_SECONDS`는 검색과 모든 원문 fetch의 전체 시간을 기본 30초로 제한합니다. 외부 HTTP client를 주입해도 요청마다 redirect 자동 추적과 client auth를 끄고 client 기본 header/cookie를 상속하지 않습니다. hostname의 DNS 해석 결과가 private/loopback/link-local로 바뀌는 경우까지 막는 resolver pinning·egress 정책은 생산 연동 전에 추가해야 하는 보안 경계입니다.
 
 절차조회 출력에는 canonical step ID, `procedure_findings`, 적용성, 준비상태, 완료상태, 조건 판정, priority, rank, selected, blocker, next action을 두지 않습니다. 이 의미 분석은 §8 정보분석 Agent, 최종 선택은 Supervisor의 책임입니다.
 
-### Kakao API 근거
+### Search provider API 근거
 
+- [Google Agent Search `searchLite` REST API](https://docs.cloud.google.com/generative-ai-app-builder/docs/reference/rest/v1/projects.locations.collections.engines.servingConfigs/searchLite)는 공개 웹사이트 검색 앱에서 API key 인증을 허용하는 `POST ...:searchLite`와 query/pageSize/SearchResponse 계약을 정의합니다. Google은 보안상 OAuth/IAM 기반 `search`를 더 권장하지만 v2의 공개 공식사이트 URL discovery에는 제한된 API key와 `X-Goog-Api-Key` header를 사용합니다.
+- [Google Agent Search 웹사이트 데이터 준비](https://docs.cloud.google.com/generative-ai-app-builder/docs/prepare-data)는 검색할 공개 웹사이트 URL pattern을 사전에 포함·제외해 Google이 해당 범위만 crawl/index하도록 구성하는 근거입니다. 이는 Google 검색결과 화면 scraping이 아닙니다.
+- [Google Cloud API key 인증](https://docs.cloud.google.com/docs/authentication/api-keys-use)은 URL query보다 `X-Goog-Api-Key` header 사용을 권장합니다.
 - [Daum 검색 REST API](https://developers.kakao.com/docs/ko/daum-search/dev-guide)는 웹문서 검색을 `GET https://dapi.kakao.com/v2/search/web`와 REST API 키 인증으로 제공하고 title/contents/url/datetime을 반환합니다. `contents`는 검색 결과의 일부이므로 원문 Evidence로 승격하지 않습니다.
 - [REST API 시작하기](https://developers.kakao.com/docs/ko/rest-api/getting-started)는 서버 환경에서 REST API 호출이 가능함을 설명합니다.
 - [앱 키 설정](https://developers.kakao.com/docs/ko/app-setting/app)은 REST API 키 관리와 호출 허용 IP 설정의 근거입니다.
@@ -1323,7 +1345,7 @@ Agent 내부 결과와 HTTP `result`는 같은 enum이 아닙니다.
 | Supervisor | 정보분석·지원금·절차조회 호출, Review 제출 | DB/Case write, Review 생략, Evidence 생성 |
 | 정보분석 Agent | 제공된 redacted input, snapshot, raw `ProcedureLookupResult` 분석과 canonical finding 생성 | 외부 Tool 호출, 웹문서 지시 실행, DB ID 생성, DB write, 최종 결정 |
 | 지원금 Agent | read-only catalog/Wiki/Chroma/S3 조회 | 신청 상태 변경, Wiki 자동 수정, 자격 확정 |
-| 절차조회 Tool | Kakao 웹문서 검색, URL·redirect·allowlist 검증, 공식 원문 fetch, raw document/Evidence 정규화 | 검색 snippet의 Evidence 승격, 문서 의미 해석, Case 적용·완료·우선순위·Next Action 결정, DB ID 생성·write |
+| 절차조회 Tool | Google 우선·Kakao query별 fallback 검색, provider attempt 기록, URL·redirect·allowlist 검증, 공식 원문 fetch, raw document/Evidence 정규화 | Google SERP HTML scraping, 검색 snippet의 Evidence 승격, 문서 의미 해석, Case 적용·완료·우선순위·Next Action 결정, DB ID 생성·write |
 | Review Tool | ReviewSubject만 읽기 | 검색 Tool, DB resolver, 초안 수정, 재호출 결정 |
 | PlanningCoordinator | Guardrail, runtime enrichment, Graph 호출, BE 저장 함수 호출 | 도메인 판단 문장 생성 |
 
@@ -1332,7 +1354,7 @@ BE persistence 함수와 SQL/ORM/session/command handle은 어떤 Agent Tool reg
 ## 17. 재시도 규칙
 
 - 목표 BE envelope 계약에서는 정보분석·지원금 Local Loop 상한을 설정값으로 강제하고, 소진을 빈 성공이 아닌 `PARTIAL` output 또는 `LOOP_LIMIT_REACHED` 실패로 구분합니다. 현재 standalone은 정보분석/Supervisor의 constructor 상한과 지원금의 고정 상한을 사용하며, deterministic 검증 소진 시 예외를 Graph 경계에서 `STRUCTURED_OUTPUT_FAILED`로 변환합니다.
-- Kakao 검색과 공식 원문 fetch retry는 각각 전체 deadline 안의 작은 고정 상한을 갖습니다. `401/403`, credential 없음, quota 소진, 전 질의 실패는 `NO_RESULTS`가 아니라 retry 가능 여부가 명시된 기술 실패입니다.
+- Google/Kakao 검색과 공식 원문 fetch retry는 각각 전체 deadline 안의 작은 고정 상한을 갖습니다. provider별 `401/403`, credential 없음, quota 소진, 전 질의 실패는 fallback 또는 retry 대상이며, chain의 모든 실제 provider attempt가 실패하면 `NO_RESULTS`가 아니라 retry 가능 여부가 명시된 기술 실패입니다.
 - 일부 질의·fetch만 실패하고 공식문서가 남으면 `PARTIAL`, 모든 검색이 정상이나 검증된 문서가 없으면 `NO_RESULTS`입니다. 이 두 업무 결과를 fixture나 모델 지식으로 채우지 않습니다.
 - Review `REVISE` 후 재작성은 최대 2회이므로 Review 호출은 최초를 포함해 최대 3회입니다.
 - Review 권고는 명령이 아닙니다. 현재 Review runtime은 모든 blocking issue의 `target_component`를 `recommended_rework_targets`에 포함하고, Graph는 그 전체 목록에서 dependency 순서상 가장 앞선 구성요소부터 결정론적으로 재실행합니다. BE 통합 후에도 동일 정책을 유지할지는 계약으로 확정합니다.
@@ -1350,7 +1372,7 @@ BE persistence 함수와 SQL/ORM/session/command handle은 어떤 Agent Tool reg
 | 공통 계약 | `backend/app/agent/schemas.py`의 `agent-io/2.0` strict Pydantic schema, Review digest/proof, standalone field registry |
 | 정보분석 Agent | provider/로컬 의미 schema 분리, redacted 입력 span 검증, raw 절차 문서의 untrusted-data projection, canonical `procedure_findings`, 충돌 분리, bounded local retry |
 | 지원금 Agent | provider 형식과 로컬 의미 schema 분리, 주입된 reviewed catalog 기반 조회/판정, 최소 prompt projection, Evidence 연결 |
-| 절차조회 Tool | Kakao 웹문서 검색으로 URL 발견, HTTPS·공식 domain 검증, 직접 fetch, sanitized raw document와 `OFFICIAL_DOCUMENT` Evidence 생성 |
+| 절차조회 Tool | Google Agent Search 우선·Kakao query별 fallback으로 URL 발견, provider attempt와 `discovery_provider` 기록, HTTPS·공식 domain 검증, 직접 fetch, sanitized raw document와 `OFFICIAL_DOCUMENT` Evidence 생성 |
 | Supervisor Agent | 전달된 하위 결과 전체를 기반으로 `ACTION`일 때 정확히 1개 Blocker/Next Action 조립, 직전 초안 기반 Review 수정, 고위험 claim 사전검증, mutation/provenance 검증, bounded rewrite |
 | Review Tool | provider 형식 출력과 로컬 의미 검증 분리, bounded corrective retry, ReviewSubject digest·독립 규칙 재검사, `PASS`/`REVISE` ReviewResult 반환 |
 | Graph | LangGraph 기반 절차조회→정보분석→지원금 순차 실행, raw lookup의 call/digest를 Info에 전달, Review dependency rerouting, 최대 2회 재작성, fail closed |
@@ -1379,19 +1401,19 @@ PYTHONPATH=backend backend/.venv/bin/python -m pytest -q backend/tests/agent
 PYTHONPATH=backend backend/.venv/bin/python -m app.agent.cli --live --compact --trace-id local-smoke
 ```
 
-CLI는 임의의 실제 Case 입력을 받지 않고 repository의 비식별 합성 Case와 지원 catalog를 사용합니다. 다만 `--live` 절차 경로는 실제 Kakao 검색과 공식 원문 fetch를 수행하며, unit test의 mock 검색 응답이나 과거 절차 fixture로 fallback하지 않습니다. BE API·DB·persistence에는 접근하지 않습니다.
+CLI는 임의의 실제 Case 입력을 받지 않고 repository의 비식별 합성 Case와 지원 catalog를 사용합니다. 다만 `--live` 절차 경로는 실제 Google Agent Search를 먼저 사용하고 query별 조건을 충족하면 Kakao로 fallback한 뒤 공식 원문을 fetch하며, unit test의 mock 검색 응답이나 과거 절차 fixture로 fallback하지 않습니다. BE API·DB·persistence에는 접근하지 않습니다.
 
-필수 LLM 환경변수는 `CHAT_PROXY_URL`, `PROXY_TOKEN`, `OPENAI_MODEL`입니다. 실제 절차조회에는 `PROCEDURE_SEARCH_API_KEY`가 우선이며 없을 때 기존 `KAKAO_CLIENT_ID`를 REST API 키 fallback으로 사용합니다. 둘 다 없으면 `ProcedureSearchConfigurationError` 또는 Graph/CLI의 설정·component failure로 fail closed합니다. 빈 `NO_RESULTS`나 fixture로 대체하지 않습니다. `CHAT_PROXY_URL`은 loopback 개발 서버를 제외하면 HTTPS여야 하고 credential/query/fragment를 포함할 수 없습니다.
+필수 LLM 환경변수는 `CHAT_PROXY_URL`, `PROXY_TOKEN`, `OPENAI_MODEL`입니다. Google primary에는 `PROCEDURE_GOOGLE_API_KEY`, `PROCEDURE_GOOGLE_PROJECT_ID`, `PROCEDURE_GOOGLE_ENGINE_ID`가 필요하고 `PROCEDURE_GOOGLE_LOCATION` 기본값은 `global`입니다. Kakao fallback은 `PROCEDURE_KAKAO_REST_API_KEY`를 우선하며 기존 `PROCEDURE_SEARCH_API_KEY`, `KAKAO_CLIENT_ID`는 deprecated alias입니다. Google이 미설정이어도 Kakao-only 실행은 가능하며 `provider_order=[KAKAO_DAUM_WEB]`, `fallback_query_count=0`으로 기록합니다. 두 provider 모두 미설정이면 `ProcedureSearchConfigurationError` 또는 Graph/CLI의 설정·component failure로 fail closed하며 빈 `NO_RESULTS`나 fixture로 대체하지 않습니다. `CHAT_PROXY_URL`은 loopback 개발 서버를 제외하면 HTTPS여야 하고 credential/query/fragment를 포함할 수 없습니다.
 
-선택 LLM 설정은 `OPENAI_REASONING_EFFORT`, `AGENT_LLM_TIMEOUT_SECONDS`, `AGENT_LLM_MAX_RETRIES`, `AGENT_LLM_RETRY_BACKOFF_SECONDS`입니다. 절차조회 설정은 `PROCEDURE_SEARCH_ALLOWED_DOMAINS`, `PROCEDURE_SEARCH_ENDPOINT`, `PROCEDURE_SEARCH_TIMEOUT_SECONDS`, `PROCEDURE_SEARCH_TOTAL_TIMEOUT_SECONDS`, `PROCEDURE_SEARCH_MAX_RETRIES`, `PROCEDURE_SEARCH_RETRY_BACKOFF_SECONDS`, `PROCEDURE_SEARCH_MAX_RESPONSE_BYTES`, `PROCEDURE_SEARCH_MAX_REDIRECTS`입니다. endpoint override도 HTTPS Kakao Daum 웹검색 endpoint만 허용합니다. allowlist 환경변수는 코드에서 검토된 공식 root와 하위 host로만 좁힐 수 있고 사용자 요청으로 동적 확장하지 않습니다. 정확한 범위·기본값은 `agent-standalone-runtime-requirements.md` §8을 따릅니다. 모든 credential 값과 실제 내부 endpoint는 문서·출력·trace에 남기지 않습니다.
+선택 LLM 설정은 `OPENAI_REASONING_EFFORT`, `AGENT_LLM_TIMEOUT_SECONDS`, `AGENT_LLM_MAX_RETRIES`, `AGENT_LLM_RETRY_BACKOFF_SECONDS`입니다. 절차조회 공통 설정은 `PROCEDURE_SEARCH_ALLOWED_DOMAINS`, `PROCEDURE_SEARCH_TIMEOUT_SECONDS`, `PROCEDURE_SEARCH_TOTAL_TIMEOUT_SECONDS`, `PROCEDURE_SEARCH_MAX_RETRIES`, `PROCEDURE_SEARCH_RETRY_BACKOFF_SECONDS`, `PROCEDURE_SEARCH_MAX_RESPONSE_BYTES`, `PROCEDURE_SEARCH_MAX_REDIRECTS`입니다. Google endpoint는 검증된 project/location/engine과 `global | us | eu`에 대응하는 승인된 Discovery Engine API host로 조립하고 Kakao endpoint는 `dapi.kakao.com/v2/search/web`로 고정하며 임의 endpoint override를 허용하지 않습니다. allowlist 환경변수는 코드에서 검토된 공식 root와 하위 host로만 좁힐 수 있고 사용자 요청으로 동적 확장하지 않습니다. 정확한 범위·기본값은 `agent-standalone-runtime-requirements.md` §8을 따릅니다. 모든 credential 값과 실제 내부 endpoint는 문서·출력·trace에 남기지 않습니다.
 
 검증 결과는 자동 검증과 opt-in live smoke를 분리해 기록합니다.
 
-- CI/unit test는 mock Kakao client와 mock fetcher를 사용하며 외부 네트워크·quota·credential을 요구하지 않습니다.
+- CI/unit test는 mock Google/Kakao provider와 mock fetcher를 사용하며 외부 네트워크·quota·credential을 요구하지 않습니다.
 - Tool contract test는 검색 snippet 비신뢰, HTTPS/allowlist/redirect, fetch 실패, no-results/partial/technical failure, Evidence 1:1, dedup과 counter를 검사합니다.
 - Graph test는 Procedure→Info→Support 순서, lookup call/digest 전달, 재작업 dependency를 검사합니다.
 - live smoke는 명시적 `--live`와 credential이 있을 때만 수행하고 실제 공식 URL, 조회시각, 문서 수, outcome만 민감정보 없이 PR에 기록합니다.
-- 한 번의 live 호출이 항상 `PASS`하는 것은 아닙니다. Kakao·원문 서버·LLM 응답이 제한 내 해결되지 않으면 미검토 결과나 fixture 대신 `SAFE_FAILURE`를 반환합니다.
+- 한 번의 live 호출이 항상 `PASS`하는 것은 아닙니다. Google/Kakao·원문 서버·LLM 응답이 제한 내 해결되지 않으면 미검토 결과나 fixture 대신 `SAFE_FAILURE`를 반환합니다.
 
 ### BE 연동 전에 남은 경계
 
@@ -1425,7 +1447,8 @@ standalone 정상 실행은 아래 생산 연동 기능의 완료를 뜻하지 �
 - [ ] Hero Scenario에 있지만 현재 API/DB에 없는 `lease_end_date`, `transfer_status`, `tax_status`의 v1 포함 여부. 합의 전 판단에 사용 금지
 - [ ] `lease_status`, `restoration_scope`, `demolition_required`의 canonical enum
 - [ ] BE canonical procedure registry의 stable `procedure_step_id`/`step_code`/표시명/alias와 인터넷 finding 매핑 정책. BE는 검색 내용이나 조건을 작성하지 않음
-- [ ] Kakao 검색 REST API 키의 secret 주입·rotation·호출 허용 IP와 quota/rate-limit 운영 주체
+- [ ] Google 공개 공식사이트 Agent Search app/engine 생성·URL pattern 승인, API key 제한·secret 주입·rotation과 quota/비용 운영 주체
+- [ ] Kakao fallback REST API 키의 secret 주입·rotation·호출 허용 IP와 quota/rate-limit 운영 주체. deprecated alias 제거 일정
 - [ ] 공식기관 domain allowlist 승인·변경 절차, redirect/SSRF 방어, fetch timeout·MIME·본문 byte 상한
 - [ ] fetched Evidence의 URL/hash/retrieved_at 보존, 재조회/cache TTL과 원문 삭제·변경 시 감사 정책
 - [ ] `support_program_id`/`wiki_uuid`/기존 `support_item_id` 명칭과 resolver
@@ -1461,8 +1484,10 @@ standalone 정상 실행은 아래 생산 연동 기능의 완료를 뜻하지 �
 
 - [ ] 모든 하위 결과의 run/case/snapshot이 현재 실행과 같다.
 - [ ] schema version은 `agent-io/2.0`이고 v1 Procedure lookup payload를 거부한다.
-- [ ] Procedure lookup은 Kakao 후보 URL을 HTTPS·공식 domain·IP-literal 금지 정책으로 검증하고 redirect마다 같은 검사를 반복한다. DNS public-address pinning은 생산 egress 완료 항목으로 별도 확인한다.
-- [ ] Kakao `contents` snippet은 Evidence가 아니며 직접 fetch한 공식 원문만 `OFFICIAL_DOCUMENT`가 된다.
+- [ ] Procedure lookup은 query마다 Google Agent Search를 먼저 시도하고 기술 실패·0건·공식 후보 0건에만 Kakao로 fallback한다. Google 미설정 Kakao-only 실행, 미사용 fallback 0 counter와 provider attempt 불변식도 검증한다.
+- [ ] Google/Kakao 후보 URL을 HTTPS·공식 domain·IP-literal 금지 정책으로 검증하고 redirect마다 같은 검사를 반복한다. DNS public-address pinning은 생산 egress 완료 항목으로 별도 확인한다.
+- [ ] Google/Kakao snippet은 Evidence가 아니며 `google.com/search` HTML을 scraping하지 않는다. 직접 fetch한 공식 원문만 `OFFICIAL_DOCUMENT`가 된다.
+- [ ] 각 문서의 `discovery_provider`, `provider_order`, `provider_summaries`, `fallback_query_count`와 aggregate counter가 일치한다.
 - [ ] Procedure document와 Evidence가 URL/excerpt/retrieved_at/freshness/hash까지 1:1로 일치한다.
 - [ ] 검색 counter와 COMPLETE/PARTIAL/NO_RESULTS 불변식이 일치하고 credential·quota·전 질의 실패는 기술 실패다.
 - [ ] Info의 모든 `procedure_findings`가 canonical `KnownProcedureStep`과 입력 lookup Evidence에 결합되고 call ID/digest가 일치한다.
@@ -1506,4 +1531,4 @@ P0 합의 뒤 BE shared 경계에 우선 필요한 schema는 다음과 같습니
 6. `OutputGuardrailProof`, `StateGuardrailProof`, `GuardrailRejection`, `ConcurrencyConflictDetail`, `PersistReviewedPlanCommand`, `PersistResult`
 7. 외부 API 결과와 `viewState`용 discriminated response DTO
 
-정보분석·지원금·절차조회·Review의 provider/local 출력 schema와 Kakao 검색/원문 fetch 구현은 AI 내부 영역입니다. BE는 ProcedureMaster나 검색 내용을 작성하거나 이를 별도 HTTP DTO로 만들 필요가 없습니다. BE는 인증된 snapshot, canonical 절차 ID registry, support catalog, secret/network 운영, Evidence 저장·복원과 Coordinator→Guardrail/persistence shared 경계를 versioned 계약으로 확정합니다.
+정보분석·지원금·절차조회·Review의 provider/local 출력 schema와 Google 우선·Kakao query별 fallback 검색/원문 fetch 구현은 AI 내부 영역입니다. BE는 ProcedureMaster나 검색 내용을 작성하거나 이를 별도 HTTP DTO로 만들 필요가 없습니다. BE/인프라는 공개 공식사이트만 포함한 Google Agent Search app/engine과 제한된 API key를 생성·운영하고 Kakao fallback secret과 provider별 quota/비용·network 경계를 제공합니다. BE는 인증된 snapshot, canonical 절차 ID registry, support catalog, Evidence 저장·복원과 Coordinator→Guardrail/persistence shared 경계를 versioned 계약으로 확정합니다.
