@@ -10,26 +10,22 @@
 
 ## 1. 한눈에 보는 결론
 
-| 질문 | 답 |
-|---|---|
-| 사용하는 실행 프레임워크는? | 외부 프레임워크 **LangGraph**의 `StateGraph`를 사용한다. |
-| `AgentGraph`는 무엇인가? | `StateGraph`를 구성·compile·실행하는 현재 프로젝트의 Python 클래스명이다. **별도 Agent가 아니다.** |
-| Agent는 몇 개인가? | Supervisor, 정보분석, 지원금의 3개다. |
-| Tool은 몇 개인가? | 절차조회, Review, 기업마당 공고조회의 3개다. 단, 기업마당 공고조회는 현재 실행 흐름에 연결되지 않았다. |
-| 목표 오케스트레이터는? | Supervisor Agent다. 필요한 하위 Agent·Tool 선택과 재호출 판단을 맡는다. |
-| 현재 실제 호출 순서는 누가 정하는가? | 현재 feature 브랜치에서는 `AgentGraph` 클래스의 조건부 edge가 trigger별 시작점과 정상 1차 순서를 정한다. Supervisor는 초안만 만든다. |
-| 목표 구조가 구현됐는가? | 아니다. 현재 고정 routing은 standalone 실행을 위한 구현 단계이며 Supervisor 주도 동적 planning은 후속 구현이다. |
-| LangChain·Langfuse는 현재 쓰는가? | package는 설치 목록에 있지만 LangChain runtime import와 Langfuse 전송 adapter는 없다. 현재 실행에 직접 쓰는 관련 프레임워크는 LangGraph다. |
+- **현재 실행 프레임워크:** 외부 프레임워크 LangGraph의 `StateGraph`
+- **`AgentGraph`의 의미:** `StateGraph`를 구성·compile·실행하는 프로젝트 내부 Python 클래스. 별도 Agent가 아님
+- **Agent:** Supervisor, 정보분석, 지원금의 3개
+- **Tool:** 절차조회, Review, 기업마당 공고조회의 3개. 기업마당 공고조회는 현재 실행 흐름에 미연결
+- **목표 오케스트레이터:** 필요한 하위 Agent·Tool 선택과 재호출을 판단하는 Supervisor Agent
+- **현재 호출 순서 결정자:** trigger별 시작점과 정상 1차 순서를 가진 `AgentGraph` 클래스의 조건부 edge
+- **현재 구현 한계:** Supervisor는 초안만 만들며, Supervisor 주도 동적 planning은 아직 구현되지 않음
+- **LangChain·Langfuse:** package만 설치돼 있다. LangChain runtime import와 Langfuse 전송 adapter는 없으며 현재 직접 사용하는 관련 프레임워크는 LangGraph다.
 
 ## 2. 문서 지도
 
-| 알고 싶은 내용 | 기준 문서 |
-|---|---|
-| Agent/Tool별 정확한 입력·출력 필드와 validator | [`agent-tool-io-schema.md`](./agent-tool-io-schema.md) |
-| BE 없이 실행하는 방법과 실제·합성 데이터 구분 | [`agent-standalone-runtime-requirements.md`](./agent-standalone-runtime-requirements.md) |
-| 공식 API, crawler, RAG의 현재 상태와 구현 순서 | [`agent-official-data-source-strategy.md`](./agent-official-data-source-strategy.md) |
-| 외부 연동 전에 협의할 shared DTO·저장 경계 | [`be-agent-integration-requirements.md`](./be-agent-integration-requirements.md) |
-| dependency 버전과 실제 import 여부 | [`tech-stack.md`](./tech-stack.md) |
+- **Agent/Tool별 입력·출력 필드와 validator:** [`agent-tool-io-schema.md`](./agent-tool-io-schema.md)
+- **BE 없는 실행법과 실제·합성 데이터 구분:** [`agent-standalone-runtime-requirements.md`](./agent-standalone-runtime-requirements.md)
+- **공식 API, crawler, RAG의 현재 상태와 구현 순서:** [`agent-official-data-source-strategy.md`](./agent-official-data-source-strategy.md)
+- **외부 연동 전 shared DTO·저장 경계:** [`be-agent-integration-requirements.md`](./be-agent-integration-requirements.md)
+- **dependency 버전과 실제 import 여부:** [`tech-stack.md`](./tech-stack.md)
 
 `interface-spec.md`와 `schema/schema_table.md`는 기존 링크를 보존하는 안내 파일이다. 이 문서들에 동일 계약을 다시 정의하지 않는다.
 
@@ -85,16 +81,39 @@ Review REVISE                  → 지정 dependency부터 재실행
 
 ### 목표와 현재 구현의 차이
 
-| 비교 항목 | 목표 구조 | 현재 feature 브랜치 |
-|---|---|---|
-| 전역 오케스트레이션 | Supervisor가 필요한 Agent·Tool을 선택 | Graph 코드가 trigger별 경로를 선택 |
-| 최초 실행 위치 | Supervisor가 Case를 해석한 뒤 선택 호출 | Procedure 또는 Support에서 시작 |
-| 하위 구성요소 노출 | Supervisor에 Agent-as-Tool/Tool로 노출 | `AgentGraph`가 runner를 직접 보유·호출 |
-| Review 재작업 | Supervisor가 문제와 상태를 보고 재호출 대상 결정 | Review 권고 target을 Graph가 재실행 경로로 변환 |
-| Decision 내용 | Supervisor가 decision variant별 Blocker·Next Action·질문을 결정 | Supervisor가 결정 — 목표와 일치 |
-| 정상 초안 Review | 항상 필수 | 항상 필수 — 목표와 일치 |
-| 전체 run deadline | 실행기가 전체 예산을 강제 | 없음 — 호출별 timeout과 LangGraph recursion limit만 있음 |
-| DB·인증·저장 | Agent 실행 경계 밖 | 미구현, 실행 경계 밖 |
+#### 전역 오케스트레이션
+
+- **목표:** Supervisor가 필요한 Agent·Tool 선택
+- **현재:** Graph 코드가 trigger별 경로 선택
+
+#### 최초 실행 위치
+
+- **목표:** Supervisor가 Case를 해석한 뒤 선택 호출
+- **현재:** Procedure 또는 Support에서 시작
+
+#### 하위 구성요소 호출
+
+- **목표:** Supervisor에 Agent-as-Tool과 일반 Tool로 노출
+- **현재:** `AgentGraph`가 runner를 직접 보유·호출
+
+#### Review 재작업
+
+- **목표:** Supervisor가 문제와 상태를 보고 재호출 대상 결정
+- **현재:** Review 권고 target을 Graph가 재실행 경로로 변환
+
+#### 목표와 일치하는 부분
+
+- Decision variant별 Blocker·Next Action·질문은 Supervisor가 결정한다.
+- 모든 정상 Supervisor 초안은 Review를 반드시 거친다.
+
+#### 전체 실행 제한
+
+- **목표:** 실행기가 전체 run 예산을 강제
+- **현재:** 전체 wall-clock deadline은 없고 호출별 timeout과 LangGraph recursion limit만 존재
+
+#### 외부 저장
+
+- **목표와 현재 모두:** DB·인증·저장은 Agent 실행 경계 밖
 
 따라서 현재 `AgentGraph` 구현을 사용자가 확정한 최종 Agent 아키텍처로 설명하지 않는다. 목표 구조가 구현됐다고 판단하려면 Supervisor planning schema뿐 아니라 최초 호출 선택, Review 뒤 재계획, 호출 allowlist·횟수·전체 deadline을 강제하는 router와 회귀 테스트가 모두 실제 실행 경로에 추가돼야 한다.
 
@@ -102,27 +121,60 @@ Review REVISE                  → 지정 dependency부터 재실행
 
 ### 5.1 실행 인프라
 
-| 구현 요소 | 현재 책임 | 구분 |
-|---|---|---|
-| LangGraph `StateGraph` | node와 조건부 edge 실행, state 전달 | 외부 프레임워크 구성요소 |
-| 프로젝트 클래스 `AgentGraph` | `StateGraph` 구성·compile, 입력 전달, 결과 수집, Review 재작업, 반복 상한, safe failure 처리 | 현재 standalone 실행기; 별도 Agent 아님 |
-| `TraceSink` | run/call/component/status/latency/attempt/error metadata 경계 | 기본 구현은 `NullTraceSink`; 현재 model·token 값은 채우지 않고 cost 필드와 Langfuse 전송도 없음 |
+#### LangGraph `StateGraph`
+
+- **구분:** 외부 프레임워크 구성요소
+- **책임:** node와 조건부 edge 실행, state 전달
+
+#### 프로젝트 클래스 `AgentGraph`
+
+- **구분:** 현재 standalone 실행기. 별도 Agent가 아님
+- **책임:** `StateGraph` 구성·compile, 입력 전달, 결과 수집, Review 재작업, 반복 상한, safe failure 처리
+
+#### `TraceSink`
+
+- **책임:** run/call/component/status/latency/attempt/error metadata 경계
+- **현재 상태:** 기본 구현은 `NullTraceSink`. model·token 값은 채우지 않고 cost 필드와 Langfuse 전송도 없음
 
 ### 5.2 Agent
 
-| Agent | 현재 책임 | 하지 않는 일 |
-|---|---|---|
-| Supervisor Agent | Procedure·Info·Support 결과를 종합해 Decision과 변경 후보·grounded claim 초안 생성. `ACTION`이면 Blocker·Next Action 각 1개, `NEEDS_MORE_INFO`이면 Blocker 1개·질문 1개 이상·Next Action 없음 | 현재 하위 구성요소 선택·직접 호출, Evidence 생성, Review 우회, DB 저장; `CASE_COMPLETE`는 현재 도달 불가 |
-| 정보분석 Agent | 비식별 입력·snapshot·공식 절차 원문을 분석해 사실·진행 관측·canonical 절차 finding·충돌·누락·질문 후보 생성 | 인터넷 조회, 웹 제목으로 canonical step 생성, Case 직접 변경 |
-| 지원금 Agent | Case 사실과 미저장 fact 후보를 생성 시 deep-copy한 read-only `ReviewedSupportCatalog` snapshot에 비교 | raw 공고 수집, 실제 자격·선정·수급 확정, 신청 상태 변경; `CHECK_SPECIFIC` 입력은 직접 호출만 가능하고 현재 Graph는 만들지 않음 |
+#### Supervisor Agent
+
+- **현재 책임:** Procedure·Info·Support 결과를 종합해 Decision, 변경 후보, grounded claim 초안 생성
+- **Decision 조건:** `ACTION`이면 Blocker·Next Action 각 1개. `NEEDS_MORE_INFO`이면 Blocker 1개·질문 1개 이상·Next Action 없음
+- **하지 않는 일:** 현재 하위 구성요소 선택·직접 호출, Evidence 생성, Review 우회, DB 저장
+- **도달 불가:** `CASE_COMPLETE`
+
+#### 정보분석 Agent
+
+- **현재 책임:** 비식별 입력·snapshot·공식 절차 원문을 분석해 사실·진행 관측·canonical 절차 finding·충돌·누락·질문 후보 생성
+- **하지 않는 일:** 인터넷 조회, 웹 제목으로 canonical step 생성, Case 직접 변경
+
+#### 지원금 Agent
+
+- **현재 책임:** Case 사실과 미저장 fact 후보를 생성 시 deep-copy한 read-only `ReviewedSupportCatalog` snapshot에 비교
+- **하지 않는 일:** raw 공고 수집, 실제 자격·선정·수급 확정, 신청 상태 변경
+- **일부 미연결:** `CHECK_SPECIFIC` 입력은 직접 호출 가능하지만 현재 Graph는 생성하지 않음
 
 ### 5.3 Tool
 
-| Tool | 현재 책임 | 현재 연결 상태 | 하지 않는 일 |
-|---|---|---|---|
-| 절차조회 Tool | 공식 URL 선택·발견, 안전한 원문 fetch, 문서·Evidence 정규화 | 현재 Graph에서 Procedure 단계로 사용 | 원문 의미 분석, Case 적용 여부·완료 여부·우선순위 결정 |
-| Review Tool | source digest·provenance·snapshot·Supervisor 초안 독립 검수, `PASS/REVISE`와 이유 반환 | Supervisor 초안 뒤 필수 사용 | 새 근거 검색, 초안 직접 수정, 저장 |
-| 기업마당 공고조회 Tool | 기업마당 API에서 raw 공고 후보와 `OFFICIAL_API` Evidence 생성 | 구현·테스트됐으나 현재 Graph·catalog 발행 흐름 미연결 | raw 공고 자동 승인, 지원 자격 판정 |
+#### 절차조회 Tool
+
+- **현재 책임:** 공식 URL 선택·발견, 안전한 원문 fetch, 문서·Evidence 정규화
+- **연결 상태:** 현재 Graph의 Procedure 단계에서 사용
+- **하지 않는 일:** 원문 의미 분석, Case 적용 여부·완료 여부·우선순위 결정
+
+#### Review Tool
+
+- **현재 책임:** source digest·provenance·snapshot·Supervisor 초안 독립 검수, `PASS/REVISE`와 이유 반환
+- **연결 상태:** Supervisor 초안 뒤 필수 사용
+- **하지 않는 일:** 새 근거 검색, 초안 직접 수정, 저장
+
+#### 기업마당 공고조회 Tool
+
+- **현재 책임:** 기업마당 API에서 raw 공고 후보와 `OFFICIAL_API` Evidence 생성
+- **연결 상태:** 구현·테스트됐으나 현재 Graph·catalog 발행 흐름 미연결
+- **하지 않는 일:** raw 공고 자동 승인, 지원 자격 판정
 
 ## 6. 주요 데이터 흐름
 
@@ -167,26 +219,30 @@ Procedure·Info·Support 결과
 
 의미 출력 재생성과 HTTP 전송 재시도는 서로 다른 층이다. 한 번의 의미 출력 시도 안에서도 일시적인 HTTP 실패가 재시도될 수 있으므로 비용과 호출량을 계산할 때 둘을 곱해 봐야 한다.
 
-| 경계 | 기본값·허용 상한 | 정확한 동작 |
-|---|---|---|
-| Info local 의미 검증 | 기본·최대 총 3회 | provider schema 변환 뒤 semantic·grounding 검증 실패 시 Agent가 새 의미 출력을 요청 |
-| Support local 의미 검증 | 고정 총 3회 | catalog ID·조건·Evidence semantic 검증 실패 시 Agent가 새 의미 출력을 요청 |
-| Supervisor local 의미 검증 | 기본·최대 총 3회 | decision·claim·provenance 검증 실패 시 재생성; 모두 실패해도 Info의 안전한 missing-field 질문이 있으면 결정론적 `NEEDS_MORE_INFO` fallback 가능 |
-| 공통 LLM HTTP 전송 | 기본 재시도 2회, 허용 0~4회 | 한 provider 요청당 기본 최대 3번 HTTP 시도; 호출별 기본 timeout 45초 |
-| Review 의미 출력 | 기본 총 2회, 허용 1~3회 | Review 출력 계약 실패 시 새 의미 출력을 요청 |
-| Review 전용 provider 전송 | 의미 출력마다 기본 재시도 1회, 허용 0~2회 | 한 Review 의미 출력당 기본 최대 2번 provider 요청 |
-| Procedure 검색·원문 fetch | 각 요청 기본 재시도 1회, 허용 0~4회 | 각 검색 요청과 각 공식문서 fetch에 적용; 요청별 기본 timeout 8초, 전체 lookup 기본 60초 |
-| LangGraph Review 재작업 | 수정 최대 2회 | 최초 Review를 포함해 총 Review round 최대 3회; 원인상 가장 앞선 구성요소부터 다시 실행 |
-| 전체 Agent run | recursion limit 32 | 현재 Graph 전체 wall-clock deadline은 없음; 호출별 timeout만 존재 |
+### 구성요소별 의미 출력
+
+- **Info:** 기본·최대 총 3회. provider schema 변환 뒤 semantic·grounding 검증 실패 시 새 의미 출력을 요청한다.
+- **Support:** 고정 총 3회. catalog ID·조건·Evidence semantic 검증 실패 시 새 의미 출력을 요청한다.
+- **Supervisor:** 기본·최대 총 3회. 모두 실패해도 Info의 안전한 missing-field 질문이 있으면 결정론적 `NEEDS_MORE_INFO` fallback을 만들 수 있다.
+- **Review:** 기본 총 2회, 허용 1~3회. Review 출력 계약 실패 시 새 의미 출력을 요청한다.
+
+### 외부 요청 재시도
+
+- **공통 LLM HTTP:** 기본 재시도 2회, 허용 0~4회. 한 provider 요청당 기본 최대 3번 HTTP를 시도하고 호출별 기본 timeout은 45초다.
+- **Review 전용 provider:** 의미 출력마다 기본 재시도 1회, 허용 0~2회. 한 의미 출력당 기본 최대 2번 provider 요청을 시도한다.
+- **Procedure 검색·원문 fetch:** 각 요청 기본 재시도 1회, 허용 0~4회. 요청별 기본 timeout은 8초, 전체 lookup 기본 timeout은 60초다.
+
+### Graph 상한
+
+- **Review 재작업:** 수정 최대 2회. 최초 Review를 포함한 총 Review round는 최대 3회다.
+- **전체 Agent run:** LangGraph recursion limit은 32다. 현재 전체 wall-clock deadline은 없고 호출별 timeout만 존재한다.
 
 Review가 `REVISE`를 반환하면 현재 실행기는 다음 순서에서 가장 앞선 권고 target부터 재실행한다.
 
-| 권고 target | 현재 재실행 범위 |
-|---|---|
-| Procedure | Procedure → Info → Support → Supervisor → Review |
-| Info | Info → Support → Supervisor → Review |
-| Support | Support → Supervisor → Review |
-| Supervisor 또는 target 없음 | Supervisor → Review |
+- **Procedure 문제:** Procedure → Info → Support → Supervisor → Review
+- **Info 문제:** Info → Support → Supervisor → Review
+- **Support 문제:** Support → Supervisor → Review
+- **Supervisor 문제 또는 target 없음:** Supervisor → Review
 
 상한 소진이나 예외는 성공처럼 포장하지 않고 `SAFE_FAILURE`로 반환한다.
 
@@ -231,27 +287,23 @@ Review가 `REVISE`를 반환하면 현재 실행기는 다음 순서에서 가�
 
 ## 10. 완료 판정 기준
 
-| 범위 | 완료라고 말할 조건 |
-|---|---|
-| Agent 내부 계약 | 코드 존재 + validator/contract test 통과 + 실제 호출 경로 존재 |
-| 외부 API adapter | 코드·테스트 + 필요한 credential로 제한 실측. HTTP 200과 실제 Case 연결은 별도 기록 |
-| crawler/RAG | 수집·파싱·버전·검수·index·retrieval·Evidence 연결과 평가 통과 |
-| Supervisor 오케스트레이션 | planning schema + bounded router + Review 재계획 경로 + 회귀 테스트 통과 |
-| Langfuse | adapter + masking 정책 + token·cost·latency 실전송 검증 |
-| 실제 사용자 Case 연동 | 인증된 read/write, 동시성 보호, 검수 결과 저장과 read-back 통합 검증. 현재 AI standalone 범위 밖 |
+- **Agent 내부 계약:** 코드, validator, contract test, 실제 호출 경로가 모두 존재해야 한다.
+- **외부 API adapter:** 코드와 테스트가 있고 필요한 credential로 제한 실측해야 한다. HTTP 200과 실제 Case 연결은 별도로 기록한다.
+- **crawler/RAG:** 수집·파싱·버전·검수·index·retrieval·Evidence 연결과 평가를 모두 통과해야 한다.
+- **Supervisor 오케스트레이션:** planning schema, bounded router, Review 재계획 경로와 회귀 테스트가 모두 필요하다.
+- **Langfuse:** adapter, masking 정책, token·cost·latency 실전송 검증이 모두 필요하다.
+- **실제 사용자 Case 연동:** 인증된 read/write, 동시성 보호, 검수 결과 저장과 read-back 통합 검증이 필요하다. 현재 AI standalone 범위 밖이다.
 
 ## 11. 구현 근거
 
-| 설명 | 저장소 근거 |
-|---|---|
-| LangGraph import, `AgentGraph` 클래스, node·조건부 edge | [`graph.py`](../backend/app/agent/graph.py) |
-| 실행 state | [`state.py`](../backend/app/agent/state.py) |
-| Agent/Tool 입출력과 component enum | [`schemas.py`](../backend/app/agent/schemas.py) |
-| Supervisor 현재 책임 | [`supervisor/`](../backend/app/agent/supervisor/) |
-| 정보분석·지원금 책임 | [`info_agent/`](../backend/app/agent/info_agent/), [`support_agent/`](../backend/app/agent/support_agent/) |
-| 절차조회·Review 책임 | [`procedure_tool/`](../backend/app/agent/procedure_tool/), [`review_tool/`](../backend/app/agent/review_tool/) |
-| standalone fixture·진입점 | [`fixtures.py`](../backend/app/agent/fixtures.py), [`cli.py`](../backend/app/agent/cli.py) |
-| metadata trace 경계 | [`tracing.py`](../backend/app/agent/tracing.py) |
-| 현재 동작 검증 | [`backend/tests/agent/`](../backend/tests/agent/) |
+- **LangGraph import, `AgentGraph` 클래스, node·조건부 edge:** [`graph.py`](../backend/app/agent/graph.py)
+- **실행 state:** [`state.py`](../backend/app/agent/state.py)
+- **Agent/Tool 입출력과 component enum:** [`schemas.py`](../backend/app/agent/schemas.py)
+- **Supervisor 현재 책임:** [`supervisor/`](../backend/app/agent/supervisor/)
+- **정보분석·지원금 책임:** [`info_agent/`](../backend/app/agent/info_agent/), [`support_agent/`](../backend/app/agent/support_agent/)
+- **절차조회·Review 책임:** [`procedure_tool/`](../backend/app/agent/procedure_tool/), [`review_tool/`](../backend/app/agent/review_tool/)
+- **standalone fixture·진입점:** [`fixtures.py`](../backend/app/agent/fixtures.py), [`cli.py`](../backend/app/agent/cli.py)
+- **metadata trace 경계:** [`tracing.py`](../backend/app/agent/tracing.py)
+- **현재 동작 검증:** [`backend/tests/agent/`](../backend/tests/agent/)
 
 현재 구현 사실은 코드와 테스트가 Markdown보다 우선한다. 목표 구조는 현재 구현 상태와 섞어 완료로 표시하지 않는다.
