@@ -48,11 +48,11 @@ MEMBERS ──1:N──► CASE
 | franchise_status | BOOLEAN | | |
 | employee_count | INT | | |
 | case_status | ENUM | | `IN_PROGRESS` / `COMPLETED` |
-| lease_status | ENUM | | `UNKNOWN`/`LEASED_PAID`/`LEASED_FREE`/`OWNED` |
+| lease_status | ENUM | | `LEASED_PAID`/`LEASED_FREE`/`OWNED` |
 | restoration_status | ENUM | | `NOT_STARTED` / `IN_PROGRESS` / `COMPLETED` / `NOT_REQUIRED` |
-| restoration_scope | ENUM | | `PARTIAL` / `FULL` / `NOT_REQUIRED` |
+| restoration_scope | ENUM | | `UNKNOWN`/`PARTIAL` / `FULL` / `NOT_REQUIRED` |
 | restoration_scope_detail | VARCHAR | | nullable, 구체적인 원상복구 범위 자연어 기록 |
-| demolition_required | ENUM | | `REQUIRED` / `NOT_REQUIRED` |
+| demolition_required | ENUM | | `UNKNOWN`/`REQUIRED` / `NOT_REQUIRED` |
 | planned_closure_date | DATE | | nullable |
 | completed_at | DATETIME | | nullable |
 | created_at | DATETIME | | |
@@ -181,6 +181,9 @@ CASE ──1:N──► CASE_PROCEDURE_STEP_HISTORY   (상태 변경마다 새 r
 | created_at | DATETIME | | |
 | updated_at | DATETIME | | |
 
+**제약조건**
+- UNIQUE (`case_id`, `procedure_step_id`) — Case 하나당 절차 하나에 대해 진행상태 row는 1개만 존재해야 함
+ 
 ### CASE_PROCEDURE_STEP_HISTORY
 
 | 컬럼 | 타입 | 키 | 설명 |
@@ -191,7 +194,7 @@ CASE ──1:N──► CASE_PROCEDURE_STEP_HISTORY   (상태 변경마다 새 r
 | case_history_id | BIGINT | FK | nullable, 이 변화를 유발한 판단 로그 |
 | previous_status | ENUM | | `NOT_STARTED` / `IN_PROGRESS` / `COMPLETED` |
 | new_status | ENUM | | `NOT_STARTED` / `IN_PROGRESS` / `COMPLETED` |
-| updated_at | DATETIME | | |
+| created_at | DATETIME | | |
 
 ---
 
