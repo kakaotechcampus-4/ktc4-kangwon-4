@@ -10,22 +10,22 @@
 
 구성요소의 정확한 필드는 [`agent-tool-io-schema.md`](./agent-tool-io-schema.md), 호출 구조는 [`architecture.md`](./architecture.md), 데이터 수집 계획은 [`agent-official-data-source-strategy.md`](./agent-official-data-source-strategy.md), 생산 연동 요구는 [`be-agent-integration-requirements.md`](./be-agent-integration-requirements.md)를 따른다.
 
-`[CURRENT_AI]`는 현재 코드·테스트가 있는 기능, `[NOT_WIRED]`는 구현체가 현재 Graph에 미연결인 기능, `[PLANNED_AI][NOT_IMPLEMENTED]`는 AI가 구현할 목표, `[PROPOSED_SHARED][NOT_APPROVED]`는 공동 승인 전 제안, `[OBSERVED_YYYY-MM-DD]`는 해당 날짜의 제한된 실호출만 뜻한다.
+상태는 내부 약어 대신 `현재 실행`, `구현됨 · 미연결`, `후속 구현`, `외부 연동 전`으로 직접 적는다. 이 상태는 feature 브랜치의 standalone 실행 기준이며 생산 서비스 연동 상태가 아니다.
 
 ## 1. 결론
 
-`[CURRENT_AI]` Agent Graph는 BE와 DB 없이 실행된다. 그러나 현재 CLI가 받는 것은 임의 자연어나 실제 사용자 Case가 아니라 코드에 고정된 비식별 fixture다.
+현재 **LangGraph 기반 standalone 실행기**는 BE와 DB 없이 실행된다. 코드 클래스명은 `AgentGraph`지만 별도 Agent가 아니다. 현재 CLI가 받는 것은 임의 자연어나 실제 사용자 Case가 아니라 코드에 고정된 비식별 fixture다.
 
 | 범위 | 상태 | 현재 사용하는 데이터 |
 |---|---|---|
-| LangGraph 실행, Review, safe failure | `[CURRENT_AI]` | schema-valid fixture 입력 |
-| LLM 분석 | `[CURRENT_AI]` | 설정된 OpenAI-compatible endpoint의 실제 응답 |
-| 폐업 절차조회 | `[CURRENT_AI]` | 공식 registry URL에서 실행 시점에 가져온 실제 원문 |
-| 지원금 분석 | `[CURRENT_AI]` | 검수됐다고 가정한 합성 `ReviewedSupportCatalog` |
-| 기업마당 raw 공고 discovery | `[CURRENT_AI][NOT_WIRED]` | 별도 adapter의 실제 API 응답; CLI/Graph 판정에는 미사용 |
-| 실제 사용자 Case read/write | `[PROPOSED_SHARED][NOT_APPROVED][NOT_IMPLEMENTED]` | 인증·snapshot·CAS·persistence가 없어 불가 |
-| 범용 crawler·RAG | `[PLANNED_AI][NOT_IMPLEMENTED]` | corpus·index·retriever 없음 |
-| Langfuse 비용 추적 | `[PLANNED_AI][NOT_IMPLEMENTED]` | 현재 기본 sink는 `NullTraceSink` |
+| LangGraph 실행, Review, safe failure | 현재 실행 | schema-valid fixture 입력 |
+| LLM 분석 | 현재 실행 | 설정된 OpenAI-compatible endpoint의 실제 응답 |
+| 폐업 절차조회 | 현재 실행 | 공식 registry URL에서 실행 시점에 가져온 실제 원문 |
+| 지원금 분석 | 현재 실행 | 검수됐다고 가정한 합성 `ReviewedSupportCatalog` |
+| 기업마당 raw 공고 discovery | 구현됨 · 실행 흐름 미연결 | 별도 adapter의 실제 API 응답; CLI/Graph 판정에는 미사용 |
+| 실제 사용자 Case read/write | 외부 연동 전 | 인증·snapshot·동시성 보호·persistence가 없어 불가 |
+| 범용 crawler·RAG | AI 후속 구현 | corpus·index·retriever 없음 |
+| Langfuse 비용 추적 | AI 후속 구현 | 현재 기본 sink는 `NullTraceSink` |
 
 따라서 현재 실행 결과를 “실제 Case 전체 연동 결과”라고 부르면 안 된다. **절차 원문과 LLM은 실제이고, Case와 지원금 catalog는 합성**이다.
 
@@ -124,7 +124,7 @@ ruff format --check backend/app/agent backend/tests/agent
 
 unit test는 외부 credential·quota를 쓰지 않는다. live smoke는 별도이며 외부 endpoint 상태와 모델의 structured-output 품질에 영향을 받는다.
 
-`[OBSERVED_2026-09-15]` 팀 proxy에서 확인된 `openai/gpt-4.1-mini`로 `REVIEWED_PLAN / NEEDS_MORE_INFO / PASS`까지 완료된 실행과 `REVIEW_RETRY_EXHAUSTED`로 안전 종료된 실행을 모두 관찰했다. 이는 지속 가용성이나 생산 SLO가 아니다.
+2026-09-15 제한 실측에서 팀 proxy의 `openai/gpt-4.1-mini`로 `REVIEWED_PLAN / NEEDS_MORE_INFO / PASS`까지 완료된 실행과 `REVIEW_RETRY_EXHAUSTED`로 안전 종료된 실행을 모두 관찰했다. 이는 해당 시점의 smoke 결과일 뿐 지속 가용성이나 생산 SLO가 아니다.
 
 ## 7. 현재 한계
 

@@ -8,17 +8,17 @@
 
 이 문서는 **AI가 공식 데이터를 어떻게 확보하고 검증 가능한 근거로 만들 것인지**를 설명한다. Agent/Tool의 정확한 입출력 필드는 [Agent·Tool 입출력 스키마](./agent-tool-io-schema.md), 호출 구조는 [Agent 아키텍처](./architecture.md), 실행법·환경변수·데이터 모드는 [standalone Runbook](./agent-standalone-runtime-requirements.md), BE가 구현하거나 함께 확정해야 할 인증·Case·저장 계약은 [BE-Agent 연동 요구사항](./be-agent-integration-requirements.md)을 정본으로 한다. 이 문서에는 그 내용을 복제하지 않는다.
 
-## 1. 상태 표기와 판정 원칙
+## 1. 상태 판정 원칙
 
-| 라벨 | 의미 |
+| 문서 표기 | 의미 |
 |---|---|
-| `[CURRENT_AI]` | 현재 저장소에 실행 코드가 있고 자동화 테스트로 경계가 검증된 AI 기능 |
-| `[OBSERVED_2026-09-15]` | 2026-09-15에 외부 API·사이트의 HTTP 응답을 직접 확인한 사실. 지속 가용성, 실제 Case 연동, 운영 승인을 뜻하지 않음 |
-| `[PLANNED_AI][NOT_IMPLEMENTED]` | AI가 구현 목표로 채택했지만 현재 코드·저장소·index·Graph 연결 중 하나 이상이 없는 기능 |
-| `[BLOCKED_BY_SHARED_DECISION]` | AI만 정해서는 안 되며 BE·PM·보안 또는 데이터 운영의 계약·권한 결정이 먼저 필요한 항목 |
-| `[DEFERRED]` | 현재 카페 폐업 MVP 범위에서 제외했고 일정이 확정되지 않은 항목 |
+| 현재 구현·검증됨 | 현재 저장소에 실행 코드가 있고 자동화 테스트로 경계가 검증된 AI 기능 |
+| 2026-09-15 제한 실측 | 해당 날짜에 외부 API·사이트의 HTTP 응답을 직접 확인한 사실. 지속 가용성, 실제 Case 연동, 운영 승인을 뜻하지 않음 |
+| AI 후속 구현 | AI 구현 목표지만 현재 코드·저장소·index·실행 연결 중 하나 이상이 없음 |
+| 선행 공동 결정 필요 | AI만 정해서는 안 되며 권한·개인정보·운영 계약 결정이 먼저 필요함 |
+| 보류 | 현재 카페 폐업 MVP 범위에서 제외했고 일정이 확정되지 않음 |
 
-상태는 독립적으로 읽는다. 예를 들어 `[OBSERVED_2026-09-15][PLANNED_AI][NOT_IMPLEMENTED]`는 외부 endpoint의 응답은 확인했지만 adapter나 Graph 연결은 아직 없다는 뜻이다. HTTP 200은 다음을 증명하지 않는다.
+한 항목에 상태가 둘 이상 적용될 수 있다. 예를 들어 `2026-09-15 제한 실측 · AI 후속 구현`은 외부 endpoint 응답은 확인했지만 adapter나 Graph 연결은 아직 없다는 뜻이다. HTTP 200은 다음을 증명하지 않는다.
 
 - 실제 사용자의 Case를 읽었다는 것
 - 해당 Case의 소유권·동의를 확인했다는 것
@@ -28,7 +28,7 @@
 
 ## 2. 결론: 현재 가능한 것과 목표
 
-### 2.1 `[CURRENT_AI]` 지금 가능한 것
+### 2.1 현재 구현·검증된 범위
 
 1. `ProcedureLookupTool`이 코드 검토된 공식 URL registry를 먼저 조회하고, 공식 원문을 직접 fetch해 `ProcedureSourceDocument`와 `EvidenceRecord`를 만든다.
 2. registry로 찾지 못한 질의는 설정된 경우 **Kakao → Google** 순서로 공식 URL 후보만 발견한다. 후보 URL은 공식 도메인 allowlist를 통과하고 원문 fetch가 성공해야 Evidence가 된다.
@@ -45,7 +45,7 @@
 - 합성 Case·catalog를 주입하는 standalone 실행: [`backend/app/agent/cli.py`](../backend/app/agent/cli.py), [`backend/app/agent/fixtures.py`](../backend/app/agent/fixtures.py)
 - 네트워크·schema drift·민감정보·공식 도메인 실패 조건 테스트: [`backend/tests/agent/test_procedure_tool.py`](../backend/tests/agent/test_procedure_tool.py), [`backend/tests/agent/test_support_discovery_tool.py`](../backend/tests/agent/test_support_discovery_tool.py)
 
-### 2.2 `[PLANNED_AI][NOT_IMPLEMENTED]` 반드시 구현할 목표
+### 2.2 AI가 이어서 구현할 목표
 
 현재의 제한된 URL fetch와 기업마당 단일-page discovery를 범용 크롤러나 RAG라고 부르지 않는다. 목표는 승인된 공식 원문을 수집하고, 재현 가능한 버전으로 검수·색인한 뒤, Agent가 원문까지 역추적 가능한 Evidence만 사용하는 전체 파이프라인이다.
 
@@ -78,14 +78,14 @@ Kakao와 Google은 사실 원천이 아니다. 현재 Google 경로는 Google HT
 
 ### 3.2 금지·제한
 
-- `[CURRENT_AI]` Naver 검색 API 결과를 Agent·RAG 입력으로 사용하지 않는다. 2026-09-07 시행 약관 공지가 검색 결과를 AI 모델·서비스의 입력 또는 개발에 사용하는 행위를 금지하므로 provider 후보에서 제외했다([네이버 개발자센터 공지](https://developers.naver.com/notice/article/33400)).
-- `[CURRENT_AI]` 검색 결과 제목·snippet, 비공식 블로그, 카페, 광고 페이지를 근거로 승격하지 않는다.
-- `[CURRENT_AI]` allowlist 밖 URL, HTTP URL, 비공식 redirect, 허용하지 않은 content type, 제한보다 큰 응답은 fetch하지 않거나 Evidence로 만들지 않는다.
-- `[PLANNED_AI][NOT_IMPLEMENTED]` **승인된 정부·공식 출처별 bounded crawler는 반드시 구현한다.** 다만 임의 URL을 무차별 순회하는 인터넷 전체 크롤링은 금지하고, 출처별 이용조건·robots·공공누리·보존 조건을 승인한 범위만 수집한다.
-- `[BLOCKED_BY_SHARED_DECISION]` 사업자등록번호·주소 등 사용자 식별정보를 검색 query, LLM prompt, trace, fixture 또는 공개 API URL에 직접 넣지 않는다. 인증·동의·마스킹·보존 계약은 BE 문서에서 먼저 확정한다.
-- `[DEFERRED]` 정부24·홈택스·4대사회보험정보연계센터의 실제 신고 대행은 현재 범위가 아니다. Agent는 검증된 방법과 공식 링크만 안내한다.
+- 현재 정책: Naver 검색 API 결과를 Agent·RAG 입력으로 사용하지 않는다. 2026-09-07 시행 약관 공지가 검색 결과를 AI 모델·서비스의 입력 또는 개발에 사용하는 행위를 금지하므로 provider 후보에서 제외했다([네이버 개발자센터 공지](https://developers.naver.com/notice/article/33400)).
+- 현재 정책: 검색 결과 제목·snippet, 비공식 블로그, 카페, 광고 페이지를 근거로 승격하지 않는다.
+- 현재 정책: allowlist 밖 URL, HTTP URL, 비공식 redirect, 허용하지 않은 content type, 제한보다 큰 응답은 fetch하지 않거나 Evidence로 만들지 않는다.
+- AI 후속 구현: **승인된 정부·공식 출처별 bounded crawler는 반드시 구현한다.** 다만 임의 URL을 무차별 순회하는 인터넷 전체 크롤링은 금지하고, 출처별 이용조건·robots·공공누리·보존 조건을 승인한 범위만 수집한다.
+- 선행 공동 결정 필요: 사업자등록번호·주소 등 사용자 식별정보를 검색 query, LLM prompt, trace, fixture 또는 공개 API URL에 직접 넣지 않는다. 인증·동의·마스킹·보존 계약을 먼저 확정한다.
+- 보류: 정부24·홈택스·4대사회보험정보연계센터의 실제 신고 대행은 현재 범위가 아니다. Agent는 검증된 방법과 공식 링크만 안내한다.
 
-## 4. `[CURRENT_AI]` 구현된 조회 경계
+## 4. 현재 구현된 조회 경계
 
 ### 4.1 절차 원문 조회
 
@@ -125,22 +125,22 @@ Kakao와 Google은 사실 원천이 아니다. 현재 Google 경로는 Google HT
 
 따라서 현재 standalone 실행 성공은 “Agent 흐름과 실제 절차 원문 fetch가 동작한다”는 뜻이며 “실제 사용자 Case와 실제 지원 자격이 연동됐다”는 뜻이 아니다.
 
-## 5. `[OBSERVED_2026-09-15]` 외부 API·사이트 실측
+## 5. 2026-09-15 외부 API·사이트 제한 실측
 
 아래 표는 2026-09-15 당시의 접근 시험 기록이다. 비밀값은 출력하거나 문서화하지 않았다. 재실행 일자와 결과를 남기지 않은 채 현재 운영 상태로 확대 해석하지 않는다.
 
 | 원천 | 그날 확인한 사실 | 코드/Case 연결 판정 |
 |---|---|---|
-| 기업마당 직접 API | HTTP 200, JSON `jsonArray` 및 폐업 관련 공고 후보 확인 | `[CURRENT_AI]` 독립 discovery adapter만 연결. catalog·Graph에는 미연결 |
-| 국세청 사업자등록 상태 API `15081808` | 합성 비실사용 번호로 HTTP 200 | `[PLANNED_AI][NOT_IMPLEMENTED]` key/access만 확인. 실제 사용자 조회 아님 |
-| 행안부 휴게음식점 API `15154921` | 목록 endpoint HTTP 200 | `[PLANNED_AI][NOT_IMPLEMENTED]` 실제 Case exact 조회·adapter 없음 |
-| 행안부 일반음식점 API `15154916` | 승인 전파 후 목록 endpoint HTTP 200 | `[PLANNED_AI][NOT_IMPLEMENTED]` 실제 Case exact 조회·adapter 없음 |
-| 행안부 제과점 API `15155252` | HTTP 403, code 30 | 활용신청 없음. `[DEFERRED]` |
+| 기업마당 직접 API | HTTP 200, JSON `jsonArray` 및 폐업 관련 공고 후보 확인 | 독립 discovery adapter만 구현됨. catalog·Graph에는 미연결 |
+| 국세청 사업자등록 상태 API `15081808` | 합성 비실사용 번호로 HTTP 200 | 접근만 확인; adapter는 AI 후속 구현. 실제 사용자 조회 아님 |
+| 행안부 휴게음식점 API `15154921` | 목록 endpoint HTTP 200 | 접근만 확인; 실제 Case exact 조회·adapter는 AI 후속 구현 |
+| 행안부 일반음식점 API `15154916` | 승인 전파 후 목록 endpoint HTTP 200 | 접근만 확인; 실제 Case exact 조회·adapter는 AI 후속 구현 |
+| 행안부 제과점 API `15155252` | HTTP 403, code 30 | 활용신청 없음; 현재 보류 |
 | 공공데이터포털 기업마당 API `15157820` | HTTP 403, code 30 | 활용신청 필요. 보강원 후보 |
 | K-Startup API `15125364` | HTTP 403, code 30 | 활용신청 필요. 보강원 후보 |
 | 정부24 혜택 API `15113968` | HTTP 401 | 활용신청·승인 상태 확인 필요. 보강원 후보 |
-| 찾기쉬운 생활법령 2개 문서 | HTTP 200, 본문 추출 성공 | `[CURRENT_AI]` Procedure registry 경로 |
-| 국민연금공단 사업장 탈퇴 안내 | HTTP 200, 본문 추출 성공 | `[CURRENT_AI]` Procedure registry 경로 |
+| 찾기쉬운 생활법령 2개 문서 | HTTP 200, 본문 추출 성공 | 현재 Procedure registry 경로에 연결됨 |
+| 국민연금공단 사업장 탈퇴 안내 | HTTP 200, 본문 추출 성공 | 현재 Procedure registry 경로에 연결됨 |
 
 공공데이터포털의 `SERVICE_KEY_IS_NOT_REGISTERED_ERROR`는 보유한 key 전체가 고장 났다는 뜻으로 단정하지 않는다. 같은 key로 성공한 서비스가 있으므로 서비스별 활용신청·승인·전파 상태부터 확인한다.
 
@@ -150,16 +150,16 @@ Kakao와 Google은 사실 원천이 아니다. 현재 Google 경로는 Google HT
 
 | 원천 | 목적 | 현재 상태 | 다음 AI 작업 | 선행 결정·준비 |
 |---|---|---|---|---|
-| 기업마당 직접 API | 지원 공고 후보 발견 | `[CURRENT_AI]` raw adapter | pagination, 상세·첨부 수집, versioning, 검수 queue | 보존·검수·발행 정책 |
-| 국세청 `15081808` | 사업자 영업·폐업 상태 확인 | `[OBSERVED_2026-09-15][PLANNED_AI][NOT_IMPLEMENTED]` | 최소 응답 adapter와 Evidence 변환 | `[BLOCKED_BY_SHARED_DECISION]` 인증된 사업자번호 resolver |
-| 행안부 `15154921`, `15154916` | 카페 영업신고·폐업·관할기관 확인 | `[OBSERVED_2026-09-15][PLANNED_AI][NOT_IMPLEMENTED]` | 업종별 exact 조회 adapter와 정규화 | `[BLOCKED_BY_SHARED_DECISION]` 매칭 key, 동의, 오매칭 처리 |
-| 국가법령정보 공동활용 API | 조문·시행일·서식 보강 | `[PLANNED_AI][NOT_IMPLEMENTED]` | 신청 후 resolver·version 검증 | 운영 `LAW_API_OC`, 이용 범위 승인 |
-| 기업마당 `15157820` | 수정일 기반 증분 수집 보강 | `[PLANNED_AI][NOT_IMPLEMENTED]` | 승인 뒤 schema spike | 활용신청, 제3유형 변경금지 검토 |
-| 정부24 혜택 `15113968` | 대상·선정기준·서류 보강 | `[PLANNED_AI][NOT_IMPLEMENTED]` | 승인 뒤 후보 connector 평가 | 활용신청, 자격 판정 기준 검수 |
-| K-Startup `15125364` | 재도전·재창업 공고 보강 | `[PLANNED_AI][NOT_IMPLEMENTED]` | 승인 뒤 후보 connector 평가 | 활용신청, 마감·제외대상 검증 |
-| 중소벤처24 | 업력·매출·지역 등 지원조건 보강 | `[PLANNED_AI][NOT_IMPLEMENTED]` | API 계약·sample 조사 | `SMES_API_TOKEN`, 승인·IP 조건 |
-| 식품안전나라 | 식품업 인허가 보조 | `[DEFERRED]` | MVP 정확도 gap 발생 시 재평가 | 별도 key, 서비스 시간·중복성 검토 |
-| Work24 | 채용·훈련 정보 | `[DEFERRED]` | 사업장 보험상실 절차의 주 원천이 아니므로 현재 도입하지 않음 | 제품 범위 변경 시 재평가 |
+| 기업마당 직접 API | 지원 공고 후보 발견 | raw adapter 구현·검증됨; 실행 흐름 미연결 | pagination, 상세·첨부 수집, versioning, 검수 queue | 보존·검수·발행 정책 |
+| 국세청 `15081808` | 사업자 영업·폐업 상태 확인 | 2026-09-15 접근만 확인; adapter 미구현 | 최소 응답 adapter와 Evidence 변환 | 선행 공동 결정: 인증된 사업자번호 resolver |
+| 행안부 `15154921`, `15154916` | 카페 영업신고·폐업·관할기관 확인 | 2026-09-15 접근만 확인; adapter 미구현 | 업종별 exact 조회 adapter와 정규화 | 선행 공동 결정: 매칭 key, 동의, 오매칭 처리 |
+| 국가법령정보 공동활용 API | 조문·시행일·서식 보강 | AI 후속 구현 | 신청 후 resolver·version 검증 | 운영 `LAW_API_OC`, 이용 범위 승인 |
+| 기업마당 `15157820` | 수정일 기반 증분 수집 보강 | AI 후속 구현 | 승인 뒤 schema spike | 활용신청, 제3유형 변경금지 검토 |
+| 정부24 혜택 `15113968` | 대상·선정기준·서류 보강 | AI 후속 구현 | 승인 뒤 후보 connector 평가 | 활용신청, 자격 판정 기준 검수 |
+| K-Startup `15125364` | 재도전·재창업 공고 보강 | AI 후속 구현 | 승인 뒤 후보 connector 평가 | 활용신청, 마감·제외대상 검증 |
+| 중소벤처24 | 업력·매출·지역 등 지원조건 보강 | AI 후속 구현 | API 계약·sample 조사 | `SMES_API_TOKEN`, 승인·IP 조건 |
+| 식품안전나라 | 식품업 인허가 보조 | 보류 | MVP 정확도 gap 발생 시 재평가 | 별도 key, 서비스 시간·중복성 검토 |
+| Work24 | 채용·훈련 정보 | 보류 | 사업장 보험상실 절차의 주 원천이 아니므로 현재 도입하지 않음 | 제품 범위 변경 시 재평가 |
 
 공식 문서 링크:
 
@@ -169,7 +169,7 @@ Kakao와 Google은 사실 원천이 아니다. 현재 Google 경로는 Google HT
 - [공공데이터포털 기업마당 `15157820`](https://www.data.go.kr/data/15157820/openapi.do), [정부24 혜택 `15113968`](https://www.data.go.kr/data/15113968/openapi.do), [K-Startup `15125364`](https://www.data.go.kr/data/15125364/openapi.do)
 - [중소벤처24 지원사업정보 API](https://portal.smes.go.kr/home/cs/opndata/UI_USR_L_210/supportBusinessInfoApi)
 
-## 7. `[PLANNED_AI][NOT_IMPLEMENTED]` 크롤링·RAG 구현 단계
+## 7. AI 후속 목표: 크롤링·RAG 구현 단계
 
 아래 단계는 순서를 갖는다. 앞 단계 acceptance criterion을 충족하지 못하면 다음 단계에서 운영 데이터로 사용하지 않는다.
 
@@ -207,7 +207,7 @@ Kakao와 Google은 사실 원천이 아니다. 현재 Google 경로는 Google HT
 - retrieval 평가는 문서 검색 recall뿐 아니라 잘못된 기관·이전 version·비공식 자료를 선택하는 false-positive도 측정한다.
 - API 장애 시 무조건 웹 크롤링으로 우회하지 않는다. 마지막으로 검수된 version을 stale 표시해 사용할지 fail closed할지는 데이터 종류별 정책으로 정한다.
 
-## 8. `[BLOCKED_BY_SHARED_DECISION]` 먼저 확정할 항목
+## 8. AI 구현 전에 공동으로 확정할 항목
 
 아래는 AI 구현 의지가 없어서 미구현인 것이 아니라, 잘못 결정하면 개인정보 노출·Case 오매칭·무근거 판정이 생기기 때문에 공동 결정이 먼저 필요한 항목이다. 상세 질문과 acceptance criterion은 [BE-Agent 연동 요구사항](./be-agent-integration-requirements.md)을 따른다.
 
@@ -236,10 +236,10 @@ Kakao와 Google은 사실 원천이 아니다. 현재 Google 경로는 Google HT
 
 | 범위 | 판정 |
 |---|---|
-| 공식 절차 원문 제한 조회 | `[CURRENT_AI]` |
-| 기업마당 raw 공고 후보 discovery | `[CURRENT_AI]` |
-| 실제 Case·실제 검수 catalog를 사용한 전체 Graph | `[BLOCKED_BY_SHARED_DECISION][PLANNED_AI][NOT_IMPLEMENTED]` |
-| 승인된 공식 원문 crawler·parser·versioned corpus | `[PLANNED_AI][NOT_IMPLEMENTED]` |
-| index·retriever·Evidence·Graph RAG 연결 | `[PLANNED_AI][NOT_IMPLEMENTED]` |
+| 공식 절차 원문 제한 조회 | 현재 구현·검증됨 |
+| 기업마당 raw 공고 후보 discovery | 구현·검증됐지만 현재 Graph 미연결 |
+| 실제 Case·실제 검수 catalog를 사용한 전체 Graph | 선행 공동 결정 필요 · AI 후속 구현 |
+| 승인된 공식 원문 crawler·parser·versioned corpus | AI 후속 구현 |
+| index·retriever·Evidence·Graph RAG 연결 | AI 후속 구현 |
 
 즉, 크롤링·RAG는 폐기한 아이디어가 아니라 **AI 구현 목표**다. 다만 현재의 세 URL fetch나 단일 기업마당 API 호출을 RAG라고 과장하지 않고, 위 단계와 acceptance criterion을 충족하는 시점에만 구현 완료로 전환한다.
