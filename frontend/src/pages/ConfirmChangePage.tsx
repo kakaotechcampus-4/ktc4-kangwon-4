@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router'
 
 import { AppShell } from '../components/AppShell'
@@ -24,6 +24,23 @@ export function ConfirmChangePage() {
   const [choices, setChoices] = useState<Record<string, ConflictSide>>({})
   const [isPending, setIsPending] = useState(false)
 
+  /*
+   * 화면이 아직 붙어 있는지.
+   *
+   * 응답을 기다리는 동안 사용자가 뒤로 갈 수 있다. 그때 이동을 그대로 실행하면
+   * 일부러 빠져나온 화면으로 몇 초 뒤에 끌려간다.
+   *
+   * 정리 함수만 두면 StrictMode의 이중 실행에서 첫 마운트가 곧바로 false가 되므로
+   * 실행할 때마다 다시 true로 세운다.
+   */
+  const alive = useRef(true)
+  useEffect(() => {
+    alive.current = true
+    return () => {
+      alive.current = false
+    }
+  }, [])
+
   if (!view) return <Navigate to="/" replace />
   // 고를 것이 없으면 이 화면의 존재 이유가 없다. 서버가 빈 목록을 보내도 막다른 골목이
   // 되지 않게 현재 Case로 돌린다.
@@ -37,11 +54,11 @@ export function ConfirmChangePage() {
 
     // TODO(API): POST /cases/{caseId}/results/confirm 으로 선택값을 보낸다.
     // 요청 형태는 confirmedChanges: [{ field, value }] 배열이다.
-    // 그때 AbortController로 화면 이탈도 처리한다 — 지금은 기다리다 뒤로 가도
-    // 응답이 오면 화면이 /replan 으로 끌려간다.
+    // 진행 중인 요청 자체를 끊는 것은 그때 AbortController로 처리한다.
     // 실패 시 대기 상태에서 빠져나올 경로도 그때 함께 만든다 — 지금은 Mock이라
     // 실패하지 않지만, fetch로 바꾸면 오류가 나도 화면이 잠긴 채로 남는다.
     const replan = await simulateConfirm(choices)
+    if (!alive.current) return
     navigate('/replan', { state: replan })
   }
 

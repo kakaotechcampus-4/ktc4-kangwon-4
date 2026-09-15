@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router'
 
 import { AppShell } from '../components/AppShell'
@@ -23,6 +23,23 @@ export function ResultInputPage() {
   const [text, setText] = useState('')
   const [state, setState] = useState<SubmitState>({ kind: 'IDLE' })
 
+  /*
+   * 화면이 아직 붙어 있는지.
+   *
+   * 응답을 기다리는 동안 사용자가 뒤로 갈 수 있다. 그때 이동을 그대로 실행하면
+   * 일부러 빠져나온 화면으로 몇 초 뒤에 끌려간다.
+   *
+   * 정리 함수만 두면 StrictMode의 이중 실행에서 첫 마운트가 곧바로 false가 되므로
+   * 실행할 때마다 다시 true로 세운다.
+   */
+  const alive = useRef(true)
+  useEffect(() => {
+    alive.current = true
+    return () => {
+      alive.current = false
+    }
+  }, [])
+
   // 어느 할 일의 결과인지는 앞 화면이 알려준다. 주소로 직접 열었을 때는 없으므로
   // 개발·Preview에서만 Mock으로 떨어지고, 그 외에는 현재 Case로 돌린다 —
   // 없는 할 일을 지어내 보여주면 사용자가 엉뚱한 대상에 결과를 보고하게 된다.
@@ -40,11 +57,11 @@ export function ResultInputPage() {
     setState({ kind: 'PENDING' })
 
     // TODO(API): 계약이 확정되면 POST /cases/{caseId}/results 로 바꾼다.
-    // 그때 AbortController로 화면 이탈도 처리한다 — 지금은 기다리다 뒤로 가도
-    // 응답이 오면 화면이 /replan 으로 끌려간다.
+    // 진행 중인 요청 자체를 끊는 것은 그때 AbortController로 처리한다.
     // 그때 실패 처리도 함께 넣는다 — 오류가 나면 PENDING에서 빠져나오지 못해
     // 입력창이 잠긴 채로 남는다. FAILED 상태가 그 자리다.
     const outcome = await simulateSubmit(readMockKey(search), text)
+    if (!alive.current) return
 
     switch (outcome.kind) {
       case 'REPLAN':
