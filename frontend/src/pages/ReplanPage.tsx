@@ -23,8 +23,11 @@ const MOCKS: Record<string, ReplanView> = {
  * 대신 주소만으로는 열 수 없다. 개발·Preview에서는 Mock으로 그려 링크 확인이
  * 가능하게 하고, 그 외에는 ②로 보낸다.
  *
- * TODO(API): 연동 후에는 state가 없을 때 `GET /cases/{caseId}`로 현재 판단을
- * 다시 불러오는 편이 나을 수 있다. 새로고침해도 화면이 유지된다.
+ * TODO(API): 라우터 state는 `window.history.state`에 남아 새로고침해도 유지된다.
+ * 편해 보이지만 반대로 오래된 판단이 계속 살아 있다는 뜻이기도 하다 — 루프를 더 돈 뒤
+ * 뒤로가기를 여러 번 누르면 지난 판단이 "지금 할 일"이라는 얼굴로 다시 뜬다.
+ * Case가 Source of Truth라는 원칙과 어긋나므로, 연동 후에는 state를 그대로 믿지 말고
+ * `GET /cases/{caseId}`로 현재 판단을 다시 불러오는 쪽을 검토한다.
  */
 export function ReplanPage() {
   const { search, state } = useLocation()
