@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import JSON, BigInteger, Column, DateTime, Enum, ForeignKey, String, Text
+from sqlalchemy import JSON, BigInteger, Column, DateTime, Enum, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.sql import func
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -32,6 +32,7 @@ class ProcedureStep(SQLModel, table=True):
 
 class CaseProcedureStep(SQLModel, table=True):
     __tablename__ = "case_procedure_step"
+    __table_args__ = (UniqueConstraint("case_id", "procedure_step_id", name="uk_case_procedure_step"),)
 
     id: int | None = Field(default=None, sa_column=Column(BigInteger, primary_key=True, autoincrement=True))
     case_id: int = Field(sa_column=Column(BigInteger, ForeignKey("case.id"), nullable=False))
