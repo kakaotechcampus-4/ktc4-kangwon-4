@@ -13,7 +13,7 @@ class Case(SQLModel, table=True):
 
     business_type: str = Field(max_length=50)
     franchise_status: bool = Field(default=False)
-    employee_count: int = Field(default=0)
+    employee_count: int | None = Field(default=None)
 
     case_status: str = Field(
         default="IN_PROGRESS",

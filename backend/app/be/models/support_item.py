@@ -14,7 +14,7 @@ class SupportItem(SQLModel, table=True):
     program_name: str = Field(max_length=255)
     application_start_date: date | None = Field(default=None, sa_column=Column(Date, nullable=True))
     application_end_date: date | None = Field(default=None, sa_column=Column(Date, nullable=True))
-    source_file_location: str | None = Field(default=None, max_length=500, description="Wiki 원문 위치")
+    source_file_location: str | None = Field(default=None, max_length=500, description="S3 원본 파일 위치")
 
     created_at: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, server_default=func.now(), nullable=False))
     updated_at: datetime | None = Field(
