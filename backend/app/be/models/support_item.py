@@ -16,7 +16,7 @@ class SupportItem(SQLModel, table=True):
     application_end_date: date | None = Field(default=None, sa_column=Column(Date, nullable=True))
     source_file_location: str | None = Field(default=None, max_length=500, description="Wiki 원문 위치")
 
-    created_at: datetime | None = Field(default=None, sa_column=Column(DateTime, server_default=func.now()))
+    created_at: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, server_default=func.now(), nullable=False))
     updated_at: datetime | None = Field(
         default=None, sa_column=Column(DateTime, server_default=func.now(), onupdate=func.now())
     )
@@ -51,7 +51,7 @@ class SupportItemApplication(SQLModel, table=True):
     )
     applied_at: datetime | None = Field(default=None, sa_column=Column(DateTime, nullable=True))
 
-    created_at: datetime | None = Field(default=None, sa_column=Column(DateTime, server_default=func.now()))
+    created_at: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, server_default=func.now(), nullable=False))
     updated_at: datetime | None = Field(
         default=None, sa_column=Column(DateTime, server_default=func.now(), onupdate=func.now())
     )

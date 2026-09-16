@@ -51,7 +51,7 @@ class Case(SQLModel, table=True):
 
     planned_closure_date: date | None = Field(default=None, sa_column=Column(Date, nullable=True))
     completed_at: datetime | None = Field(default=None, sa_column=Column(DateTime, nullable=True))
-    created_at: datetime | None = Field(default=None, sa_column=Column(DateTime, server_default=func.now()))
+    created_at: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, server_default=func.now(), nullable=False))
     updated_at: datetime | None = Field(
         default=None, sa_column=Column(DateTime, server_default=func.now(), onupdate=func.now())
     )

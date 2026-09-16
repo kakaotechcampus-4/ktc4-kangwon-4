@@ -22,7 +22,7 @@ class CaseHistory(SQLModel, table=True):
         default=None, sa_column=Column(BigInteger, ForeignKey("blocker.id"), nullable=True)
     )
 
-    created_at: datetime | None = Field(default=None, sa_column=Column(DateTime, server_default=func.now()))
+    created_at: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, server_default=func.now(), nullable=False))
 
     case: "Case" = Relationship(back_populates="histories")
     procedure_step_histories: list["CaseProcedureStepHistory"] = Relationship(back_populates="case_history")

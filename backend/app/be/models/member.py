@@ -13,7 +13,7 @@ class Member(SQLModel, table=True):
     nickname: str = Field(max_length=255, description="카카오 닉네임")
     refresh_token: str | None = Field(default=None, max_length=512)
 
-    created_at: datetime | None = Field(default=None, sa_column=Column(DateTime, server_default=func.now()))
+    created_at: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, server_default=func.now(), nullable=False))
     updated_at: datetime | None = Field(
         default=None, sa_column=Column(DateTime, server_default=func.now(), onupdate=func.now())
     )

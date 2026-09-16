@@ -21,7 +21,7 @@ class ProcedureStep(SQLModel, table=True):
         sa_column=Column(Enum("ALL", "CAFE", name="applicable_business_type_enum"), server_default="ALL", nullable=False),
     )
 
-    created_at: datetime | None = Field(default=None, sa_column=Column(DateTime, server_default=func.now()))
+    created_at: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, server_default=func.now(), nullable=False))
     updated_at: datetime | None = Field(
         default=None, sa_column=Column(DateTime, server_default=func.now(), onupdate=func.now())
     )
@@ -46,7 +46,7 @@ class CaseProcedureStep(SQLModel, table=True):
         ),
     )
 
-    created_at: datetime | None = Field(default=None, sa_column=Column(DateTime, server_default=func.now()))
+    created_at: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, server_default=func.now(), nullable=False))
     updated_at: datetime | None = Field(
         default=None, sa_column=Column(DateTime, server_default=func.now(), onupdate=func.now())
     )
@@ -72,9 +72,7 @@ class CaseProcedureStepHistory(SQLModel, table=True):
         sa_column=Column(Enum("NOT_STARTED", "IN_PROGRESS", "COMPLETED", name="new_step_status_enum"), nullable=False)
     )
 
-    updated_at: datetime | None = Field(
-        default=None, sa_column=Column(DateTime, server_default=func.now(), onupdate=func.now())
-    )
+    created_at: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, server_default=func.now(), nullable=False))
 
     case: "Case" = Relationship(back_populates="case_procedure_step_histories")
     procedure_step: "ProcedureStep" = Relationship(back_populates="case_procedure_step_histories")
@@ -91,7 +89,7 @@ class StepDependency(SQLModel, table=True):
     )
     dependency_type: str = Field(max_length=50)
 
-    created_at: datetime | None = Field(default=None, sa_column=Column(DateTime, server_default=func.now()))
+    created_at: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, server_default=func.now(), nullable=False))
     updated_at: datetime | None = Field(
         default=None, sa_column=Column(DateTime, server_default=func.now(), onupdate=func.now())
     )
@@ -105,7 +103,7 @@ class StepEligibility(SQLModel, table=True):
     condition_key: str = Field(max_length=100)
     condition_value: str = Field(max_length=255)
 
-    created_at: datetime | None = Field(default=None, sa_column=Column(DateTime, server_default=func.now()))
+    created_at: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, server_default=func.now(), nullable=False))
     updated_at: datetime | None = Field(
         default=None, sa_column=Column(DateTime, server_default=func.now(), onupdate=func.now())
     )

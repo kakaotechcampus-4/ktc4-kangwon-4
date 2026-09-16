@@ -29,7 +29,7 @@ class Blocker(SQLModel, table=True):
         sa_column=Column(Enum("ACTIVE", "RESOLVED", name="blocker_status_enum"), server_default="ACTIVE"),
     )
 
-    created_at: datetime | None = Field(default=None, sa_column=Column(DateTime, server_default=func.now()))
+    created_at: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, server_default=func.now(), nullable=False))
     updated_at: datetime | None = Field(
         default=None, sa_column=Column(DateTime, server_default=func.now(), onupdate=func.now())
     )
