@@ -17,7 +17,7 @@ class Case(SQLModel, table=True):
 
     case_status: str = Field(
         default="IN_PROGRESS",
-        sa_column=Column(Enum("IN_PROGRESS", "COMPLETED", name="case_status_enum"), server_default="IN_PROGRESS"),
+        sa_column=Column(Enum("IN_PROGRESS", "COMPLETED", name="case_status_enum"), server_default="IN_PROGRESS", nullable=False),
     )
     lease_status: str = Field(
         sa_column=Column(
