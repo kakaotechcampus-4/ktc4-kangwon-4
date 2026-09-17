@@ -57,7 +57,8 @@ export function ConfirmChangePage() {
     // 진행 중인 요청 자체를 끊는 것은 그때 AbortController로 처리한다.
     //
     // 이 요청에는 동시성 보호가 없다 — `/results`의 expectedVersion에 해당하는 필드가
-    // 계약에 빠져 있다(interface-spec.md §5에 확정 필요로 기록됨). 같은 결정이 두 번
+    // 계약에 빠져 있다(be-agent-integration-requirements.md §4에 P0 결정으로 기록됨).
+    // 같은 결정이 두 번
     // 도착해도 서버가 걸러낼 수단이 없으므로, 보호 방식이 정해지면 함께 맞춘다.
     // 실패 시 대기 상태에서 빠져나올 경로도 그때 함께 만든다 — 지금은 Mock이라
     // 실패하지 않지만, fetch로 바꾸면 오류가 나도 화면이 잠긴 채로 남는다.
