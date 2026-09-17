@@ -19,7 +19,7 @@ class CaseHistory(SQLModel, table=True):
         default=None, sa_column=Column(String(500), nullable=True), description="nullable, 판단이 발생한 경우에만"
     )
     priority_blocker_id: int | None = Field(
-        default=None, sa_column=Column(BigInteger, ForeignKey("blocker.id"), nullable=True)
+        default=None, sa_column=Column(BigInteger, ForeignKey("blocker.id", use_alter=True, name="fk_case_history_priority_blocker"), nullable=True)
     )
 
     created_at: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, server_default=func.now(), nullable=False))
