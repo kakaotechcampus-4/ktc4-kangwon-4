@@ -2,7 +2,7 @@
 
 > 소유: AI
 >
-> 기준일: 2026-09-15
+> 기준일: 2026-09-18
 >
 > 내부 schema version: `agent-io/2.0`
 
@@ -19,7 +19,7 @@
 
 standalone 실행에서 데이터 출처는 다음과 같이 섞여 있다.
 
-- **실제 외부 응답:** 설정된 OpenAI-compatible LLM endpoint의 응답
+- **실제 외부 응답:** 설정된 OpenAI-compatible LLM endpoint의 응답. Supervisor 전용 설정이 있으면 Supervisor만 다른 endpoint·model을 쓰고 정보분석·지원금·Review는 공용 설정을 쓴다
 - **실제 공식 원문:** 공식 registry URL에서 실행 시점에 가져오는 폐업 절차 문서
 - **합성 입력:** 코드에 고정된 비식별 `CaseSnapshot` fixture
 - **합성 지원사업 데이터:** 검수됐다고 가정해 작성한 `ReviewedSupportCatalog` fixture
@@ -32,7 +32,7 @@ standalone 실행에서 데이터 출처는 다음과 같이 섞여 있다.
 ### 현재 실행되는 기능
 
 - LangGraph 실행, Review 재작업, fail-closed `SAFE_FAILURE`
-- 설정된 endpoint를 이용한 실제 LLM 분석
+- 설정된 endpoint를 이용한 실제 LLM 분석. Supervisor는 별도 endpoint·model로 분리할 수 있고, 미설정이면 공용 설정을 그대로 쓴다
 - 코드 검토된 공식 registry URL의 원문 조회
 - 합성 `ReviewedSupportCatalog`를 이용한 지원사업 조건 비교
 - schema-valid fixture를 이용한 standalone CLI 실행
@@ -51,6 +51,7 @@ standalone 실행에서 데이터 출처는 다음과 같이 섞여 있다.
 - 기업마당 raw 공고를 검수 catalog로 발행하는 pipeline
 - 범용 crawler, parser/chunker corpus, vector index와 RAG retriever
 - Langfuse token·비용 전송
+- 한 프로세스에서 동시 요청 처리 — LLM 호출 예산 객체를 실행 사이에 공유하고 실행 시작 시 되돌리므로 동시 실행 시 집계가 섞인다. 현재 server 연결이 없어 단일 실행만 전제한다
 
 ## 3. 실행 전 준비
 
@@ -74,13 +75,21 @@ process environment가 저장소 루트 `.env`보다 우선한다. 비밀값은 
 - `PROXY_TOKEN`: endpoint credential
 - `OPENAI_MODEL`: endpoint가 실제 지원하는 model ID
 
+Supervisor만 다른 provider·model로 분리할 때 다음 세 값을 설정한다. 비어 있으면 항목별로 위 공용 값으로 폴백한다. 정보분석·지원금·Review는 이 값과 무관하게 항상 공용 설정을 쓴다.
+
+- `SUPERVISOR_CHAT_PROXY_URL`: 선택; Supervisor 전용 chat endpoint base URL
+- `SUPERVISOR_PROXY_TOKEN`: 선택; Supervisor 전용 endpoint credential
+- `SUPERVISOR_MODEL`: 선택; Supervisor 전용 model ID
+
 다음 값은 선택 사항이다.
 
 - `OPENAI_REASONING_EFFORT`: provider가 지원할 때만 전달
 - `AGENT_LLM_TIMEOUT_SECONDS`: provider 시도 deadline
-- `AGENT_LLM_MAX_RETRIES`: provider retry 상한
+- `AGENT_LLM_MAX_RETRIES`: provider retry 상한. retry 시도도 실행당 LLM 호출 예산을 1회로 센다
 - `AGENT_LLM_RETRY_BACKOFF_SECONDS`: 첫 retry backoff, `0..60`초
 - `AGENT_LLM_MAX_RESPONSE_BYTES`: 응답 크기 상한, 기본 `1,000,000` bytes
+
+한 실행이 쓸 수 있는 LLM 호출 수에는 전역 상한이 있다. 공용 client와 Supervisor 전용 client가 예산 하나를 공유하며 기본 상한은 15회다. HTTP retry도 1회로 센다. 상한을 넘으면 `LOOP_LIMIT_REACHED` 사유로 `SAFE_FAILURE` 처리한다. 현재 이 값은 환경변수로 조정하지 않는다.
 
 ### 절차조회 설정 — registry는 key 불필요
 
@@ -124,7 +133,7 @@ PYTHONPATH=backend backend/.venv/bin/python \
 
 - `REVIEWED_PLAN`: Review를 통과한 계획 후보
 - `CONFLICT`: 확정 사실과 새 입력이 충돌해 현재 run만 안전 종료
-- `SAFE_FAILURE`: 구성요소 실패 또는 Review 재작업 상한 소진을 fail-closed 처리
+- `SAFE_FAILURE`: 구성요소 실패, Review 재작업 상한 소진 또는 실행당 LLM 호출 예산 소진(`LOOP_LIMIT_REACHED`)을 fail-closed 처리
 
 종료 코드는 다음과 같다.
 
@@ -182,7 +191,7 @@ ruff format --check backend/app/agent backend/tests/agent
 
 unit test는 외부 credential·quota를 쓰지 않는다. live smoke는 외부 endpoint 상태와 모델의 structured-output 품질에 영향을 받는다.
 
-같은 날 팀 proxy의 `openai/gpt-4.1-mini`로 다음 두 흐름을 제한 실측했다.
+같은 날 팀 proxy의 `openai/gpt-4.1-mini` 하나로 Supervisor를 포함한 모든 구성요소를 돌려 다음 두 흐름을 제한 실측했다. Supervisor 전용 endpoint 분리와 실행당 호출 예산이 들어간 뒤의 실측은 아직 없다.
 
 - `REVIEWED_PLAN / NEEDS_MORE_INFO / PASS`까지 완료
 - `REVIEW_RETRY_EXHAUSTED`로 안전 종료
@@ -205,13 +214,14 @@ unit test는 외부 credential·quota를 쓰지 않는다. live smoke는 외부 
 - version/CAS와 transaction 기반 저장
 - 실제 사용자 입력 redaction·조립 경계
 - 통합 테스트와 저장 후 read-back
+- 실행당 LLM 호출 예산을 실행 단위로 격리 — 현재 공유 객체 방식은 동시 요청에 안전하지 않다
 
 공식 사이트나 LLM endpoint 장애 시 standalone 성공을 보장하지 않으며 안전 실패할 수 있다. 생산 연동 완료로 판단하려면 BE 전달 문서의 공동 계약이 승인되고 실제 구현과 통합 테스트까지 끝나야 한다.
 
 ## 8. 저장소 근거
 
 - CLI 플래그·fixture·종료 코드: `backend/app/agent/cli.py`, `backend/app/agent/fixtures.py`
-- LLM 환경변수·retry: `backend/app/agent/llm.py`
+- LLM 환경변수·retry·실행당 호출 예산: `backend/app/agent/llm.py`
 - 절차조회 환경변수·trust root: `backend/app/agent/procedure_tool/models.py`, `backend/app/agent/procedure_tool/tool.py`
 - 현재 Graph 결과: `backend/app/agent/graph.py`, `backend/app/agent/schemas.py`
 - 기업마당 별도 adapter: `backend/app/agent/support_agent/discovery_tool.py`

@@ -9,7 +9,7 @@
 ## 1. 먼저 보는 결론
 
 - 현재 Agent 실행은 **Pydantic, LangGraph, httpx**를 사용한다.
-- LLM은 LangChain이나 OpenAI SDK가 아니라 `httpx`로 OpenAI-compatible endpoint를 호출한다.
+- LLM은 LangChain이나 OpenAI SDK가 아니라 `httpx`로 OpenAI-compatible endpoint를 호출한다. endpoint는 하나로 고정돼 있지 않다 — `SUPERVISOR_*` 환경변수를 설정하면 Supervisor만 별도 provider·model을 쓰는 client를 따로 받고, 설정하지 않으면 전 구성요소가 공용 endpoint 하나를 그대로 공유한다(환경변수는 `agent-standalone-runtime-requirements.md`가 단일 출처).
 - LangChain, OpenAI SDK, Langfuse와 Chroma는 설치 목록에 있지만 현재 Agent 실행에서는 사용하지 않는다.
 - 루트 `docker-compose.yml`은 **MySQL 8.0 DB만** 실행한다. Backend와 Agent container는 없다.
 - FastAPI route, ORM, migration, 인증과 실제 Case 읽기·쓰기는 아직 구현되지 않았다.
@@ -57,7 +57,7 @@
 
 - **상태:** 추적 인터페이스만 현재 코드에서 사용
 - **용도:** 실행·호출 metadata를 받을 수 있는 경계
-- **제한:** 기본 구현은 아무 곳에도 보내지 않는 `NullTraceSink`다. Langfuse 전송과 token·비용 수집은 없다.
+- **제한:** 기본 구현은 아무 곳에도 보내지 않는 `NullTraceSink`다. Langfuse 전송과 token·비용 수집은 없다. 실행당 LLM 호출 횟수 상한(`llm.py`의 `LLMCallBudget`, 기본 15회)은 있지만 이는 호출 수를 세어 막는 장치일 뿐 token·비용 측정이 아니다.
 
 현재 구조를 “LangChain과 LangGraph를 함께 사용한다”고 설명하면 부정확하다. 실행 순서 관리는 LangGraph, LLM HTTP 통신은 `httpx`가 담당한다.
 
