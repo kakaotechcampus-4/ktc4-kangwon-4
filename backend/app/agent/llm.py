@@ -31,7 +31,11 @@ _DEFAULT_TIMEOUT_SECONDS = 45.0
 _DEFAULT_MAX_RETRIES = 2
 _DEFAULT_RETRY_BACKOFF_SECONDS = 0.25
 _DEFAULT_MAX_RESPONSE_BYTES = 1_000_000
-_DEFAULT_MAX_CALLS_PER_RUN = 15
+# Documented component limits (architecture.md §6) allow, in the worst case,
+# Info 3 + Support 3 and then Supervisor 3 + Review 3 for each of the three
+# Review rounds. A cap below that would fail runs the component limits still
+# consider valid, so the budget sits just above the documented ceiling.
+_DEFAULT_MAX_CALLS_PER_RUN = 40
 _MAX_ALLOWED_RETRIES = 4
 _MAX_RETRY_BACKOFF_SECONDS = 60.0
 _MIN_RESPONSE_BYTES = 1_024

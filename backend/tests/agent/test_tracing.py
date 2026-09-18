@@ -115,11 +115,54 @@ def test_sink_swallows_backend_failures() -> None:
     sink.flush()
 
 
-def test_sink_is_disabled_without_credentials() -> None:
-    assert LangfuseTraceSink.from_env(environ={}) is None
+def test_sink_is_disabled_without_credentials(tmp_path: Path) -> None:
+    empty = tmp_path / ".env"
+    empty.write_text("", encoding="utf-8")
+
+    assert LangfuseTraceSink.from_env(environ={}, env_file=empty) is None
     assert (
         LangfuseTraceSink.from_env(
-            environ={"LANGFUSE_PUBLIC_KEY": "pk", "LANGFUSE_SECRET_KEY": "  "}
+            environ={"LANGFUSE_PUBLIC_KEY": "pk", "LANGFUSE_SECRET_KEY": "  "},
+            env_file=empty,
         )
         is None
     )
+
+
+def test_sink_reads_credentials_from_env_file(tmp_path: Path) -> None:
+    """The CLI does not load .env into os.environ, so the sink must read it."""
+
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "LANGFUSE_PUBLIC_KEY=pk-lf-file\n"
+        "LANGFUSE_SECRET_KEY=sk-lf-file\n"
+        "LANGFUSE_BASE_URL=https://cloud.langfuse.test\n",
+        encoding="utf-8",
+    )
+    captured: dict[str, Any] = {}
+
+    class FakeLangfuseModule:
+        def __call__(self, **kwargs: Any) -> Any:
+            captured.update(kwargs)
+            return FakeLangfuse()
+
+    import app.agent.tracing as tracing_module
+
+    original = tracing_module.LangfuseTraceSink.from_env.__func__
+
+    def build(**kwargs: Any) -> Any:
+        return original(tracing_module.LangfuseTraceSink, **kwargs)
+
+    import langfuse
+
+    real_client = langfuse.Langfuse
+    langfuse.Langfuse = FakeLangfuseModule()
+    try:
+        sink = build(environ={}, env_file=env_file)
+    finally:
+        langfuse.Langfuse = real_client
+
+    assert sink is not None
+    assert captured["public_key"] == "pk-lf-file"
+    assert captured["secret_key"] == "sk-lf-file"
+    assert captured["base_url"] == "https://cloud.langfuse.test"

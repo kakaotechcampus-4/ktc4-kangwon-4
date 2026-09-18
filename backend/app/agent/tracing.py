@@ -10,7 +10,10 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Protocol
+
+from dotenv import dotenv_values
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +28,10 @@ class TraceEvent:
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     error_code: str | None = None
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[3]
 
 
 class TraceSink(Protocol):
@@ -88,25 +95,48 @@ class LangfuseTraceSink:
         self._client = client
 
     @classmethod
-    def from_env(cls, environ: Mapping[str, str] | None = None) -> LangfuseTraceSink | None:
+    def from_env(
+        cls,
+        *,
+        env_file: str | Path | None = None,
+        environ: Mapping[str, str] | None = None,
+    ) -> LangfuseTraceSink | None:
         """Build a sink when credentials are configured, otherwise ``None``.
 
-        The SDK reads ``LANGFUSE_PUBLIC_KEY``/``LANGFUSE_SECRET_KEY``/
-        ``LANGFUSE_BASE_URL`` itself; this only decides whether to enable it.
+        Settings are read the same way the LLM client reads them: the process
+        environment wins, then the repository-root ``.env``. Credentials are
+        passed to the SDK explicitly because it only inspects ``os.environ``,
+        which a ``.env`` file does not populate.
         """
 
         environment = os.environ if environ is None else environ
-        if not (
-            environment.get("LANGFUSE_PUBLIC_KEY", "").strip()
-            and environment.get("LANGFUSE_SECRET_KEY", "").strip()
-        ):
+        dotenv_path = Path(env_file) if env_file is not None else _repo_root() / ".env"
+        file_values: Mapping[str, str | None] = {}
+        if dotenv_path.is_file():
+            try:
+                file_values = dotenv_values(dotenv_path)
+            except (OSError, ValueError):
+                file_values = {}
+
+        def value(key: str) -> str:
+            raw = environment.get(key) or file_values.get(key) or ""
+            return str(raw).strip()
+
+        public_key, secret_key = value("LANGFUSE_PUBLIC_KEY"), value("LANGFUSE_SECRET_KEY")
+        if not (public_key and secret_key):
             return None
         try:
-            from langfuse import get_client
+            from langfuse import Langfuse
         except ImportError:
             return None
         try:
-            return cls(get_client())
+            return cls(
+                Langfuse(
+                    public_key=public_key,
+                    secret_key=secret_key,
+                    base_url=value("LANGFUSE_BASE_URL") or None,
+                )
+            )
         except Exception:  # noqa: BLE001 - observability must not block a run
             return None
 

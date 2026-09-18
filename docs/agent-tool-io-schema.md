@@ -1263,7 +1263,7 @@ Conflict ref와 candidate ID는 unique이고 각 conflict의 snapshot/version은
 | `failed_component` | `Component \| null` | Graph가 실패 owner를 기록하거나 Graph-level 실패이면 null | 허용 component enum만 가능 |
 | `trace_id` | non-empty string \| null | Graph가 입력 trace ID를 복사 | 빈 문자열 거부 |
 
-현재 Graph producer는 recovery action으로 `RETRY` 또는 `NONE`만 만들고 `requested_field_paths=[]`를 사용한다. 구성요소의 schema/guardrail/value 오류는 `STRUCTURED_OUTPUT_FAILED`, 설정·요청·upstream 계열 오류는 `COMPONENT_UNAVAILABLE`로 분류한다. Review 수정 2회 소진 시 `REVIEW_RETRY_EXHAUSTED`다. 한 실행의 전체 LLM 호출 수가 `LLMCallBudget` 상한(기본 15회)을 넘겨 `LLMBudgetExceededError`가 올라오면 `LOOP_LIMIT_REACHED`로 분류한다. 검수되지 않은 draft나 mutation은 포함하지 않는다.
+현재 Graph producer는 recovery action으로 `RETRY` 또는 `NONE`만 만들고 `requested_field_paths=[]`를 사용한다. 구성요소의 schema/guardrail/value 오류는 `STRUCTURED_OUTPUT_FAILED`, 설정·요청·upstream 계열 오류는 `COMPONENT_UNAVAILABLE`로 분류한다. Review 수정 2회 소진 시 `REVIEW_RETRY_EXHAUSTED`다. 한 실행의 전체 LLM 호출 수가 `LLMCallBudget` 상한(기본 40회)을 넘겨 `LLMBudgetExceededError`가 올라오면 `LOOP_LIMIT_REACHED`로 분류한다. 검수되지 않은 draft나 mutation은 포함하지 않는다.
 
 ### 11.6 Review 재작업 라우팅
 
@@ -1275,7 +1275,7 @@ Conflict ref와 candidate ID는 unique이고 각 conflict의 snapshot/version은
 - Support 재작업 시 Procedure와 Info source를 유지한다.
 - Supervisor 재작업 시 source를 모두 유지한다.
 - 각 재실행은 새 call ID와 digest를 만들며 이전 proof를 재사용하지 않는다.
-- 위 상한과 별개로, 한 실행 전체의 LLM 호출 수에 `LLMCallBudget` 상한(기본 15회)이 걸린다. 예산이 먼저 소진되면 Review attempt가 남아 있어도 `LOOP_LIMIT_REACHED` `SafeFailureOutcome`으로 끝난다.
+- 위 상한과 별개로, 한 실행 전체의 LLM 호출 수에 `LLMCallBudget` 상한(기본 40회)이 걸린다. 예산이 먼저 소진되면 Review attempt가 남아 있어도 `LOOP_LIMIT_REACHED` `SafeFailureOutcome`으로 끝난다.
 - 예산은 `AgentGraph.run()` 시작 시 되돌리므로 실행 단위이고, provider HTTP 재시도도 각각 1회로 센다. Supervisor용 별도 client를 쓰더라도 두 client가 같은 예산 객체 하나를 공유한다.
 - 현재 예산 객체는 공유 instance 하나다. 한 프로세스가 동시 요청을 처리하면 안전하지 않으며, server 연결이 아직 없어 코드에 TODO로만 남겨 두었다.
 

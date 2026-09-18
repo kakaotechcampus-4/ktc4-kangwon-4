@@ -89,7 +89,7 @@ Supervisor만 다른 provider·model로 분리할 때 다음 세 값을 설정�
 - `AGENT_LLM_RETRY_BACKOFF_SECONDS`: 첫 retry backoff, `0..60`초
 - `AGENT_LLM_MAX_RESPONSE_BYTES`: 응답 크기 상한, 기본 `1,000,000` bytes
 
-한 실행이 쓸 수 있는 LLM 호출 수에는 전역 상한이 있다. 공용 client와 Supervisor 전용 client가 예산 하나를 공유하며 기본 상한은 15회다. HTTP retry도 1회로 센다. 상한을 넘으면 `LOOP_LIMIT_REACHED` 사유로 `SAFE_FAILURE` 처리한다. 현재 이 값은 환경변수로 조정하지 않는다.
+한 실행이 쓸 수 있는 LLM 호출 수에는 전역 상한이 있다. 공용 client와 Supervisor 전용 client가 예산 하나를 공유하며 기본 상한은 40회다. HTTP retry도 1회로 센다. 상한을 넘으면 `LOOP_LIMIT_REACHED` 사유로 `SAFE_FAILURE` 처리한다. 현재 이 값은 환경변수로 조정하지 않는다.
 
 ### 절차조회 설정 — registry는 key 불필요
 
