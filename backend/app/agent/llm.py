@@ -30,6 +30,7 @@ _DEFAULT_TIMEOUT_SECONDS = 45.0
 _DEFAULT_MAX_RETRIES = 2
 _DEFAULT_RETRY_BACKOFF_SECONDS = 0.25
 _DEFAULT_MAX_RESPONSE_BYTES = 1_000_000
+_DEFAULT_MAX_CALLS_PER_RUN = 15
 _MAX_ALLOWED_RETRIES = 4
 _MAX_RETRY_BACKOFF_SECONDS = 60.0
 _MIN_RESPONSE_BYTES = 1_024
@@ -68,6 +69,47 @@ class LLMClientError(RuntimeError):
 
 class LLMConfigurationError(LLMClientError):
     """Raised before a request when required client configuration is invalid."""
+
+
+class LLMBudgetExceededError(LLMClientError):
+    """Raised when one run has spent its whole allowance of provider calls."""
+
+
+class LLMCallBudget:
+    """Provider-call allowance shared by every client used within one run.
+
+    Each HTTP attempt costs money, so retries consume the allowance too. The
+    graph resets the counter when a run starts, which makes the cap per-run.
+    """
+
+    # TODO: a single shared instance is not safe once one process serves
+    # concurrent runs; scope it per run (contextvar) when the server is wired.
+    def __init__(self, max_calls: int = _DEFAULT_MAX_CALLS_PER_RUN) -> None:
+        if type(max_calls) is not int or max_calls < 1:
+            raise ValueError("max_calls must be a positive integer")
+        self._max_calls = max_calls
+        self._spent = 0
+
+    @property
+    def max_calls(self) -> int:
+        return self._max_calls
+
+    @property
+    def spent(self) -> int:
+        return self._spent
+
+    def reset(self) -> None:
+        self._spent = 0
+
+    def consume(self) -> None:
+        if self._spent >= self._max_calls:
+            raise LLMBudgetExceededError(
+                f"Run exhausted its budget of {self._max_calls} provider call(s)",
+                code="LOOP_LIMIT_REACHED",
+                retryable=False,
+                attempts=self._spent,
+            )
+        self._spent += 1
 
 
 class LLMRequestError(LLMClientError):
@@ -143,11 +185,16 @@ class LLMConfig:
         *,
         env_file: str | Path | None = None,
         environ: Mapping[str, str] | None = None,
+        env_prefix: str = "",
     ) -> LLMConfig:
         """Load settings with process environment taking precedence over `.env`.
 
         By default the repository-root ``.env`` is loaded, independent of the
         current working directory. Tests can inject both the file and mapping.
+
+        ``env_prefix`` reads component-specific overrides such as
+        ``SUPERVISOR_OPENAI_MODEL``, falling back to the shared setting per key
+        so a component can override only the model, or only the endpoint.
         """
 
         environment = os.environ if environ is None else environ
@@ -163,18 +210,26 @@ class LLMConfig:
         else:
             file_values = {}
 
-        def value(key: str) -> str | None:
-            raw = environment.get(key)
-            if raw is None:
-                raw = file_values.get(key)
-            if raw is None:
-                return None
-            normalized = str(raw).strip()
-            return normalized or None
+        def value(*names: str) -> str | None:
+            for name in names:
+                raw = environment.get(name)
+                if raw is None:
+                    raw = file_values.get(name)
+                if raw is None:
+                    continue
+                normalized = str(raw).strip()
+                if normalized:
+                    return normalized
+            return None
 
-        base_url = value("CHAT_PROXY_URL")
-        api_token = value("PROXY_TOKEN")
-        model = value("OPENAI_MODEL")
+        def overridable(shared_key: str, override_suffix: str) -> str | None:
+            if not env_prefix:
+                return value(shared_key)
+            return value(f"{env_prefix}{override_suffix}", shared_key)
+
+        base_url = overridable("CHAT_PROXY_URL", "CHAT_PROXY_URL")
+        api_token = overridable("PROXY_TOKEN", "PROXY_TOKEN")
+        model = overridable("OPENAI_MODEL", "MODEL")
         missing = [
             key
             for key, configured in (
@@ -232,12 +287,14 @@ class StructuredLLMClient:
         client: httpx.AsyncClient | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
         sleep: SleepCallable = asyncio.sleep,
+        call_budget: LLMCallBudget | None = None,
     ) -> None:
         if client is not None and transport is not None:
             raise ValueError("Pass either an HTTP client or a transport, not both")
 
         self.config = config
         self._sleep = sleep
+        self._call_budget = call_budget
         self._owns_client = client is None
         self._client = client or httpx.AsyncClient(
             timeout=config.timeout_seconds,
@@ -250,15 +307,20 @@ class StructuredLLMClient:
         *,
         env_file: str | Path | None = None,
         environ: Mapping[str, str] | None = None,
+        env_prefix: str = "",
         client: httpx.AsyncClient | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
         sleep: SleepCallable = asyncio.sleep,
+        call_budget: LLMCallBudget | None = None,
     ) -> StructuredLLMClient:
         return cls(
-            LLMConfig.from_env(env_file=env_file, environ=environ),
+            LLMConfig.from_env(
+                env_file=env_file, environ=environ, env_prefix=env_prefix
+            ),
             client=client,
             transport=transport,
             sleep=sleep,
+            call_budget=call_budget,
         )
 
     async def __aenter__(self) -> Self:
@@ -312,6 +374,8 @@ class StructuredLLMClient:
             response: httpx.Response | None = None
             should_retry = False
             try:
+                if self._call_budget is not None:
+                    self._call_budget.consume()
                 async with asyncio.timeout(self.config.timeout_seconds):
                     request = self._client.build_request(
                         "POST",
@@ -715,6 +779,8 @@ def _configuration_error(message: str) -> LLMConfigurationError:
 
 
 __all__ = [
+    "LLMBudgetExceededError",
+    "LLMCallBudget",
     "LLMClientError",
     "LLMConfig",
     "LLMConfigurationError",

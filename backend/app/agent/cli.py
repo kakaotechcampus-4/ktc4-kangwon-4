@@ -11,7 +11,7 @@ from collections.abc import Sequence
 from app.agent.fixtures import build_standalone_fixture
 from app.agent.graph import AgentGraph
 from app.agent.info_agent import InfoAnalysisAgent
-from app.agent.llm import LLMClientError, StructuredLLMClient
+from app.agent.llm import LLMCallBudget, LLMClientError, StructuredLLMClient
 from app.agent.procedure_tool import ProcedureLookupTool
 from app.agent.review_tool import ReviewTool
 from app.agent.supervisor import SupervisorAgent
@@ -44,22 +44,33 @@ async def _run(args: argparse.Namespace) -> int:
     request.trace_id = args.trace_id
 
     client: StructuredLLMClient | None = None
+    supervisor_client: StructuredLLMClient | None = None
     procedure_tool: ProcedureLookupTool | None = None
     try:
-        client = StructuredLLMClient.from_env()
+        # Both clients share one budget, so splitting Supervisor onto another
+        # provider does not double what a single run may spend.
+        call_budget = LLMCallBudget()
+        client = StructuredLLMClient.from_env(call_budget=call_budget)
+        supervisor_client = StructuredLLMClient.from_env(
+            env_prefix="SUPERVISOR_",
+            call_budget=call_budget,
+        )
         procedure_tool = ProcedureLookupTool.from_env()
         runtime = AgentGraph(
             info_agent=InfoAnalysisAgent(client),
             procedure_tool=procedure_tool,
             support_agent=SupportAgent(client, fixture.support_catalog),
-            supervisor=SupervisorAgent(client),
+            supervisor=SupervisorAgent(supervisor_client),
             review_tool=ReviewTool(client),
             known_procedure_steps=fixture.known_procedure_steps,
+            call_budget=call_budget,
         )
         outcome = await runtime.run(request)
     finally:
         if procedure_tool is not None:
             await procedure_tool.aclose()
+        if supervisor_client is not None:
+            await supervisor_client.aclose()
         if client is not None:
             await client.aclose()
 

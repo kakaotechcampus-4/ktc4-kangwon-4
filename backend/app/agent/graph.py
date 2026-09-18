@@ -13,7 +13,10 @@ from datetime import date, datetime, timezone
 from typing import Any, Literal, Protocol, cast
 from uuid import UUID, uuid4
 
+from langgraph.graph import END, START, StateGraph
+
 from app.agent.enrichment import build_fact_overlays
+from app.agent.llm import LLMCallBudget
 from app.agent.schemas import (
     CASE_FIELD_SPECS,
     AgentGraphInput,
@@ -46,7 +49,6 @@ from app.agent.schemas import (
 )
 from app.agent.state import AgentGraphState
 from app.agent.tracing import NullTraceSink, TraceEvent, TraceSink
-from langgraph.graph import END, START, StateGraph
 
 
 class InfoRunner(Protocol):
@@ -89,6 +91,7 @@ class AgentGraph:
         uuid_factory: Callable[[], UUID] = uuid4,
         trace_sink: TraceSink | None = None,
         max_review_revisions: int = 2,
+        call_budget: LLMCallBudget | None = None,
     ) -> None:
         if max_review_revisions < 0 or max_review_revisions > 2:
             raise ValueError("max_review_revisions must be between 0 and 2")
@@ -102,9 +105,12 @@ class AgentGraph:
         self._uuid = uuid_factory
         self._trace_sink = trace_sink or NullTraceSink()
         self._max_review_revisions = max_review_revisions
+        self._call_budget = call_budget
         self.compiled = self._compile()
 
     async def run(self, request: AgentGraphInput) -> AgentGraphOutput:
+        if self._call_budget is not None:
+            self._call_budget.reset()
         # An owned deep copy prevents caller-side mutation while the graph is in flight.
         owned_request = request.model_copy(deep=True)
         failure_request = request.model_copy(deep=True)
@@ -629,6 +635,14 @@ class AgentGraph:
         component: Component | None,
     ) -> dict[str, Any]:
         name = exc.__class__.__name__
+        if name == "LLMBudgetExceededError":
+            return {
+                "phase": "SAFE_FAILED",
+                "failure_code": "LOOP_LIMIT_REACHED",
+                "failure_message_code": "AGENT_LOOP_LIMIT_REACHED",
+                "failed_component": component,
+                "retryable": False,
+            }
         response_like = name in {
             "InfoAnalysisGuardrailError",
             "LLMResponseError",

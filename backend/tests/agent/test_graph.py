@@ -6,6 +6,7 @@ from typing import Any
 from uuid import UUID
 
 from app.agent.graph import AgentGraph
+from app.agent.llm import LLMBudgetExceededError, LLMCallBudget
 from app.agent.schemas import (
     ActionDecisionDraft,
     AgentGraphInput,
@@ -645,3 +646,48 @@ def test_fact_conflict_stops_after_lookup_and_returns_structured_conflict() -> N
     assert len(outcome.conflicts) == 1
     assert procedure.calls == 1
     assert support.calls == supervisor.calls == review.calls == 0
+
+
+class BudgetExhaustedProcedure(FakeProcedure):
+    """Stands in for any component whose provider call exceeds the run budget."""
+
+    async def lookup(self, request: Any) -> Any:
+        raise LLMBudgetExceededError(
+            "Run exhausted its budget of 15 provider call(s)",
+            code="LOOP_LIMIT_REACHED",
+            retryable=False,
+        )
+
+
+def test_llm_budget_exhaustion_fails_closed_as_loop_limit_reached() -> None:
+    runtime, _, _, support, supervisor, review = graph(
+        procedure=BudgetExhaustedProcedure(),
+    )
+
+    outcome = asyncio.run(runtime.run(request()))
+
+    assert outcome.outcome_type == "SAFE_FAILURE"
+    assert outcome.failure_code == "LOOP_LIMIT_REACHED"
+    assert outcome.retryable is False
+    assert support.calls == supervisor.calls == review.calls == 0
+
+
+def test_run_resets_the_call_budget_so_the_cap_is_per_run() -> None:
+    budget = LLMCallBudget(max_calls=2)
+    budget.consume()
+    budget.consume()
+    runtime = AgentGraph(
+        info_agent=FakeInfo(),
+        procedure_tool=FakeProcedure(),
+        support_agent=FakeSupport(),
+        supervisor=FakeSupervisor(),
+        review_tool=FakeReview(["PASS"]),
+        known_procedure_steps=[],
+        clock=lambda: NOW,
+        call_budget=budget,
+    )
+
+    outcome = asyncio.run(runtime.run(request()))
+
+    assert budget.spent == 0
+    assert outcome.outcome_type == "REVIEWED_PLAN"
