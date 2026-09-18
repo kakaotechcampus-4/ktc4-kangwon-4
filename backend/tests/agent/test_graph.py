@@ -6,7 +6,7 @@ from typing import Any
 from uuid import UUID
 
 from app.agent.graph import AgentGraph
-from app.agent.llm import LLMBudgetExceededError, LLMCallBudget
+from app.agent.llm import LLMBudgetExceededError, LLMCallBudget, LLMUsage
 from app.agent.schemas import (
     ActionDecisionDraft,
     AgentGraphInput,
@@ -32,6 +32,7 @@ from app.agent.schemas import (
     canonical_digest,
 )
 from app.agent.support_agent import SupportAnalysisGuardrailError
+from app.agent.tracing import MemoryTraceSink, UsageAccumulator
 
 NOW = datetime(2026, 9, 14, 3, 0, tzinfo=timezone.utc)
 SNAPSHOT_ID = UUID("00000000-0000-4000-8000-000000000301")
@@ -691,3 +692,24 @@ def test_run_resets_the_call_budget_so_the_cap_is_per_run() -> None:
 
     assert budget.spent == 0
     assert outcome.outcome_type == "REVIEWED_PLAN"
+
+
+def test_run_resets_usage_so_it_is_not_attributed_to_the_next_run() -> None:
+    usage = UsageAccumulator()
+    usage.record(LLMUsage(model="leftover", prompt_tokens=999, completion_tokens=999))
+    sink = MemoryTraceSink()
+    runtime = AgentGraph(
+        info_agent=FakeInfo(),
+        procedure_tool=FakeProcedure(),
+        support_agent=FakeSupport(),
+        supervisor=FakeSupervisor(),
+        review_tool=FakeReview(["PASS"]),
+        known_procedure_steps=[],
+        clock=lambda: NOW,
+        usage=usage,
+        trace_sink=sink,
+    )
+
+    asyncio.run(runtime.run(request()))
+
+    assert all(e.prompt_tokens != 999 for e in sink.events)

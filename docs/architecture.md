@@ -89,7 +89,7 @@ Review가 정확히 같은 Case snapshot, 선행 결과와 Supervisor 초안을 
 #### `TraceSink`
 
 - **책임:** 실행 ID, 호출 ID, 구성요소, 상태, 지연 시간, 시도 횟수와 오류를 받을 수 있는 추적 경계
-- **현재 상태:** 기본값은 아무 곳에도 전송하지 않는 `NullTraceSink`다. `LANGFUSE_PUBLIC_KEY`와 `LANGFUSE_SECRET_KEY`가 모두 설정되면 `LangfuseTraceSink`로 바뀌어 구성요소별 상태·지연 시간·시도 횟수·model·token 수를 전송한다. prompt 원문, evidence와 사용자 입력은 전송 대상에 포함하지 않는다. 비용 금액은 계산하지 않는다.
+- **현재 상태:** 기본값은 아무 곳에도 전송하지 않는 `NullTraceSink`다. `LANGFUSE_PUBLIC_KEY`와 `LANGFUSE_SECRET_KEY`가 모두 설정되면 `LangfuseTraceSink`로 바뀐다. 두 키가 있어도 SDK import나 client 생성이 실패하면 조용히 `NullTraceSink`로 남는다. 전송이 켜졌을 때 구성요소별 상태·지연 시간·시도 횟수·model·token 수를 전송한다. prompt 원문, evidence와 사용자 입력은 전송 대상에 포함하지 않는다. 비용 금액은 계산하지 않는다.
 
 ### 3.2 Agent
 
@@ -205,7 +205,8 @@ LLM이 의미상 잘못된 결과를 내서 다시 생성하는 것과 HTTP 요�
 
 ### 실행당 LLM 호출 총량
 
-- 한 실행에서 쓸 수 있는 LLM 호출 총 횟수는 기본 40회다. 이 값은 위 구성요소별 상한에서 나왔다. 최악의 경우 정보분석 3회와 지원금 3회를 쓰고, 이후 Review 3라운드마다 Supervisor 3회와 Review 3회를 쓸 수 있다. 이보다 낮게 잡으면 구성요소별 상한이 아직 유효한 실행을 예산이 먼저 끊는다.
+- 한 실행에서 쓸 수 있는 LLM 호출 총 횟수는 기본 40회다. 이 숫자는 구성요소별 시도가 아니라 **실제 HTTP 호출 수**를 센다. 의미 시도 한 번이 HTTP 재시도까지 포함하므로, 구성요소별 상한을 모두 소진하면 기본 설정에서 57회가 나온다(정보분석 3×3 + 지원금 3×3 + Review 3라운드 각각 Supervisor 3×3 + Review 2×2). 재작업이 정보분석·지원금까지 되돌리면 더 커진다.
+- 따라서 40회는 그 상한을 보장하는 값이 아니라 **그보다 낮게 잡은 비용 상한**이다. 구성요소별 상한이 남아 있어도 예산이 먼저 끊을 수 있고, 그것이 의도다.
 - 정보분석·지원금·Supervisor·Review가 하나의 counter를 공유한다. Supervisor가 다른 provider·model을 쓰더라도 같은 counter를 쓴다.
 - 의미 결과 재생성과 외부 요청 재전송 모두 실제 HTTP 호출 직전에 1회씩 소비한다.
 - `AgentGraph`가 실행 시작 시 counter를 되돌리므로 상한은 실행 단위다.

@@ -89,7 +89,7 @@ Supervisor만 다른 provider·model로 분리할 때 다음 세 값을 설정�
 - `AGENT_LLM_RETRY_BACKOFF_SECONDS`: 첫 retry backoff, `0..60`초
 - `AGENT_LLM_MAX_RESPONSE_BYTES`: 응답 크기 상한, 기본 `1,000,000` bytes
 
-한 실행이 쓸 수 있는 LLM 호출 수에는 전역 상한이 있다. 공용 client와 Supervisor 전용 client가 예산 하나를 공유하며 기본 상한은 40회다. HTTP retry도 1회로 센다. 상한을 넘으면 `LOOP_LIMIT_REACHED` 사유로 `SAFE_FAILURE` 처리한다. 현재 이 값은 환경변수로 조정하지 않는다.
+한 실행이 쓸 수 있는 LLM 호출 수에는 전역 상한이 있다. 공용 client와 Supervisor 전용 client가 예산 하나를 공유하며 기본 상한은 40회다. 이 숫자는 실제 HTTP 호출 수이고 retry도 1회로 센다. 구성요소별 상한을 다 쓰면 57회가 나오므로, 40회는 그보다 낮게 잡은 비용 상한이며 구성요소 상한이 남아도 먼저 끊을 수 있다. 상한을 넘으면 `LOOP_LIMIT_REACHED` 사유로 `SAFE_FAILURE` 처리한다. 현재 이 값은 환경변수로 조정하지 않는다.
 
 ### 절차조회 설정 — registry는 key 불필요
 
@@ -115,8 +115,8 @@ Supervisor만 다른 provider·model로 분리할 때 다음 세 값을 설정�
 
 - `BIZINFO_API_KEY`: 별도 기업마당 discovery adapter만 사용
 - `DATA_GO_KR_SERVICE_KEY`, `LAW_API_OC`: 현재 CLI 미연결
-- `LANGFUSE_PUBLIC_KEY`·`LANGFUSE_SECRET_KEY`: 둘 다 있으면 전송을 켠다. 하나라도 비면 `NullTraceSink`로 남아 아무 데도 보내지 않는다
-- `LANGFUSE_BASE_URL`: Langfuse 주소. Cloud는 `https://cloud.langfuse.com`, 셀프호스팅이면 그 주소. SDK가 직접 읽는다
+- `LANGFUSE_PUBLIC_KEY`·`LANGFUSE_SECRET_KEY`: 둘 다 있어야 전송이 켜진다. 하나라도 비거나 SDK client 생성이 실패하면 `NullTraceSink`로 남아 아무 데도 보내지 않는다
+- `LANGFUSE_BASE_URL`: Langfuse 주소. Cloud는 `https://cloud.langfuse.com`, 셀프호스팅이면 그 주소. `tracing.py`가 process env 또는 저장소 루트 `.env`에서 읽어 SDK에 직접 넘긴다(SDK 자체는 `.env`를 읽지 않는다)
 - RAG 관련 값: corpus·index·retriever 미구현
 
 이 값들은 데이터 구현 계획과 기술 상태표에만 기록한다.

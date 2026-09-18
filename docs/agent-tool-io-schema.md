@@ -241,7 +241,7 @@ Graph가 각 하위 호출과 Review provenance에 생성한다. 현재 `parent_
 
 ### 3.4 타입만 정의됨: component envelope
 
-아래 envelope 타입은 구현되어 있지만 현재 Graph와 구성요소 메서드는 사용하지 않는다. 코드에는 `ComponentResult` alias도 없다. `ComponentErrorCode` enum만 예외다 — Graph가 실행당 LLM 호출 예산 초과를 `SafeFailureOutcome`으로 바꿀 때 `LOOP_LIMIT_REACHED` 값 하나를 참조한다(§11.5). enum 값 하나를 쓰는 것과 `ComponentError`·envelope 객체를 만드는 것은 다르며, envelope 객체는 여전히 어디에서도 생성·소비되지 않는다.
+아래 envelope 타입은 구현되어 있지만 현재 Graph와 구성요소 메서드는 사용하지 않는다. 코드에는 `ComponentResult` alias도 없다. `ComponentErrorCode`를 포함해 이 절의 타입은 모두 그대로 미사용이다. §11.5의 `SafeFailureOutcome.failure_code`가 이번에 `LOOP_LIMIT_REACHED` 값을 갖게 됐지만, 그것은 이 enum과 무관한 별도의 닫힌 `Literal`이고 Graph는 문자열로 직접 쓴다.
 
 | 모델 | 필드 |
 |---|---|
@@ -251,7 +251,7 @@ Graph가 각 하위 호출과 Review provenance에 생성한다. 현재 `parent_
 | `ComponentWarning` | `code: UpperSnakeCode`, `message: string`, `target_path: JsonPointer \| null` |
 | `ComponentError` | `code`, `message_code`, `retryable`, `failed_dependency`, `retry_after_ms` |
 
-`ComponentError.code` 허용값은 `INVALID_INPUT | SCHEMA_VALIDATION_FAILED | SNAPSHOT_UNAVAILABLE | SOURCE_UNAVAILABLE | TIMEOUT | RATE_LIMITED | UPSTREAM_ERROR | LOOP_LIMIT_REACHED | INTERNAL_ERROR`다. 이 중 `LOOP_LIMIT_REACHED`만 §11.5의 LLM 호출 예산 초과 `SafeFailureOutcome`에서 실제로 쓰인다. 나머지 값과 `ComponentError` 모델 자체는 현재 생성되지 않는다.
+`ComponentError.code` 허용값은 `INVALID_INPUT | SCHEMA_VALIDATION_FAILED | SNAPSHOT_UNAVAILABLE | SOURCE_UNAVAILABLE | TIMEOUT | RATE_LIMITED | UPSTREAM_ERROR | LOOP_LIMIT_REACHED | INTERNAL_ERROR`다. 이 enum은 현재 어디에서도 생성·소비되지 않는다. §11.5의 `failure_code`에 같은 이름의 값이 있지만 그것은 별도의 `Literal`이다.
 
 ## 4. 공통 입력 기반 스키마
 
@@ -1296,7 +1296,7 @@ Conflict ref와 candidate ID는 unique이고 각 conflict의 snapshot/version은
 
 ### 타입만 정의됐거나 현재 도달할 수 없음
 
-- **`ComponentRequest`, `ComponentSuccess`, `ComponentFailure`, `ComponentWarning`, `ComponentError`:** 타입은 있지만 현재 공개 호출은 입력·정상 반환 schema와 exception을 직접 사용한다. `ComponentErrorCode.LOOP_LIMIT_REACHED` 값만 Graph의 LLM 호출 예산 초과 `SafeFailureOutcome`이 참조하며, envelope 모델과 `ComponentError` 객체 자체는 여전히 생성되지 않는다.
+- **`ComponentRequest`, `ComponentSuccess`, `ComponentFailure`, `ComponentWarning`, `ComponentError`:** 타입은 있지만 현재 공개 호출은 입력·정상 반환 schema와 exception을 직접 사용한다. `SafeFailureOutcome.failure_code`가 같은 이름의 값을 갖지만 그것은 별도의 `Literal`이며, 이 절의 타입은 여전히 생성되지 않는다.
 - **`CaseCompleteDecisionDraft`:** 타입은 유효하지만 Supervisor가 현재 항상 거부한다.
 - **`CaseStatusChangeCandidate`:** `CASE_COMPLETE`일 때만 생성되므로 현재 도달할 수 없다.
 - **`FactChangeSourceType.CONFIRMED_CONFLICT`:** validator는 있지만 사용자 확인 trigger와 Graph 단계가 없다.

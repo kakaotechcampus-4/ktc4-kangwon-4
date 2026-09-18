@@ -55,7 +55,7 @@
 
 #### `TraceSink`
 
-- **상태:** 추적 인터페이스만 현재 코드에서 사용
+- **상태:** 추적 인터페이스 + credential이 있을 때 Langfuse 전송 사용
 - **용도:** 실행·호출 metadata를 받을 수 있는 경계
 - **현재:** credential이 없으면 아무 곳에도 보내지 않는 `NullTraceSink`, 있으면 `LangfuseTraceSink`가 구성요소별 상태·지연 시간·시도 횟수·model·token 수를 전송한다. prompt 원문과 evidence는 보내지 않는다.
 - **제한:** token 수는 보내지만 비용 금액은 계산하지 않는다. 실행당 LLM 호출 횟수 상한(`llm.py`의 `LLMCallBudget`, 기본 40회)은 호출 수를 세어 막는 장치이지 비용 측정이 아니다.

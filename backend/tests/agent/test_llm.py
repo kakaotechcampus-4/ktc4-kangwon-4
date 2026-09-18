@@ -20,9 +20,9 @@ from app.agent.llm import (
     LLMCallBudget,
     LLMConfig,
     LLMConfigurationError,
-    LLMUsage,
     LLMRequestError,
     LLMResponseError,
+    LLMUsage,
     StructuredLLMClient,
     sanitize_json_schema,
 )
@@ -1039,3 +1039,68 @@ def test_usage_sink_failure_never_breaks_the_call() -> None:
             await client.aclose()
 
     assert asyncio.run(run()) == StrictOutput(answer="ok", count=1)
+
+
+def test_overriding_the_endpoint_requires_its_own_token(tmp_path: Path) -> None:
+    """Falling back on the shared token would leak it to another vendor."""
+
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "CHAT_PROXY_URL=https://shared.example.test/v1\n"
+        "PROXY_TOKEN=shared-token\n"
+        "OPENAI_MODEL=shared-model\n"
+        "SUPERVISOR_CHAT_PROXY_URL=https://other-vendor.example.test/v1\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(LLMConfigurationError) as caught:
+        LLMConfig.from_env(env_file=env_file, environ={}, env_prefix="SUPERVISOR_")
+
+    assert "SUPERVISOR_PROXY_TOKEN" in str(caught.value)
+
+
+def test_overriding_only_the_model_keeps_the_shared_endpoint_and_token(
+    tmp_path: Path,
+) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "CHAT_PROXY_URL=https://shared.example.test/v1\n"
+        "PROXY_TOKEN=shared-token\n"
+        "OPENAI_MODEL=shared-model\n"
+        "SUPERVISOR_MODEL=bigger-model\n",
+        encoding="utf-8",
+    )
+
+    config = LLMConfig.from_env(env_file=env_file, environ={}, env_prefix="SUPERVISOR_")
+
+    assert config.model == "bigger-model"
+    assert config.base_url == "https://shared.example.test/v1"
+
+
+def test_usage_falls_back_to_configured_model_when_provider_omits_it() -> None:
+    recorded: list[LLMUsage] = []
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return _chat_response_with_usage(
+            '{"answer":"ok","count":1}',
+            usage={"prompt_tokens": 10, "completion_tokens": 2},
+            model=None,
+        )
+
+    async def run() -> None:
+        client = StructuredLLMClient(
+            _config(model="configured-model"),
+            transport=httpx.MockTransport(handler),
+            usage_sink=recorded.append,
+        )
+        try:
+            await client.generate(
+                StrictOutput,
+                [{"role": "developer", "content": "return JSON"}],
+            )
+        finally:
+            await client.aclose()
+
+    asyncio.run(run())
+
+    assert recorded[0].model == "configured-model"

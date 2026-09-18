@@ -1,8 +1,9 @@
 """Metadata-only tracing boundary for the Agent runtime.
 
 Prompt text, evidence excerpts and user-visible prose are intentionally absent
-from this interface.  A future Langfuse adapter can implement ``TraceSink``
-without changing the graph.
+from this interface, so nothing a sink forwards can carry user data.  The
+default sink discards events; ``LangfuseTraceSink`` forwards them and is used
+only when both Langfuse credentials resolve.
 """
 
 from __future__ import annotations
@@ -75,11 +76,14 @@ class UsageAccumulator:
                 self.completion_tokens or 0
             ) + usage.completion_tokens
 
-    def drain(self) -> tuple[str | None, int | None, int | None]:
-        taken = (self.model, self.prompt_tokens, self.completion_tokens)
+    def reset(self) -> None:
         self.model = None
         self.prompt_tokens = None
         self.completion_tokens = None
+
+    def drain(self) -> tuple[str | None, int | None, int | None]:
+        taken = (self.model, self.prompt_tokens, self.completion_tokens)
+        self.reset()
         return taken
 
 
@@ -152,18 +156,22 @@ class LangfuseTraceSink:
                 usage["input_tokens"] = event.prompt_tokens
             if event.completion_tokens is not None:
                 usage["output_tokens"] = event.completion_tokens
-            observation.update(
-                metadata={
-                    "run_id": event.run_id,
-                    "call_id": event.call_id,
-                    "status": event.status,
-                    "latency_ms": event.latency_ms,
-                    "attempt": event.attempt,
-                    "error_code": event.error_code,
-                },
-                **({"usage_details": usage} if usage else {}),
-            )
-            observation.end()
+            try:
+                observation.update(
+                    metadata={
+                        "run_id": event.run_id,
+                        "call_id": event.call_id,
+                        "status": event.status,
+                        "latency_ms": event.latency_ms,
+                        "attempt": event.attempt,
+                        "error_code": event.error_code,
+                    },
+                    **({"usage_details": usage} if usage else {}),
+                )
+            finally:
+                # An observation left open is dropped or reported without a
+                # duration, so it is ended even when the update fails.
+                observation.end()
         except Exception:  # noqa: BLE001 - observability must not change behavior
             return
 

@@ -118,6 +118,10 @@ class AgentGraph:
     async def run(self, request: AgentGraphInput) -> AgentGraphOutput:
         if self._call_budget is not None:
             self._call_budget.reset()
+        if self._usage is not None:
+            # Usage a previous run recorded but never drained would otherwise be
+            # attributed to this run's first component.
+            self._usage.reset()
         # An owned deep copy prevents caller-side mutation while the graph is in flight.
         owned_request = request.model_copy(deep=True)
         failure_request = request.model_copy(deep=True)

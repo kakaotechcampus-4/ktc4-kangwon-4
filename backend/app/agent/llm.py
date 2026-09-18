@@ -31,10 +31,12 @@ _DEFAULT_TIMEOUT_SECONDS = 45.0
 _DEFAULT_MAX_RETRIES = 2
 _DEFAULT_RETRY_BACKOFF_SECONDS = 0.25
 _DEFAULT_MAX_RESPONSE_BYTES = 1_000_000
-# Documented component limits (architecture.md §6) allow, in the worst case,
-# Info 3 + Support 3 and then Supervisor 3 + Review 3 for each of the three
-# Review rounds. A cap below that would fail runs the component limits still
-# consider valid, so the budget sits just above the documented ceiling.
+# This counts HTTP attempts, not component attempts: each semantic attempt is a
+# generate() call that retries up to max_retries times. With the defaults that
+# makes the component limits worth 57 provider calls (Info 3x3 + Support 3x3 +
+# three Review rounds of Supervisor 3x3 + Review 2x2), and more when a rework
+# reruns Info or Support. 40 is deliberately below that ceiling: it is a cost
+# stop that can end a run whose component limits are not yet spent.
 _DEFAULT_MAX_CALLS_PER_RUN = 40
 _MAX_ALLOWED_RETRIES = 4
 _MAX_RETRY_BACKOFF_SECONDS = 60.0
@@ -210,9 +212,12 @@ class LLMConfig:
         By default the repository-root ``.env`` is loaded, independent of the
         current working directory. Tests can inject both the file and mapping.
 
-        ``env_prefix`` reads component-specific overrides such as
-        ``SUPERVISOR_OPENAI_MODEL``, falling back to the shared setting per key
-        so a component can override only the model, or only the endpoint.
+        ``env_prefix`` reads component-specific overrides: ``SUPERVISOR_MODEL``
+        for the shared ``OPENAI_MODEL``, and ``SUPERVISOR_CHAT_PROXY_URL`` /
+        ``SUPERVISOR_PROXY_TOKEN`` for their same-named shared keys. The model
+        is the one key whose override drops the ``OPENAI_`` part. Each key
+        falls back on its own, so a component can override only the model —
+        but overriding the endpoint requires its own token.
         """
 
         environment = os.environ if environ is None else environ
@@ -248,6 +253,18 @@ class LLMConfig:
         base_url = overridable("CHAT_PROXY_URL", "CHAT_PROXY_URL")
         api_token = overridable("PROXY_TOKEN", "PROXY_TOKEN")
         model = overridable("OPENAI_MODEL", "MODEL")
+
+        # Falling back on the token alone would send the shared credential to
+        # whichever vendor the overridden endpoint belongs to.
+        if (
+            env_prefix
+            and value(f"{env_prefix}CHAT_PROXY_URL")
+            and not value(f"{env_prefix}PROXY_TOKEN")
+        ):
+            raise _configuration_error(
+                f"{env_prefix}PROXY_TOKEN is required when "
+                f"{env_prefix}CHAT_PROXY_URL overrides the shared endpoint"
+            )
         missing = [
             key
             for key, configured in (
@@ -430,7 +447,9 @@ class StructuredLLMClient:
                             response,
                             max_bytes=self.config.max_response_bytes,
                         )
-                        parsed, usage = _parse_response(body, response_model)
+                        parsed, usage = _parse_response(
+                            body, response_model, self.config.model
+                        )
                         self._report_usage(usage)
                         return parsed
             except (TimeoutError, httpx.TimeoutException, httpx.TransportError):
