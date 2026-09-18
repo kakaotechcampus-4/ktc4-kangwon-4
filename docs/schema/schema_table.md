@@ -27,36 +27,36 @@ MEMBERS ──1:N──► CASE
 
 ### MEMBERS
 
-| 컬럼 | 타입 | 키 | 설명 |
-|---|---|---|---|
-| id | BIGINT | PK | |
-| oauth_id | VARCHAR | UK | 카카오 회원번호 |
-| nickname | VARCHAR | | 카카오 닉네임 |
-| refresh_token | VARCHAR | | |
-| created_at | DATETIME | | |
-| updated_at | DATETIME | | |
+| 컬럼 | 타입 | 키 | 제약조건 | 예시 값 | 설명 |
+|---|---|---|---|---|---|
+| id | BIGINT | PK | NOT NULL, AUTO_INCREMENT | 1 | |
+| oauth_id | VARCHAR | UK | NOT NULL, UNIQUE | `"kakao_3928471029"` | 카카오 회원번호 |
+| nickname | VARCHAR | | NOT NULL | `"승준카페"` | 카카오 닉네임 |
+| refresh_token | VARCHAR | | NULLABLE | `"eyJhbGciOiJIUzI1NiIs..."` | |
+| created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-09-01 10:23:00` | |
+| updated_at | DATETIME | | NOT NULL, ON UPDATE CURRENT_TIMESTAMP | `2026-09-05 14:02:00` | |
 
 ### CASE
 
 사용자 한 명이 진행하는 폐업 건 하나를 의미함.
 
-| 컬럼 | 타입 | 키 | 설명 |
-|---|---|---|---|
-| id | BIGINT | PK | |
-| member_id | BIGINT | FK | |
-| business_type | VARCHAR | | |
-| franchise_status | BOOLEAN | | |
-| employee_count | INT | | |
-| case_status | ENUM | | `IN_PROGRESS` / `COMPLETED` |
-| lease_status | ENUM | | `LEASED_PAID`/`LEASED_FREE`/`OWNED` |
-| restoration_status | ENUM | | `NOT_STARTED` / `IN_PROGRESS` / `COMPLETED` / `NOT_REQUIRED` |
-| restoration_scope | ENUM | | `UNKNOWN`/`PARTIAL` / `FULL` / `NOT_REQUIRED` |
-| restoration_scope_detail | VARCHAR | | nullable, 구체적인 원상복구 범위 자연어 기록 |
-| demolition_required | ENUM | | `UNKNOWN`/`REQUIRED` / `NOT_REQUIRED` |
-| planned_closure_date | DATE | | nullable |
-| completed_at | DATETIME | | nullable |
-| created_at | DATETIME | | |
-| updated_at | DATETIME | | |
+| 컬럼 | 타입 | 키 | 제약조건 | 예시 값 | 설명 |
+|---|---|---|---|---|---|
+| id | BIGINT | PK | NOT NULL, AUTO_INCREMENT | 1 | |
+| member_id | BIGINT | FK | NOT NULL | 1 | |
+| business_type | VARCHAR | | NOT NULL | `"카페"` | |
+| franchise_status | BOOLEAN | | NOT NULL, DEFAULT false | `false` | |
+| employee_count | INT | | NULLABLE | `2` | |
+| case_status | ENUM | | NOT NULL, DEFAULT `IN_PROGRESS` | `IN_PROGRESS` | `IN_PROGRESS` / `COMPLETED` |
+| lease_status | ENUM | | NOT NULL | `LEASED_PAID` | `LEASED_PAID`/`LEASED_FREE`/`OWNED` |
+| restoration_status | ENUM | | NOT NULL | `NOT_STARTED` | `NOT_STARTED` / `IN_PROGRESS` / `COMPLETED` / `NOT_REQUIRED` — 기본값 없음, 클라이언트/에이전트가 `restoration_scope` 확정 여부에 맞춰 명시적으로 넣어야 함 (필요 없으면 `NOT_REQUIRED`, 필요하면 `NOT_STARTED`) |
+| restoration_scope | ENUM | | NOT NULL, DEFAULT `UNKNOWN` | `FULL` | `UNKNOWN`/`PARTIAL` / `FULL` / `NOT_REQUIRED` |
+| restoration_scope_detail | VARCHAR | | NULLABLE | `"바닥재·전기배선까지 철거 필요"` | nullable, 구체적인 원상복구 범위 자연어 기록 |
+| demolition_required | ENUM | | NOT NULL, DEFAULT `UNKNOWN` | `REQUIRED` | `UNKNOWN`/`REQUIRED` / `NOT_REQUIRED` |
+| planned_closure_date | DATE | | NULLABLE | `2026-12-31` | nullable |
+| completed_at | DATETIME | | NULLABLE | `NULL` | nullable |
+| created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-09-01 10:24:00` | |
+| updated_at | DATETIME | | NOT NULL, ON UPDATE CURRENT_TIMESTAMP | `2026-09-10 09:11:00` | |
 
 ---
 
@@ -78,29 +78,29 @@ CASE_HISTORY.priority_blocker_id ──► BLOCKER
 
 ### CASE_HISTORY
 
-| 컬럼 | 타입 | 키 | 설명 |
-|---|---|---|---|
-| id | BIGINT | PK | |
-| case_id | BIGINT | FK | |
-| raw_input | TEXT | | 입력 원문 (사용자 발화 또는 배치가 에이전트에 전달한 지시문) |
-| source | ENUM | | `USER_INPUT` / `SYSTEM_BATCH` |
-| next_action | VARCHAR | | nullable, 판단이 발생한 경우에만 |
-| priority_blocker_id | BIGINT | FK | nullable, 이 next_action이 해결하려는 blocker |
-| created_at | DATETIME | | |
+| 컬럼 | 타입 | 키 | 제약조건 | 예시 값 | 설명 |
+|---|---|---|---|---|---|
+| id | BIGINT | PK | NOT NULL, AUTO_INCREMENT | 1 | |
+| case_id | BIGINT | FK | NOT NULL | 1 | |
+| raw_input | TEXT | | NOT NULL | `"임대인이랑 얘기 끝났어요, 다음 달까지 나가기로 했어요"` | 입력 원문 (사용자 발화 또는 배치가 에이전트에 전달한 지시문) |
+| source | ENUM | | NOT NULL | `USER_INPUT` | `USER_INPUT` / `SYSTEM_BATCH` |
+| next_action | VARCHAR | | NULLABLE | `"부가가치세 확정신고를 진행하세요"` | nullable, 판단이 발생한 경우에만 |
+| priority_blocker_id | BIGINT | FK | NULLABLE | `NULL` | nullable, 이 next_action이 해결하려는 blocker |
+| created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-09-10 09:10:00` | |
 
 ### BLOCKER
 
-| 컬럼 | 타입 | 키 | 설명 |
-|---|---|---|---|
-| id | BIGINT | PK | |
-| case_id | BIGINT | FK | |
-| created_from_case_history_id | BIGINT | FK | 이 blocker를 생성시킨 판단 로그 |
-| resolved_from_case_history_id | BIGINT | FK | nullable, 이 blocker를 해소시킨 판단 로그 |
-| description | VARCHAR | | |
-| status | ENUM | | `ACTIVE` / `RESOLVED` |
-| created_at | DATETIME | | |
-| updated_at | DATETIME | | |
-| resolved_at | DATETIME | | nullable |
+| 컬럼 | 타입 | 키 | 제약조건 | 예시 값 | 설명 |
+|---|---|---|---|---|---|
+| id | BIGINT | PK | NOT NULL, AUTO_INCREMENT | 1 | |
+| case_id | BIGINT | FK | NOT NULL | 1 | |
+| created_from_case_history_id | BIGINT | FK | NOT NULL | 5 | 이 blocker를 생성시킨 판단 로그 |
+| resolved_from_case_history_id | BIGINT | FK | NULLABLE | `NULL` | nullable, 이 blocker를 해소시킨 판단 로그 |
+| description | VARCHAR | | NOT NULL | `"원상복구 범위가 아직 확정되지 않았습니다"` | |
+| status | ENUM | | NOT NULL, DEFAULT `ACTIVE` | `ACTIVE` | `ACTIVE` / `RESOLVED` |
+| created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-09-10 09:10:05` | |
+| updated_at | DATETIME | | NOT NULL, ON UPDATE CURRENT_TIMESTAMP | `2026-09-10 09:10:05` | |
+| resolved_at | DATETIME | | NULLABLE | `NULL` | nullable |
 
 ---
 
@@ -116,45 +116,45 @@ PROCEDURE_STEP ◄──┬── STEP_DEPENDENCY   (단계 간 순서 규칙)
 
 ### PROCEDURE_STEP
 
-| 컬럼 | 타입 | 키 | 설명 |
-|---|---|---|---|
-| id | BIGINT | PK | |
-| step_code | VARCHAR | UK | 절차 구분 코드 |
-| responsible_agency | VARCHAR | | 담당 기관 |
-| deadline_rule | VARCHAR | | 기한 규칙 |
-| required_documents | JSON | | 필요 서류 목록 |
-| requires_professional | BOOLEAN | | 전문가 필요 여부 |
-| professional_type | VARCHAR | | 전문가 종류 |
-| caution_note | TEXT | | 주의사항·벌칙 |
-| applicable_business_type | ENUM | | `ALL`=공통 절차 / 특정 업종명=해당 업종 전용 |
-| created_at | DATETIME | | |
-| updated_at | DATETIME | | |
+| 컬럼 | 타입 | 키 | 제약조건 | 예시 값 | 설명 |
+|---|---|---|---|---|---|
+| id | BIGINT | PK | NOT NULL, AUTO_INCREMENT | 1 | |
+| step_code | VARCHAR | UK | NOT NULL, UNIQUE | `"BUSINESS_CLOSURE_REPORT"` | 절차 구분 코드 |
+| responsible_agency | VARCHAR | | NULLABLE | `"세무서/홈택스"` | 담당 기관 |
+| deadline_rule | VARCHAR | | NULLABLE | `"D+0"` | 기한 규칙 |
+| required_documents | JSON | | NULLABLE | `[{"name":"휴업(폐업)신고서","mandatory":true}]` | 필요 서류 목록 |
+| requires_professional | BOOLEAN | | NOT NULL, DEFAULT false | `false` | 전문가 필요 여부 |
+| professional_type | VARCHAR | | NULLABLE | `"세무사"` | 전문가 종류 |
+| caution_note | TEXT | | NULLABLE | `"미신고 시 가산세 부과"` | 주의사항·벌칙 |
+| applicable_business_type | ENUM | | NOT NULL, DEFAULT `ALL` | `ALL` | `ALL`=공통 절차 / 특정 업종명=해당 업종 전용 |
+| created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-08-01 00:00:00` | |
+| updated_at | DATETIME | | NOT NULL, ON UPDATE CURRENT_TIMESTAMP | `2026-08-01 00:00:00` | |
 
 ### STEP_DEPENDENCY
 
 어떤 단계가 어떤 단계보다 먼저 끝나야 하는지 (선후관계).
 
-| 컬럼 | 타입 | 키 | 설명 |
-|---|---|---|---|
-| id | BIGINT | PK | |
-| procedure_step_id | BIGINT | FK | 실행하려는 단계 |
-| prerequisite_procedure_step_id | BIGINT | FK | 먼저 끝나야 하는 단계 |
-| dependency_type | VARCHAR | | |
-| created_at | DATETIME | | |
-| updated_at | DATETIME | | |
+| 컬럼 | 타입 | 키 | 제약조건 | 예시 값 | 설명 |
+|---|---|---|---|---|---|
+| id | BIGINT | PK | NOT NULL, AUTO_INCREMENT | 1 | |
+| procedure_step_id | BIGINT | FK | NOT NULL | 5 | 실행하려는 단계 |
+| prerequisite_procedure_step_id | BIGINT | FK | NOT NULL | 3 | 먼저 끝나야 하는 단계 |
+| dependency_type | VARCHAR | | NOT NULL | `"SEQUENTIAL"` | 기본값 없음, 생성 시 명시적으로 채워야 함 |
+| created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-08-01 00:00:00` | |
+| updated_at | DATETIME | | NOT NULL, ON UPDATE CURRENT_TIMESTAMP | `2026-08-01 00:00:00` | |
 
 ### STEP_ELIGIBILITY
 
 어떤 조건의 Case에서 이 단계가 적용되는지 (한 단계에 조건이 여러 개면 전부 AND로 해석).
 
-| 컬럼 | 타입 | 키 | 설명 |
-|---|---|---|---|
-| id | BIGINT | PK | |
-| procedure_step_id | BIGINT | FK | |
-| condition_key | VARCHAR | | |
-| condition_value | VARCHAR | | |
-| created_at | DATETIME | | |
-| updated_at | DATETIME | | |
+| 컬럼 | 타입 | 키 | 제약조건 | 예시 값 | 설명 |
+|---|---|---|---|---|---|
+| id | BIGINT | PK | NOT NULL, AUTO_INCREMENT | 1 | |
+| procedure_step_id | BIGINT | FK | NOT NULL | 7 | |
+| condition_key | VARCHAR | | NOT NULL | `"has_employee"` | |
+| condition_value | VARCHAR | | NOT NULL | `"true"` | |
+| created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-08-01 00:00:00` | |
+| updated_at | DATETIME | | NOT NULL, ON UPDATE CURRENT_TIMESTAMP | `2026-08-01 00:00:00` | |
 
 ---
 
@@ -172,29 +172,29 @@ CASE ──1:N──► CASE_PROCEDURE_STEP_HISTORY   (상태 변경마다 새 r
 
 ### CASE_PROCEDURE_STEP
 
-| 컬럼 | 타입 | 키 | 설명 |
-|---|---|---|---|
-| id | BIGINT | PK | |
-| case_id | BIGINT | FK | |
-| procedure_step_id | BIGINT | FK | |
-| status | ENUM | | `NOT_STARTED` / `IN_PROGRESS` / `COMPLETED` (현재 상태) |
-| created_at | DATETIME | | |
-| updated_at | DATETIME | | |
+| 컬럼 | 타입 | 키 | 제약조건 | 예시 값 | 설명 |
+|---|---|---|---|---|---|
+| id | BIGINT | PK | NOT NULL, AUTO_INCREMENT | 1 | |
+| case_id | BIGINT | FK | NOT NULL | 1 | |
+| procedure_step_id | BIGINT | FK | NOT NULL | 1 | |
+| status | ENUM | | NOT NULL, DEFAULT `NOT_STARTED` | `IN_PROGRESS` | `NOT_STARTED` / `IN_PROGRESS` / `COMPLETED` (현재 상태) |
+| created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-09-01 10:30:00` | |
+| updated_at | DATETIME | | NOT NULL, ON UPDATE CURRENT_TIMESTAMP | `2026-09-10 09:11:00` | |
 
 **제약조건**
 - UNIQUE (`case_id`, `procedure_step_id`) — Case 하나당 절차 하나에 대해 진행상태 row는 1개만 존재해야 함
- 
+
 ### CASE_PROCEDURE_STEP_HISTORY
 
-| 컬럼 | 타입 | 키 | 설명 |
-|---|---|---|---|
-| id | BIGINT | PK | |
-| case_id | BIGINT | FK | |
-| procedure_step_id | BIGINT | FK | NOT NULL — 상태가 바뀐 절차 하나 |
-| case_history_id | BIGINT | FK | nullable, 이 변화를 유발한 판단 로그 |
-| previous_status | ENUM | | `NOT_STARTED` / `IN_PROGRESS` / `COMPLETED` |
-| new_status | ENUM | | `NOT_STARTED` / `IN_PROGRESS` / `COMPLETED` |
-| created_at | DATETIME | | |
+| 컬럼 | 타입 | 키 | 제약조건 | 예시 값 | 설명 |
+|---|---|---|---|---|---|
+| id | BIGINT | PK | NOT NULL, AUTO_INCREMENT | 1 | |
+| case_id | BIGINT | FK | NOT NULL | 1 | |
+| procedure_step_id | BIGINT | FK | NOT NULL | 1 | NOT NULL — 상태가 바뀐 절차 하나 |
+| case_history_id | BIGINT | FK | NULLABLE | 5 | nullable, 이 변화를 유발한 판단 로그 |
+| previous_status | ENUM | | NOT NULL | `NOT_STARTED` | `NOT_STARTED` / `IN_PROGRESS` / `COMPLETED` |
+| new_status | ENUM | | NOT NULL | `IN_PROGRESS` | `NOT_STARTED` / `IN_PROGRESS` / `COMPLETED` |
+| created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-09-10 09:11:00` | |
 
 ---
 
@@ -212,25 +212,25 @@ SUPPORT_ITEM ──1:N──► SUPPORT_ITEM_APPLICATION ◄──N:1── CASE
 
 ### SUPPORT_ITEM
 
-| 컬럼 | 타입 | 키 | 설명 |
-|---|---|---|---|
-| id | BIGINT | PK | |
-| uuid | VARCHAR | UK | 배치 작업 시 생성, Wiki와 매핑 용도 |
-| program_name | VARCHAR | | 표시용 이름 (식별자 아님, 식별자는 id) |
-| application_start_date | DATE | | |
-| application_end_date | DATE | | |
-| source_file_location | VARCHAR | | S3 원본 파일 위치 |
-| created_at | DATETIME | | |
-| updated_at | DATETIME | | |
+| 컬럼 | 타입 | 키 | 제약조건 | 예시 값 | 설명 |
+|---|---|---|---|---|---|
+| id | BIGINT | PK | NOT NULL, AUTO_INCREMENT | 1 | |
+| uuid | VARCHAR | UK | NOT NULL, UNIQUE | `"550e8400-e29b-41d4-a716-446655440000"` | 배치 작업 시 생성, Wiki와 매핑 용도 |
+| program_name | VARCHAR | | NOT NULL | `"희망리턴패키지 - 점포철거비"` | 표시용 이름 (식별자 아님, 식별자는 id) |
+| application_start_date | DATE | | NULLABLE | `2026-01-01` | |
+| application_end_date | DATE | | NULLABLE | `2026-12-31` | |
+| source_file_location | VARCHAR | | NULLABLE | `"s3://katecamp-docs/2026/hope-return.pdf"` | S3 원본 파일 위치 (확정) |
+| created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-08-01 00:00:00` | |
+| updated_at | DATETIME | | NOT NULL, ON UPDATE CURRENT_TIMESTAMP | `2026-08-01 00:00:00` | |
 
 ### SUPPORT_ITEM_APPLICATION
 
-| 컬럼 | 타입 | 키 | 설명 |
-|---|---|---|---|
-| id | BIGINT | PK | |
-| case_id | BIGINT | FK | |
-| support_item_id | BIGINT | FK | |
-| application_status | ENUM | | `NOT_CHECKED` / `ELIGIBLE` / `NOT_ELIGIBLE` / `APPLIED` / `SUPPLEMENT_REQUIRED` / `RESUBMITTED` / `APPROVED` / `REJECTED` |
-| applied_at | DATETIME | | nullable |
-| created_at | DATETIME | | |
-| updated_at | DATETIME | | |
+| 컬럼 | 타입 | 키 | 제약조건 | 예시 값 | 설명 |
+|---|---|---|---|---|---|
+| id | BIGINT | PK | NOT NULL, AUTO_INCREMENT | 1 | |
+| case_id | BIGINT | FK | NOT NULL | 1 | |
+| support_item_id | BIGINT | FK | NOT NULL | 3 | |
+| application_status | ENUM | | NOT NULL, DEFAULT `NOT_CHECKED` | `ELIGIBLE` | `NOT_CHECKED` / `ELIGIBLE` / `NOT_ELIGIBLE` / `APPLIED` / `SUPPLEMENT_REQUIRED` / `RESUBMITTED` / `APPROVED` / `REJECTED` |
+| applied_at | DATETIME | | NULLABLE | `NULL` | nullable |
+| created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-09-05 11:00:00` | |
+| updated_at | DATETIME | | NOT NULL, ON UPDATE CURRENT_TIMESTAMP | `2026-09-05 11:00:00` | |
