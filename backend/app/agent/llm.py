@@ -25,6 +25,7 @@ from pydantic import BaseModel, ValidationError
 
 ResponseModelT = TypeVar("ResponseModelT", bound=BaseModel)
 SleepCallable = Callable[[float], Awaitable[None]]
+UsageSink = Callable[["LLMUsage"], None]
 
 _DEFAULT_TIMEOUT_SECONDS = 45.0
 _DEFAULT_MAX_RETRIES = 2
@@ -73,6 +74,19 @@ class LLMConfigurationError(LLMClientError):
 
 class LLMBudgetExceededError(LLMClientError):
     """Raised when one run has spent its whole allowance of provider calls."""
+
+
+@dataclass(frozen=True, slots=True)
+class LLMUsage:
+    """Metadata-only record of what one provider call cost.
+
+    Prompt text, evidence and completions are deliberately absent so this can
+    be forwarded to observability backends without carrying user data.
+    """
+
+    model: str
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
 
 
 class LLMCallBudget:
@@ -288,6 +302,7 @@ class StructuredLLMClient:
         transport: httpx.AsyncBaseTransport | None = None,
         sleep: SleepCallable = asyncio.sleep,
         call_budget: LLMCallBudget | None = None,
+        usage_sink: UsageSink | None = None,
     ) -> None:
         if client is not None and transport is not None:
             raise ValueError("Pass either an HTTP client or a transport, not both")
@@ -295,6 +310,7 @@ class StructuredLLMClient:
         self.config = config
         self._sleep = sleep
         self._call_budget = call_budget
+        self._usage_sink = usage_sink
         self._owns_client = client is None
         self._client = client or httpx.AsyncClient(
             timeout=config.timeout_seconds,
@@ -312,6 +328,7 @@ class StructuredLLMClient:
         transport: httpx.AsyncBaseTransport | None = None,
         sleep: SleepCallable = asyncio.sleep,
         call_budget: LLMCallBudget | None = None,
+        usage_sink: UsageSink | None = None,
     ) -> StructuredLLMClient:
         return cls(
             LLMConfig.from_env(
@@ -321,6 +338,7 @@ class StructuredLLMClient:
             transport=transport,
             sleep=sleep,
             call_budget=call_budget,
+            usage_sink=usage_sink,
         )
 
     async def __aenter__(self) -> Self:
@@ -408,7 +426,9 @@ class StructuredLLMClient:
                             response,
                             max_bytes=self.config.max_response_bytes,
                         )
-                        return _parse_response(body, response_model)
+                        parsed, usage = _parse_response(body, response_model)
+                        self._report_usage(usage)
+                        return parsed
             except (TimeoutError, httpx.TimeoutException, httpx.TransportError):
                 last_failure_code = "UPSTREAM_UNAVAILABLE"
                 if attempt < total_attempts:
@@ -503,6 +523,15 @@ class StructuredLLMClient:
             payload["reasoning_effort"] = self.config.reasoning_effort
         return payload
 
+    def _report_usage(self, usage: LLMUsage | None) -> None:
+        if self._usage_sink is None:
+            return
+        reported = usage or LLMUsage(model=self.config.model)
+        try:
+            self._usage_sink(reported)
+        except Exception:  # noqa: BLE001 - telemetry must not change call results
+            return
+
     async def _backoff(self, attempt_index: int) -> None:
         delay = self.config.retry_backoff_seconds * (2**attempt_index)
         if delay > 0:
@@ -555,10 +584,44 @@ class _InvalidStructuredResponse(ValueError):
         self.retryable = retryable
 
 
+def _coerce_token_count(value: Any) -> int | None:
+    return value if type(value) is int and value >= 0 else None
+
+
+def _extract_usage(body: Mapping[str, Any], fallback_model: str) -> LLMUsage:
+    """Read the metadata-only parts of a provider envelope.
+
+    Providers disagree on token field names, and some omit usage entirely, so
+    every field degrades to ``None`` rather than failing the call.
+    """
+
+    reported_model = body.get("model")
+    model = (
+        reported_model
+        if isinstance(reported_model, str) and reported_model.strip()
+        else fallback_model
+    )
+    usage = body.get("usage")
+    if not isinstance(usage, Mapping):
+        return LLMUsage(model=model)
+    prompt_tokens = _coerce_token_count(
+        usage.get("prompt_tokens", usage.get("input_tokens"))
+    )
+    completion_tokens = _coerce_token_count(
+        usage.get("completion_tokens", usage.get("output_tokens"))
+    )
+    return LLMUsage(
+        model=model,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+    )
+
+
 def _parse_response(
     response_body: bytes,
     response_model: type[ResponseModelT],
-) -> ResponseModelT:
+    fallback_model: str = "",
+) -> tuple[ResponseModelT, LLMUsage | None]:
     try:
         body = json.loads(response_body)
     except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
@@ -587,11 +650,12 @@ def _parse_response(
     else:
         candidate = _extract_message_content(message.get("content"))
 
+    usage = _extract_usage(body, fallback_model)
     try:
         if isinstance(candidate, Mapping):
-            return response_model.model_validate(candidate)
+            return response_model.model_validate(candidate), usage
         if isinstance(candidate, str):
-            return response_model.model_validate_json(candidate)
+            return response_model.model_validate_json(candidate), usage
     except (ValidationError, ValueError, TypeError, json.JSONDecodeError):
         raise _InvalidStructuredResponse("SCHEMA_VALIDATION_FAILED") from None
     raise _InvalidStructuredResponse("EMPTY_PROVIDER_CONTENT")

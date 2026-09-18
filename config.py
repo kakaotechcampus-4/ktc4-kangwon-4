@@ -63,11 +63,11 @@ class Settings(BaseSettings):
     kakao_redirect_uri: str | None = Field(default=None, alias="KAKAO_REDIRECT_URI")
     jwt_secret_key: str | None = Field(default=None, alias="JWT_SECRET_KEY")
 
-    # 6. Observability — Langfuse (셀프호스팅, EC2에 함께 배포)
+    # 6. Observability — Langfuse (SDK가 읽는 이름은 LANGFUSE_BASE_URL)
     langfuse_public_key: str | None = Field(default=None, alias="LANGFUSE_PUBLIC_KEY")
     langfuse_secret_key: str | None = Field(default=None, alias="LANGFUSE_SECRET_KEY")
-    langfuse_host: str | None = Field(
-        default="http://localhost:3000", alias="LANGFUSE_HOST"
+    langfuse_base_url: str | None = Field(
+        default="https://cloud.langfuse.com", alias="LANGFUSE_BASE_URL"
     )
 
 

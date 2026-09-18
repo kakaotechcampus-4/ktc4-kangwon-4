@@ -48,7 +48,12 @@ from app.agent.schemas import (
     canonical_digest,
 )
 from app.agent.state import AgentGraphState
-from app.agent.tracing import NullTraceSink, TraceEvent, TraceSink
+from app.agent.tracing import (
+    NullTraceSink,
+    TraceEvent,
+    TraceSink,
+    UsageAccumulator,
+)
 
 
 class InfoRunner(Protocol):
@@ -92,6 +97,7 @@ class AgentGraph:
         trace_sink: TraceSink | None = None,
         max_review_revisions: int = 2,
         call_budget: LLMCallBudget | None = None,
+        usage: UsageAccumulator | None = None,
     ) -> None:
         if max_review_revisions < 0 or max_review_revisions > 2:
             raise ValueError("max_review_revisions must be between 0 and 2")
@@ -106,6 +112,7 @@ class AgentGraph:
         self._trace_sink = trace_sink or NullTraceSink()
         self._max_review_revisions = max_review_revisions
         self._call_budget = call_budget
+        self._usage = usage
         self.compiled = self._compile()
 
     async def run(self, request: AgentGraphInput) -> AgentGraphOutput:
@@ -740,6 +747,9 @@ class AgentGraph:
         status: str,
         exc: Exception | None = None,
     ) -> None:
+        model, prompt_tokens, completion_tokens = (
+            self._usage.drain() if self._usage is not None else (None, None, None)
+        )
         event = TraceEvent(
             run_id=str(meta.run_id),
             call_id=str(meta.call_id),
@@ -747,6 +757,9 @@ class AgentGraph:
             status=status,
             latency_ms=max(0, int((time.monotonic() - started) * 1000)),
             attempt=meta.attempt,
+            model=model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
             error_code=(
                 str(getattr(exc, "code", exc.__class__.__name__)) if exc else None
             ),

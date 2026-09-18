@@ -50,7 +50,7 @@ standalone 실행에서 데이터 출처는 다음과 같이 섞여 있다.
 - CLI에서 임의 자연어나 사업자 정보 입력
 - 기업마당 raw 공고를 검수 catalog로 발행하는 pipeline
 - 범용 crawler, parser/chunker corpus, vector index와 RAG retriever
-- Langfuse token·비용 전송
+- Langfuse 비용 금액 산출 — token 수는 전송하지만 금액으로 환산하지 않는다
 - 한 프로세스에서 동시 요청 처리 — LLM 호출 예산 객체를 실행 사이에 공유하고 실행 시작 시 되돌리므로 동시 실행 시 집계가 섞인다. 현재 server 연결이 없어 단일 실행만 전제한다
 
 ## 3. 실행 전 준비
@@ -115,7 +115,8 @@ Supervisor만 다른 provider·model로 분리할 때 다음 세 값을 설정�
 
 - `BIZINFO_API_KEY`: 별도 기업마당 discovery adapter만 사용
 - `DATA_GO_KR_SERVICE_KEY`, `LAW_API_OC`: 현재 CLI 미연결
-- `LANGFUSE_*`: 전송 adapter 미구현. 현재 기본 sink는 `NullTraceSink`
+- `LANGFUSE_PUBLIC_KEY`·`LANGFUSE_SECRET_KEY`: 둘 다 있으면 전송을 켠다. 하나라도 비면 `NullTraceSink`로 남아 아무 데도 보내지 않는다
+- `LANGFUSE_BASE_URL`: Langfuse 주소. Cloud는 `https://cloud.langfuse.com`, 셀프호스팅이면 그 주소. SDK가 직접 읽는다
 - RAG 관련 값: corpus·index·retriever 미구현
 
 이 값들은 데이터 구현 계획과 기술 상태표에만 기록한다.
@@ -205,7 +206,7 @@ unit test는 외부 credential·quota를 쓰지 않는다. live smoke는 외부 
 - 기업마당 discovery 결과를 구조화·검수해 immutable catalog로 발행
 - 승인된 공식 출처용 bounded crawler와 parser/chunker 구현
 - versioned corpus, vector index, retriever와 Evidence 변환 경로 연결
-- Langfuse adapter와 token·비용 추적 구현
+- Langfuse 전송 내용의 masking 정책 승인과 보존 기간 결정
 
 ### BE·AI 공동 작업
 

@@ -10,7 +10,7 @@
 
 - 현재 Agent 실행은 **Pydantic, LangGraph, httpx**를 사용한다.
 - LLM은 LangChain이나 OpenAI SDK가 아니라 `httpx`로 OpenAI-compatible endpoint를 호출한다. endpoint는 하나로 고정돼 있지 않다 — `SUPERVISOR_*` 환경변수를 설정하면 Supervisor만 별도 provider·model을 쓰는 client를 따로 받고, 설정하지 않으면 전 구성요소가 공용 endpoint 하나를 그대로 공유한다(환경변수는 `agent-standalone-runtime-requirements.md`가 단일 출처).
-- LangChain, OpenAI SDK, Langfuse와 Chroma는 설치 목록에 있지만 현재 Agent 실행에서는 사용하지 않는다.
+- LangChain, OpenAI SDK와 Chroma는 설치 목록에 있지만 현재 Agent 실행에서는 사용하지 않는다. Langfuse는 credential이 설정된 경우에만 metadata 전송에 사용한다.
 - 루트 `docker-compose.yml`은 **MySQL 8.0 DB만** 실행한다. Backend와 Agent container는 없다.
 - FastAPI route, ORM, migration, 인증과 실제 Case 읽기·쓰기는 아직 구현되지 않았다.
 - Support Agent는 생성 시 주입된 검수 catalog를 사용한다.
@@ -57,7 +57,8 @@
 
 - **상태:** 추적 인터페이스만 현재 코드에서 사용
 - **용도:** 실행·호출 metadata를 받을 수 있는 경계
-- **제한:** 기본 구현은 아무 곳에도 보내지 않는 `NullTraceSink`다. Langfuse 전송과 token·비용 수집은 없다. 실행당 LLM 호출 횟수 상한(`llm.py`의 `LLMCallBudget`, 기본 15회)은 있지만 이는 호출 수를 세어 막는 장치일 뿐 token·비용 측정이 아니다.
+- **현재:** credential이 없으면 아무 곳에도 보내지 않는 `NullTraceSink`, 있으면 `LangfuseTraceSink`가 구성요소별 상태·지연 시간·시도 횟수·model·token 수를 전송한다. prompt 원문과 evidence는 보내지 않는다.
+- **제한:** token 수는 보내지만 비용 금액은 계산하지 않는다. 실행당 LLM 호출 횟수 상한(`llm.py`의 `LLMCallBudget`, 기본 15회)은 호출 수를 세어 막는 장치이지 비용 측정이 아니다.
 
 현재 구조를 “LangChain과 LangGraph를 함께 사용한다”고 설명하면 부정확하다. 실행 순서 관리는 LangGraph, LLM HTTP 통신은 `httpx`가 담당한다.
 
@@ -99,7 +100,7 @@ MySQL은 container 설정만 존재한다. DB model, migration, transaction과 �
 
 ### 후속 AI 기능용 패키지
 
-- **Langfuse `4.15.1`:** adapter와 token·비용·지연 시간 전송 경로 미구현
+- **Langfuse `4.15.1`:** `LangfuseTraceSink`로 metadata 전송 구현. 비용 금액 산출은 없음
 - **langchain-chroma `1.1.0`:** corpus, index와 retriever 미구현
 - **ChromaDB `1.5.9`:** Agent 조회 경로 미구현
 
@@ -128,7 +129,7 @@ MySQL은 container 설정만 존재한다. DB model, migration, transaction과 �
 - **미구현:** raw 공고 검수 → reviewed catalog 발행 → `AgentGraph` 연결 pipeline
 - **미구현:** 승인된 공식 원문 crawler, parser, versioned corpus, index, retriever와 RAG 연결
 - **미구현:** Supervisor가 필요한 Agent·Tool을 고르는 동적 호출 계획
-- **미구현:** Langfuse adapter와 token·비용·지연 시간 전송
+- **미구현:** Langfuse 비용 금액 산출, masking 정책 승인
 
 Support Agent의 현재 입력은 생성 시 주입된 reviewed catalog다. 검수 corpus, versioned index, retriever 평가, Evidence 변환과 Graph 연결이 모두 있어야 RAG가 완료됐다고 판단한다.
 

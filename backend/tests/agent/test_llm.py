@@ -20,6 +20,7 @@ from app.agent.llm import (
     LLMCallBudget,
     LLMConfig,
     LLMConfigurationError,
+    LLMUsage,
     LLMRequestError,
     LLMResponseError,
     StructuredLLMClient,
@@ -930,6 +931,110 @@ def test_generate_without_budget_is_unbounded() -> None:
             for _ in range(20):
                 result = await client.generate(StrictOutput, messages)
             return result
+        finally:
+            await client.aclose()
+
+    assert asyncio.run(run()) == StrictOutput(answer="ok", count=1)
+
+
+def _chat_response_with_usage(
+    content: Any,
+    *,
+    usage: dict[str, Any] | None = None,
+    model: str | None = "openai/gpt-4.1-mini",
+) -> httpx.Response:
+    body: dict[str, Any] = {
+        "id": "fake-completion",
+        "choices": [{"message": {"role": "assistant", "content": content}}],
+    }
+    if usage is not None:
+        body["usage"] = usage
+    if model is not None:
+        body["model"] = model
+    return httpx.Response(200, json=body)
+
+
+def test_generate_reports_provider_usage_to_the_usage_sink() -> None:
+    recorded: list[LLMUsage] = []
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return _chat_response_with_usage(
+            '{"answer":"ok","count":1}',
+            usage={"prompt_tokens": 120, "completion_tokens": 30, "total_tokens": 150},
+            model="openai/gpt-4.1-mini",
+        )
+
+    async def run() -> None:
+        client = StructuredLLMClient(
+            _config(),
+            transport=httpx.MockTransport(handler),
+            usage_sink=recorded.append,
+        )
+        try:
+            await client.generate(
+                StrictOutput,
+                [{"role": "developer", "content": "return JSON"}],
+            )
+        finally:
+            await client.aclose()
+
+    asyncio.run(run())
+
+    assert len(recorded) == 1
+    assert recorded[0].model == "openai/gpt-4.1-mini"
+    assert recorded[0].prompt_tokens == 120
+    assert recorded[0].completion_tokens == 30
+
+
+def test_generate_reports_usage_even_when_provider_omits_token_counts() -> None:
+    recorded: list[LLMUsage] = []
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return _chat_response_with_usage('{"answer":"ok","count":1}', usage=None)
+
+    async def run() -> None:
+        client = StructuredLLMClient(
+            _config(model="configured-model"),
+            transport=httpx.MockTransport(handler),
+            usage_sink=recorded.append,
+        )
+        try:
+            await client.generate(
+                StrictOutput,
+                [{"role": "developer", "content": "return JSON"}],
+            )
+        finally:
+            await client.aclose()
+
+    asyncio.run(run())
+
+    assert len(recorded) == 1
+    assert recorded[0].prompt_tokens is None
+    assert recorded[0].completion_tokens is None
+    assert recorded[0].model == "openai/gpt-4.1-mini"
+
+
+def test_usage_sink_failure_never_breaks_the_call() -> None:
+    def exploding_sink(_: LLMUsage) -> None:
+        raise RuntimeError("telemetry backend down")
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return _chat_response_with_usage(
+            '{"answer":"ok","count":1}',
+            usage={"prompt_tokens": 1, "completion_tokens": 2},
+        )
+
+    async def run() -> StrictOutput:
+        client = StructuredLLMClient(
+            _config(),
+            transport=httpx.MockTransport(handler),
+            usage_sink=exploding_sink,
+        )
+        try:
+            return await client.generate(
+                StrictOutput,
+                [{"role": "developer", "content": "return JSON"}],
+            )
         finally:
             await client.aclose()
 

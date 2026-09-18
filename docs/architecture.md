@@ -18,7 +18,7 @@
 - 현재 호출 순서는 Supervisor가 정하지 않는다. `AgentGraph` 코드가 실행 이유와 앞 단계 결과에 따라 제한된 경로를 선택한다.
 - 목표는 Supervisor가 필요한 Agent·Tool을 선택하는 구조지만, 이 동적 계획 기능은 아직 구현되지 않았다.
 - 실제 사용자 Case 조회·저장과 DB 처리는 현재 Agent 실행 범위에 없다.
-- Lang 계열 프레임워크 중 현재 실행에 직접 사용하는 것은 LangGraph다. LangChain 실행 코드와 Langfuse 전송 코드는 아직 없다.
+- Lang 계열 프레임워크 중 현재 실행에 직접 사용하는 것은 LangGraph다. LangChain 실행 코드는 아직 없다. Langfuse는 credential이 설정된 경우에만 metadata를 전송한다.
 
 ### 이 문서에서 자주 쓰는 말
 
@@ -89,7 +89,7 @@ Review가 정확히 같은 Case snapshot, 선행 결과와 Supervisor 초안을 
 #### `TraceSink`
 
 - **책임:** 실행 ID, 호출 ID, 구성요소, 상태, 지연 시간, 시도 횟수와 오류를 받을 수 있는 추적 경계
-- **현재 상태:** 기본값은 아무 곳에도 전송하지 않는 `NullTraceSink`다. model·token·비용을 기록하거나 Langfuse로 전송하지 않는다.
+- **현재 상태:** 기본값은 아무 곳에도 전송하지 않는 `NullTraceSink`다. `LANGFUSE_PUBLIC_KEY`와 `LANGFUSE_SECRET_KEY`가 모두 설정되면 `LangfuseTraceSink`로 바뀌어 구성요소별 상태·지연 시간·시도 횟수·model·token 수를 전송한다. prompt 원문, evidence와 사용자 입력은 전송 대상에 포함하지 않는다. 비용 금액은 계산하지 않는다.
 
 ### 3.2 Agent
 
@@ -261,7 +261,7 @@ LLM이 의미상 잘못된 결과를 내서 다시 생성하는 것과 HTTP 요�
 - 사용자 확인 후 conflict 재실행
 - 승인된 공식 출처 crawler와 RAG
 - 전체 실행 시간(wall-clock) 제한 — 실행당 LLM 호출 횟수 상한만 구현했고 시간 기반 제한은 없다
-- Langfuse token·비용·지연 시간 전송
+- Langfuse 비용 금액 산출과 masking 정책 검증
 
 crawler·RAG의 단계와 완료 조건은 [`agent-official-data-source-strategy.md`](./agent-official-data-source-strategy.md)를 따른다.
 
@@ -271,7 +271,7 @@ crawler·RAG의 단계와 완료 조건은 [`agent-official-data-source-strategy
 - **외부 API adapter:** 코드·테스트뿐 아니라 필요한 credential을 사용한 제한 실측이 있어야 함
 - **crawler·RAG:** 수집, 파싱, version, 검수, index, 검색, Evidence 연결과 평가를 모두 통과해야 함
 - **Supervisor 오케스트레이션:** planning schema, 제한된 router, Review 재계획과 회귀 테스트가 있어야 함
-- **Langfuse:** adapter, masking 정책과 실제 token·비용·지연 시간 전송 검증이 있어야 함
+- **Langfuse:** adapter는 구현했고, masking 정책 승인과 실제 전송 검증이 남아 있음
 - **실제 사용자 Case 연동:** 인증된 읽기·쓰기, 동시성 보호, 저장과 재조회 통합 검증이 있어야 함
 
 HTTP 200, 검색 성공, Agent 실행 성공, 실제 Case 연동 성공은 서로 다른 완료 조건으로 기록한다.

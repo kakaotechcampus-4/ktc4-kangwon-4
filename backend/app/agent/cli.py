@@ -16,6 +16,7 @@ from app.agent.procedure_tool import ProcedureLookupTool
 from app.agent.review_tool import ReviewTool
 from app.agent.supervisor import SupervisorAgent
 from app.agent.support_agent import SupportAgent
+from app.agent.tracing import LangfuseTraceSink, UsageAccumulator
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -46,16 +47,23 @@ async def _run(args: argparse.Namespace) -> int:
     client: StructuredLLMClient | None = None
     supervisor_client: StructuredLLMClient | None = None
     procedure_tool: ProcedureLookupTool | None = None
+    trace_sink: LangfuseTraceSink | None = None
     try:
         # Both clients share one budget, so splitting Supervisor onto another
         # provider does not double what a single run may spend.
         call_budget = LLMCallBudget()
-        client = StructuredLLMClient.from_env(call_budget=call_budget)
+        usage = UsageAccumulator()
+        client = StructuredLLMClient.from_env(
+            call_budget=call_budget,
+            usage_sink=usage.record,
+        )
         supervisor_client = StructuredLLMClient.from_env(
             env_prefix="SUPERVISOR_",
             call_budget=call_budget,
+            usage_sink=usage.record,
         )
         procedure_tool = ProcedureLookupTool.from_env()
+        trace_sink = LangfuseTraceSink.from_env()
         runtime = AgentGraph(
             info_agent=InfoAnalysisAgent(client),
             procedure_tool=procedure_tool,
@@ -64,9 +72,13 @@ async def _run(args: argparse.Namespace) -> int:
             review_tool=ReviewTool(client),
             known_procedure_steps=fixture.known_procedure_steps,
             call_budget=call_budget,
+            usage=usage,
+            trace_sink=trace_sink,
         )
         outcome = await runtime.run(request)
     finally:
+        if trace_sink is not None:
+            trace_sink.flush()
         if procedure_tool is not None:
             await procedure_tool.aclose()
         if supervisor_client is not None:

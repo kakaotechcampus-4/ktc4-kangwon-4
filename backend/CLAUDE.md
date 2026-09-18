@@ -9,7 +9,7 @@
 - FastAPI + SQLAlchemy 2.0 + pymysql (MySQL) + Alembic(마이그레이션)
 - 인증: 카카오 OAuth + 자체 발급 Access/Refresh JWT (PyJWT). 비밀번호 해싱 라이브러리는 없음(카카오 OAuth만 사용)
 - 카카오 API(토큰 교환·사용자정보) 호출: httpx
-- Agent: 현재 `httpx` 직접 LLM 호출 + LangGraph. Supervisor는 선택적으로 별도 endpoint·model을 쓰고(미설정 시 공용 설정), 두 client는 실행당 LLM 호출 예산 하나를 공유합니다. LangChain은 설치만 됐고 runtime 미사용, Langfuse는 향후 연동
+- Agent: 현재 `httpx` 직접 LLM 호출 + LangGraph. Supervisor는 선택적으로 별도 endpoint·model을 쓰고(미설정 시 공용 설정), 두 client는 실행당 LLM 호출 예산 하나를 공유합니다. LangChain은 설치만 됐고 runtime 미사용. Langfuse는 credential이 있을 때만 metadata를 전송합니다
 
 ## 런타임/버전
 
@@ -57,7 +57,7 @@ Redis는 이 확정 스택에 포함되어 있지 않습니다 — `config.py`/`
     - `tools/`, `prompts/`
   - `procedure_tool/` — 코드 검토된 공식 출처를 우선하는 폐업 절차 인터넷 조회 Tool. 원문을 수집하지만 Case 적용 여부·우선순위·Next Action은 결정하지 않음
   - `review_tool/` — 제공된 초안·Evidence만 독립 검토하는 필수 Tool. 검색·직접 수정·자체 루프 없음
-  - `llm.py`, `tracing.py` — OpenAI-compatible `httpx` client(공용 1개 + Supervisor 전용 선택 1개), 두 client가 공유하는 실행당 호출 예산(`LLMCallBudget`, 기본 15회), metadata-only trace interface. Langfuse adapter는 미구현
+  - `llm.py`, `tracing.py` — OpenAI-compatible `httpx` client(공용 1개 + Supervisor 전용 선택 1개), 두 client가 공유하는 실행당 호출 예산(`LLMCallBudget`, 기본 15회), metadata-only trace interface와 `LangfuseTraceSink`(credential이 있을 때만 활성화)
 - 독립된 `app/rules/` Rule 엔진은 두지 않는다. 입력·상태 전이·출력의 결정 가능한 제약은 코드 Guardrail로, 절차 정보 조회는 절차조회 Tool로 분리한다.
 
 ## Case / 검증 규칙
