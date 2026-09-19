@@ -10,17 +10,3 @@ from app.be.models.procedure_step import (
     StepEligibility,
 )
 from app.be.models.support_item import SupportItem, SupportItemApplication
-
-__all__ = [
-    "Member",
-    "Case",
-    "CaseHistory",
-    "Blocker",
-    "ProcedureStep",
-    "CaseProcedureStep",
-    "CaseProcedureStepHistory",
-    "StepDependency",
-    "StepEligibility",
-    "SupportItem",
-    "SupportItemApplication",
-]
