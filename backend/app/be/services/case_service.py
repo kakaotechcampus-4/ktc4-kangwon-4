@@ -187,8 +187,10 @@ def apply_case_field_changes(session: Session, case: Case, changes: dict[str, ob
     # 컬럼이 생기면 아래 줄의 주석을 풀어 낙관적 동시성 증가를 강제한다.
     # case.case_version = (case.case_version or 0) + 1
 
-    # TODO(schema): CASE_FIELD_HISTORY 테이블이 아직 모델에 없다. 생기면 여기서
-    # canonical_field/before_value/after_value/source/reason/resulting_case_version을 append한다.
+    # NOTE: CASE_FIELD_HISTORY(필드 변경 감사 이력) 기록은 이 함수의 책임이 아니다.
+    # source/reason은 Review 판단이 끝난 뒤(B11)에만 알 수 있고, 트랜잭션 경계도 C5가
+    # 아직 결정 전이라 여기서 임의로 만들지 않는다. 책임 소재는 docs/case-service.md
+    # "열린 이슈 C-7" 참고.
 
     session.add(case)
     session.commit()

@@ -92,8 +92,11 @@ CaseSnapshot의 필수 필드라, "무관"이 아니라 "A가 풀린 다음에 �
 
 6. **`CONFLICT_REFERENCE`** — 충돌 확인(`/results/confirm`) 전용, B12 소관.
 7. **`CASE_FIELD_HISTORY`** — 쓰기 감사 이력(변경 전/후 기록)이지 스냅샷에 들어가는 값이
-   아닙니다. `apply_case_field_changes`에 TODO로 걸어뒀지만, 이걸 B7(쓰기 단일 경로)이
-   채울지 이후 Guardrail·트랜잭션 티켓(B10/B11)이 채울지는 아직 안 정해졌습니다.
+   아닙니다. 이걸 B7(쓰기 단일 경로)이 채울지, 이후 Guardrail·트랜잭션 티켓(B10/B11)이
+   채울지는 **팀이 확정한 적 없는 미결 사안**입니다. `apply_case_field_changes`는 일단
+   이걸 안 채우도록 짜뒀습니다 — 작성자(BE) 판단으로는 `source`/`reason`이 Review 판단이
+   끝난 뒤(B11)에만 나오고 트랜잭션 경계도 C5 미정이라 B10/B11 쪽이 맞다고 봤기 때문인데,
+   이건 어디까지나 코드를 쓰기 위한 잠정 선택이고 PR 리뷰에서 팀 확인이 필요합니다.
 
 ## 다음에 할 일
 
@@ -102,6 +105,7 @@ CaseSnapshot의 필수 필드라, "무관"이 아니라 "A가 풀린 다음에 �
    DB에 없는 3개 필드 처리 방향이 정해지면(A-3) `to_agent_case_snapshot` 1차 구현을 진행한다.
 3. `EVIDENCE`/`EVIDENCE_LINEAGE`(B-4), `DECISION_RECORD`(B-5)가 머지되면 `to_agent_case_snapshot`을
    완성한다 — 이게 끝나야 B7이 원래 목표한 "AI가 실제로 쓰는 CaseSnapshot"까지 완료된 것.
-4. `CASE_FIELD_HISTORY`(C-7)를 B7이 채울지 다른 티켓이 채울지 정한다.
+4. `CASE_FIELD_HISTORY`(C-7)를 B7이 채울지 B10/B11이 채울지 — 작성자는 B10/B11 쪽으로
+   잠정 선택했으나 팀 확정 사항이 아니므로 PR 리뷰에서 확인 필요.
 5. B10(상태 전이 Guardrail), B11(핵심 루프)이 이 서비스 함수들을 호출하도록 연결한다 — 이때
    `CONFLICT_REFERENCE`(C-6)가 B12에서 필요해진다.
