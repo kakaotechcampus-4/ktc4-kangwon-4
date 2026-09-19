@@ -9,13 +9,13 @@
 - FastAPI + SQLAlchemy 2.0 + pymysql (MySQL) + Alembic(마이그레이션)
 - 인증: 카카오 OAuth + 자체 발급 Access/Refresh JWT (PyJWT). 비밀번호 해싱 라이브러리는 없음(카카오 OAuth만 사용)
 - 카카오 API(토큰 교환·사용자정보) 호출: httpx
-- Agent: LangChain + LangGraph, 관측성: Langfuse(실제 구현 착수 시점에 연동)
+- Agent: 현재 `httpx` 직접 LLM 호출 + LangGraph. Supervisor는 선택적으로 별도 endpoint·model을 쓰고(미설정 시 공용 설정), 두 client는 실행당 LLM 호출 예산 하나를 공유합니다. LangChain은 설치만 됐고 runtime 미사용. Langfuse는 credential이 있을 때만 metadata를 전송합니다
 
 ## 런타임/버전
 
 - Python: **3.12** (`backend/.python-version`, `Dockerfile` 베이스 이미지 `python:3.12-slim`)
 - 패키지 관리: **plain pip + `backend/requirements.txt`**(정확 버전 고정, `==`) — 2026-09 BE가 실제로 설치·`pip check`·import 테스트까지 마친 확정본입니다. `requirements-dev.txt`는 테스트 전용(pytest, testcontainers).
-- 온보딩: `pip install -r backend/requirements.txt` (또는 `docker-compose up`으로 컨테이너째 실행).
+- 온보딩: `pip install -r backend/requirements.txt`. `docker compose up -d db`는 MySQL만 실행하며 backend/Agent는 로컬 Python 프로세스로 실행합니다.
 - AI 스택(langchain/langchain-openai/langgraph/langfuse/openai)도 이 파일 안에 함께 고정되어 있으며, BE가 나머지 8개 패키지와 같은 가상환경에 동시 설치해 충돌 없음을 확인했고, AI팀이 `backend/`에서 별도로 재현한 버전과 정확히 일치함을 교차 확인했습니다(자세한 버전은 `docs/tech-stack.md` §6).
 
 ## 개발/배포/테스트 환경 (BE 확정)
@@ -23,7 +23,8 @@
 | 항목 | 결정 |
 |---|---|
 | 배포 | Docker, `backend/Dockerfile`(`python:3.12-slim` + `pip install -r requirements.txt`) |
-| 로컬 개발 · 배포 실행 | 루트 `docker-compose.yml` (`db`=`mysql:8.0`, `app`=backend 빌드) — AI팀도 동일 파일로 `docker-compose up` |
+| 로컬 개발 | 루트 `docker-compose.yml`은 `db`=`mysql:8.0`만 실행. backend+Agent는 로컬 Python 프로세스 |
+| 배포 실행 | Compose와 분리해 추후 확정. `backend/Dockerfile`은 존재하지만 현재 db-only Compose가 app을 빌드하지 않음 |
 | 테스트 DB | `testcontainers[mysql]` — 테스트마다 격리된 MySQL 컨테이너를 코드로 직접 실행(compose와 별개 메커니즘, 이미지 버전만 `mysql:8.0`으로 통일) |
 | 테스트 범위 | API 엔드포인트 테스트 + 서비스 로직 단위 테스트 |
 | Agent 호출부 테스트 | 실제 LLM 호출 대신 `unittest.mock`으로 목 처리 |
@@ -46,17 +47,17 @@ Redis는 이 확정 스택에 포함되어 있지 않습니다 — `config.py`/`
   - `schemas/` — BE API·DB 경계의 Pydantic 스키마. Agent 내부 입출력 스키마는 AI가 정의하고, BE 연동 DTO만 합의 후 공유
   - `functions/` — DB 접근 함수 본체. Case 생성, 소유권 조건을 포함한 조회, 확인된 변경 후보 반영, 충돌 확인 기능이 필요합니다. 함수명·인자·동시성 제어와 트랜잭션 경계는 BE 계약에서 확정합니다.
 - `app/api/` — API 라우터 (`shared/functions` 호출)
-- `app/agent/` — LangChain/LangGraph 런타임. **Supervisor가 전역 계획을 담당**하고 정보분석·지원금 Agent를 Agent-as-Tool로, 절차조회 Tool을 일반 Tool로 선택 호출한다. 모든 정상 초안은 Review Tool을 반드시 거친다(`docs/architecture.md`).
+- `app/agent/` — LangGraph 런타임. 현재 첫 실행은 trigger별 고정 dependency(`Procedure→Info→Support` 또는 `Support refresh`)이고 Supervisor는 수집된 결과로 초안과 Review 재작업을 조정합니다. 장래에는 Supervisor가 호출 필요성까지 계획합니다. 모든 정상 초안은 Review Tool을 반드시 거칩니다(`docs/architecture.md`).
   - `graph.py`, `state.py` — 최상위 그래프/공유 상태 정의
-  - `supervisor/` — 호출 대상 선택, 결과 평가, Blocker 1개·Next Action 1개 결정, 재호출·종료 판단
+  - `supervisor/` — 현재 수집 결과 평가, Blocker 1개·Next Action 1개 초안, Review 재작업 조정. 일반화된 첫 호출 선택은 목표 범위
   - `info_agent/` — 정보분석 Agent-as-Tool. 자기 분석 범위의 bounded Local Loop만 허용
   - `support_agent/` — 지원금 Agent-as-Tool. 근거 확보를 위한 bounded Local Loop만 허용
     - `wiki/` — LLM Wiki(Obsidian) 조회 (Wiki 우선 경로)
     - `rag/` — Wiki miss·업데이트 시 RAG (`docs/tech-stack.md` §4.4 참고)
     - `tools/`, `prompts/`
-  - `procedure_tool/` — 정형 절차 데이터 조회 Tool. 우선순위와 Next Action을 결정하지 않음
+  - `procedure_tool/` — 코드 검토된 공식 출처를 우선하는 폐업 절차 인터넷 조회 Tool. 원문을 수집하지만 Case 적용 여부·우선순위·Next Action은 결정하지 않음
   - `review_tool/` — 제공된 초안·Evidence만 독립 검토하는 필수 Tool. 검색·직접 수정·자체 루프 없음
-  - `llm.py`, `tracing.py` — OpenAI 클라이언트, Langfuse 연동
+  - `llm.py`, `tracing.py` — OpenAI-compatible `httpx` client(공용 1개 + Supervisor 전용 선택 1개), 두 client가 공유하는 실행당 호출 예산(`LLMCallBudget`, 기본 40회), metadata-only trace interface와 `LangfuseTraceSink`(credential이 있을 때만 활성화)
 - 독립된 `app/rules/` Rule 엔진은 두지 않는다. 입력·상태 전이·출력의 결정 가능한 제약은 코드 Guardrail로, 절차 정보 조회는 절차조회 Tool로 분리한다.
 
 ## Case / 검증 규칙
