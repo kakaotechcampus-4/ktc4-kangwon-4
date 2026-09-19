@@ -3,6 +3,7 @@ from fastapi.responses import RedirectResponse
 from sqlmodel import Session
 
 from app.be.db import get_db
+from app.be.dependencies.auth import get_current_member_id
 from app.be.schemas.auth import LoginRequest
 from app.be.services import auth as auth_service
 from app.common.config import get_settings
@@ -29,3 +30,9 @@ def login(login_request: LoginRequest, response: Response, session: Session = De
     response.headers["Access-Token"] = access_token
     response.headers["Refresh-Token"] = refresh_token
     return {"nickname": nickname}
+
+
+@router.post("/logout")
+def logout(member_id: int = Depends(get_current_member_id), session: Session = Depends(get_db)):
+    auth_service.logout(session, member_id)
+    return {"message": "ok"}

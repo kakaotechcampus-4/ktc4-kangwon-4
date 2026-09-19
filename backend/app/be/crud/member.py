@@ -12,3 +12,7 @@ def create_member(session: Session, oauth_id: str, nickname: str) -> Member:
     session.add(member)
     session.flush()  # DB에 INSERT를 보내 auto increment id를 확보
     return member
+
+
+def get_member_by_id(session: Session, id: int) -> Member | None:
+    return session.get(Member, id)
