@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 import jwt
+from fastapi import HTTPException
 from sqlmodel import Session
 
 from app.be.crud import member as member_crud
@@ -25,6 +26,14 @@ def login(session: Session, code: str) -> tuple[str, str, str]:
     session.commit()
 
     return access_token, refresh_token, nickname
+
+
+def logout(session: Session, member_id: int) -> None:
+    member = member_crud.get_member_by_id(session, member_id)
+    if member is None:
+        raise HTTPException(status_code=401, detail="존재하지 않는 회원입니다.")
+    member.refresh_token = None
+    session.commit()
 
 
 def _fetch_kakao_token(code: str) -> str:
