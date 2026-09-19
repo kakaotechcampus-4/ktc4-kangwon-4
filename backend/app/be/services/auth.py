@@ -36,6 +36,22 @@ def logout(session: Session, member_id: int) -> None:
     session.commit()
 
 
+def reissue(session: Session, member_id: int, refresh_token: str) -> tuple[str, str]:
+    member = member_crud.get_member_by_id(session, member_id)
+    if member is None:
+        raise HTTPException(status_code=401, detail="존재하지 않는 회원입니다.")
+    if member.refresh_token != refresh_token:
+        raise HTTPException(status_code=401, detail="유효하지 않은 Refresh 토큰입니다.")
+
+    new_access_token = _create_access_token(member.id)
+    new_refresh_token = _create_refresh_token(member.id)
+
+    member.refresh_token = new_refresh_token
+    session.commit()
+
+    return new_access_token, new_refresh_token
+
+
 def _fetch_kakao_token(code: str) -> str:
     settings = get_settings()
     with httpx.Client() as client:
