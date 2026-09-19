@@ -22,7 +22,7 @@ Agent에게 넘길 스냅샷 조립. `docs/architecture.md`가 말하는 "Agent�
 | `get_case_for_member` | 소유권 조건(`case_id` + `member_id`) 포함 단일 조회. 다른 코드는 이 함수를 거치지 않고 `Case`를 직접 select하지 않는다 |
 | `assemble_case_snapshot` | 한 시점 기준 Case 상태(사실·절차 진행·활성 Blocker·최근 이력)를 고정한 BE 내부 스냅샷(`InternalCaseSnapshot`) 조립 |
 | `apply_case_field_changes` | Case 필드를 바꾸는 단일 경로. 다른 코드는 `Case` 컬럼을 직접 assign하지 않는다 |
-| `to_agent_case_snapshot` | AI `CaseSnapshot`으로의 변환 — **보류, `NotImplementedError`** (이유는 아래 "열린 이슈 1") |
+| `to_agent_case_snapshot` | AI `CaseSnapshot`으로의 변환 — **보류, `NotImplementedError`** (이유는 아래 "열린 이슈 A-2") |
 
 `CaseNotFoundError`는 소유하지 않았거나 존재하지 않는 Case를 같은 예외 하나로 표현합니다.
 라우터는 이걸 항상 404로만 변환해야 합니다 — 소유권 없음과 존재하지 않음을 구분해서 응답하면
