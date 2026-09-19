@@ -26,8 +26,10 @@ class Case(SQLModel, table=True):
         ),
     )
     restoration_status: str = Field(
+        default="UNKNOWN",
         sa_column=Column(
-            Enum("NOT_STARTED", "IN_PROGRESS", "COMPLETED", "NOT_REQUIRED", name="restoration_status_enum"),
+            Enum("UNKNOWN", "NOT_STARTED", "IN_PROGRESS", "COMPLETED", "NOT_REQUIRED", name="restoration_status_enum"),
+            server_default="UNKNOWN",
             nullable=False,
         ),
     )
