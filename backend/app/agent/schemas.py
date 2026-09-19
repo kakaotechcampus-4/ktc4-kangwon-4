@@ -2357,6 +2357,7 @@ class SafeFailureOutcome(AgentSchema):
         "REVIEW_RETRY_EXHAUSTED",
         "COMPONENT_UNAVAILABLE",
         "STRUCTURED_OUTPUT_FAILED",
+        "LOOP_LIMIT_REACHED",
     ] = Field(description="Bounded machine classification of the Graph failure.")
     message_code: UpperSnakeCode = Field(
         description="Safe caller-facing machine message code."

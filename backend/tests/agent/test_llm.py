@@ -16,10 +16,13 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 from app.agent.llm import (
+    LLMBudgetExceededError,
+    LLMCallBudget,
     LLMConfig,
     LLMConfigurationError,
     LLMRequestError,
     LLMResponseError,
+    LLMUsage,
     StructuredLLMClient,
     sanitize_json_schema,
 )
@@ -740,3 +743,364 @@ def test_extracts_content_parts_and_json_fence() -> None:
             await client.aclose()
 
     assert asyncio.run(run()) == StrictOutput(answer="ok", count=3)
+
+
+def test_call_budget_allows_calls_up_to_limit_then_refuses() -> None:
+    budget = LLMCallBudget(max_calls=2)
+
+    budget.consume()
+    budget.consume()
+
+    with pytest.raises(LLMBudgetExceededError) as caught:
+        budget.consume()
+
+    assert caught.value.retryable is False
+    assert caught.value.code == "LOOP_LIMIT_REACHED"
+
+
+def test_call_budget_reset_restores_full_allowance() -> None:
+    budget = LLMCallBudget(max_calls=1)
+    budget.consume()
+
+    budget.reset()
+
+    budget.consume()
+    with pytest.raises(LLMBudgetExceededError):
+        budget.consume()
+
+
+@pytest.mark.parametrize("max_calls", [0, -1, 1.5, True])
+def test_call_budget_rejects_invalid_limits(max_calls: Any) -> None:
+    with pytest.raises(ValueError):
+        LLMCallBudget(max_calls=max_calls)
+
+
+def test_config_reads_prefixed_settings_when_present(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "CHAT_PROXY_URL=https://shared.example.test/v1\n"
+        "PROXY_TOKEN=shared-token\n"
+        "OPENAI_MODEL=shared-model\n"
+        "SUPERVISOR_CHAT_PROXY_URL=https://supervisor.example.test/v1\n"
+        "SUPERVISOR_PROXY_TOKEN=supervisor-token\n"
+        "SUPERVISOR_MODEL=supervisor-model\n",
+        encoding="utf-8",
+    )
+
+    config = LLMConfig.from_env(env_file=env_file, environ={}, env_prefix="SUPERVISOR_")
+
+    assert config.base_url == "https://supervisor.example.test/v1"
+    assert config.model == "supervisor-model"
+    assert "supervisor-token" not in repr(config)
+
+
+def test_config_falls_back_to_shared_settings_when_prefix_unset(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "CHAT_PROXY_URL=https://shared.example.test/v1\n"
+        "PROXY_TOKEN=shared-token\n"
+        "OPENAI_MODEL=shared-model\n",
+        encoding="utf-8",
+    )
+
+    config = LLMConfig.from_env(env_file=env_file, environ={}, env_prefix="SUPERVISOR_")
+
+    assert config.base_url == "https://shared.example.test/v1"
+    assert config.model == "shared-model"
+
+
+def test_config_falls_back_per_setting_not_all_or_nothing(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "CHAT_PROXY_URL=https://shared.example.test/v1\n"
+        "PROXY_TOKEN=shared-token\n"
+        "OPENAI_MODEL=shared-model\n"
+        "SUPERVISOR_MODEL=supervisor-model\n",
+        encoding="utf-8",
+    )
+
+    config = LLMConfig.from_env(env_file=env_file, environ={}, env_prefix="SUPERVISOR_")
+
+    assert config.model == "supervisor-model"
+    assert config.base_url == "https://shared.example.test/v1"
+
+
+def test_generate_consumes_budget_once_per_http_attempt() -> None:
+    budget = LLMCallBudget(max_calls=5)
+    attempts = 0
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return httpx.Response(503)
+        return _chat_response('{"answer":"ok","count":1}')
+
+    async def run() -> None:
+        client = StructuredLLMClient(
+            _config(),
+            transport=httpx.MockTransport(handler),
+            call_budget=budget,
+        )
+        try:
+            await client.generate(
+                StrictOutput,
+                [{"role": "developer", "content": "return JSON"}],
+            )
+        finally:
+            await client.aclose()
+
+    asyncio.run(run())
+
+    assert attempts == 2
+    assert budget.spent == 2
+
+
+def test_generate_stops_when_budget_is_exhausted() -> None:
+    budget = LLMCallBudget(max_calls=1)
+    attempts = 0
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(503)
+
+    async def run() -> None:
+        client = StructuredLLMClient(
+            _config(max_retries=4),
+            transport=httpx.MockTransport(handler),
+            call_budget=budget,
+        )
+        try:
+            await client.generate(
+                StrictOutput,
+                [{"role": "developer", "content": "return JSON"}],
+            )
+        finally:
+            await client.aclose()
+
+    with pytest.raises(LLMBudgetExceededError):
+        asyncio.run(run())
+
+    assert attempts == 1
+
+
+def test_two_clients_share_one_budget() -> None:
+    budget = LLMCallBudget(max_calls=2)
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return _chat_response('{"answer":"ok","count":1}')
+
+    async def run() -> None:
+        shared = StructuredLLMClient(
+            _config(model="openai/gpt-4.1-mini"),
+            transport=httpx.MockTransport(handler),
+            call_budget=budget,
+        )
+        supervisor = StructuredLLMClient(
+            _config(model="supervisor-model"),
+            transport=httpx.MockTransport(handler),
+            call_budget=budget,
+        )
+        try:
+            messages = [{"role": "developer", "content": "return JSON"}]
+            await shared.generate(StrictOutput, messages)
+            await supervisor.generate(StrictOutput, messages)
+            await shared.generate(StrictOutput, messages)
+        finally:
+            await shared.aclose()
+            await supervisor.aclose()
+
+    with pytest.raises(LLMBudgetExceededError):
+        asyncio.run(run())
+
+    assert budget.spent == 2
+
+
+def test_generate_without_budget_is_unbounded() -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        return _chat_response('{"answer":"ok","count":1}')
+
+    async def run() -> StrictOutput:
+        client = StructuredLLMClient(
+            _config(),
+            transport=httpx.MockTransport(handler),
+        )
+        try:
+            messages = [{"role": "developer", "content": "return JSON"}]
+            for _ in range(20):
+                result = await client.generate(StrictOutput, messages)
+            return result
+        finally:
+            await client.aclose()
+
+    assert asyncio.run(run()) == StrictOutput(answer="ok", count=1)
+
+
+def _chat_response_with_usage(
+    content: Any,
+    *,
+    usage: dict[str, Any] | None = None,
+    model: str | None = "openai/gpt-4.1-mini",
+) -> httpx.Response:
+    body: dict[str, Any] = {
+        "id": "fake-completion",
+        "choices": [{"message": {"role": "assistant", "content": content}}],
+    }
+    if usage is not None:
+        body["usage"] = usage
+    if model is not None:
+        body["model"] = model
+    return httpx.Response(200, json=body)
+
+
+def test_generate_reports_provider_usage_to_the_usage_sink() -> None:
+    recorded: list[LLMUsage] = []
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return _chat_response_with_usage(
+            '{"answer":"ok","count":1}',
+            usage={"prompt_tokens": 120, "completion_tokens": 30, "total_tokens": 150},
+            model="openai/gpt-4.1-mini",
+        )
+
+    async def run() -> None:
+        client = StructuredLLMClient(
+            _config(),
+            transport=httpx.MockTransport(handler),
+            usage_sink=recorded.append,
+        )
+        try:
+            await client.generate(
+                StrictOutput,
+                [{"role": "developer", "content": "return JSON"}],
+            )
+        finally:
+            await client.aclose()
+
+    asyncio.run(run())
+
+    assert len(recorded) == 1
+    assert recorded[0].model == "openai/gpt-4.1-mini"
+    assert recorded[0].prompt_tokens == 120
+    assert recorded[0].completion_tokens == 30
+
+
+def test_generate_reports_usage_even_when_provider_omits_token_counts() -> None:
+    recorded: list[LLMUsage] = []
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return _chat_response_with_usage('{"answer":"ok","count":1}', usage=None)
+
+    async def run() -> None:
+        client = StructuredLLMClient(
+            _config(model="configured-model"),
+            transport=httpx.MockTransport(handler),
+            usage_sink=recorded.append,
+        )
+        try:
+            await client.generate(
+                StrictOutput,
+                [{"role": "developer", "content": "return JSON"}],
+            )
+        finally:
+            await client.aclose()
+
+    asyncio.run(run())
+
+    assert len(recorded) == 1
+    assert recorded[0].prompt_tokens is None
+    assert recorded[0].completion_tokens is None
+    assert recorded[0].model == "openai/gpt-4.1-mini"
+
+
+def test_usage_sink_failure_never_breaks_the_call() -> None:
+    def exploding_sink(_: LLMUsage) -> None:
+        raise RuntimeError("telemetry backend down")
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return _chat_response_with_usage(
+            '{"answer":"ok","count":1}',
+            usage={"prompt_tokens": 1, "completion_tokens": 2},
+        )
+
+    async def run() -> StrictOutput:
+        client = StructuredLLMClient(
+            _config(),
+            transport=httpx.MockTransport(handler),
+            usage_sink=exploding_sink,
+        )
+        try:
+            return await client.generate(
+                StrictOutput,
+                [{"role": "developer", "content": "return JSON"}],
+            )
+        finally:
+            await client.aclose()
+
+    assert asyncio.run(run()) == StrictOutput(answer="ok", count=1)
+
+
+def test_overriding_the_endpoint_requires_its_own_token(tmp_path: Path) -> None:
+    """Falling back on the shared token would leak it to another vendor."""
+
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "CHAT_PROXY_URL=https://shared.example.test/v1\n"
+        "PROXY_TOKEN=shared-token\n"
+        "OPENAI_MODEL=shared-model\n"
+        "SUPERVISOR_CHAT_PROXY_URL=https://other-vendor.example.test/v1\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(LLMConfigurationError) as caught:
+        LLMConfig.from_env(env_file=env_file, environ={}, env_prefix="SUPERVISOR_")
+
+    assert "SUPERVISOR_PROXY_TOKEN" in str(caught.value)
+
+
+def test_overriding_only_the_model_keeps_the_shared_endpoint_and_token(
+    tmp_path: Path,
+) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "CHAT_PROXY_URL=https://shared.example.test/v1\n"
+        "PROXY_TOKEN=shared-token\n"
+        "OPENAI_MODEL=shared-model\n"
+        "SUPERVISOR_MODEL=bigger-model\n",
+        encoding="utf-8",
+    )
+
+    config = LLMConfig.from_env(env_file=env_file, environ={}, env_prefix="SUPERVISOR_")
+
+    assert config.model == "bigger-model"
+    assert config.base_url == "https://shared.example.test/v1"
+
+
+def test_usage_falls_back_to_configured_model_when_provider_omits_it() -> None:
+    recorded: list[LLMUsage] = []
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return _chat_response_with_usage(
+            '{"answer":"ok","count":1}',
+            usage={"prompt_tokens": 10, "completion_tokens": 2},
+            model=None,
+        )
+
+    async def run() -> None:
+        client = StructuredLLMClient(
+            _config(model="configured-model"),
+            transport=httpx.MockTransport(handler),
+            usage_sink=recorded.append,
+        )
+        try:
+            await client.generate(
+                StrictOutput,
+                [{"role": "developer", "content": "return JSON"}],
+            )
+        finally:
+            await client.aclose()
+
+    asyncio.run(run())
+
+    assert recorded[0].model == "configured-model"

@@ -13,7 +13,10 @@ from datetime import date, datetime, timezone
 from typing import Any, Literal, Protocol, cast
 from uuid import UUID, uuid4
 
+from langgraph.graph import END, START, StateGraph
+
 from app.agent.enrichment import build_fact_overlays
+from app.agent.llm import LLMCallBudget
 from app.agent.schemas import (
     CASE_FIELD_SPECS,
     AgentGraphInput,
@@ -45,8 +48,12 @@ from app.agent.schemas import (
     canonical_digest,
 )
 from app.agent.state import AgentGraphState
-from app.agent.tracing import NullTraceSink, TraceEvent, TraceSink
-from langgraph.graph import END, START, StateGraph
+from app.agent.tracing import (
+    NullTraceSink,
+    TraceEvent,
+    TraceSink,
+    UsageAccumulator,
+)
 
 
 class InfoRunner(Protocol):
@@ -89,6 +96,8 @@ class AgentGraph:
         uuid_factory: Callable[[], UUID] = uuid4,
         trace_sink: TraceSink | None = None,
         max_review_revisions: int = 2,
+        call_budget: LLMCallBudget | None = None,
+        usage: UsageAccumulator | None = None,
     ) -> None:
         if max_review_revisions < 0 or max_review_revisions > 2:
             raise ValueError("max_review_revisions must be between 0 and 2")
@@ -102,9 +111,17 @@ class AgentGraph:
         self._uuid = uuid_factory
         self._trace_sink = trace_sink or NullTraceSink()
         self._max_review_revisions = max_review_revisions
+        self._call_budget = call_budget
+        self._usage = usage
         self.compiled = self._compile()
 
     async def run(self, request: AgentGraphInput) -> AgentGraphOutput:
+        if self._call_budget is not None:
+            self._call_budget.reset()
+        if self._usage is not None:
+            # Usage a previous run recorded but never drained would otherwise be
+            # attributed to this run's first component.
+            self._usage.reset()
         # An owned deep copy prevents caller-side mutation while the graph is in flight.
         owned_request = request.model_copy(deep=True)
         failure_request = request.model_copy(deep=True)
@@ -629,6 +646,14 @@ class AgentGraph:
         component: Component | None,
     ) -> dict[str, Any]:
         name = exc.__class__.__name__
+        if name == "LLMBudgetExceededError":
+            return {
+                "phase": "SAFE_FAILED",
+                "failure_code": "LOOP_LIMIT_REACHED",
+                "failure_message_code": "AGENT_LOOP_LIMIT_REACHED",
+                "failed_component": component,
+                "retryable": False,
+            }
         response_like = name in {
             "InfoAnalysisGuardrailError",
             "LLMResponseError",
@@ -726,6 +751,9 @@ class AgentGraph:
         status: str,
         exc: Exception | None = None,
     ) -> None:
+        model, prompt_tokens, completion_tokens = (
+            self._usage.drain() if self._usage is not None else (None, None, None)
+        )
         event = TraceEvent(
             run_id=str(meta.run_id),
             call_id=str(meta.call_id),
@@ -733,6 +761,9 @@ class AgentGraph:
             status=status,
             latency_ms=max(0, int((time.monotonic() - started) * 1000)),
             attempt=meta.attempt,
+            model=model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
             error_code=(
                 str(getattr(exc, "code", exc.__class__.__name__)) if exc else None
             ),

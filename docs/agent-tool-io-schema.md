@@ -131,7 +131,7 @@ BE가 구현하거나 AI와 공동 승인해야 하는 HTTP/shared DTO와 저장
 `LangGraph`는 외부 프레임워크이고 `StateGraph`는 그 프레임워크가 제공하는 그래프 구성 객체다. `AgentGraph`는 이번 feature 브랜치에서 `StateGraph`를 구성·compile·실행하도록 만든 **프로젝트 내부 Python 클래스명**이다. 새로운 Agent도 아니고 LangGraph의 다른 이름도 아니다.
 
 - **공개 호출:** `AgentGraph.run()`
-- **역할:** 현재 고정 실행 순서, 단계 간 결과 전달, Review 재작업, 반복 상한, fail-closed 처리
+- **역할:** 현재 고정 실행 순서, 단계 간 결과 전달, Review 재작업, 반복 상한, 실행당 LLM 호출 예산 초기화, fail-closed 처리
 - **호출 입력:** [`AgentGraphInput`](#111-입력-agentgraphinput)
 - **정상 반환:** [`AgentGraphOutput`](#112-출력-agentgraphoutput)
 - **연결 상태:** standalone CLI/test 실행 흐름에 연결됨. 실제 사용자 Case read/write 경로는 없음.
@@ -241,7 +241,7 @@ Graph가 각 하위 호출과 Review provenance에 생성한다. 현재 `parent_
 
 ### 3.4 타입만 정의됨: component envelope
 
-아래 타입은 구현되어 있지만 현재 Graph와 구성요소 메서드는 사용하지 않는다. 코드에는 `ComponentResult` alias도 없다.
+아래 envelope 타입은 구현되어 있지만 현재 Graph와 구성요소 메서드는 사용하지 않는다. 코드에는 `ComponentResult` alias도 없다. `ComponentErrorCode`를 포함해 이 절의 타입은 모두 그대로 미사용이다. §11.5의 `SafeFailureOutcome.failure_code`가 이번에 `LOOP_LIMIT_REACHED` 값을 갖게 됐지만, 그것은 이 enum과 무관한 별도의 닫힌 `Literal`이고 Graph는 문자열로 직접 쓴다.
 
 | 모델 | 필드 |
 |---|---|
@@ -251,7 +251,7 @@ Graph가 각 하위 호출과 Review provenance에 생성한다. 현재 `parent_
 | `ComponentWarning` | `code: UpperSnakeCode`, `message: string`, `target_path: JsonPointer \| null` |
 | `ComponentError` | `code`, `message_code`, `retryable`, `failed_dependency`, `retry_after_ms` |
 
-`ComponentError.code` 허용값은 `INVALID_INPUT | SCHEMA_VALIDATION_FAILED | SNAPSHOT_UNAVAILABLE | SOURCE_UNAVAILABLE | TIMEOUT | RATE_LIMITED | UPSTREAM_ERROR | LOOP_LIMIT_REACHED | INTERNAL_ERROR`다.
+`ComponentError.code` 허용값은 `INVALID_INPUT | SCHEMA_VALIDATION_FAILED | SNAPSHOT_UNAVAILABLE | SOURCE_UNAVAILABLE | TIMEOUT | RATE_LIMITED | UPSTREAM_ERROR | LOOP_LIMIT_REACHED | INTERNAL_ERROR`다. 이 enum은 현재 어디에서도 생성·소비되지 않는다. §11.5의 `failure_code`에 같은 이름의 값이 있지만 그것은 별도의 `Literal`이다.
 
 ## 4. 공통 입력 기반 스키마
 
@@ -1188,7 +1188,7 @@ Review invocation component가 `REVIEW_TOOL`이고 run/case가 subject와 같으
 
 현재 연결 상태: standalone CLI와 테스트에 연결됨. Agent나 Tool이 아니며 실제 사용자 Case read/write에는 연결되지 않음.
 
-역할: LangGraph `StateGraph`의 node와 조건부 edge를 구성·실행하고, 단계 간 결과 전달·재작업 상한·안전 실패 변환을 담당한다. 도메인 전문 역할을 가진 별도 Agent가 아니다.
+역할: LangGraph `StateGraph`의 node와 조건부 edge를 구성·실행하고, 단계 간 결과 전달·재작업 상한·실행당 LLM 호출 예산 초기화·안전 실패 변환을 담당한다. 도메인 전문 역할을 가진 별도 Agent가 아니다.
 
 ### 11.1 입력 `AgentGraphInput`
 
@@ -1218,7 +1218,7 @@ Graph는 입력을 deep copy하고 시작 snapshot digest를 보관해 실행 �
 |---|---|---|---|
 | `ReviewedPlanOutcome` | `REVIEWED_PLAN` | Review가 exact subject에 `PASS`하고 Graph가 proof를 발급 | 검수된 계획 후보이며 DB 저장 완료가 아님; subject/proof 전 provenance 일치 필요 |
 | `ConflictOutcome` | `CONFLICT` | Info가 confirmed Case fact와 다른 새 입력을 발견 | 서비스 종료가 아니라 해당 run을 안전 종료하고 사용자 확인을 기다림; conflict digest/snapshot 일치 필요 |
-| `SafeFailureOutcome` | `SAFE_FAILURE` | component 실패, structured output 실패, Review revision 소진 | 미검수 draft/mutation을 노출하지 않는 fail-closed 결과; code·component·trace schema 검증 |
+| `SafeFailureOutcome` | `SAFE_FAILURE` | component 실패, structured output 실패, Review revision 소진, 실행당 LLM 호출 예산 소진 | 미검수 draft/mutation을 노출하지 않는 fail-closed 결과; code·component·trace schema 검증 |
 
 ### 11.3 `ReviewedPlanOutcome`
 
@@ -1255,7 +1255,7 @@ Conflict ref와 candidate ID는 unique이고 각 conflict의 snapshot/version은
 | `trigger` | `RunTrigger` | Graph가 입력 trigger를 복사 | trigger variant schema 검증 |
 | `snapshot_id` | runtime UUID | Graph가 입력 snapshot ID를 복사 | UUID 형식 필수 |
 | `case_version` | positive strict integer \| null | Graph가 입력 snapshot version을 복사 | null 또는 positive strict integer |
-| `failure_code` | `REVIEW_RETRY_EXHAUSTED \| COMPONENT_UNAVAILABLE \| STRUCTURED_OUTPUT_FAILED` | Graph가 exception 종류 또는 revision 소진으로 분류 | 허용 enum만 가능 |
+| `failure_code` | `REVIEW_RETRY_EXHAUSTED \| COMPONENT_UNAVAILABLE \| STRUCTURED_OUTPUT_FAILED \| LOOP_LIMIT_REACHED` | Graph가 exception 종류, revision 소진 또는 LLM 호출 예산 소진으로 분류 | 허용 enum만 가능 |
 | `message_code` | `UpperSnakeCode` | Graph가 안전한 caller-facing 기계 code를 선택 | upper snake 형식 |
 | `recovery_action_code` | `RETRY \| RESUBMIT_INPUT \| CONTACT_SUPPORT \| NONE` | Graph가 안전한 후속 처리 종류를 선택 | 현재 producer는 `RETRY` 또는 `NONE`만 생성 |
 | `requested_field_paths` | `CaseFieldKey[]` | 추가 입력 대상이 있을 경우 Graph가 제공하는 자리 | 현재 producer는 `[]`; registry 밖 값 거부 |
@@ -1263,7 +1263,7 @@ Conflict ref와 candidate ID는 unique이고 각 conflict의 snapshot/version은
 | `failed_component` | `Component \| null` | Graph가 실패 owner를 기록하거나 Graph-level 실패이면 null | 허용 component enum만 가능 |
 | `trace_id` | non-empty string \| null | Graph가 입력 trace ID를 복사 | 빈 문자열 거부 |
 
-현재 Graph producer는 recovery action으로 `RETRY` 또는 `NONE`만 만들고 `requested_field_paths=[]`를 사용한다. 구성요소의 schema/guardrail/value 오류는 `STRUCTURED_OUTPUT_FAILED`, 설정·요청·upstream 계열 오류는 `COMPONENT_UNAVAILABLE`로 분류한다. Review 수정 2회 소진 시 `REVIEW_RETRY_EXHAUSTED`다. 검수되지 않은 draft나 mutation은 포함하지 않는다.
+현재 Graph producer는 recovery action으로 `RETRY` 또는 `NONE`만 만들고 `requested_field_paths=[]`를 사용한다. 구성요소의 schema/guardrail/value 오류는 `STRUCTURED_OUTPUT_FAILED`, 설정·요청·upstream 계열 오류는 `COMPONENT_UNAVAILABLE`로 분류한다. Review 수정 2회 소진 시 `REVIEW_RETRY_EXHAUSTED`다. 한 실행의 전체 LLM 호출 수가 `LLMCallBudget` 상한(기본 40회)을 넘겨 `LLMBudgetExceededError`가 올라오면 `LOOP_LIMIT_REACHED`로 분류한다. 검수되지 않은 draft나 mutation은 포함하지 않는다.
 
 ### 11.6 Review 재작업 라우팅
 
@@ -1275,6 +1275,9 @@ Conflict ref와 candidate ID는 unique이고 각 conflict의 snapshot/version은
 - Support 재작업 시 Procedure와 Info source를 유지한다.
 - Supervisor 재작업 시 source를 모두 유지한다.
 - 각 재실행은 새 call ID와 digest를 만들며 이전 proof를 재사용하지 않는다.
+- 위 상한과 별개로, 한 실행 전체의 LLM 호출 수에 `LLMCallBudget` 상한(기본 40회)이 걸린다. 예산이 먼저 소진되면 Review attempt가 남아 있어도 `LOOP_LIMIT_REACHED` `SafeFailureOutcome`으로 끝난다.
+- 예산은 `AgentGraph.run()` 시작 시 되돌리므로 실행 단위이고, provider HTTP 재시도도 각각 1회로 센다. Supervisor용 별도 client를 쓰더라도 두 client가 같은 예산 객체 하나를 공유한다.
+- 현재 예산 객체는 공유 instance 하나다. 한 프로세스가 동시 요청을 처리하면 안전하지 않으며, server 연결이 아직 없어 코드에 TODO로만 남겨 두었다.
 
 ## 12. 타입·기능별 현재 실행 상태
 
@@ -1293,7 +1296,7 @@ Conflict ref와 candidate ID는 unique이고 각 conflict의 snapshot/version은
 
 ### 타입만 정의됐거나 현재 도달할 수 없음
 
-- **`ComponentRequest`, `ComponentSuccess`, `ComponentFailure`, `ComponentWarning`, `ComponentError`:** 타입은 있지만 현재 공개 호출은 입력·정상 반환 schema와 exception을 직접 사용한다.
+- **`ComponentRequest`, `ComponentSuccess`, `ComponentFailure`, `ComponentWarning`, `ComponentError`:** 타입은 있지만 현재 공개 호출은 입력·정상 반환 schema와 exception을 직접 사용한다. `SafeFailureOutcome.failure_code`가 같은 이름의 값을 갖지만 그것은 별도의 `Literal`이며, 이 절의 타입은 여전히 생성되지 않는다.
 - **`CaseCompleteDecisionDraft`:** 타입은 유효하지만 Supervisor가 현재 항상 거부한다.
 - **`CaseStatusChangeCandidate`:** `CASE_COMPLETE`일 때만 생성되므로 현재 도달할 수 없다.
 - **`FactChangeSourceType.CONFIRMED_CONFLICT`:** validator는 있지만 사용자 확인 trigger와 Graph 단계가 없다.

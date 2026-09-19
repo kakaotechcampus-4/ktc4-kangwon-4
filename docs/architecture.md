@@ -18,7 +18,7 @@
 - 현재 호출 순서는 Supervisor가 정하지 않는다. `AgentGraph` 코드가 실행 이유와 앞 단계 결과에 따라 제한된 경로를 선택한다.
 - 목표는 Supervisor가 필요한 Agent·Tool을 선택하는 구조지만, 이 동적 계획 기능은 아직 구현되지 않았다.
 - 실제 사용자 Case 조회·저장과 DB 처리는 현재 Agent 실행 범위에 없다.
-- Lang 계열 프레임워크 중 현재 실행에 직접 사용하는 것은 LangGraph다. LangChain 실행 코드와 Langfuse 전송 코드는 아직 없다.
+- Lang 계열 프레임워크 중 현재 실행에 직접 사용하는 것은 LangGraph다. LangChain 실행 코드는 아직 없다. Langfuse는 credential이 설정된 경우에만 metadata를 전송한다.
 
 ### 이 문서에서 자주 쓰는 말
 
@@ -64,7 +64,7 @@ Review가 정확히 같은 Case snapshot, 선행 결과와 Supervisor 초안을 
 
 #### `SAFE_FAILURE`
 
-구성요소 오류, 검증 실패 또는 Review 재작업 상한 소진을 성공처럼 반환하지 않는 안전 실패 결과다.
+구성요소 오류, 검증 실패, Review 재작업 상한 소진 또는 한 실행의 LLM 호출 총량 상한 소진을 성공처럼 반환하지 않는 안전 실패 결과다. 호출 총량 상한을 넘은 경우는 `LOOP_LIMIT_REACHED`로 끝낸다.
 
 #### `NEEDS_MORE_INFO`
 
@@ -82,13 +82,14 @@ Review가 정확히 같은 Case snapshot, 선행 결과와 Supervisor 초안을 
 #### 프로젝트 클래스 `AgentGraph`
 
 - **구분:** 현재 standalone 실행기. 별도 Agent가 아님
-- **책임:** `StateGraph` 구성·실행, 다음 호출 입력 구성, 결과 수집, Review 재작업, 반복 상한과 안전 실패 처리
+- **책임:** `StateGraph` 구성·실행, 다음 호출 입력 구성, 결과 수집, Review 재작업, 반복 상한, 실행 시작 시 LLM 호출 총량 counter 초기화와 안전 실패 처리
 - **하지 않는 일:** 실제 사용자 Case 조회·저장, 인증, DB 동시성 제어
+- **현재 전제:** LLM 호출 총량 counter는 client와 공유하는 단일 객체다. 한 프로세스가 여러 실행을 동시에 처리하는 구성은 아직 전제하지 않는다.
 
 #### `TraceSink`
 
 - **책임:** 실행 ID, 호출 ID, 구성요소, 상태, 지연 시간, 시도 횟수와 오류를 받을 수 있는 추적 경계
-- **현재 상태:** 기본값은 아무 곳에도 전송하지 않는 `NullTraceSink`다. model·token·비용을 기록하거나 Langfuse로 전송하지 않는다.
+- **현재 상태:** 기본값은 아무 곳에도 전송하지 않는 `NullTraceSink`다. `LANGFUSE_PUBLIC_KEY`와 `LANGFUSE_SECRET_KEY`가 모두 설정되면 `LangfuseTraceSink`로 바뀐다. 두 키가 있어도 SDK import나 client 생성이 실패하면 조용히 `NullTraceSink`로 남는다. 전송이 켜졌을 때 구성요소별 상태·지연 시간·시도 횟수·model·token 수를 전송한다. prompt 원문, evidence와 사용자 입력은 전송 대상에 포함하지 않는다. 비용 금액은 계산하지 않는다.
 
 ### 3.2 Agent
 
@@ -179,13 +180,13 @@ Review가 정확히 같은 Case snapshot, 선행 결과와 Supervisor 초안을 
 - 지원금 재평가는 지원금 Agent부터 시작한다.
 - Review가 `REVISE`를 반환하면 `AgentGraph`가 권고 대상을 재실행 경로로 바꾼다.
 - Supervisor는 Blocker와 Next Action 초안은 만들지만 호출 계획은 만들지 않는다.
-- 호출별 timeout과 LangGraph 반복 제한은 있지만 전체 실행 시간 제한은 없다.
+- 호출별 timeout, LangGraph 반복 제한과 실행당 LLM 호출 횟수 상한은 있지만 전체 실행 시간 제한은 없다. 호출 횟수 상한은 시간이 아니라 횟수만 막는다.
 
 따라서 현재 구현을 목표 아키텍처가 완료된 상태로 설명하지 않는다. 목표 완료에는 Supervisor planning schema, 제한된 router, Review 뒤 재계획, 전체 실행 시간 제한과 회귀 테스트가 모두 필요하다.
 
 ## 6. 재시도와 재작업
 
-LLM이 의미상 잘못된 결과를 내서 다시 생성하는 것과 HTTP 요청 자체가 실패해 다시 전송하는 것은 별도다.
+LLM이 의미상 잘못된 결과를 내서 다시 생성하는 것과 HTTP 요청 자체가 실패해 다시 전송하는 것은 별도다. 다만 두 가지 모두 한 실행의 LLM 호출 총량 상한을 함께 소비한다.
 
 ### 의미 결과 재생성
 
@@ -194,11 +195,23 @@ LLM이 의미상 잘못된 결과를 내서 다시 생성하는 것과 HTTP 요�
 - **Supervisor:** 최초 시도를 포함해 최대 3회. 모두 실패해도 안전한 누락 정보 질문이 있으면 결정론적 `NEEDS_MORE_INFO`를 만들 수 있음
 - **Review:** 기본 총 2회, 설정 가능 범위 1~3회
 
+위 횟수는 구성요소별 상한이다. 실행당 LLM 호출 총량 상한이 먼저 소진되면 이 횟수에 도달하기 전에 중단된다.
+
 ### 외부 요청 재전송
 
-- **공통 LLM 요청:** 기본 재시도 2회, 설정 가능 범위 0~4회, 요청별 기본 timeout 45초
+- **Agent LLM 요청:** 기본 재시도 2회, 설정 가능 범위 0~4회, 요청별 기본 timeout 45초. 정보분석·지원금·Review는 공유 client를 쓰고, `SUPERVISOR_*` 환경변수가 설정되면 Supervisor만 다른 provider·model의 전용 client를 쓴다. 두 client 모두 같은 기본값을 쓰며, 재전송도 실행당 호출 총량 상한을 소비한다.
 - **Review provider 요청:** 의미 결과 한 번마다 기본 재시도 1회, 설정 가능 범위 0~2회
 - **절차 검색·원문 조회:** 요청마다 기본 재시도 1회, 설정 가능 범위 0~4회, 요청별 기본 timeout 8초, 전체 조회 기본 timeout 60초
+
+### 실행당 LLM 호출 총량
+
+- 한 실행에서 쓸 수 있는 LLM 호출 총 횟수는 기본 40회다. 이 숫자는 구성요소별 시도가 아니라 **실제 HTTP 호출 수**를 센다. 의미 시도 한 번이 HTTP 재시도까지 포함하므로, 구성요소별 상한을 모두 소진하면 기본 설정에서 57회가 나온다(정보분석 3×3 + 지원금 3×3 + Review 3라운드 각각 Supervisor 3×3 + Review 2×2). 재작업이 정보분석·지원금까지 되돌리면 더 커진다.
+- 따라서 40회는 그 상한을 보장하는 값이 아니라 **그보다 낮게 잡은 비용 상한**이다. 구성요소별 상한이 남아 있어도 예산이 먼저 끊을 수 있고, 그것이 의도다.
+- 정보분석·지원금·Supervisor·Review가 하나의 counter를 공유한다. Supervisor가 다른 provider·model을 쓰더라도 같은 counter를 쓴다.
+- 의미 결과 재생성과 외부 요청 재전송 모두 실제 HTTP 호출 직전에 1회씩 소비한다.
+- `AgentGraph`가 실행 시작 시 counter를 되돌리므로 상한은 실행 단위다.
+- 상한을 넘으면 결과를 더 만들지 않고 `LOOP_LIMIT_REACHED` 코드의 `SAFE_FAILURE`로 끝낸다.
+- 횟수 제한이며 시간 제한이 아니다.
 
 ### Review 재작업
 
@@ -222,6 +235,7 @@ LLM이 의미상 잘못된 결과를 내서 다시 생성하는 것과 HTTP 요�
 - 공식 웹 원문만으로 사용자의 실제 절차 진행을 `COMPLETED`로 바꾸지 않는다.
 - 사용자 입력이나 검색 결과 제목으로 새로운 canonical ID를 만들지 않는다.
 - Review를 통과하지 않은 초안과 변경 후보를 `REVIEWED_PLAN`으로 반환하지 않는다.
+- 한 실행의 LLM 호출 총 횟수가 상한을 넘으면 계속 생성하지 않고 안전 실패로 끝낸다.
 - 외부 문서와 사용자 입력을 실행 명령이 아니라 검증이 필요한 데이터로 취급한다.
 
 업무 판단은 Agent와 Review가 담당한다. 반면 ID, schema, digest, 출처 연결, 호출 권한과 반복 상한처럼 코드로 확실히 검사할 수 있는 조건은 코드가 강제한다.
@@ -247,8 +261,8 @@ LLM이 의미상 잘못된 결과를 내서 다시 생성하는 것과 HTTP 요�
 - Supervisor 주도 동적 호출 계획과 제한된 router
 - 사용자 확인 후 conflict 재실행
 - 승인된 공식 출처 crawler와 RAG
-- 전체 실행 시간 제한
-- Langfuse token·비용·지연 시간 전송
+- 전체 실행 시간(wall-clock) 제한 — 실행당 LLM 호출 횟수 상한만 구현했고 시간 기반 제한은 없다
+- Langfuse 비용 금액 산출과 masking 정책 검증
 
 crawler·RAG의 단계와 완료 조건은 [`agent-official-data-source-strategy.md`](./agent-official-data-source-strategy.md)를 따른다.
 
@@ -258,7 +272,7 @@ crawler·RAG의 단계와 완료 조건은 [`agent-official-data-source-strategy
 - **외부 API adapter:** 코드·테스트뿐 아니라 필요한 credential을 사용한 제한 실측이 있어야 함
 - **crawler·RAG:** 수집, 파싱, version, 검수, index, 검색, Evidence 연결과 평가를 모두 통과해야 함
 - **Supervisor 오케스트레이션:** planning schema, 제한된 router, Review 재계획과 회귀 테스트가 있어야 함
-- **Langfuse:** adapter, masking 정책과 실제 token·비용·지연 시간 전송 검증이 있어야 함
+- **Langfuse:** adapter는 구현했고, masking 정책 승인과 실제 전송 검증이 남아 있음
 - **실제 사용자 Case 연동:** 인증된 읽기·쓰기, 동시성 보호, 저장과 재조회 통합 검증이 있어야 함
 
 HTTP 200, 검색 성공, Agent 실행 성공, 실제 Case 연동 성공은 서로 다른 완료 조건으로 기록한다.
