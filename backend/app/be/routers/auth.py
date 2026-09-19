@@ -1,9 +1,9 @@
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Header, Response
 from fastapi.responses import RedirectResponse
 from sqlmodel import Session
 
 from app.be.db import get_db
-from app.be.dependencies.auth import get_current_member_id
+from app.be.dependencies.auth import get_current_member_id, get_refresh_member_id
 from app.be.schemas.auth import LoginRequest
 from app.be.services import auth as auth_service
 from app.common.config import get_settings
@@ -35,4 +35,17 @@ def login(login_request: LoginRequest, response: Response, session: Session = De
 @router.post("/logout")
 def logout(member_id: int = Depends(get_current_member_id), session: Session = Depends(get_db)):
     auth_service.logout(session, member_id)
+    return {"message": "ok"}
+
+
+@router.post("/reissue")
+def reissue(
+    response: Response,
+    refresh_token: str = Header(alias="Refresh-Token"),
+    member_id: int = Depends(get_refresh_member_id),
+    session: Session = Depends(get_db),
+):
+    new_access_token, new_refresh_token = auth_service.reissue(session, member_id, refresh_token)
+    response.headers["Access-Token"] = new_access_token
+    response.headers["Refresh-Token"] = new_refresh_token
     return {"message": "ok"}
