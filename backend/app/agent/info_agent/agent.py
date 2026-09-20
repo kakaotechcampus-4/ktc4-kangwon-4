@@ -13,6 +13,7 @@ from app.agent.guardrails import (
     GuardrailViolation,
     ensure_no_sensitive_text,
     exact_span,
+    resolve_evidence_aliases,
 )
 from app.agent.projection import ensure_projection_has_no_obvious_sensitive_text
 from app.agent.prompts import info_messages
@@ -327,6 +328,10 @@ class InfoAnalysisAgent:
 
     async def analyze(self, request: InfoAnalysisInput) -> InfoAnalysisResult:
         prompt_input = self._prompt_input(request)
+        evidence_by_alias = {
+            alias: evidence_id
+            for evidence_id, alias in self._procedure_evidence_aliases(request).items()
+        }
         try:
             ensure_projection_has_no_obvious_sensitive_text(prompt_input)
         except GuardrailViolation:
@@ -345,8 +350,9 @@ class InfoAnalysisAgent:
                             "value_type, and allowed enum value to canonical_field_registry; "
                             "CLEAR requires null and SET requires a non-null value. "
                             "NEEDS_USER_INPUT requires at least one missing field. Use only "
-                            "allowed fields, known procedure steps, and supplied procedure "
-                            "evidence IDs. Copy fact source_text and procedure detail text "
+                            "allowed fields, known procedure steps, and the evidence_ref "
+                            "handles shown on the supplied documents. Copy fact source_text "
+                            "and procedure detail text "
                             "from the supplied source. A document may bind only to one of "
                             "its candidate_step_codes. UNKNOWN or STALE evidence requires "
                             "relevance=UNDETERMINED. Do not SET or CLEAR a fact merely "
@@ -365,7 +371,14 @@ class InfoAnalysisAgent:
                 schema_name="reborn_info_analysis",
             )
             try:
-                draft = self._validated_draft(provider_output)
+                draft = InfoAnalysisDraft.model_validate(
+                    resolve_evidence_aliases(
+                        self._validated_draft(provider_output).model_dump(
+                            mode="python"
+                        ),
+                        evidence_by_alias,
+                    )
+                )
                 return self._materialize(request, draft)
             except (GuardrailViolation, ValueError):
                 continue
@@ -391,8 +404,14 @@ class InfoAnalysisAgent:
     @staticmethod
     def _prompt_input(request: InfoAnalysisInput) -> dict[str, Any]:
         allowed = set(request.allowed_field_paths)
+        aliases_by_evidence = InfoAnalysisAgent._procedure_evidence_aliases(request)
         return {
-            "input": request.input.model_dump(mode="json"),
+            # The input event ID is a runtime handle, not evidence. Showing it
+            # gave the model a second identifier to reach for, and measured runs
+            # had it cited as support for a procedure finding. Nothing the model
+            # returns needs it: evidence for an extracted fact is built by the
+            # runtime from the span the model quotes.
+            "input": request.input.model_dump(mode="json", exclude={"input_event_id"}),
             "snapshot_facts": [
                 fact.model_dump(mode="json")
                 for fact in request.case_snapshot.facts
@@ -422,7 +441,7 @@ class InfoAnalysisAgent:
                         "canonical_url": item.canonical_url,
                         "excerpt": item.excerpt,
                         "freshness_status": item.freshness_status.value,
-                        "evidence_ref": item.evidence_ref,
+                        "evidence_ref": aliases_by_evidence[item.evidence_ref],
                         "search_query": item.search_query,
                         "candidate_step_codes": (
                             InfoAnalysisAgent._candidate_step_codes(
@@ -446,6 +465,28 @@ class InfoAnalysisAgent:
             "review_feedback": [
                 item.model_dump(mode="json") for item in request.review_feedback
             ],
+        }
+
+    @staticmethod
+    def _procedure_evidence_aliases(request: InfoAnalysisInput) -> dict[str, str]:
+        """Map a short per-request handle to each procedure evidence ID.
+
+        The model has to name which document supports a finding.  Making it
+        copy the stored identifier means copying a 55-character UUID exactly,
+        and a single wrong character throws the whole result away.  Measured
+        runs failed that way more than any other: the document chosen was
+        right, the identifier was mistyped.
+
+        A handle is short enough to reproduce reliably and is translated back
+        here, so nothing downstream -- or stored -- ever sees it.
+        """
+
+        return {
+            document.evidence_ref: f"doc{index}"
+            for index, document in enumerate(
+                request.procedure_lookup_result.documents,
+                start=1,
+            )
         }
 
     @staticmethod

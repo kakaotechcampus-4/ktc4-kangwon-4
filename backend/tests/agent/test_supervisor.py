@@ -1186,3 +1186,47 @@ def test_supervisor_rejects_info_finding_without_raw_lookup_provenance() -> None
                 supervisor_input([tampered_info, raw_source])
             )
         )
+
+
+# --- Supervisor도 근거를 짧은 손잡이로 고르게 한다 -------------------------
+#
+# 정보분석과 같은 실패가 여기서도 나왔다. 실측에서 Review가 "blocker가 제공된
+# 목록에 없는 근거 ID를 참조한다"며 반려했고, 그 반려가 Supervisor 재작업을
+# 세 번 돌려 실행을 끝냈다. 고르게 할 목록이 이미 있으니 그 항목에 짧은 이름을
+# 붙여 주면 옮겨 적다 틀릴 자리가 없어진다.
+
+
+def test_the_model_picks_evidence_by_a_short_handle() -> None:
+    llm = FakeLLM(semantic_payload(evidence_id="e1"))
+
+    asyncio.run(
+        SupervisorAgent(llm).draft(supervisor_input([source(), procedure_source()]))
+    )
+
+    sent = llm.messages[0][-1]["content"]
+    assert '"evidence_ref": "e1"' in sent or '"evidence_ref":"e1"' in sent
+    # The stored identifier is not what the model has to reproduce.
+    assert '"evidence_ref": "ev-input"' not in sent
+    assert '"evidence_ref":"ev-input"' not in sent
+
+
+def test_a_supervisor_handle_is_resolved_back_to_the_real_evidence_id() -> None:
+    draft = asyncio.run(
+        SupervisorAgent(FakeLLM(semantic_payload(evidence_id="e1"))).draft(
+            supervisor_input([source(), procedure_source()])
+        )
+    )
+
+    # Handles stay inside the runtime; the draft carries the real IDs.
+    assert draft.decision.evidence_refs == ["ev-input"]
+    assert draft.blocker is not None
+    assert draft.blocker.evidence_refs == ["ev-input"]
+
+
+def test_a_supervisor_handle_that_was_never_offered_is_still_refused() -> None:
+    with pytest.raises(SupervisorGuardrailError):
+        asyncio.run(
+            SupervisorAgent(FakeLLM(semantic_payload(evidence_id="e9"))).draft(
+                supervisor_input([source(), procedure_source()])
+            )
+        )

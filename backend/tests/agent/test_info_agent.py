@@ -847,3 +847,102 @@ def test_clearing_an_already_unknown_fact_is_ignored() -> None:
 
     assert result.fact_candidates == []
     assert result.conflicts == []
+
+
+# --- 근거 참조를 모델이 옮겨 적기 쉬운 형태로 주기 -------------------------
+#
+# 실측에서 가장 잦은 실패 원인이었다. 모델은 문서는 제대로 고르는데 55자짜리
+# UUID를 한 글자씩 틀리게 베낀다(`...4f4d...` → `...4d4d...`, `...7c8db...` →
+# `...7cdb...`). 추론 실패가 아니라 필사 오류다. 프롬프트에 짧은 손잡이를 주고
+# 런타임이 되돌리면 이 실패가 생길 자리가 없어진다.
+
+LONG_EVIDENCE_ID = "procedure:reviewed:d9402e69-fd17-4f4d-8d69-0e32008beb9b"
+
+
+def long_id_request() -> InfoAnalysisInput:
+    """운영과 같은 모양: 절차 근거 ID가 긴 UUID인 조회 결과."""
+
+    data = procedure_result().model_dump(mode="python")
+    data["documents"][0]["evidence_ref"] = LONG_EVIDENCE_ID
+    data["evidence_records"][0]["evidence_id"] = LONG_EVIDENCE_ID
+    return request().model_copy(
+        update={"procedure_lookup_result": ProcedureLookupResult.model_validate(data)}
+    )
+
+
+def finding_payload(ref: str) -> dict[str, Any]:
+    payload = extraction_payload()
+    payload["facts"] = []
+    payload["procedure_findings"] = [
+        {
+            "step_code": "CONFIRM_RESTORATION_SCOPE",
+            "summary": {
+                "text": "공식 안내에서 폐업 신고서 제출을 설명합니다.",
+                "evidence_refs": [ref],
+            },
+            "relevance": "UNDETERMINED",
+            "decision_authority": "OFFICIAL_AGENCY",
+            "requires_confirmation": True,
+            "required_actions": [
+                {"text": "폐업 신고서를 제출합니다", "evidence_refs": [ref]}
+            ],
+            "required_documents": [],
+            "application_channel": None,
+            "application_url": None,
+            "deadline": None,
+            "evidence_refs": [ref],
+        }
+    ]
+    return payload
+
+
+def test_the_model_is_given_a_short_handle_not_a_long_identifier() -> None:
+    llm = FakeLLM(finding_payload("doc1"))
+
+    asyncio.run(InfoAnalysisAgent(llm).analyze(long_id_request()))
+
+    sent = llm.messages[0][-1]["content"]
+    assert "doc1" in sent
+    # The identifier the model would otherwise have to transcribe is not shown.
+    assert LONG_EVIDENCE_ID not in sent
+
+
+def test_a_handle_is_resolved_back_to_the_real_evidence_id() -> None:
+    result = asyncio.run(
+        InfoAnalysisAgent(FakeLLM(finding_payload("doc1"))).analyze(long_id_request())
+    )
+
+    finding = result.procedure_findings[0]
+    # The handle never leaves the runtime: callers and storage see the real ID.
+    assert finding.evidence_refs == [LONG_EVIDENCE_ID]
+    assert finding.summary.evidence_refs == [LONG_EVIDENCE_ID]
+    assert finding.required_actions[0].evidence_refs == [LONG_EVIDENCE_ID]
+
+
+def test_a_handle_that_was_never_offered_is_still_refused() -> None:
+    # Substituting a short handle must not weaken the grounding check.
+    with pytest.raises(InfoAnalysisGuardrailError):
+        asyncio.run(
+            InfoAnalysisAgent(FakeLLM(finding_payload("doc7"))).analyze(
+                long_id_request()
+            )
+        )
+
+
+def test_the_model_is_not_shown_runtime_ids_it_must_never_cite() -> None:
+    """Runtime identifiers are not evidence, so the model should not see them.
+
+    Measured runs showed the model reaching for the input event ID and citing
+    it as support for a procedure finding.  It is the only other identifier in
+    the prompt, and nothing the model produces needs it: evidence for extracted
+    facts is created by the runtime from the quoted span.
+    """
+
+    llm = FakeLLM(finding_payload("doc1"))
+
+    asyncio.run(InfoAnalysisAgent(llm).analyze(long_id_request()))
+
+    sent = llm.messages[0][-1]["content"]
+    assert "input-1" not in sent
+    # The text it must quote from is still there.
+    assert "임대인에게 확인했는데" in sent

@@ -23,6 +23,7 @@ from app.agent.guardrails import (
     GuardrailViolation,
     ensure_known_refs,
     ensure_no_sensitive_text,
+    resolve_evidence_aliases,
 )
 from app.agent.projection import (
     ensure_projection_has_no_obvious_sensitive_text,
@@ -216,6 +217,17 @@ class SupervisorAgent:
                 )
         self._validate_procedure_analysis_sources(source_results)
         evidence_registry = self._evidence(source_results, request)
+        # The model picks evidence from a list we supply, so it should pick by a
+        # short handle rather than copy a stored identifier. Measured runs had
+        # Review reject a draft because the blocker cited an ID that was not in
+        # the supplied set, which then burned three Supervisor reworks.
+        aliases_by_evidence = {
+            evidence_id: f"e{index}"
+            for index, evidence_id in enumerate(evidence_registry, start=1)
+        }
+        evidence_by_alias = {
+            alias: evidence_id for evidence_id, alias in aliases_by_evidence.items()
+        }
 
         prompt_input = {
             "trigger": to_model_projection(request.trigger),
@@ -272,7 +284,7 @@ class SupervisorAgent:
                 },
                 "allowed_evidence_refs": [
                     {
-                        "evidence_ref": evidence.evidence_id,
+                        "evidence_ref": aliases_by_evidence[evidence.evidence_id],
                         "source_type": evidence.source_type.value,
                         "freshness_status": evidence.freshness_status.value,
                     }
@@ -324,7 +336,7 @@ class SupervisorAgent:
                             "or target_kind=SUPPORT_PROGRAM with a support_program from a "
                             "Support check. Never mix both kinds in one action. "
                             "Every ELIGIBILITY claim must use NEEDS_CONFIRMATION. Select only "
-                            "evidence_ref values listed in contract.allowed_evidence_refs; never "
+                            "short evidence_ref handles listed in contract.allowed_evidence_refs; never "
                             "use a call, candidate, finding, document, or question UUID as evidence. "
                             "Select only an available grounded-claim target_kind and use a zero-based "
                             "target_index only for an existing question. For NEEDS_MORE_INFO about "
@@ -350,6 +362,10 @@ class SupervisorAgent:
                     self._materialize_model_claim(model_output, claim)
                     for claim in model_output.grounded_claims
                 ]
+                semantic_payload = resolve_evidence_aliases(
+                    semantic_payload,
+                    evidence_by_alias,
+                )
                 semantic = SupervisorSemanticDraft.model_validate(semantic_payload)
                 return self._materialize(
                     request,
