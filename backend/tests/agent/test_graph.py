@@ -100,6 +100,31 @@ def request(*, trace_id: str | None = None) -> AgentGraphInput:
     )
 
 
+def test_small_business_wording_does_not_infer_an_entity_type_for_lookup() -> None:
+    component_input = request()
+    component_input.trigger.input.redacted_text = "소상공인이고 자영업을 합니다."
+
+    assert AgentGraph._procedure_queries(component_input) == [
+        "사업자 폐업 신고 절차 국세청"
+    ]
+
+
+def test_explicit_entity_wording_selects_a_query_without_adding_a_case_fact() -> None:
+    component_input = request()
+    snapshot_digest = canonical_digest(component_input.case_snapshot)
+    component_input.trigger.input.redacted_text = "개인사업자 폐업 절차가 궁금합니다."
+
+    assert "개인사업자 폐업 신고 절차 국세청" in AgentGraph._procedure_queries(
+        component_input
+    )
+
+    component_input.trigger.input.redacted_text = "법인 사업자 폐업 절차가 궁금합니다."
+    assert "법인 사업자 폐업 신고 절차 국세청" in AgentGraph._procedure_queries(
+        component_input
+    )
+    assert canonical_digest(component_input.case_snapshot) == snapshot_digest
+
+
 class FakeInfo:
     def __init__(self, *, conflict: bool = False) -> None:
         self.conflict = conflict
@@ -112,7 +137,11 @@ class FakeInfo:
         conflicts = []
         records = []
         if self.conflict:
-            records = [evidence("ev-conflict", "USER_INPUT")]
+            records = [
+                evidence("ev-conflict", "USER_INPUT").model_copy(
+                    update={"excerpt": "원상복구 범위는 일부입니다."}
+                )
+            ]
             conflicts = [
                 ConflictCandidate.create_standalone(
                     candidate_id=UUID("00000000-0000-4000-8000-000000000302"),
@@ -120,10 +149,10 @@ class FakeInfo:
                     case_version=1,
                     field_path="restoration_scope",
                     committed_status="CONFIRMED",
-                    committed_value="TENANT_ALL",
+                    committed_value="FULL",
                     proposed_operation="SET",
                     proposed_status="CONFIRMED",
-                    proposed_value="LANDLORD_ALL",
+                    proposed_value="PARTIAL",
                     source_evidence_refs=["ev-conflict"],
                     source_call_id=component_input.source_call_id,
                 )

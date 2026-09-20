@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from dotenv import dotenv_values
 
@@ -36,6 +36,15 @@ class TraceEvent:
     # so it cannot answer "how much of the run budget did this spend".
     provider_calls: int | None = None
     outcome_type: str | None = None
+    # A successful Review call may return REVISE; status describes execution,
+    # while this bounded value records the independent review decision.
+    review_verdict: Literal["PASS", "REVISE"] | None = None
+    # RUN-only totals: returned verdicts, returned REVISE verdicts, and distinct
+    # rework rounds that actually reached a component call after its deadline check.
+    # Failed review calls are not verdicts and do not enter review_count.
+    review_count: int | None = None
+    review_revise_count: int | None = None
+    rework_count: int | None = None
 
 
 def _repo_root() -> Path:
@@ -210,18 +219,28 @@ class LangfuseTraceSink:
                 usage["input_tokens"] = event.prompt_tokens
             if event.completion_tokens is not None:
                 usage["output_tokens"] = event.completion_tokens
+            metadata = {
+                "run_id": event.run_id,
+                "call_id": event.call_id,
+                "status": event.status,
+                "latency_ms": event.latency_ms,
+                "attempt": event.attempt,
+                "error_code": event.error_code,
+                "provider_calls": event.provider_calls,
+                "outcome_type": event.outcome_type,
+            }
+            for key in (
+                "review_verdict",
+                "review_count",
+                "review_revise_count",
+                "rework_count",
+            ):
+                value = getattr(event, key)
+                if value is not None:
+                    metadata[key] = value
             try:
                 observation.update(
-                    metadata={
-                        "run_id": event.run_id,
-                        "call_id": event.call_id,
-                        "status": event.status,
-                        "latency_ms": event.latency_ms,
-                        "attempt": event.attempt,
-                        "error_code": event.error_code,
-                        "provider_calls": event.provider_calls,
-                        "outcome_type": event.outcome_type,
-                    },
+                    metadata=metadata,
                     **({"usage_details": usage} if usage else {}),
                 )
             finally:

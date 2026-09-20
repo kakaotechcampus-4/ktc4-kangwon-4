@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Sequence
+from contextvars import ContextVar
+from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from typing import Any, Literal, Protocol, cast
 from uuid import UUID, uuid4
@@ -81,6 +83,18 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+@dataclass(slots=True)
+class _ReviewTraceCounters:
+    review_count: int = 0
+    review_revise_count: int = 0
+    started_rework_rounds: set[int] = field(default_factory=set)
+
+
+_REVIEW_TRACE_COUNTERS: ContextVar[_ReviewTraceCounters | None] = ContextVar(
+    "agent_review_trace_counters", default=None
+)
+
+
 class AgentGraph:
     """Run the Agent components and expose only reviewed or safe outcomes."""
 
@@ -139,6 +153,8 @@ class AgentGraph:
             "revision_count": 0,
         }
         run_started = time.monotonic()
+        review_counters = _ReviewTraceCounters()
+        counter_scope = _REVIEW_TRACE_COUNTERS.set(review_counters)
         outcome: AgentGraphOutput
         try:
             result = await self.compiled.ainvoke(
@@ -159,10 +175,13 @@ class AgentGraph:
                 trace_id=failure_request.trace_id,
                 failure=failure,
             )
+        finally:
+            _REVIEW_TRACE_COUNTERS.reset(counter_scope)
         self._emit_run_summary(
             run_id=run_id,
             started=run_started,
             outcome=outcome,
+            review_counters=review_counters,
         )
         return outcome
 
@@ -172,6 +191,7 @@ class AgentGraph:
         run_id: UUID,
         started: float,
         outcome: AgentGraphOutput,
+        review_counters: _ReviewTraceCounters,
     ) -> None:
         """Record what one whole run actually cost.
 
@@ -191,6 +211,9 @@ class AgentGraph:
             attempt=1,
             provider_calls=None if budget is None else budget.spent,
             outcome_type=outcome.outcome_type,
+            review_count=review_counters.review_count,
+            review_revise_count=review_counters.review_revise_count,
+            rework_count=len(review_counters.started_rework_rounds),
             error_code=(
                 outcome.failure_code if outcome.outcome_type == "SAFE_FAILURE" else None
             ),
@@ -280,6 +303,14 @@ class AgentGraph:
         if deadline is not None:
             deadline.check()
 
+    @staticmethod
+    def _record_rework_start(meta: InvocationMeta) -> None:
+        # One round can re-run several components; count it once, only after
+        # the deadline check and immediately before actual component work.
+        counters = _REVIEW_TRACE_COUNTERS.get()
+        if counters is not None and meta.attempt > 1:
+            counters.started_rework_rounds.add(meta.attempt - 1)
+
     async def _info_node(self, state: AgentGraphState) -> dict[str, Any]:
         request = state["request"]
         trigger_input = getattr(request.trigger, "input", None)
@@ -313,6 +344,7 @@ class AgentGraph:
         started = time.monotonic()
         try:
             self._check_deadline()
+            self._record_rework_start(meta)
             output = await self._info_agent.analyze(component_input)
             source = ReviewSourceResult(
                 meta=meta,
@@ -403,6 +435,7 @@ class AgentGraph:
         started = time.monotonic()
         try:
             self._check_deadline()
+            self._record_rework_start(meta)
             output = await self._procedure_tool.lookup(component_input)
             source = ReviewSourceResult(
                 meta=meta,
@@ -456,6 +489,7 @@ class AgentGraph:
         started = time.monotonic()
         try:
             self._check_deadline()
+            self._record_rework_start(meta)
             output = await self._support_agent.analyze(component_input)
             source = ReviewSourceResult(
                 meta=meta,
@@ -485,17 +519,17 @@ class AgentGraph:
                 if state.get("revision_count", 0) > 0
                 else None
             )
-            draft = await self._supervisor.draft(
-                SupervisorAgentInput(
-                    trigger=state["request"].trigger,
-                    case_snapshot=state["request"].case_snapshot,
-                    source_results=state["source_results"],
-                    draft_version=state.get("revision_count", 0) + 1,
-                    review_feedback=state.get("review_feedback", []),
-                    fact_overlays=state.get("fact_overlays", []),
-                    previous_draft=previous_draft,
-                )
+            component_input = SupervisorAgentInput(
+                trigger=state["request"].trigger,
+                case_snapshot=state["request"].case_snapshot,
+                source_results=state["source_results"],
+                draft_version=state.get("revision_count", 0) + 1,
+                review_feedback=state.get("review_feedback", []),
+                fact_overlays=state.get("fact_overlays", []),
+                previous_draft=previous_draft,
             )
+            self._record_rework_start(meta)
+            draft = await self._supervisor.draft(component_input)
         except Exception as exc:  # noqa: BLE001 - graph must fail closed
             self._emit(meta, started, "ERROR", exc)
             return self._failure(exc, Component.SUPERVISOR)
@@ -524,7 +558,12 @@ class AgentGraph:
             if "meta" in locals():
                 self._emit(meta, started, "ERROR", exc)
             return self._failure(exc, Component.REVIEW_TOOL)
-        self._emit(meta, started, "SUCCESS")
+        self._emit(
+            meta,
+            started,
+            "SUCCESS",
+            review_verdict="PASS" if result.verdict == ReviewVerdict.PASS else "REVISE",
+        )
         update: dict[str, Any] = {
             "phase": "REVIEWING",
             "review_subject": subject,
@@ -835,18 +874,11 @@ class AgentGraph:
         redacted_text = trigger_input.redacted_text if trigger_input is not None else ""
 
         queries = ["사업자 폐업 신고 절차 국세청"]
-        entity_type = confirmed.get("entity_type")
-        if entity_type is None:
-            if "법인" in redacted_text:
-                entity_type = "CORPORATION"
-            elif any(
-                keyword in redacted_text
-                for keyword in ("개인사업자", "자영업", "소상공인")
-            ):
-                entity_type = "SOLE_PROPRIETOR"
-        if entity_type == "SOLE_PROPRIETOR":
+        # Entity type is not a CASE field in schema_table.md. Explicit wording
+        # may select a lookup topic, but never creates or confirms a Case fact.
+        if "개인사업자" in redacted_text:
             queries.append("개인사업자 폐업 신고 절차 국세청")
-        elif entity_type == "CORPORATION":
+        elif "법인사업자" in redacted_text or "법인 사업자" in redacted_text:
             queries.append("법인 사업자 폐업 신고 절차 국세청")
 
         business_type = confirmed.get("business_type")
@@ -879,7 +911,14 @@ class AgentGraph:
         started: float,
         status: str,
         exc: Exception | None = None,
+        *,
+        review_verdict: Literal["PASS", "REVISE"] | None = None,
     ) -> None:
+        counters = _REVIEW_TRACE_COUNTERS.get()
+        if counters is not None and review_verdict is not None:
+            counters.review_count += 1
+            if review_verdict == "REVISE":
+                counters.review_revise_count += 1
         model, prompt_tokens, completion_tokens = (
             self._usage.drain() if self._usage is not None else (None, None, None)
         )
@@ -890,6 +929,7 @@ class AgentGraph:
             status=status,
             latency_ms=max(0, int((time.monotonic() - started) * 1000)),
             attempt=meta.attempt,
+            review_verdict=review_verdict,
             model=model,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
