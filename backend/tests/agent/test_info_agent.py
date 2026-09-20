@@ -587,6 +587,26 @@ def test_rejects_free_form_value_for_enum_field() -> None:
         InfoAnalysisDraft.model_validate(payload)
 
 
+@pytest.mark.parametrize("field_name", ["eligible", "tax_due", "best_closure_date"])
+@pytest.mark.parametrize("location", ["extra_output", "fact_field"])
+def test_provider_contract_rejects_eligibility_tax_and_date_decisions(
+    field_name: str, location: str
+) -> None:
+    payload = extraction_payload()
+    if location == "extra_output":
+        payload[field_name] = "unsupported decision"
+        error = "Extra inputs are not permitted"
+    else:
+        payload["facts"][0]["field_path"] = field_name
+        error = "field_path"
+    llm = FakeLLM(payload)
+
+    with pytest.raises(ValidationError, match=error):
+        asyncio.run(InfoAnalysisAgent(llm).analyze(request()))
+
+    assert llm.response_models == [InfoProviderOutput]
+
+
 def test_semantic_failure_is_corrected_inside_bounded_local_retry() -> None:
     invalid = extraction_payload()
     invalid["facts"][0]["value"] = "철거가 필요하다고 함"
@@ -639,6 +659,166 @@ def test_fact_value_must_be_explicit_in_exact_source_span() -> None:
         asyncio.run(
             InfoAnalysisAgent(FakeLLM(payload), max_local_attempts=1).analyze(request())
         )
+
+
+@pytest.mark.parametrize(
+    ("field_path", "value", "text"),
+    [
+        ("lease_status", "LEASED_PAID", "점포를 유상으로 임차 중입니다."),
+        ("lease_status", "LEASED_PAID", "임대료를 내고 임차하고 있습니다."),
+        ("lease_status", "LEASED_FREE", "점포를 무상으로 임차 중입니다."),
+        ("lease_status", "LEASED_FREE", "임대료 없이 임차하고 있습니다."),
+        ("lease_status", "OWNED", "점포는 본인 소유입니다."),
+        ("restoration_scope", "PARTIAL", "원상복구 범위는 일부입니다."),
+        ("restoration_scope", "FULL", "원상복구 범위는 전체입니다."),
+        ("restoration_scope", "NOT_REQUIRED", "원상복구가 필요하지 않습니다."),
+        ("restoration_status", "NOT_REQUIRED", "원상복구가 필요하지 않습니다."),
+    ],
+)
+def test_extracts_explicit_schema_lease_terms_and_restoration_scope(
+    field_path: str, value: str, text: str
+) -> None:
+    component_input = request()
+    component_input.input.redacted_text = text
+    component_input.allowed_field_paths = [field_path]
+    payload = extraction_payload(source_text=text)
+    payload["facts"][0].update({"field_path": field_path, "value": value})
+
+    result = asyncio.run(
+        InfoAnalysisAgent(FakeLLM(payload), max_local_attempts=1).analyze(
+            component_input
+        )
+    )
+
+    assert len(result.fact_candidates) == 1
+    assert result.fact_candidates[0].value == value
+    assert result.fact_candidates[0].source_span.text == text
+    assert result.evidence_records[0].excerpt == text
+
+
+@pytest.mark.parametrize(
+    ("field_path", "value", "text"),
+    [
+        ("lease_status", "LEASED_PAID", "현재 임차 중입니다."),
+        ("lease_status", "LEASED_FREE", "현재 임차 중입니다."),
+        ("lease_status", "LEASED_PAID", "세입자입니다."),
+        ("lease_status", "LEASED_FREE", "계약 해지 통보를 했습니다."),
+        ("restoration_scope", "FULL", "원상복구는 임차인 전부 부담입니다."),
+        ("restoration_scope", "PARTIAL", "원상복구는 임차인 부담입니다."),
+        ("restoration_scope", "FULL", "원상복구는 임대인 전부 부담입니다."),
+        ("restoration_scope", "PARTIAL", "원상복구 비용은 공동 부담입니다."),
+        ("restoration_scope", "FULL", "원상복구 협의가 필요합니다."),
+        (
+            "lease_status",
+            "LEASED_PAID",
+            "점포가 유상 임차인지 무상 임차인지 확인해야 합니다.",
+        ),
+        (
+            "restoration_scope",
+            "FULL",
+            "전체 원상복구인지 부분 원상복구인지 확인해야 합니다.",
+        ),
+    ],
+)
+def test_does_not_infer_lease_terms_or_scope_from_unrelated_facts(
+    field_path: str, value: str, text: str
+) -> None:
+    component_input = request()
+    component_input.input.redacted_text = text
+    component_input.allowed_field_paths = [field_path]
+    payload = extraction_payload(source_text=text)
+    payload["facts"][0].update({"field_path": field_path, "value": value})
+
+    with pytest.raises(InfoAnalysisGuardrailError, match="grounding checks"):
+        asyncio.run(
+            InfoAnalysisAgent(FakeLLM(payload), max_local_attempts=1).analyze(
+                component_input
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    ("field_path", "value", "text", "clipped_source"),
+    [
+        (
+            "lease_status",
+            "LEASED_PAID",
+            "유상으로 임차한 것은 아닙니다.",
+            "유상으로 임차",
+        ),
+        (
+            "lease_status",
+            "LEASED_FREE",
+            "무상으로 임차 중인지 확인이 필요합니다.",
+            "무상으로 임차",
+        ),
+        (
+            "restoration_scope",
+            "FULL",
+            "전체 원상복구는 필요하지 않습니다.",
+            "전체 원상복구",
+        ),
+        (
+            "restoration_scope",
+            "PARTIAL",
+            "부분 원상복구인지 아직 모릅니다.",
+            "부분 원상복구",
+        ),
+        (
+            "restoration_status",
+            "NOT_REQUIRED",
+            "원상복구가 필요하지 않은지는 아직 모릅니다.",
+            "원상복구가 필요하지 않",
+        ),
+        (
+            "restoration_scope",
+            "NOT_REQUIRED",
+            "원상복구가 필요하지 않은지는 아직 모릅니다.",
+            "원상복구가 필요하지 않",
+        ),
+        (
+            "restoration_scope",
+            "NOT_REQUIRED",
+            "원상복구 불필요는 아닙니다.",
+            "원상복구 불필요",
+        ),
+    ],
+)
+@pytest.mark.parametrize("clip", [False, True])
+def test_schema_enum_cues_reject_negation_and_uncertainty_in_user_sentence(
+    field_path: str, value: str, text: str, clipped_source: str, clip: bool
+) -> None:
+    component_input = request()
+    component_input.input.redacted_text = text
+    component_input.allowed_field_paths = [field_path]
+    payload = extraction_payload(source_text=clipped_source if clip else text)
+    payload["facts"][0].update({"field_path": field_path, "value": value})
+
+    with pytest.raises(InfoAnalysisGuardrailError, match="grounding checks"):
+        asyncio.run(
+            InfoAnalysisAgent(FakeLLM(payload), max_local_attempts=1).analyze(
+                component_input
+            )
+        )
+
+
+def test_not_required_fact_remains_valid_when_next_sentence_is_uncertain() -> None:
+    component_input = request()
+    component_input.input.redacted_text = (
+        "원상복구가 필요하지 않습니다. 세금 신고 여부는 아직 모릅니다."
+    )
+    payload = extraction_payload(source_text="원상복구가 필요하지 않습니다.")
+    payload["facts"][0].update(
+        {"field_path": "restoration_scope", "value": "NOT_REQUIRED"}
+    )
+
+    result = asyncio.run(
+        InfoAnalysisAgent(FakeLLM(payload), max_local_attempts=1).analyze(
+            component_input
+        )
+    )
+
+    assert result.fact_candidates[0].value == "NOT_REQUIRED"
 
 
 def test_procedure_completion_must_be_explicit_in_exact_source_span() -> None:

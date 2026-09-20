@@ -43,7 +43,12 @@ CANDIDATE_ID = UUID("00000000-0000-4000-8000-000000000402")
 CALL_ID = UUID("00000000-0000-4000-8000-000000000403")
 
 
-def snapshot(*, committed: str = "TENANT_ALL", version: int | None = 1) -> CaseSnapshot:
+def snapshot(*, committed: str = "FULL", version: int | None = 1) -> CaseSnapshot:
+    committed_text = {
+        "FULL": "원상복구 범위는 전체입니다.",
+        "PARTIAL": "원상복구 범위는 일부입니다.",
+        "NOT_REQUIRED": "원상복구가 필요하지 않습니다.",
+    }[committed]
     return CaseSnapshot(
         snapshot_id=SNAPSHOT_ID,
         case_id=1,
@@ -60,7 +65,14 @@ def snapshot(*, committed: str = "TENANT_ALL", version: int | None = 1) -> CaseS
             )
         ],
         procedure_progress=[],
-        evidence_records=[_fixtures.evidence("ev-system")],
+        evidence_records=[
+            _fixtures.evidence("ev-system").model_copy(
+                update={"excerpt": committed_text}
+            ),
+            _fixtures.evidence("ev-proposed-scope", "USER_INPUT").model_copy(
+                update={"excerpt": "원상복구 범위는 일부입니다."}
+            ),
+        ],
         captured_at=NOW,
     )
 
@@ -72,11 +84,11 @@ def conflict(**updates: Any) -> ConflictCandidate:
         "case_version": 1,
         "field_path": "restoration_scope",
         "committed_status": "CONFIRMED",
-        "committed_value": "TENANT_ALL",
+        "committed_value": "FULL",
         "proposed_operation": "SET",
         "proposed_status": "CONFIRMED",
-        "proposed_value": "SHARED",
-        "source_evidence_refs": ["ev-system"],
+        "proposed_value": "PARTIAL",
+        "source_evidence_refs": ["ev-proposed-scope"],
         "source_call_id": CALL_ID,
     }
     values.update(updates)
@@ -128,8 +140,8 @@ def test_a_confirmation_becomes_one_reviewable_change() -> None:
 
     assert overlay.source_type.value == "CONFIRMED_CONFLICT"
     assert overlay.field_path.value == "restoration_scope"
-    assert overlay.before_value == "TENANT_ALL"
-    assert overlay.proposed_value == "SHARED"
+    assert overlay.before_value == "FULL"
+    assert overlay.proposed_value == "PARTIAL"
     assert overlay.candidate_status == "READY_FOR_REVIEW"
     # The link back to the original conflict is what lets a reviewer see that
     # this change came from a person answering, not from analysis.
@@ -156,7 +168,7 @@ def test_a_confirmation_is_refused_once_the_value_has_moved_on() -> None:
     """
 
     with pytest.raises(StaleConfirmationError):
-        build_confirmed_conflict_overlay(snapshot(committed="LANDLORD_ALL"), conflict())
+        build_confirmed_conflict_overlay(snapshot(committed="NOT_REQUIRED"), conflict())
 
 
 def test_a_confirmation_is_refused_when_the_field_is_no_longer_confirmed() -> None:
@@ -232,7 +244,7 @@ def test_the_confirmed_value_reaches_the_planner_as_a_change() -> None:
     overlays = supervisor.inputs[0].fact_overlays
     assert len(overlays) == 1
     assert overlays[0].source_type.value == "CONFIRMED_CONFLICT"
-    assert overlays[0].proposed_value == "SHARED"
+    assert overlays[0].proposed_value == "PARTIAL"
     # The change is traced by the conflict reference, not by a component call.
     assert overlays[0].source_call_id is None
     assert overlays[0].confirmed_conflict_ref
@@ -242,7 +254,7 @@ def test_the_confirmed_value_reaches_the_planner_as_a_change() -> None:
 
 def test_a_stale_confirmation_fails_closed_without_planning() -> None:
     runtime, _, _, support, supervisor, review = graph()
-    stale = confirm_request(case_snapshot=snapshot(committed="LANDLORD_ALL"))
+    stale = confirm_request(case_snapshot=snapshot(committed="NOT_REQUIRED"))
 
     outcome = asyncio.run(runtime.run(stale))
 
@@ -291,5 +303,5 @@ def test_the_real_planner_puts_the_confirmed_change_into_its_mutation_set() -> N
 
     changes = draft.mutations.fact_changes
     assert [item.source_type.value for item in changes] == ["CONFIRMED_CONFLICT"]
-    assert changes[0].proposed_value == "SHARED"
+    assert changes[0].proposed_value == "PARTIAL"
     assert changes[0].confirmed_conflict_ref == overlay.confirmed_conflict_ref

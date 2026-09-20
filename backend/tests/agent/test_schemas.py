@@ -93,7 +93,7 @@ def evidence(
         source_ref="input-event-1",
         source_version=None,
         locator="/redacted_text/0:16",
-        excerpt="임대차 계약이 진행 중입니다",
+        excerpt="유상으로 임차하고 있습니다",
         parent_evidence_refs=[],
         published_at=None,
         retrieved_at=NOW,
@@ -112,7 +112,7 @@ def snapshot() -> CaseSnapshot:
             CaseFact(
                 field_path="lease_status",
                 value_type=FactValueType.ENUM,
-                value="ACTIVE",
+                value="LEASED_PAID",
                 status=FactStatus.CONFIRMED,
                 evidence_refs=["ev-user-1"],
                 updated_at=NOW,
@@ -251,11 +251,81 @@ def test_all_models_forbid_extra_fields() -> None:
         CaseFact(
             field_path="lease_status",
             value_type="ENUM",
-            value="ACTIVE",
+            value="LEASED_PAID",
             status="CONFIRMED",
             evidence_refs=["ev-user-1"],
             updated_at=NOW,
             made_up=True,
+        )
+
+
+@pytest.mark.parametrize(
+    ("field_path", "value"),
+    [
+        ("lease_status", "LEASED_PAID"),
+        ("lease_status", "LEASED_FREE"),
+        ("lease_status", "OWNED"),
+        ("restoration_scope", "PARTIAL"),
+        ("restoration_scope", "FULL"),
+        ("restoration_scope", "NOT_REQUIRED"),
+        ("restoration_status", "NOT_REQUIRED"),
+    ],
+)
+def test_case_fact_accepts_schema_table_enum_values(
+    field_path: str, value: str
+) -> None:
+    fact = CaseFact(
+        field_path=field_path,
+        value_type="ENUM",
+        value=value,
+        status="CONFIRMED",
+        evidence_refs=["ev-user-1"],
+        updated_at=NOW,
+    )
+
+    assert fact.value == value
+
+
+@pytest.mark.parametrize(
+    ("field_path", "value"),
+    [
+        ("lease_status", "ACTIVE"),
+        ("lease_status", "TERMINATION_NOTIFIED"),
+        ("lease_status", "TERMINATED"),
+        ("restoration_scope", "AGREEMENT_REQUIRED"),
+        ("restoration_scope", "TENANT_ALL"),
+        ("restoration_scope", "LANDLORD_ALL"),
+        ("restoration_scope", "SHARED"),
+        ("restoration_scope", "UNKNOWN"),
+        ("restoration_status", "UNKNOWN"),
+    ],
+)
+def test_case_fact_rejects_legacy_meanings_and_confirmed_unknown(
+    field_path: str, value: str
+) -> None:
+    with pytest.raises(ValidationError, match=f"{field_path} must be one of"):
+        CaseFact(
+            field_path=field_path,
+            value_type="ENUM",
+            value=value,
+            status="CONFIRMED",
+            evidence_refs=["ev-user-1"],
+            updated_at=NOW,
+        )
+
+
+@pytest.mark.parametrize(
+    "field_path", ["entity_type", "building_use_type", "previous_support_history"]
+)
+def test_case_fact_rejects_fields_absent_from_schema_table(field_path: str) -> None:
+    with pytest.raises(ValidationError, match="field_path"):
+        CaseFact(
+            field_path=field_path,
+            value_type="ENUM",
+            value=None,
+            status="UNKNOWN",
+            evidence_refs=[],
+            updated_at=None,
         )
 
 
@@ -338,7 +408,7 @@ def support_check(
         related_steps=[],
         match_status=match_status,
         criteria=[],
-        unknown_field_paths=["previous_support_history"],
+        unknown_field_paths=["demolition_required"],
         required_documents=[],
         application_channel=None,
         application_url=None,
@@ -886,10 +956,10 @@ def test_conflict_outcome_is_structured_and_snapshot_bound() -> None:
         case_version=1,
         field_path="lease_status",
         committed_status="CONFIRMED",
-        committed_value="ACTIVE",
+        committed_value="LEASED_PAID",
         proposed_operation="SET",
         proposed_status="CONFIRMED",
-        proposed_value="TERMINATION_NOTIFIED",
+        proposed_value="LEASED_FREE",
         source_evidence_refs=["ev-user-1"],
         source_call_id=INFO_CALL_ID,
     )
@@ -898,7 +968,7 @@ def test_conflict_outcome_is_structured_and_snapshot_bound() -> None:
     assert conflict.conflict_digest == conflict.calculate_digest()
 
     tampered_conflict = conflict.model_dump(mode="python")
-    tampered_conflict["proposed_value"] = "TERMINATED"
+    tampered_conflict["proposed_value"] = "OWNED"
     with pytest.raises(ValidationError, match="conflict_digest"):
         ConflictCandidate.model_validate(tampered_conflict)
 

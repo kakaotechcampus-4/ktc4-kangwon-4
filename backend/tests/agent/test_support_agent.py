@@ -185,7 +185,7 @@ def _snapshot(*, employee_count: int = 3) -> CaseSnapshot:
                 updated_at=NOW,
             ),
             CaseFact(
-                field_path="entity_type",
+                field_path="restoration_status",
                 value_type="ENUM",
                 value=None,
                 status="UNKNOWN",

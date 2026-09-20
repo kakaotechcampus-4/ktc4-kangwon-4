@@ -79,31 +79,19 @@ _FACT_VALUE_CUES: dict[tuple[CaseFieldKey, object], tuple[str, ...]] = {
         "가맹점이아니",
         "독립매장",
     ),
-    (CaseFieldKey.LEASE_STATUS, "ACTIVE"): ("임차중", "임대차중", "세입자"),
-    (CaseFieldKey.LEASE_STATUS, "TERMINATION_NOTIFIED"): (
-        "계약해지통보",
-        "해지한다고알렸",
+    (CaseFieldKey.LEASE_STATUS, "LEASED_PAID"): (
+        "유상임차",
+        "유상으로임차",
+        "임대료를내고임차",
+        "임차료를내고사용",
     ),
-    (CaseFieldKey.LEASE_STATUS, "TERMINATED"): (
-        "임대차종료",
-        "계약해지완료",
-        "계약종료",
+    (CaseFieldKey.LEASE_STATUS, "LEASED_FREE"): (
+        "무상임차",
+        "무상으로임차",
+        "임대료없이임차",
+        "임차료없이사용",
     ),
     (CaseFieldKey.LEASE_STATUS, "OWNED"): ("자가", "본인소유", "직접소유"),
-    (CaseFieldKey.ENTITY_TYPE, "SOLE_PROPRIETOR"): ("개인사업자",),
-    (CaseFieldKey.ENTITY_TYPE, "CORPORATION"): ("법인사업자", "법인"),
-    (CaseFieldKey.BUILDING_USE_TYPE, "NEIGHBORHOOD_LIVING"): ("근린생활시설",),
-    (CaseFieldKey.BUILDING_USE_TYPE, "OTHER"): ("기타용도",),
-    (CaseFieldKey.PREVIOUS_SUPPORT_HISTORY, "NONE"): (
-        "지원받은적없",
-        "지원금을받은적없",
-        "수혜이력없",
-    ),
-    (CaseFieldKey.PREVIOUS_SUPPORT_HISTORY, "RECEIVED"): (
-        "지원받았",
-        "지원금을받았",
-        "수혜이력있",
-    ),
     (CaseFieldKey.RESTORATION_STATUS, "NOT_STARTED"): (
         "원상복구시작전",
         "원상복구를시작하지않",
@@ -117,24 +105,22 @@ _FACT_VALUE_CUES: dict[tuple[CaseFieldKey, object], tuple[str, ...]] = {
         "원상복구를마쳤",
         "원상복구를끝냈",
     ),
-    (CaseFieldKey.RESTORATION_SCOPE, "AGREEMENT_REQUIRED"): (
-        "원상복구협의필요",
-        "원상복구합의필요",
+    (CaseFieldKey.RESTORATION_STATUS, "NOT_REQUIRED"): (
+        "원상복구불필요",
+        "원상복구가필요하지않",
+        "원상복구필요없",
     ),
-    (CaseFieldKey.RESTORATION_SCOPE, "TENANT_ALL"): (
-        "임차인전부부담",
-        "세입자전부부담",
-        "임차인부담",
+    (CaseFieldKey.RESTORATION_SCOPE, "PARTIAL"): (
+        "원상복구범위는일부",
+        "원상복구범위가일부",
+        "부분원상복구",
+        "일부만원상복구",
     ),
-    (CaseFieldKey.RESTORATION_SCOPE, "LANDLORD_ALL"): (
-        "임대인전부부담",
-        "건물주전부부담",
-        "임대인부담",
-    ),
-    (CaseFieldKey.RESTORATION_SCOPE, "SHARED"): (
-        "공동부담",
-        "나눠부담",
-        "분담",
+    (CaseFieldKey.RESTORATION_SCOPE, "FULL"): (
+        "원상복구범위는전체",
+        "원상복구범위가전체",
+        "전체원상복구",
+        "전면원상복구",
     ),
     (CaseFieldKey.RESTORATION_SCOPE, "NOT_REQUIRED"): (
         "원상복구불필요",
@@ -158,9 +144,6 @@ _FIELD_CUES: dict[CaseFieldKey, tuple[str, ...]] = {
     CaseFieldKey.FRANCHISE_STATUS: ("프랜차이즈", "가맹"),
     CaseFieldKey.EMPLOYEE_COUNT: ("직원", "근로자", "종업원"),
     CaseFieldKey.LEASE_STATUS: ("임차", "임대차", "계약", "자가", "소유"),
-    CaseFieldKey.ENTITY_TYPE: ("개인사업자", "법인", "사업자형태"),
-    CaseFieldKey.BUILDING_USE_TYPE: ("건축물용도", "건물용도", "근린생활"),
-    CaseFieldKey.PREVIOUS_SUPPORT_HISTORY: ("지원", "수혜"),
     CaseFieldKey.RESTORATION_STATUS: ("원상복구",),
     CaseFieldKey.RESTORATION_SCOPE: ("원상복구",),
     CaseFieldKey.RESTORATION_SCOPE_DETAIL: ("원상복구", "범위"),
@@ -168,6 +151,12 @@ _FIELD_CUES: dict[CaseFieldKey, tuple[str, ...]] = {
     CaseFieldKey.PLANNED_CLOSURE_DATE: ("폐업", "종료", "예정일"),
 }
 _CLEAR_CUES = ("삭제", "지워", "제거", "입력취소", "잘못입력")
+_SCHEMA_FACT_UNCERTAINTY = re.compile(
+    r"인지|여부|모르|모릅|모름|불확실|미확인|추정|가능성"
+    r"|확인(?:이)?필요|확인(?:해봐야|해야)"
+    r"|(?:일|할)수도|(?:인|한|일|할)것같"
+)
+_SCHEMA_FACT_NEGATION = re.compile(r"아니|아닌|아님|아닙|아닐|않|못|없|불필요")
 _COMPLETED_OBSERVATION = re.compile(
     r"(?:완료|끝냈|마쳤|처리했|신고했|제출했|반납했|해지했|탈퇴했|확인했|종료했)"
 )
@@ -537,7 +526,9 @@ class InfoAnalysisAgent:
         return re.sub(r"[^0-9a-z가-힣]+", "", value.casefold())
 
     @classmethod
-    def _fact_source_supports_value(cls, fact: ExtractedFactDraft) -> bool:
+    def _fact_source_supports_value(
+        cls, fact: ExtractedFactDraft, *, input_text: str | None = None
+    ) -> bool:
         """Require the proposed operation and value inside the exact source span.
 
         Exact substring grounding alone proves only that the model copied user text.
@@ -555,6 +546,29 @@ class InfoAnalysisAgent:
             return any(cue in compact_source for cue in field_cues) and any(
                 cls._compact_text(cue) in compact_source for cue in _CLEAR_CUES
             )
+
+        if fact.field_path in {
+            CaseFieldKey.LEASE_STATUS,
+            CaseFieldKey.RESTORATION_SCOPE,
+        } or (
+            fact.field_path == CaseFieldKey.RESTORATION_STATUS
+            and fact.value == "NOT_REQUIRED"
+        ):
+            # Schema-aligned values describe asserted lease terms and scope.
+            # Read the containing sentence too: quoting only "유상으로 임차"
+            # cannot erase the user's following "한 것은 아닙니다".
+            statement = fact.source_text
+            if input_text is not None:
+                start, end = exact_span(input_text, fact.source_text)
+                left = max(input_text.rfind(mark, 0, start) for mark in ".!?\n")
+                if input_text[end - 1] in ".!?\n":
+                    right = end
+                else:
+                    boundary = re.search(r"[.!?\n]", input_text[end:])
+                    right = end + boundary.end() if boundary else len(input_text)
+                statement = input_text[left + 1 : right]
+            if not cls._schema_enum_is_asserted(fact, statement):
+                return False
 
         value_matches: list[tuple[int, int, object]] = []
         for (field_path, candidate_value), cues in _FACT_VALUE_CUES.items():
@@ -620,6 +634,23 @@ class InfoAnalysisAgent:
         # Every current BOOLEAN and ENUM value has an explicit cue registry.
         # Missing registry coverage is intentionally fail-closed.
         return False
+
+    @classmethod
+    def _schema_enum_is_asserted(
+        cls, fact: ExtractedFactDraft, statement: str
+    ) -> bool:
+        """Reject negation/uncertainty for the schema-aligned enum cues only."""
+
+        compact = cls._compact_text(statement)
+        if "?" in statement or _SCHEMA_FACT_UNCERTAINTY.search(compact):
+            return False
+        # NOT_REQUIRED is itself expressed with negation. Remove only the
+        # exact supported cue, then reject additional negation such as
+        # "원상복구 불필요는 아닙니다". A bare "필요하지 않습니다" still passes.
+        cues = _FACT_VALUE_CUES.get((fact.field_path, fact.value), ())
+        for cue in sorted(cues, key=len, reverse=True):
+            compact = compact.replace(cls._compact_text(cue), "")
+        return _SCHEMA_FACT_NEGATION.search(compact) is None
 
     @staticmethod
     def _same_value_casefolded(left: object, right: object) -> bool:
@@ -709,7 +740,9 @@ class InfoAnalysisAgent:
                 # Re-stating an already unknown fact is not a mutation and must not
                 # require the model to fabricate a user-text source span.
                 continue
-            if not self._fact_source_supports_value(semantic):
+            if not self._fact_source_supports_value(
+                semantic, input_text=request.input.redacted_text
+            ):
                 raise InfoAnalysisGuardrailError(
                     "fact value is not explicit in its source text"
                 )

@@ -104,9 +104,6 @@ class CaseFieldKey(StrEnum):
     FRANCHISE_STATUS = "franchise_status"
     EMPLOYEE_COUNT = "employee_count"
     LEASE_STATUS = "lease_status"
-    ENTITY_TYPE = "entity_type"
-    BUILDING_USE_TYPE = "building_use_type"
-    PREVIOUS_SUPPORT_HISTORY = "previous_support_history"
     RESTORATION_STATUS = "restoration_status"
     RESTORATION_SCOPE = "restoration_scope"
     RESTORATION_SCOPE_DETAIL = "restoration_scope_detail"
@@ -161,44 +158,25 @@ class EvidenceSourceType(StrEnum):
     SYSTEM_RECORD = "SYSTEM_RECORD"
 
 
-# This catalog is intentionally local to the standalone Agent.  The unresolved
-# BE/API enum mismatch remains a boundary decision.  Expanding these values must
-# be an explicit contract change; free-form text never passes an ENUM field.
+# Case enum values follow docs/schema/schema_table.md.  The DB's UNKNOWN sentinel
+# is represented internally by FactStatus.UNKNOWN and value=None; it is never a
+# confirmed enum value.  Lease terms and restoration scope must not be replaced
+# with contract-termination stages or responsibility for restoration costs.
 CASE_FIELD_SPECS: dict[CaseFieldKey, tuple[FactValueType, frozenset[str] | None]] = {
     CaseFieldKey.BUSINESS_TYPE: (FactValueType.STRING, None),
     CaseFieldKey.FRANCHISE_STATUS: (FactValueType.BOOLEAN, None),
     CaseFieldKey.EMPLOYEE_COUNT: (FactValueType.INTEGER, None),
     CaseFieldKey.LEASE_STATUS: (
         FactValueType.ENUM,
-        frozenset({"ACTIVE", "TERMINATION_NOTIFIED", "TERMINATED", "OWNED"}),
-    ),
-    CaseFieldKey.ENTITY_TYPE: (
-        FactValueType.ENUM,
-        frozenset({"SOLE_PROPRIETOR", "CORPORATION"}),
-    ),
-    CaseFieldKey.BUILDING_USE_TYPE: (
-        FactValueType.ENUM,
-        frozenset({"NEIGHBORHOOD_LIVING", "OTHER"}),
-    ),
-    CaseFieldKey.PREVIOUS_SUPPORT_HISTORY: (
-        FactValueType.ENUM,
-        frozenset({"NONE", "RECEIVED"}),
+        frozenset({"LEASED_PAID", "LEASED_FREE", "OWNED"}),
     ),
     CaseFieldKey.RESTORATION_STATUS: (
         FactValueType.ENUM,
-        frozenset({"NOT_STARTED", "IN_PROGRESS", "COMPLETED"}),
+        frozenset({"NOT_STARTED", "IN_PROGRESS", "COMPLETED", "NOT_REQUIRED"}),
     ),
     CaseFieldKey.RESTORATION_SCOPE: (
         FactValueType.ENUM,
-        frozenset(
-            {
-                "AGREEMENT_REQUIRED",
-                "TENANT_ALL",
-                "LANDLORD_ALL",
-                "SHARED",
-                "NOT_REQUIRED",
-            }
-        ),
+        frozenset({"PARTIAL", "FULL", "NOT_REQUIRED"}),
     ),
     CaseFieldKey.RESTORATION_SCOPE_DETAIL: (FactValueType.STRING, None),
     CaseFieldKey.DEMOLITION_REQUIRED: (
