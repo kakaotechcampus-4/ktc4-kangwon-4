@@ -13,6 +13,7 @@ Agent(=폐업 계획을 만드는 AI 부분) 관련 문서를 모아둔 폴더�
 | **뭐가 아직 안 정해졌나** | [`open-decisions.md`](./open-decisions.md) |
 | BE에 뭘 요청해야 하나 | [`be-requests.md`](./be-requests.md) |
 | 절차 정보를 어디서 읽나 | [`procedure-knowledge.md`](./procedure-knowledge.md) |
+| 지원사업 정보를 어디서 읽나 | [`support-knowledge.md`](./support-knowledge.md) |
 | 한 번 실행에 얼마나 쓰나 | [`runtime-limits.md`](./runtime-limits.md) |
 | 어떻게 실행하나, 환경변수는 | [`standalone-runtime.md`](./standalone-runtime.md) |
 | 각 Agent·Tool의 정확한 입출력 | [`tool-io-schema.md`](./tool-io-schema.md) |

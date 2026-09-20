@@ -110,6 +110,7 @@ Review가 정확히 같은 Case snapshot, 선행 결과와 Supervisor 초안을 
 #### 지원금 Agent
 
 - **받는 내용:** Case 사실, 아직 저장되지 않은 사실 후보, 생성 시 주입된 `ReviewedSupportCatalog`
+- **출처:** 검수된 카탈로그만 읽는다. 공고 발견은 별도 명령이고, 사람이 자격조건을 써 넣기 전까지 그 공고는 카탈로그가 되지 않는다([`agent/support-knowledge.md`](./agent/support-knowledge.md))
 - **반환하는 내용:** 지원사업별 조건 비교, 추가로 확인할 Case 정보와 불확실성
 - **하지 않는 일:** raw 공고 수집, 실제 자격·선정·수급 확정, 신청 상태 변경
 - **현재 제한:** `CHECK_SPECIFIC` 입력은 처리할 수 있지만 `AgentGraph`가 해당 경로를 만들지 않는다.
@@ -157,9 +158,9 @@ Review가 정확히 같은 Case snapshot, 선행 결과와 Supervisor 초안을 
 
 ### 4.2 지원사업 공고와 지원금 판단을 분리
 
-- 현재 standalone 지원금 판단은 합성 `ReviewedSupportCatalog`를 사용한다.
-- 기업마당 Tool은 실제 API에서 raw 공고 후보를 가져올 수 있다.
-- raw 공고를 검수 catalog로 발행하는 과정이 없어 두 기능은 아직 연결하지 않았다.
+- 기업마당 Tool이 실제 API에서 공고 후보를 가져와 검수 대기 카탈로그에 적는다.
+- 사람이 자격조건을 써 넣은 항목만 Support Agent에게 전달된다.
+- 검수된 항목이 없으면 지원금 판단은 "후보 없음"으로 끝난다. standalone CLI는 그때 "실제 사업 아님"이라고 이름에 적힌 데모 카탈로그로 돌아간다.
 
 이 경계를 두는 이유는 공고 문구를 바로 자격조건으로 단정하거나 미검수 자료가 확정 결과로 승격되는 것을 막기 위해서다.
 

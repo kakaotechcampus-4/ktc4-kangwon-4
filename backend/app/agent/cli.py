@@ -7,10 +7,12 @@ import asyncio
 import json
 import sys
 from collections.abc import Sequence
+from typing import Any
 
 from app.agent.fixtures import build_standalone_fixture
 from app.agent.llm import LLMClientError
 from app.agent.runtime import build_runtime
+from app.agent.support_agent import JsonFileSupportStore, SupportStoreError
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -39,6 +41,41 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _support_catalog(fixture: Any) -> Any:
+    """Prefer the reviewed catalog; fall back to the labelled demo one.
+
+    A discovered notice is only served once a person has written its
+    eligibility rules, so a fresh catalog is empty and the support step would
+    have nothing to compare.  The fixture keeps the loop demonstrable, and its
+    programme name says in the text that it is not a real scheme, so it cannot
+    be mistaken for one.
+    """
+
+    try:
+        snapshot = JsonFileSupportStore.from_env().snapshot()
+    except SupportStoreError:
+        print(
+            "Reviewed support catalog unavailable; using the demo catalog.",
+            file=sys.stderr,
+        )
+        return fixture.support_catalog
+    catalog, pending = snapshot.build_catalog(known_steps=fixture.known_procedure_steps)
+    if catalog.programs:
+        print(
+            f"Support catalog {snapshot.catalog_version}: "
+            f"{len(catalog.programs)} reviewed, {pending} awaiting review.",
+            file=sys.stderr,
+        )
+        return catalog
+    print(
+        f"Support catalog {snapshot.catalog_version} has no reviewed programme "
+        f"yet ({pending} awaiting eligibility rules); using the demo catalog. "
+        "Run app.support_agent.refresh, then review each notice.",
+        file=sys.stderr,
+    )
+    return fixture.support_catalog
+
+
 async def _run(args: argparse.Namespace) -> int:
     fixture = build_standalone_fixture()
     request = fixture.request.model_copy(deep=True)
@@ -46,7 +83,7 @@ async def _run(args: argparse.Namespace) -> int:
 
     runtime = await build_runtime(
         known_procedure_steps=fixture.known_procedure_steps,
-        support_catalog=fixture.support_catalog,
+        support_catalog=_support_catalog(fixture),
     )
     try:
         outcome = await runtime.run_planning(

@@ -54,7 +54,11 @@
   - 코드에는 `support_agent/wiki/`도 `support_agent/rag/`도 **없습니다.** 실제로는 catalog 방식만 구현돼 있습니다
 - **MVP:** **필수.** SUPPORT_ITEM 스키마와 검수 절차가 여기서 갈립니다
 - **누가 정하나:** **공동** (AI·BE·PM)
-- **결정 전 안전 기본값:** 코드가 주입한 검수 catalog만 사용. 현재 standalone은 합성 fixture 1건
+- **2026-09-20 경과:** 카탈로그 쪽 경로를 구현했다. 기업마당에서 실제 공고 7건을 찾아왔고,
+  사람이 자격조건을 써 넣기 전까지는 서비스되지 않는다([`support-knowledge.md`](./support-knowledge.md)).
+  Wiki·RAG는 여전히 구현 0이다 — `support_agent/wiki/`도 `rag/`도 없고 결과의 `wiki_lookup`은
+  항상 `NOT_REQUESTED`다. **이 결정이 나야 Wiki를 만들지 말지가 정해진다**
+- **결정 전 안전 기본값:** 검수된 카탈로그만 비교에 쓴다. 검수된 항목이 없으면 "후보 없음"으로 끝낸다
 
 ### OD-02 · 절차 스냅샷을 언제 갱신하는가
 

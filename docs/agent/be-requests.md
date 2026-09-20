@@ -113,6 +113,10 @@ Alembic 설정도, seed 스크립트도, SQL 파일도 없습니다.
 
 ### BE (문서)
 
+- `backend/CLAUDE.md:55-56` — `support_agent/wiki/`, `support_agent/rag/`를 있는 것처럼
+  설명하지만 **둘 다 존재하지 않습니다.** 지원사업 자격은 검수 카탈로그로 비교하고 있고,
+  Wiki·RAG는 구현 0입니다
+
 - `backend/CLAUDE.md:44-56` — 없는 디렉토리를 설명합니다:
   `app/shared/{db,models,schemas,functions}`, `app/api/`, `support_agent/wiki/`, `support_agent/rag/`.
   실제 위치는 `app/be/models/`이고 wiki·rag는 구현되지 않았습니다
