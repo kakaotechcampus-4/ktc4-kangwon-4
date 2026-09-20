@@ -1,7 +1,7 @@
 # RE:BORN Agent·Tool 공개 호출 입·출력 계약
 
 - **계약 버전:** `agent-io/2.0`
-- **기준일:** 2026-09-19
+- **기준일:** 2026-09-20
 - **범위:** 현재 Python 코드로 구현된 standalone Agent·Tool 공개 메서드와 내부 데이터 계약
 - **제외 범위:** BE HTTP DTO, DB 모델·migration, 인증·인가, 운영 저장, 외부 Guardrail 계약
 
@@ -1256,15 +1256,15 @@ Conflict ref와 candidate ID는 unique이고 각 conflict의 snapshot/version은
 | `trigger` | `RunTrigger` | Graph가 입력 trigger를 복사 | trigger variant schema 검증 |
 | `snapshot_id` | runtime UUID | Graph가 입력 snapshot ID를 복사 | UUID 형식 필수 |
 | `case_version` | positive strict integer \| null | Graph가 입력 snapshot version을 복사 | null 또는 positive strict integer |
-| `failure_code` | `REVIEW_RETRY_EXHAUSTED \| COMPONENT_UNAVAILABLE \| STRUCTURED_OUTPUT_FAILED \| LOOP_LIMIT_REACHED \| RUN_DEADLINE_EXCEEDED` | Graph가 exception 종류, revision 소진, LLM 호출 예산 소진 또는 전체 시간 초과로 분류 | 허용 enum만 가능 |
+| `failure_code` | `REVIEW_RETRY_EXHAUSTED \| COMPONENT_UNAVAILABLE \| STRUCTURED_OUTPUT_FAILED \| LOOP_LIMIT_REACHED \| RUN_DEADLINE_EXCEEDED \| STALE_CONFLICT_CONFIRMATION` | Graph가 exception 종류, revision 소진, LLM 호출 예산 소진, 전체 시간 초과 또는 오래된 충돌 확인으로 분류 | 허용 enum만 가능 |
 | `message_code` | `UpperSnakeCode` | Graph가 안전한 caller-facing 기계 code를 선택 | upper snake 형식 |
-| `recovery_action_code` | `RETRY \| RESUBMIT_INPUT \| CONTACT_SUPPORT \| NONE` | Graph가 안전한 후속 처리 종류를 선택 | 현재 producer는 `RETRY` 또는 `NONE`만 생성 |
+| `recovery_action_code` | `RETRY \| RESUBMIT_INPUT \| CONTACT_SUPPORT \| NONE` | Graph가 안전한 후속 처리 종류를 선택 | 현재 producer는 `RETRY`, `RESUBMIT_INPUT`, `NONE`을 생성 |
 | `requested_field_paths` | `CaseFieldKey[]` | 추가 입력 대상이 있을 경우 Graph가 제공하는 자리 | 현재 producer는 `[]`; registry 밖 값 거부 |
 | `retryable` | strict boolean | Graph가 failure 분류에 따라 계산 | `0/1` 등 boolean coercion 거부 |
 | `failed_component` | `Component \| null` | Graph가 실패 owner를 기록하거나 Graph-level 실패이면 null | 허용 component enum만 가능 |
 | `trace_id` | non-empty string \| null | Graph가 입력 trace ID를 복사 | 빈 문자열 거부 |
 
-현재 Graph producer는 recovery action으로 `RETRY` 또는 `NONE`만 만들고 `requested_field_paths=[]`를 사용한다. 구성요소의 schema/guardrail/value 오류는 `STRUCTURED_OUTPUT_FAILED`, 설정·요청·upstream 계열 오류는 `COMPONENT_UNAVAILABLE`로 분류한다. Review 수정 2회 소진 시 `REVIEW_RETRY_EXHAUSTED`다. 한 실행의 전체 LLM 호출 수가 상한을 넘으면 `LOOP_LIMIT_REACHED`, 전체 실행 시간이 상한을 넘으면 `RUN_DEADLINE_EXCEEDED`로 분류한다. 뒤엣것은 재시도 가능으로 표시한다. 검수되지 않은 draft나 mutation은 포함하지 않는다.
+현재 Graph producer는 recovery action으로 `RETRY`, `RESUBMIT_INPUT` 또는 `NONE`을 만들고 `requested_field_paths=[]`를 사용한다. 구성요소의 schema/guardrail/value 오류는 `STRUCTURED_OUTPUT_FAILED`, 설정·요청·upstream 계열 오류는 `COMPONENT_UNAVAILABLE`로 분류한다. Review 수정 2회 소진 시 `REVIEW_RETRY_EXHAUSTED`다. 한 실행의 전체 LLM 호출 수가 상한을 넘으면 `LOOP_LIMIT_REACHED`, 전체 실행 시간이 상한을 넘으면 `RUN_DEADLINE_EXCEEDED`로 분류한다. 뒤엣것은 재시도 가능으로 표시한다. 검수되지 않은 draft나 mutation은 포함하지 않는다.
 
 ### 11.6 Review 재작업 라우팅
 
@@ -1287,7 +1287,7 @@ Conflict ref와 candidate ID는 unique이고 각 conflict의 snapshot/version은
 ### 현재 실행 흐름에 연결됨
 
 - **`InvocationMeta`:** Graph가 선행 결과와 Review의 출처 연결에 사용한다.
-- **`CASE_CREATED`, `RESULT_SUBMITTED`, `SUPPORT_REFRESH`:** 현재 `RunTrigger`와 Graph 경로에 존재한다.
+- **`CASE_CREATED`, `RESULT_SUBMITTED`, `SUPPORT_REFRESH`, `CONFLICT_CONFIRMED`:** 현재 `RunTrigger`와 Graph 경로에 존재한다.
 - **`ReviewedPlanOutcome`, `ConflictOutcome`, `SafeFailureOutcome`:** 현재 전체 실행이 반환할 수 있는 세 가지 최종 결과다.
 
 ### 구현됐지만 실행 흐름에 미연결
@@ -1300,7 +1300,6 @@ Conflict ref와 candidate ID는 unique이고 각 conflict의 snapshot/version은
 - **`ComponentRequest`, `ComponentSuccess`, `ComponentFailure`, `ComponentWarning`, `ComponentError`:** 타입은 있지만 현재 공개 호출은 입력·정상 반환 schema와 exception을 직접 사용한다. `SafeFailureOutcome.failure_code`가 같은 이름의 값을 갖지만 그것은 별도의 `Literal`이며, 이 절의 타입은 여전히 생성되지 않는다.
 - **`CaseCompleteDecisionDraft`:** 타입은 유효하지만 Supervisor가 현재 항상 거부한다.
 - **`CaseStatusChangeCandidate`:** `CASE_COMPLETE`일 때만 생성되므로 현재 도달할 수 없다.
-- **`FactChangeSourceType.CONFIRMED_CONFLICT`:** validator는 있지만 사용자 확인 trigger와 Graph 단계가 없다.
 
 다음 항목은 이 문서의 AI 내부 스키마가 아니므로 여기서 필드 계약을 정의하지 않는다.
 

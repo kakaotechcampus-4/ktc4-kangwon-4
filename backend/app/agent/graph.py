@@ -13,7 +13,7 @@ from datetime import date, datetime, timezone
 from typing import Any, Literal, Protocol, cast
 from uuid import UUID, uuid4
 
-from app.agent.enrichment import build_fact_overlays
+from app.agent.enrichment import build_confirmed_conflict_overlay, build_fact_overlays
 from app.agent.llm import LLMCallBudget, current_call_budget
 from app.agent.run_scope import current_deadline
 from app.agent.schemas import (
@@ -21,6 +21,7 @@ from app.agent.schemas import (
     AgentGraphInput,
     AgentGraphOutput,
     Component,
+    ConflictConfirmedTrigger,
     ConflictOutcome,
     DiscoverSupportInput,
     InfoAnalysisInput,
@@ -203,6 +204,7 @@ class AgentGraph:
         builder = StateGraph(AgentGraphState)
         builder.add_node("info_analysis", self._info_node)
         builder.add_node("conflict", self._conflict_node)
+        builder.add_node("confirmed_conflict", self._confirmed_conflict_node)
         builder.add_node("procedure_lookup", self._procedure_node)
         builder.add_node("support_analysis", self._support_node)
         builder.add_node("supervisor", self._supervisor_node)
@@ -213,7 +215,16 @@ class AgentGraph:
         builder.add_conditional_edges(
             START,
             self._route_start,
-            {"procedure": "procedure_lookup", "support": "support_analysis"},
+            {
+                "procedure": "procedure_lookup",
+                "support": "support_analysis",
+                "confirmed_conflict": "confirmed_conflict",
+            },
+        )
+        builder.add_conditional_edges(
+            "confirmed_conflict",
+            self._route_after_component,
+            {"continue": "support_analysis", "failure": "safe_failure"},
         )
         builder.add_conditional_edges(
             "procedure_lookup",
@@ -344,6 +355,33 @@ class AgentGraph:
             message_code="CONFIRM_CONFLICT",
         )
         return {"phase": "COMPLETED", "outcome": outcome}
+
+    def _confirmed_conflict_node(self, state: AgentGraphState) -> dict[str, Any]:
+        """Turn the user's confirmation into one reviewable change candidate.
+
+        Deliberately not a write.  Letting the caller apply a confirmed value
+        straight to the Case would put a Case change outside Review, and every
+        change reaching a user has to have passed it.
+        """
+
+        request = state["request"]
+        trigger = request.trigger
+        if not isinstance(trigger, ConflictConfirmedTrigger):
+            raise TypeError("confirmed-conflict node requires its own trigger")
+        meta = self._meta(state, Component.INFO_AGENT, attempt=1)
+        started = time.monotonic()
+        try:
+            self._check_deadline()
+            overlay = build_confirmed_conflict_overlay(
+                request.case_snapshot,
+                trigger.confirmed_conflict,
+                uuid_factory=self._uuid,
+            )
+        except Exception as exc:  # noqa: BLE001 - graph must fail closed
+            self._emit(meta, started, "ERROR", exc)
+            return self._failure(exc, Component.INFO_AGENT)
+        self._emit(meta, started, "SUCCESS")
+        return {"phase": "INFO_ANALYSIS", "fact_overlays": [overlay]}
 
     async def _procedure_node(self, state: AgentGraphState) -> dict[str, Any]:
         request = state["request"]
@@ -568,7 +606,10 @@ class AgentGraph:
             message_code=failure.get(
                 "failure_message_code", "AGENT_COMPONENT_UNAVAILABLE"
             ),
-            recovery_action_code="RETRY" if failure.get("retryable", False) else "NONE",
+            recovery_action_code=failure.get(
+                "recovery_action_code",
+                "RETRY" if failure.get("retryable", False) else "NONE",
+            ),
             requested_field_paths=[],
             retryable=failure.get("retryable", False),
             failed_component=failure.get("failed_component"),
@@ -587,8 +628,13 @@ class AgentGraph:
         return "continue"
 
     @staticmethod
-    def _route_start(state: AgentGraphState) -> Literal["procedure", "support"]:
-        if isinstance(state["request"].trigger, SupportRefreshTrigger):
+    def _route_start(
+        state: AgentGraphState,
+    ) -> Literal["procedure", "support", "confirmed_conflict"]:
+        trigger = state["request"].trigger
+        if isinstance(trigger, ConflictConfirmedTrigger):
+            return "confirmed_conflict"
+        if isinstance(trigger, SupportRefreshTrigger):
             return "support"
         return "procedure"
 
@@ -698,6 +744,8 @@ class AgentGraph:
         trigger = request.trigger
         if isinstance(trigger, SupportRefreshTrigger):
             return trigger.as_of
+        if isinstance(trigger, ConflictConfirmedTrigger):
+            return trigger.confirmed_at.date()
         return trigger.submitted_at.date()
 
     @staticmethod
@@ -706,6 +754,17 @@ class AgentGraph:
         component: Component | None,
     ) -> dict[str, Any]:
         name = exc.__class__.__name__
+        if name == "StaleConfirmationError":
+            return {
+                "phase": "SAFE_FAILED",
+                "failure_code": "STALE_CONFLICT_CONFIRMATION",
+                "failure_message_code": "AGENT_STALE_CONFLICT_CONFIRMATION",
+                "failed_component": component,
+                # Resending the same answer cannot help; the user has to see the
+                # value as it is now and decide again.
+                "retryable": False,
+                "recovery_action_code": "RESUBMIT_INPUT",
+            }
         if name == "RunDeadlineExceededError":
             return {
                 "phase": "SAFE_FAILED",

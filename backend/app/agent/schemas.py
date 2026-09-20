@@ -1892,8 +1892,35 @@ class SupportRefreshTrigger(AgentSchema):
     as_of: date
 
 
+class ConflictConfirmedTrigger(AgentSchema):
+    """User chose which of two conflicting values for one Case field holds.
+
+    The confirmed candidate is restored by the caller from its own stored
+    conflict record, not resent by the client.  That is what makes this safe:
+    a client cannot use a confirmation to write an arbitrary field or value,
+    only to accept a proposal the Agent itself produced earlier.
+
+    The confirmed value still goes through Review like any other change. A
+    user saying "yes" settles which value was meant; it does not make the
+    resulting plan correct.
+    """
+
+    trigger_type: Literal["CONFLICT_CONFIRMED"]
+    input_event_id: NonEmptyStr
+    client_event_id: NonEmptyStr | None
+    confirmed_conflict: ConflictCandidate = Field(
+        description="The original conflict candidate the user accepted."
+    )
+    confirmed_at: AwareDatetime = Field(
+        description="When the user confirmed; used as the planning as-of date."
+    )
+
+
 RunTrigger: TypeAlias = Annotated[
-    CaseCreatedTrigger | ResultSubmittedTrigger | SupportRefreshTrigger,
+    CaseCreatedTrigger
+    | ResultSubmittedTrigger
+    | SupportRefreshTrigger
+    | ConflictConfirmedTrigger,
     Field(discriminator="trigger_type"),
 ]
 
@@ -2373,6 +2400,10 @@ class SafeFailureOutcome(AgentSchema):
         # means it ran out of provider calls: one is a latency stop and the
         # other a cost stop, and they need different follow-up.
         "RUN_DEADLINE_EXCEEDED",
+        # The Case moved on between raising a conflict and the user answering
+        # it. Not a malformed result: the caller should show the current value
+        # and ask again, which is a different follow-up from a retry.
+        "STALE_CONFLICT_CONFIRMATION",
     ] = Field(description="Bounded machine classification of the Graph failure.")
     message_code: UpperSnakeCode = Field(
         description="Safe caller-facing machine message code."
@@ -2502,6 +2533,7 @@ __all__ = [
     "ComponentSuccess",
     "ComponentWarning",
     "ConflictCandidate",
+    "ConflictConfirmedTrigger",
     "ConflictOutcome",
     "CriterionStatus",
     "DecisionAuthority",

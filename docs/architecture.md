@@ -2,7 +2,7 @@
 
 > 소유: AI
 >
-> 기준일: 2026-09-19
+> 기준일: 2026-09-20
 >
 > 이 문서의 책임: 현재 Agent 실행 구조, 목표 구조, 구성요소별 책임과 데이터 전달 방향
 
@@ -48,6 +48,10 @@ CASE_CREATED | RESULT_SUBMITTED
                 ├─ REVISE → 권고된 앞 단계부터 재실행
                 └─ 실패·상한 소진 → SAFE_FAILURE
 
+CONFLICT_CONFIRMED
+  → 확인된 값을 변경 후보 1건으로 변환
+  → 지원금 Agent → Supervisor Agent → Review Tool
+
 SUPPORT_REFRESH
   → 지원금 Agent → Supervisor Agent → Review Tool
 ```
@@ -62,7 +66,9 @@ Review가 정확히 같은 Case snapshot, 선행 결과와 Supervisor 초안을 
 
 서비스나 Agent 프로세스를 종료하지 않는다. 기존에 확정된 Case 사실과 새 입력이 충돌할 때 잘못 덮어쓰지 않도록 **현재 실행만** 끝내고 사용자 확인이 필요하다고 알린다.
 
-사용자 확인을 받아 충돌 값을 적용하고 다시 실행하는 경로는 아직 없다.
+사용자가 값을 고르면 `CONFLICT_CONFIRMED` 실행으로 이어진다. 확인된 값은 변경 후보 1건이 되어 **Review를 그대로 거친다.** 사용자가 정한 것은 "어느 값이 맞는가"이지 "그 값으로 세운 계획이 옳은가"가 아니기 때문이다. 그래서 확인을 받았다고 바로 저장하지 않는다.
+
+확인이 그 사이 바뀐 Case에 대한 것이면 덮어쓰지 않고 `STALE_CONFLICT_CONFIRMATION`으로 끝낸다. 호출자는 현재 값을 사용자에게 다시 보여주고 새로 묻는다.
 
 #### `SAFE_FAILURE`
 
@@ -268,14 +274,12 @@ LLM이 의미상 잘못된 결과를 내서 다시 생성하는 것과 HTTP 요�
 - `ComponentRequest`, `ComponentSuccess`, `ComponentFailure`
 - `CASE_COMPLETE`
 - `CaseStatusChangeCandidate`
-- 사용자 확인을 반영하는 `CONFIRMED_CONFLICT`
 
 ### 후속 AI 구현 대상
 
 - 기업마당 raw 공고 검수, `ReviewedSupportCatalog` 발행과 `AgentGraph` 연결
 - `AgentGraph`가 `CHECK_SPECIFIC` 입력을 만드는 실행 경로
 - Supervisor 주도 동적 호출 계획과 제한된 router
-- 사용자 확인 후 conflict 재실행
 - 사용자 자연어 입력을 받아 비식별 처리하고 실행 입력으로 조립하는 경로
 - 승인된 공식 출처 crawler와 RAG
 - Langfuse 비용 금액 산출과 masking 정책 검증

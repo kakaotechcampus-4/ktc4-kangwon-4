@@ -349,7 +349,9 @@ audit 필드나 별도 proof DTO는 §4 P0에서 구조와 발급·검증 주체
 
 `ConflictConfirmationRequest` 후보는 `conflictRef`, `confirmation=CONFIRM_ORIGINAL`, `expectedVersion`, `clientEventId`만 받는다. client가 원 후보의 field/value를 다시 보내거나 수정할 수 없다. 서버는 opaque ref로 원 candidate, subject digest, Case ID/version, owner를 복원하고 TTL·single-use·CAS를 검증해야 한다. `standalone:` ref는 운영 HTTP에 노출하지 않는다.
 
-그 뒤 확인된 후보를 새 Graph 실행과 Review에 넣는 경로는 아직 구현되지 않았다. 현재 `CONFIRMED_CONFLICT` fact-change 타입만 있고 이를 만드는 trigger, Graph 단계와 외부→AI adapter는 없다. 운영 confirm endpoint를 열기 전에 AI가 이 경로와 Review 회귀 테스트를 구현하고 공통 계약으로 승인받아야 한다.
+확인된 후보를 새 Graph 실행과 Review에 넣는 경로는 **구현됐다**(`CONFLICT_CONFIRMED` trigger). BE가 opaque ref로 원 candidate를 복원해 trigger에 실어 보내면, Agent가 그것을 변경 후보 1건으로 바꿔 Review까지 태운다. **client가 field/value를 다시 보내는 경로는 없다** — 그래서 확인이 임의 쓰기로 쓰이지 않는다.
+
+Agent가 코드로 막는 것: 확인이 다른 snapshot·다른 case version에 대한 것이거나, 그 사이 해당 필드 값이 바뀌었으면 덮어쓰지 않고 `STALE_CONFLICT_CONFIRMATION`으로 끝낸다(`recovery_action_code=RESUBMIT_INPUT`). TTL·1회 사용·소유권 검증은 여전히 BE 몫이다.
 
 ### 5.6 지원사업 DTO 분리
 

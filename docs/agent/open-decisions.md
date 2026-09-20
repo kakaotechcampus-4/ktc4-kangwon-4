@@ -36,6 +36,7 @@
 | Guardrail 위치 | **Agent 안.** 저장 직전 version·소유권 확인만 BE | 팀 결정(2026-09-19). `be-integration-requirements.md` §5.5를 이에 맞게 정정함 |
 | enum에 `UNKNOWN` | **넣지 않음.** 미확인은 값이 아니라 상태(`status=UNKNOWN`, `value=null`) | 팀 결정(2026-09-19). Agent는 이미 이 방식. DB 쪽 정리는 [`be-requests.md`](./be-requests.md) 4번 |
 | 실행 단위 예산·시간 격리 | contextvar로 실행마다 분리 | 동시 요청에서 카운터가 섞이는 문제. `run_scope.py`, `llm.py` |
+| 충돌 확인 후 재계획 | 확인된 값도 Review를 거치는 `CONFLICT_CONFIRMED` 경로로 구현 | 확인을 바로 저장하면 Case 변경이 Review를 건너뛴다. 그 사이 값이 바뀌었으면 덮어쓰지 않고 `STALE_CONFLICT_CONFIRMATION`으로 끝낸다 |
 
 ---
 
