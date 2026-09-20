@@ -471,6 +471,7 @@ class StructuredLLMClient:
         schema_name: str | None = None,
         max_retries: int | None = None,
         temperature: float | None = None,
+        enum_constraints: Mapping[str, Sequence[str]] | None = None,
     ) -> ResponseModelT:
         """Return a locally validated Pydantic model.
 
@@ -492,6 +493,7 @@ class StructuredLLMClient:
             messages=normalized_messages,
             schema_name=schema_name,
             temperature=temperature,
+            enum_constraints=enum_constraints,
         )
         total_attempts = retries + 1
         last_status_code: int | None = None
@@ -616,10 +618,13 @@ class StructuredLLMClient:
         messages: list[dict[str, Any]],
         schema_name: str | None,
         temperature: float | None,
+        enum_constraints: Mapping[str, Sequence[str]] | None = None,
     ) -> dict[str, Any]:
         schema = sanitize_json_schema(
             response_model.model_json_schema(mode="validation")
         )
+        if enum_constraints:
+            schema = restrict_string_enums(schema, enum_constraints)
         payload: dict[str, Any] = {
             "model": self.config.model,
             "messages": messages,
@@ -655,6 +660,60 @@ class StructuredLLMClient:
         delay = self.config.retry_backoff_seconds * (2**attempt_index)
         if delay > 0:
             await self._sleep(delay)
+
+
+def restrict_string_enums(
+    schema: Mapping[str, Any],
+    constraints: Mapping[str, Sequence[str]],
+) -> dict[str, Any]:
+    """Limit named string properties to a supplied set of values.
+
+    Validating a bad value after the fact costs a whole generation and the
+    budget it spent.  An enum in the request schema is enforced by the provider
+    while the answer is produced, so the wrong value is never generated in the
+    first place.  Used for references the caller offers a closed list of, such
+    as which supplied document supports a finding.
+
+    The local Pydantic model still validates every response; this only narrows
+    what the provider is allowed to emit.
+    """
+
+    usable = {
+        name: sorted(set(values)) for name, values in constraints.items() if values
+    }
+    if not usable:
+        return dict(schema)
+
+    def restrict(node: Any, allowed: Sequence[str]) -> Any:
+        if not isinstance(node, dict):
+            return node
+        narrowed = dict(node)
+        if narrowed.get("type") == "array" and isinstance(narrowed.get("items"), dict):
+            narrowed["items"] = {"type": "string", "enum": list(allowed)}
+        elif narrowed.get("type") == "string":
+            narrowed["enum"] = list(allowed)
+        return narrowed
+
+    def walk(node: Any) -> Any:
+        if isinstance(node, list):
+            return [walk(item) for item in node]
+        if not isinstance(node, dict):
+            return node
+        result: dict[str, Any] = {}
+        for key, value in node.items():
+            if key == "properties" and isinstance(value, dict):
+                properties = {}
+                for name, child in value.items():
+                    allowed = usable.get(name)
+                    properties[name] = (
+                        restrict(child, allowed) if allowed else walk(child)
+                    )
+                result[key] = properties
+            else:
+                result[key] = walk(value)
+        return result
+
+    return walk(dict(schema))
 
 
 def sanitize_json_schema(schema: Mapping[str, Any]) -> dict[str, Any]:
@@ -981,5 +1040,6 @@ __all__ = [
     "configuration_error",
     "current_call_budget",
     "resolve_max_calls_per_run",
+    "restrict_string_enums",
     "sanitize_json_schema",
 ]

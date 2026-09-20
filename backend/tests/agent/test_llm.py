@@ -24,6 +24,7 @@ from app.agent.llm import (
     LLMResponseError,
     LLMUsage,
     StructuredLLMClient,
+    restrict_string_enums,
     sanitize_json_schema,
 )
 
@@ -1104,3 +1105,73 @@ def test_usage_falls_back_to_configured_model_when_provider_omits_it() -> None:
     asyncio.run(run())
 
     assert recorded[0].model == "configured-model"
+
+
+# --- 제공한 값 밖은 생성 자체가 안 되게 한다 -------------------------------
+
+
+class RefOutput(BaseModel):
+    evidence_refs: list[str]
+    summary: str
+
+
+def test_named_properties_are_limited_to_the_offered_values() -> None:
+    schema = restrict_string_enums(
+        sanitize_json_schema(RefOutput.model_json_schema(mode="validation")),
+        {"evidence_refs": ["doc2", "doc1", "doc1"]},
+    )
+
+    items = schema["properties"]["evidence_refs"]["items"]
+    assert items == {"type": "string", "enum": ["doc1", "doc2"]}
+    # Untouched properties keep their original shape.
+    assert "enum" not in schema["properties"]["summary"]
+
+
+def test_an_empty_allowed_list_leaves_the_schema_alone() -> None:
+    # An empty enum would describe a value that cannot exist, which would make
+    # the whole request unsatisfiable rather than merely constrained.
+    original = sanitize_json_schema(RefOutput.model_json_schema(mode="validation"))
+
+    assert restrict_string_enums(original, {"evidence_refs": []}) == original
+
+
+def test_the_restriction_reaches_the_provider_request() -> None:
+    captured: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {"evidence_refs": ["doc1"], "summary": "ok"}
+                            )
+                        }
+                    }
+                ]
+            },
+        )
+
+    client = StructuredLLMClient(
+        LLMConfig(
+            base_url="https://example.invalid/v1",
+            api_token="token",
+            model="model",
+            max_retries=0,
+        ),
+        transport=httpx.MockTransport(handler),
+    )
+    asyncio.run(
+        client.generate(
+            RefOutput,
+            [{"role": "user", "content": "x"}],
+            enum_constraints={"evidence_refs": ["doc1"]},
+        )
+    )
+    asyncio.run(client.aclose())
+
+    sent = captured[0]["response_format"]["json_schema"]["schema"]
+    assert sent["properties"]["evidence_refs"]["items"]["enum"] == ["doc1"]

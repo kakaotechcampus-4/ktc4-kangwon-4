@@ -332,6 +332,16 @@ class InfoAnalysisAgent:
             alias: evidence_id
             for evidence_id, alias in self._procedure_evidence_aliases(request).items()
         }
+        permitted_step_codes = sorted(
+            {
+                code
+                for document in request.procedure_lookup_result.documents
+                for code in self._candidate_step_codes(
+                    document.search_query,
+                    request.known_procedure_steps,
+                )
+            }
+        )
         try:
             ensure_projection_has_no_obvious_sensitive_text(prompt_input)
         except GuardrailViolation:
@@ -369,6 +379,17 @@ class InfoAnalysisAgent:
                 InfoProviderOutput,
                 messages,
                 schema_name="reborn_info_analysis",
+                # The provider cannot emit a reference we did not offer, so a
+                # made-up or mistyped one is never generated. Validation below
+                # is unchanged; this only stops the wasted generation.
+                enum_constraints={
+                    "evidence_refs": sorted(evidence_by_alias),
+                    # A finding may only bind to a step one of the supplied
+                    # documents actually covers. Offering the union here stops
+                    # the model naming a step no document supports; the
+                    # per-document check below still rejects a mismatched pair.
+                    "step_code": permitted_step_codes,
+                },
             )
             try:
                 draft = InfoAnalysisDraft.model_validate(

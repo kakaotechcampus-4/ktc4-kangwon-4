@@ -355,6 +355,9 @@ class SupervisorAgent:
                 SupervisorModelOutput,
                 messages,
                 schema_name="reborn_supervisor_draft",
+                # Same reason as the Info Agent: the evidence list is closed, so
+                # the provider is not allowed to name anything outside it.
+                enum_constraints={"evidence_refs": sorted(evidence_by_alias)},
             )
             try:
                 semantic_payload = model_output.model_dump(mode="python")
