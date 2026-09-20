@@ -18,8 +18,16 @@ class GuardrailViolation(ValueError):
     """Raised when a model result cannot safely cross a runtime boundary."""
 
 
+# These run over official excerpts and evidence as well as over model output,
+# so a pattern here has to be narrow enough not to reject real source material.
 _SENSITIVE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("NATIONAL_ID", re.compile(r"(?<!\d)\d{6}\s*[- ]\s*\d{7}(?!\d)")),
+    # Hyphens only.  The search-input check in ``support_agent.discovery_tool``
+    # deliberately also accepts spaces, because a person types a query freely
+    # and nothing official flows through it.  Widening this one the same way
+    # matches runs inside SHA-256 evidence digests and official document IDs,
+    # which would fail a run on its own grounding.
+    ("BUSINESS_REGISTRATION_NUMBER", re.compile(r"(?<!\d)\d{3}-\d{2}-\d{5}(?!\d)")),
     ("BEARER_TOKEN", re.compile(r"(?i)\bbearer\s+[a-z0-9._~+/=-]{12,}")),
     ("API_KEY", re.compile(r"(?i)\b(?:sk|pk)-[a-z0-9_-]{12,}")),
 )

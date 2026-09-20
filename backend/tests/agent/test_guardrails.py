@@ -42,6 +42,7 @@ def test_unknown_reference_is_rejected() -> None:
     "value",
     [
         "주민번호 900101-1234567",
+        "사업자등록번호 123-45-67890 입니다",
         "Authorization: Bearer abcdefghijklmnop",
         "키는 sk-abcdefghijklmnop 입니다",
     ],
@@ -49,3 +50,25 @@ def test_unknown_reference_is_rejected() -> None:
 def test_obvious_sensitive_output_is_rejected(value: str) -> None:
     with pytest.raises(GuardrailViolation, match="sensitive output"):
         ensure_no_sensitive_text([value])
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        # A run's own grounding: an evidence digest and an official document
+        # link. Both contain 3-2-5 digit runs once spaces are allowed as
+        # separators, so a wider business-number pattern would reject them.
+        "sha256:a455e29c4868005c74711d0130145877ff1cdb3e9aa83a5bcfd4",
+        "https://1350.moel.go.kr/rtmview.do?id=1000281283",
+        "지원 한도는 300만원이고 접수는 2026년 3월 2일까지입니다",
+        "문의는 063-717-1313 또는 1588-0700입니다",
+    ],
+)
+def test_real_source_material_is_not_treated_as_sensitive(value: str) -> None:
+    """Grounding and contact details have to survive the check.
+
+    Blocking these would not protect anyone: they are what the answer is built
+    from, and losing them means the user cannot be told where to apply.
+    """
+
+    ensure_no_sensitive_text([value])
