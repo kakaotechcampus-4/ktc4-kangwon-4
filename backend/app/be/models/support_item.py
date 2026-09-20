@@ -1,11 +1,12 @@
 from datetime import date, datetime
 
 from sqlalchemy import BigInteger, Column, Date, DateTime, Enum, ForeignKey, String
-from sqlalchemy.sql import func
-from sqlmodel import Field, Relationship, SQLModel
+from sqlmodel import Field, Relationship
+
+from app.be.models.mixins import TimestampMixin
 
 
-class SupportItem(SQLModel, table=True):
+class SupportItem(TimestampMixin, table=True):
     __tablename__ = "support_item"
 
     id: int | None = Field(default=None, sa_column=Column(BigInteger, primary_key=True, autoincrement=True))
@@ -16,15 +17,10 @@ class SupportItem(SQLModel, table=True):
     application_end_date: date | None = Field(default=None, sa_column=Column(Date, nullable=True))
     source_file_location: str | None = Field(default=None, max_length=500, description="S3 원본 파일 위치")
 
-    created_at: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, server_default=func.now(), nullable=False))
-    updated_at: datetime | None = Field(
-        default=None, sa_column=Column(DateTime, server_default=func.now(), onupdate=func.now())
-    )
-
     applications: list["SupportItemApplication"] = Relationship(back_populates="support_item")
 
 
-class SupportItemApplication(SQLModel, table=True):
+class SupportItemApplication(TimestampMixin, table=True):
     __tablename__ = "support_item_application"
 
     id: int | None = Field(default=None, sa_column=Column(BigInteger, primary_key=True, autoincrement=True))
@@ -50,11 +46,6 @@ class SupportItemApplication(SQLModel, table=True):
         ),
     )
     applied_at: datetime | None = Field(default=None, sa_column=Column(DateTime, nullable=True))
-
-    created_at: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, server_default=func.now(), nullable=False))
-    updated_at: datetime | None = Field(
-        default=None, sa_column=Column(DateTime, server_default=func.now(), onupdate=func.now())
-    )
 
     case: "Case" = Relationship(back_populates="support_item_applications")
     support_item: "SupportItem" = Relationship(back_populates="applications")
