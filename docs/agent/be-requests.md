@@ -127,6 +127,28 @@ Alembic 설정도, seed 스크립트도, SQL 파일도 없습니다.
 지원금 조회는 `SUPPORT_ITEM.uuid`와 `source_file_location`을 사용하는 Wiki·S3 연결이 남았습니다.
 Agent가 필요한 자격정보를 새 Case 필드로 만들거나 확인되지 않은 값으로 채우지 않습니다.
 
+## 8. 사용자 입력의 비식별 처리를 누가 하는지 확인이 필요합니다
+
+Agent는 `RedactedInput`을 받습니다. 이름 그대로 **BE가 이미 개인정보를 지운 텍스트**를 준다는
+전제이고, `redacted_text`와 `redactions`가 그 계약입니다(`backend/app/agent/schemas.py`).
+그런데 실제로 그 처리를 하는 BE 구현이 있는지 확인하지 못했습니다.
+
+Agent 안에도 민감정보 정규식이 있지만 **그물이지 방벽이 아닙니다.** 이번에 사업자등록번호
+패턴을 추가하면서 왜 그런지 실측했습니다 — 전화번호·이메일·주소까지 넓히면 실제 공고의
+기관 문의처와 접수처가 걸립니다. 공백 구분까지 허용하는 사업자번호 패턴은 저장소의 공식
+자료에서 11건이 걸리는데 전부 SHA-256 근거 digest와 공식 문서 URL의 id 값입니다.
+근거와 공식 링크를 막으면 실행이 자기 근거 때문에 실패합니다.
+
+즉 **경계마다 필요한 엄격함이 다릅니다.** 외부로 나가는 검색어는 넓게 막아도 되지만,
+공식 원문 발췌가 지나가는 자리는 좁아야 합니다. 정규식만으로 입력 단계의 개인정보를
+책임질 수 없습니다.
+
+확인이 필요한 것:
+
+- `RedactedInput`을 만드는 BE 구현이 있는지, 없다면 누가 언제 만드는지
+- 무엇을 지우고 무엇을 남기는지(상호·주소·금액·연락처)와 `redactions`의 형식
+- 지우기 전 원문을 어디에 얼마나 두는지 — `CASE_HISTORY.raw_input`과 함께 OD-05에서 정합니다
+
 ---
 
 ## 다른 파트에 전달할 것 (AI 소유가 아님)
@@ -137,6 +159,10 @@ Agent가 필요한 자격정보를 새 Case 필드로 만들거나 확인되지 
   → `docs/agent/be-integration-requirements.md`로 바꿔주세요
 - `docs/hero-scenario.md` — 없는 테이블 이름 2개: `subsidy_application` → `SUPPORT_ITEM_APPLICATION`,
   `support_check_result` → `SUPPORT_MATCH`
+- `/CLAUDE.md` "개인정보" 절의 **"테스트는 가짜 데이터로 한다"** 와 이번 작업의 **더미 데이터
+  금지** 지시가 문서 수준에서 서로 반대입니다. 지금은 "가짜 Case·사업자·DB 식별자를 만들지
+  않는 검사만 실행한다"로 정리하고 `real_data` marker로 갈라 뒀습니다(`backend/tests/conftest.py`).
+  팀 기준을 어느 쪽으로 할지 정해 주세요 — 두 문장이 같이 있으면 다음 사람이 또 헷갈립니다
 
 ### FE
 
@@ -153,8 +179,8 @@ Agent가 필요한 자격정보를 새 Case 필드로 만들거나 확인되지 
 - `backend/CLAUDE.md:44-56` — 없는 디렉토리를 설명합니다:
   `app/shared/{db,models,schemas,functions}`, `app/api/`.
   실제 모델 위치는 `app/be/models/`이며 Wiki reader와 오프라인 검색은 AI 디렉터리에 추가됐습니다
-- `docs/tech-stack.md` — Chroma 미사용이라는 현재 상태 설명을 후속 AI 작업과 맞춰야 합니다.
-  설치 의존성을 바꾸지 않고 별도 미검수 검색 CLI에서 사용하며, 운영 Graph에는 아직 연결하지 않았습니다
+- (해결) `docs/tech-stack.md`의 Chroma 설명은 AI 소유 문서라 직접 고쳤습니다. 설치 의존성은
+  바꾸지 않았고, 별도 미검수 검색 CLI에서만 쓰며 운영 Graph에는 연결하지 않았다고 적었습니다
 - `backend/CLAUDE.md:56` — `docs/tech-stack.md §4.4`를 가리키는데 그런 절이 없습니다
 
 ### 공동 (논의 필요)

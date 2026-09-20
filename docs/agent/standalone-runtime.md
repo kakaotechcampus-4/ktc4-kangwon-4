@@ -272,7 +272,28 @@ PYTHONPATH=backend backend/.venv/bin/python -m app.agent.cli --help
 ```
 
 이번 CLI 변경은 Ruff, 소스 compile, `--help`, diff 공백 검사를 확인했다.
-더미 입력·mock·pytest 실행은 하지 않았다. 이는 실제 Case 실행 성공을 의미하지 않는다.
+이는 실제 Case 실행 성공을 의미하지 않는다.
+
+### 다시 돌릴 수 있는 검사
+
+테스트 suite 대부분은 합성 Case를 만들기 때문에 멈춰 둔다. 실제 Case·사업자·DB 식별자를
+만들지 않는 모듈만 `real_data` marker로 골라 실행한다. 정의는
+`backend/tests/conftest.py`에 있다.
+
+```bash
+backend/.venv/bin/python -m pytest backend/tests/agent -m real_data -q
+```
+
+2026-09-21 기준 **77 passed, 541 deselected**. 무엇을 확인하는가:
+
+- 저장소의 실제 기업마당 공고 7건을 읽어 corpus를 만들고, 모든 chunk의 발췌가 원본 필드의
+  정확한 구간과 글자 그대로 일치하는지 대조한다. 같은 Vault를 두 번 읽으면 digest가 같다
+- 검수완료 노트가 0건이라는 사실과, 검수 노트가 없는 조회가 miss가 되는 것을 고정한다
+- 결정적 claim 정책, 민감정보·투영 가드레일, trace 경계를 회귀로 확인한다. 여기에는 공식
+  원문 발췌와 근거 digest가 민감정보로 오분류되지 **않는지**도 포함된다
+
+통과는 위 범위만 뜻한다. 실제 Case 실행, Graph 전체 경로, DB 저장·재조회는 여전히 미검증이다.
+네트워크를 부르는 검사(임베딩·LLM 호출)는 비용과 재현성 때문에 만들지 않았다.
 
 과거 검증 기록:
 

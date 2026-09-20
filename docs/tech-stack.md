@@ -10,7 +10,7 @@
 
 - 현재 Agent 실행은 **Pydantic, LangGraph, httpx**를 사용한다.
 - LLM은 LangChain이나 OpenAI SDK가 아니라 `httpx`로 OpenAI-compatible endpoint를 호출한다. endpoint는 하나로 고정돼 있지 않다 — `SUPERVISOR_*` 환경변수를 설정하면 Supervisor만 별도 provider·model을 쓰는 client를 따로 받고, 설정하지 않으면 전 구성요소가 공용 endpoint 하나를 그대로 공유한다(환경변수는 `agent/standalone-runtime.md`가 단일 출처).
-- LangChain, OpenAI SDK와 Chroma는 설치 목록에 있지만 현재 Agent 실행에서는 사용하지 않는다. Langfuse는 credential이 설정된 경우에만 metadata 전송에 사용한다.
+- LangChain과 OpenAI SDK는 설치 목록에 있지만 현재 Agent 실행에서는 사용하지 않는다. Chroma도 **요청 처리 경로에는 연결돼 있지 않다** — 미검수 공고를 오프라인에서 색인·검색하는 별도 CLI에서만 쓴다(`app.agent.support_agent.rag.cli`). Langfuse는 credential이 설정된 경우에만 metadata 전송에 사용한다.
 - 루트 `docker-compose.yml`은 **MySQL 8.0 DB만** 실행한다. Backend와 Agent container는 없다.
 - `develop`에는 BE의 SQLModel 테이블 정의 11개가 있다. FastAPI route, migration, 인증과 실제 Case 읽기·쓰기는 아직 `develop`에 없다.
 - Support Agent는 생성 시 주입된 검수 catalog를 사용한다.
@@ -103,8 +103,8 @@ MySQL은 container 설정만 존재한다. migration, transaction과 통합 테�
 ### 후속 AI 기능용 패키지
 
 - **Langfuse `4.15.1`:** `LangfuseTraceSink`로 metadata 전송 구현. 비용 금액 산출은 없음
-- **langchain-chroma `1.1.0`:** corpus, index와 retriever 미구현
-- **ChromaDB `1.5.9`:** Agent 조회 경로 미구현
+- **langchain-chroma `1.1.0`:** 미사용. `rag/`는 chromadb를 직접 쓴다
+- **ChromaDB `1.5.9`:** 별도 오프라인 CLI에서 미검수 공고 색인·검색에 사용. **운영 Graph의 조회 경로에는 미연결**이며 Support Agent의 `rag_used`는 false 그대로다
 
 ### 개발 도구
 
@@ -130,7 +130,8 @@ MySQL은 container 설정만 존재한다. migration, transaction과 통합 테�
 전체 목록은 [`architecture.md`](./architecture.md) §8, 아직 정하지 못한 항목은 [`agent/open-decisions.md`](./agent/open-decisions.md)에 둔다. 여기서는 패키지와 직접 관련된 것만 적는다.
 
 - **구현됐지만 미연결:** 기업마당 API의 raw 공고 후보를 조회하는 독립 adapter
-- **미구현:** 승인된 공식 원문 crawler, parser, versioned corpus, index, retriever와 RAG 연결(`langchain-chroma`, `chromadb`가 여기에 해당)
+- **구현됐지만 미연결:** 미검수 공고의 corpus·index·검색(`chromadb`). 별도 CLI로만 실행하며 검수 corpus·S3 원문·운영 Graph에는 잇지 않았다. 상세는 [`agent/support-retrieval.md`](./agent/support-retrieval.md)
+- **미구현:** 승인된 공식 원문 crawler와 parser, 검수 corpus의 versioned index·retriever와 요청 경로 RAG 연결
 - **미구현:** Langfuse 비용 금액 산출, masking 정책 승인
 
 Support Agent의 현재 입력은 생성 시 주입된 reviewed catalog다. 검수 corpus, versioned index, retriever 평가, Evidence 변환과 Graph 연결이 모두 있어야 RAG가 완료됐다고 판단한다.

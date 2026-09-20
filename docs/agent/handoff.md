@@ -1,6 +1,6 @@
 # Agent 작업 인수인계
 
-> 소유: AI · 작성/점검: 2026-09-20 KST
+> 소유: AI · 작성/점검: 2026-09-21 KST (직전 판 2026-09-20)
 > 대상: 현재 작업을 이어받는 개발자·AI. 아래 Git 상태는 작성 시점의 로컬 작업 트리 기준이다.
 
 ## 1. 먼저 알아야 할 현재 상태
@@ -18,6 +18,8 @@ Obsidian 공고 저장·재읽기, 별도 Chroma 색인·검색이다.
 | 공식 자료 | 절차 문서 3건, 지원공고 7건. 전부 미검수이며 지원사업 서비스 후보는 0건 |
 | A7 | 선택적 Wiki ID·UUID reader 구현. 실제 DB 매핑·사람 검수 후 HIT→비교→Review 확인 필요 |
 | A8 | 미검수 공고 7건·35구간을 실제 임베딩 API로 Chroma 저장·검색. 운영 RAG·S3는 미연결 |
+| A6 | 2026-09-21에 검수 소진 실패가 `requested_field_paths`를 파생하도록 고침. 외부 실패 응답 형태는 C5 대기 |
+| 되살린 검사 | `pytest -m real_data` **77 passed, 541 deselected**. 합성 Case를 만드는 541개는 멈춰 둠 |
 | 실제 DB의 마지막 관측 | 2026-09-20 20:52 KST: 11개 테이블, 기준 대비 6개 테이블·8개 컬럼 누락. Case·절차·지원사업·Case 이력 0건 |
 
 티켓별 완료 조건은 [implementation-status.md](./implementation-status.md), 실측과 실패 기록은
@@ -48,14 +50,19 @@ Obsidian 공고 저장·재읽기, 별도 Chroma 색인·검색이다.
 | 항목 | 작성 시점 값 |
 |---|---|
 | 작업 브랜치 | `feature/agent-ssot-runtime-and-conflict-replan` |
-| HEAD | `4498a47` |
+| HEAD | `380ffa3` (직전 판은 `4498a47`) |
 | 로컬 `develop` / `origin/develop` | 둘 다 `e360ab3`, 서로 차이 0 |
 | 최신 develop 포함 | 현재 HEAD가 해당 develop을 포함함 |
-| 이번 후속 작업 | **미커밋·미푸시**. 새 파일과 기존 수정이 함께 있음 |
+| 이전 판의 미커밋 작업 | **커밋 완료.** `4498a47` 위에 13개 커밋(이 문서 갱신 포함) |
+| 푸시 | **안 함.** 2026-09-20 기준 PR을 더 올리지 않기로 해 로컬에만 있다 |
+| 남은 미커밋 | `.env.example` 하나. **사용자 작업이므로 AI가 건드리지 않는다** |
 
 `develop`은 이전에 `1a11cf1 → e360ab3`로 fast-forward했고 마지막 원격 재확인에서도 같았다.
 이어받을 때는 먼저 아래 읽기 전용 확인을 한다. 새 upstream 변경이 있으면 작업 트리를 보존하며
 반영한다. `reset --hard`, `clean`, 일괄 checkout으로 현재 결과를 지우지 않는다.
+
+커밋은 소유 범위별로 나눴다. 되돌릴 일이 생기면 통째로 말고 해당 커밋만 본다.
+`.env.example`은 어느 커밋에도 들어 있지 않다(확인: `git show --name-only <커밋> | grep '^\.env'`).
 
 ```bash
 git status --short --branch
@@ -64,10 +71,10 @@ git rev-list --left-right --count develop...origin/develop
 git merge-base --is-ancestor develop HEAD
 ```
 
-`git diff`만으로 새 파일이 보이지 않는다. 특히 `support_agent/wiki/`, `support_agent/rag/`,
-`docs/agent/obsidian/`와 새 Agent 문서는 미추적 파일이므로 함께 확인한다.
-`.env.example` 수정은 사용자 작업이다. 이후 커밋할 때 `git add .`로 섞지 말고 실제 diff와
-소유 범위를 확인한다. 기존 `backend/tests/agent/` 변경도 남아 있지만 최신 실행 성공의 증거가 아니다.
+이전 판에서 미추적이던 `support_agent/wiki/`, `support_agent/rag/`, `docs/agent/obsidian/`와
+새 Agent 문서는 모두 커밋됐다. 앞으로도 `git diff`만으로는 새 파일이 보이지 않으므로
+`git status --short`로 미추적 항목을 함께 확인한다.
+`.env.example` 수정은 사용자 작업이다. 커밋할 때 `git add .`로 섞지 말고 경로를 지정한다.
 
 ## 4. 구현을 이어볼 코드와 문서
 
@@ -76,7 +83,9 @@ git merge-base --is-ancestor develop HEAD
 | Case 허용 필드·추출 | [schemas.py](../../backend/app/agent/schemas.py), [info_agent/agent.py](../../backend/app/agent/info_agent/agent.py) | 임대 형태·복구 범위를 현행 스키마에 맞춤. 스키마에 없는 Case 필드 제거 |
 | Graph·관측 | [graph.py](../../backend/app/agent/graph.py), [tracing.py](../../backend/app/agent/tracing.py) | Review 필수, 실행별 예산·판정 집계. 새 Review 집계의 실제 Case 관측은 미검증 |
 | BE 주입·실행 | [runtime.py](../../backend/app/agent/runtime.py), [cli.py](../../backend/app/agent/cli.py) | 실제 요청·절차 registry 필요. 선택 `procedure_store`·`support_wiki` 주입. DB 저장 없음 |
-| 실제 문장 가드레일 수정 | [claim_safety.py](../../backend/app/agent/claim_safety.py) | 공식 원문의 금액 뒤 조사 누락 2건 수정. 모든 표현·개인정보 처리 완료가 아님 |
+| 실제 문장 가드레일 | [claim_safety.py](../../backend/app/agent/claim_safety.py), [guardrails.py](../../backend/app/agent/guardrails.py) | 금액 뒤 조사 누락 2건 수정, 사업자등록번호 패턴 추가(좁은 형태). 전화번호·이메일·주소는 실측 근거로 의도적 제외 — OD-08 |
+| 검수 소진 실패 | [graph.py](../../backend/app/agent/graph.py) | `requested_field_paths`를 source 결과에서 파생. 외부 응답 형태는 C5 대기 |
+| 되살린 검사 | [conftest.py](../../backend/tests/conftest.py), [test_real_vault_sources.py](../../backend/tests/agent/test_real_vault_sources.py) | `real_data` marker. 합성 Case를 만드는 541개는 멈춘 상태 |
 | A7 | [wiki/](../../backend/app/agent/support_agent/wiki/), [support-wiki.md](./support-wiki.md) | 검수 UUID reader와 미검수 공고 import를 분리. 기존 노트 덮어쓰기·자동 검수 없음 |
 | A8 | [rag/](../../backend/app/agent/support_agent/rag/), [support-retrieval.md](./support-retrieval.md) | 공개 API 필드의 오프라인 검색만. 검수 catalog·Case Graph·S3에는 미연결 |
 | 공식 폐업 절차 | [official-closure-procedure.md](./official-closure-procedure.md) | 공식 출처·조건·미확인 범위. 팀 검수나 DB 시드 발행을 대신하지 않음 |
@@ -104,7 +113,13 @@ git diff --check
 PYTHONPATH=backend backend/.venv/bin/python -m app.agent.cli --help
 PYTHONPATH=backend backend/.venv/bin/python -m app.agent.support_agent.wiki.import_notices --help
 PYTHONPATH=backend backend/.venv/bin/python -m app.agent.support_agent.rag.cli --help
+
+# 합성 Case를 만들지 않는 검사만. 정의는 backend/tests/conftest.py
+backend/.venv/bin/python -m pytest backend/tests/agent -m real_data -q
 ```
+
+`-m real_data` 없이 전체를 돌리지 않는다. 나머지 541개는 합성 Case를 만들며, 통과해도 실제
+동작의 증거가 아니다. 지우지 않은 이유는 BE 연결 뒤 실제 입력으로 되살릴 수 있어서다.
 
 당시 Ruff는 `/home/vasebull/.local/bin/ruff`를 사용했다. PATH에 없으면 그 경로를 확인한다.
 도움말은 네트워크 호출·Case 실행 검증이 아니다.
@@ -202,5 +217,9 @@ Case CLI는 호출 전에 출력 파일을 예약하므로 예외 후 빈 파일
 - 합의가 끝난 항목만 [미정 사항 대장](./open-decisions.md)에서 결정 완료로 옮긴다.
 - 실행법·환경설정은 [standalone-runtime.md](./standalone-runtime.md), 한도는
   [runtime-limits.md](./runtime-limits.md)에 갱신하고 문서 링크를 확인한다.
+- 검사를 추가하면 `real_data` 기준(실제 Case·사업자·DB 식별자를 만들지 않음)을 지키는지 보고,
+  해당하면 marker를 붙인다. 합성 Case가 필요해지면 붙이지 않고 그 이유를 남긴다.
+- 파일을 지울 때 그 파일을 가리키는 문서 링크를 함께 정리한다. `fixtures.py`를 지울 때
+  문서 3곳이 걸려 있었다.
 
 현재 읽기 시작점은 이 문서, 세부 문서 색인은 [README.md](./README.md)다.

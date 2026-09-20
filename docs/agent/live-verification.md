@@ -249,3 +249,45 @@ Ruff·format·소스 compile·CLI 도움말을 확인했고 pytest·mock·더미
 원문 확인·Wiki miss의 운영 fallback은 미완료이며 Graph의 `rag_used=false`를 유지한다.
 서비스 MySQL 테이블·BE·FE는 수정하지 않았다. 실제 실행 방법과 경계는
 [`support-retrieval.md`](./support-retrieval.md)에 정리했다.
+
+## 11. 2026-09-21 미커밋 작업 보존과 AI 단독 마감
+
+### 실제로 한 것
+
+BE 연결 상태는 이 날 다시 확인하지 않았다. 외부 API·DB·LLM 호출도 하지 않았다.
+이번 작업은 **네트워크를 부르지 않는 범위**에서만 진행했다.
+
+| 대상 | 확인 방법 | 결과 |
+|---|---|---|
+| 미커밋 작업 보존 | 소유 범위별로 나눠 8개 커밋 | `.env.example`은 모든 커밋에서 제외. 신규 코드 1,927줄과 Vault 15개 파일 포함 |
+| 정적 검사 | `ruff check backend/app/agent`, `ruff format --check`, `git diff --check` | 통과 |
+| CLI 기동 | `cli`, `rag.cli`, `wiki.import_notices`의 `--help` | 3개 모두 정상 종료 |
+| 되살린 검사 | `pytest backend/tests/agent -m real_data -q` | **77 passed, 541 deselected** |
+| 사업자등록번호 패턴 오탐 | 저장소 공식 자료 전수 스캔 | 좁은 패턴 0건 / 넓은 패턴 11건(전부 근거 digest·공식 URL id) |
+
+### 코드에서 고친 것
+
+- **검수 소진 실패가 다음 행동을 못 내던 문제**(A6): `requested_field_paths`가 빈 목록으로
+  고정돼 있었다. 실패 시점의 source 결과에서 막혀 있던 Case 필드를 파생하도록 바꿨다.
+  Review 결과에서는 파생하지 않는다 — `ReviewIssue.target_path`는 초안 내부 JSON Pointer이고
+  이 필드는 Case 필드 키여서 대응 관계가 없다. 스키마 필드 추가나 `message_code` 변경은
+  하지 않았다(C5 협의 대상).
+- **사업자등록번호 가드레일**: 하이픈만 인정하는 좁은 패턴을 추가했다. 넓히지 않은 근거는
+  위 표의 실측이며 [`open-decisions.md`](./open-decisions.md) OD-08에 남겼다.
+- **죽은 코드 제거**: `fixtures.py` 289줄. 합성 Case·지원사업을 만드는 모듈인데 CLI의 더미
+  대체를 없애면서 호출자가 0곳이 됐다. 이 파일을 가리키던 문서 링크 3곳도 정리했다.
+- **끝난 일이 남은 일처럼 보이던 메모**: `llm.py`의 실행별 예산 분리 TODO. `call_budget_scope`와
+  `ScopedCallBudget`으로 이미 해결돼 있었다.
+
+### 검증하지 못한 것 (그대로 유지)
+
+- 실제 Case → 정보분석 → Supervisor → 필수 Review → 가드레일 전체 경로
+- A6 파생 결과의 실제 Case 관측. `source_results`가 없는 예외 경로가 기존과 같이 빈 목록을
+  내는 것만 확인했다
+- Review 결과의 Case·판단·Evidence·History 저장과 재조회
+- Wiki HIT → 조건 비교 → Review. 검수완료 노트는 여전히 0건이다
+- 실제 반송률·비용 집계. 가짜 Review 이벤트를 만들지 않았다
+
+`real_data` 통과는 위 표의 범위만 뜻한다. 실제 Case 실행 성공이나 DB 저장 성공으로 옮겨
+적지 않는다. 멈춰 둔 541개는 합성 Case를 만들기 때문이며, BE 연결 뒤 실제 입력으로
+되살릴 수 있도록 지우지 않았다.
