@@ -6,9 +6,20 @@
 >
 > Agent 외부 연동에 공동 확정된 DTO, endpoint, persistence mapping: **0개**
 
-> 기준일: 2026-09-19 · 지금 바로 막고 있는 요청만 추린 것은 [`be-requests.md`](./be-requests.md)
+> 기준일: 2026-09-20 · 지금 바로 막고 있는 요청만 추린 것은 [`be-requests.md`](./be-requests.md)
 
 ## 먼저 읽어주세요
+
+**2026-09-20 적용 범위:** 사용자 지시로 물리 테이블·컬럼·enum의 기준을
+[`schema_table.md`](../schema/schema_table.md)로 고정한다. 이 문서의 과거 확장·version·DTO
+제안은 공동 검토안이며 실제 스키마를 확장할 권한이 아니다. 최신 티켓별 상태는
+[`implementation-status.md`](./implementation-status.md), 결정 충돌은
+[`open-decisions.md`](./open-decisions.md)를 따른다.
+
+**현재 검증 제약:** 더미·mock·합성 Case 테스트를 실행하지 않는다. 소유권 확인·비식별 처리를
+마친 실제 Case export와 실제 API·저장 결과로 검증한다. 아래 장애·동시성·보안 항목은 공동 검토할
+완료 조건이며, 필요한 실제 조건을 관측하지 못한 항목은 미검증으로 남긴다. 과거 fixture 기반
+시험을 재실행하라는 지시가 아니다. 작업 보존·재현 절차는 [`handoff.md`](./handoff.md)를 따른다.
 
 현재 AI에는 standalone Agent 코어와 AI 내부 schema가 있습니다. 하지만 실제 사용자 Case를 읽고 Agent 결과를 DB에 저장하는 BE 연동은 아직 없습니다.
 
@@ -21,12 +32,13 @@
 1. §4의 `구현 전에 닫아야 할 P0 결정`마다 `동의 / 수정안 / 제외`로 회신해 주세요.
 2. 공동 결정 후 exact DTO·JSON Schema, OpenAPI, DB migration을 BE 기술 스택에 맞게 제시해 주세요.
 3. Case snapshot 조립, Agent 호출, CAS 저장, Evidence 조회를 담당할 BE coordinator·persistence 경계를 구현해 주세요.
-4. AI와 같은 contract fixture를 사용해 `Case 조회 → Agent 실행 → Review → 저장 → 재조회`를 통합 검증해 주세요.
+4. 소유권 확인·비식별 처리를 마친 동일한 실제 Case export를 사용해 `Case 조회 → Agent 실행 → Review → 저장 → 재조회`를 통합 검증해 주세요.
 
 ### 이 문서의 사용 방법
 
 - AI의 내부 JSON과 DB 설계 문서를 임의로 조합해 외부 연동 계약을 추정하지 맙니다.
-- 먼저 핵심 결정을 합의한 뒤, BE가 생성한 DTO·OpenAPI·migration을 실제 구현 기준으로 삼습니다.
+- 먼저 현행 `schema_table.md` 안에서 핵심 결정을 합의하고 DTO·OpenAPI·migration을 맞춥니다.
+  코드가 스키마와 다르다는 이유로 그 코드를 새 데이터 기준으로 삼지 않습니다.
 - AI 내부 schema의 상세는 [`tool-io-schema.md`](./tool-io-schema.md), AI 실행 구조는 [`architecture.md`](../architecture.md)에서 확인합니다.
 - DB 팀의 현재 설계는 [`../schema/schema_table.md`](../schema/schema_table.md)와 [`schema/ERD.png`](../schema/ERD.png)에서 확인합니다.
 - 공식 데이터, 크롤링, RAG 계획은 [`official-data-sources.md`](./official-data-sources.md)에서 확인합니다.
@@ -39,8 +51,10 @@
 - Supervisor 초안과 Review 검수
 - 공식 폐업 절차 원문 제한 조회
 - 기업마당 raw 공고를 독립적으로 조회하는 adapter
+- 선택적 검수 Wiki ID·UUID reader와 실제 미검수 공고를 담은 Obsidian Vault
+- 미검수 공고 전용 Chroma 색인·검색 명령. 운영 Graph·S3 연결은 미완료
 
-위 기능은 AI 내부 코드와 테스트가 있다는 뜻이다. 외부 HTTP·DB 계약이 승인됐다는 뜻은 아니다.
+위 기능은 AI 내부 구현이 있다는 뜻이다. 실제 확인 범위는 [`live-verification.md`](./live-verification.md)에 기록하며, 외부 HTTP·DB 계약이 승인됐다는 뜻은 아니다.
 
 ### 이 문서에서 제안하는 것
 
@@ -59,18 +73,23 @@ Agent 외부 연동용 shared DTO, endpoint와 persistence mapping은 현재 **0
 
 이 문서의 명령형 문장은 승인 전 요청안이다. 합의 전에 field, enum, HTTP status와 저장 위치를 확정된 값처럼 구현하지 않는다.
 
-승인 후 규범 우선순위는 다음과 같습니다.
+데이터 기준의 우선순위는 다음과 같습니다.
 
-1. migration·repository·DTO 코드와 그 코드에서 생성한 JSON Schema/OpenAPI
-2. 공동 contract fixture와 digest test vector
-3. 승인된 ADR
-4. 이 Markdown 설명
+1. **현행 `docs/schema/schema_table.md`** — 테이블·컬럼·타입·키·제약조건·enum·관계
+2. 위 스키마에 맞춰 공동 확정한 DB ↔ Agent ↔ API 변환 계약
+3. 그 계약을 구현한 migration·repository·DTO·OpenAPI와 테스트
+4. 이 Markdown 설명과 과거 제안·회의 메모
 
-상위 산출물과 이 문서가 다르면 코드를 무조건 정답으로 간주하지 말고 계약 drift로 처리해 함께 수정한다.
+스키마가 직접 정하지 않는 HTTP 응답·transaction·검수 정책은 공동 계약에서 정합니다.
+새 컬럼이나 제약 변경이 필요하면 근거와 대안을 먼저 건의하며, 협의로 기준 문서가 정리되기 전에는
+코드·DTO·fixture를 통해 물리 스키마를 확장하거나 NOT NULL·FK 제약을 우회하지 않습니다.
 
 ## 1. 현재 사실과 생산 연동에 없는 것
 
-### AI에 구현되고 테스트까지 끝난 기능
+### AI 내부에 구현된 기능
+
+아래 test 파일은 과거 검증 코드의 위치다. 더미 금지 이후 재실행하지 않았고, 최신 코드의 실제
+Case 통합 성공 근거로 사용하지 않는다. 티켓별 한계는 [`implementation-status.md`](./implementation-status.md)를 따른다.
 
 - **AI 내부 schema와 검증 규칙**
   - 근거: `backend/app/agent/schemas.py`, `backend/tests/agent/test_schemas.py`
@@ -202,8 +221,14 @@ BE는 Agent 하위 구성요소를 개별 HTTP endpoint로 만들 필요가 없�
 ### Case 값과 절차 단계
 
 - **미확인과 삭제 구분:** `UNKNOWN`은 `value=null`, 명시적 삭제는 별도 operation으로 표현하는 안을 제안한다. `null`, 미확인, 해당 없음과 삭제를 어떻게 구분할지 정해야 한다.
-- **공식 field와 enum:** `UNKNOWN`을 enum 값으로 둘지는 **결정됐다 — 두지 않는다**(팀 결정 2026-09-19). 미확인은 값이 아니라 상태이므로 `value=null`과 확인 상태로 표현한다. DB 쪽 정리는 [`be-requests.md`](./be-requests.md) 4번. 나머지 값 집합은 아직 다르다. 예를 들어 DB의 `lease_status`는 `LEASED_PAID | LEASED_FREE | OWNED`, AI는 `ACTIVE | TERMINATION_NOTIFIED | TERMINATED | OWNED`를 사용한다. DB의 `restoration_scope`는 `UNKNOWN | PARTIAL | FULL | NOT_REQUIRED`, AI는 `AGREEMENT_REQUIRED | TENANT_ALL | LANDLORD_ALL | SHARED | NOT_REQUIRED`를 사용한다. 어느 값을 공통 기준으로 삼을지와 이전 값 mapping을 합의해야 하며, adapter에서 임의 변환하면 안 된다.
-- **Case fact 범위:** 지원 판단에 필요한 사업체 형태, 건축물 용도와 과거 지원 이력 등의 포함 범위와 저장 원천을 정해야 한다.
+- **공식 field와 enum:** AI의 확정값은 현행 `schema_table.md`에 맞췄다. `lease_status`는
+  `LEASED_PAID | LEASED_FREE | OWNED`, `restoration_scope`는 `PARTIAL | FULL | NOT_REQUIRED`다.
+  미확인은 AI 내부에서 `status=UNKNOWN,value=null`로 표현한다. DB의 기존 `UNKNOWN` enum을
+  제거하지 않으며, 양방향 변환과 nullable·삭제 처리는 C1에서 협의한다. 이전의 해지 진행 단계나
+  비용 부담자를 새 값으로 자동 매핑하지 않는다.
+- **Case fact 범위:** `entity_type`, `building_use_type`, `previous_support_history`는 물리 스키마에
+  없으므로 AI Case 필드에서도 제거했다. 이 조건이 필요한 지원사업을 불완전한 조건만으로
+  검토 완료 처리하지 않는다. 추가 정보를 다룰 저장·조회 경계는 스키마 확장 없이 공동 협의한다.
 - **절차 registry:** AI 입력에는 변하지 않는 ID·code뿐 아니라 사용자에게 보여줄 `stepName`, 발화 매칭용 alias와 registry version이 필요하다. **ERD에는 이미 `step_name`·`utterance_aliases`·`registry_version`이 들어갔다.** 남은 것은 SQLModel 클래스 반영과 데이터 입력이다 — [`be-requests.md`](./be-requests.md) 1·6번. 소유자, 적용 조건과 변경·폐기 정책은 여전히 합의가 필요하다.
 - **진행 상태 초기화:** Case에 적용되는 모든 절차 단계를 한 transaction에서 만들고 개수를 검증하는 방식을 제안한다. 초기화 시점과 registry 변경 시 처리를 정해야 한다.
 
@@ -435,12 +460,12 @@ Case route는 항상 BE가 token과 Case owner를 검증한 뒤 snapshot을 조�
 ### 인증정보
 
 - **최소 요구:** OAuth, JWT와 API key를 prompt, 오류 응답과 일반 log에 기록하지 않는다.
-- **검증:** secret pattern test와 log 점검
+- **검증:** 실제 호출의 log·trace·오류 응답에 비밀값이 남지 않는지 원문 노출 없이 점검
 
 ### 사용자 원문과 사업자 식별정보
 
 - **최소 요구:** 입력 ID와 비식별 텍스트를 분리하고 필요한 범위만 전달·보존한다. 사업자 식별정보는 권한 있는 결정적 resolver에만 전달하고 암호화·마스킹·외부 전송 기록을 적용한다.
-- **검증:** PII fixture 기반 prompt·trace 검사와 다른 사용자 접근 거부 테스트
+- **검증:** 허용된 실제 입력의 prompt·trace 비식별 처리 점검 및 실제 사용자 간 접근 거부 확인. 미관측 경로는 미검증으로 기록
 
 ### Evidence
 
@@ -455,12 +480,12 @@ Case route는 항상 BE가 token과 Case owner를 검증한 뒤 snapshot을 조�
 ### 중복 요청과 제한 시간
 
 - **최소 요구:** 같은 key와 같은 내용은 이전 결과를 다시 주고, 같은 key에 다른 내용은 거부한다. 전체 deadline 안에서 구성요소 예산과 제한된 재시도를 적용하고 취소 정책을 정한다.
-- **검증:** 동시 재전송, timeout과 fault injection 테스트
+- **검증:** 허용된 실제 요청의 중복·동시 재전송과 timeout 시 저장 상태 확인. 장애별 원자성 검증 방법은 공동 확정하며 가짜 장애 응답으로 통과 처리하지 않음
 
 ### 외부 원문 조회
 
 - **최소 요구:** 공식 allowlist, DNS와 private IP 차단, redirect 재검증, 응답 크기·MIME·시간 상한을 적용한다.
-- **검증:** SSRF, redirect와 대용량 응답 fixture 테스트
+- **검증:** SSRF 차단·redirect 재검증·크기 제한 코드를 검토하고 실제 수집에서 관측한 거부 결과 확인. 미관측 조건은 통과로 표시하지 않음
 
 Langfuse 등 특정 관측 제품은 이 계약의 필수조건이 아니다. 제품을 선택해도 raw prompt·PII·credential을 수집하지 않고 위 trace/cost 의미를 만족해야 한다.
 
@@ -468,13 +493,13 @@ Langfuse 등 특정 관측 제품은 이 계약의 필수조건이 아니다. �
 
 P0 합의 뒤 BE PR에는 다음이 함께 있어야 한다.
 
-- **공통 DTO 코드:** version, 필수·nullable, enum, tagged union과 adapter. AI와 같은 fixture를 양방향으로 검증해야 함
+- **공통 DTO 코드:** version, 필수·nullable, enum, tagged union과 adapter. 양측이 같은 비식별 실제 Case export의 양방향 변환을 검증해야 함
 - **생성된 OpenAPI:** §6 endpoint, 인증, 정상·오류 결과와 예시. CI에서 코드와 문서 차이를 검출하고 예시가 schema를 통과해야 함
 - **공식 registry:** Case field·enum, 절차 ID·code·별칭·version과 지원사업 ID. unknown·폐기 값 mapping을 테스트해야 함
 - **Migration과 data dictionary:** 실제 테이블·제약·index와 rollback. 기존 데이터 보존과 적용·복구 테스트가 있어야 함
 - **Snapshot assembler:** 권한 확인 후 한 시점의 `SharedCaseSnapshotDTO` 생성. AI strict adapter와 계약 테스트를 통과해야 함
 - **Coordinator:** 중복 요청 방지, 전체 제한 시간, Agent 호출, Guardrail과 저장 순서. 중복·timeout·retry 테스트가 있어야 함
-- **Persistence service:** CAS, 변경·decision·history의 원자 저장과 저장 후 재조회. 동시성과 fault injection 테스트가 있어야 함
+- **Persistence service:** CAS, 변경·decision·history의 원자 저장과 저장 후 재조회. 실제 동시 요청·실패 시 원자성 검증 결과가 있어야 하며 미관측 실패 경로는 별도로 기록
 - **Evidence resolver:** 출처별 저장, hash, 계보, 권한과 보존. 모든 reference 조회와 변조 거부 테스트가 있어야 함
 - **Conflict reference service:** opaque ref, digest, owner, version, TTL과 1회 사용. 변조·만료·재사용·오래된 version을 거부해야 함
 - **운영 ADR·runbook:** 인증, transaction, 개인정보, 외부 통신, timeout, 장애와 rollback. 비밀값 없이 재현 가능한 절차가 있어야 함
@@ -486,7 +511,7 @@ P0 합의 뒤 BE PR에는 다음이 함께 있어야 한다.
 - [ ] 다른 사용자의 Case read/write가 동일한 비노출 정책으로 거부된다.
 - [ ] 하나의 read point에서 만든 snapshot이 shared schema와 AI adapter를 통과한다.
 - [ ] 적용 canonical procedure step마다 progress가 정확히 1개이며 동시 생성·retry·부분 실패에서도 유지된다.
-- [ ] `RESTORATION_CHECK=COMPLETED` fixture가 같은 미확인을 latest blocker로 반환하지 않는다.
+- [ ] 실제 복구 확인 절차가 완료되고 그 근거가 저장된 Case에 같은 미확인을 latest blocker로 반환하지 않는다. BE의 실제 절차 ID·code를 사용한다.
 - [ ] web title이나 LLM 문자열로 procedure ID/progress row를 만들 수 없다.
 - [ ] support match 조회가 application row를 생성·변경하지 않는다.
 - [ ] 모든 confirmed fact, completed progress와 grounded claim의 Evidence가 resolve된다.
@@ -506,10 +531,10 @@ P0 합의 뒤 BE PR에는 다음이 함께 있어야 한다.
 ## 12. 승인과 변경 절차
 
 1. BE·AI·PM은 §4 P0 각 항목에 결정과 근거를 기록한다.
-2. BE와 AI가 shared DTO version, canonical registry와 contract fixture를 함께 승인한다.
+2. BE와 AI가 shared DTO version, canonical registry와 비식별 실제 입력의 계약 검증 방식을 함께 승인한다.
 3. BE가 OpenAPI, migration, coordinator/persistence 구현과 ADR를 PR로 제출한다.
 4. AI가 shared adapter와 필요한 runtime schema 확장을 별도 PR로 제출한다.
-5. 양측 CI에서 같은 contract fixture와 digest vector를 실행한다.
+5. 양측이 같은 실제 입력·근거의 DTO 변환과 digest 일치를 확인한다. CI에 가져갈 자료·검증 범위는 개인정보 보존 정책과 더미 금지 지시에 맞춰 공동 확정한다.
 6. 개발 Case로 read-only smoke를 먼저 통과한 뒤 쓰기 통합 test를 연다.
 7. §11을 모두 충족한 version만 공동 승인·구현·검증 완료로 기록한다.
 

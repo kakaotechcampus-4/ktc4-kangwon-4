@@ -1,6 +1,6 @@
 # Agent 미정 사항 대장
 
-> 소유: AI · 기준일: 2026-09-20 · 기준 브랜치: `develop`
+> 소유: AI · 기준일: 2026-09-20 · 작업 브랜치: `feature/agent-ssot-runtime-and-conflict-replan`
 >
 > 이 문서의 책임: **무엇이 아직 안 정해졌는지**를 한 곳에 모으는 것.
 > 멘토 리뷰(PR #14, 2026-09-19) 요청 사항입니다.
@@ -17,7 +17,8 @@
 | **누가 정하나** | `AI 단독` / `BE 단독` / `공동` |
 | **결정 전 안전 기본값** | 정해지기 전까지 코드가 취하는 동작. 이게 있으면 미정 상태로도 안전하게 돌아갑니다 |
 
-"미구현"은 미정이 아닙니다. 무엇이 구현됐고 무엇이 안 됐는지는 [`architecture.md`](../architecture.md) §8을 보세요.
+"미구현"은 미정이 아닙니다. 최신 구현·검증 상태는 [implementation-status.md](./implementation-status.md),
+작업 인수인계는 [handoff.md](./handoff.md)를 보세요. 아키텍처 목표와 현재 동작을 구분합니다.
 
 ---
 
@@ -31,34 +32,52 @@
 | 실행당 LLM 호출 상한 | **40회 유지.** 실측하며 조정 | 멘토: "값은 판단하신대로 픽스하고 40회로 테스트해보시길 권고" |
 | 전체 실행 시간 상한 | **60초.** `AGENT_RUN_DEADLINE_SECONDS`로 조정 | 멘토 권고값. 실측은 [`runtime-limits.md`](./runtime-limits.md) |
 | Supervisor 모델 분리 | `SUPERVISOR_*` 환경변수로 분리 가능. 미설정 시 공용 설정 | 멘토: "비싼 모델에서 저렴한 모델로 테스트하는 방향" |
-| Evidence·판단기록 저장 구조 | MVP는 **판단 결과 JSON을 통째로 저장**해도 됨. 구조화는 MVP 이후 | 멘토 재리뷰: "evidence가 포함된 llm 응답을 json 형식으로 저장해두는 것만으로도 evidence 추적이 이미 동작합니다" |
-| 정규식 가드레일 고도화 | **MVP 이후.** 설계·구현 그대로 둠 | 멘토: "설계 및 구현 모두 그대로 두시고 MVP 릴리즈 이후에 필요하다면 고도화" |
+| Evidence·판단기록 저장 기준 | **현행 `schema_table.md`의 기존 테이블을 기준으로 연결** | 멘토는 JSON 보관을 대안으로 허용했지만 저장 구현은 없고 스키마에 JSON 컬럼도 없다. 사용자 최신 지시에 따라 변경이 필요하면 먼저 건의하며 새 컬럼을 임의 추가하지 않음 |
+| 정규식 가드레일 고도화 | **광범위 고도화는 MVP 이후.** 이후 사용자 지시에 따른 실동작 점검에서 재현한 금액 조사 누락만 수정 | 기존 멘토 의견 보존. 후속 수정과 검증 범위는 OD-08 |
 | Guardrail 위치 | **Agent 안.** 저장 직전 version·소유권 확인만 BE | 팀 결정(2026-09-19). `be-integration-requirements.md` §5.5를 이에 맞게 정정함 |
-| enum에 `UNKNOWN` | **넣지 않음.** 미확인은 값이 아니라 상태(`status=UNKNOWN`, `value=null`) | 팀 결정(2026-09-19). Agent는 이미 이 방식. DB 쪽 정리는 [`be-requests.md`](./be-requests.md) 4번 |
+| AI 내부 미확인 표현 | 미확인은 값이 아니라 상태(`status=UNKNOWN`, `value=null`) | 팀 결정(2026-09-19). 2026-09-20 사용자 지시로 물리 스키마는 `schema_table.md` 그대로 유지. DB의 `UNKNOWN` 변환은 OD-04에서 협의 |
+| AI Case 필드·확정 enum 기준 | **`schema_table.md`의 CASE 정의 안으로 제한** | 2026-09-20 사용자 지시 및 BE `feature/case-service`의 AI enum 수정 요청. 임대 형태/복구 범위 정렬, 스키마에 없는 Case 필드 3개 제거. 공유 DTO 전체 승인과는 별개 |
+| 지원금 조회의 남은 구현 방향 | **A7 Wiki exact lookup → A8 Chroma·S3 연결** | 2026-09-20 사용자가 전달한 AI 티켓 원문 및 `SUPPORT_ITEM.uuid` Wiki 매핑 정의. 현재 구현 완료를 뜻하지 않음 |
 | 실행 단위 예산·시간 격리 | contextvar로 실행마다 분리 | 동시 요청에서 카운터가 섞이는 문제. `run_scope.py`, `llm.py` |
 | 모델이 근거 ID를 틀리게 쓰던 문제 | 고를 수 있는 값을 요청 스키마에서 닫아 provider가 그 밖을 생성하지 못하게 함 | 검증으로 걸러내면 생성 한 번과 예산이 이미 날아간 뒤다. 멘토 리뷰 1번의 "응답 전에 후보를 추리는" 방향. 로컬 검증은 그대로 돈다 |
 | Review가 "아직 모른다"는 Blocker에 근거를 요구하던 문제 | `NEEDS_MORE_INFO` 결정의 Blocker는 근거 요구 대상에서 제외 | 모르는 것을 증명하는 근거는 없다. Case의 해당 fact가 `UNKNOWN`인 것이 그 근거다. 금액·날짜·법률·세무·자격 주장이 섞이면 제외하지 않는다 |
+| Case version 데이터 기준 | **현행 스키마의 `case_version`과 NOT NULL 정의를 유지** | 과거 MVP 제외 메모보다 “모든 기준을 schema_table.md에 맞춘다”는 최신 사용자 지시를 우선함. 내부 fixture의 null 허용은 DB 저장 허용이 아님. 버전 공급·증가·저장 경계는 OD-11 |
 | 충돌 확인 후 재계획 | 확인된 값도 Review를 거치는 `CONFLICT_CONFIRMED` 경로로 구현 | 확인을 바로 저장하면 Case 변경이 Review를 건너뛴다. 그 사이 값이 바뀌었으면 덮어쓰지 않고 `STALE_CONFLICT_CONFIRMATION`으로 끝낸다 |
 
 ---
 
 ## 2. 아직 정해지지 않은 것
 
-### OD-01 · 지원금 지식을 어디서 읽는가
+### OD-01 · 지원금 Wiki 검수 형식과 catalog 연결
 
-- **미정인 내용:** 지원사업 자격조건을 **LLM Wiki(Obsidian)**에서 읽는가, 코드가 주입한 **검수 catalog**에서 읽는가
-- **누가 남긴 미정인가:** **문서에만 있음.** 아무도 이 충돌을 안건으로 올린 적이 없습니다
-- **쟁점:** 문서 두 갈래가 **서로 반대**입니다
-  - Wiki 쪽: `../schema/schema_table.md`(SUPPORT_ITEM이 uuid로 Wiki와 매핑, "판정은 LLM+Wiki가 담당"), `backend/CLAUDE.md:55-56`, `../hero-scenario.md:49`
-  - catalog 쪽: `../architecture.md` §3.2, [`official-data-sources.md`](./official-data-sources.md) §8 ("RAG 유사도만으로 `ELIGIBLE`을 만들지 않는다")
-  - 코드에는 `support_agent/wiki/`도 `support_agent/rag/`도 **없습니다.** 실제로는 catalog 방식만 구현돼 있습니다
+- **미정인 내용:** A7의 검수 Wiki 노트 형식·공식 원문 검수 기준과 기존 검수 catalog의 연결 방식
+- **누가 남긴 미정인가:** **문서로 제안됨.** 사용자 티켓과 현행 스키마를 기준으로 AI 구현을 진행했으나 공동 승인 기록은 없음
+- **현재 상태:** Wiki ID·UUID reader와 프로젝트 Vault를 만들었고, 미검수 자료의 Chroma 검색도 확인했다.
+  실제 검수 노트·BE ID/UUID 매핑·S3·운영 RAG 연결은 남아 있다.
+- **쟁점:** `SUPPORT_ITEM.uuid`의 Wiki 연결을 유지하면서 검수·발행·공식 근거·기존 catalog 변환의
+  책임을 확정해야 한다. AI 내부 adapter 구현만으로 운영 정책을 승인한 것은 아니다.
+  기준은 [schema_table.md](../schema/schema_table.md)와 [공식 자료의 검수 원칙](./official-data-sources.md#8-corpuscatalograg-안전-규칙)이다.
 - **MVP:** **필수.** SUPPORT_ITEM 스키마와 검수 절차가 여기서 갈립니다
 - **누가 정하나:** **공동** (AI·BE·PM)
-- **2026-09-20 경과:** 카탈로그 쪽 경로를 구현했다. 기업마당에서 실제 공고 7건을 찾아왔고,
-  사람이 자격조건을 써 넣기 전까지는 서비스되지 않는다([`support-knowledge.md`](./support-knowledge.md)).
-  Wiki·RAG는 여전히 구현 0이다 — `support_agent/wiki/`도 `rag/`도 없고 결과의 `wiki_lookup`은
-  항상 `NOT_REQUESTED`다. **이 결정이 나야 Wiki를 만들지 말지가 정해진다**
-- **결정 전 안전 기본값:** 검수된 카탈로그만 비교에 쓴다. 검수된 항목이 없으면 "후보 없음"으로 끝낸다
+- **최초 조사 당시 이력:** catalog 경로와 실제 수집 공고 7건만 있었고 Wiki·RAG 디렉터리가 없었다.
+  당시의 `wiki_lookup=NOT_REQUESTED` 고정 설명은 이후 A7 구현으로 대체됐다.
+- **2026-09-20 티켓 원문 확인:** 사용자가 A7의 Wiki exact lookup과 A8의 Chroma·S3 연결을
+  AI 작업으로 제시했고 `schema_table.md`도 `SUPPORT_ITEM.uuid`의 Wiki 연결을 정의한다.
+  이에 따라 Wiki를 구현했고 현재 남은 작업은 실제 검수 자료 연결이다. 검수 Wiki 형식·원문 검수 기준과 기존 catalog
+  경계의 공동 합의까지 끝났다고 보지는 않는다. 스키마에 없는 자격 필드를 새 Case 컬럼으로 만들지 않는다.
+- **후속 구현:** AI 내부 선택 adapter는 `<uuid>.md`의 `reborn-support-entry` JSON 블록을
+  기존 `ReviewedSupportEntry`로 읽는다. 자동 노트 생성·검수·자격 규칙 추출은 없고,
+  정확한 ID·UUID 쌍과 공식 근거를 확인한다. 운영 Wiki 형식을 공동 승인한 것은 아니다.
+  실제 검수 노트와 BE ID·UUID 매핑이 없어 HIT 경로는 미검증이다. 상세는
+  [`support-wiki.md`](./support-wiki.md)에 있다. 검수 corpus의 Chroma·S3 운영 연결은 남았다.
+- **프로젝트 Vault 추가:** 사용자 요청에 따라 [`obsidian/`](./obsidian/README.md)에 실제 공고
+  7건의 미검수 노트와 검수 안내를 만들었다. 초안 작성 도구만 공고 ID를 사용하고, 요청 처리 reader는
+  기존 DB ID·UUID 계약을 유지한다. 사람 검수와 DB 매핑을 대신 수행하거나 운영 형식을 공동 승인한 것은 아니다.
+- **A8 후속 구현:** `support_agent/rag/`의 별도 미검수 namespace에서 실제 공고의 Chroma
+  색인·검색·원자료 대조를 확인했다. 운영 요청에는 미연결이며, 검수 corpus·S3 확인·Wiki miss
+  처리의 공동 경계는 그대로 남는다([상세](./support-retrieval.md)).
+- **결정 전 안전 기본값:** 검수된 catalog/Wiki만 비교한다. 비교 대상과 source 누락이 모두 없으면
+  `NO_CANDIDATE`, 요청한 Wiki 자료가 없으면 `PARTIAL/SOURCE_UNAVAILABLE`을 유지한다.
 
 ### OD-02 · 절차 스냅샷을 언제 갱신하는가
 
@@ -78,17 +97,22 @@
 - **누가 정하나:** **공동**
 - **결정 전 안전 기본값:** `runId`는 Agent가 생성. deadline은 Agent 기본 60초이되 `run_planning(deadline_seconds=...)`로 호출자가 덮어쓸 수 있음
 
-### OD-04 · Case 필드 enum 값 집합
+### OD-04 · C1의 DB ↔ AI 미확인 변환과 외부 계약
 
-- **미정인 내용:** `lease_status`, `restoration_scope`의 값 집합이 DB와 Agent에서 다름
-  - `lease_status` — DB `LEASED_PAID|LEASED_FREE|OWNED` / Agent `ACTIVE|TERMINATION_NOTIFIED|TERMINATED|OWNED`
-  - `restoration_scope` — DB `PARTIAL|FULL|NOT_REQUIRED` / Agent `AGREEMENT_REQUIRED|TENANT_ALL|LANDLORD_ALL|SHARED|NOT_REQUIRED`
+- **해결한 AI 부분:** `lease_status=LEASED_PAID|LEASED_FREE|OWNED`,
+  `restoration_scope=PARTIAL|FULL|NOT_REQUIRED`, `restoration_status`의 `NOT_REQUIRED`를
+  현행 스키마에 맞췄다. `entity_type/building_use_type/previous_support_history`는
+  스키마에 없으므로 Case 필드 허용 목록에서 제거했다. 이전 값은 자동 변환하지 않는다.
+- **미정인 내용:** DB `UNKNOWN`을 AI `status=UNKNOWN,value=null`로 읽고 다시 저장하는
+  규칙, 명시적 `CLEAR`와 nullable 필드 처리, FE에 전달할 DTO
 - **누가 남긴 미정인가:** **검토됨** (`be-integration-requirements.md` §4에 명시적으로 올려둠)
-- **쟁점:** 어느 쪽을 공통 기준으로 삼을지. adapter에서 임의로 변환하면 안 됨
+- **쟁점:** 물리 기준은 사용자 지시로 `schema_table.md`다. 내부 미확인 표현 때문에 DB
+  enum·컬럼·NOT NULL 제약을 임의 변경하지 않는다. 실제 adapter 변환과 FE 계약을 협의한다.
 - **MVP:** **필수**
 - **누가 정하나:** **공동**
-- **결정 전 안전 기본값:** 변환하지 않음. 실제 Case 연동 전까지 합성 fixture만 사용
-- 참고: `UNKNOWN`을 값으로 둘지는 **결정됐습니다**(§1). 이 항목은 나머지 값 집합 얘기입니다
+- **결정 전 안전 기본값:** 운영 adapter를 임의 구현하지 않음. 실제 Case export와 BE 연결을 기다리며,
+  사용자 지시 이후에는 합성 fixture·mock 테스트를 실행하지 않음.
+  알려진 값의 부재를 `NOT_REQUIRED`나 false로 바꾸지 않음
 
 ### OD-05 · `CASE_HISTORY.raw_input`에 사용자 발화 원문을 저장하는가
 
@@ -101,9 +125,9 @@
 
 ### OD-06 · `CASE` 예약어
 
-- **미정인 내용:** MySQL 예약어인 테이블명 `CASE`를 `CASES`로 바꿀지, quoting 규칙을 강제할지
+- **미정인 내용:** 현행 테이블명 `CASE`를 유지하면서 ORM·migration의 quoting을 어떻게 검증할지
 - **누가 남긴 미정인가:** **문서에만 있음** (`be-integration-requirements.md` §7-1)
-- **쟁점:** migration 후에 바꾸면 비용이 큼
+- **쟁점:** 이름 변경으로 우회하지 않고 현행 스키마대로 예약어를 처리해야 함. 변경이 필요하면 먼저 건의
 - **MVP:** **필수** (migration 전)
 - **누가 정하나:** **BE 단독**
 - **결정 전 안전 기본값:** Agent는 물리 테이블명을 모름. 내부적으로 `case_id` 의미만 유지
@@ -117,14 +141,17 @@
 - **누가 정하나:** **AI 단독**
 - **결정 전 안전 기본값:** trigger별 고정 경로. 모든 초안은 Review를 반드시 거침
 
-### OD-08 · 정규식 가드레일의 실제 구멍
+### OD-08 · 정규식 가드레일의 남은 범위
 
 - **미정인 내용:** 언제, 어디까지 고도화할지
 - **누가 남긴 미정인가:** **검토됨.** 멘토 리뷰 1번 → MVP 이후
-- **쟁점:** 구체적인 구멍이 하나 확인됐습니다 — **금액 뒤에 조사가 붙으면 탐지하지 못합니다.**
-  `_AMOUNT_PATTERN`이 화폐 단위 뒤에 `\b`를 요구하는데 한국어 조사도 단어 문자라서, `1,200,000원이`·`300만원을`·`30000원입니다`가 전부 빠져나갑니다. 실제 문장은 대부분 이 모양입니다.
-  `backend/tests/agent/test_claim_safety.py::test_known_gap_an_amount_followed_by_a_particle_is_missed`에 현재 동작으로 고정해 뒀습니다
-- **MVP:** **연기 가능** — Review가 2차로 막습니다. 다만 결정적 1차 방어가 금액에서는 사실상 비어 있습니다
+- **해결한 부분:** 2026-09-20 실동작 점검에서 공식 원문의 금액+조사 표현 2건이
+  `\b` 때문에 미탐지되는 것을 재현하고 수정했다. 단어 경계 또는 명시적인 한국어 조사로
+  금액 뒤 경계를 인정한다. 원문 그대로 다시 분류해 `AMOUNT`와 공식 근거 필수를 확인했다.
+  예전 미탐지를 정상으로 고정한 테스트는 실제 원문 발췌의 회귀 기대값으로 교체했고,
+  합성 테스트 suite는 실행하지 않았다. 세부 출처·검증은 `live-verification.md` §7에 있다.
+- **쟁점:** 이 수정이 모든 금액 표기·문장 의미·개인정보 탐지를 해결한 것은 아니다.
+- **MVP:** **광범위 고도화는 연기 가능** — Review의 독립 검증도 계속 필요하다
 - **누가 정하나:** **AI 단독**
 - **결정 전 안전 기본값:** Review Tool의 독립 검증. `guardrails.py`의 민감정보 패턴도 3개뿐(주민번호·Bearer·API key)이라 전화번호·이메일·사업자등록번호·주소는 못 잡습니다
 
@@ -144,6 +171,23 @@
 - **MVP:** **연기 가능** — MVP에 배치 기능이 없습니다
 - **누가 정하나:** **BE 단독**
 - **결정 전 안전 기본값:** 배치 없음. 절차 갱신은 수동 명령
+
+### OD-11 · C5/C6의 저장 계약과 현행 Case 버전
+
+- **미정인 내용:** Case 변경·판단·근거·이력의 transaction 소유자, 안전 실패 시 저장 상태,
+  외부 `REPLAN_FAILED` 응답, conflict 참조의 발급·만료·1회 소비와 필드 재확인
+- **누가 남긴 미정인가:** **문서에만 있음** — 연동 요청서의 제안이며 이번 원본 티켓 C5/C6도 공동 확정을 요구
+- **쟁점:** 과거 MVP에서 `case_version`을 제외한다는 팀 메모와 현행 스키마의
+  `CASE_FIELD_HISTORY.resulting_case_version`, `CONFLICT_REFERENCE.case_version`,
+  `DECISION_RECORD.case_version` NOT NULL 정의가 달랐다. 최신 사용자 지시로 데이터 기준은
+  현행 스키마로 고정한다. AI가 임의 버전이나 null을 저장하지 않고, BE가 실제 버전을 공급·증가·
+  확인하는 방법을 협의한다. BE CaseService의 자체 commit과 전체 결과 저장도 정리해야 한다.
+- **MVP:** **필수** (실제 저장·충돌 확인 연결 시)
+- **누가 정하나:** **공동** (BE·AI, 응답 형태는 FE 검토)
+- **결정 전 안전 기본값:** Agent는 저장 없는 결과 후보만 반환한다. 확인한 필드의 현재 값이
+  달라지면 내부 재계획은 거부하지만, 이 검사만으로 DB에서의 원자적 충돌 보호를 보장하지 않는다.
+- 검토 가능한 실행 순서·확인 항목은 [`implementation-status.md`](./implementation-status.md) §5,
+  상세 후보는 [`be-integration-requirements.md`](./be-integration-requirements.md) §4를 따른다.
 
 ---
 

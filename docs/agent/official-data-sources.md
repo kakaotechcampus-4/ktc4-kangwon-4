@@ -11,11 +11,13 @@
 - 실행법·환경변수·데이터 모드: [standalone 실행 안내](./standalone-runtime.md)
 - 인증·Case·저장 공동 계약: [BE-Agent 연동 요구사항](./be-integration-requirements.md)
 
-> 기준일: 2026-09-19
+> 기준일: 2026-09-20
 
 ## 1. 한눈에 보는 결론
 
-**사용자 요청 경로는 인터넷을 조회하지 않는다.** 미리 받아 팀이 검수한 스냅샷에서만 읽는다(멘토 리뷰 PR #14). 아래 직접 조회는 그 스냅샷을 만드는 **갱신 경로**에서만 돈다. 요청 시점의 지식원은 하나다.
+**사용자 요청 중 절차·지원정책을 인터넷에서 갱신하지 않는다.** 사전 수집 스냅샷의 검수 상태를
+보존하며 미검수 절차는 `UNKNOWN`으로 읽고, 지원사업은 검수 항목만 비교한다.
+아래 직접 조회는 지식 준비·갱신 경로에서 돈다. 판단을 위한 설정된 LLM 호출은 별도다.
 
 요청 경로의 동작은 [`procedure-knowledge.md`](./procedure-knowledge.md)가 단일 출처다. 이 문서는 **그 스냅샷을 어디서 어떻게 확보하는지**를 다룬다.
 
@@ -26,7 +28,9 @@
 - 검색 결과의 제목과 snippet은 근거가 아니다. 공식 allowlist 검증과 원문 fetch까지 성공해야 `EvidenceRecord`가 된다.
 - 받아온 자료는 **사람이 검수하기 전까지 `UNKNOWN`**이며 확정형 판단에 쓰이지 않는다.
 - `BizInfoSupportDiscoveryTool`이 기업마당 공식 API를 bounded 조회해 검수 전 raw 공고 후보와 `OFFICIAL_API` Evidence를 만든다.
-- standalone Graph는 실제 절차 원문을 사용할 수 있지만 Case와 `ReviewedSupportCatalog`는 합성 fixture를 사용한다.
+- standalone CLI는 실제 Case·절차 registry export를 필수로 받고 합성 fixture fallback을 사용하지 않는다.
+- 별도 `rag.cli`는 실제 미검수 공고 노트의 API 필드를 임베딩해 Chroma에 색인·검색하고 원자료와 대조한다.
+  운영 판단에 쓰는 검수 corpus와는 분리돼 있다([상세](./support-retrieval.md)).
 
 현재 불가능한 범위는 다음과 같다.
 
@@ -34,28 +38,31 @@
 - 실제 사업자등록번호·인허가 정보의 Case exact-match 조회
 - 기업마당 raw 공고의 자동 검수와 catalog 발행
 - 전체 공식 사이트를 순회하거나 주기적으로 갱신하는 crawler
-- versioned corpus, vector index, retriever를 이용한 RAG
+- 검수 corpus·S3 원문 확인·Wiki miss를 연결한 운영 RAG
 - 실제 사용자에 대한 지원 자격·선정·수급 확정
 
-따라서 현재 standalone 성공은 **Agent 흐름과 공식 절차 원문 조회 경로가 실행되고, 조회 실패도 성공으로 꾸미지 않고 처리한다**는 뜻이다. 실제 fetch 성공은 `ProcedureLookupResult.documents`가 비어 있지 않은 live smoke에서 별도로 확인해야 한다. 실제 사용자 Case와 실제 지원 자격이 연결됐다는 뜻도 아니다.
+과거 합성 입력의 standalone 성공 기록과 현재 실제 연결 확인을 구분한다. 실제 Case Graph와
+DB 저장은 아직 미검증이다. 공식 API 조회·LLM 호출·미검수 공고 검색의 확인 범위는 각각
+[live-verification.md](./live-verification.md)에 기록하며 지원 자격 연결 성공으로 해석하지 않는다.
 
 ## 2. 실제 데이터와 합성 데이터
 
 ### 현재 standalone Graph가 사용하는 데이터
 
-- `CaseSnapshot`: 실제 사용자 DB Case가 아닌 합성 fixture
-- `ReviewedSupportCatalog`: 실제 공고에서 발행한 catalog가 아닌 합성 fixture
+- `CaseSnapshot`: BE가 비식별·소유권 확인 후 제공해야 하는 실제 export. 현재 자료가 없어 전체 실행 미검증
+- `ReviewedSupportCatalog`: 검수·조건 작성이 끝난 실제 항목만 사용. 현재 수집 공고는 전부 미검수
 - 공식 절차 원문: 갱신 명령이 실제 공식 사이트에서 받아 저장해 둔 문서. 요청 중에는 저장된 것만 읽는다
 - LLM 응답: 설정된 OpenAI-compatible endpoint의 실제 응답
 
 ### 별도 adapter에서만 조회할 수 있는 데이터
 
 - 기업마당 raw 공고 후보: 실제 API 조회가 가능하지만 Graph와 catalog 발행에는 미연결
+- 미검수 공고 index: 실제 API 필드의 Chroma 색인·검색을 확인했으며 Graph에는 미연결
 
 ### 아직 연결되지 않은 데이터
 
 - 사업자 상태·인허가: Case 조회 adapter 없음
-- RAG corpus·index·retriever: 구현 없음
+- 검수 RAG corpus·S3 원문 확인·Graph retriever: 아직 미연결
 - 실제 사용자 Case: 인증·소유권·동의·snapshot adapter 없음
 
 “실제 데이터로 실행했다”는 표현에는 어느 항목이 실제인지 함께 기록해야 한다. 외부 API HTTP 200은 다음을 증명하지 않는다.
@@ -146,7 +153,7 @@ raw 후보는 곧바로 `ReviewedSupportCatalog`가 될 수 없다. “세부사
 
 ### 접근만 확인했고 adapter는 없는 원천
 
-- **국세청 사업자등록 상태 API `15081808`:** 합성 비실사용 번호로 HTTP 200. 실제 사용자 조회가 아니며 adapter는 AI 후속 구현.
+- **국세청 사업자등록 상태 API `15081808`:** 더미 금지 지시 전 합성 비실사용 번호로 HTTP 200을 받은 과거 기록. 금지 이후 재실행하지 않았으며 실제 사용자 조회 성공으로 집계하지 않는다. adapter는 AI 후속 구현.
 - **행안부 휴게음식점 API `15154921`:** 목록 endpoint HTTP 200. 실제 Case exact 조회와 adapter는 AI 후속 구현.
 - **행안부 일반음식점 API `15154916`:** 승인 전파 후 목록 endpoint HTTP 200. 실제 Case exact 조회와 adapter는 AI 후속 구현.
 
@@ -241,6 +248,8 @@ raw 후보는 곧바로 `ReviewedSupportCatalog`가 될 수 없다. “세부사
 
 - 외부 공고 ID, 공식 URL, 원문 수정시각과 hash로 중복을 병합한다. 제목 문자열만으로 병합하지 않는다.
 - 공고 종료, 예산 소진, 지역·업종·업력·매출·고용·중복수혜·제외대상을 구조화한다.
+  이는 검수 자료 정리의 목표다. 현행 Case 허용 필드·조건 모델로 표현할 수 없는 정보는
+  원문과 확인 필요 사항으로 보존하고, 새 Case 필드·typed criterion으로 임의 추가하지 않는다.
 - raw API 후보와 검수 catalog를 같은 타입·테이블·index namespace로 취급하지 않는다.
 - Support Agent는 검수된 catalog를 read-only로 비교하며 RAG 유사도만으로 `ELIGIBLE`을 만들지 않는다.
 
@@ -258,7 +267,8 @@ raw 후보는 곧바로 `ReviewedSupportCatalog`가 될 수 없다. “세부사
 
 - **인증된 Case snapshot 전달과 소유권 확인**
   - 이유: 실제 사용자와 합성 fixture를 구분하고 타인 Case 조회를 차단해야 한다.
-  - 결정 전 경계: fixture 외 실제 Case를 조회하지 않는다.
+  - 결정 전 경계: 소유권·비식별 처리를 마친 실제 export만 Agent 입력으로 받는다.
+    Agent가 직접 DB를 조회하거나 없는 입력을 fixture로 생성하지 않는다.
 - **사업자등록번호·주소 resolver 경계**
   - 이유: NTS·인허가 exact 조회에는 식별정보가 필요하다.
   - 결정 전 경계: 자연어 prompt·검색 query에 식별정보를 넣지 않는다.
@@ -291,9 +301,10 @@ raw 후보는 곧바로 `ReviewedSupportCatalog`가 될 수 없다. “세부사
 
 - **현재 구현·검증:** 공식 절차 원문 제한 조회
 - **구현·검증됐지만 Graph 미연결:** 기업마당 raw 공고 후보 discovery
+- **구현·검증됐지만 Graph 미연결:** 실제 미검수 공고의 Chroma 인덱스·검색·원자료 span/hash 대조
 - **공동 결정과 후속 구현 필요:** 실제 Case·실제 검수 catalog를 사용한 전체 Graph
 - **후속 구현:** 승인된 공식 원문 crawler·parser·versioned corpus
-- **후속 구현:** index·retriever·Evidence·Graph RAG 연결
+- **후속 구현:** 검수 corpus·S3 원문·Evidence·Graph RAG 연결 및 일반 질문 검색 평가
 
 크롤링과 RAG는 폐기한 아이디어가 아니라 AI 구현 목표다. 현재의 세 URL fetch나 단일 기업마당 API 호출을 RAG라고 부르지 않으며, 위 단계와 완료 기준을 충족한 뒤에만 구현 완료로 판단한다.
 
@@ -304,5 +315,6 @@ raw 후보는 곧바로 `ReviewedSupportCatalog`가 될 수 없다. “세부사
 - 기업마당 raw discovery와 정규화: [`backend/app/agent/support_agent/discovery_tool.py`](../../backend/app/agent/support_agent/discovery_tool.py)
 - raw 후보와 검수 catalog를 분리한 계약: [`backend/app/agent/support_agent/discovery_models.py`](../../backend/app/agent/support_agent/discovery_models.py)
 - RAG를 사용하지 않았음을 `rag_used=False`로 출력하는 현재 Support Agent: [`backend/app/agent/support_agent/agent.py`](../../backend/app/agent/support_agent/agent.py)
-- 합성 Case·catalog를 주입하는 standalone 실행: [`backend/app/agent/cli.py`](../../backend/app/agent/cli.py), [`backend/app/agent/fixtures.py`](../../backend/app/agent/fixtures.py)
+- 미검수 공고의 별도 오프라인 색인·검색: [`backend/app/agent/support_agent/rag/`](../../backend/app/agent/support_agent/rag/)
+- 실제 export 입력을 필수로 받는 standalone 실행: [`backend/app/agent/cli.py`](../../backend/app/agent/cli.py)
 - 네트워크·schema drift·민감정보·공식 도메인 실패 조건 테스트: [`backend/tests/agent/test_procedure_tool.py`](../../backend/tests/agent/test_procedure_tool.py), [`backend/tests/agent/test_support_discovery_tool.py`](../../backend/tests/agent/test_support_discovery_tool.py)

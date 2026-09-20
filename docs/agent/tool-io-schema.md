@@ -7,7 +7,10 @@
 
 이 문서는 **각 Agent·Tool의 Python 메서드가 무엇을 받고 무엇을 반환하는지** 설명한다. 여기서 공개 호출은 HTTP API나 Agent끼리의 직접 통신이 아니다. 현재는 프로젝트 내부 실행기 `AgentGraph`가 이전 결과로 다음 호출 입력을 만든다.
 
-실행 가능한 최종 기준은 [`backend/app/agent/schemas.py`](../../backend/app/agent/schemas.py)와 각 구성요소의 Pydantic 모델·validator다. 이 문서는 해당 코드를 사람이 검토할 수 있도록 정리한 설명서다.
+현재 실행 구현은 [`backend/app/agent/schemas.py`](../../backend/app/agent/schemas.py)와 각 구성요소의
+Pydantic 모델·validator에서 확인한다. **데이터 기준은 [`schema_table.md`](../schema/schema_table.md)**이며,
+내부 모델과 물리 스키마의 차이는 변환 계약 또는 수정 건의로 해결한다. 내부 모델의 허용값이나
+optional 필드가 DB 컬럼·enum·nullable 제약을 변경하지 않는다. 이 문서는 현재 코드를 검토하기 위한 설명서다.
 
 BE가 구현하거나 AI와 공동 승인해야 하는 HTTP/shared DTO와 저장 불변식은 [`be-integration-requirements.md`](./be-integration-requirements.md)만 따른다. 전체 호출 구조는 [`architecture.md`](../architecture.md), 실행법·환경변수·데이터 모드는 [`standalone-runtime.md`](./standalone-runtime.md), 외부 공식 데이터/API와 크롤링·RAG 계획은 [`official-data-sources.md`](./official-data-sources.md)를 따른다. 이 문서에는 해당 내용을 중복 정의하지 않는다.
 
@@ -27,21 +30,21 @@ BE가 구현하거나 AI와 공동 승인해야 하는 HTTP/shared DTO와 저장
 
 - **snapshot:** 한 번의 실행이 기준으로 삼는 특정 시점의 Case 읽기 상태
 - **fact:** Case에서 관리하는 구조화된 사실 값
-- **catalog:** 검수됐다고 가정하고 지원금 Agent에 주입하는 지원사업 목록
+- **catalog:** 검수 기록과 조건을 확인해 지원금 Agent에 주입하는 지원사업 목록
 - **Evidence:** 주장·후보가 어떤 입력이나 공식 원문에 근거했는지 추적하는 레코드
 - **provenance:** 어떤 run·호출·snapshot·Evidence에서 결과가 나왔는지 나타내는 출처 연결 정보
 - **digest:** 내용 변경을 검출하기 위해 canonical JSON에 계산한 SHA-256 값
 - **provider:** LLM 또는 외부 검색/API처럼 구성요소가 호출하는 외부 제공자
 - **canonical:** 코드와 팀이 미리 정한 공식 field·ID·값. LLM이나 검색 결과가 새로 만들 수 없음
-- **fixture:** 실제 사용자의 정보가 아닌, standalone 실행과 테스트를 위해 만든 합성 입력
+- **fixture:** 과거 개발·테스트에 사용한 합성 입력. 현재 CLI에서 생성·주입하지 않으며 더미 금지 지시 이후 재실행하지 않음
 
 ## 1. 구현 상태를 구분하는 기준
 
 이 문서의 연결 상태는 **현재 feature 브랜치의 standalone Python 실행 경로**를 기준으로 한다. BE API·DB 연동 완료 또는 최종 Agent 아키텍처 승인을 뜻하지 않는다. 기존 영문 내부 상태 코드는 리뷰 시 의미를 다시 해석해야 하므로 사용하지 않고, 아래 한국어 상태를 직접 적는다.
 
-- **현재 실행 흐름에 연결됨:** 구현·검증됐으며 현재 standalone LangGraph 실행 중 실제 생성·호출·소비된다.
+- **현재 실행 흐름에 연결됨:** 현재 standalone LangGraph의 생성·호출·소비 코드가 연결돼 있다. 실제 Case 검증 여부는 별도다.
 - **일부 입력만 연결됨:** 공개 메서드는 여러 입력 variant를 처리하지만 현재 실행기가 그중 일부만 생성한다.
-- **구현됨 · 실행 흐름 미연결:** 구현과 단위 테스트는 있지만 현재 app/LangGraph 호출 경로가 없다.
+- **구현됨 · 실행 흐름 미연결:** 구현은 있지만 현재 app/LangGraph 호출 경로가 없다. 과거 테스트와 최신 실제 검증을 구분한다.
 - **타입만 정의됨:** Pydantic 타입과 validator는 있지만 정상 실행에서 생성·소비되지 않는다.
 
 따라서 “코드에 타입이 있다”, “독립 단위 테스트가 통과한다”, “standalone 실행에서 호출된다”, “실제 사용자 Case와 연동됐다”는 서로 다른 상태다.
@@ -87,7 +90,9 @@ BE가 구현하거나 AI와 공동 승인해야 하는 HTTP/shared DTO와 저장
 - **정상 반환:** [`SupervisorDraft`](#92-출력-supervisordraft)
   - 핵심 필드: `decision`, 검수 전 `mutations`, `grounded_claims`, 사용한 source call ID
 
-`ReviewedSupportCatalog`는 `SupportAgent.analyze()`의 호출별 입력이 아니라 Agent 생성 시 주입하는 dependency다. 현재 standalone에서는 합성 fixture를 주입한다.
+`ReviewedSupportCatalog`는 `SupportAgent.analyze()`의 호출별 입력이 아니라 Agent 생성 시 주입하는 dependency다.
+현재 CLI는 실제 파일에서 검수된 항목만 로딩하며, 검수 0건을 합성 catalog로 대체하지 않는다.
+선택적 Wiki는 실제 ID·UUID로 검수 자료를 읽는다([support-wiki.md](./support-wiki.md)).
 
 ### 2.2 Tool
 
@@ -118,7 +123,7 @@ BE가 구현하거나 AI와 공동 승인해야 하는 HTTP/shared DTO와 저장
 
 - **공개 호출:** `BizInfoSupportDiscoveryTool.discover()`
 - **역할:** 기업마당 API 응답을 검수 전 raw 공고 후보와 공식 API Evidence로 정규화한다. 지원 자격 판정이나 검수 catalog 발행은 하지 않는다.
-- **현재 호출 위치:** app 호출자 없음. 현재 저장소 호출자는 단위 테스트뿐이며 독립 직접 호출은 가능하다.
+- **현재 호출 위치:** 별도 `support_agent.refresh` 명령과 독립 공식 API 호출. 사용자 Case의 Graph 안에서는 호출하지 않는다.
 - **연결 상태:** 구현됨 · 실행 흐름 미연결
 - **호출 입력:** [`SupportNoticeDiscoveryInput`](#81-입력-supportnoticediscoveryinput)
   - 핵심 필드: `keywords`, 최대 결과 수
@@ -306,20 +311,26 @@ Graph가 각 하위 호출과 Review provenance에 생성한다. 현재 `parent_
 
 ### 4.4 현재 사용: Case fact registry
 
+Case에 저장될 수 있는 필드·확정 enum은 [`schema_table.md`](../schema/schema_table.md)의
+`CASE` 정의를 따른다. 아래는 그중 Agent가 변경 후보로 낼 수 있는 부분집합이다.
+관리용 ID·소유자·완료시각 등을 LLM이 임의로 변경하지 않는다.
+
 | `field_path` | `value_type` | 허용값/제약 |
 |---|---|---|
 | `business_type` | `STRING` | 길이 1 이상 string |
 | `franchise_status` | `BOOLEAN` | strict boolean |
 | `employee_count` | `INTEGER` | strict integer `>= 0`, boolean 금지 |
-| `lease_status` | `ENUM` | `ACTIVE \| TERMINATION_NOTIFIED \| TERMINATED \| OWNED` |
-| `entity_type` | `ENUM` | `SOLE_PROPRIETOR \| CORPORATION` |
-| `building_use_type` | `ENUM` | `NEIGHBORHOOD_LIVING \| OTHER` |
-| `previous_support_history` | `ENUM` | `NONE \| RECEIVED` |
-| `restoration_status` | `ENUM` | `NOT_STARTED \| IN_PROGRESS \| COMPLETED` |
-| `restoration_scope` | `ENUM` | `AGREEMENT_REQUIRED \| TENANT_ALL \| LANDLORD_ALL \| SHARED \| NOT_REQUIRED` |
+| `lease_status` | `ENUM` | `LEASED_PAID \| LEASED_FREE \| OWNED` |
+| `restoration_status` | `ENUM` | `NOT_STARTED \| IN_PROGRESS \| COMPLETED \| NOT_REQUIRED` |
+| `restoration_scope` | `ENUM` | `PARTIAL \| FULL \| NOT_REQUIRED` |
 | `restoration_scope_detail` | `STRING` | 길이 1 이상 string |
 | `demolition_required` | `ENUM` | `REQUIRED \| NOT_REQUIRED` |
 | `planned_closure_date` | `DATE` | 유효한 `YYYY-MM-DD` 또는 date |
+
+`UNKNOWN`은 AI 내부에서 확정 enum 값이 아니라 아래의 미확인 상태다. DB의
+`UNKNOWN`을 읽고 쓰는 변환, nullable·삭제 처리는 C1에서 BE·FE와 확정한다.
+스키마에 없는 `entity_type`, `building_use_type`, `previous_support_history` 및 이전
+해지 진행/비용 부담자 enum은 받지 않는다. 과거 fixture·외부 입력을 새 값으로 자동 변환하지 않는다.
 
 `CaseFact`:
 
@@ -348,6 +359,10 @@ Graph가 각 하위 호출과 Review provenance에 생성한다. 현재 `parent_
 | `procedure_progress` | `ProcedureProgress[]` | 해당 시점의 canonical 절차별 현재 진행 상태 |
 | `evidence_records` | `EvidenceRecord[]` | facts와 progress가 참조하는 snapshot 내부 근거 목록 |
 | `captured_at` | aware runtime datetime | caller가 이 읽기 상태를 조립한 시각 |
+
+`case_version=null`은 내부 standalone 입력에서만 허용되는 상태다. 현행 스키마의 `CASE`와
+판단·충돌·변경이력의 version은 NOT NULL이므로, 이 내부 값으로 저장 가능하다고 간주하거나
+임의의 버전을 만들어 넣지 않는다. 실제 DB 값의 공급·증가·저장 검증은 BE 연결 조건이다.
 
 `ProcedureProgress`는 다음 필드를 갖는다.
 
@@ -740,7 +755,9 @@ Overlay는 아직 저장되지 않은 fact 변경 후보다. 지원금 Agent는 
 
 Graph는 일반 trigger에서 `DiscoverSupportInput`, `SUPPORT_REFRESH`에서 `RefreshSupportInput`만 만든다. 일반 흐름의 `related_steps`는 Info finding 중 relevance가 `RELEVANT | POSSIBLY_RELEVANT`인 step이다. 현재 Tool이 생성하는 Evidence freshness는 `UNKNOWN`이므로 해당 finding은 보통 `UNDETERMINED`이고 관련 step 목록에서 제외될 수 있다. `DISCOVER_RELEVANT`에서 `related_steps=[]`이면 Support Agent는 reviewed catalog 전체 프로그램을 대상으로 선택하고, 값이 있으면 related-step 교집합이 있는 프로그램만 선택한다.
 
-`as_of`는 Graph/schema에 전달되지만 현재 Support Agent의 prompt·freshness 계산에는 사용되지 않는다. `REFRESH_STALE`도 외부 API·crawler·RAG로 catalog를 갱신하는 동작이 아니라 **이미 주입된 같은 catalog에서 지정 program을 다시 평가**하는 경로다.
+`as_of`는 Graph/schema에 전달되지만 현재 Support Agent의 prompt·freshness 계산에는 사용되지 않는다.
+`REFRESH_STALE`은 지정 program을 주입된 catalog 또는 선택적 로컬 Wiki에서 읽어 재평가한다.
+공식 API·crawler·RAG로 자료를 갱신하거나 검수일·최신성을 자동 갱신하는 동작은 아니다.
 
 ### 7.4 출력 `SupportAnalysisResult`
 
@@ -752,7 +769,7 @@ Graph는 일반 trigger에서 `DiscoverSupportInput`, `SUPPORT_REFRESH`에서 `R
 | `support_checks` | `SupportCheck[]` | Agent가 선택된 각 검수 program에 대해 하나씩 생성 | program ID unique; 선택 program 전체와 1:1; criterion·Evidence 일치 |
 | `no_candidate_reason_code` | `UpperSnakeCode \| null` | 후보가 없을 때 runtime이 기계 판독 이유를 제공 | `NO_CANDIDATE`일 때만 non-null |
 | `uncertainties` | `Uncertainty[]` | unknown fact와 stale/unknown source 한계를 Agent가 보존 | `PARTIAL`이면 최소 1개; path/ref schema 검증 |
-| `search_summary` | `SupportSearchSummary` | runtime이 catalog/wiki/RAG/공식 출처 사용 사실을 기록 | 현재 `wiki_lookup=NOT_REQUESTED`, `rag_used=false`; 공식 source 여부는 Evidence로 계산 |
+| `search_summary` | `SupportSearchSummary` | runtime이 catalog/wiki/RAG/공식 출처 사용 사실을 기록 | Wiki 실제 조회에 따라 `HIT/MISS/NOT_REQUESTED`, 운영 `rag_used=false`; 공식 source 여부는 Evidence로 계산 |
 | `evidence_records` | `EvidenceRecord[]` | Agent가 선택 program의 검수 catalog 소유 Evidence와 parent closure를 복사 | catalog 소유 ref는 이 목록에서, Case snapshot·Info overlay ref는 같은 `ReviewSubject`의 snapshot·Info source와 합쳐 해석 |
 | `based_on_snapshot_id` | runtime UUID | Agent가 `planning_context.case_snapshot.snapshot_id`를 복사 | 입력 snapshot과 같아야 함 |
 | `based_on_candidate_ids` | runtime UUID[] unique | 실제 criterion 계산에 사용한 overlay ID만 runtime이 기록 | 입력 overlay의 부분집합, 중복 금지 |
@@ -792,10 +809,14 @@ Graph는 일반 trigger에서 `DiscoverSupportInput`, `SUPPORT_REFRESH`에서 `R
 
 | 필드 | 타입 | 현재 `SupportAgent` producer 값 |
 |---|---|---|
-| `wiki_lookup` | `HIT \| MISS \| NOT_REQUESTED` | `NOT_REQUESTED` |
+| `wiki_lookup` | `HIT \| MISS \| NOT_REQUESTED` | 미설정·조회할 참조 없음이면 `NOT_REQUESTED`, 요청 자료 전부 확인하면 `HIT`, 하나라도 누락되면 `MISS` |
 | `rag_used` | strict boolean | `false` |
 | `official_source_checked` | strict boolean | 출력 Evidence에 공식 source가 있는지 계산 |
 | `checked_at` | aware runtime datetime | runtime clock |
+
+Wiki 자료가 일부 또는 전부 누락되면 `SOURCE_UNAVAILABLE`과 `PARTIAL`을 남긴다.
+`official_source_checked`는 제공된 공식 Evidence를 사용했는지이며 해당 실행의 HTTP 재조회 성공 표시가 아니다.
+별도 미검수 공고 Chroma 검색은 이 결과 producer에 연결하지 않았다.
 
 Completion·판정 불변식:
 
@@ -823,7 +844,10 @@ Completion·판정 불변식:
 
 Provider `SupportCheckModelOutput`은 `support_program`, `match_status`, `criteria`, `unknown_field_paths`, `reason_summary`, `evidence_refs`만 갖는다. nested criterion은 `criterion_code`, `status`, `reason_summary`, `evidence_refs`만 갖는다. program 표시명·신청 정보·case value·required value·freshness·checked time은 모델이 만들지 않는다.
 
-Catalog에서 대상 program이 없으면 LLM을 호출하지 않고 runtime이 `NO_CANDIDATE/NO_REVIEWED_CATALOG_MATCH`를 만든다. 대상이 있으면 provider 출력 검증은 최초 포함 최대 3회다. 근거 밖 ID, criterion 비교와 다른 status, 과신 자격 문구, 민감정보가 있으면 `SupportAnalysisGuardrailError`다.
+비교 대상이 없고 source 누락도 없으면 LLM 호출 없이 `NO_CANDIDATE/NO_REVIEWED_CATALOG_MATCH`를 만든다.
+요청한 Wiki 자료를 확보하지 못한 경우에는 대상이 없어도 `PARTIAL/SOURCE_UNAVAILABLE`을 반환한다.
+대상이 있으면 provider 출력 검증은 최초 포함 최대 3회다. 근거 밖 ID, criterion 비교와 다른 status,
+과신 자격 문구, 민감정보가 있으면 `SupportAnalysisGuardrailError`다.
 
 근거: [`support_agent/agent.py`](../../backend/app/agent/support_agent/agent.py), [`support_agent/models.py`](../../backend/app/agent/support_agent/models.py), [`test_support_agent.py`](../../backend/tests/agent/test_support_agent.py).
 
@@ -1029,9 +1053,13 @@ Variant:
 | `source_call_id` | runtime UUID \| null |
 | `confirmed_conflict_ref` | non-empty string \| null |
 
-현재 실행이 생성하는 분기는 `source_type=INFO_ANALYSIS`, `source_call_id` non-null, `confirmed_conflict_ref=null`뿐이다.
+일반 입력에서는 `source_type=INFO_ANALYSIS`, `source_call_id` non-null,
+`confirmed_conflict_ref=null`인 변경 후보를 만든다.
 
-타입만 정의된 `source_type=CONFIRMED_CONFLICT` 분기는 반대로 `source_call_id=null`, `confirmed_conflict_ref` non-null이어야 한다. 그러나 이를 만드는 trigger와 Graph node가 없으므로 **현재 실행에서 도달할 수 없다**.
+`CONFLICT_CONFIRMED` trigger에서는 `source_type=CONFIRMED_CONFLICT`, `source_call_id=null`,
+`confirmed_conflict_ref` non-null인 후보를 `build_confirmed_conflict_overlay()`로 만든다.
+기존 필드 값이 확인 대상과 일치하는지 검사한 뒤 Supervisor와 Review를 다시 거친다.
+운영용 참조 발급·만료·1회 소비·소유권 검증과 실제 저장은 C6의 BE 연동 범위다.
 
 `ProcedureProgressChangeCandidate`:
 
@@ -1313,7 +1341,9 @@ Conflict ref와 candidate ID는 unique이고 각 conflict의 snapshot/version은
 
 필요한 경계는 [`be-integration-requirements.md`](./be-integration-requirements.md), 아직 정하지 못한 항목은 [`open-decisions.md`](./open-decisions.md), 실행 구조는 [`architecture.md`](../architecture.md), 데이터 수집 계획은 [`official-data-sources.md`](./official-data-sources.md)에서 각각 관리한다.
 
-이 절은 **schema 타입**의 상태만 다룬다. 기능 단위의 미구현 목록은 `architecture.md` §8 한 곳에만 둔다.
+이 절은 **schema 타입**의 상태만 다룬다. 최신 기능·티켓 상태는 [implementation-status.md](./implementation-status.md),
+실제 검증은 [live-verification.md](./live-verification.md)를 본다. AI 내부 지식 준비용 Wiki import와
+오프라인 Chroma 명령의 계약은 [support-wiki.md](./support-wiki.md), [support-retrieval.md](./support-retrieval.md)에 있다.
 
 ## 13. 구현 근거와 변경 동기화 규칙
 
