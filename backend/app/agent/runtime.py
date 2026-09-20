@@ -32,7 +32,11 @@ from app.agent.llm import (
     configuration_error,
     resolve_max_calls_per_run,
 )
-from app.agent.procedure_tool import JsonFileProcedureStore, StoredProcedureLookupTool
+from app.agent.procedure_tool import (
+    JsonFileProcedureStore,
+    ReviewedProcedureStore,
+    StoredProcedureLookupTool,
+)
 from app.agent.review_tool import ReviewTool
 from app.agent.run_scope import RunDeadline, run_deadline_scope
 from app.agent.schemas import (
@@ -42,6 +46,7 @@ from app.agent.schemas import (
 )
 from app.agent.supervisor import SupervisorAgent
 from app.agent.support_agent import ReviewedSupportCatalog, SupportAgent
+from app.agent.support_agent.wiki import SupportWikiStore
 from app.agent.tracing import (
     LangfuseTraceSink,
     ScopedUsageAccumulator,
@@ -193,14 +198,25 @@ async def build_runtime(
     *,
     known_procedure_steps: Sequence[KnownProcedureStep],
     support_catalog: ReviewedSupportCatalog,
+    procedure_store: ReviewedProcedureStore | None = None,
+    support_wiki: SupportWikiStore | None = None,
     limits: RuntimeLimits | None = None,
 ) -> AgentRuntime:
     """Assemble the Agent from environment configuration.
 
     ``known_procedure_steps`` and ``support_catalog`` stay parameters rather
     than being read here: they are the two inputs that must come from reviewed
-    team data, and the caller is what knows whether that data is the standalone
-    fixture or something a backend resolved.
+    team data. The caller supplies actual backend references; this function
+    never generates Case or support identifiers to replace missing data.
+
+    ``procedure_store`` accepts an already loaded snapshot whose ``records()``
+    and ``snapshot_version`` are synchronous in-memory reads. The caller must
+    preload backend data through agreed BE functions; the Agent executes no
+    SQL. Omitting this store retains the environment-configured JSON source.
+
+    ``support_wiki`` optionally resolves exact support ID/UUID pairs from
+    reviewed notes before comparison. Misses remain unavailable; they never
+    silently use catalog rules or an unimplemented RAG fallback.
 
     Async only so a half-built runtime can close the transports it already
     opened; nothing here awaits I/O.
@@ -225,12 +241,19 @@ async def build_runtime(
             usage_sink=scoped_usage.record,
         )
         clients.append(supervisor_client)
-        procedure_tool = StoredProcedureLookupTool(JsonFileProcedureStore.from_env())
+        resolved_store = (
+            JsonFileProcedureStore.from_env()
+            if procedure_store is None
+            else procedure_store
+        )
+        procedure_tool = StoredProcedureLookupTool(resolved_store)
         trace_sink = LangfuseTraceSink.from_env()
         graph = AgentGraph(
             info_agent=InfoAnalysisAgent(client),
             procedure_tool=procedure_tool,
-            support_agent=SupportAgent(client, support_catalog),
+            support_agent=SupportAgent(
+                client, support_catalog, wiki_store=support_wiki
+            ),
             supervisor=SupervisorAgent(supervisor_client),
             review_tool=ReviewTool(client),
             known_procedure_steps=known_procedure_steps,

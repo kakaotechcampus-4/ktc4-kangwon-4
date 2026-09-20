@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 from uuid import UUID
 
 from app.agent.guardrails import GuardrailViolation, ensure_no_sensitive_text
 from app.agent.prompts import support_messages
+from app.agent.run_scope import RunDeadlineExceededError, current_deadline
 from app.agent.schemas import (
     CaseFieldKey,
     CriterionStatus,
@@ -40,12 +43,14 @@ from .models import (
     SupportCriterionDefinition,
     SupportProviderOutput,
 )
+from .wiki import SupportWikiStore
 
 _OVERCONFIDENT_SUPPORT_LANGUAGE = re.compile(
     r"(?i)(?:\beligible\b|지원\s*(?:가능|대상|수령)\s*(?:확정|보장)|"
     r"수령\s*(?:확정|보장)|자격\s*(?:확정|보장))"
 )
 _MAX_LOCAL_GUARDRAIL_RETRIES = 2
+_MAX_WIKI_LOOKUPS = 100
 _CORRECTIVE_MESSAGE = {
     "role": "developer",
     "content": (
@@ -121,12 +126,14 @@ class SupportAgent:
         catalog: ReviewedSupportCatalog | None,
         *,
         clock: Callable[[], datetime] = _utc_now,
+        wiki_store: SupportWikiStore | None = None,
     ) -> None:
         self._llm = llm
         # A deep copy prevents a caller retaining the input model from mutating
         # nested shared EvidenceRecord instances after injection.
         self._catalog = catalog.model_copy(deep=True) if catalog is not None else None
         self._clock = clock
+        self._wiki_store = wiki_store
 
     async def analyze(self, request: SupportAgentInput) -> SupportAnalysisResult:
         catalog = self._catalog
@@ -135,16 +142,26 @@ class SupportAgent:
                 "a reviewed support catalog must be injected before analysis"
             )
 
-        selected = self._select_programs(request, catalog)
+        catalog, wiki_lookup, source_uncertainties = await self._resolve_wiki(
+            request, catalog
+        )
+        selected = (
+            list(catalog.programs)
+            if wiki_lookup != "NOT_REQUESTED"
+            and _text(request.lookup_goal) != "DISCOVER_RELEVANT"
+            else self._select_programs(request, catalog)
+        )
         checked_at = self._checked_at()
         if not selected:
             return SupportAnalysisResult(
-                completion_status="NO_CANDIDATE",
+                completion_status="PARTIAL" if source_uncertainties else "NO_CANDIDATE",
                 support_checks=[],
-                no_candidate_reason_code="NO_REVIEWED_CATALOG_MATCH",
-                uncertainties=[],
+                no_candidate_reason_code=(
+                    None if source_uncertainties else "NO_REVIEWED_CATALOG_MATCH"
+                ),
+                uncertainties=source_uncertainties,
                 search_summary=SupportSearchSummary(
-                    wiki_lookup="NOT_REQUESTED",
+                    wiki_lookup=wiki_lookup,
                     rag_used=False,
                     official_source_checked=False,
                     checked_at=checked_at,
@@ -178,6 +195,8 @@ class SupportAgent:
                     plans=plans,
                     draft=draft,
                     checked_at=checked_at,
+                    wiki_lookup=wiki_lookup,
+                    source_uncertainties=source_uncertainties,
                 )
             except SupportAnalysisGuardrailError:
                 if attempt == _MAX_LOCAL_GUARDRAIL_RETRIES:
@@ -185,6 +204,103 @@ class SupportAgent:
 
         raise SupportAnalysisGuardrailError(
             "support model output failed deterministic validation"
+        )
+
+    async def _resolve_wiki(
+        self,
+        request: SupportAgentInput,
+        catalog: ReviewedSupportCatalog,
+    ) -> tuple[
+        ReviewedSupportCatalog,
+        Literal["HIT", "MISS", "NOT_REQUESTED"],
+        list[Uncertainty],
+    ]:
+        """Resolve exact references before catalog selection can reject a new ID.
+
+        Discovery still needs caller-supplied references; a Wiki directory is
+        never searched by name or similarity. A configured miss never falls
+        back to older catalog rules or pretends a RAG search occurred.
+        """
+
+        if self._wiki_store is None:
+            return catalog, "NOT_REQUESTED", []
+        if _text(request.lookup_goal) == "DISCOVER_RELEVANT":
+            refs = [
+                item.support_program for item in self._select_programs(request, catalog)
+            ]
+        else:
+            refs = list(getattr(request, "support_programs", []))
+        if not refs:
+            return catalog, "NOT_REQUESTED", []
+        if len(refs) > _MAX_WIKI_LOOKUPS:
+            raise SupportAnalysisInputError("support Wiki lookup limit exceeded")
+        if len({ref.support_program_id for ref in refs}) != len(refs) or len(
+            {ref.wiki_uuid for ref in refs}
+        ) != len(refs):
+            raise SupportAnalysisInputError("support Wiki references must be unique")
+
+        programs: list[ReviewedSupportProgram] = []
+        evidence: dict[str, EvidenceRecord] = {}
+        versions: list[str] = []
+        missing: list[Uncertainty] = []
+        for ref in refs:
+            deadline = current_deadline()
+            if deadline is None:
+                resolved = await self._wiki_store.lookup(ref)
+            else:
+                deadline.check()
+                timeout = asyncio.timeout(deadline.remaining_seconds())
+                try:
+                    async with timeout:
+                        resolved = await self._wiki_store.lookup(ref)
+                except TimeoutError:
+                    if timeout.expired():
+                        raise RunDeadlineExceededError() from None
+                    raise
+                deadline.check()
+            if resolved is None:
+                if not missing:
+                    missing.append(
+                        Uncertainty(
+                            code="SOURCE_UNAVAILABLE",
+                            target_path="/search_summary/wiki_lookup",
+                            reason_summary=(
+                                "요청한 지원사업 중 검수된 Wiki 자료와 공식 근거를 "
+                                "확인할 수 없는 항목이 있습니다."
+                            ),
+                            evidence_refs=[],
+                        )
+                    )
+                continue
+            # Revalidate even a custom resolver's model, including closed
+            # Evidence lineage, rather than trusting mutable nested objects.
+            resolved = ReviewedSupportCatalog.model_validate(
+                resolved.model_dump(mode="python")
+            )
+            if len(resolved.programs) != 1 or _program_key(
+                resolved.programs[0].support_program
+            ) != _program_key(ref):
+                raise SupportAnalysisInputError(
+                    "support Wiki result does not match the exact requested reference"
+                )
+            programs.append(resolved.programs[0])
+            versions.append(resolved.catalog_version)
+            for item in resolved.evidence_records:
+                previous = evidence.get(item.evidence_id)
+                if previous is not None and previous != item:
+                    raise SupportAnalysisInputError(
+                        "support Wiki evidence identifiers have conflicting content"
+                    )
+                evidence[item.evidence_id] = item
+        version = hashlib.sha256("\0".join(sorted(versions)).encode()).hexdigest()
+        return (
+            ReviewedSupportCatalog(
+                catalog_version=f"wiki:{version}",
+                programs=tuple(programs),
+                evidence_records=tuple(evidence.values()),
+            ),
+            "MISS" if missing else "HIT",
+            missing,
         )
 
     @staticmethod
@@ -208,6 +324,8 @@ class SupportAgent:
         plans: list[_ProgramPlan],
         draft: SupportAnalysisDraft,
         checked_at: datetime,
+        wiki_lookup: Literal["HIT", "MISS", "NOT_REQUESTED"] = "NOT_REQUESTED",
+        source_uncertainties: list[Uncertainty] | None = None,
     ) -> SupportAnalysisResult:
         self._validate_model_text(draft)
         self._validate_check_coverage(plans, draft)
@@ -249,6 +367,10 @@ class SupportAgent:
         if stale_uncertainties:
             completion_status = SupportCompletionStatus.PARTIAL
             no_candidate_reason = None
+        if source_uncertainties:
+            uncertainties.extend(source_uncertainties)
+            completion_status = SupportCompletionStatus.PARTIAL
+            no_candidate_reason = None
 
         relevant_catalog_evidence = self._output_evidence(
             catalog,
@@ -265,7 +387,7 @@ class SupportAgent:
             no_candidate_reason_code=no_candidate_reason,
             uncertainties=uncertainties,
             search_summary=SupportSearchSummary(
-                wiki_lookup="NOT_REQUESTED",
+                wiki_lookup=wiki_lookup,
                 rag_used=False,
                 official_source_checked=official_checked,
                 checked_at=checked_at,

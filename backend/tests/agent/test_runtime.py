@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import time
+from datetime import date, datetime, timezone
 from typing import Any
+from unittest.mock import AsyncMock, Mock
+from uuid import UUID
 
 import pytest
+from app.agent import runtime as runtime_module
 from app.agent.llm import (
     LLMBudgetExceededError,
     LLMCallBudget,
@@ -14,13 +18,20 @@ from app.agent.llm import (
     current_call_budget,
     resolve_max_calls_per_run,
 )
+from app.agent.procedure_tool import (
+    JsonFileProcedureStore,
+    ProcedureStoreError,
+    ReviewedProcedureRecord,
+)
 from app.agent.run_scope import (
     RunDeadline,
     RunDeadlineExceededError,
     current_deadline,
     run_deadline_scope,
 )
-from app.agent.runtime import RuntimeLimits, resolve_run_deadline_seconds
+from app.agent.runtime import RuntimeLimits, build_runtime, resolve_run_deadline_seconds
+from app.agent.schemas import ProcedureLookupInput, ProcedureLookupResult
+from app.agent.support_agent import ReviewedSupportCatalog
 from app.agent.tracing import (
     ScopedUsageAccumulator,
     UsageAccumulator,
@@ -219,3 +230,154 @@ def test_two_concurrent_runs_keep_their_own_deadline() -> None:
 
     assert seen["short"] < seen["long"]
     assert current_deadline() is None
+
+
+@pytest.fixture
+def runtime_clients(monkeypatch: pytest.MonkeyPatch) -> list[Mock]:
+    clients = [Mock(aclose=AsyncMock()), Mock(aclose=AsyncMock())]
+    monkeypatch.setattr(
+        runtime_module.StructuredLLMClient, "from_env", Mock(side_effect=clients)
+    )
+    monkeypatch.setattr(
+        runtime_module.LangfuseTraceSink, "from_env", Mock(return_value=None)
+    )
+    return clients
+
+
+@pytest.fixture
+def runtime_options() -> dict[str, Any]:
+    return {
+        "known_procedure_steps": [],
+        "support_catalog": ReviewedSupportCatalog(
+            catalog_version="test/1", programs=(), evidence_records=()
+        ),
+        "limits": RuntimeLimits(max_llm_calls_per_run=10, run_deadline_seconds=30),
+    }
+
+
+class PreloadedProcedureStore:
+    snapshot_version = "be-preloaded/test"
+
+    def __init__(self, records: tuple[ReviewedProcedureRecord, ...]) -> None:
+        self._records = records
+
+    def records(self) -> tuple[ReviewedProcedureRecord, ...]:
+        return self._records
+
+    def __bool__(self) -> bool:
+        # Adapter truthiness must never select a different data source.
+        return False
+
+
+@pytest.mark.parametrize(
+    ("reviewed_at", "freshness", "warning"),
+    [
+        (datetime(2026, 9, 19, tzinfo=timezone.utc), "CURRENT", None),
+        (
+            datetime(2026, 1, 1, tzinfo=timezone.utc),
+            "STALE",
+            "STALE_PROCEDURE_REVIEW",
+        ),
+        (None, "UNKNOWN", "UNREVIEWED_PROCEDURE_SOURCE"),
+    ],
+)
+def test_runtime_injected_store_preserves_evidence_and_review_state(
+    monkeypatch: pytest.MonkeyPatch,
+    runtime_clients: list[Mock],
+    runtime_options: dict[str, Any],
+    reviewed_at: datetime | None,
+    freshness: str,
+    warning: str | None,
+) -> None:
+    loader = Mock(side_effect=AssertionError("injected store must bypass JSON"))
+    monkeypatch.setattr(JsonFileProcedureStore, "from_env", loader)
+    record = ReviewedProcedureRecord(
+        record_id="TAX_BUSINESS_CLOSURE",
+        title="폐업 신고 안내",
+        authority_name="국세청",
+        canonical_url="https://www.nts.go.kr/test/closure",
+        source_domain="www.nts.go.kr",
+        excerpt="폐업 신고에 관한 검수 대상 문서",
+        content_hash="sha256:" + "a" * 64,
+        published_at=None,
+        retrieved_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        reviewed_by="test-reviewer" if reviewed_at is not None else None,
+        reviewed_at=reviewed_at,
+        review_valid_days=30,
+        step_codes=["FILE_TAX_BUSINESS_CLOSURE"],
+        required_terms=["폐업"],
+        any_terms=[],
+    )
+    store = PreloadedProcedureStore((record,))
+    request = ProcedureLookupInput(
+        lookup_goal="BUSINESS_CLOSURE",
+        search_queries=["폐업 신고"],
+        as_of=date(2026, 9, 20),
+        locale="ko-KR",
+        source_policy="OFFICIAL_ONLY",
+        max_results_per_query=5,
+        based_on_snapshot_id=UUID("00000000-0000-4000-8000-000000000001"),
+        review_feedback=[],
+    )
+
+    async def run() -> ProcedureLookupResult:
+        runtime = await build_runtime(procedure_store=store, **runtime_options)
+        try:
+            return await runtime._procedure_tool.lookup(request)
+        finally:
+            await runtime.aclose()
+
+    result = asyncio.run(run())
+
+    loader.assert_not_called()
+    document = result.documents[0]
+    evidence = result.evidence_records[0]
+    assert document.evidence_ref == evidence.evidence_id
+    assert document.canonical_url == evidence.source_ref == record.canonical_url
+    assert document.content_hash == evidence.content_hash == record.content_hash
+    assert document.excerpt == evidence.excerpt == record.excerpt
+    assert document.retrieved_at == evidence.retrieved_at == record.retrieved_at
+    assert evidence.source_version == store.snapshot_version
+    assert (
+        document.freshness_status.value == evidence.freshness_status.value == freshness
+    )
+    assert {item.code for item in result.warnings} == ({warning} if warning else set())
+    for client in runtime_clients:
+        client.aclose.assert_awaited_once()
+
+
+def test_runtime_without_injected_store_loads_the_configured_json(
+    monkeypatch: pytest.MonkeyPatch,
+    runtime_clients: list[Mock],
+    runtime_options: dict[str, Any],
+) -> None:
+    store = PreloadedProcedureStore(())
+    loader = Mock(return_value=store)
+    monkeypatch.setattr(JsonFileProcedureStore, "from_env", loader)
+
+    async def run() -> None:
+        runtime = await build_runtime(**runtime_options)
+        try:
+            assert runtime._procedure_tool._store is store
+        finally:
+            await runtime.aclose()
+
+    asyncio.run(run())
+
+    loader.assert_called_once_with()
+
+
+def test_runtime_store_load_failure_closes_clients_and_is_not_hidden(
+    monkeypatch: pytest.MonkeyPatch,
+    runtime_clients: list[Mock],
+    runtime_options: dict[str, Any],
+) -> None:
+    loader = Mock(side_effect=ProcedureStoreError("snapshot unavailable"))
+    monkeypatch.setattr(JsonFileProcedureStore, "from_env", loader)
+
+    with pytest.raises(ProcedureStoreError, match="snapshot unavailable"):
+        asyncio.run(build_runtime(**runtime_options))
+
+    loader.assert_called_once_with()
+    for client in runtime_clients:
+        client.aclose.assert_awaited_once()
