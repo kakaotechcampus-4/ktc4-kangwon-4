@@ -6,20 +6,25 @@
 
 이 문서는 **AI가 공식 데이터를 어떻게 확보하고 검증 가능한 근거로 만들 것인지**를 설명한다.
 
-- Agent·Tool의 정확한 공개 호출 계약: [Agent·Tool 공개 호출 입·출력 계약](./agent-tool-io-schema.md)
-- 호출 구조: [Agent 아키텍처](./architecture.md)
-- 실행법·환경변수·데이터 모드: [standalone 실행 안내](./agent-standalone-runtime-requirements.md)
-- 인증·Case·저장 공동 계약: [BE-Agent 연동 요구사항](./be-agent-integration-requirements.md)
+- Agent·Tool의 정확한 공개 호출 계약: [Agent·Tool 공개 호출 입·출력 계약](./tool-io-schema.md)
+- 호출 구조: [Agent 아키텍처](../architecture.md)
+- 실행법·환경변수·데이터 모드: [standalone 실행 안내](./standalone-runtime.md)
+- 인증·Case·저장 공동 계약: [BE-Agent 연동 요구사항](./be-integration-requirements.md)
+
+> 기준일: 2026-09-19
 
 ## 1. 한눈에 보는 결론
 
-현재 구현은 **제한된 공식 원문 조회와 기업마당 raw 공고 발견**까지다. 범용 crawler나 RAG는 아직 구현되지 않았다.
+**사용자 요청 경로는 인터넷을 조회하지 않는다.** 미리 받아 팀이 검수한 스냅샷에서만 읽는다(멘토 리뷰 PR #14). 아래 직접 조회는 그 스냅샷을 만드는 **갱신 경로**에서만 돈다. 요청 시점의 지식원은 하나다.
 
-현재 가능한 범위는 다음과 같다.
+요청 경로의 동작은 [`procedure-knowledge.md`](./procedure-knowledge.md)가 단일 출처다. 이 문서는 **그 스냅샷을 어디서 어떻게 확보하는지**를 다룬다.
 
-- `ProcedureLookupTool`이 코드 검토된 공식 URL registry를 먼저 확인하고 공식 원문을 직접 가져와 `ProcedureSourceDocument`와 `EvidenceRecord`를 만든다.
+현재 확보 가능한 범위는 다음과 같다.
+
+- `ProcedureLookupTool`이 코드 검토된 공식 URL registry를 먼저 확인하고 공식 원문을 직접 가져와 `ProcedureSourceDocument`와 `EvidenceRecord`를 만든다. **갱신 명령에서만 호출된다.**
 - registry에서 찾지 못하면 설정된 경우 **Kakao → Google** 순서로 공식 URL 후보를 찾는다.
 - 검색 결과의 제목과 snippet은 근거가 아니다. 공식 allowlist 검증과 원문 fetch까지 성공해야 `EvidenceRecord`가 된다.
+- 받아온 자료는 **사람이 검수하기 전까지 `UNKNOWN`**이며 확정형 판단에 쓰이지 않는다.
 - `BizInfoSupportDiscoveryTool`이 기업마당 공식 API를 bounded 조회해 검수 전 raw 공고 후보와 `OFFICIAL_API` Evidence를 만든다.
 - standalone Graph는 실제 절차 원문을 사용할 수 있지만 Case와 `ReviewedSupportCatalog`는 합성 fixture를 사용한다.
 
@@ -40,7 +45,7 @@
 
 - `CaseSnapshot`: 실제 사용자 DB Case가 아닌 합성 fixture
 - `ReviewedSupportCatalog`: 실제 공고에서 발행한 catalog가 아닌 합성 fixture
-- 공식 절차 원문: 요청 시 인터넷에서 직접 가져오는 실제 공식 문서
+- 공식 절차 원문: 갱신 명령이 실제 공식 사이트에서 받아 저장해 둔 문서. 요청 중에는 저장된 것만 읽는다
 - LLM 응답: 설정된 OpenAI-compatible endpoint의 실제 응답
 
 ### 별도 adapter에서만 조회할 수 있는 데이터
@@ -63,7 +68,7 @@
 
 ## 3. 공식 데이터 조회 우선순위
 
-### 현재 Procedure Tool의 실행 순서
+### 갱신 명령의 실행 순서 (요청 경로 아님)
 
 1. 코드 검토된 공식 source registry
 2. registry에서 공식 문서를 찾지 못하면 Kakao Daum 웹문서 검색
@@ -211,72 +216,17 @@ raw 후보는 곧바로 `ReviewedSupportCatalog`가 될 수 없다. “세부사
 - [공공데이터포털 기업마당 `15157820`](https://www.data.go.kr/data/15157820/openapi.do), [정부24 혜택 `15113968`](https://www.data.go.kr/data/15113968/openapi.do), [K-Startup `15125364`](https://www.data.go.kr/data/15125364/openapi.do)
 - [중소벤처24 지원사업정보 API](https://portal.smes.go.kr/home/cs/opndata/UI_USR_L_210/supportBusinessInfoApi)
 
-## 7. 후속 crawler·RAG 구현 순서
+## 7. 후속 crawler·RAG
 
-앞 단계의 완료 기준을 충족하지 못하면 다음 단계에서 운영 데이터로 사용하지 않는다.
+멘토 리뷰에서 crawler·RAG는 **MVP 이후**로 정리됐다. 단계별 완료 기준을 이 문서에 길게
+펼쳐 두면 현재 상태와 섞여 읽히므로, 항목 자체는 [`open-decisions.md`](./open-decisions.md)에
+남기고 여기서는 원칙만 둔다.
 
-### 0단계. 출처 등록과 정책 심사
-
-- 담당: AI + PM/보안/데이터 운영
-- 선행조건: 공식 기관, 이용조건, robots, 공공누리, 수집 목적 확인
-- 산출물: versioned source registry, 허용 경로·주기·보존·삭제 정책
-- 완료 기준: 모든 source가 소유기관·공식 URL·허용 근거·검토일·재검토일을 가지며 미승인 source는 fetch 불가
-
-### 1단계. connector와 bounded crawler
-
-- 담당: AI
-- 선행조건: 0단계 승인, 필요한 API key·rate limit
-- 산출물: 출처별 bounded connector, retry/timeout/size/redirect 정책, raw manifest
-- 완료 기준: allowlist 밖 통신 0건, secret log 0건, rate limit 준수, 부분 실패를 typed result로 기록
-
-### 2단계. parser·정규화·chunking
-
-- 담당: AI
-- 선행조건: raw 원문과 지원 content type 확정
-- 산출물: source별 parser, normalized document, 의미 단위 chunk, parser version
-- 완료 기준: fixture와 실문서 golden test 통과, 표·기한·서류 locator 보존, parser drift 시 fail closed
-
-### 3단계. version·hash·provenance
-
-- 담당: AI
-- 선행조건: canonical URL/외부 ID와 parser 출력
-- 산출물: raw hash, normalized hash, source version, 수집·게시·개정·시행일, parent lineage
-- 완료 기준: 동일 원문 재수집은 동일 digest, 변경 원문은 새 version, 모든 chunk가 원문 locator로 역추적 가능
-
-### 4단계. 검수 corpus와 catalog 발행
-
-- 담당: AI + 데이터 운영/PM
-- 선행조건: 2·3단계 완료, 검수 기준과 권한 확정
-- 산출물: immutable procedure corpus version, immutable `ReviewedSupportCatalog` version, 승인·반려 기록
-- 완료 기준: 미검수 자료는 운영 조회에서 제외, 지원 조건·제외대상·서류 coverage 검수, 발행 version 재현 가능
-
-### 5단계. index 생성
-
-- 담당: AI
-- 선행조건: 승인된 corpus/catalog version
-- 산출물: index manifest, embedding model/version, chunk↔source mapping
-- 완료 기준: 같은 corpus+설정에서 동일 manifest 생성, 삭제·교체 source가 index에서 제거됨, 고아 chunk 0건
-
-### 6단계. retriever
-
-- 담당: AI
-- 선행조건: versioned index, freshness·license metadata
-- 산출물: official-only retriever, metadata filter, top-k/score 정책
-- 완료 기준: 승인 평가셋에서 필수 source Recall@5 ≥ 0.95, Evidence Precision@5 ≥ 0.98, 비공식·금지 source 선택 0건
-
-### 7단계. Evidence와 Agent 연결
-
-- 담당: AI
-- 선행조건: retriever 평가 통과, 현재 Agent schema와 호환
-- 산출물: retriever result→`EvidenceRecord` adapter, Procedure/Info/Support/Graph wiring
-- 완료 기준: 확정형 claim 100%가 source_ref+version+locator+hash로 추적되고 Evidence 없는 mutation은 Review에서 거부
-
-### 8단계. 운영 검증과 갱신
-
-- 담당: AI + 데이터 운영 + BE
-- 선행조건: 저장·스케줄·관측 계약 확정
-- 산출물: 증분 수집 job, stale 경보, rollback, 품질 dashboard
-- 완료 기준: 갱신 SLA 준수, schema/source drift 경보, 이전 catalog/index로 rollback 가능, Case 결과에서 사용 version 감사 가능
+- 앞 단계의 완료 기준을 충족하지 못하면 다음 단계에서 운영 데이터로 사용하지 않는다.
+- 순서는 출처 승인 → connector → parser·정규화 → version·provenance → 검수 발행 → index →
+  retriever → Evidence 연결 → 운영 검증이다.
+- 승인되지 않은 출처는 수집하지 않는다. 공개 URL이 대량 수집·재배포 권한을 자동으로 주지 않는다.
+- 아래 §8의 안전 규칙은 단계와 무관하게 항상 적용된다.
 
 ## 8. corpus·catalog·RAG 안전 규칙
 
@@ -304,7 +254,7 @@ raw 후보는 곧바로 `ReviewedSupportCatalog`가 될 수 없다. “세부사
 
 ## 9. 구현 전에 공동으로 정할 사항
 
-아래 항목은 구현 의지가 없어서 미뤄 둔 것이 아니다. 잘못 결정하면 개인정보 노출, Case 오매칭 또는 무근거 판정이 생기므로 공동 결정이 먼저 필요하다. 상세 질문과 완료 기준은 [BE-Agent 연동 요구사항](./be-agent-integration-requirements.md)을 따른다.
+아래 항목은 구현 의지가 없어서 미뤄 둔 것이 아니다. 잘못 결정하면 개인정보 노출, Case 오매칭 또는 무근거 판정이 생기므로 공동 결정이 먼저 필요하다. 상세 질문과 완료 기준은 [BE-Agent 연동 요구사항](./be-integration-requirements.md)을 따른다.
 
 - **인증된 Case snapshot 전달과 소유권 확인**
   - 이유: 실제 사용자와 합성 fixture를 구분하고 타인 Case 조회를 차단해야 한다.
@@ -349,10 +299,10 @@ raw 후보는 곧바로 `ReviewedSupportCatalog`가 될 수 없다. “세부사
 
 ## 11. 저장소 근거
 
-- 공식 source registry, provider 순서, 원문 fetch와 Evidence 생성: [`backend/app/agent/procedure_tool/tool.py`](../backend/app/agent/procedure_tool/tool.py)
-- 공식 도메인·검색 환경설정과 제한: [`backend/app/agent/procedure_tool/models.py`](../backend/app/agent/procedure_tool/models.py)
-- 기업마당 raw discovery와 정규화: [`backend/app/agent/support_agent/discovery_tool.py`](../backend/app/agent/support_agent/discovery_tool.py)
-- raw 후보와 검수 catalog를 분리한 계약: [`backend/app/agent/support_agent/discovery_models.py`](../backend/app/agent/support_agent/discovery_models.py)
-- RAG를 사용하지 않았음을 `rag_used=False`로 출력하는 현재 Support Agent: [`backend/app/agent/support_agent/agent.py`](../backend/app/agent/support_agent/agent.py)
-- 합성 Case·catalog를 주입하는 standalone 실행: [`backend/app/agent/cli.py`](../backend/app/agent/cli.py), [`backend/app/agent/fixtures.py`](../backend/app/agent/fixtures.py)
-- 네트워크·schema drift·민감정보·공식 도메인 실패 조건 테스트: [`backend/tests/agent/test_procedure_tool.py`](../backend/tests/agent/test_procedure_tool.py), [`backend/tests/agent/test_support_discovery_tool.py`](../backend/tests/agent/test_support_discovery_tool.py)
+- 공식 source registry, provider 순서, 원문 fetch와 Evidence 생성: [`backend/app/agent/procedure_tool/tool.py`](../../backend/app/agent/procedure_tool/tool.py)
+- 공식 도메인·검색 환경설정과 제한: [`backend/app/agent/procedure_tool/models.py`](../../backend/app/agent/procedure_tool/models.py)
+- 기업마당 raw discovery와 정규화: [`backend/app/agent/support_agent/discovery_tool.py`](../../backend/app/agent/support_agent/discovery_tool.py)
+- raw 후보와 검수 catalog를 분리한 계약: [`backend/app/agent/support_agent/discovery_models.py`](../../backend/app/agent/support_agent/discovery_models.py)
+- RAG를 사용하지 않았음을 `rag_used=False`로 출력하는 현재 Support Agent: [`backend/app/agent/support_agent/agent.py`](../../backend/app/agent/support_agent/agent.py)
+- 합성 Case·catalog를 주입하는 standalone 실행: [`backend/app/agent/cli.py`](../../backend/app/agent/cli.py), [`backend/app/agent/fixtures.py`](../../backend/app/agent/fixtures.py)
+- 네트워크·schema drift·민감정보·공식 도메인 실패 조건 테스트: [`backend/tests/agent/test_procedure_tool.py`](../../backend/tests/agent/test_procedure_tool.py), [`backend/tests/agent/test_support_discovery_tool.py`](../../backend/tests/agent/test_support_discovery_tool.py)

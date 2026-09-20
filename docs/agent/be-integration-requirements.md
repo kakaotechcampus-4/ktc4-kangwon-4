@@ -6,13 +6,15 @@
 >
 > Agent 외부 연동에 공동 확정된 DTO, endpoint, persistence mapping: **0개**
 
+> 기준일: 2026-09-19 · 지금 바로 막고 있는 요청만 추린 것은 [`be-requests.md`](./be-requests.md)
+
 ## 먼저 읽어주세요
 
 현재 AI에는 standalone Agent 코어와 AI 내부 schema가 있습니다. 하지만 실제 사용자 Case를 읽고 Agent 결과를 DB에 저장하는 BE 연동은 아직 없습니다.
 
 이 문서는 BE에 전달할 **요청서이자 공동 검토안**입니다. 바로 구현해야 하는 확정 명세가 아닙니다.
 
-`develop`에는 DB 팀의 현재 설계 문서인 [`schema/schema_table.md`](./schema/schema_table.md)와 [`schema/ERD.png`](./schema/ERD.png)가 있습니다. 이 요청서는 해당 설계를 폐기하거나 대신하지 않습니다. DB 설계와 AI 내부 schema 사이의 이름·enum·version 차이를 실제 연동 전에 함께 닫기 위한 문서입니다.
+`develop`에는 DB 팀의 현재 설계 문서인 [`../schema/schema_table.md`](../schema/schema_table.md)와 [`schema/ERD.png`](../schema/ERD.png)가 있습니다. 이 요청서는 해당 설계를 폐기하거나 대신하지 않습니다. DB 설계와 AI 내부 schema 사이의 이름·enum·version 차이를 실제 연동 전에 함께 닫기 위한 문서입니다.
 
 ### BE에게 요청하는 것
 
@@ -25,9 +27,9 @@
 
 - AI의 내부 JSON과 DB 설계 문서를 임의로 조합해 외부 연동 계약을 추정하지 맙니다.
 - 먼저 핵심 결정을 합의한 뒤, BE가 생성한 DTO·OpenAPI·migration을 실제 구현 기준으로 삼습니다.
-- AI 내부 schema의 상세는 [`agent-tool-io-schema.md`](./agent-tool-io-schema.md), AI 실행 구조는 [`architecture.md`](./architecture.md)에서 확인합니다.
-- DB 팀의 현재 설계는 [`schema/schema_table.md`](./schema/schema_table.md)와 [`schema/ERD.png`](./schema/ERD.png)에서 확인합니다.
-- 공식 데이터, 크롤링, RAG 계획은 [`agent-official-data-source-strategy.md`](./agent-official-data-source-strategy.md)에서 확인합니다.
+- AI 내부 schema의 상세는 [`tool-io-schema.md`](./tool-io-schema.md), AI 실행 구조는 [`architecture.md`](../architecture.md)에서 확인합니다.
+- DB 팀의 현재 설계는 [`../schema/schema_table.md`](../schema/schema_table.md)와 [`schema/ERD.png`](../schema/ERD.png)에서 확인합니다.
+- 공식 데이터, 크롤링, RAG 계획은 [`official-data-sources.md`](./official-data-sources.md)에서 확인합니다.
 
 ## 0. 이 문서의 상태
 
@@ -200,9 +202,9 @@ BE는 Agent 하위 구성요소를 개별 HTTP endpoint로 만들 필요가 없�
 ### Case 값과 절차 단계
 
 - **미확인과 삭제 구분:** `UNKNOWN`은 `value=null`, 명시적 삭제는 별도 operation으로 표현하는 안을 제안한다. `null`, 미확인, 해당 없음과 삭제를 어떻게 구분할지 정해야 한다.
-- **공식 field와 enum:** DB 설계와 AI 내부 값이 현재 다르다. 예를 들어 DB의 `lease_status`는 `LEASED_PAID | LEASED_FREE | OWNED`, AI는 `ACTIVE | TERMINATION_NOTIFIED | TERMINATED | OWNED`를 사용한다. DB의 `restoration_scope`는 `UNKNOWN | PARTIAL | FULL | NOT_REQUIRED`, AI는 `AGREEMENT_REQUIRED | TENANT_ALL | LANDLORD_ALL | SHARED | NOT_REQUIRED`를 사용한다. 어느 값을 공통 기준으로 삼을지와 이전 값 mapping을 합의해야 하며, adapter에서 임의 변환하면 안 된다.
+- **공식 field와 enum:** `UNKNOWN`을 enum 값으로 둘지는 **결정됐다 — 두지 않는다**(팀 결정 2026-09-19). 미확인은 값이 아니라 상태이므로 `value=null`과 확인 상태로 표현한다. DB 쪽 정리는 [`be-requests.md`](./be-requests.md) 4번. 나머지 값 집합은 아직 다르다. 예를 들어 DB의 `lease_status`는 `LEASED_PAID | LEASED_FREE | OWNED`, AI는 `ACTIVE | TERMINATION_NOTIFIED | TERMINATED | OWNED`를 사용한다. DB의 `restoration_scope`는 `UNKNOWN | PARTIAL | FULL | NOT_REQUIRED`, AI는 `AGREEMENT_REQUIRED | TENANT_ALL | LANDLORD_ALL | SHARED | NOT_REQUIRED`를 사용한다. 어느 값을 공통 기준으로 삼을지와 이전 값 mapping을 합의해야 하며, adapter에서 임의 변환하면 안 된다.
 - **Case fact 범위:** 지원 판단에 필요한 사업체 형태, 건축물 용도와 과거 지원 이력 등의 포함 범위와 저장 원천을 정해야 한다.
-- **절차 registry:** AI 입력에는 변하지 않는 ID·code뿐 아니라 사용자에게 보여줄 `stepName`, 발화 매칭용 alias와 registry version이 필요하다. 현재 DB의 `PROCEDURE_STEP`에는 `step_code`는 있지만 표시명·alias가 없으므로 컬럼, 별도 registry 또는 resolver 중 제공 방식을 정해야 한다. 소유자, 적용 조건과 변경·폐기 정책도 함께 합의해야 한다.
+- **절차 registry:** AI 입력에는 변하지 않는 ID·code뿐 아니라 사용자에게 보여줄 `stepName`, 발화 매칭용 alias와 registry version이 필요하다. **ERD에는 이미 `step_name`·`utterance_aliases`·`registry_version`이 들어갔다.** 남은 것은 SQLModel 클래스 반영과 데이터 입력이다 — [`be-requests.md`](./be-requests.md) 1·6번. 소유자, 적용 조건과 변경·폐기 정책은 여전히 합의가 필요하다.
 - **진행 상태 초기화:** Case에 적용되는 모든 절차 단계를 한 transaction에서 만들고 개수를 검증하는 방식을 제안한다. 초기화 시점과 registry 변경 시 처리를 정해야 한다.
 
 ### 지원사업과 Evidence
@@ -337,7 +339,11 @@ BE는 Agent 하위 구성요소를 개별 HTTP endpoint로 만들 필요가 없�
 - 전체 `MutationSet`; 일부만 선택해 저장할 수 없음
 - 새 Evidence와 기존 Evidence reference
 
-Output/State Transition Guardrail의 판정은 BE Coordinator가 command를 받기 전과 저장 직전에 수행한다. audit 필드나 별도 proof DTO는 §4 P0에서 구조와 발급·검증 주체를 정하기 전까지 이 command의 확정 필드가 아니다.
+**Guardrail 판정은 Agent 안에서 한다**(팀 결정 2026-09-19). 무엇이 허용되는 변경인지, 근거 없는 단정이 아닌지, 상태 전이가 유효한지는 Agent가 판정해 결과에 담는다.
+
+BE가 저장 직전에 하는 것은 Guardrail이 아니라 **저장 조건 확인**이다 — Case version이 그대로인지, 요청자가 그 Case의 주인인지. 이 둘은 DB의 현재 상태를 봐야 알 수 있어서 Agent가 할 수 없다.
+
+audit 필드나 별도 proof DTO는 §4 P0에서 구조와 발급·검증 주체를 정하기 전까지 이 command의 확정 필드가 아니다.
 
 `PersistResult`는 `APPLIED | NO_CHANGE | VERSION_CONFLICT | REJECTED` tagged union 후보이며, `APPLIED`일 때 새 Case version과 read-back 식별자를 반환한다. 여기의 persistence `NO_CHANGE`는 현재 Agent outcome `NO_CHANGE`가 있다는 뜻이 아니다.
 
@@ -394,7 +400,7 @@ Case route는 항상 BE가 token과 Case owner를 검증한 뒤 snapshot을 조�
 
 ## 7. persistence 논리 요구사항
 
-이 절은 AI 연동에 필요한 **논리 불변식과 현재 DB 설계의 확인 항목**이다. [`schema/schema_table.md`](./schema/schema_table.md)와 `ERD.png`의 테이블·컬럼을 덮어쓰는 물리 설계가 아니다. 실제 migration·ORM이 생기기 전에는 DB 문서와 아래 요구사항의 차이를 함께 확인해야 한다.
+이 절은 AI 연동에 필요한 **논리 불변식과 현재 DB 설계의 확인 항목**이다. [`../schema/schema_table.md`](../schema/schema_table.md)와 `ERD.png`의 테이블·컬럼을 덮어쓰는 물리 설계가 아니다. 실제 migration·ORM이 생기기 전에는 DB 문서와 아래 요구사항의 차이를 함께 확인해야 한다.
 
 1. 현재 DB 설계 문서는 테이블명을 `CASE`로 사용한다. `CASE`는 MySQL keyword이므로 `CASES`로 바꿀지, quoting 규칙을 강제할지 migration 전에 결정해야 한다. AI adapter는 결정된 물리명에 맞추되 내부 `case_id` 의미는 유지한다.
 2. Case의 변경 가능한 상태에는 단조 증가하는 version 또는 동등하게 강한 field-level CAS가 있어야 한다. 저장은 snapshot의 `expectedCaseVersion`과 현재 상태가 일치할 때만 성공한다.
@@ -412,14 +418,15 @@ Case route는 항상 BE가 token과 Case owner를 검증한 뒤 snapshot을 조�
 
 ## 8. 데이터·조회 운영 경계
 
-- 폐업 절차 **내용**은 AI의 ProcedureLookupTool이 공식기관 인터넷 원문에서 조회한다. BE가 절차 본문을 작성하는 master API를 만들 필요는 없다.
-- BE는 절차 내용이 아니라 canonical step identity, Case progress와 Evidence 저장·resolver를 제공한다.
+- 폐업 절차 **내용**은 미리 저장·검수한 자료에서만 읽는다(멘토 리뷰 PR #14). 사용자 요청마다 공식 사이트를 조회하지 않는다. BE가 절차 본문을 **작성**할 필요는 없지만, 검수된 본문과 그 **출처(URL·발췌·해시·수집시각·검수자)를 저장할 자리**는 필요하다 — [`be-requests.md`](./be-requests.md) 2번.
+- BE는 canonical step identity, Case progress, Evidence 저장·resolver와 위 절차 자료의 저장소를 제공한다.
+- AI는 그 자료를 읽어 Case 문맥에서 해석한다. 공식 사이트 직접 조회는 AI의 갱신 명령에서만 수행한다.
 - 검색 provider 결과는 URL 발견 수단일 뿐 Evidence가 아니다. 공식 domain allowlist, HTTPS, redirect·DNS/SSRF, MIME, byte, timeout 제한을 통과해 직접 읽은 원문만 Evidence 후보가 된다.
 - 공식 registry miss에서만 승인된 provider fallback을 쓰고 provider attempt, URL, fetch 결과, hash와 최신성을 trace한다.
 - 기업마당 API 응답은 discovery input이다. 원문 보존·hash → external/canonical ID mapping → 조건·서류 구조화 → 공식 첨부 교차검증 → 담당자 또는 승인된 deterministic rule 검수 → immutable catalog version 발행 뒤에만 Support Agent의 trusted input이 된다.
 - API로 제공되지 않는 자료의 crawling/RAG는 AI 구현 계획에 포함하되 robots/이용조건, 증분수집, chunk lineage, freshness, 삭제와 재색인 기준을 먼저 승인한다. “미구현” 표시는 포기가 아니라 현재 상태이며 milestone과 acceptance를 가진 목표여야 한다.
 
-상세 provider 우선순위, 실제 API 관찰과 crawling/RAG milestone은 `agent-official-data-source-strategy.md`를 따른다.
+상세 provider 우선순위, 실제 API 관찰과 crawling/RAG milestone은 `official-data-sources.md`를 따른다.
 
 ## 9. 보안·PII·trace·비용·재시도
 
@@ -523,10 +530,10 @@ P0 합의 뒤 BE PR에는 다음이 함께 있어야 한다.
 - **지원금 분석과 기업마당 조회의 분리:** `backend/app/agent/support_agent/`과 관련 테스트
 - **Review 무결성:** `backend/app/agent/review_tool/`과 관련 테스트
 - **Agent의 DB 직접 접근 금지:** `backend/CLAUDE.md`
-- **현재 구조와 목표 구조:** [`architecture.md`](./architecture.md)
-- **Agent·Tool의 정확한 공개 호출 계약:** [`agent-tool-io-schema.md`](./agent-tool-io-schema.md)
-- **공식 API 관찰과 crawler·RAG 계획:** [`agent-official-data-source-strategy.md`](./agent-official-data-source-strategy.md)
-- **DB 팀의 현재 설계:** [`schema/schema_table.md`](./schema/schema_table.md), [`schema/ERD.png`](./schema/ERD.png)
+- **현재 구조와 목표 구조:** [`architecture.md`](../architecture.md)
+- **Agent·Tool의 정확한 공개 호출 계약:** [`tool-io-schema.md`](./tool-io-schema.md)
+- **공식 API 관찰과 crawler·RAG 계획:** [`official-data-sources.md`](./official-data-sources.md)
+- **DB 팀의 현재 설계:** [`../schema/schema_table.md`](../schema/schema_table.md), [`schema/ERD.png`](../schema/ERD.png)
 - **남은 연동 차이:** `CASE` 예약어 처리, DB·AI enum mapping, Case version/CAS, Case field 이력, 완료 상태와 Blocker의 정합성
 
 이 문서가 확정하는 것은 **구현 방향이 아니라 검토할 단일 계약안**이다. 승인 전 공동 계약은 0개이며, 실제 BE migration·OpenAPI·통합 test가 생기기 전에는 생산 연동 완료로 보고하지 않는다.

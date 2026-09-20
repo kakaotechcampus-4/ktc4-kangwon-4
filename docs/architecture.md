@@ -2,11 +2,11 @@
 
 > 소유: AI
 >
-> 기준일: 2026-09-15
+> 기준일: 2026-09-19
 >
 > 이 문서의 책임: 현재 Agent 실행 구조, 목표 구조, 구성요소별 책임과 데이터 전달 방향
 
-이 문서는 **누가 무엇을 호출하고 어떤 결과를 다음 단계에 전달하는지** 설명한다. 정확한 필드와 검증 규칙은 [`agent-tool-io-schema.md`](./agent-tool-io-schema.md)를 따른다.
+이 문서는 **누가 무엇을 호출하고 어떤 결과를 다음 단계에 전달하는지** 설명한다. 정확한 필드와 검증 규칙은 [`agent/tool-io-schema.md`](./agent/tool-io-schema.md)를 따른다.
 
 ## 1. 먼저 보는 결론
 
@@ -15,6 +15,8 @@
 - Agent는 Supervisor, 정보분석, 지원금의 3개다.
 - Tool은 절차조회, Review, 기업마당 공고조회의 3개다.
 - 기업마당 공고조회 Tool은 구현과 단위 테스트는 끝났지만 현재 전체 실행 흐름에는 연결되지 않았다.
+- 절차 지식은 미리 저장·검수한 스냅샷에서만 읽는다. 사용자 요청 경로에서 인터넷을 조회하지 않는다.
+- 한 실행은 LLM 호출 횟수와 전체 시간을 모두 넘기면 안전 실패한다. 값과 실측은 [`agent/runtime-limits.md`](./agent/runtime-limits.md)에 둔다.
 - 현재 호출 순서는 Supervisor가 정하지 않는다. `AgentGraph` 코드가 실행 이유와 앞 단계 결과에 따라 제한된 경로를 선택한다.
 - 목표는 Supervisor가 필요한 Agent·Tool을 선택하는 구조지만, 이 동적 계획 기능은 아직 구현되지 않았다.
 - 실제 사용자 Case 조회·저장과 DB 처리는 현재 Agent 실행 범위에 없다.
@@ -64,7 +66,7 @@ Review가 정확히 같은 Case snapshot, 선행 결과와 Supervisor 초안을 
 
 #### `SAFE_FAILURE`
 
-구성요소 오류, 검증 실패, Review 재작업 상한 소진 또는 한 실행의 LLM 호출 총량 상한 소진을 성공처럼 반환하지 않는 안전 실패 결과다. 호출 총량 상한을 넘은 경우는 `LOOP_LIMIT_REACHED`로 끝낸다.
+구성요소 오류, 검증 실패, Review 재작업 상한 소진, 한 실행의 LLM 호출 총량 상한 소진 또는 전체 실행 시간 초과를 성공처럼 반환하지 않는 안전 실패 결과다. 호출 총량을 넘으면 `LOOP_LIMIT_REACHED`, 시간을 넘으면 `RUN_DEADLINE_EXCEEDED`로 끝낸다. 둘은 각각 비용과 지연을 막는 서로 다른 장치이므로 구분해 기록한다.
 
 #### `NEEDS_MORE_INFO`
 
@@ -118,8 +120,10 @@ Review가 정확히 같은 Case snapshot, 선행 결과와 Supervisor 초안을 
 #### 절차조회 Tool
 
 - **받는 내용:** 폐업 절차 조회어, 기준일, 공식 출처만 허용하는 정책
-- **반환하는 내용:** 직접 가져온 공식 원문, 검색 처리 요약, 경고와 공식 문서 Evidence
-- **하지 않는 일:** 원문 의미 분석, 사용자에게 적용되는 절차 판단, 실제 완료 여부 판단
+- **반환하는 내용:** 검수된 스냅샷의 공식 원문, 조회 요약, 경고와 공식 문서 Evidence
+- **하지 않는 일:** 인터넷 조회, 원문 의미 분석, 사용자에게 적용되는 절차 판단, 실제 완료 여부 판단
+- **출처:** 사용자 요청 경로에서는 미리 저장·검수한 스냅샷만 읽는다. 공식 사이트 직접 조회는 별도 갱신 명령에서만 수행한다([`agent/procedure-knowledge.md`](./agent/procedure-knowledge.md))
+- **검수 상태가 최신성을 정한다:** 사람이 검수하지 않은 자료는 `UNKNOWN`으로 나가며 확정형 판단에 쓸 수 없다
 
 #### Review Tool
 
@@ -138,12 +142,12 @@ Review가 정확히 같은 Case snapshot, 선행 결과와 Supervisor 초안을 
 
 ### 4.1 절차조회 결과를 정보분석에 전달
 
-1. 절차조회 Tool이 공식 URL을 찾고 원문을 직접 가져온다.
+1. 절차조회 Tool이 조회어에 해당하는 검수 문서를 스냅샷에서 찾는다.
 2. Tool은 원문과 Evidence가 들어 있는 `ProcedureLookupResult`를 반환한다.
 3. `AgentGraph`가 이 결과와 호출 ID를 `InfoAnalysisInput`에 넣는다.
 4. 정보분석 Agent가 사용자 Case 문맥에서 원문 의미를 분석한다.
 
-검색 결과의 제목과 짧은 설명은 URL을 찾는 데만 사용한다. 공식 원문을 직접 가져오기 전에는 Evidence가 아니다.
+맞는 문서가 없으면 비슷한 것을 내놓지 않고 `NO_RESULTS`로 끝낸다. 조회어와 문서를 맞추는 규칙은 공식 URL registry와 같으므로, 출처를 스냅샷으로 옮겨도 어떤 조회어가 어떤 문서를 찾는지는 바뀌지 않는다.
 
 ### 4.2 지원사업 공고와 지원금 판단을 분리
 
@@ -180,9 +184,9 @@ Review가 정확히 같은 Case snapshot, 선행 결과와 Supervisor 초안을 
 - 지원금 재평가는 지원금 Agent부터 시작한다.
 - Review가 `REVISE`를 반환하면 `AgentGraph`가 권고 대상을 재실행 경로로 바꾼다.
 - Supervisor는 Blocker와 Next Action 초안은 만들지만 호출 계획은 만들지 않는다.
-- 호출별 timeout, LangGraph 반복 제한과 실행당 LLM 호출 횟수 상한은 있지만 전체 실행 시간 제한은 없다. 호출 횟수 상한은 시간이 아니라 횟수만 막는다.
+- 호출별 timeout, LangGraph 반복 제한, 실행당 LLM 호출 횟수 상한과 전체 실행 시간 제한이 모두 있다.
 
-따라서 현재 구현을 목표 아키텍처가 완료된 상태로 설명하지 않는다. 목표 완료에는 Supervisor planning schema, 제한된 router, Review 뒤 재계획, 전체 실행 시간 제한과 회귀 테스트가 모두 필요하다.
+따라서 현재 구현을 목표 아키텍처가 완료된 상태로 설명하지 않는다. 목표 완료에는 Supervisor planning schema, 제한된 router, Review 뒤 재계획과 회귀 테스트가 남아 있다.
 
 ## 6. 재시도와 재작업
 
@@ -201,7 +205,7 @@ LLM이 의미상 잘못된 결과를 내서 다시 생성하는 것과 HTTP 요�
 
 - **Agent LLM 요청:** 기본 재시도 2회, 설정 가능 범위 0~4회, 요청별 기본 timeout 45초. 정보분석·지원금·Review는 공유 client를 쓰고, `SUPERVISOR_*` 환경변수가 설정되면 Supervisor만 다른 provider·model의 전용 client를 쓴다. 두 client 모두 같은 기본값을 쓰며, 재전송도 실행당 호출 총량 상한을 소비한다.
 - **Review provider 요청:** 의미 결과 한 번마다 기본 재시도 1회, 설정 가능 범위 0~2회
-- **절차 검색·원문 조회:** 요청마다 기본 재시도 1회, 설정 가능 범위 0~4회, 요청별 기본 timeout 8초, 전체 조회 기본 timeout 60초
+- **절차조회:** 검수 스냅샷을 메모리에서 읽으므로 외부 요청이 없다. 갱신 명령의 직접 조회만 요청마다 기본 재시도 1회, 요청별 기본 timeout 8초, 전체 조회 기본 timeout 60초를 쓴다
 
 ### 실행당 LLM 호출 총량
 
@@ -209,9 +213,20 @@ LLM이 의미상 잘못된 결과를 내서 다시 생성하는 것과 HTTP 요�
 - 따라서 40회는 그 상한을 보장하는 값이 아니라 **그보다 낮게 잡은 비용 상한**이다. 구성요소별 상한이 남아 있어도 예산이 먼저 끊을 수 있고, 그것이 의도다.
 - 정보분석·지원금·Supervisor·Review가 하나의 counter를 공유한다. Supervisor가 다른 provider·model을 쓰더라도 같은 counter를 쓴다.
 - 의미 결과 재생성과 외부 요청 재전송 모두 실제 HTTP 호출 직전에 1회씩 소비한다.
-- `AgentGraph`가 실행 시작 시 counter를 되돌리므로 상한은 실행 단위다.
+- counter는 **실행이 시작될 때 그 실행 몫으로 새로 만든다.** 한 프로세스가 동시에 두 요청을 처리해도 집계가 섞이지 않는다.
 - 상한을 넘으면 결과를 더 만들지 않고 `LOOP_LIMIT_REACHED` 코드의 `SAFE_FAILURE`로 끝낸다.
-- 횟수 제한이며 시간 제한이 아니다.
+- 횟수 제한이며 시간 제한이 아니다. 시간은 아래 항목이 막는다.
+
+### 전체 실행 시간
+
+- 한 실행의 전체 시간 상한은 기본 60초다. 호출 수 상한이 비용을 막는다면 이것은 사용자가 기다리는 길이를 막는다.
+- 각 구성요소를 시작하기 전에 남은 시간을 확인한다. 전체를 하나의 timeout으로 감싸지 않는 이유는, 그러면 구성요소 중간에서 끊겨 타입이 있는 결과를 잃기 때문이다.
+- 개별 LLM 호출의 timeout도 남은 시간에 맞춰 줄인다. 남은 시간이 없으면 예산을 쓰기 전에 멈춘다.
+- monotonic 시계를 쓰므로 실행 도중 시계가 조정돼도 상한이 늘거나 줄지 않는다.
+- 상한을 넘으면 `RUN_DEADLINE_EXCEEDED` 코드의 `SAFE_FAILURE`로 끝낸다. 예산 소진과 달리 재시도 가능으로 표시한다 — 느린 실행은 다시 하면 들어올 수 있지만 소진된 예산은 다시 해도 또 소진되기 때문이다.
+- 외부 호출자가 자기 deadline을 넘기면 그 값을 쓴다.
+
+정확한 값과 실측 기록은 [`agent/runtime-limits.md`](./agent/runtime-limits.md)가 단일 출처다.
 
 ### Review 재작업
 
@@ -235,7 +250,8 @@ LLM이 의미상 잘못된 결과를 내서 다시 생성하는 것과 HTTP 요�
 - 공식 웹 원문만으로 사용자의 실제 절차 진행을 `COMPLETED`로 바꾸지 않는다.
 - 사용자 입력이나 검색 결과 제목으로 새로운 canonical ID를 만들지 않는다.
 - Review를 통과하지 않은 초안과 변경 후보를 `REVIEWED_PLAN`으로 반환하지 않는다.
-- 한 실행의 LLM 호출 총 횟수가 상한을 넘으면 계속 생성하지 않고 안전 실패로 끝낸다.
+- 한 실행의 LLM 호출 총 횟수나 전체 시간이 상한을 넘으면 계속 생성하지 않고 안전 실패로 끝낸다.
+- 사람이 검수하지 않은 절차 자료는 최신성을 `UNKNOWN`으로 유지해 확정형 판단에 쓰이지 않게 한다.
 - 외부 문서와 사용자 입력을 실행 명령이 아니라 검증이 필요한 데이터로 취급한다.
 
 업무 판단은 Agent와 Review가 담당한다. 반면 ID, schema, digest, 출처 연결, 호출 권한과 반복 상한처럼 코드로 확실히 검사할 수 있는 조건은 코드가 강제한다.
@@ -260,11 +276,15 @@ LLM이 의미상 잘못된 결과를 내서 다시 생성하는 것과 HTTP 요�
 - `AgentGraph`가 `CHECK_SPECIFIC` 입력을 만드는 실행 경로
 - Supervisor 주도 동적 호출 계획과 제한된 router
 - 사용자 확인 후 conflict 재실행
+- 사용자 자연어 입력을 받아 비식별 처리하고 실행 입력으로 조립하는 경로
 - 승인된 공식 출처 crawler와 RAG
-- 전체 실행 시간(wall-clock) 제한 — 실행당 LLM 호출 횟수 상한만 구현했고 시간 기반 제한은 없다
 - Langfuse 비용 금액 산출과 masking 정책 검증
 
-crawler·RAG의 단계와 완료 조건은 [`agent-official-data-source-strategy.md`](./agent-official-data-source-strategy.md)를 따른다.
+**미구현과 미정은 다르다.** 위는 만들지 않은 것이고, 무엇을 만들지 아직 정하지 못한 항목은
+[`agent/open-decisions.md`](./agent/open-decisions.md)에 모아 둔다. 같은 목록을 여러 문서에
+나눠 적지 않는다.
+
+crawler·RAG의 단계와 완료 조건은 [`agent/official-data-sources.md`](./agent/official-data-sources.md)를 따른다.
 
 ## 9. 완료라고 판단하는 기준
 
@@ -281,14 +301,18 @@ HTTP 200, 검색 성공, Agent 실행 성공, 실제 Case 연동 성공은 서�
 
 ### 관련 문서
 
-- **Agent·Tool의 정확한 입력·출력:** [`agent-tool-io-schema.md`](./agent-tool-io-schema.md)
-- **standalone 실행법과 실제·합성 데이터:** [`agent-standalone-runtime-requirements.md`](./agent-standalone-runtime-requirements.md)
-- **공식 API, crawler, RAG:** [`agent-official-data-source-strategy.md`](./agent-official-data-source-strategy.md)
-- **외부 연동 공동 검토 요청:** [`be-agent-integration-requirements.md`](./be-agent-integration-requirements.md)
+- **아직 정해지지 않은 것:** [`agent/open-decisions.md`](./agent/open-decisions.md)
+- **절차 지식 출처와 갱신:** [`agent/procedure-knowledge.md`](./agent/procedure-knowledge.md)
+- **호출 수·시간 한도와 실측:** [`agent/runtime-limits.md`](./agent/runtime-limits.md)
+- **BE에 요청하는 것:** [`agent/be-requests.md`](./agent/be-requests.md)
+- **Agent·Tool의 정확한 입력·출력:** [`agent/tool-io-schema.md`](./agent/tool-io-schema.md)
+- **standalone 실행법과 실제·합성 데이터:** [`agent/standalone-runtime.md`](./agent/standalone-runtime.md)
+- **공식 API, crawler, RAG:** [`agent/official-data-sources.md`](./agent/official-data-sources.md)
+- **외부 연동 공동 검토 요청:** [`agent/be-integration-requirements.md`](./agent/be-integration-requirements.md)
 - **라이브러리 선언과 실제 사용 여부:** [`tech-stack.md`](./tech-stack.md)
 - **DB 팀의 현재 스키마 설계:** [`schema/schema_table.md`](./schema/schema_table.md), [`schema/ERD.png`](./schema/ERD.png)
 
-`interface-spec.md`는 이전 링크를 위한 안내 파일이다. `schema/schema_table.md`와 `ERD.png`는 `develop`에서 관리하는 DB 설계 문서이며, 실제 migration·ORM 구현 완료나 AI 내부 schema와의 필드 mapping 확정을 뜻하지 않는다. AI와 DB 사이의 차이는 외부 연동 공동 검토 요청서에서 합의한다.
+`schema/schema_table.md`와 `ERD.png`는 `develop`에서 관리하는 DB 설계 문서이며, 실제 migration·ORM 구현 완료나 AI 내부 schema와의 필드 mapping 확정을 뜻하지 않는다. AI와 DB 사이의 차이는 외부 연동 공동 검토 요청서에서 합의한다.
 
 ### 구현 근거
 
@@ -296,7 +320,8 @@ HTTP 200, 검색 성공, Agent 실행 성공, 실제 Case 연동 성공은 서�
 - **공통 schema와 결과 타입:** [`schemas.py`](../backend/app/agent/schemas.py)
 - **Agent:** [`info_agent/`](../backend/app/agent/info_agent/), [`support_agent/`](../backend/app/agent/support_agent/), [`supervisor/`](../backend/app/agent/supervisor/)
 - **Tool:** [`procedure_tool/`](../backend/app/agent/procedure_tool/), [`review_tool/`](../backend/app/agent/review_tool/)
-- **standalone fixture와 실행 진입점:** [`fixtures.py`](../backend/app/agent/fixtures.py), [`cli.py`](../backend/app/agent/cli.py)
+- **실행 진입점과 실행 단위 한도:** [`runtime.py`](../backend/app/agent/runtime.py), [`run_scope.py`](../backend/app/agent/run_scope.py)
+- **standalone fixture와 CLI:** [`fixtures.py`](../backend/app/agent/fixtures.py), [`cli.py`](../backend/app/agent/cli.py)
 - **추적 경계:** [`tracing.py`](../backend/app/agent/tracing.py)
 - **테스트:** [`backend/tests/agent/`](../backend/tests/agent/)
 

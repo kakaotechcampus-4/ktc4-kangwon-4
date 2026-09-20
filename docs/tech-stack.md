@@ -1,6 +1,6 @@
 # RE:BORN 기술 스택과 현재 사용 상태
 
-> 기준일: 2026-09-15
+> 기준일: 2026-09-19
 >
 > 이 문서의 책임: 패키지 선언 버전과 현재 코드의 실제 사용 여부
 
@@ -9,10 +9,10 @@
 ## 1. 먼저 보는 결론
 
 - 현재 Agent 실행은 **Pydantic, LangGraph, httpx**를 사용한다.
-- LLM은 LangChain이나 OpenAI SDK가 아니라 `httpx`로 OpenAI-compatible endpoint를 호출한다. endpoint는 하나로 고정돼 있지 않다 — `SUPERVISOR_*` 환경변수를 설정하면 Supervisor만 별도 provider·model을 쓰는 client를 따로 받고, 설정하지 않으면 전 구성요소가 공용 endpoint 하나를 그대로 공유한다(환경변수는 `agent-standalone-runtime-requirements.md`가 단일 출처).
+- LLM은 LangChain이나 OpenAI SDK가 아니라 `httpx`로 OpenAI-compatible endpoint를 호출한다. endpoint는 하나로 고정돼 있지 않다 — `SUPERVISOR_*` 환경변수를 설정하면 Supervisor만 별도 provider·model을 쓰는 client를 따로 받고, 설정하지 않으면 전 구성요소가 공용 endpoint 하나를 그대로 공유한다(환경변수는 `agent/standalone-runtime.md`가 단일 출처).
 - LangChain, OpenAI SDK와 Chroma는 설치 목록에 있지만 현재 Agent 실행에서는 사용하지 않는다. Langfuse는 credential이 설정된 경우에만 metadata 전송에 사용한다.
 - 루트 `docker-compose.yml`은 **MySQL 8.0 DB만** 실행한다. Backend와 Agent container는 없다.
-- FastAPI route, ORM, migration, 인증과 실제 Case 읽기·쓰기는 아직 구현되지 않았다.
+- `develop`에는 BE의 SQLModel 테이블 정의 11개가 있다. FastAPI route, migration, 인증과 실제 Case 읽기·쓰기는 아직 `develop`에 없다.
 - Support Agent는 생성 시 주입된 검수 catalog를 사용한다.
 - 기업마당 raw 공고조회는 구현됐지만 전체 Agent 흐름에 연결되지 않았다.
 - 공식 문서 crawler와 RAG도 아직 구현되지 않았다.
@@ -89,14 +89,16 @@ Agent standalone은 MySQL을 사용하지 않는다. manifest와 lockfile은 설
 
 ### Application·DB 관련 패키지
 
-- **FastAPI `0.141.1`:** 버전은 선언됐지만 `backend/app/main.py`와 route가 없음
-- **Uvicorn `0.52.4`:** 버전은 선언됐지만 실행 가능한 FastAPI app이 없음
-- **SQLAlchemy `2.0.52`:** model과 session 미구현
-- **PyMySQL `1.2.0`:** application DB 연결 미구현
+- **FastAPI `0.141.1`:** `develop`에 `backend/app/main.py`와 route가 없음(다른 브랜치에서 작업 중)
+- **Uvicorn `0.52.4`:** 실행 가능한 FastAPI app이 `develop`에 없음
+- **SQLAlchemy `2.0.52`:** `backend/app/be/models/`에 SQLModel 테이블 정의 11개가 있음. session은 `develop`에 없음
+- **PyMySQL `1.2.0`:** application DB 연결이 `develop`에 없음
 - **Alembic `1.19.2`:** migration 미구현
-- **PyJWT `2.13.0`:** Kakao OAuth와 서비스 JWT route·정책 미구현
+- **PyJWT `2.13.0`:** Kakao OAuth와 서비스 JWT route·정책이 `develop`에 없음
 
-MySQL은 container 설정만 존재한다. DB model, migration, transaction과 통합 테스트가 생겨야 DB 기능이 구현됐다고 판단한다.
+⚠️ **`sqlmodel`이 `backend/requirements.txt`에 없다.** 모든 BE 모델이 import하는데 고정돼 있지 않아, 깨끗한 환경에서 설치하면 `app.be.models`를 import할 수 없다 — [`agent/be-requests.md`](./agent/be-requests.md) 5번.
+
+MySQL은 container 설정만 존재한다. migration, transaction과 통합 테스트가 생겨야 DB 기능이 구현됐다고 판단한다.
 
 ### 후속 AI 기능용 패키지
 
@@ -125,10 +127,10 @@ MySQL은 container 설정만 존재한다. DB model, migration, transaction과 �
 
 ### Agent와 공식 데이터
 
+전체 목록은 [`architecture.md`](./architecture.md) §8, 아직 정하지 못한 항목은 [`agent/open-decisions.md`](./agent/open-decisions.md)에 둔다. 여기서는 패키지와 직접 관련된 것만 적는다.
+
 - **구현됐지만 미연결:** 기업마당 API의 raw 공고 후보를 조회하는 독립 adapter
-- **미구현:** raw 공고 검수 → reviewed catalog 발행 → `AgentGraph` 연결 pipeline
-- **미구현:** 승인된 공식 원문 crawler, parser, versioned corpus, index, retriever와 RAG 연결
-- **미구현:** Supervisor가 필요한 Agent·Tool을 고르는 동적 호출 계획
+- **미구현:** 승인된 공식 원문 crawler, parser, versioned corpus, index, retriever와 RAG 연결(`langchain-chroma`, `chromadb`가 여기에 해당)
 - **미구현:** Langfuse 비용 금액 산출, masking 정책 승인
 
 Support Agent의 현재 입력은 생성 시 주입된 reviewed catalog다. 검수 corpus, versioned index, retriever 평가, Evidence 변환과 Graph 연결이 모두 있어야 RAG가 완료됐다고 판단한다.
@@ -139,11 +141,12 @@ Support Agent의 현재 입력은 생성 시 주입된 reviewed catalog다. 검�
 
 ## 6. 관련 문서
 
+- **Agent 문서 전체:** [`agent/README.md`](./agent/README.md)
 - **Agent 호출 구조:** [`architecture.md`](./architecture.md)
-- **Agent·Tool 공개 호출 입·출력:** [`agent-tool-io-schema.md`](./agent-tool-io-schema.md)
-- **standalone 실행과 검증:** [`agent-standalone-runtime-requirements.md`](./agent-standalone-runtime-requirements.md)
-- **공식 API·crawler·RAG 계획:** [`agent-official-data-source-strategy.md`](./agent-official-data-source-strategy.md)
-- **외부 연동 공동 검토 요청:** [`be-agent-integration-requirements.md`](./be-agent-integration-requirements.md)
+- **Agent·Tool 공개 호출 입·출력:** [`agent/tool-io-schema.md`](./agent/tool-io-schema.md)
+- **standalone 실행과 검증:** [`agent/standalone-runtime.md`](./agent/standalone-runtime.md)
+- **공식 API·crawler·RAG 계획:** [`agent/official-data-sources.md`](./agent/official-data-sources.md)
+- **외부 연동 공동 검토 요청:** [`agent/be-integration-requirements.md`](./agent/be-integration-requirements.md)
 
 ## 7. 버전과 상태의 근거
 
