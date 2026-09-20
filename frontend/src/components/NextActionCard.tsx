@@ -1,3 +1,5 @@
+import { Link, useLocation } from 'react-router'
+
 import type { NextAction } from '../types/view'
 
 interface NextActionCardProps {
@@ -11,6 +13,8 @@ interface NextActionCardProps {
  */
 export function NextActionCard({ nextAction }: NextActionCardProps) {
   const { title, reason, questions } = nextAction
+  // ?mock= 을 이어준다. 예외 화면을 링크만으로 따라갈 수 있어야 리뷰가 된다
+  const { search } = useLocation()
 
   return (
     <section className="rounded-2xl bg-gray-900 p-5 text-white">
@@ -37,15 +41,14 @@ export function NextActionCard({ nextAction }: NextActionCardProps) {
         </div>
       )}
 
-      {/* ③ 결과 입력 화면이 아직 없다. 라우트가 생길 때 연결한다 */}
-      <button
-        type="button"
-        disabled
-        className="mt-4 min-h-13 w-full rounded-xl bg-white text-base font-bold text-gray-900 disabled:cursor-not-allowed disabled:bg-white/40 disabled:text-gray-700"
+      {/* 어떤 할 일의 결과인지 다음 화면이 알아야 한다. 모르면 직전 할 일을 보여주게 된다 */}
+      <Link
+        to={{ pathname: '/results', search }}
+        state={nextAction}
+        className="mt-4 flex min-h-13 w-full items-center justify-center rounded-xl bg-white text-base font-bold text-gray-900"
       >
         결과 알려주기
-      </button>
-      <p className="mt-2 text-center text-sm text-gray-400">다음 단계 화면은 준비 중입니다</p>
+      </Link>
     </section>
   )
 }

@@ -1,182 +1,156 @@
-# RE:BORN 기술 스택 & 프로젝트 구조 (팀 공유용)
+# RE:BORN 기술 스택과 현재 사용 상태
 
-> 2026-09 기준 확정 사항. 실제 운영 문서(에이전트 지침)는 레포의 `/CLAUDE.md`, `/frontend/CLAUDE.md`, `/backend/CLAUDE.md`이고, 이 문서는 그 내용을 팀 공유용으로 요약한 것입니다 — 원문과 어긋나면 항상 CLAUDE.md 쪽이 맞습니다.
+> 기준일: 2026-09-15
+>
+> 이 문서의 책임: 패키지 선언 버전과 현재 코드의 실제 사용 여부
 
-## 1. 프론트엔드
+패키지가 `requirements.txt`나 `package.json`에 있다고 해서 해당 기능이 구현됐거나 운영 중이라는 뜻은 아니다. 이 문서는 **설치 목록**과 **실제 실행 코드**를 구분한다.
 
-| 구분 | 기술 |
-|---|---|
-| 개발 방향 | Mobile-First 반응형 웹앱 |
-| 핵심 프레임워크 | React |
-| 개발 언어 | TypeScript |
-| 빌드/개발 환경 | Vite |
-| 라우팅 | React Router |
-| 스타일링 | Tailwind CSS 4 (필요 시 Kakao·Toss 디자인 시스템 참고) |
-| 서버 통신 | Fetch API |
-| 상태 관리 | React 기본 상태 관리 |
-| 배포 | Vercel |
-| Node.js | 22 LTS |
-| React 버전 | 19 |
-| TypeScript 버전 | 5.x 최신 stable |
-| Vite 버전 | 6 |
+## 1. 먼저 보는 결론
 
-## 2. 백엔드
+- 현재 Agent 실행은 **Pydantic, LangGraph, httpx**를 사용한다.
+- LLM은 LangChain이나 OpenAI SDK가 아니라 `httpx`로 OpenAI-compatible endpoint를 호출한다. endpoint는 하나로 고정돼 있지 않다 — `SUPERVISOR_*` 환경변수를 설정하면 Supervisor만 별도 provider·model을 쓰는 client를 따로 받고, 설정하지 않으면 전 구성요소가 공용 endpoint 하나를 그대로 공유한다(환경변수는 `agent-standalone-runtime-requirements.md`가 단일 출처).
+- LangChain, OpenAI SDK와 Chroma는 설치 목록에 있지만 현재 Agent 실행에서는 사용하지 않는다. Langfuse는 credential이 설정된 경우에만 metadata 전송에 사용한다.
+- 루트 `docker-compose.yml`은 **MySQL 8.0 DB만** 실행한다. Backend와 Agent container는 없다.
+- FastAPI route, ORM, migration, 인증과 실제 Case 읽기·쓰기는 아직 구현되지 않았다.
+- Support Agent는 생성 시 주입된 검수 catalog를 사용한다.
+- 기업마당 raw 공고조회는 구현됐지만 전체 Agent 흐름에 연결되지 않았다.
+- 공식 문서 crawler와 RAG도 아직 구현되지 않았다.
 
-| 구분 | 기술 |
-|---|---|
-| API 서버 | FastAPI |
-| Agent ↔ DB 연동 | 백엔드와 동일 DB를 공유하며, Agent가 DB 접근을 **함수 호출(tool/function-calling)** 형태로 수행 (별도 데이터 레이어 없음) |
-| DB / ORM | **MySQL 8.0 + SQLAlchemy 2.0 + pymysql** (2026-09 BE 확정) + **Alembic**(마이그레이션) |
-| 인증 | **카카오 OAuth + 자체 발급 Access/Refresh JWT**(PyJWT, 2026-09 BE 확정). 비밀번호 해싱 라이브러리 없음(카카오 OAuth만 사용, 자체 비밀번호 인증 없음) |
-| 카카오 API 호출 | httpx (토큰 교환·사용자정보 조회) |
-| 패키지 관리 | **plain pip + `backend/requirements.txt`**(정확 버전 고정, `==`) — BE가 실제 설치·`pip check`·import까지 검증 완료. `uv`/`pyproject.toml`은 쓰지 않음(이전 계획에서 변경) |
-| 배포 | **Docker** — `backend/Dockerfile`(`python:3.12-slim` + `pip install`), 루트 `docker-compose.yml`로 로컬/배포 실행. 호스팅 플랫폼(EC2 등)은 AWS 크레딧 활용 예정이나 구체 서비스는 추가 확인 필요 |
-| 테스트 | `testcontainers[mysql]`로 격리된 MySQL 컨테이너 실행 + pytest. LLM 호출은 `unittest.mock`으로 목 처리. 커버리지 측정 도입 안 함 |
-| 스케줄러 | 미정 (APScheduler 내장 vs 외부 cron) |
-| Python 버전 | 3.12 |
+## 2. 상태를 읽는 기준
 
-Redis는 이 확정 스택에 포함되어 있지 않습니다 — `config.py`/`.env`의 `REDIS_URL`은 현재 실제 사용처가 없는 선점 변수입니다.
+- **현재 코드에서 사용:** 실제 실행 경로가 import하고 호출한다.
+- **구현됐지만 미연결:** 코드와 테스트는 있지만 현재 application이나 `AgentGraph`가 호출하지 않는다.
+- **설정만 존재:** 설정 파일은 있지만 실제 실행·배포 여부는 별도 확인이 필요하다.
+- **버전만 선언:** manifest에 설치 버전만 고정돼 있다.
+- **미구현:** 목표나 dependency는 있지만 기능 코드가 없다.
+- **저장소에 없음:** 확인한 저장소 경로에 필요한 진입점이나 코드가 없다.
+- **미정:** 팀 공동 결정이 필요하다.
 
-## 3. Agent
+상태가 충돌하면 실제 import와 호출 경로, 자동화 테스트, 설정, 이 문서 순서로 판단한다.
 
-| 구분 | 기술 | 비고 |
-|---|---|---|
-| LLM Provider | OpenAI API (mlapi.run 프록시 경유, `OPENAI_API_KEY` 직접 호출 아님 — §6 참고) | |
-| 모델 | **GPT-5.6 Luna**(`openai/gpt-5.6-luna`, 2026-09 확정) | `config.py`의 `OPENAI_MODEL`/`OPENAI_REASONING_EFFORT`로 설정. 구성요소별로 다른 모델을 강제하지 않고 실행 컨텍스트를 분리 |
-| 에이전트 프레임워크 | LangChain | LLM 체인·툴 연동 |
-| 에이전트 오케스트레이션 | LangGraph | 멀티스텝/상태 기반 워크플로우 |
-| 관측성(Observability) | Langfuse | 실제 구현 착수 시점에 연동 예정 (아직 미연동). LLM·Tool 호출 수, token·비용, 지연, 오류와 Review 반송을 관찰 |
-| 지원금(정책) 도메인 지식베이스 | LLM Wiki + Obsidian | Obsidian 볼트에 지식 축적 + LLM Wiki 패턴으로 질의. 검증된 지원사업 항목에 없는 사업명·조건은 생성하지 않음 |
-| 벡터스토어/임베딩 | **Chroma**(2026-09 확정) | 셀프호스팅(임베디드로 시작, 필요 시 컨테이너로 분리) — Pinecone은 데이터 외부 반출로 Langfuse 셀프호스팅 원칙과 배치, Weaviate는 MVP 규모 대비 운영 부담 과함. `langchain-chroma` 통합. 아래 4.4 참고, 상시 사용 아니고 Wiki miss/업데이트 시점에만 사용 |
-| Agent 구성 | Supervisor + 정보분석·지원금 Agent-as-Tool + 절차조회 Tool + 필수 Review Tool | 아래 4.3 참고 |
+## 3. 현재 코드에서 사용하는 기술
 
-정확한 버전은 §6(단일 출처)을 참고하세요 — Agent 5개 패키지는 BE가 자신들의 8개 패키지와 함께 설치해 충돌 없음을 확인했고, AI팀이 독립적으로 얻은 버전과 정확히 일치합니다.
+### Agent 실행
 
-## 4. 프로젝트 문서/디렉토리 구조
+#### Pydantic `2.13.5`
 
-### 4.1 CLAUDE.md 2단 구조
+- **상태:** 현재 코드에서 사용
+- **용도:** Agent·Tool의 strict schema와 validator
 
-- **루트 `/CLAUDE.md`**: FE/BE/Agent 공통 원칙 (서비스 정의, Hero Loop, 하지 않는 것, 역할 경계, 개인정보, 용어, 참조 문서, 레포 운영, 문서 소유권)
-- **파트별 `CLAUDE.md`**: 각 파트에서만 필요한 구현 규칙 (`frontend/CLAUDE.md`, `backend/CLAUDE.md`)
-- CLAUDE.md에는 변하지 않는 원칙만 두고, 반복되는 디렉터리·작업 지침은 Skill로 분리합니다. 정확한 Skill 구조는 구현할 작업이 생길 때 추가합니다.
+#### LangGraph `1.2.11`
 
-### 4.2 목표 디렉토리 구조 (아직 미구현)
+- **상태:** 현재 코드에서 사용
+- **용도:** 현재 코드로 정한 실행 경로와 Review 재작업 수행
 
-```
-ktc4-kangwon-4/
-├─ CLAUDE.md
-├─ README.md
-├─ .gitignore
-├─ .github/
-├─ docker-compose.yml       # 로컬/배포 공용 — db(MySQL) + app(backend+agent)
-│
-├─ docs/
-│  ├─ hero-scenario.md      # 사용자 시나리오 / Hero Loop 상세
-│  ├─ interface-spec.md     # FE/BE API 인터페이스 정의
-│  ├─ schema/
-│  │  └─ schema_table.md    # 물리 DB 테이블 정의
-│  ├─ architecture.md       # 전체 시스템 아키텍처
-│  └─ tech-stack.md         # 이 문서
-│
-├─ frontend/
-│  ├─ CLAUDE.md
-│  └─ src/
-│
-└─ backend/
-   ├─ CLAUDE.md
-   ├─ Dockerfile
-   ├─ requirements.txt      # 정확 버전 고정 (BE+Agent 전체)
-   ├─ requirements-dev.txt  # pytest, testcontainers
-   └─ app/
-      ├─ main.py            # FastAPI 진입점
-      ├─ config.py          # 설정/환경변수
-      │
-      ├─ shared/            # BE와 Agent가 공동으로 쓰는 영역
-      │  ├─ db.py           # DB 세션/커넥션 (SQLAlchemy + pymysql, MySQL 접속)
-      │  ├─ models/         # Case, SupportItem 등 도메인 모델(테이블 정의)
-      │  ├─ schemas/        # BE API·DB 경계 스키마. Agent 내부 schema는 AI가 소유
-      │  └─ functions/      # DB 접근 함수 본체 — Agent가 "함수 호출"로 쓰는 바로 그 함수,
-      │                     # api/ 라우터도 동일 함수를 재사용 (구현이 두 곳에 따로 없음). 최소 함수 목록은 backend/CLAUDE.md 참고
-      │
-      ├─ api/               # BE 전용 — API 라우터 (shared/functions 호출)
-      │
-      ├─ agent/             # Agent 런타임 — 상세 경계는 architecture.md
-      │  ├─ graph.py        # Supervisor Global Loop + 필수 Review 경로
-      │  ├─ state.py        # 공유 실행 상태. 정확한 schema는 AI 확정 대기
-      │  │
-      │  ├─ supervisor/     # 호출 선택·결과 평가·Blocker/Next Action·종료 판단
-      │  │  └─ prompts/
-      │  │
-      │  ├─ info_agent/     # 정보분석 Agent-as-Tool — bounded Local Loop
-      │  │  ├─ tools/       # shared/functions를 LangChain 툴로 감싼 어댑터
-      │  │  └─ prompts/
-      │  │
-      │  ├─ support_agent/  # 지원금 Agent-as-Tool — bounded Local Loop
-      │  │  ├─ wiki/        # LLM Wiki(Obsidian) 조회 — Wiki 우선 경로 (§4.4)
-      │  │  ├─ rag/         # Wiki miss·업데이트 시 RAG (§4.4)
-      │  │  ├─ tools/
-      │  │  └─ prompts/
-      │  │
-      │  ├─ procedure_tool/ # 절차조회 일반 Tool
-      │  ├─ review_tool/    # 필수 Review 일반 Tool
-      │  ├─ llm.py          # OpenAI 클라이언트 초기화
-      │  └─ tracing.py      # Langfuse 호출 수·token·비용·지연 관측
-```
+#### httpx `0.28.1`
 
-- **`shared/`가 필요한 이유**: DB 함수가 API와 Agent 쪽에 중복되면 구현이 어긋날 수 있습니다. `shared/functions/`에 BE 구현을 하나만 두고 API 라우터와 각 Agent/Tool adapter가 재사용합니다.
-- 독립 Rule 엔진 디렉터리는 두지 않습니다. Input / State Transition / Output Guardrail의 정확한 코드 위치는 구현 착수 시 정하되, Agent가 우회할 수 없는 경로에 둡니다.
+- **상태:** 현재 코드에서 사용
+- **용도:** LLM, 공식 절차 원문과 기업마당 API 호출
 
-### 4.3 Agent 내부 구조
+#### python-dotenv `1.2.3`
 
-Supervisor가 전역 호출·재호출·종료를 판단합니다. 정보분석·지원금 구성요소는 내부 bounded Local Loop를 가진 Agent-as-Tool이고, 절차조회·Review는 자체 루프가 없는 일반 Tool입니다. Review는 선택할 수 없는 필수 경로입니다. 상세 정의와 다이어그램은 **`docs/architecture.md`**를 참고하세요.
+- **상태:** 현재 코드에서 사용
+- **용도:** Agent 환경변수 파일 로드
 
-### 4.4 지원금 지식 흐름 (LLM Wiki + RAG)
+#### `TraceSink`
 
-지원금 조회는 기본적으로 **Wiki 우선**이고, LLM/RAG는 Wiki miss·정보 업데이트 시에만 개입합니다. 상세 흐름도와 저장소 구조는 **`docs/architecture.md` §6**을 참고하세요(여기서 재서술하지 않음). 검증된 지원사업 항목에 없는 사업명·조건은 생성하지 않습니다(`/CLAUDE.md` 역할 경계 원칙).
+- **상태:** 추적 인터페이스 + credential이 있을 때 Langfuse 전송 사용
+- **용도:** 실행·호출 metadata를 받을 수 있는 경계
+- **현재:** credential이 없으면 아무 곳에도 보내지 않는 `NullTraceSink`, 있으면 `LangfuseTraceSink`가 구성요소별 상태·지연 시간·시도 횟수·model·token 수를 전송한다. prompt 원문과 evidence는 보내지 않는다.
+- **제한:** token 수는 보내지만 비용 금액은 계산하지 않는다. 실행당 LLM 호출 횟수 상한(`llm.py`의 `LLMCallBudget`, 기본 40회)은 호출 수를 세어 막는 장치이지 비용 측정이 아니다.
 
-### 4.5 문서 소유권
+현재 구조를 “LangChain과 LangGraph를 함께 사용한다”고 설명하면 부정확하다. 실행 순서 관리는 LangGraph, LLM HTTP 통신은 `httpx`가 담당한다.
 
-문서 소유권은 `/CLAUDE.md` "문서 소유권" 표가 canonical입니다(여기서 복제하지 않음).
+### Frontend
 
-## 5. 핵심 제품 원칙
+- **React / React DOM `^19.2.8`:** entrypoint와 component에서 사용
+- **React Router `^7.18.3`:** route 구성과 화면 이동에 사용
+- **TypeScript `~6.0.2`:** TS/TSX source와 build에 사용
+- **Vite `^8.2.2`:** script와 설정이 존재
+- **Tailwind CSS `^4.3.3`:** CSS import와 Vite plugin 설정에 사용
+- **Vercel:** `frontend/vercel.json` 설정이 존재하며 실제 배포 상태는 별도 확인 대상
 
-전체 원칙(서비스 정의, Hero Loop, 하지 않는 것, 역할 경계)은 `/CLAUDE.md`가 canonical입니다 — 이 문서는 기술 스택 요약이므로 제품 원칙을 복제하지 않습니다.
+### 로컬 실행 환경
 
-## 6. 확정 버전 전체 (백엔드+Agent, 단일 출처)
+- **Python `3.12`:** `backend/.python-version`과 Dockerfile 기준
+- **MySQL `8.0`:** 루트 Compose가 DB service만 실행
 
-> 2026-09, `BE기술스택.html`(BE 실 테스트) + `backend/`에서 AI팀이 독립 실행한 `uv sync` 결과 교차검증. 모든 문서(이 문서, `backend/CLAUDE.md`)는 버전을 여기 한 곳에서만 관리합니다 — 다른 곳에 숫자를 다시 적지 마세요.
+Agent standalone은 MySQL을 사용하지 않는다. manifest와 lockfile은 설치 요청 상태를 보여주며 실제 빌드·배포 성공은 별도 검증이 필요하다.
 
-| 패키지 | 버전 | 역할 | 비교 검토한 대안 |
-|---|---|---|---|
-| fastapi | 0.141.1 | 웹 프레임워크 본체 | Django, Flask (이미 확정) |
-| uvicorn[standard] | 0.52.4 | ASGI 서버 | hypercorn, daphne |
-| pydantic | 2.13.5 | 요청/응답 검증 (FastAPI 필수 의존성) | — |
-| sqlalchemy | 2.0.52 | ORM | SQLModel, Tortoise ORM |
-| pymysql | 1.2.0 | MySQL 통신 드라이버 | mysqlclient, asyncmy/aiomysql |
-| alembic | 1.19.2 | DB 스키마 마이그레이션 이력 관리 | 수동 SQL 관리 (비권장) |
-| pyjwt | 2.13.0 | 자체 Access/Refresh JWT 발급·검증 | python-jose, authlib |
-| httpx | 0.28.1 | 카카오 API 호출 클라이언트 | requests, aiohttp |
-| pydantic-settings | 2.15.0 | 설정 로더 | — |
-| python-dotenv | 1.2.3 | `.env` 로드 | — |
-| langchain | 1.4.0 | LLM 체인·툴 연동 | — |
-| langchain-openai | 1.6.0 | LangChain-OpenAI 연동 | — |
-| langgraph | 1.2.11 | 멀티스텝/상태 기반 워크플로우 | — |
-| langfuse | 4.15.1 | 관측성 | LangSmith(서드파티 SaaS라 배제) |
-| openai | 3.8.0 | LLM Provider SDK | — |
-| langchain-chroma | 1.1.0 | Chroma-LangChain 통합 | — |
-| chromadb | 1.5.9 | 벡터스토어(RAG, Wiki miss 폴백 전용) | Pinecone(SaaS·데이터 외부반출), Weaviate(운영부담) |
+## 4. 버전은 선언됐지만 현재 Agent 실행에서 사용하지 않는 기술
 
-Python 3.12(`backend/.python-version`), `backend/Dockerfile` 베이스 이미지도 `python:3.12-slim`. 온보딩: `pip install -r backend/requirements.txt`.
+### Agent 관련 패키지
 
----
+- **langchain `1.4.0`:** 버전만 선언. Agent runtime import 없음
+- **langchain-openai `1.6.0`:** 버전만 선언. Agent runtime import 없음
+- **openai `3.8.0`:** 버전만 선언. Agent runtime import 없음
+- **pydantic-settings `2.15.0`:** 루트 `config.py`에서는 사용하지만 현재 Agent runtime은 import하지 않음
 
-## 출처
+### Application·DB 관련 패키지
 
-| 섹션 | 원본 |
-|---|---|
-| §1 프론트엔드 | `IDEATHON/docs/tech-stack.md` 그대로 이식 |
-| §2 DB/인증/패키지관리/배포/테스트 | 사용자가 공유한 `BE기술스택.html`(2026-09, BE 실제 테스트 완료본) — `uv`→`pip` 전환, MySQL 8.0, PyJWT 인증, testcontainers 반영 |
-| §3 Agent | `IDEATHON/docs/tech-stack.md` §4.3 요약, 버전 표는 §6으로 통합(중복 제거) |
-| §4.3~4.5 | `docs/architecture.md`로 상세 이관, 이 문서는 링크만 유지(중복 제거 — 검증 워크플로우 지적사항 반영) |
-| §5 | `/CLAUDE.md`로 전면 위임(중복 제거) |
-| §6 확정 버전 전체 | `BE기술스택.html` §1 표 + AI팀 `uv sync` 교차검증 결과 병합 |
+- **FastAPI `0.141.1`:** 버전은 선언됐지만 `backend/app/main.py`와 route가 없음
+- **Uvicorn `0.52.4`:** 버전은 선언됐지만 실행 가능한 FastAPI app이 없음
+- **SQLAlchemy `2.0.52`:** model과 session 미구현
+- **PyMySQL `1.2.0`:** application DB 연결 미구현
+- **Alembic `1.19.2`:** migration 미구현
+- **PyJWT `2.13.0`:** Kakao OAuth와 서비스 JWT route·정책 미구현
+
+MySQL은 container 설정만 존재한다. DB model, migration, transaction과 통합 테스트가 생겨야 DB 기능이 구현됐다고 판단한다.
+
+### 후속 AI 기능용 패키지
+
+- **Langfuse `4.15.1`:** `LangfuseTraceSink`로 metadata 전송 구현. 비용 금액 산출은 없음
+- **langchain-chroma `1.1.0`:** corpus, index와 retriever 미구현
+- **ChromaDB `1.5.9`:** Agent 조회 경로 미구현
+
+### 개발 도구
+
+- **pytest `9.1.1`:** 현재 Agent 테스트에 사용
+- **testcontainers[mysql] `4.15.0`:** 버전만 선언. DB 통합 테스트는 아직 없음
+
+## 5. 아직 없거나 연결되지 않은 기능
+
+### Application과 DB
+
+- FastAPI app과 API route
+- SQLAlchemy model, DB session과 repository
+- Alembic migration과 transaction
+- Kakao OAuth와 서비스 JWT 인증
+- 실제 Case snapshot adapter, 동시성 제어, 저장과 재조회
+- Redis service와 Redis 사용 코드
+- Compose의 Backend·Agent service
+- 저장소에 없는 `app.main:app` 실행 진입점
+- 아직 결정되지 않은 운영 호스팅과 배포 방식
+
+### Agent와 공식 데이터
+
+- **구현됐지만 미연결:** 기업마당 API의 raw 공고 후보를 조회하는 독립 adapter
+- **미구현:** raw 공고 검수 → reviewed catalog 발행 → `AgentGraph` 연결 pipeline
+- **미구현:** 승인된 공식 원문 crawler, parser, versioned corpus, index, retriever와 RAG 연결
+- **미구현:** Supervisor가 필요한 Agent·Tool을 고르는 동적 호출 계획
+- **미구현:** Langfuse 비용 금액 산출, masking 정책 승인
+
+Support Agent의 현재 입력은 생성 시 주입된 reviewed catalog다. 검수 corpus, versioned index, retriever 평가, Evidence 변환과 Graph 연결이 모두 있어야 RAG가 완료됐다고 판단한다.
+
+### Frontend
+
+- 현재 `frontend/src`에서 별도 API client 또는 fetch 경계는 확인되지 않았다.
+
+## 6. 관련 문서
+
+- **Agent 호출 구조:** [`architecture.md`](./architecture.md)
+- **Agent·Tool 공개 호출 입·출력:** [`agent-tool-io-schema.md`](./agent-tool-io-schema.md)
+- **standalone 실행과 검증:** [`agent-standalone-runtime-requirements.md`](./agent-standalone-runtime-requirements.md)
+- **공식 API·crawler·RAG 계획:** [`agent-official-data-source-strategy.md`](./agent-official-data-source-strategy.md)
+- **외부 연동 공동 검토 요청:** [`be-agent-integration-requirements.md`](./be-agent-integration-requirements.md)
+
+## 7. 버전과 상태의 근거
+
+- **Python package:** `backend/requirements.txt`, `backend/requirements-dev.txt`
+- **Frontend package:** `frontend/package.json`과 lockfile
+- **Agent 실제 import와 호출:** `backend/app/agent/`
+- **Agent 회귀 테스트:** `backend/tests/agent/`
+- **Python·container 설정:** `backend/.python-version`, `backend/Dockerfile`, `docker-compose.yml`
+
+`==` 또는 frontend version range는 설치 요청 버전이다. 실제 기능 사용 여부는 import, 호출 경로와 테스트로 별도 확인한다.

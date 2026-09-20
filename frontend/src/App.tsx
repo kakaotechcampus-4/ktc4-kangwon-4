@@ -1,29 +1,15 @@
-import { insufficientCase, noBlockerCase, normalCase } from './mocks/currentCase'
-import { CurrentCasePage } from './pages/CurrentCasePage'
-import type { CurrentCaseView } from './types/view'
+import { RouterProvider } from 'react-router'
 
-const MOCKS: Record<string, CurrentCaseView> = {
-  'no-blocker': noBlockerCase,
-  insufficient: insufficientCase,
-}
+import { router } from './routes'
 
 /**
- * 개발 중에만 URL 쿼리로 Mock을 바꾼다. 예외 화면을 링크만으로 확인할 수 있어야
- * 리뷰어가 코드를 고치지 않고도 볼 수 있다.
+ * 라우터를 띄우는 것 외에 하는 일이 없다.
  *
- *   /                      정상
- *   /?mock=no-blocker      막고 있는 것 없음
- *   /?mock=insufficient    정보 부족
+ * 화면이 필요한 데이터는 각 페이지가 직접 구한다 — 여기서 모아 나눠주면
+ * 화면이 늘어날 때마다 이 파일이 커지고, 나중에 fetch를 넣을 자리도 흩어진다.
  */
-function resolveMock(): CurrentCaseView {
-  if (!import.meta.env.DEV) return normalCase
-
-  const key = new URLSearchParams(window.location.search).get('mock') ?? ''
-  return MOCKS[key] ?? normalCase
-}
-
 function App() {
-  return <CurrentCasePage data={resolveMock()} />
+  return <RouterProvider router={router} />
 }
 
 export default App
