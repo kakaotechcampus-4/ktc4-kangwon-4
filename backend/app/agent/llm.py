@@ -101,12 +101,13 @@ class LLMUsage:
 class LLMCallBudget:
     """Provider-call allowance shared by every client used within one run.
 
-    Each HTTP attempt costs money, so retries consume the allowance too. The
-    graph resets the counter when a run starts, which makes the cap per-run.
+    Each HTTP attempt costs money, so retries consume the allowance too. One
+    instance belongs to one run: ``run_planning`` builds a fresh budget and
+    installs it with ``call_budget_scope``, and the clients hold a
+    ``ScopedCallBudget`` that reads whichever run is in scope. Concurrent runs
+    therefore never share a counter.
     """
 
-    # TODO: a single shared instance is not safe once one process serves
-    # concurrent runs; scope it per run (contextvar) when the server is wired.
     def __init__(self, max_calls: int = _DEFAULT_MAX_CALLS_PER_RUN) -> None:
         if type(max_calls) is not int or max_calls < 1:
             raise ValueError("max_calls must be a positive integer")
