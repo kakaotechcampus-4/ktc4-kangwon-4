@@ -22,6 +22,7 @@ from app.agent.schemas import (
     CASE_FIELD_SPECS,
     AgentGraphInput,
     AgentGraphOutput,
+    CaseFieldKey,
     Component,
     ConflictConfirmedTrigger,
     ConflictOutcome,
@@ -30,6 +31,7 @@ from app.agent.schemas import (
     InfoAnalysisResult,
     InvocationMeta,
     KnownProcedureStep,
+    MissingFieldBlock,
     PlanningContext,
     ProcedureLookupInput,
     ProcedureLookupResult,
@@ -573,6 +575,9 @@ class AgentGraph:
         if result.verdict == ReviewVerdict.REVISE:
             revision_count = state.get("revision_count", 0)
             if revision_count >= self._max_review_revisions:
+                # Keep the last Review's findings instead of dropping them.
+                # Without this the caller learns only that the run failed, not
+                # what would unblock it, and the reason for the verdict is gone.
                 update.update(
                     {
                         "phase": "SAFE_FAILED",
@@ -580,6 +585,8 @@ class AgentGraph:
                         "failure_message_code": "REVIEW_RETRY_EXHAUSTED",
                         "failed_component": Component.REVIEW_TOOL,
                         "retryable": False,
+                        "review_feedback": self._review_feedback(result),
+                        "rework_targets": list(result.recommended_rework_targets),
                     }
                 )
             else:
@@ -627,6 +634,39 @@ class AgentGraph:
         return {"phase": "SAFE_FAILED", "outcome": outcome}
 
     @staticmethod
+    def _requested_field_paths(failure: dict[str, Any]) -> list[CaseFieldKey]:
+        """Name the Case fields whose absence is what stopped this run.
+
+        The Review result cannot answer this.  Its paths point inside the draft
+        (``/decision/next_action/...``) while this field takes Case field keys,
+        and no mapping between the two exists; inventing one would be a guess.
+        The source results do carry real field keys, so ask them instead, most
+        specific first: what blocks the decision, then what the support
+        comparison could not resolve, then what asking the user would settle.
+        """
+
+        blocks_decision: set[CaseFieldKey] = set()
+        unresolved_support: set[CaseFieldKey] = set()
+        answerable: set[CaseFieldKey] = set()
+        for source in failure.get("source_results", []):
+            output = source.output
+            if isinstance(output, InfoAnalysisResult):
+                blocks_decision.update(
+                    item.field_path
+                    for item in output.missing_fields
+                    if MissingFieldBlock.SUPERVISOR_DECISION in item.blocks
+                )
+                for question in output.question_candidates:
+                    answerable.update(question.resolves_field_paths)
+            elif isinstance(output, SupportAnalysisResult):
+                for check in output.support_checks:
+                    unresolved_support.update(check.unknown_field_paths)
+        found = blocks_decision or unresolved_support or answerable
+        # Canonical order, so two runs that found the same fields in a
+        # different sequence still produce the same outcome digest.
+        return [key for key in CASE_FIELD_SPECS if key in found]
+
+    @staticmethod
     def _build_safe_failure(
         request: AgentGraphInput,
         *,
@@ -634,6 +674,14 @@ class AgentGraph:
         trace_id: str | None,
         failure: dict[str, Any],
     ) -> SafeFailureOutcome:
+        requested = AgentGraph._requested_field_paths(failure)
+        retryable = failure.get("retryable", False)
+        # Naming fields the caller can actually collect beats telling them
+        # there is nothing to do.  Only when a retry is not the answer: a
+        # timeout is a latency problem, not a missing-input one.
+        fallback_recovery = "RETRY" if retryable else "NONE"
+        if requested and not retryable:
+            fallback_recovery = "RESUBMIT_INPUT"
         return SafeFailureOutcome(
             outcome_type="SAFE_FAILURE",
             run_id=run_id,
@@ -645,12 +693,9 @@ class AgentGraph:
             message_code=failure.get(
                 "failure_message_code", "AGENT_COMPONENT_UNAVAILABLE"
             ),
-            recovery_action_code=failure.get(
-                "recovery_action_code",
-                "RETRY" if failure.get("retryable", False) else "NONE",
-            ),
-            requested_field_paths=[],
-            retryable=failure.get("retryable", False),
+            recovery_action_code=failure.get("recovery_action_code", fallback_recovery),
+            requested_field_paths=requested,
+            retryable=retryable,
             failed_component=failure.get("failed_component"),
             trace_id=trace_id,
         )

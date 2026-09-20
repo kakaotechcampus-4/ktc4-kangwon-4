@@ -1287,12 +1287,18 @@ Conflict ref와 candidate ID는 unique이고 각 conflict의 snapshot/version은
 | `failure_code` | `REVIEW_RETRY_EXHAUSTED \| COMPONENT_UNAVAILABLE \| STRUCTURED_OUTPUT_FAILED \| LOOP_LIMIT_REACHED \| RUN_DEADLINE_EXCEEDED \| STALE_CONFLICT_CONFIRMATION` | Graph가 exception 종류, revision 소진, LLM 호출 예산 소진, 전체 시간 초과 또는 오래된 충돌 확인으로 분류 | 허용 enum만 가능 |
 | `message_code` | `UpperSnakeCode` | Graph가 안전한 caller-facing 기계 code를 선택 | upper snake 형식 |
 | `recovery_action_code` | `RETRY \| RESUBMIT_INPUT \| CONTACT_SUPPORT \| NONE` | Graph가 안전한 후속 처리 종류를 선택 | 현재 producer는 `RETRY`, `RESUBMIT_INPUT`, `NONE`을 생성 |
-| `requested_field_paths` | `CaseFieldKey[]` | 추가 입력 대상이 있을 경우 Graph가 제공하는 자리 | 현재 producer는 `[]`; registry 밖 값 거부 |
+| `requested_field_paths` | `CaseFieldKey[]` | Graph가 실패 시점의 source 결과에서 막혀 있던 Case 필드를 파생 | `CASE_FIELD_SPECS` 순서로 정렬; registry 밖 값 거부 |
 | `retryable` | strict boolean | Graph가 failure 분류에 따라 계산 | `0/1` 등 boolean coercion 거부 |
 | `failed_component` | `Component \| null` | Graph가 실패 owner를 기록하거나 Graph-level 실패이면 null | 허용 component enum만 가능 |
 | `trace_id` | non-empty string \| null | Graph가 입력 trace ID를 복사 | 빈 문자열 거부 |
 
-현재 Graph producer는 recovery action으로 `RETRY`, `RESUBMIT_INPUT` 또는 `NONE`을 만들고 `requested_field_paths=[]`를 사용한다. 구성요소의 schema/guardrail/value 오류는 `STRUCTURED_OUTPUT_FAILED`, 설정·요청·upstream 계열 오류는 `COMPONENT_UNAVAILABLE`로 분류한다. Review 수정 2회 소진 시 `REVIEW_RETRY_EXHAUSTED`다. 한 실행의 전체 LLM 호출 수가 상한을 넘으면 `LOOP_LIMIT_REACHED`, 전체 실행 시간이 상한을 넘으면 `RUN_DEADLINE_EXCEEDED`로 분류한다. 뒤엣것은 재시도 가능으로 표시한다. 검수되지 않은 draft나 mutation은 포함하지 않는다.
+현재 Graph producer는 recovery action으로 `RETRY`, `RESUBMIT_INPUT` 또는 `NONE`을 만든다.
+`requested_field_paths`는 실패 시점에 남아 있는 source 결과에서 파생한다 — 우선 정보분석이
+`SUPERVISOR_DECISION`을 막는다고 보고한 `missing_fields`, 없으면 지원사업 비교의
+`unknown_field_paths`, 그래도 없으면 질문 후보가 푸는 `resolves_field_paths`다.
+Review 결과에서는 파생하지 않는다. `ReviewIssue.target_path`는 초안 내부 JSON Pointer이고
+이 필드는 Case 필드 키여서 서로 대응 관계가 없다. 재시도가 답이 아닌 실패에서 파생 결과가
+비어 있지 않으면 recovery action은 `RESUBMIT_INPUT`이 된다. 구성요소의 schema/guardrail/value 오류는 `STRUCTURED_OUTPUT_FAILED`, 설정·요청·upstream 계열 오류는 `COMPONENT_UNAVAILABLE`로 분류한다. Review 수정 2회 소진 시 `REVIEW_RETRY_EXHAUSTED`다. 한 실행의 전체 LLM 호출 수가 상한을 넘으면 `LOOP_LIMIT_REACHED`, 전체 실행 시간이 상한을 넘으면 `RUN_DEADLINE_EXCEEDED`로 분류한다. 뒤엣것은 재시도 가능으로 표시한다. 검수되지 않은 draft나 mutation은 포함하지 않는다.
 
 ### 11.6 Review 재작업 라우팅
 
