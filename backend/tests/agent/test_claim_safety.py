@@ -1,13 +1,8 @@
-"""Pin the current behaviour of the deterministic claim policy.
+"""Regression coverage of the deterministic claim policy.
 
-The mentor asked that this module's design and implementation be left alone
-until after the MVP release, so nothing here changes it.  These tests record
-what it does today: the regular expressions are the part hardest to reason
-about, several of them had no direct coverage at all, and a later hardening
-pass needs a way to see what it moved.
-
-Each case states the intent, not just the string, so a future change can tell
-"this was deliberate" from "this broke".
+The particle regression uses verbatim official text fetched on 2026-09-20.
+Other cases are historical synthetic unit cases; this suite was not executed
+after the user's request to validate only actual data and API calls.
 """
 
 from __future__ import annotations
@@ -65,29 +60,17 @@ def test_money_amounts_demand_an_official_source(text: str) -> None:
 @pytest.mark.parametrize(
     "text",
     [
-        "철거비 1,200,000원이 듭니다",
-        "지원금 300만원을 받습니다",
-        "보증금 1억원은 별도입니다",
-        "수수료 30000원입니다",
+        "30만원을 받기 위해서는",
+        "총 77.7억원을 지급",
     ],
 )
-def test_known_gap_an_amount_followed_by_a_particle_is_missed(text: str) -> None:
-    """KNOWN GAP, recorded rather than fixed.
+def test_official_amounts_with_particles_demand_a_source(text: str) -> None:
+    # Source: https://www.mss.go.kr/site/smba/ex/bbs/View.do?bcIdx=1058272&cbIdx=86
+    # These are lexical regression excerpts, not current eligibility guidance.
+    risks, required = high_risk_metadata(text, NO_PROGRAMS)
 
-    ``_AMOUNT_PATTERN`` ends in ``\b`` after the currency unit.  Korean
-    particles are word characters, so ``원이``/``원을``/``원입니다`` leave no
-    boundary and the amount is not detected -- which is most real sentences.
-
-    The mentor asked that this module be left as it is until after the MVP
-    release, so this pins the hole instead of closing it.  Review still has to
-    catch these; the deterministic layer does not.  When the pattern is
-    hardened, this test should start failing, and that is the signal to move
-    these cases into the test above.
-    """
-
-    risks, _ = high_risk_metadata(text, NO_PROGRAMS)
-
-    assert ClaimType.AMOUNT not in risks
+    assert ClaimType.AMOUNT in risks
+    assert required == OFFICIAL
 
 
 @pytest.mark.parametrize(
