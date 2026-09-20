@@ -1,8 +1,10 @@
 """Regression coverage of the deterministic claim policy.
 
 The particle regression uses verbatim official text fetched on 2026-09-20.
-Other cases are historical synthetic unit cases; this suite was not executed
-after the user's request to validate only actual data and API calls.
+The rest are literal sentences chosen to exercise the patterns; they invent no
+Case, business owner or database identity, which is why this module carries
+``real_data`` and is runnable. Passing says the classifier still behaves as
+recorded -- not that any real Case was planned or stored.
 """
 
 from __future__ import annotations
@@ -22,6 +24,8 @@ from app.agent.claim_safety import (
     required_sources_for_claim,
 )
 from app.agent.schemas import ClaimType, EvidenceRecord, EvidenceSourceType
+
+pytestmark = pytest.mark.real_data
 
 NOW = datetime(2026, 9, 19, tzinfo=timezone.utc)
 OFFICIAL = frozenset(

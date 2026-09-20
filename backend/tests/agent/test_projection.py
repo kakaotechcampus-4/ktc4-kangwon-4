@@ -16,6 +16,8 @@ from app.agent.schemas import (
     Redaction,
 )
 
+pytestmark = pytest.mark.real_data
+
 NOW = datetime(2026, 9, 14, 7, 0, tzinfo=timezone.utc)
 
 

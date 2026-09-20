@@ -11,6 +11,8 @@ from app.agent.guardrails import (
     sha256_digest,
 )
 
+pytestmark = pytest.mark.real_data
+
 
 def test_canonical_digest_is_stable_across_mapping_order() -> None:
     instant = datetime(2026, 9, 14, 1, 2, 3, tzinfo=timezone.utc)
