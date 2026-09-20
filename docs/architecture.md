@@ -326,7 +326,7 @@ HTTP 200, 검색 성공, Agent 실행 성공, 실제 Case 연동 성공은 서�
 - **Agent:** [`info_agent/`](../backend/app/agent/info_agent/), [`support_agent/`](../backend/app/agent/support_agent/), [`supervisor/`](../backend/app/agent/supervisor/)
 - **Tool:** [`procedure_tool/`](../backend/app/agent/procedure_tool/), [`review_tool/`](../backend/app/agent/review_tool/)
 - **실행 진입점과 실행 단위 한도:** [`runtime.py`](../backend/app/agent/runtime.py), [`run_scope.py`](../backend/app/agent/run_scope.py)
-- **standalone fixture와 CLI:** [`fixtures.py`](../backend/app/agent/fixtures.py), [`cli.py`](../backend/app/agent/cli.py)
+- **실제 입력 CLI:** [`cli.py`](../backend/app/agent/cli.py)
 - **추적 경계:** [`tracing.py`](../backend/app/agent/tracing.py)
 - **테스트:** [`backend/tests/agent/`](../backend/tests/agent/)
 
