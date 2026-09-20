@@ -9,7 +9,9 @@ only when both Langfuse credentials resolve.
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
@@ -29,6 +31,11 @@ class TraceEvent:
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     error_code: str | None = None
+    # How many provider HTTP calls this event covers. ``attempt`` is the
+    # component's semantic attempt number, which can hide several HTTP calls,
+    # so it cannot answer "how much of the run budget did this spend".
+    provider_calls: int | None = None
+    outcome_type: str | None = None
 
 
 def _repo_root() -> Path:
@@ -87,6 +94,50 @@ class UsageAccumulator:
         return taken
 
 
+_CURRENT_USAGE: ContextVar[UsageAccumulator | None] = ContextVar(
+    "agent_usage_accumulator",
+    default=None,
+)
+
+
+@contextmanager
+def usage_scope(usage: UsageAccumulator) -> Iterator[UsageAccumulator]:
+    """Install ``usage`` as the accumulator for work done inside this block."""
+
+    token = _CURRENT_USAGE.set(usage)
+    try:
+        yield usage
+    finally:
+        _CURRENT_USAGE.reset(token)
+
+
+@dataclass(slots=True)
+class ScopedUsageAccumulator:
+    """Usage stand-in that defers to whichever run is currently in scope.
+
+    Same reason as the call budget: a client is built once and serves many
+    runs, so token counts must follow the run rather than sit on the client.
+    Outside any run scope it records nothing, which keeps direct client use in
+    tests and scripts working unchanged.
+    """
+
+    def record(self, usage: Any) -> None:
+        accumulator = _CURRENT_USAGE.get()
+        if accumulator is not None:
+            accumulator.record(usage)
+
+    def reset(self) -> None:
+        accumulator = _CURRENT_USAGE.get()
+        if accumulator is not None:
+            accumulator.reset()
+
+    def drain(self) -> tuple[str | None, int | None, int | None]:
+        accumulator = _CURRENT_USAGE.get()
+        if accumulator is None:
+            return (None, None, None)
+        return accumulator.drain()
+
+
 class LangfuseTraceSink:
     """Forward metadata-only trace events to Langfuse.
 
@@ -126,7 +177,10 @@ class LangfuseTraceSink:
             raw = environment.get(key) or file_values.get(key) or ""
             return str(raw).strip()
 
-        public_key, secret_key = value("LANGFUSE_PUBLIC_KEY"), value("LANGFUSE_SECRET_KEY")
+        public_key, secret_key = (
+            value("LANGFUSE_PUBLIC_KEY"),
+            value("LANGFUSE_SECRET_KEY"),
+        )
         if not (public_key and secret_key):
             return None
         try:
@@ -165,6 +219,8 @@ class LangfuseTraceSink:
                         "latency_ms": event.latency_ms,
                         "attempt": event.attempt,
                         "error_code": event.error_code,
+                        "provider_calls": event.provider_calls,
+                        "outcome_type": event.outcome_type,
                     },
                     **({"usage_details": usage} if usage else {}),
                 )

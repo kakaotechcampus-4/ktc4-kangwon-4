@@ -1,7 +1,7 @@
 """Strict Agent/Tool contracts for the standalone RE:BORN runtime.
 
 The models in this module are the executable, conservative subset of
-``docs/agent-tool-io-schema.md`` needed to execute one complete planning run.
+``docs/agent/tool-io-schema.md`` needed to execute one complete planning run.
 They deliberately keep BE persistence and HTTP response DTOs out of the Agent
 package.
 
@@ -1224,6 +1224,14 @@ class ProcedureSourcePolicy(StrEnum):
 
 
 class ProcedureSearchProvider(StrEnum):
+    """Where a procedure source document was discovered.
+
+    ``REVIEWED_PROCEDURE_STORE`` is the only MVP request-path source: documents
+    fetched earlier and approved by the team.  The three search providers stay
+    because the offline refresh command still uses them to build that store.
+    """
+
+    REVIEWED_PROCEDURE_STORE = "REVIEWED_PROCEDURE_STORE"
     OFFICIAL_SOURCE_REGISTRY = "OFFICIAL_SOURCE_REGISTRY"
     GOOGLE_AGENT_SEARCH = "GOOGLE_AGENT_SEARCH"
     KAKAO_DAUM_WEB = "KAKAO_DAUM_WEB"
@@ -1377,6 +1385,9 @@ class ProcedureSearchSummary(AgentSchema):
         if len(set(self.provider_order)) != len(self.provider_order):
             raise ValueError("provider_order must be unique")
         allowed_orders = {
+            # A reviewed-store read never falls back to a live provider: mixing
+            # the two would put an unreviewed source back on the request path.
+            (ProcedureSearchProvider.REVIEWED_PROCEDURE_STORE,),
             (ProcedureSearchProvider.OFFICIAL_SOURCE_REGISTRY,),
             (
                 ProcedureSearchProvider.OFFICIAL_SOURCE_REGISTRY,
@@ -2358,6 +2369,10 @@ class SafeFailureOutcome(AgentSchema):
         "COMPONENT_UNAVAILABLE",
         "STRUCTURED_OUTPUT_FAILED",
         "LOOP_LIMIT_REACHED",
+        # Ran out of wall-clock time. Distinct from LOOP_LIMIT_REACHED, which
+        # means it ran out of provider calls: one is a latency stop and the
+        # other a cost stop, and they need different follow-up.
+        "RUN_DEADLINE_EXCEEDED",
     ] = Field(description="Bounded machine classification of the Graph failure.")
     message_code: UpperSnakeCode = Field(
         description="Safe caller-facing machine message code."

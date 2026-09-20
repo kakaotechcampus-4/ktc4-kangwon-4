@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
 from app.agent.graph import AgentGraph
-from app.agent.llm import LLMBudgetExceededError, LLMCallBudget, LLMUsage
+from app.agent.llm import (
+    LLMBudgetExceededError,
+    LLMCallBudget,
+    LLMUsage,
+    call_budget_scope,
+)
+from app.agent.run_scope import RunDeadline, run_deadline_scope
 from app.agent.schemas import (
     ActionDecisionDraft,
     AgentGraphInput,
@@ -713,3 +720,99 @@ def test_run_resets_usage_so_it_is_not_attributed_to_the_next_run() -> None:
     asyncio.run(runtime.run(request()))
 
     assert all(e.prompt_tokens != 999 for e in sink.events)
+
+
+def test_an_expired_deadline_fails_closed_before_any_component_runs() -> None:
+    runtime, info, procedure, support, supervisor, review = graph()
+
+    with run_deadline_scope(RunDeadline(expires_at=time.monotonic() - 1)):
+        outcome = asyncio.run(runtime.run(request()))
+
+    assert outcome.outcome_type == "SAFE_FAILURE"
+    assert outcome.failure_code == "RUN_DEADLINE_EXCEEDED"
+    # Retryable, unlike an exhausted call budget: a slow run may well fit on a
+    # second attempt, whereas the budget would simply be spent again.
+    assert outcome.retryable is True
+    assert procedure.calls == 0
+    assert info.calls == support.calls == supervisor.calls == review.calls == 0
+
+
+def test_a_deadline_that_expires_mid_run_stops_the_next_component() -> None:
+    class SlowProcedure(FakeProcedure):
+        """Uses up the whole window, so the next node has nothing left."""
+
+        def __init__(self, deadline: RunDeadline) -> None:
+            super().__init__()
+            self._deadline = deadline
+
+        async def lookup(self, lookup_request: Any) -> Any:
+            result = await super().lookup(lookup_request)
+            object.__setattr__(self._deadline, "expires_at", time.monotonic() - 1)
+            return result
+
+    deadline = RunDeadline.after(30)
+    procedure = SlowProcedure(deadline)
+    runtime, info, _, support, supervisor, review = graph(procedure=procedure)
+
+    with run_deadline_scope(deadline):
+        outcome = asyncio.run(runtime.run(request()))
+
+    assert outcome.outcome_type == "SAFE_FAILURE"
+    assert outcome.failure_code == "RUN_DEADLINE_EXCEEDED"
+    assert outcome.failed_component.value == "INFO_AGENT"
+    assert procedure.calls == 1
+    assert info.calls == support.calls == supervisor.calls == review.calls == 0
+
+
+def test_a_run_reports_what_it_spent_so_the_budget_can_be_tuned() -> None:
+    """Without this the per-run call cap can only be guessed at.
+
+    Component events do not answer it: one of them can cover several provider
+    calls, so their count is not the run's call count.
+    """
+
+    sink = MemoryTraceSink()
+    runtime = AgentGraph(
+        info_agent=FakeInfo(),
+        procedure_tool=FakeProcedure(),
+        support_agent=FakeSupport(),
+        supervisor=FakeSupervisor(),
+        review_tool=FakeReview(["PASS"]),
+        known_procedure_steps=[],
+        clock=lambda: NOW,
+        trace_sink=sink,
+    )
+    budget = LLMCallBudget(max_calls=10)
+    with call_budget_scope(budget):
+        budget.consume()
+        budget.consume()
+        budget.consume()
+        outcome = asyncio.run(runtime.run(request()))
+
+    summaries = [item for item in sink.events if item.component == "RUN"]
+    assert len(summaries) == 1
+    assert summaries[0].provider_calls == 3
+    assert summaries[0].outcome_type == "REVIEWED_PLAN"
+    assert summaries[0].status == "SUCCESS"
+    assert outcome.outcome_type == "REVIEWED_PLAN"
+
+
+def test_a_failed_run_is_reported_with_its_failure_code() -> None:
+    sink = MemoryTraceSink()
+    runtime = AgentGraph(
+        info_agent=FakeInfo(),
+        procedure_tool=BudgetExhaustedProcedure(),
+        support_agent=FakeSupport(),
+        supervisor=FakeSupervisor(),
+        review_tool=FakeReview(["PASS"]),
+        known_procedure_steps=[],
+        clock=lambda: NOW,
+        trace_sink=sink,
+    )
+
+    asyncio.run(runtime.run(request()))
+
+    summaries = [item for item in sink.events if item.component == "RUN"]
+    assert summaries[0].status == "ERROR"
+    assert summaries[0].error_code == "LOOP_LIMIT_REACHED"
+    assert summaries[0].outcome_type == "SAFE_FAILURE"

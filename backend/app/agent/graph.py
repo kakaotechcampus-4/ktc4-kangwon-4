@@ -13,10 +13,9 @@ from datetime import date, datetime, timezone
 from typing import Any, Literal, Protocol, cast
 from uuid import UUID, uuid4
 
-from langgraph.graph import END, START, StateGraph
-
 from app.agent.enrichment import build_fact_overlays
-from app.agent.llm import LLMCallBudget
+from app.agent.llm import LLMCallBudget, current_call_budget
+from app.agent.run_scope import current_deadline
 from app.agent.schemas import (
     CASE_FIELD_SPECS,
     AgentGraphInput,
@@ -54,6 +53,7 @@ from app.agent.tracing import (
     TraceSink,
     UsageAccumulator,
 )
+from langgraph.graph import END, START, StateGraph
 
 
 class InfoRunner(Protocol):
@@ -137,6 +137,8 @@ class AgentGraph:
             "review_feedback": [],
             "revision_count": 0,
         }
+        run_started = time.monotonic()
+        outcome: AgentGraphOutput
         try:
             result = await self.compiled.ainvoke(
                 initial,
@@ -144,18 +146,58 @@ class AgentGraph:
             )
             if canonical_digest(owned_request.case_snapshot) != snapshot_digest:
                 raise RuntimeError("Agent graph mutated its Case snapshot")
-            outcome = result.get("outcome")
-            if outcome is None:
+            raw_outcome = result.get("outcome")
+            if raw_outcome is None:
                 raise RuntimeError("Agent graph terminated without a safe outcome")
-            return cast(AgentGraphOutput, outcome)
+            outcome = cast(AgentGraphOutput, raw_outcome)
         except Exception as exc:  # noqa: BLE001 - public graph boundary fails closed
             failure = self._failure(exc, None)
-            return self._build_safe_failure(
+            outcome = self._build_safe_failure(
                 failure_request,
                 run_id=run_id,
                 trace_id=failure_request.trace_id,
                 failure=failure,
             )
+        self._emit_run_summary(
+            run_id=run_id,
+            started=run_started,
+            outcome=outcome,
+        )
+        return outcome
+
+    def _emit_run_summary(
+        self,
+        *,
+        run_id: UUID,
+        started: float,
+        outcome: AgentGraphOutput,
+    ) -> None:
+        """Record what one whole run actually cost.
+
+        Per-component events cannot answer this: one of them may cover several
+        provider calls, so their count is not the run's call count.  Without
+        this the per-run call budget can only be guessed at, which is the whole
+        reason it is hard to say whether the current cap is the right one.
+        """
+
+        budget = current_call_budget()
+        event = TraceEvent(
+            run_id=str(run_id),
+            call_id=str(run_id),
+            component="RUN",
+            status=("ERROR" if outcome.outcome_type == "SAFE_FAILURE" else "SUCCESS"),
+            latency_ms=max(0, int((time.monotonic() - started) * 1000)),
+            attempt=1,
+            provider_calls=None if budget is None else budget.spent,
+            outcome_type=outcome.outcome_type,
+            error_code=(
+                outcome.failure_code if outcome.outcome_type == "SAFE_FAILURE" else None
+            ),
+        )
+        try:
+            self._trace_sink.emit(event)
+        except Exception:  # noqa: BLE001 - telemetry is deliberately best-effort
+            return
 
     def _compile(self) -> Any:
         builder = StateGraph(AgentGraphState)
@@ -214,6 +256,19 @@ class AgentGraph:
         builder.add_edge("safe_failure", END)
         return builder.compile()
 
+    @staticmethod
+    def _check_deadline() -> None:
+        """Stop before starting work the run no longer has time to finish.
+
+        Checked per node rather than as one timeout around the whole graph: an
+        outer timeout would abort mid-node and lose the typed outcome, while
+        this returns a normal SAFE_FAILURE the caller can act on.
+        """
+
+        deadline = current_deadline()
+        if deadline is not None:
+            deadline.check()
+
     async def _info_node(self, state: AgentGraphState) -> dict[str, Any]:
         request = state["request"]
         trigger_input = getattr(request.trigger, "input", None)
@@ -246,6 +301,7 @@ class AgentGraph:
         )
         started = time.monotonic()
         try:
+            self._check_deadline()
             output = await self._info_agent.analyze(component_input)
             source = ReviewSourceResult(
                 meta=meta,
@@ -308,6 +364,7 @@ class AgentGraph:
         )
         started = time.monotonic()
         try:
+            self._check_deadline()
             output = await self._procedure_tool.lookup(component_input)
             source = ReviewSourceResult(
                 meta=meta,
@@ -360,6 +417,7 @@ class AgentGraph:
             )
         started = time.monotonic()
         try:
+            self._check_deadline()
             output = await self._support_agent.analyze(component_input)
             source = ReviewSourceResult(
                 meta=meta,
@@ -383,6 +441,7 @@ class AgentGraph:
         )
         started = time.monotonic()
         try:
+            self._check_deadline()
             previous_draft = (
                 state.get("current_draft")
                 if state.get("revision_count", 0) > 0
@@ -409,6 +468,7 @@ class AgentGraph:
         attempt = state.get("revision_count", 0) + 1
         started = time.monotonic()
         try:
+            self._check_deadline()
             meta = self._meta(state, Component.REVIEW_TOOL, attempt=attempt)
             subject = ReviewSubject.create(
                 schema_version="agent-io/2.0",
@@ -646,6 +706,16 @@ class AgentGraph:
         component: Component | None,
     ) -> dict[str, Any]:
         name = exc.__class__.__name__
+        if name == "RunDeadlineExceededError":
+            return {
+                "phase": "SAFE_FAILED",
+                "failure_code": "RUN_DEADLINE_EXCEEDED",
+                "failure_message_code": "AGENT_RUN_DEADLINE_EXCEEDED",
+                "failed_component": component,
+                # A slow run may well succeed on a second try, unlike an
+                # exhausted call budget, which would be spent again.
+                "retryable": True,
+            }
         if name == "LLMBudgetExceededError":
             return {
                 "phase": "SAFE_FAILED",

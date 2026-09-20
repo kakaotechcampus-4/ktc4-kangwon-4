@@ -72,9 +72,7 @@ def test_sink_sends_only_metadata_and_usage() -> None:
     client = FakeLangfuse()
     sink = LangfuseTraceSink(client)
 
-    sink.emit(
-        event(model="gpt-5.6-luna", prompt_tokens=100, completion_tokens=20)
-    )
+    sink.emit(event(model="gpt-5.6-luna", prompt_tokens=100, completion_tokens=20))
 
     assert client.started["as_type"] == "generation"
     assert client.started["model"] == "gpt-5.6-luna"
