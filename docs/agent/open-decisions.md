@@ -36,6 +36,7 @@
 | Guardrail 위치 | **Agent 안.** 저장 직전 version·소유권 확인만 BE | 팀 결정(2026-09-19). `be-integration-requirements.md` §5.5를 이에 맞게 정정함 |
 | enum에 `UNKNOWN` | **넣지 않음.** 미확인은 값이 아니라 상태(`status=UNKNOWN`, `value=null`) | 팀 결정(2026-09-19). Agent는 이미 이 방식. DB 쪽 정리는 [`be-requests.md`](./be-requests.md) 4번 |
 | 실행 단위 예산·시간 격리 | contextvar로 실행마다 분리 | 동시 요청에서 카운터가 섞이는 문제. `run_scope.py`, `llm.py` |
+| Review가 "아직 모른다"는 Blocker에 근거를 요구하던 문제 | `NEEDS_MORE_INFO` 결정의 Blocker는 근거 요구 대상에서 제외 | 모르는 것을 증명하는 근거는 없다. Case의 해당 fact가 `UNKNOWN`인 것이 그 근거다. 금액·날짜·법률·세무·자격 주장이 섞이면 제외하지 않는다 |
 | 충돌 확인 후 재계획 | 확인된 값도 Review를 거치는 `CONFLICT_CONFIRMED` 경로로 구현 | 확인을 바로 저장하면 Case 변경이 Review를 건너뛴다. 그 사이 값이 바뀌었으면 덮어쓰지 않고 `STALE_CONFLICT_CONFIRMATION`으로 끝낸다 |
 
 ---
@@ -138,25 +139,6 @@
 - **MVP:** **연기 가능** — MVP에 배치 기능이 없습니다
 - **누가 정하나:** **BE 단독**
 - **결정 전 안전 기본값:** 배치 없음. 절차 갱신은 수동 명령
-
-### OD-12 · Review가 "아직 모른다"는 Blocker에 근거를 요구한다
-
-- **미정인 내용:** 확인되지 않은 사실을 가리키는 Blocker를 Review가 어떻게 다뤄야 하는가
-- **누가 남긴 미정인가:** **검토됨.** 2026-09-20 실측에서 확인. 전체 실행 7회 중 3회가
-  이 이유로 `REVIEW_RETRY_EXHAUSTED`로 끝났다
-- **쟁점:** Review가 "원상복구 범위와 철거 필요 여부가 아직 확인되지 않음"이라는 Blocker에
-  대해 `MISSING_EVIDENCE`를 낸다. **모르는 것을 증명하는 근거는 존재할 수 없으므로
-  Supervisor가 다시 써도 충족할 수 없다.** 실제로 세 번 재작업하고 끝난다.
-  한 반려 사유는 Review 스스로 "이건 known unknown이지 근거가 필요한 사실 주장이 아니다"라고
-  쓰면서도 REVISE를 냈다 — 판정과 사유가 어긋나 있다.
-  - Case 상태(해당 fact의 status가 `UNKNOWN`)가 이미 그 Blocker의 근거다. 별도 Evidence가
-    필요한 종류의 주장이 아니다
-  - 다만 Review를 느슨하게 만들면 "근거 없는 단정"을 막는 힘이 약해진다. 어디까지가
-    "상태 진술"이고 어디부터가 "사실 주장"인지 선을 그어야 한다
-- **MVP:** **필수.** 지금 전체 실행 실패의 최다 원인이다
-- **누가 정하나:** **AI 단독** (Review Tool은 AI 소유)
-- **결정 전 안전 기본값:** 재작업 상한을 소진하면 안전 실패로 끝난다. 잘못된 계획이
-  나가지는 않는다. 다만 사용자는 아무 답도 못 받는다
 
 ### OD-11 · 정보분석의 응답 형식 실패를 어떻게 줄일 것인가
 

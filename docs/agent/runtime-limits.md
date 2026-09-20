@@ -72,10 +72,13 @@ Supervisor 초안을 반려해 재작업을 돌리고, 그 재작업이 시간�
 재작업이 도는 실행은 70~75초로 **60초 상한을 넘깁니다.** 상한은 팀 결정대로
 60초를 유지하므로, 이런 실행은 `RUN_DEADLINE_EXCEEDED`로 안전 종료됩니다.
 
-**남은 반려 사유는 근거 문제가 아닙니다.** Review가 "원상복구 범위가 아직
-확인되지 않음" 같은 Blocker에 근거를 요구합니다. 모르는 것을 증명하라는 요구라
-Supervisor가 다시 써도 충족할 수 없습니다. 자세한 내용은
-[`open-decisions.md`](./open-decisions.md) OD-12.
+**Review 반려는 해결했습니다.** `NEEDS_MORE_INFO` 결정의 Blocker를 근거 요구
+대상에서 제외한 뒤 5회 실행에서 `REVIEW_RETRY_EXHAUSTED`가 0건입니다.
+
+**남은 실패는 정보분석이 근거 ID를 지어내는 것입니다.** UUID 필사 오류는 사라졌지만
+모델이 `fixture:case:profile`, `INPUT_JSON` 같은 그럴듯한 문자열을 근거로 씁니다.
+프롬프트에 보이는 식별자는 무엇이든 인용 후보가 됩니다 —
+[`open-decisions.md`](./open-decisions.md) OD-11.
 
 **절차조회는 계속 1밀리초 이하입니다.**
 

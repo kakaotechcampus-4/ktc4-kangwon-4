@@ -182,7 +182,11 @@ class ReviewTool:
                 temperature=0,
             )
             try:
-                model_output = _coerce_model_output(raw_output, subject)
+                model_output = _coerce_model_output(
+                    raw_output,
+                    subject,
+                    context.support_program_names,
+                )
                 _validate_model_output(
                     model_output,
                     subject,
@@ -205,6 +209,7 @@ class ReviewTool:
 def _coerce_model_output(
     value: BaseModel | Mapping[str, Any],
     subject: ReviewSubject,
+    support_program_names: frozenset[str] = frozenset(),
 ) -> ReviewModelOutput:
     try:
         if isinstance(value, ReviewModelOutput):
@@ -222,15 +227,17 @@ def _coerce_model_output(
                 for issue in payload["issues"]
                 if not (
                     issue["issue_code"] == ReviewIssueCode.MISSING_EVIDENCE
-                    and _is_unassertive_information_question(
-                        subject, issue["target_path"]
+                    and _is_exempt_from_evidence(
+                        subject, issue["target_path"], support_program_names
                     )
                 )
             ]
             payload["missing_evidence"] = [
                 item
                 for item in payload["missing_evidence"]
-                if not _is_unassertive_information_question(subject, item["claim_path"])
+                if not _is_exempt_from_evidence(
+                    subject, item["claim_path"], support_program_names
+                )
             ]
             dropped_question_finding = (
                 len(payload["issues"]) != original_issue_count
@@ -275,6 +282,69 @@ def _coerce_model_output(
         return ReviewModelOutput.model_validate(value)
     except (ValidationError, TypeError, ValueError) as exc:
         raise ReviewOutputViolation("review model output violates its schema") from exc
+
+
+_PENDING_DECISION_PATHS = (
+    ["supervisor_draft", "decision"],
+    ["supervisor_draft", "decision", "blocker"],
+)
+
+
+def _is_pending_decision_path(path: str) -> bool:
+    tokens = _json_pointer_tokens(path)
+    if list(tokens) in [list(item) for item in _PENDING_DECISION_PATHS]:
+        return True
+    return list(tokens[:3]) == ["supervisor_draft", "decision", "blocker"] and tokens[
+        3:
+    ] in ([], ["title"], ["description"])
+
+
+def _is_not_yet_known_blocker(
+    subject: ReviewSubject,
+    path: str,
+    support_program_names: frozenset[str],
+) -> bool:
+    """Recognize a blocker whose whole content is "this is not known yet".
+
+    A ``NEEDS_MORE_INFO`` decision exists because the Case does not yet hold
+    what a next action would need.  Its blocker names what is missing, and no
+    evidence can show that something is unknown -- the Case state is what shows
+    it.  Provider reviewers nonetheless asked for evidence here, and since the
+    Supervisor cannot supply any, the rework limit was spent and the user got
+    nothing back.  Measured runs failed this way more than any other.
+
+    The exemption is deliberately narrow.  It applies only when the Case really
+    does hold an unconfirmed fact, and only while the blocker text asserts
+    nothing on its own: an amount, date, legal, tax or eligibility statement
+    makes it a claim again, and deterministic review keeps checking it either
+    way.
+    """
+
+    if not _is_pending_decision_path(path):
+        return False
+    decision = subject.supervisor_draft.decision
+    if decision.decision_type != DecisionType.NEEDS_MORE_INFO:
+        return False
+    if not any(fact.status == FactStatus.UNKNOWN for fact in subject.snapshot.facts):
+        return False
+    blocker = getattr(decision, "blocker", None)
+    if blocker is None:
+        return False
+    text = f"{blocker.title} {blocker.description}"
+    risks, _ = high_risk_metadata(text, support_program_names)
+    return not risks and not is_overconfident(text)
+
+
+def _is_exempt_from_evidence(
+    subject: ReviewSubject,
+    path: str,
+    support_program_names: frozenset[str],
+) -> bool:
+    """Paths where asking for supporting evidence is a category error."""
+
+    return _is_unassertive_information_question(subject, path) or (
+        _is_not_yet_known_blocker(subject, path, support_program_names)
+    )
 
 
 def _is_question_path(path: str) -> bool:

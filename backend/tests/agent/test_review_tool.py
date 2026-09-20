@@ -30,6 +30,7 @@ from app.agent.schemas import (
     InvocationMeta,
     MissingEvidence,
     MutationSet,
+    NeedsMoreInfoDecisionDraft,
     NextAction,
     ProcedureActionTarget,
     ProcedureFinding,
@@ -1966,3 +1967,140 @@ def test_sensitive_review_projection_is_rejected_before_model_call() -> None:
         asyncio.run(ReviewTool(client).review(subject))
 
     assert client.calls == []
+
+
+# --- "아직 모른다"는 Blocker에 근거를 요구하지 않는다 ---------------------
+#
+# 실측에서 전체 실행 실패의 최다 원인이었다. Supervisor가 NEEDS_MORE_INFO로
+# "원상복구 범위가 확인되지 않았습니다"라는 Blocker를 내면 provider reviewer가
+# "그 사실을 확인할 근거가 없다"며 반려한다. 모르는 것을 증명하는 근거는 존재할
+# 수 없어서 다시 써도 충족되지 않고, 재작업 상한만 소진하고 끝난다.
+#
+# 같은 초안이 통과하기도 반려되기도 했다. 질문 문자열에 대한 기존 오탐 처리와
+# 같은 종류의 흔들림이다.
+
+
+def needs_more_info_subject(
+    *,
+    blocker_description: str = "원상복구 범위가 확인되지 않았습니다. 임대인에게 확인해야 다음 절차를 정할 수 있습니다.",
+) -> ReviewSubject:
+    original = review_subject()
+    unknown_fact = CaseFact(
+        field_path="restoration_scope",
+        value_type="ENUM",
+        value=None,
+        status="UNKNOWN",
+        evidence_refs=[],
+        updated_at=None,
+    )
+    snapshot = original.snapshot.model_copy(
+        update={"facts": [*original.snapshot.facts, unknown_fact]}
+    )
+    call_ids = [source.meta.call_id for source in original.source_results]
+    action = original.supervisor_draft.decision
+    decision = NeedsMoreInfoDecisionDraft(
+        decision_type="NEEDS_MORE_INFO",
+        draft_id=action.draft_id,
+        draft_version=action.draft_version,
+        selection_summary="원상복구 범위를 먼저 확인해야 다음 절차를 정할 수 있습니다.",
+        requires_human=True,
+        evidence_refs=list(action.evidence_refs),
+        based_on_call_ids=call_ids,
+        created_at=action.created_at,
+        blocker=Blocker(
+            blocker_code="RESTORATION_SCOPE_UNKNOWN",
+            title="원상복구 범위 확인 필요",
+            description=blocker_description,
+            evidence_refs=list(action.evidence_refs),
+        ),
+        next_action=None,
+        questions_for_user=["임대인이 요구한 원상복구 범위가 무엇인가요?"],
+    )
+    draft = SupervisorDraft(
+        decision=decision,
+        mutations=original.supervisor_draft.mutations,
+        grounded_claims=[],
+        source_call_ids=call_ids,
+    )
+    return ReviewSubject.create(
+        schema_version=original.schema_version,
+        review_subject_id=original.review_subject_id,
+        review_attempt=original.review_attempt,
+        run_id=original.run_id,
+        case_id=original.case_id,
+        trigger=original.trigger,
+        snapshot=snapshot,
+        source_results=list(original.source_results),
+        supervisor_draft=draft,
+    )
+
+
+def missing_evidence_output(path: str) -> ReviewProviderOutput:
+    return ReviewProviderOutput(
+        verdict="REVISE",
+        issues=[
+            {
+                "issue_code": "MISSING_EVIDENCE",
+                "category": "EVIDENCE",
+                "severity": "BLOCKING",
+                "target_component": "SUPERVISOR",
+                "target_call_id": INVENTED_CALL_ID,
+                "target_path": path,
+                "reason_summary": "확인되지 않았다는 주장을 뒷받침할 근거가 없습니다.",
+                "evidence_refs": [],
+            }
+        ],
+        missing_evidence=[
+            {
+                "claim_path": path,
+                "reason_summary": "원상복구 범위가 미확인이라는 사실을 확인할 근거가 필요합니다.",
+                "required_source_types": ["OFFICIAL_DOCUMENT"],
+            }
+        ],
+        recommended_rework_targets=["SUPERVISOR"],
+        resolution_reason="근거가 없다고 판단했습니다.",
+    )
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/supervisor_draft/decision", "/supervisor_draft/decision/blocker"],
+)
+def test_provider_does_not_require_evidence_for_a_not_yet_known_blocker(
+    path: str,
+) -> None:
+    client = FakeStructuredClient([missing_evidence_output(path)])
+
+    result = asyncio.run(ReviewTool(client).review(needs_more_info_subject()))
+
+    assert result.verdict == "PASS"
+    assert not result.missing_evidence
+
+
+def test_a_not_yet_known_blocker_that_asserts_a_deadline_still_needs_evidence() -> None:
+    # The exemption is for stating what is unknown. A blocker that slips a
+    # factual claim in alongside is not that, and must still be backed.
+    subject = needs_more_info_subject(
+        blocker_description=(
+            "원상복구 범위가 확인되지 않았습니다. 2026년 12월 31일까지 신고해야 합니다."
+        )
+    )
+    client = FakeStructuredClient(
+        [missing_evidence_output("/supervisor_draft/decision/blocker")] * 2
+    )
+
+    result = asyncio.run(ReviewTool(client).review(subject))
+
+    assert result.verdict == "REVISE"
+
+
+def test_an_action_decision_still_needs_evidence_for_its_blocker() -> None:
+    # Only a NEEDS_MORE_INFO decision is exempt. An ACTION decision tells the
+    # user to go do something, and that has to be supported.
+    client = FakeStructuredClient(
+        [missing_evidence_output("/supervisor_draft/decision/blocker")] * 2
+    )
+
+    result = asyncio.run(ReviewTool(client).review(review_subject()))
+
+    assert result.verdict == "REVISE"
