@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import date, datetime, timezone
 from typing import Annotated, Any, Literal, Protocol
 from uuid import UUID, uuid4
@@ -67,7 +67,22 @@ class StructuredGenerator(Protocol):
 
 
 class InfoAnalysisGuardrailError(GuardrailViolation):
-    """Raised when a syntactically valid model result is not grounded."""
+    """Raised when a syntactically valid model result is not grounded.
+
+    ``rejected_fields`` names the canonical fields a deterministic check turned
+    down, so the bounded retry can say which ones to drop instead of repeating
+    "something was wrong". Only field names travel: a value or a source excerpt
+    would carry the user's own words, and this reaches the provider on retry.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        rejected_fields: Sequence[CaseFieldKey] = (),
+    ) -> None:
+        super().__init__(message)
+        self.rejected_fields = tuple(rejected_fields)
 
 
 # Only BOOLEAN and ENUM fields belong here: the table maps a canonical value
@@ -342,9 +357,30 @@ class InfoAnalysisAgent:
             raise InfoAnalysisGuardrailError(
                 "information-analysis input failed sensitive-data preflight"
             ) from None
+        rejected_fields: tuple[CaseFieldKey, ...] = ()
         for attempt in range(1, self._max_local_attempts + 1):
             messages = info_messages(prompt_input)
             if attempt > 1:
+                if rejected_fields:
+                    # Without this the retry only learns that something was
+                    # rejected, so it proposes the same field again and the
+                    # whole draft is discarded once per attempt.
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                "A deterministic check rejected these fields "
+                                "because the proposed value is not stated in "
+                                "the exact source_text: "
+                                + ", ".join(
+                                    field.value for field in rejected_fields
+                                )
+                                + ". Do not propose them again. If the text "
+                                "only hints at them, leave them out and list "
+                                "them as missing fields instead."
+                            ),
+                        }
+                    )
                 messages.append(
                     {
                         "role": "system",
@@ -395,7 +431,8 @@ class InfoAnalysisAgent:
                     )
                 )
                 return self._materialize(request, draft)
-            except (GuardrailViolation, ValueError):
+            except (GuardrailViolation, ValueError) as exc:
+                rejected_fields = getattr(exc, "rejected_fields", ())
                 continue
         raise InfoAnalysisGuardrailError(
             "information analysis failed deterministic semantic or grounding checks"
@@ -749,7 +786,8 @@ class InfoAnalysisAgent:
                 semantic, input_text=request.input.redacted_text
             ):
                 raise InfoAnalysisGuardrailError(
-                    "fact value is not explicit in its source text"
+                    "fact value is not explicit in its source text",
+                    rejected_fields=(semantic.field_path,),
                 )
             span, evidence = self._ground_text(request, semantic.source_text)
             evidence_by_span[(span.start_offset, span.end_offset)] = evidence
