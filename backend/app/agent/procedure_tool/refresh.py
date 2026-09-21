@@ -73,6 +73,17 @@ _REFRESH_TARGETS: tuple[_RefreshTarget, ...] = (
         required_terms=("폐업",),
         any_terms=("4대보험", "근로자", "직원", "사업장", "국민연금"),
     ),
+    # The step code here is an AI-internal candidate name, like the three
+    # above: the real PROCEDURE_STEP rows do not exist yet, so none of these
+    # is a database identifier. What this target adds is the official text
+    # that restoration scope had none of.
+    _RefreshTarget(
+        record_id="LEASE_RESTORATION_SCOPE",
+        query="임차인 원상회복 의무 임대차 보증금 반환",
+        step_codes=("CONFIRM_RESTORATION_SCOPE",),
+        required_terms=("임차",),
+        any_terms=("원상회복", "원상복구", "임대차", "반환", "보증금"),
+    ),
 )
 
 

@@ -201,6 +201,21 @@ _OFFICIAL_SOURCES: tuple[_OfficialSource, ...] = (
         required_terms=("폐업",),
         any_terms=("4대보험", "근로자", "직원", "사업장", "국민연금"),
     ),
+    # Added 2026-09-21. Same publisher and domain as the two entries above, so
+    # this is not a new egress target. It fills the one gap the procedure notes
+    # named outright: returning the shop is a lease question, and until now no
+    # official text covered it, which left restoration scope with nothing to
+    # cite. Whether a given lease requires full or partial restoration is still
+    # a matter of that contract, and this page does not decide it.
+    _OfficialSource(
+        title="임차인의 권리·의무",
+        url=(
+            "https://www.easylaw.go.kr/CSP/CnpClsMain.laf"
+            "?ccfNo=3&cciNo=2&cnpClsNo=2&csmSeq=627&popMenu=ov"
+        ),
+        required_terms=("임차",),
+        any_terms=("원상회복", "원상복구", "임대차", "반환", "보증금"),
+    ),
 )
 
 
