@@ -70,8 +70,13 @@ class InfoAnalysisGuardrailError(GuardrailViolation):
     """Raised when a syntactically valid model result is not grounded."""
 
 
+# Only BOOLEAN and ENUM fields belong here: the table maps a canonical value
+# to the words that assert it. business_type is neither -- schema_table.md
+# defines it as VARCHAR whose own example is "카페" -- so it previously sat
+# here under a canonical "CAFE" that exists nowhere in the schema. Any value
+# the model proposed then lost to that phantom, and the STRING branch below
+# could never be reached, which made business_type impossible to extract.
 _FACT_VALUE_CUES: dict[tuple[CaseFieldKey, object], tuple[str, ...]] = {
-    (CaseFieldKey.BUSINESS_TYPE, "CAFE"): ("카페", "커피전문점"),
     (CaseFieldKey.FRANCHISE_STATUS, True): ("프랜차이즈", "가맹점"),
     (CaseFieldKey.FRANCHISE_STATUS, False): (
         "비프랜차이즈",
