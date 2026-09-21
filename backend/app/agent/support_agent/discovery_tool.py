@@ -727,13 +727,25 @@ def _optional_bizinfo_url(value: str | None) -> str | None:
 
 
 def _external_metadata_url(value: str | None) -> str | None:
+    """Normalize a third-party application page, fragment and all.
+
+    Unlike the Bizinfo URLs above, this one points at whatever site the issuing
+    agency runs, and several of them are single-page apps whose route lives in
+    the fragment -- 소상공인24 publishes ``https://www.sbiz24.kr/#/pbanc/591``.
+    Dropping the fragment would not make that safer: it would send the user to
+    the site's front page instead of the notice they were promised. Nothing
+    here is ever fetched; it is shown to a person to click.
+    """
+
     plain = _optional_plain_text(value, 4_096)
     if plain is None:
         return None
-    return _absolute_web_url(plain, https_only=False)
+    return _absolute_web_url(plain, https_only=False, allow_fragment=True)
 
 
-def _absolute_web_url(value: str, *, https_only: bool) -> str:
+def _absolute_web_url(
+    value: str, *, https_only: bool, allow_fragment: bool = False
+) -> str:
     if len(value) > 4_096 or any(ord(char) <= 32 or ord(char) == 127 for char in value):
         raise _response_error("BIZINFO_URL_INVALID")
     try:
@@ -747,7 +759,7 @@ def _absolute_web_url(value: str, *, https_only: bool) -> str:
         or not parsed.hostname
         or parsed.username is not None
         or parsed.password is not None
-        or parsed.fragment
+        or (parsed.fragment and not allow_fragment)
         or port not in {None, 80, 443}
     ):
         raise _response_error("BIZINFO_URL_INVALID")
@@ -774,7 +786,8 @@ def _absolute_web_url(value: str, *, https_only: bool) -> str:
     ):
         raise _response_error("BIZINFO_URL_INVALID")
     netloc = hostname if port is None else f"{hostname}:{port}"
-    return urlunsplit((scheme, netloc, parsed.path or "/", parsed.query, ""))
+    fragment = parsed.fragment if allow_fragment else ""
+    return urlunsplit((scheme, netloc, parsed.path or "/", parsed.query, fragment))
 
 
 def _provider_datetime(value: str) -> datetime | None:

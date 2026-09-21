@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import sys
 from collections.abc import Sequence
 from datetime import datetime, timezone
@@ -36,10 +37,22 @@ __all__ = ["main"]
 # Bizinfo matches on hashtags, so these are the terms that actually surface
 # closure support rather than general small-business notices. "점포철거비" is
 # what finds the one-stop closure package the hero case is about.
+#
+# The terms below the first three are not invented: each one is a hashtag the
+# already-collected notices carry in their own API payload. Searching by a tag
+# the notices themselves use is asking the provider in its own vocabulary.
+# Kept as many small sets rather than one wide one, for the reason below.
 _KEYWORD_SETS: tuple[tuple[str, ...], ...] = (
     ("폐업",),
     ("점포철거비",),
     ("폐업", "재창업"),
+    ("사업정리",),
+    ("폐업소상공인",),
+    ("폐업예정소상공인",),
+    ("폐업정리",),
+    ("점포철거",),
+    ("원상복구",),
+    ("희망리턴패키지",),
 )
 # Only notices whose title says so are kept. A hashtag match alone pulls in
 # unrelated notices such as department-store tenancy calls.
@@ -59,6 +72,14 @@ def _parser() -> argparse.ArgumentParser:
         )
     )
     parser.add_argument("--out", required=True, help="path of the catalog draft")
+    parser.add_argument(
+        "--discovery-out",
+        default=None,
+        help=(
+            "new directory to write each keyword set's raw discovery result "
+            "into; these files are what wiki.import_notices reads"
+        ),
+    )
     parser.add_argument(
         "--catalog-version",
         default=None,
@@ -88,9 +109,27 @@ def _load_existing(path: str | None) -> dict[str, ReviewedSupportEntry]:
     return {entry.external_notice_id: entry for entry in snapshot.entries}
 
 
-async def _discover(tool: BizInfoSupportDiscoveryTool) -> dict[str, object]:
+def _write_discovery(directory: Path, index: int, result: object) -> None:
+    """Keep the provider's own answer, so the vault import needs no network.
+
+    Written as a new 0600 file: an existing one is never replaced, because the
+    point of keeping it is that it is the record of one actual call.
+    """
+
+    path = directory / f"discovery-{index:02d}.json"
+    payload = json.dumps(result.model_dump(mode="json"), ensure_ascii=False, indent=2)
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        handle.write(payload + "\n")
+
+
+async def _discover(
+    tool: BizInfoSupportDiscoveryTool,
+    *,
+    discovery_out: Path | None = None,
+) -> dict[str, object]:
     found: dict[str, object] = {}
-    for keywords in _KEYWORD_SETS:
+    for index, keywords in enumerate(_KEYWORD_SETS, start=1):
         try:
             result = await tool.discover(
                 SupportNoticeDiscoveryInput(
@@ -103,6 +142,8 @@ async def _discover(tool: BizInfoSupportDiscoveryTool) -> dict[str, object]:
                 file=sys.stderr,
             )
             continue
+        if discovery_out is not None:
+            _write_discovery(discovery_out, index, result)
         evidence = {item.evidence_id: item for item in result.evidence_records}
         for candidate in result.candidates:
             if not any(term in candidate.title for term in _TITLE_TERMS):
@@ -157,9 +198,14 @@ def _entry(
 async def _build(args: argparse.Namespace) -> tuple[ReviewedSupportSnapshot, int, int]:
     now = datetime.now(timezone.utc)
     existing = _load_existing(args.merge)
+    discovery_out = Path(args.discovery_out) if args.discovery_out else None
+    if discovery_out is not None:
+        # A fresh directory each run, so one call's record is never mixed with
+        # another's or silently extended.
+        discovery_out.mkdir(mode=0o700, parents=True, exist_ok=False)
     tool = BizInfoSupportDiscoveryTool.from_env()
     try:
-        found = await _discover(tool)
+        found = await _discover(tool, discovery_out=discovery_out)
     finally:
         await tool.aclose()
 

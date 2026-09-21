@@ -203,7 +203,14 @@ class SupportNoticeCandidate(SupportNoticeDiscoveryModel):
                 if parsed.hostname != _BIZINFO_HOST:
                     raise ValueError("attachment URLs must use the Bizinfo host")
         if self.application_url is not None:
-            _validated_web_url(self.application_url, https_only=False)
+            # The issuing agency's own site, not Bizinfo. Some are single-page
+            # apps whose route is the fragment (소상공인24 publishes
+            # ``https://www.sbiz24.kr/#/pbanc/591``), so rejecting fragments
+            # here threw away the whole notice. Bizinfo's own URLs above stay
+            # strict: their shape is fixed and we know it.
+            _validated_web_url(
+                self.application_url, https_only=False, allow_fragment=True
+            )
         if (self.attachment_name is None) != (self.attachment_url is None):
             raise ValueError("attachment name and URL must be present together")
         if (self.print_attachment_name is None) != (self.print_attachment_url is None):
@@ -379,7 +386,9 @@ def _validated_keywords(values: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(normalized)
 
 
-def _validated_web_url(value: str, *, https_only: bool) -> str:
+def _validated_web_url(
+    value: str, *, https_only: bool, allow_fragment: bool = False
+) -> str:
     if any(ord(char) <= 32 or ord(char) == 127 for char in value):
         raise ValueError("support discovery URL is invalid")
     try:
@@ -393,7 +402,7 @@ def _validated_web_url(value: str, *, https_only: bool) -> str:
         or not parsed.hostname
         or parsed.username is not None
         or parsed.password is not None
-        or parsed.fragment
+        or (parsed.fragment and not allow_fragment)
         or port not in {None, 80, 443}
     ):
         raise ValueError("support discovery URL is invalid")
