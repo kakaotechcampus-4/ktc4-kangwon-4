@@ -120,7 +120,6 @@ MySQL은 container 설정만 존재한다. migration, transaction과 통합 테�
 - Alembic migration과 transaction
 - Kakao OAuth와 서비스 JWT 인증
 - 실제 Case snapshot adapter, 동시성 제어, 저장과 재조회
-- Redis service와 Redis 사용 코드
 - Compose의 Backend·Agent service
 - 저장소에 없는 `app.main:app` 실행 진입점
 - 아직 결정되지 않은 운영 호스팅과 배포 방식

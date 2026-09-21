@@ -176,6 +176,10 @@ Agent 안에도 민감정보 정규식이 있지만 **그물이지 방벽이 아
   A8의 `support_agent/rag/`에는 미검수 공고의 오프라인 검색이 추가됐습니다. 실제 검수 Wiki·S3 연결은 남아 있습니다. 두 경로가 모두
   운영 중인 것으로 설명하지 않도록 현재 상태를 맞춰야 합니다
 
+- `backend/CLAUDE.md:34` — **Redis를 쓰지 않기로 확정했습니다(2026-09-21).** `config.py`의
+  `redis_url` 필드, `.env`/`.env.example`의 `REDIS_URL`, `docs/tech-stack.md`의 언급을 모두
+  지웠습니다. 저장소 전체에 Redis 참조는 이 한 줄만 남았습니다. "현재 사용처가 없는 선점
+  변수"가 아니라 아예 없으므로 문장을 지워 주세요
 - `backend/CLAUDE.md:44-56` — 없는 디렉토리를 설명합니다:
   `app/shared/{db,models,schemas,functions}`, `app/api/`.
   실제 모델 위치는 `app/be/models/`이며 Wiki reader와 오프라인 검색은 AI 디렉터리에 추가됐습니다
