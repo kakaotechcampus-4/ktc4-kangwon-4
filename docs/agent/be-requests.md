@@ -89,7 +89,7 @@ Agent는 이미 이 방식입니다 — 값은 typed 값이거나 `null`이고, 
 반대 방향의 저장과 명시적 `CLEAR`, NOT NULL 필드의 처리는 BE·FE와 합의가 필요합니다.
 확인되지 않은 값을 `NOT_REQUIRED`나 false로 바꾸지 않습니다.
 
-## 5. `sqlmodel`이 `backend/requirements.txt`에 없습니다
+## 5. (해결) `sqlmodel`이 `backend/requirements.txt`에 없었습니다
 
 `backend/app/be/models/`의 모든 모델이 `from sqlmodel import ...`를 하는데
 requirements 세 파일 어디에도 고정돼 있지 않습니다.
@@ -97,8 +97,8 @@ requirements 세 파일 어디에도 고정돼 있지 않습니다.
 
 (`backend/requirements.txt`는 BE 소유라 직접 고치지 않았습니다. 현재 venv에는 `0.0.42`가 설치돼 있습니다.)
 
-`origin/feature/validator` (`4b34da2`)에는 이미 `sqlmodel==0.0.42`가 추가돼 있습니다.
-새 중복 구현보다 해당 BE 작업의 병합 상태를 확인하면 됩니다.
+**2026-09-21 해결됨.** `origin/develop`(`87367f6`)의 `backend/requirements.txt:10`에
+`sqlmodel==0.0.42`가 있습니다(커밋 `b82d58a`). 더 요청할 것은 없습니다.
 
 ## 6. `procedure_step`에 행을 넣을 방법이 없습니다
 
@@ -148,6 +148,91 @@ Agent 안에도 민감정보 정규식이 있지만 **그물이지 방벽이 아
 - `RedactedInput`을 만드는 BE 구현이 있는지, 없다면 누가 언제 만드는지
 - 무엇을 지우고 무엇을 남기는지(상호·주소·금액·연락처)와 `redactions`의 형식
 - 지우기 전 원문을 어디에 얼마나 두는지 — `CASE_HISTORY.raw_input`과 함께 OD-05에서 정합니다
+
+## 9. Case를 만들 수 없는 두 컬럼 — `lease_status` · `restoration_status`
+
+2026-09-21에 Agent Graph를 실제로 끝까지 돌려 보고 확인했습니다. **지금 스키마로는 Hero
+Scenario Turn 1의 Case를 만들 수 없습니다.** 이건 미정 사항이 아니라 고쳐야 할 것입니다.
+
+### 무엇이 문제인가
+
+| 컬럼 | `schema_table.md` | 실제 DB·모델 | 문제 |
+|---|---|---|---|
+| `lease_status` | NOT NULL, **DEFAULT 없음**, `LEASED_PAID/LEASED_FREE/OWNED` | 같음 | 임대 형태를 모르면 **행을 만들 수 없음** |
+| `restoration_status` | NOT NULL, **DEFAULT `UNKNOWN`**, `UNKNOWN` 포함 5값 | `UNKNOWN` 없음, DEFAULT 없음 | 문서가 지정한 기본값이 **enum에 없음** |
+| (비교) `restoration_scope` | NOT NULL, DEFAULT `UNKNOWN` | `UNKNOWN` 있음, DEFAULT 있음 | 정상 |
+| (비교) `demolition_required` | NOT NULL, DEFAULT `UNKNOWN` | `UNKNOWN` 있음, DEFAULT 있음 | 정상 |
+
+`restoration_scope`와 `demolition_required`는 "아직 모름"을 `UNKNOWN` 기본값으로 이미
+처리하고 있습니다. 같은 성격의 두 컬럼만 빠져 있습니다.
+
+### 왜 Case 생성이 막히는가
+
+Turn 1에서 사용자는 "카페를 접으려고 합니다" 정도만 말합니다. 그 시점에 임대료를 내는지,
+원상복구를 시작했는지는 **아무도 모릅니다.** 그런데 두 컬럼은 NOT NULL이고 넣을 값이 없습니다.
+
+- `lease_status`: enum에 "모름"에 해당하는 값이 아예 없습니다
+- `restoration_status`: `schema_table.md:60`이 "Case 생성 직후 `UNKNOWN`으로 시작"이라고
+  적어 두었는데, 그 `UNKNOWN`이 enum에 없습니다
+
+### 실측 근거
+
+실제 LLM으로 Graph를 돌린 결과입니다(Case 골격은 만든 값, 절차·지원사업 지식은 실제 자료).
+
+- 재계획 시나리오 **4회 전부 `lease_status`에서 막혔습니다.** 안전 실패 결과의
+  `requested_field_paths`가 `['lease_status']`를 가리켰습니다.
+- Case 생성 시나리오에서도 정보분석은 `lease_status`를 **일관되게 미확인으로 남겼습니다.**
+  사용자가 "임대차 계약 기간이 아직 남았는데"라고만 말했고, 유상인지 무상인지는 그 문장에
+  없기 때문입니다. Agent 가드레일이 추정을 막는 것은 의도된 동작입니다.
+
+즉 **사용자가 알려주기 전에는 이 값을 채울 방법이 없고, 채우지 않으면 행을 만들 수 없습니다.**
+
+### 요청
+
+1. **`CASE.restoration_status` enum에 `UNKNOWN`을 추가하고 DEFAULT로 지정해 주세요.**
+   `schema_table.md`가 이미 그렇게 정의하고 있으므로 스키마 변경이 아니라 **구현을 문서에
+   맞추는 일**입니다. 실제 DB와 SQLModel 양쪽 모두 해당합니다.
+
+2. **`CASE.lease_status`를 Case 생성 시점에 어떻게 둘지 정해 주세요.** 이건 `schema_table.md`
+   자체를 바꾸는 일이라 AI가 단독으로 건의만 합니다. 선택지는 둘로 보입니다.
+   - enum에 `UNKNOWN`을 추가하고 DEFAULT로 둔다 — 다른 두 컬럼과 같은 방식이고 일관됩니다
+   - 컬럼을 nullable로 바꾼다 — AI 내부 표현(`status=UNKNOWN, value=null`)과 더 가깝습니다
+
+   어느 쪽이든 **AI가 임의로 `LEASED_PAID`를 채워 넣지는 않습니다.** 사용자가 말하지 않은
+   사실을 만드는 것이고, 루트 `CLAUDE.md`의 "모르는 것을 아는 척하기"에 걸립니다.
+
+3. 두 컬럼이 정해지기 전까지 **Case 생성 API는 이 값들을 필수 입력으로 요구하지 말아
+   주세요.** 요구하면 FE가 사용자에게 "임대료를 내십니까"를 첫 화면에서 물어야 합니다.
+
+### 새 테이블·컬럼을 요청하는 것은 아닙니다
+
+위 2건은 기존 컬럼의 허용값과 기본값 문제입니다. `schema_table.md`에 이미 정의된
+6개 테이블(`EVIDENCE`, `EVIDENCE_LINEAGE`, `CONFLICT_REFERENCE`, `DECISION_RECORD`,
+`CASE_FIELD_HISTORY`, `SUPPORT_MATCH`)은 구현 예정으로 확인했고, `CASE.case_version`은
+구현하지 않기로 확인했습니다(2026-09-21). 그 밖에 새로 만들어 달라고 요청하는 테이블이나
+컬럼은 없습니다.
+
+## 10. AI 쪽에서 이미 닫은 항목 — `to_agent_case_snapshot` 진행 가능
+
+BE `feature/case-service`의 `docs/case-service.md` "열린 이슈 A"가 `to_agent_case_snapshot`을
+막고 있는 이유로 두 가지를 들었고, **둘 다 AI 쪽에서 끝냈습니다.**
+
+| BE가 적은 조건 | 현재 AI 코드 | 상태 |
+|---|---|---|
+| **A-2** `lease_status`가 `ACTIVE/TERMINATION_NOTIFIED/TERMINATED/OWNED`(해지 단계)라 DB의 임대 조건과 다른 사실 | `LEASED_PAID/LEASED_FREE/OWNED` | **해결** — DB와 같은 값 |
+| **A-2** `restoration_scope`가 `AGREEMENT_REQUIRED/TENANT_ALL/LANDLORD_ALL/SHARED/NOT_REQUIRED`(비용 부담자) | `PARTIAL/FULL/NOT_REQUIRED` | **해결** — DB와 같은 값 |
+| **A-3** `entity_type`·`building_use_type`·`previous_support_history`가 DB에 없음 | Case 필드 허용 목록에서 **제거** | **해결** — DB에 컬럼을 만들 필요 없음 |
+
+BE 문서의 "다음에 할 일" 2번이 *"AI 쪽이 `CASE_FIELD_SPECS`를 schema_table.md 기준으로
+갱신하거나 매핑을 승인하면, DB에 없는 3개 필드 처리 방향이 정해지면 1차 구현을 진행한다"*
+였습니다. 그 조건이 충족됐으니 진행하셔도 됩니다.
+
+`restoration_status`에도 스키마에 있는 `NOT_REQUIRED`를 추가했습니다. AI 쪽에 `UNKNOWN`이
+enum 값으로 없는 것은 실수가 아니라 설계입니다 — 미확인은 값이 아니라 상태
+(`status=UNKNOWN, value=null`)로 표현합니다(팀 결정 2026-09-19). 경계 변환은 OD-04입니다.
+
+**주의:** 위 AI 변경은 아직 원격에 올라가 있지 않습니다. `origin/develop`에는 이전 값이
+그대로 있으므로, 원격만 보고 판단하면 여전히 불일치로 보입니다.
 
 ---
 
