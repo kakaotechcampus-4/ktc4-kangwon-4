@@ -261,6 +261,55 @@ enum 값으로 없는 것은 실수가 아니라 설계입니다 — 미확인�
 **주의:** 위 AI 변경은 아직 원격에 올라가 있지 않습니다. `origin/develop`에는 이전 값이
 그대로 있으므로, 원격만 보고 판단하면 여전히 불일치로 보입니다.
 
+## 11. 설정과 환경 파일이 둘로 갈라졌습니다
+
+`origin/develop`(`1f7f9d6`) 기준입니다. 같은 값을 읽는 곳이 두 군데씩 생겼습니다.
+
+| | 루트 | `backend/` |
+|---|---|---|
+| 설정 클래스 | `config.py` (16개 키) | `backend/app/common/config.py` (7개 키) |
+| 예시 파일 | `.env.example` (49개 키) | `backend/.env.example` (7개 키) |
+
+**겹치는 키 5개:** `DATABASE_URL`, `KAKAO_CLIENT_ID`, `KAKAO_CLIENT_SECRET`,
+`KAKAO_REDIRECT_URI`, `JWT_SECRET_KEY`
+
+### 문제 셋
+
+**1. 같은 키의 예시 값이 다릅니다.**
+
+| 키 | 루트 `.env.example` | `backend/.env.example` |
+|---|---|---|
+| `KAKAO_REDIRECT_URI` | `http://localhost:8000/auth/kakao/callback` | `http://localhost:8000/login/callback` |
+
+`backend/app/be/routers/auth.py`에는 `/login/form`과 `/login`만 있고 콜백 경로가 없습니다.
+어느 주소가 맞는지, 그 주소를 FE가 받는지 BE가 받는지 알려 주세요. 카카오 앱 설정에
+등록하는 값이라 틀리면 로그인 자체가 안 됩니다.
+
+**2. `env_file=".env"`가 상대 경로입니다** (`backend/app/common/config.py:7`).
+
+실행 위치에 따라 다른 파일을 읽습니다 — 저장소 루트에서 실행하면 루트 `.env`, `backend/`에서
+실행하면 `backend/.env`입니다. 지금 루트 `.env` 하나에 모든 값이 있고 `backend/.env`는
+없으므로, `backend/`에서 띄우면 `KAKAO_CLIENT_ID` 등이 없어 기동에 실패합니다(기본값이 없는
+필수 필드입니다).
+
+**3. 값이 갈라지면 조용히 어긋납니다.** 한쪽 `.env`만 고치면 다른 쪽은 옛 값을 계속 씁니다.
+같은 `DATABASE_URL`로 AI는 A를, BE는 B를 볼 수 있습니다.
+
+### 요청
+
+- **환경 파일을 하나로 정해 주세요.** 루트 `.env` 하나를 쓰고 `backend/.env.example`을
+  없애거나, `backend/` 하나로 옮기고 루트를 없애는 쪽 중 하나입니다. 어느 쪽이든 AI 쪽
+  실행 경로(`PYTHONPATH=backend python -m app.agent.cli`)가 같은 파일을 읽어야 합니다.
+- 나누기로 한다면 **`env_file`에 절대 경로 또는 저장소 루트 기준 경로**를 쓰고, 겹치는 키 5개를
+  어느 쪽이 소유하는지 정해 주세요.
+- `docker-compose.yml`과 `backend/Dockerfile`이 어느 파일을 읽는지도 함께 맞춰야 합니다.
+
+AI 쪽은 루트 `.env`를 읽습니다(`config.py`, `app.agent.llm`, `procedure_tool`,
+`support_agent` 전부). 옮기기로 하면 AI 코드도 함께 바꾸겠습니다.
+
+**참고:** 루트 `.env`/`.env.example`/`config.py`에서 `REDIS_URL`을 지웠습니다(2026-09-21).
+`backend/` 쪽에는 원래 없으니 되살리지 말아 주세요.
+
 ---
 
 ## 다른 파트에 전달할 것 (AI 소유가 아님)
