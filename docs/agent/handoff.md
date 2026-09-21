@@ -15,9 +15,9 @@ Obsidian 공고 저장·재읽기, 별도 Chroma 색인·검색이다.
 | AI 내부 코드 완료로 분류한 티켓 | **A1·A2·A3·A5**. 실제 Case 전체 실행 성공을 의미하지 않음 |
 | 남은 AI 티켓 | **C4·A4·A6·A7·A8·A9**. 아래 §6의 조건을 충족해야 완료 처리 |
 | 공동 협의 | **C1·C5·C6**. 제안 문서는 있지만 외부 계약·저장 방식 공동 확정은 남음 |
-| 공식 자료 | 절차 문서 3건, 지원공고 7건. 전부 미검수이며 지원사업 서비스 후보는 0건 |
+| 공식 자료 | 2026-09-21 재수집 후 절차 문서 **4건**, 지원공고 **9건**. 전부 미검수이며 서비스 후보는 0건 |
 | A7 | 선택적 Wiki ID·UUID reader 구현. 실제 DB 매핑·사람 검수 후 HIT→비교→Review 확인 필요 |
-| A8 | 미검수 공고 7건·35구간을 실제 임베딩 API로 Chroma 저장·검색. 운영 RAG·S3는 미연결 |
+| A8 | 미검수 공고를 실제 임베딩 API로 Chroma 저장·검색(당시 7건·35구간, 현재 노트는 9건). 운영 RAG·S3는 미연결 |
 | A6 | 2026-09-21에 검수 소진 실패가 `requested_field_paths`를 파생하도록 고침. 외부 실패 응답 형태는 C5 대기 |
 | 되살린 검사 | `pytest -m real_data` **77 passed, 541 deselected**. 합성 Case를 만드는 541개는 멈춰 둠 |
 | 실제 DB의 마지막 관측 | 2026-09-20 20:52 KST: 11개 테이블, 기준 대비 6개 테이블·8개 컬럼 누락. Case·절차·지원사업·Case 이력 0건 |
@@ -89,7 +89,7 @@ git merge-base --is-ancestor develop HEAD
 | A7 | [wiki/](../../backend/app/agent/support_agent/wiki/), [support-wiki.md](./support-wiki.md) | 검수 UUID reader와 미검수 공고 import를 분리. 기존 노트 덮어쓰기·자동 검수 없음 |
 | A8 | [rag/](../../backend/app/agent/support_agent/rag/), [support-retrieval.md](./support-retrieval.md) | 공개 API 필드의 오프라인 검색만. 검수 catalog·Case Graph·S3에는 미연결 |
 | 공식 폐업 절차 | [official-closure-procedure.md](./official-closure-procedure.md) | 공식 출처·조건·미확인 범위. 팀 검수나 DB 시드 발행을 대신하지 않음 |
-| 지식 Vault | [obsidian/README.md](./obsidian/README.md) | `docs/agent/obsidian`을 Vault로 열기. 미검수 7건·검수 완료 0건 |
+| 지식 Vault | [obsidian/README.md](./obsidian/README.md) | `docs/agent/obsidian`을 Vault로 열기. 미검수 9건·검수 완료 0건 |
 | 공동 계약 | [be-integration-requirements.md](./be-integration-requirements.md), [open-decisions.md](./open-decisions.md) | 내부 DTO와 외부 API·저장 계약을 구분. 결정 전 제안을 확정 계약으로 사용하지 않음 |
 
 `support_agent.refresh`가 로컬 수집용으로 부여한 번호·UUID는 BE의 `SUPPORT_ITEM` 식별자가 아니다.

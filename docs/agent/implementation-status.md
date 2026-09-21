@@ -18,8 +18,8 @@
 |---|---|---|
 | Supervisor | 수집된 결과로 Blocker·Next Action 초안, 재작업 | 첫 호출 순서는 Graph 고정. 자율 호출 계획과 Case 전체 완료 판정은 미완료 |
 | 정보분석 | 허용 필드·근거 구간 확인, 불확실성·충돌 후보, 제한된 재시도 | 실제 BE snapshot 입력 연결·통합 검증 필요 |
-| 절차조회 Tool | 메모리에 올린 파일 스냅샷 조회, 출처·검수 상태 보존 | 실제 원문 3건 모두 미검수. DB의 적용 조건·선후 관계·불가 사유 연결 필요 |
-| 지원금 Agent | 주입한 catalog 조건 비교, 선택적 Wiki ID·UUID exact lookup 연결, 근거 없는 자격 확정 차단. 별도 명령에서 미검수 공고 Chroma 검색 확인 | 공고 7건 모두 미검수·조건 미작성. 실제 검수 Wiki·DB 식별자 매핑이 없어 HIT 실행 미검증. 운영 RAG·S3 조회 미연결 |
+| 절차조회 Tool | 메모리에 올린 파일 스냅샷 조회, 출처·검수 상태 보존 | 실제 원문 4건 모두 미검수. DB의 적용 조건·선후 관계·불가 사유 연결 필요 |
+| 지원금 Agent | 주입한 catalog 조건 비교, 선택적 Wiki ID·UUID exact lookup 연결, 근거 없는 자격 확정 차단. 별도 명령에서 미검수 공고 Chroma 검색 확인 | 공고 9건 모두 미검수·조건 미작성. 실제 검수 Wiki·DB 식별자 매핑이 없어 HIT 실행 미검증. 운영 RAG·S3 조회 미연결 |
 | Review Tool | 독립 검수, PASS 증명·digest 확인, 재작업 | 저장 허가·운영 안전성 검증을 대신하지 않음 |
 | 가드레일 | schema·근거 참조·상태·충돌 후보·예산·일부 민감정보 검사. 실제 공식 문장에서 재현한 금액 뒤 조사 탐지 누락 수정 | 개인정보 패턴·더 넓은 표현 검증은 남음(OD-08). BE의 소유권·저장 직전 보호 미연결 |
 | 테이블 저장 | 실제 MySQL 접속 성공, 11개 테이블 확인 | 기준 대비 6개 테이블·8개 컬럼 누락. Case·절차·지원사업·Case 이력 0건. 저장 함수 호출·transaction·rollback·재조회 통합 검증 없음 |
@@ -44,8 +44,8 @@ JSON을 필수로 받고, 미검수 지원사업은 서비스 후보 0건으로 
 | **A4** `[AI]` | **부분 완료** | 검수 상태를 보존하는 절차 스냅샷 조회, 공식 원문 수집 명령. 이번 작업에서 `build_runtime(procedure_store=...)` 주입 지원 | B4의 실제 절차 ID·시드/규칙·출처와 연결. 파일 문서 조회만으로 DB 절차 의존성 조회가 완료된 것은 아님 |
 | **A5** `[AI]` | **구현 완료** | 독립 Review 프롬프트·검수 컨텍스트, PASS 증명·digest 검증, REVISE 대상 재실행. 모든 정상 초안의 검수 강제 | 현재 의미는 최초 검수 + 최대 2회 재작업. 전체 폐업 완료 판단은 별도 coverage가 없어 차단 |
 | **A6** `[AI]` | **부분 완료** | 검수 재작업·호출 예산·deadline 소진 시 검수 전 초안을 버리는 `SAFE_FAILURE`. 실패 시점의 source 결과에서 막혀 있던 Case 필드를 파생해 `requested_field_paths`에 싣고, 재시도가 답이 아닌 실패에서는 `recovery_action_code=RESUBMIT_INPUT`을 낸다. 소진 분기도 마지막 Review 지적과 재작업 대상을 버리지 않는다 | C5의 외부 실패 응답·Output Guardrail과 FE 확인 요청 연결. 파생 결과의 실제 Case 검증은 미수행. 재작업 횟수 표현은 “최초 Review + 수정 후 최대 2회”로 통일함 |
-| **A7** `[AI]` | **부분 완료 · 검수·DB 매핑 필요** | 읽기 전용 Markdown Wiki adapter, 지원사업 ID·UUID exact lookup, SupportAgent/runtime/CLI 선택 연결. 프로젝트 Obsidian Vault와 실제 공식 공고 7건의 미검수 노트 추가 | 실제 사람 검수와 BE 식별자 매핑으로 HIT→비교→Review 확인. 운영 노트 형식·검수 기준 협의. Wiki miss는 PARTIAL로 보존하며 운영 RAG fallback은 미연결 |
-| **A8** `[AI]` | **부분 완료 · 오프라인 검색 확인** | 실제 임베딩 API로 미검수 공고 7건·35구간 색인, Chroma 저장·재검색·공고 필터·원자료 span/hash 대조 | 검수 corpus와 BE 매핑, S3 원문·version·최신성 확인, Wiki miss의 운영 RAG 연결. 현재 Graph는 `rag_used=false` |
+| **A7** `[AI]` | **부분 완료 · 검수·DB 매핑 필요** | 읽기 전용 Markdown Wiki adapter, 지원사업 ID·UUID exact lookup, SupportAgent/runtime/CLI 선택 연결. 프로젝트 Obsidian Vault와 실제 공식 공고의 미검수 노트 추가(2026-09-21 재수집 후 9건) | 실제 사람 검수와 BE 식별자 매핑으로 HIT→비교→Review 확인. 운영 노트 형식·검수 기준 협의. Wiki miss는 PARTIAL로 보존하며 운영 RAG fallback은 미연결 |
+| **A8** `[AI]` | **부분 완료 · 오프라인 검색 확인** | 실제 임베딩 API로 미검수 공고 색인(당시 7건·35구간, 이후 노트는 9건), Chroma 저장·재검색·공고 필터·원자료 span/hash 대조 | 검수 corpus와 BE 매핑, S3 원문·version·최신성 확인, Wiki miss의 운영 RAG 연결. 현재 Graph는 `rag_used=false` |
 | **A9** `[AI]` | **부분 완료** | Info/Support의 반복 상한, 실행 시간·호출 예산, 토큰·지연·상태 trace와 동시 실행 격리. Review verdict와 실행별 판정·반송·실제 시작한 재작업 횟수 기록 추가 | 새 Review 집계의 실제 Case 검증, 반송률·비용 집계, Langfuse 대시보드 |
 
 **AI 코드 기준으로 완료한 번호는 A1·A2·A3·A5다.** 공동 계약과 실제 사용자 Case 연결까지
@@ -113,7 +113,8 @@ timezone이 있는 시각이 더 필요하다. DB에 없는 출처·확인시각
 2. **B7/C4 연결 — BE·AI:** 소유권 확인을 마친 Case를 근거 포함 `CaseSnapshot`으로 변환한다.
    부족한 근거를 임의의 `SYSTEM_RECORD`로 확정 사실처럼 꾸미지 않는다.
 3. **B4/A4 지식 연결 — BE·AI:** 공식 절차 문서를 팀이 검수하고 실제 절차 ID와 적용 조건·선후 관계에 연결한다.
-   현재 절차 원문 3건은 모두 미검수다. 지원공고 7건도 미검수·조건 미작성이라 실제 서비스 항목은 0건이다.
+   2026-09-21 재수집 후 절차 원문은 4건, 지원공고는 9건이며 **전부 미검수**다. 조건도 미작성이라
+   실제 서비스 항목은 0건이다. 원상복구 범위의 공식 근거가 이때 처음 확보됐다.
 4. **C5/B11/A6 — BE·AI:** DB transaction 밖에서 Agent를 실행하고, 결과 검증 후 Case·판단·근거·이력을
    합의된 단위로 저장한다. 실패 시 저장 상태와 외부 응답을 결정한다.
 5. **C6/B12 — BE·AI, 응답 검토 FE:** 서버의 충돌 참조를 검증·소비하고 확인된 입력으로 재계획한다.

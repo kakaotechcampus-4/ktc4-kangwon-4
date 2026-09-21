@@ -156,7 +156,7 @@
 
 | 기존 `step_code` | 이 문서의 관련 내용 | 현재 확보한 절차 스냅샷 |
 |---|---|---|
-| `CONFIRM_RESTORATION_SCOPE` | 임대인과 원상복구 범위 확인 | 해당 공식 원문 레코드 없음 |
+| `CONFIRM_RESTORATION_SCOPE` | 임대인과 원상복구 범위 확인 | `LEASE_RESTORATION_SCOPE` (2026-09-21 추가) |
 | `CHECK_DEMOLITION_SUPPORT` | 철거 전 지원조건 확인 | 지원 카탈로그 경로의 별도 검수 필요 |
 | `FILE_TAX_BUSINESS_CLOSURE` | 사업자등록 폐업신고 | `TAX_BUSINESS_CLOSURE` |
 | `FILE_FOOD_SERVICE_CLOSURE` | 식품영업 폐업신고 | `FOOD_SERVICE_CLOSURE` |
