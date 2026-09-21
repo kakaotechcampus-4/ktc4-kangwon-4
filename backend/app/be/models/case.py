@@ -10,7 +10,7 @@ class Case(TimestampMixin, table=True):
     __tablename__ = "case"
 
     id: int | None = Field(default=None, sa_column=Column(BigInteger, primary_key=True, autoincrement=True))
-    member_id: int = Field(sa_column=Column(BigInteger, ForeignKey("members.id"), nullable=False))
+    member_id: int = Field(sa_column=Column(BigInteger, ForeignKey("members.id"), nullable=False, unique=True))
 
     business_type: str = Field(max_length=50)
     franchise_status: bool = Field(default=False)
