@@ -1,6 +1,8 @@
 # BE에 요청하는 것
 
-> 소유: AI · 기준일: 2026-09-20 · 기준: 현행 `docs/schema/schema_table.md` 및 확인한 BE 브랜치
+> 소유: AI · 기준일: 2026-09-21
+> 데이터 기준은 **`origin/develop`의 `docs/schema/schema_table.md`**입니다. 로컬 사본이나
+> 미병합 브랜치가 아니라 병합된 것을 봅니다(2026-09-21 확인: 로컬과 `origin/develop` 동일).
 >
 > 이 문서의 책임: **Agent가 동작하려면 필요한데 AI가 고칠 수 없는 것**만 모읍니다.
 
@@ -204,7 +206,32 @@ Turn 1에서 사용자는 "카페를 접으려고 합니다" 정도만 말합니
 3. 두 컬럼이 정해지기 전까지 **Case 생성 API는 이 값들을 필수 입력으로 요구하지 말아
    주세요.** 요구하면 FE가 사용자에게 "임대료를 내십니까"를 첫 화면에서 물어야 합니다.
 
-### 새 테이블·컬럼을 요청하는 것은 아닙니다
+### `case_version`을 빼면 다른 세 테이블이 참조 대상을 잃습니다
+
+`CASE.case_version`은 구현하지 않기로 확인했습니다(2026-09-21). 그런데 `origin/develop`의
+`schema_table.md`는 그 컬럼을 여전히 `NOT NULL, DEFAULT 1`로 정의하고, **다른 세 테이블이
+그 값을 NOT NULL로 담도록** 돼 있습니다.
+
+| 테이블 | 컬럼 | 정의 |
+|---|---|---|
+| `CASE_FIELD_HISTORY` | `resulting_case_version` | NOT NULL — "변경 결과로 생성된 `case_version`" |
+| `CONFLICT_REFERENCE` | `case_version` | NOT NULL — "대상 케이스 시점 버전" |
+| `DECISION_RECORD` | `case_version` | NOT NULL — "대상 케이스 시점 버전" |
+
+세 테이블 모두 구현 예정 목록에 있습니다. 구현할 때 이 컬럼에 **무엇을 넣을지** 정해야 합니다.
+원본이 없어지므로 그대로 두면 채울 값이 없습니다. 정리가 필요한 것은 둘입니다.
+
+1. `schema_table.md`에서 `CASE.case_version`을 빼고, 위 세 컬럼도 함께 정리해 주세요.
+   문서와 결정이 어긋난 채로 두면 다음 사람이 다시 같은 질문을 합니다.
+2. 낙관적 동시성 제어(동시 수정 충돌 방지)를 버전 없이 어떻게 할지 정해 주세요. 원래 이
+   컬럼의 용도입니다. AI는 저장하지 않으므로 BE 판단이지만, 충돌 확인(C6) 경로가 이 값을
+   쓰기로 돼 있어 함께 정해야 합니다.
+
+AI 쪽은 `case_version`을 이미 선택 값(`int | None`)으로 다루고 있어 없어도 동작합니다.
+2026-09-21 실제 Graph 실행도 `case_version=null`로 통과했습니다. 다만 AI가 임의의 버전을
+만들어 넣지는 않습니다.
+
+### 그 밖에 새 테이블·컬럼을 요청하는 것은 아닙니다
 
 위 2건은 기존 컬럼의 허용값과 기본값 문제입니다. `schema_table.md`에 이미 정의된
 6개 테이블(`EVIDENCE`, `EVIDENCE_LINEAGE`, `CONFLICT_REFERENCE`, `DECISION_RECORD`,
