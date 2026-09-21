@@ -59,8 +59,13 @@ _KEYWORD_SETS: tuple[tuple[str, ...], ...] = (
 _TITLE_TERMS = ("폐업", "철거", "재기", "재도전", "희망리턴", "사업정리", "점포정리")
 _NAMESPACE = UUID("6ba7b811-9dad-11d1-80b4-00c04fd430c8")
 # Asking for more raises the chance one malformed notice fails strict parsing
-# and takes the whole keyword set with it. Several small sets beat one big one.
-_MAX_PER_KEYWORD = 8
+# and takes the whole keyword set with it, which is why the sets above stay
+# small and specific. But 8 was below what the provider actually holds: on
+# 2026-09-21 it reported 11 notices for 폐업 and 13 for 폐업+재창업, so eight
+# of them were never being fetched. 20 covers today's largest set with room
+# to grow; the adapter's own ceiling is 100. Raise this only against a
+# measured provider_total_count, not on a guess.
+_MAX_PER_KEYWORD = 20
 
 
 def _parser() -> argparse.ArgumentParser:
