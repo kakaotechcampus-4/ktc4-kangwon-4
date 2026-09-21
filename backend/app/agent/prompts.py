@@ -122,7 +122,18 @@ def review_messages(value: BaseModel | dict[str, Any]) -> list[dict[str, str]]:
                 "only. Every ACTION must have exactly one canonical PROCEDURE or "
                 "SUPPORT_PROGRAM target and matching Info finding or Support check, with "
                 "intersecting evidence. Mixed-target actions must not pass.\n"
-                + SAFETY_RULES
+                # Without this, reviewers kept asking the Supervisor to prove a
+                # negative. It cannot, so every rework round was spent and the
+                # user received nothing. Deterministic review applies the same
+                # exemption on the same terms.
+                "One exception to the evidence rule: a NEEDS_MORE_INFO blocker whose "
+                "whole content is that the Case does not yet know something needs no "
+                "evidence. Nothing can show that a fact is unknown -- the Case holding "
+                "it as UNKNOWN is what shows it. Do not raise MISSING_EVIDENCE against "
+                "such a blocker or against the questions that ask for it. The exception "
+                "ends the moment that blocker asserts something of its own: an amount, "
+                "a date, or a legal, tax or eligibility statement is a claim again and "
+                "needs evidence like any other.\n" + SAFETY_RULES
             ),
         },
         {"role": "user", "content": "INPUT_JSON=" + _json_payload(value)},
