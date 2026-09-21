@@ -15,7 +15,8 @@ Agent(=폐업 계획을 만드는 AI 부분) 관련 문서를 모아둔 폴더�
 | **실제 API 호출·MySQL 조회로 확인한 것은 무엇인가** | [`live-verification.md`](./live-verification.md) |
 | **공식 폐업 절차·기관·출처는 무엇인가** | [`official-closure-procedure.md`](./official-closure-procedure.md) |
 | **뭐가 아직 안 정해졌나** | [`open-decisions.md`](./open-decisions.md) |
-| BE에 뭘 요청해야 하나 | [`be-requests.md`](./be-requests.md) |
+| **BE에 넘길 스키마 요청 (테이블·컬럼·enum)** | [`be-schema-request.md`](./be-schema-request.md) |
+| BE에 뭘 요청해야 하나 (배경·논의) | [`be-requests.md`](./be-requests.md) |
 | 절차 정보를 어디서 읽나 | [`procedure-knowledge.md`](./procedure-knowledge.md) |
 | 지원사업 정보를 어디서 읽나 | [`support-knowledge.md`](./support-knowledge.md) |
 | 지원사업 Wiki를 ID·UUID로 연결하는 방법 | [`support-wiki.md`](./support-wiki.md) |

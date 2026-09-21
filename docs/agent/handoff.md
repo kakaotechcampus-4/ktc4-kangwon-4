@@ -91,6 +91,7 @@ git merge-base --is-ancestor develop HEAD
 | A8 | [rag/](../../backend/app/agent/support_agent/rag/), [support-retrieval.md](./support-retrieval.md) | 공개 API 필드의 오프라인 검색만. 검수 catalog·Case Graph·S3에는 미연결 |
 | 공식 폐업 절차 | [official-closure-procedure.md](./official-closure-procedure.md) | 공식 출처·조건·미확인 범위. 팀 검수나 DB 시드 발행을 대신하지 않음 |
 | 지식 Vault | [obsidian/README.md](./obsidian/README.md) | `docs/agent/obsidian`을 Vault로 열기. 미검수 9건·검수 완료 0건 |
+| BE 스키마 요청 | [be-schema-request.md](./be-schema-request.md) |
 | 공동 계약 | [be-integration-requirements.md](./be-integration-requirements.md), [open-decisions.md](./open-decisions.md) | 내부 DTO와 외부 API·저장 계약을 구분. 결정 전 제안을 확정 계약으로 사용하지 않음 |
 
 `support_agent.refresh`가 로컬 수집용으로 부여한 번호·UUID는 BE의 `SUPPORT_ITEM` 식별자가 아니다.

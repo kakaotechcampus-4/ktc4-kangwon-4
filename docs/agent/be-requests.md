@@ -9,6 +9,10 @@
 배경 계약과 논의 항목은 [`be-integration-requirements.md`](./be-integration-requirements.md)에 있습니다.
 여기는 그중 **지금 바로 막고 있는 것**만 짧게 추립니다.
 
+> **BE가 바로 작업할 수 있게 정리한 스키마 요청은 [`be-schema-request.md`](./be-schema-request.md)에
+> 따로 있습니다.** 어떤 테이블의 어떤 컬럼이 왜 필요한지, 각 enum의 값이 무엇을 뜻하는지를
+> 근거와 함께 담았습니다. 이 문서는 그 배경입니다.
+
 **이번 작업은 `schema_table.md`를 변경하지 않습니다.** 과거의 새 출처 컬럼·JSON 컬럼·공용
 테이블 제안은 구현 요청으로 진행하지 않습니다. BE가 만든 코드와 현재 브랜치 반영 상태는
 [`implementation-status.md`](./implementation-status.md) §3에 구분했습니다. 2026-09-20 20:52 KST에
