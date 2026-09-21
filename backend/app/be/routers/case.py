@@ -16,3 +16,12 @@ def create_case(
     session: Session = Depends(get_db),
 ):
     return case_service.create_case(session, member_id, case_request)
+
+
+@router.get("/cases", response_model=CaseResponse | dict)
+def get_case(
+    member_id: int = Depends(get_current_member_id),
+    session: Session = Depends(get_db),
+):
+    case = case_service.get_case(session, member_id)
+    return case if case is not None else {}
