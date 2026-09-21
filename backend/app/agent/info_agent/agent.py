@@ -9,6 +9,15 @@ from datetime import date, datetime, timezone
 from typing import Annotated, Any, Literal, Protocol
 from uuid import UUID, uuid4
 
+from pydantic import (
+    Field,
+    StrictBool,
+    StrictInt,
+    StrictStr,
+    ValidationError,
+    model_validator,
+)
+
 from app.agent.guardrails import (
     GuardrailViolation,
     ensure_no_sensitive_text,
@@ -46,14 +55,6 @@ from app.agent.schemas import (
     Uncertainty,
     VerifiedTextSpan,
     validate_case_field_value,
-)
-from pydantic import (
-    Field,
-    StrictBool,
-    StrictInt,
-    StrictStr,
-    ValidationError,
-    model_validator,
 )
 
 

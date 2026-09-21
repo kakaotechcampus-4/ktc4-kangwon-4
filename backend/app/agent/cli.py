@@ -12,6 +12,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import TextIO
 
+from pydantic import TypeAdapter
+
 from app.agent.llm import LLMClientError, resolve_max_calls_per_run
 from app.agent.runtime import (
     RuntimeLimits,
@@ -24,7 +26,6 @@ from app.agent.support_agent import (
     ReviewedSupportCatalog,
 )
 from app.agent.support_agent.wiki import MarkdownSupportWikiStore
-from pydantic import TypeAdapter
 
 _MAX_INPUT_BYTES = 4 * 1024 * 1024
 

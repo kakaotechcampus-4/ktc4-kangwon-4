@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from typing import Annotated, Any, Literal, Protocol
 from uuid import UUID, uuid4
 
+from pydantic import Field, StrictBool, StrictInt, StrictStr, model_validator
+
 from app.agent.claim_safety import (
     expand_evidence,
     has_confirmation_caveat,
@@ -60,7 +62,6 @@ from app.agent.schemas import (
     SupportMatchStatus,
     SupportMatchUpdateCandidate,
 )
-from pydantic import Field, StrictBool, StrictInt, StrictStr, model_validator
 
 
 class StructuredGenerator(Protocol):

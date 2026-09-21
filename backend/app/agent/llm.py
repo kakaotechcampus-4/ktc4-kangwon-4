@@ -22,9 +22,10 @@ from typing import Any, Self, TypeVar
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
-from app.agent.run_scope import current_deadline
 from dotenv import dotenv_values
 from pydantic import BaseModel, ValidationError
+
+from app.agent.run_scope import current_deadline
 
 ResponseModelT = TypeVar("ResponseModelT", bound=BaseModel)
 SleepCallable = Callable[[float], Awaitable[None]]

@@ -17,11 +17,6 @@ from datetime import datetime
 from typing import Annotated, Any, Final, Literal
 from urllib.parse import parse_qsl, urlsplit
 
-from app.agent.schemas import (
-    EvidenceRecord,
-    FreshnessStatus,
-    NonNegativeStrictInt,
-)
 from pydantic import (
     AwareDatetime,
     BaseModel,
@@ -33,6 +28,12 @@ from pydantic import (
     StringConstraints,
     field_validator,
     model_validator,
+)
+
+from app.agent.schemas import (
+    EvidenceRecord,
+    FreshnessStatus,
+    NonNegativeStrictInt,
 )
 
 _MAX_KEYWORDS = 8

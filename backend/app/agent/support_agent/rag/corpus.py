@@ -10,6 +10,8 @@ import os
 from pathlib import Path
 from typing import Literal, Self
 
+from pydantic import Field, StrictInt, model_validator
+
 from app.agent.guardrails import sha256_digest
 from app.agent.schemas import AgentSchema, Digest, EvidenceRecord, NonEmptyStr
 from app.agent.support_agent.discovery_models import SupportNoticeCandidate
@@ -18,7 +20,6 @@ from app.agent.support_agent.wiki.import_notices import (
     read_discovery_note,
 )
 from app.agent.support_agent.wiki.store import _root_descriptor
-from pydantic import Field, StrictInt, model_validator
 
 PARSER_VERSION = "bizinfo-api-fields-v1"
 MAX_NOTICES = 100

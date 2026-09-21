@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 from uuid import UUID
 
+from pydantic import BaseModel, ValidationError
+
 from app.agent.claim_safety import (
     expand_evidence,
     has_confirmation_caveat,
@@ -47,7 +49,6 @@ from app.agent.schemas import (
     SupportMatchStatus,
     canonical_digest,
 )
-from pydantic import BaseModel, ValidationError
 
 from .models import ReviewModelOutput, ReviewProviderOutput
 

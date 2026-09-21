@@ -19,6 +19,8 @@ from collections.abc import Sequence
 from typing import Protocol
 from uuid import UUID
 
+from pydantic import Field, model_validator
+
 from app.agent.schemas import (
     AgentSchema,
     AwareDatetime,
@@ -35,7 +37,6 @@ from app.agent.support_agent.models import (
     SupportCriterionDefinition,
     SupportRequiredDocumentDefinition,
 )
-from pydantic import Field, model_validator
 
 __all__ = [
     "ReviewedSupportEntry",

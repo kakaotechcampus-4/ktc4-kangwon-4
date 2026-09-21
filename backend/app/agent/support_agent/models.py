@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
 from app.agent.schemas import (
     CaseFieldKey,
     CriterionStatus,
@@ -18,7 +20,6 @@ from app.agent.schemas import (
     Uncertainty,
     UpperSnakeCode,
 )
-from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class SupportCatalogModel(BaseModel):

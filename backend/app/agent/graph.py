@@ -15,6 +15,8 @@ from datetime import date, datetime, timezone
 from typing import Any, Literal, Protocol, cast
 from uuid import UUID, uuid4
 
+from langgraph.graph import END, START, StateGraph
+
 from app.agent.enrichment import build_confirmed_conflict_overlay, build_fact_overlays
 from app.agent.llm import LLMCallBudget, current_call_budget
 from app.agent.run_scope import current_deadline
@@ -58,7 +60,6 @@ from app.agent.tracing import (
     TraceSink,
     UsageAccumulator,
 )
-from langgraph.graph import END, START, StateGraph
 
 
 class InfoRunner(Protocol):

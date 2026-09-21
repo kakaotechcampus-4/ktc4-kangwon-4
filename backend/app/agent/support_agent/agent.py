@@ -11,6 +11,8 @@ from datetime import date, datetime, timezone
 from typing import Any, Literal, Protocol
 from uuid import UUID
 
+from pydantic import BaseModel, ValidationError
+
 from app.agent.guardrails import GuardrailViolation, ensure_no_sensitive_text
 from app.agent.prompts import support_messages
 from app.agent.run_scope import RunDeadlineExceededError, current_deadline
@@ -32,7 +34,6 @@ from app.agent.schemas import (
     SupportSearchSummary,
     Uncertainty,
 )
-from pydantic import BaseModel, ValidationError
 
 from .models import (
     CatalogSourcedText,

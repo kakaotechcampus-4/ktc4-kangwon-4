@@ -22,6 +22,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from dotenv import dotenv_values
+
 from app.agent.graph import AgentGraph
 from app.agent.info_agent import InfoAnalysisAgent
 from app.agent.llm import (
@@ -54,7 +56,6 @@ from app.agent.tracing import (
     UsageAccumulator,
     usage_scope,
 )
-from dotenv import dotenv_values
 
 __all__ = ["AgentRuntime", "RuntimeLimits", "build_runtime"]
 

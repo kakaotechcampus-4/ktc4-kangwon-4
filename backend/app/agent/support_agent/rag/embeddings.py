@@ -19,8 +19,9 @@ from typing import Any, Self
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
-from app.agent.guardrails import GuardrailViolation, ensure_no_sensitive_text
 from dotenv import dotenv_values
+
+from app.agent.guardrails import GuardrailViolation, ensure_no_sensitive_text
 
 _TIMEOUT_SECONDS = 20.0
 _MAX_RESPONSE_BYTES = 4 * 1024 * 1024

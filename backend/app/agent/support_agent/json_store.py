@@ -12,12 +12,13 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Self
 
+from dotenv import dotenv_values
+from pydantic import ValidationError
+
 from app.agent.support_agent.store import (
     ReviewedSupportSnapshot,
     SupportStoreError,
 )
-from dotenv import dotenv_values
-from pydantic import ValidationError
 
 __all__ = ["DEFAULT_CATALOG_PATH", "JsonFileSupportStore"]
 
