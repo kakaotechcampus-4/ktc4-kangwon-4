@@ -85,6 +85,21 @@ class InfoAnalysisGuardrailError(GuardrailViolation):
         self.rejected_fields = tuple(rejected_fields)
 
 
+def _with_particles(prefix: str, suffix: str) -> tuple[str, ...]:
+    """Same assertion, different Korean particle.
+
+    "원상복구 범위는 일부", "범위가 일부", "범위를 일부로" all assert the same
+    scope; only the particle moves. Listing one form and missing the others
+    rejected a user who said it the second way. The particle set is explicit
+    rather than a wildcard so an unrelated sentence cannot slip through.
+    """
+
+    return tuple(
+        f"{prefix}{particle}{suffix}"
+        for particle in ("은", "는", "이", "가", "을", "를", "")
+    )
+
+
 # Only BOOLEAN and ENUM fields belong here: the table maps a canonical value
 # to the words that assert it. business_type is neither -- schema_table.md
 # defines it as VARCHAR whose own example is "카페" -- so it previously sat
@@ -131,14 +146,14 @@ _FACT_VALUE_CUES: dict[tuple[CaseFieldKey, object], tuple[str, ...]] = {
         "원상복구필요없",
     ),
     (CaseFieldKey.RESTORATION_SCOPE, "PARTIAL"): (
-        "원상복구범위는일부",
-        "원상복구범위가일부",
+        *_with_particles("원상복구범위", "일부"),
+        *_with_particles("원상복구", "일부"),
         "부분원상복구",
         "일부만원상복구",
     ),
     (CaseFieldKey.RESTORATION_SCOPE, "FULL"): (
-        "원상복구범위는전체",
-        "원상복구범위가전체",
+        *_with_particles("원상복구범위", "전체"),
+        *_with_particles("원상복구", "전체"),
         "전체원상복구",
         "전면원상복구",
     ),
