@@ -11,7 +11,9 @@
 
 ## 0. 서비스 전체가 완료됐는가
 
-**아니다. 현재는 standalone Agent 코어이며 실제 Case API → Agent → DB 저장 → 재조회는 미연결이다.**
+**아니다. 실제 Case API → Agent → DB 저장 → 재조회는 여전히 미연결이다.**
+2026-09-21에 Graph 전체 경로는 처음으로 끝까지 돌아 `REVIEWED_PLAN`을 냈지만, Case 골격과
+사용자 발화는 만든 값이었고 저장은 하지 않았다. 상세는 [`live-verification.md`](./live-verification.md) §13.
 아래의 코드·테스트 존재는 실제 사용자 판단 품질이나 운영 저장 성공을 보장하지 않는다.
 
 | 구성요소 | 확인된 현재 동작 | 미완료·검증 한계 |
@@ -43,7 +45,7 @@ JSON을 필수로 받고, 미검수 지원사업은 서비스 후보 0건으로 
 | **A3** `[AI]` | **AI 내부 구현 완료** | `info_agent/agent.py`: exact source span, 필드 허용 목록, 불명확한 사실 확인, 제한된 재시도. 이번 작업에서 DB와 다른 필드·값 제거 | 실제 BE snapshot 입력은 C1/B7 연결 이후 검증 |
 | **A4** `[AI]` | **부분 완료** | 검수 상태를 보존하는 절차 스냅샷 조회, 공식 원문 수집 명령. 이번 작업에서 `build_runtime(procedure_store=...)` 주입 지원 | B4의 실제 절차 ID·시드/규칙·출처와 연결. 파일 문서 조회만으로 DB 절차 의존성 조회가 완료된 것은 아님 |
 | **A5** `[AI]` | **구현 완료** | 독립 Review 프롬프트·검수 컨텍스트, PASS 증명·digest 검증, REVISE 대상 재실행. 모든 정상 초안의 검수 강제 | 현재 의미는 최초 검수 + 최대 2회 재작업. 전체 폐업 완료 판단은 별도 coverage가 없어 차단 |
-| **A6** `[AI]` | **부분 완료** | 검수 재작업·호출 예산·deadline 소진 시 검수 전 초안을 버리는 `SAFE_FAILURE`. 실패 시점의 source 결과에서 막혀 있던 Case 필드를 파생해 `requested_field_paths`에 싣고, 재시도가 답이 아닌 실패에서는 `recovery_action_code=RESUBMIT_INPUT`을 낸다. 소진 분기도 마지막 Review 지적과 재작업 대상을 버리지 않는다 | C5의 외부 실패 응답·Output Guardrail과 FE 확인 요청 연결. 파생 결과의 실제 Case 검증은 미수행. 재작업 횟수 표현은 “최초 Review + 수정 후 최대 2회”로 통일함 |
+| **A6** `[AI]` | **부분 완료** | 검수 재작업·호출 예산·deadline 소진 시 검수 전 초안을 버리는 `SAFE_FAILURE`. 실패 시점의 source 결과에서 막혀 있던 Case 필드를 파생해 `requested_field_paths`에 싣고, 재시도가 답이 아닌 실패에서는 `recovery_action_code=RESUBMIT_INPUT`을 낸다. 소진 분기도 마지막 Review 지적과 재작업 대상을 버리지 않는다 | C5의 외부 실패 응답·Output Guardrail과 FE 확인 요청 연결. 파생 결과는 2026-09-21 실제 Graph 실행에서 확인함(`RESUBMIT_INPUT` + 필드 4개). 재작업 횟수 표현은 “최초 Review + 수정 후 최대 2회”로 통일함 |
 | **A7** `[AI]` | **부분 완료 · 검수·DB 매핑 필요** | 읽기 전용 Markdown Wiki adapter, 지원사업 ID·UUID exact lookup, SupportAgent/runtime/CLI 선택 연결. 프로젝트 Obsidian Vault와 실제 공식 공고의 미검수 노트 추가(2026-09-21 재수집 후 9건) | 실제 사람 검수와 BE 식별자 매핑으로 HIT→비교→Review 확인. 운영 노트 형식·검수 기준 협의. Wiki miss는 PARTIAL로 보존하며 운영 RAG fallback은 미연결 |
 | **A8** `[AI]` | **부분 완료 · 오프라인 검색 확인** | 실제 임베딩 API로 미검수 공고 색인(당시 7건·35구간, 이후 노트는 9건), Chroma 저장·재검색·공고 필터·원자료 span/hash 대조 | 검수 corpus와 BE 매핑, S3 원문·version·최신성 확인, Wiki miss의 운영 RAG 연결. 현재 Graph는 `rag_used=false` |
 | **A9** `[AI]` | **부분 완료** | Info/Support의 반복 상한, 실행 시간·호출 예산, 토큰·지연·상태 trace와 동시 실행 격리. Review verdict와 실행별 판정·반송·실제 시작한 재작업 횟수 기록 추가 | 새 Review 집계의 실제 Case 검증, 반송률·비용 집계, Langfuse 대시보드 |

@@ -20,6 +20,7 @@ Obsidian 공고 저장·재읽기, 별도 Chroma 색인·검색이다.
 | A8 | 미검수 공고를 실제 임베딩 API로 Chroma 저장·검색(당시 7건·35구간, 현재 노트는 9건). 운영 RAG·S3는 미연결 |
 | A6 | 2026-09-21에 검수 소진 실패가 `requested_field_paths`를 파생하도록 고침. 외부 실패 응답 형태는 C5 대기 |
 | 되살린 검사 | `pytest -m real_data` **77 passed, 541 deselected**. 합성 Case를 만드는 541개는 멈춰 둠 |
+| Graph 전체 실행 | 2026-09-21 첫 성공(`REVIEWED_PLAN`). 수정 후 4회 중 3회. Case 골격·발화는 만든 값이며 저장은 없음 |
 | 실제 DB의 마지막 관측 | 2026-09-20 20:52 KST: 11개 테이블, 기준 대비 6개 테이블·8개 컬럼 누락. Case·절차·지원사업·Case 이력 0건 |
 
 티켓별 완료 조건은 [implementation-status.md](./implementation-status.md), 실측과 실패 기록은
