@@ -1,11 +1,12 @@
 from datetime import datetime
 
 from sqlalchemy import BigInteger, Column, DateTime, Enum, ForeignKey, String
-from sqlalchemy.sql import func
-from sqlmodel import Field, Relationship, SQLModel
+from sqlmodel import Field, Relationship
+
+from app.be.models.mixins import TimestampMixin
 
 
-class Blocker(SQLModel, table=True):
+class Blocker(TimestampMixin, table=True):
     __tablename__ = "blocker"
 
     id: int | None = Field(default=None, sa_column=Column(BigInteger, primary_key=True, autoincrement=True))
@@ -29,10 +30,6 @@ class Blocker(SQLModel, table=True):
         sa_column=Column(Enum("ACTIVE", "RESOLVED", name="blocker_status_enum"), server_default="ACTIVE"),
     )
 
-    created_at: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, server_default=func.now(), nullable=False))
-    updated_at: datetime | None = Field(
-        default=None, sa_column=Column(DateTime, server_default=func.now(), onupdate=func.now())
-    )
     resolved_at: datetime | None = Field(default=None, sa_column=Column(DateTime, nullable=True))
 
     case: "Case" = Relationship(back_populates="blockers")
