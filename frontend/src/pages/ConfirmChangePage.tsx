@@ -17,7 +17,7 @@ import type { ConfirmView, ConflictSide } from '../types/view'
  * 그래서 한 항목이라도 고르지 않으면 진행할 수 없게 한다.
  */
 export function ConfirmChangePage() {
-  const { state } = useLocation()
+  const { search, state } = useLocation()
   const navigate = useNavigate()
 
   const view = (state as ConfirmView | null) ?? (MOCK_SWITCH_ENABLED ? conflictConfirm : null)
@@ -41,10 +41,10 @@ export function ConfirmChangePage() {
     }
   }, [])
 
-  if (!view) return <Navigate to="/" replace />
+  if (!view) return <Navigate to={{ pathname: '/', search }} replace />
   // 고를 것이 없으면 이 화면의 존재 이유가 없다. 서버가 빈 목록을 보내도 막다른 골목이
   // 되지 않게 현재 Case로 돌린다.
-  if (view.conflicts.length === 0) return <Navigate to="/" replace />
+  if (view.conflicts.length === 0) return <Navigate to={{ pathname: '/', search }} replace />
 
   const { rawInput, conflicts } = view
   const allDecided = conflicts.every((conflict) => choices[conflict.key])
@@ -67,7 +67,7 @@ export function ConfirmChangePage() {
     // 이미 해결한 충돌 화면으로 뒤로 돌아가 같은 결정을 다시 제출하는 일을 막는다.
     // 히스토리에서 이 항목을 지우는 것이라 확인을 마친 경우에만 해당한다 —
     // 아직 고르지 않고 떠난 충돌은 그대로 남아 다시 들어올 수 있다.
-    navigate('/replan', { state: replan, replace: true })
+    navigate({ pathname: '/replan', search }, { state: replan, replace: true })
   }
 
   return (

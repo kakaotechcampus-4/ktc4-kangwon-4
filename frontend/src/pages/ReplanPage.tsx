@@ -40,7 +40,7 @@ export function ReplanPage() {
       : null
   const view = (state as ReplanView | null) ?? fallback
 
-  if (!view) return <Navigate to="/" replace />
+  if (!view) return <Navigate to={{ pathname: '/', search }} replace />
 
   const { changes, blocker, nextAction } = view
 

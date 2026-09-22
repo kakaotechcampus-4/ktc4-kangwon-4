@@ -21,7 +21,7 @@ export function LoginPage() {
 
   // 이미 로그인한 사용자에게 로그인 버튼을 다시 보여줄 이유가 없다.
   // 뒤로가기로는 닿을 수 없고 주소를 직접 열었을 때만 생기는 경로다
-  if (isLoggedIn(search)) return <Navigate to="/" replace />
+  if (isLoggedIn(search)) return <Navigate to={{ pathname: '/', search }} replace />
 
   function handleLogin() {
     logIn()

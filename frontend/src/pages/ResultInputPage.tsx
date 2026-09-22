@@ -48,7 +48,7 @@ export function ResultInputPage() {
   const isPending = state.kind === 'PENDING'
   const canRetry = text.trim().length > 0
 
-  if (!nextAction) return <Navigate to="/" replace />
+  if (!nextAction) return <Navigate to={{ pathname: '/', search }} replace />
 
   async function handleSubmit() {
     // "다시 시도" 버튼도 이 함수를 부른다. 폼에만 검증을 두면 그 경로로 빈 입력이 나간다
@@ -72,10 +72,10 @@ export function ResultInputPage() {
 
     switch (outcome.kind) {
       case 'REPLAN':
-        navigate('/replan', { state: outcome.view })
+        navigate({ pathname: '/replan', search }, { state: outcome.view })
         return
       case 'CONFIRM':
-        navigate('/confirm', { state: outcome.view })
+        navigate({ pathname: '/confirm', search }, { state: outcome.view })
         return
       case 'STAY':
         setState(outcome.state)
