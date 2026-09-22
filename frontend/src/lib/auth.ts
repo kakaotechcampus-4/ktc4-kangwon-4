@@ -1,3 +1,6 @@
+import { readMockKey } from './mockSwitch'
+import { createSessionFlag } from './sessionFlag'
+
 /**
  * 로그인 상태.
  *
@@ -9,41 +12,21 @@
  * 보관하고, 보호된 요청마다 `Access-Token` 헤더로 실어 보낸다. 보관 위치·만료 처리·
  * `POST /reissue` 재발급 시점은 아직 정해지지 않았다.
  */
-
-const STORAGE_KEY = 'reborn:logged-in'
-
-/**
- * sessionStorage를 쓸 수 없는 환경(사생활 보호 모드, 저장소 차단)의 대체 저장소.
- *
- * 이 경우 새로고침하면 로그인이 풀리지만, 화면이 아예 멈추는 것보다는 낫다.
- */
-let fallback = false
+const flag = createSessionFlag('reborn:logged-in')
 
 /**
- * sessionStorage를 쓰는 이유는 탭을 닫으면 같이 끝나기 때문이다.
- * 공용 PC에서 쓰는 사용자가 있을 수 있어 브라우저를 껐다 켜도 남아 있게 두지 않는다.
+ * `search`를 반드시 받는다. `?mock=logged-out` 처리를 호출부가 빼먹으면 화면마다
+ * 다른 답이 나오는데, 인자로 요구하면 빼먹을 수가 없다.
  */
-export function isLoggedIn(): boolean {
-  try {
-    return window.sessionStorage.getItem(STORAGE_KEY) === 'true'
-  } catch {
-    return fallback
-  }
+export function isLoggedIn(search: string): boolean {
+  if (readMockKey(search) === 'logged-out') return false
+  return flag.read()
 }
 
 export function logIn(): void {
-  write(true)
+  flag.write(true)
 }
 
 export function logOut(): void {
-  write(false)
-}
-
-function write(value: boolean): void {
-  fallback = value
-  try {
-    window.sessionStorage.setItem(STORAGE_KEY, String(value))
-  } catch {
-    // 대체 저장소에 이미 담았다
-  }
+  flag.write(false)
 }

@@ -1,6 +1,6 @@
 import { Navigate, useLocation } from 'react-router'
 
-import { readMockKey } from '../lib/mockSwitch'
+import { hasCase } from '../lib/caseState'
 
 /**
  * 진입 분기. 화면이 없고 보낼 곳만 정한다.
@@ -17,11 +17,8 @@ import { readMockKey } from '../lib/mockSwitch'
 export function EntryPage() {
   const { search } = useLocation()
 
-  /**
-   * TODO(API): `GET /cases` 응답의 `case`가 `null`인지로 판단한다.
-   * 지금은 즉시 끝나지만 연동하면 응답을 기다리는 로딩 상태가 생긴다.
-   */
-  const hasCase = readMockKey(search) !== 'no-case'
+  // TODO(API): 연동하면 `GET /cases` 응답을 기다리는 로딩 상태가 생긴다
+  const next = hasCase(search) ? '/case' : '/start'
 
-  return <Navigate to={{ pathname: hasCase ? '/case' : '/start', search }} replace />
+  return <Navigate to={{ pathname: next, search }} replace />
 }

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router'
 
 import { AppShell } from '../components/AppShell'
 import { CaseCreateForm } from '../components/CaseCreateForm'
+import { markCaseCreated } from '../lib/caseState'
 import type { CaseDraft } from '../types/view'
 
 const EMPTY_DRAFT: CaseDraft = {
@@ -36,6 +37,7 @@ export function CaseCreatePage() {
      * 이미 Case가 있으면 409가 오는데, 그때도 `/case`로 보내면 된다.
      * 두 탭에서 동시에 만들거나 뒤로가기로 폼에 되돌아온 경우다.
      */
+    markCaseCreated()
     navigate('/case', { replace: true })
   }
 
