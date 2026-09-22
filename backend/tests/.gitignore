@@ -1,0 +1,3 @@
+# Agent development checks and their local pytest bootstrap.
+/agent/
+/conftest.py

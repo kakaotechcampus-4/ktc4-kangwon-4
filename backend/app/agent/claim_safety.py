@@ -65,18 +65,14 @@ _SUPPORT_ACTION_CONTEXT_PATTERN = re.compile(
 )
 
 
-def required_sources_for_claim(
-    claim_type: ClaimType,
-) -> frozenset[EvidenceSourceType]:
-    """Return the Review-authoritative source allowlist for a claim type."""
-
-    official = frozenset(
-        {
-            EvidenceSourceType.OFFICIAL_DOCUMENT,
-            EvidenceSourceType.OFFICIAL_API,
-        }
-    )
-    return official
+# Every claim type Review can authorise needs an official source; there is no
+# per-type allowlist to configure.
+REQUIRED_CLAIM_SOURCES = frozenset(
+    {
+        EvidenceSourceType.OFFICIAL_DOCUMENT,
+        EvidenceSourceType.OFFICIAL_API,
+    }
+)
 
 
 def high_risk_metadata(
@@ -208,6 +204,7 @@ def expand_evidence(
 
 
 __all__ = [
+    "REQUIRED_CLAIM_SOURCES",
     "expand_evidence",
     "has_confirmation_caveat",
     "has_explicit_eligibility_language",
@@ -216,5 +213,4 @@ __all__ = [
     "high_risk_metadata",
     "is_overconfident",
     "references_other_known_label",
-    "required_sources_for_claim",
 ]

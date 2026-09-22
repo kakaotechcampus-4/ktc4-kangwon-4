@@ -1,9 +1,8 @@
-"""Strict Agent/Tool contracts for the standalone RE:BORN runtime.
+"""Strict Agent/Tool contracts aligned with docs/schema/schema_table.md.
 
-The models in this module are the executable, conservative subset of
-``docs/agent/tool-io-schema.md`` needed to execute one complete planning run.
-They deliberately keep BE persistence and HTTP response DTOs out of the Agent
-package.
+These models are the contract itself, not a restatement of one: the validators
+here are what a planning run must satisfy. They deliberately keep BE persistence
+and HTTP response DTOs out of the Agent package.
 
 Values described as runtime-injected are never trusted when proposed by an
 LLM.  Callers must construct them after validating the semantic LLM payload.
@@ -17,7 +16,7 @@ import json
 import re
 from datetime import date, datetime, timezone
 from enum import Enum
-from typing import Annotated, Any, Generic, Literal, TypeAlias, TypeVar
+from typing import Annotated, Any, Literal, TypeAlias
 from urllib.parse import urlsplit
 from uuid import UUID
 
@@ -186,7 +185,13 @@ CASE_FIELD_SPECS: dict[CaseFieldKey, tuple[FactValueType, frozenset[str] | None]
     CaseFieldKey.PLANNED_CLOSURE_DATE: (FactValueType.DATE, None),
 }
 
-SIMULATION_CONFLICT_REF_PREFIX = "standalone:"
+REQUIRED_CASE_FIELDS = frozenset(
+    {
+        CaseFieldKey.BUSINESS_TYPE,
+        CaseFieldKey.FRANCHISE_STATUS,
+        CaseFieldKey.LEASE_STATUS,
+    }
+)
 
 
 def validate_case_field_value(
@@ -196,7 +201,7 @@ def validate_case_field_value(
     *,
     allow_null: bool,
 ) -> None:
-    """Validate a fact against the standalone canonical field registry.
+    """Validate a fact against the canonical Case field registry.
 
     ``UNKNOWN`` is represented by the surrounding status and a null value.  It
     is never accepted as a confirmed enum value.
@@ -208,7 +213,7 @@ def validate_case_field_value(
             f"{field_path.value} requires value_type={expected_type.value}"
         )
     if value is None:
-        if allow_null:
+        if allow_null and field_path not in REQUIRED_CASE_FIELDS:
             return
         raise ValueError(f"{field_path.value} requires a non-null value")
 
@@ -242,6 +247,18 @@ def _is_iso_date(value: str) -> bool:
     return True
 
 
+def validate_restoration_state(statuses: dict[CaseFieldKey, FactStatus]) -> None:
+    """A restoration status can be confirmed only after its scope is known."""
+
+    if (
+        statuses.get(CaseFieldKey.RESTORATION_STATUS) == FactStatus.CONFIRMED
+        and statuses.get(CaseFieldKey.RESTORATION_SCOPE) != FactStatus.CONFIRMED
+    ):
+        raise ValueError(
+            "confirmed restoration_status requires confirmed restoration_scope"
+        )
+
+
 def _ensure_unique(values: list[Any], key: Any, label: str) -> None:
     seen: set[Any] = set()
     for value in values:
@@ -263,60 +280,13 @@ class InvocationMeta(AgentSchema):
     trace_id: NonEmptyStr | None
 
 
-T = TypeVar("T")
-
-
-class ComponentRequest(AgentSchema, Generic[T]):
-    meta: InvocationMeta
-    input: T
-
-
-class ComponentWarning(AgentSchema):
-    code: UpperSnakeCode
-    message: NonEmptyStr
-    target_path: JsonPointer | None
-
-
-class ComponentErrorCode(StrEnum):
-    INVALID_INPUT = "INVALID_INPUT"
-    SCHEMA_VALIDATION_FAILED = "SCHEMA_VALIDATION_FAILED"
-    SNAPSHOT_UNAVAILABLE = "SNAPSHOT_UNAVAILABLE"
-    SOURCE_UNAVAILABLE = "SOURCE_UNAVAILABLE"
-    TIMEOUT = "TIMEOUT"
-    RATE_LIMITED = "RATE_LIMITED"
-    UPSTREAM_ERROR = "UPSTREAM_ERROR"
-    LOOP_LIMIT_REACHED = "LOOP_LIMIT_REACHED"
-    INTERNAL_ERROR = "INTERNAL_ERROR"
-
-
-class ComponentError(AgentSchema):
-    code: ComponentErrorCode
-    message_code: UpperSnakeCode
-    retryable: StrictBool
-    failed_dependency: NonEmptyStr | None
-    retry_after_ms: NonNegativeStrictInt | None
-
-
-class ComponentSuccess(AgentSchema, Generic[T]):
-    execution_status: Literal["SUCCESS"]
-    meta: InvocationMeta
-    output: T
-    warnings: list[ComponentWarning]
-
-
-class ComponentFailure(AgentSchema):
-    execution_status: Literal["ERROR"]
-    meta: InvocationMeta
-    error: ComponentError
-
-
 class EvidenceRecord(AgentSchema):
     evidence_id: NonEmptyStr
     source_type: EvidenceSourceType
     source_ref: NonEmptyStr
     source_version: NonEmptyStr | None
-    locator: NonEmptyStr
-    excerpt: NonEmptyStr
+    locator: NonEmptyStr | None
+    excerpt: NonEmptyStr | None
     parent_evidence_refs: list[NonEmptyStr]
     published_at: AwareDatetime | None
     retrieved_at: RuntimeDateTime
@@ -387,8 +357,7 @@ class ProcedureProgress(AgentSchema):
 class CaseSnapshot(AgentSchema):
     snapshot_id: RuntimeUUID
     case_id: PositiveStrictInt
-    case_version: PositiveStrictInt | None
-    case_status: CaseStatus
+    case_status: Literal[CaseStatus.IN_PROGRESS]
     facts: list[CaseFact]
     procedure_progress: list[ProcedureProgress]
     evidence_records: list[EvidenceRecord]
@@ -397,6 +366,15 @@ class CaseSnapshot(AgentSchema):
     @model_validator(mode="after")
     def validate_snapshot_integrity(self) -> CaseSnapshot:
         _ensure_unique(self.facts, lambda item: item.field_path, "fact field_path")
+        statuses = {item.field_path: item.status for item in self.facts}
+        if any(
+            statuses.get(field) != FactStatus.CONFIRMED
+            for field in REQUIRED_CASE_FIELDS
+        ):
+            raise ValueError(
+                "snapshot requires confirmed business_type, franchise_status and lease_status"
+            )
+        validate_restoration_state(statuses)
         _ensure_unique(
             self.procedure_progress,
             lambda item: item.procedure_step.procedure_step_id,
@@ -588,13 +566,45 @@ class PlanningContext(AgentSchema):
         _ensure_unique(
             self.fact_overlays, lambda item: item.field_path, "overlay field_path"
         )
+        validate_restoration_state(
+            {
+                **{item.field_path: item.status for item in self.case_snapshot.facts},
+                **{
+                    item.field_path: item.proposed_status for item in self.fact_overlays
+                },
+            }
+        )
         return self
+
+
+class ProcedureDependency(AgentSchema):
+    prerequisite_procedure_step_id: PositiveStrictInt
+    dependency_type: NonEmptyStr
+
+
+class ProcedureEligibility(AgentSchema):
+    condition_key: NonEmptyStr
+    condition_value: NonEmptyStr
 
 
 class KnownProcedureStep(AgentSchema):
     procedure_step: ProcedureStepRef
     step_name: NonEmptyStr
     utterance_aliases: list[NonEmptyStr]
+    registry_version: NonEmptyStr
+    applicable_business_type: NonEmptyStr
+    deprecated_at: AwareDatetime | None
+    dependencies: list[ProcedureDependency]
+    eligibility_conditions: list[ProcedureEligibility]
+
+
+def validate_procedure_registry(steps: list[KnownProcedureStep]) -> None:
+    _ensure_unique(
+        steps, lambda item: item.procedure_step.procedure_step_id, "procedure_step_id"
+    )
+    _ensure_unique(
+        steps, lambda item: item.procedure_step.step_code, "procedure step_code"
+    )
 
 
 class InfoCompletionStatus(StrEnum):
@@ -656,16 +666,14 @@ class ConflictCandidate(AgentSchema):
         NonEmptyStr,
         Field(
             description=(
-                "BE-issued conflict reference. Values beginning with 'standalone:' "
-                "are simulation-only and must never be persisted or accepted by a "
-                "production confirmation endpoint."
+                "Opaque runtime-generated conflict reference. BE must persist its "
+                "Case, ownership and expiry binding before exposing it."
             )
         ),
     ]
     conflict_digest: Digest
     candidate_id: RuntimeUUID
     snapshot_id: RuntimeUUID
-    case_version: PositiveStrictInt | None
     field_path: CaseFieldKey
     committed_status: Literal[FactStatus.CONFIRMED]
     committed_value: NonNullStrictScalar
@@ -700,33 +708,20 @@ class ConflictCandidate(AgentSchema):
             self.proposed_value,
             allow_null=self.proposed_operation == FactOperation.CLEAR,
         )
-        if self.conflict_ref.startswith(
-            SIMULATION_CONFLICT_REF_PREFIX
-        ) and not re.fullmatch(
-            rf"{re.escape(SIMULATION_CONFLICT_REF_PREFIX)}[0-9a-f]{{24}}",
-            self.conflict_ref,
-        ):
-            raise ValueError(
-                "standalone conflict_ref must contain a 24-hex digest suffix"
-            )
         self.assert_integrity()
         return self
 
     def calculate_digest(self) -> str:
-        """Digest all conflict content except the server/simulation reference."""
+        """Digest conflict content independently of its persisted lookup reference."""
 
         return canonical_digest(
             self,
             exclude={"conflict_ref", "conflict_digest"},
         )
 
-    @property
-    def is_simulation_only(self) -> bool:
-        return self.conflict_ref.startswith(SIMULATION_CONFLICT_REF_PREFIX)
-
     @classmethod
     def create(cls, *, conflict_ref: str, **values: Any) -> ConflictCandidate:
-        """Bind trusted conflict fields and a resolver-issued reference to a digest."""
+        """Bind trusted conflict fields and an opaque runtime reference to a digest."""
 
         provisional = cls.model_construct(
             conflict_ref=conflict_ref,
@@ -742,23 +737,6 @@ class ConflictCandidate(AgentSchema):
             }
         )
 
-    @classmethod
-    def create_standalone(cls, **values: Any) -> ConflictCandidate:
-        """Build a digest-bound conflict with an explicitly non-production ref."""
-
-        provisional = cls.model_construct(
-            conflict_ref=SIMULATION_CONFLICT_REF_PREFIX + "0" * 24,
-            conflict_digest="sha256:" + "0" * 64,
-            **values,
-        )
-        digest = provisional.calculate_digest()
-        return cls.create(
-            conflict_ref=(
-                SIMULATION_CONFLICT_REF_PREFIX + digest.removeprefix("sha256:")[:24]
-            ),
-            **values,
-        )
-
     def assert_integrity(self) -> None:
         if self.conflict_digest != self.calculate_digest():
             raise ValueError("conflict_digest does not match conflict candidate")
@@ -772,11 +750,18 @@ class ConflictCandidate(AgentSchema):
 class InfoAnalysisInput(AgentSchema):
     """Complete request schema accepted by ``InfoAnalysisAgent.analyze``."""
 
-    input: RedactedInput = Field(
-        description="Redacted user or expert text to interpret in this call."
+    input: RedactedInput | None = Field(
+        description=(
+            "Redacted user or expert text, or null to reconsider procedures after "
+            "a confirmed conflict without extracting new facts."
+        )
     )
     case_snapshot: CaseSnapshot = Field(
         description="Immutable Case read view used as the analysis baseline."
+    )
+    fact_overlays: list[FactChangeCandidate] = Field(
+        default_factory=list,
+        description="Uncommitted confirmed changes used to assess procedure relevance.",
     )
     allowed_field_paths: Annotated[
         list[CaseFieldKey],
@@ -803,6 +788,35 @@ class InfoAnalysisInput(AgentSchema):
 
     @model_validator(mode="after")
     def validate_input(self) -> InfoAnalysisInput:
+        if self.input is None and (
+            not self.fact_overlays
+            or any(
+                item.source_type != FactChangeSourceType.CONFIRMED_CONFLICT
+                for item in self.fact_overlays
+            )
+        ):
+            raise ValueError("Info without input requires confirmed-conflict overlays")
+        if self.fact_overlays:
+            PlanningContext(
+                case_snapshot=self.case_snapshot, fact_overlays=self.fact_overlays
+            )
+            facts = {item.field_path: item for item in self.case_snapshot.facts}
+            evidence_ids = {
+                item.evidence_id for item in self.case_snapshot.evidence_records
+            }
+            for overlay in self.fact_overlays:
+                current = facts.get(overlay.field_path)
+                if (
+                    current is None
+                    or current.status != overlay.before_status
+                    or type(current.value) is not type(overlay.before_value)
+                    or current.value != overlay.before_value
+                ):
+                    raise ValueError(
+                        "Info overlay before state must match its snapshot"
+                    )
+                if not set(overlay.source_evidence_refs).issubset(evidence_ids):
+                    raise ValueError("Info overlay evidence must exist in its snapshot")
         if len(set(self.allowed_field_paths)) != len(self.allowed_field_paths):
             raise ValueError("allowed_field_paths must be unique")
         _ensure_unique(
@@ -936,23 +950,11 @@ class InfoAnalysisResult(AgentSchema):
         return self
 
 
-class SupportLookupGoal(StrEnum):
-    DISCOVER_RELEVANT = "DISCOVER_RELEVANT"
-    CHECK_SPECIFIC = "CHECK_SPECIFIC"
-    REFRESH_STALE = "REFRESH_STALE"
-
-
 class DiscoverSupportInput(AgentSchema):
     """Support Agent request for all reviewed programs relevant to the Case."""
 
-    lookup_goal: Literal[SupportLookupGoal.DISCOVER_RELEVANT] = Field(
-        description="Select reviewed programs relevant to the supplied Case context."
-    )
     planning_context: PlanningContext = Field(
         description="Immutable Case snapshot plus reviewable fact overlays."
-    )
-    related_steps: list[ProcedureStepRef] = Field(
-        description="Canonical procedure steps used to narrow program selection."
     )
     as_of: date = Field(
         description="Decision date carried as provenance for this comparison."
@@ -962,71 +964,7 @@ class DiscoverSupportInput(AgentSchema):
     )
 
 
-class CheckSpecificSupportInput(AgentSchema):
-    """Support Agent request for an explicit set of reviewed programs."""
-
-    lookup_goal: Literal[SupportLookupGoal.CHECK_SPECIFIC] = Field(
-        description="Compare only the explicitly requested reviewed programs."
-    )
-    planning_context: PlanningContext = Field(
-        description="Immutable Case snapshot plus reviewable fact overlays."
-    )
-    related_steps: list[ProcedureStepRef] = Field(
-        description="Canonical procedure steps used to validate program relevance."
-    )
-    as_of: date = Field(
-        description="Decision date carried as provenance for this comparison."
-    )
-    review_feedback: list[ReviewIssue] = Field(
-        description="Blocking review issues supplied when this call is a rework."
-    )
-    support_programs: Annotated[
-        list[SupportProgramRef],
-        Field(
-            min_length=1,
-            description="Stable identifiers of reviewed programs to compare.",
-        ),
-    ]
-
-
-class RefreshSupportInput(AgentSchema):
-    """Support Agent request to re-evaluate programs in the injected catalog."""
-
-    lookup_goal: Literal[SupportLookupGoal.REFRESH_STALE] = Field(
-        description="Re-evaluate named programs from the already injected catalog."
-    )
-    planning_context: PlanningContext = Field(
-        description="Immutable Case snapshot plus reviewable fact overlays."
-    )
-    related_steps: list[ProcedureStepRef] = Field(
-        description="Canonical procedure steps used to validate program relevance."
-    )
-    as_of: date = Field(
-        description="Decision date carried as provenance for this comparison."
-    )
-    review_feedback: list[ReviewIssue] = Field(
-        description="Blocking review issues supplied when this call is a rework."
-    )
-    support_programs: Annotated[
-        list[SupportProgramRef],
-        Field(
-            min_length=1,
-            description="Stable identifiers of injected programs to re-evaluate.",
-        ),
-    ]
-
-
-SupportAgentInput: TypeAlias = Annotated[
-    DiscoverSupportInput | CheckSpecificSupportInput | RefreshSupportInput,
-    Field(
-        title="SupportAgentInput",
-        discriminator="lookup_goal",
-        description=(
-            "Complete Support Agent input; lookup_goal selects exactly one request "
-            "schema."
-        ),
-    ),
-]
+SupportAgentInput: TypeAlias = DiscoverSupportInput
 
 
 class CriterionStatus(StrEnum):
@@ -1189,7 +1127,6 @@ class DecisionAuthority(StrEnum):
 
 class ProcedureCompletionStatus(StrEnum):
     COMPLETE = "COMPLETE"
-    PARTIAL = "PARTIAL"
     NO_RESULTS = "NO_RESULTS"
 
 
@@ -1199,20 +1136,6 @@ class ProcedureLookupGoal(StrEnum):
 
 class ProcedureSourcePolicy(StrEnum):
     OFFICIAL_ONLY = "OFFICIAL_ONLY"
-
-
-class ProcedureSearchProvider(StrEnum):
-    """Where a procedure source document was discovered.
-
-    ``REVIEWED_PROCEDURE_STORE`` is the only MVP request-path source: documents
-    fetched earlier and approved by the team.  The three search providers stay
-    because the offline refresh command still uses them to build that store.
-    """
-
-    REVIEWED_PROCEDURE_STORE = "REVIEWED_PROCEDURE_STORE"
-    OFFICIAL_SOURCE_REGISTRY = "OFFICIAL_SOURCE_REGISTRY"
-    GOOGLE_AGENT_SEARCH = "GOOGLE_AGENT_SEARCH"
-    KAKAO_DAUM_WEB = "KAKAO_DAUM_WEB"
 
 
 class ProcedureLookupInput(AgentSchema):
@@ -1282,10 +1205,14 @@ class ProcedureSourceDocument(AgentSchema):
     content_hash: Digest
     evidence_ref: NonEmptyStr
     search_query: NonEmptyStr
-    discovery_provider: ProcedureSearchProvider
+    step_codes: list[UpperSnakeCode] = Field(
+        description="Reviewed PROCEDURE_STEP bindings; empty means no usable binding."
+    )
 
     @model_validator(mode="after")
     def validate_source_identity(self) -> ProcedureSourceDocument:
+        if len(set(self.step_codes)) != len(self.step_codes):
+            raise ValueError("procedure document step_codes must be unique")
         parsed = urlsplit(self.canonical_url)
         if parsed.scheme != "https" or not parsed.hostname:
             raise ValueError("procedure document URL must be absolute HTTPS")
@@ -1322,136 +1249,6 @@ class ProcedureSourceDocument(AgentSchema):
         return self
 
 
-class ProcedureProviderSearchSummary(AgentSchema):
-    provider: ProcedureSearchProvider
-    attempted_query_count: NonNegativeStrictInt
-    successful_query_count: NonNegativeStrictInt
-    failed_query_count: NonNegativeStrictInt
-    provider_result_count: NonNegativeStrictInt
-
-    @model_validator(mode="after")
-    def validate_counts(self) -> ProcedureProviderSearchSummary:
-        if self.successful_query_count + self.failed_query_count != (
-            self.attempted_query_count
-        ):
-            raise ValueError("provider query outcomes must cover provider attempts")
-        if self.successful_query_count == 0 and self.provider_result_count != 0:
-            raise ValueError("provider results require a successful provider response")
-        return self
-
-
-class ProcedureSearchSummary(AgentSchema):
-    provider_order: Annotated[
-        list[ProcedureSearchProvider], Field(min_length=1, max_length=3)
-    ]
-    provider_summaries: Annotated[
-        list[ProcedureProviderSearchSummary], Field(min_length=1, max_length=3)
-    ]
-    fallback_query_count: NonNegativeStrictInt
-    requested_query_count: PositiveStrictInt
-    successful_query_count: NonNegativeStrictInt
-    failed_query_count: NonNegativeStrictInt
-    provider_result_count: NonNegativeStrictInt
-    official_candidate_count: NonNegativeStrictInt
-    fetched_document_count: NonNegativeStrictInt
-    rejected_result_count: NonNegativeStrictInt
-    fetch_failure_count: NonNegativeStrictInt
-    searched_at: RuntimeDateTime
-
-    @model_validator(mode="after")
-    def validate_counts(self) -> ProcedureSearchSummary:
-        if len(set(self.provider_order)) != len(self.provider_order):
-            raise ValueError("provider_order must be unique")
-        allowed_orders = {
-            # A reviewed-store read never falls back to a live provider: mixing
-            # the two would put an unreviewed source back on the request path.
-            (ProcedureSearchProvider.REVIEWED_PROCEDURE_STORE,),
-            (ProcedureSearchProvider.OFFICIAL_SOURCE_REGISTRY,),
-            (
-                ProcedureSearchProvider.OFFICIAL_SOURCE_REGISTRY,
-                ProcedureSearchProvider.KAKAO_DAUM_WEB,
-            ),
-            (
-                ProcedureSearchProvider.OFFICIAL_SOURCE_REGISTRY,
-                ProcedureSearchProvider.GOOGLE_AGENT_SEARCH,
-            ),
-            (
-                ProcedureSearchProvider.OFFICIAL_SOURCE_REGISTRY,
-                ProcedureSearchProvider.KAKAO_DAUM_WEB,
-                ProcedureSearchProvider.GOOGLE_AGENT_SEARCH,
-            ),
-            (ProcedureSearchProvider.GOOGLE_AGENT_SEARCH,),
-            (ProcedureSearchProvider.KAKAO_DAUM_WEB,),
-            (
-                ProcedureSearchProvider.KAKAO_DAUM_WEB,
-                ProcedureSearchProvider.GOOGLE_AGENT_SEARCH,
-            ),
-        }
-        if tuple(self.provider_order) not in allowed_orders:
-            raise ValueError(
-                "provider_order must preserve official-registry, Kakao, Google policy"
-            )
-        summary_providers = [item.provider for item in self.provider_summaries]
-        if summary_providers != self.provider_order:
-            raise ValueError(
-                "provider_summaries must match provider_order exactly and in order"
-            )
-        if (
-            self.successful_query_count + self.failed_query_count
-            != self.requested_query_count
-        ):
-            raise ValueError("query outcome counts must match requested_query_count")
-        if self.fetched_document_count > self.official_candidate_count:
-            raise ValueError("fetched documents cannot exceed official candidates")
-        if not any(item.successful_query_count for item in self.provider_summaries):
-            raise ValueError(
-                "a procedure result requires at least one successful provider response"
-            )
-        if any(
-            item.attempted_query_count > self.requested_query_count
-            for item in self.provider_summaries
-        ):
-            raise ValueError("provider attempts cannot exceed requested queries")
-        first = self.provider_summaries[0]
-        if first.attempted_query_count != self.requested_query_count:
-            raise ValueError("the first source provider must attempt every query")
-        for previous, current in zip(
-            self.provider_summaries,
-            self.provider_summaries[1:],
-            strict=False,
-        ):
-            if current.attempted_query_count > previous.attempted_query_count:
-                raise ValueError(
-                    "a fallback provider cannot attempt more queries than its predecessor"
-                )
-        expected_fallbacks = (
-            self.provider_summaries[1].attempted_query_count
-            if len(self.provider_summaries) > 1
-            else 0
-        )
-        if self.fallback_query_count != expected_fallbacks:
-            raise ValueError(
-                "fallback count must match queries passed beyond the first provider"
-            )
-        if self.provider_result_count != sum(
-            item.provider_result_count for item in self.provider_summaries
-        ):
-            raise ValueError("aggregate provider results must match provider summaries")
-        if (
-            self.official_candidate_count + self.rejected_result_count
-            != self.provider_result_count
-        ):
-            raise ValueError(
-                "official and rejected result counts must cover provider results"
-            )
-        if (
-            self.fetched_document_count + self.fetch_failure_count
-            > self.official_candidate_count
-        ):
-            raise ValueError("fetch outcomes cannot exceed official candidate count")
-        return self
-
-
 class ProcedureLookupResult(AgentSchema):
     """Complete success schema returned by ``ProcedureLookupTool.lookup``."""
 
@@ -1463,9 +1260,6 @@ class ProcedureLookupResult(AgentSchema):
     )
     documents: list[ProcedureSourceDocument] = Field(
         description="Fetched and verified official procedure source documents."
-    )
-    search_summary: ProcedureSearchSummary = Field(
-        description="Provider attempts, fallback use, and source filtering counts."
     )
     warnings: list[ProcedureLookupWarning] = Field(
         description="Non-fatal source retrieval warnings."
@@ -1485,28 +1279,10 @@ class ProcedureLookupResult(AgentSchema):
         _ensure_unique(
             self.evidence_records, lambda item: item.evidence_id, "evidence_id"
         )
-        if self.search_summary.fetched_document_count != len(self.documents):
-            raise ValueError("fetched_document_count must match documents")
         if len(self.documents) != len(self.evidence_records):
             raise ValueError("each document must have exactly one evidence record")
         evidence_by_id = {item.evidence_id: item for item in self.evidence_records}
-        provider_summaries = {
-            item.provider: item for item in self.search_summary.provider_summaries
-        }
-        document_counts: dict[ProcedureSearchProvider, int] = {}
         for document in self.documents:
-            provider_summary = provider_summaries.get(document.discovery_provider)
-            if (
-                provider_summary is None
-                or provider_summary.successful_query_count == 0
-                or provider_summary.provider_result_count == 0
-            ):
-                raise ValueError(
-                    "procedure document provider must have a successful search result"
-                )
-            document_counts[document.discovery_provider] = (
-                document_counts.get(document.discovery_provider, 0) + 1
-            )
             evidence = evidence_by_id.get(document.evidence_ref)
             if evidence is None:
                 raise ValueError("procedure document has unresolved evidence_ref")
@@ -1522,29 +1298,10 @@ class ProcedureLookupResult(AgentSchema):
                 raise ValueError(
                     "procedure document and evidence must describe one source"
                 )
-        for provider, document_count in document_counts.items():
-            if document_count > provider_summaries[provider].provider_result_count:
-                raise ValueError(
-                    "procedure documents cannot exceed their provider result count"
-                )
-        failures = (
-            self.search_summary.failed_query_count
-            + self.search_summary.fetch_failure_count
-        )
-        if self.completion_status == ProcedureCompletionStatus.COMPLETE:
-            if not self.documents or failures:
-                raise ValueError("COMPLETE requires documents and no request failures")
-        elif self.completion_status == ProcedureCompletionStatus.NO_RESULTS:
-            if (
-                self.documents
-                or failures
-                or self.search_summary.official_candidate_count != 0
-            ):
-                raise ValueError(
-                    "NO_RESULTS requires successful lookup with no official candidates"
-                )
-        elif failures == 0:
-            raise ValueError("PARTIAL requires at least one query or fetch failure")
+        if bool(self.documents) != (
+            self.completion_status == ProcedureCompletionStatus.COMPLETE
+        ):
+            raise ValueError("COMPLETE requires documents and NO_RESULTS requires none")
         return self
 
 
@@ -1560,7 +1317,7 @@ class ProcedureFinding(AgentSchema):
     step_name: NonEmptyStr
     summary: SourcedText
     relevance: ProcedureRelevance
-    current_status: ProcedureProgressStatus | None
+    current_status: ProcedureProgressStatus
     decision_authority: DecisionAuthority
     requires_confirmation: Literal[True]
     required_actions: list[SourcedText]
@@ -1588,8 +1345,6 @@ class ProcedureFinding(AgentSchema):
 
 
 class Blocker(AgentSchema):
-    blocker_code: UpperSnakeCode
-    title: NonEmptyStr
     description: NonEmptyStr
     evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
 
@@ -1629,7 +1384,6 @@ NextActionDraft = NextAction
 class DecisionType(StrEnum):
     ACTION = "ACTION"
     NEEDS_MORE_INFO = "NEEDS_MORE_INFO"
-    CASE_COMPLETE = "CASE_COMPLETE"
 
 
 class ActionDecisionDraft(AgentSchema):
@@ -1667,29 +1421,8 @@ class NeedsMoreInfoDecisionDraft(AgentSchema):
     questions_for_user: Annotated[list[NonEmptyStr], Field(min_length=1)]
 
 
-class CaseCompleteDecisionDraft(AgentSchema):
-    decision_type: Literal[DecisionType.CASE_COMPLETE]
-    draft_id: RuntimeUUID
-    draft_version: PositiveStrictInt
-    selection_summary: NonEmptyStr
-    requires_human: Literal[False]
-    evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
-    based_on_call_ids: Annotated[list[RuntimeUUID], Field(min_length=1)]
-    created_at: RuntimeDateTime
-    blocker: None
-    next_action: None
-    questions_for_user: list[NonEmptyStr]
-
-    @field_validator("questions_for_user")
-    @classmethod
-    def complete_has_no_questions(cls, value: list[str]) -> list[str]:
-        if value:
-            raise ValueError("CASE_COMPLETE questions_for_user must be []")
-        return value
-
-
 DecisionDraft: TypeAlias = Annotated[
-    ActionDecisionDraft | NeedsMoreInfoDecisionDraft | CaseCompleteDecisionDraft,
+    ActionDecisionDraft | NeedsMoreInfoDecisionDraft,
     Field(discriminator="decision_type"),
 ]
 
@@ -1697,7 +1430,7 @@ DecisionDraft: TypeAlias = Annotated[
 class ProcedureProgressChangeCandidate(AgentSchema):
     candidate_id: RuntimeUUID
     procedure_step: ProcedureStepRef
-    before_status: ProcedureProgressStatus | None
+    before_status: ProcedureProgressStatus
     proposed_status: ProcedureProgressStatus
     reason_summary: NonEmptyStr
     execution_evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
@@ -1722,19 +1455,10 @@ class SupportMatchUpdateCandidate(AgentSchema):
     source_call_id: RuntimeUUID
 
 
-class CaseStatusChangeCandidate(AgentSchema):
-    candidate_id: RuntimeUUID
-    before_status: Literal[CaseStatus.IN_PROGRESS]
-    proposed_status: Literal[CaseStatus.COMPLETED]
-    reason_summary: NonEmptyStr
-    evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
-
-
 class MutationSet(AgentSchema):
     fact_changes: list[FactChangeCandidate]
     procedure_progress_changes: list[ProcedureProgressChangeCandidate]
     support_match_updates: list[SupportMatchUpdateCandidate]
-    case_status_change: CaseStatusChangeCandidate | None
 
     @model_validator(mode="after")
     def validate_uniqueness(self) -> MutationSet:
@@ -1743,8 +1467,6 @@ class MutationSet(AgentSchema):
             *self.procedure_progress_changes,
             *self.support_match_updates,
         ]
-        if self.case_status_change is not None:
-            all_candidates.append(self.case_status_change)
         _ensure_unique(all_candidates, lambda item: item.candidate_id, "candidate_id")
         _ensure_unique(
             self.fact_changes, lambda item: item.field_path, "fact field_path"
@@ -1818,11 +1540,6 @@ class SupervisorDraft(AgentSchema):
             raise ValueError(
                 "source_call_ids must exactly match decision.based_on_call_ids"
             )
-        if self.decision.decision_type == DecisionType.CASE_COMPLETE:
-            if self.mutations.case_status_change is None:
-                raise ValueError("CASE_COMPLETE requires a case status change")
-        elif self.mutations.case_status_change is not None:
-            raise ValueError("only CASE_COMPLETE may include a case status change")
         return self
 
     @property
@@ -1862,14 +1579,6 @@ class ResultSubmittedTrigger(AgentSchema):
         return self
 
 
-class SupportRefreshTrigger(AgentSchema):
-    trigger_type: Literal["SUPPORT_REFRESH"]
-    input_event_id: NonEmptyStr
-    client_event_id: NonEmptyStr | None
-    support_programs: Annotated[list[SupportProgramRef], Field(min_length=1)]
-    as_of: date
-
-
 class ConflictConfirmedTrigger(AgentSchema):
     """User chose which of two conflicting values for one Case field holds.
 
@@ -1895,10 +1604,7 @@ class ConflictConfirmedTrigger(AgentSchema):
 
 
 RunTrigger: TypeAlias = Annotated[
-    CaseCreatedTrigger
-    | ResultSubmittedTrigger
-    | SupportRefreshTrigger
-    | ConflictConfirmedTrigger,
+    CaseCreatedTrigger | ResultSubmittedTrigger | ConflictConfirmedTrigger,
     Field(discriminator="trigger_type"),
 ]
 
@@ -2011,6 +1717,9 @@ class SupervisorAgentInput(AgentSchema):
     case_snapshot: CaseSnapshot = Field(
         description="Immutable Case read view shared by every supplied source result."
     )
+    known_procedure_steps: list[KnownProcedureStep] = Field(
+        description="Procedure registry with stored applicability and dependency rules."
+    )
     source_results: Annotated[
         list[ReviewSourceResult],
         Field(
@@ -2040,6 +1749,7 @@ class SupervisorAgentInput(AgentSchema):
 
     @model_validator(mode="after")
     def validate_sources(self) -> SupervisorAgentInput:
+        validate_procedure_registry(self.known_procedure_steps)
         call_ids = [item.meta.call_id for item in self.source_results]
         if len(set(call_ids)) != len(call_ids):
             raise ValueError("Supervisor source call IDs must be unique")
@@ -2052,15 +1762,8 @@ class SupervisorAgentInput(AgentSchema):
             if source.output.based_on_snapshot_id != self.case_snapshot.snapshot_id:
                 raise ValueError("Supervisor source snapshot must match its snapshot")
         if self.fact_overlays is not None:
-            _ensure_unique(
-                self.fact_overlays,
-                lambda item: item.candidate_id,
-                "Supervisor fact overlay candidate_id",
-            )
-            _ensure_unique(
-                self.fact_overlays,
-                lambda item: item.field_path,
-                "Supervisor fact overlay field_path",
+            PlanningContext(
+                case_snapshot=self.case_snapshot, fact_overlays=self.fact_overlays
             )
         return self
 
@@ -2094,6 +1797,9 @@ class ReviewSubject(AgentSchema):
     snapshot: CaseSnapshot = Field(
         description="Immutable Case baseline used by every reviewed component."
     )
+    known_procedure_steps: list[KnownProcedureStep] = Field(
+        description="Exact registry and rules used by the Supervisor, bound to this review."
+    )
     source_results: Annotated[
         list[ReviewSourceResult],
         Field(
@@ -2116,8 +1822,13 @@ class ReviewSubject(AgentSchema):
     def assert_integrity(self) -> None:
         """Reject any structural or nested change made after subject creation."""
 
+        validate_procedure_registry(self.known_procedure_steps)
         if self.case_id != self.snapshot.case_id:
             raise ValueError("review case_id must match snapshot")
+        PlanningContext(
+            case_snapshot=self.snapshot,
+            fact_overlays=self.supervisor_draft.mutations.fact_changes,
+        )
         call_ids = [item.meta.call_id for item in self.source_results]
         if len(set(call_ids)) != len(call_ids):
             raise ValueError("source result call IDs must be unique")
@@ -2209,7 +1920,6 @@ class ReviewProof(AgentSchema):
     run_id: RuntimeUUID
     case_id: PositiveStrictInt
     snapshot_id: RuntimeUUID
-    case_version: PositiveStrictInt | None
     review_subject_id: RuntimeUUID
     reviewed_subject_digest: Digest
     verdict: Literal[ReviewVerdict.PASS]
@@ -2246,7 +1956,6 @@ class ReviewProof(AgentSchema):
             run_id=subject.run_id,
             case_id=subject.case_id,
             snapshot_id=subject.snapshot.snapshot_id,
-            case_version=subject.snapshot.case_version,
             review_subject_id=subject.review_subject_id,
             reviewed_subject_digest=subject.subject_digest,
             verdict=ReviewVerdict.PASS,
@@ -2282,7 +1991,6 @@ class ReviewedPlanOutcome(AgentSchema):
             subject.run_id,
             subject.case_id,
             subject.snapshot.snapshot_id,
-            subject.snapshot.case_version,
             subject.review_subject_id,
             subject.subject_digest,
         )
@@ -2290,7 +1998,6 @@ class ReviewedPlanOutcome(AgentSchema):
             proof.run_id,
             proof.case_id,
             proof.snapshot_id,
-            proof.case_version,
             proof.review_subject_id,
             proof.reviewed_subject_digest,
         )
@@ -2321,9 +2028,6 @@ class ConflictOutcome(AgentSchema):
     snapshot_id: RuntimeUUID = Field(
         description="Immutable snapshot identifier against which conflicts were found."
     )
-    case_version: PositiveStrictInt | None = Field(
-        description="Optional Case version copied from the input snapshot."
-    )
     conflicts: Annotated[
         list[ConflictCandidate],
         Field(
@@ -2331,6 +2035,9 @@ class ConflictOutcome(AgentSchema):
             description="User statements that conflict with confirmed snapshot facts.",
         ),
     ]
+    evidence_records: list[EvidenceRecord] = Field(
+        description="Conflict source evidence and its parents to retain for confirmation."
+    )
     message_code: Literal["CONFIRM_CONFLICT"] = Field(
         description="Caller instruction to request explicit user confirmation."
     )
@@ -2339,12 +2046,22 @@ class ConflictOutcome(AgentSchema):
     def validate_conflicts(self) -> ConflictOutcome:
         _ensure_unique(self.conflicts, lambda item: item.conflict_ref, "conflict_ref")
         _ensure_unique(self.conflicts, lambda item: item.candidate_id, "candidate_id")
+        _ensure_unique(
+            self.evidence_records, lambda item: item.evidence_id, "evidence_id"
+        )
+        known_evidence = {item.evidence_id for item in self.evidence_records}
+        referenced = {
+            ref for conflict in self.conflicts for ref in conflict.source_evidence_refs
+        } | {
+            ref
+            for evidence in self.evidence_records
+            for ref in evidence.parent_evidence_refs
+        }
+        if referenced - known_evidence:
+            raise ValueError("conflict outcome contains unresolved evidence refs")
         for conflict in self.conflicts:
-            if (
-                conflict.snapshot_id != self.snapshot_id
-                or conflict.case_version != self.case_version
-            ):
-                raise ValueError("conflict does not match outcome snapshot/version")
+            if conflict.snapshot_id != self.snapshot_id:
+                raise ValueError("conflict does not match outcome snapshot")
         return self
 
 
@@ -2365,9 +2082,6 @@ class SafeFailureOutcome(AgentSchema):
     )
     snapshot_id: RuntimeUUID = Field(
         description="Immutable snapshot identifier used by the failed run."
-    )
-    case_version: PositiveStrictInt | None = Field(
-        description="Optional Case version copied from the input snapshot."
     )
     failure_code: Literal[
         "REVIEW_RETRY_EXHAUSTED",
@@ -2480,13 +2194,11 @@ InfoAnalysisInput.model_rebuild()
 InfoAnalysisResult.model_rebuild()
 ProcedureLookupInput.model_rebuild()
 DiscoverSupportInput.model_rebuild()
-CheckSpecificSupportInput.model_rebuild()
-RefreshSupportInput.model_rebuild()
 
 
 __all__ = [
     "CASE_FIELD_SPECS",
-    "SIMULATION_CONFLICT_REF_PREFIX",
+    "REQUIRED_CASE_FIELDS",
     "ActionDecisionDraft",
     "AgentGraphInput",
     "AgentGraphOutput",
@@ -2494,22 +2206,13 @@ __all__ = [
     "AgentSchema",
     "Blocker",
     "BlockerDraft",
-    "CaseCompleteDecisionDraft",
     "CaseCreatedTrigger",
     "CaseFact",
     "CaseFieldKey",
     "CaseSnapshot",
     "CaseStatus",
-    "CaseStatusChangeCandidate",
-    "CheckSpecificSupportInput",
     "ClaimType",
     "Component",
-    "ComponentError",
-    "ComponentErrorCode",
-    "ComponentFailure",
-    "ComponentRequest",
-    "ComponentSuccess",
-    "ComponentWarning",
     "ConflictCandidate",
     "ConflictConfirmedTrigger",
     "ConflictOutcome",
@@ -2548,6 +2251,8 @@ __all__ = [
     "PlanningContext",
     "ProcedureActionTarget",
     "ProcedureCompletionStatus",
+    "ProcedureDependency",
+    "ProcedureEligibility",
     "ProcedureFinding",
     "ProcedureLookupGoal",
     "ProcedureLookupInput",
@@ -2557,10 +2262,7 @@ __all__ = [
     "ProcedureProgressChangeCandidate",
     "ProcedureProgressObservation",
     "ProcedureProgressStatus",
-    "ProcedureProviderSearchSummary",
     "ProcedureRelevance",
-    "ProcedureSearchProvider",
-    "ProcedureSearchSummary",
     "ProcedureSourceDocument",
     "ProcedureSourcePolicy",
     "ProcedureStepRef",
@@ -2568,7 +2270,6 @@ __all__ = [
     "RedactedInput",
     "Redaction",
     "RedactionType",
-    "RefreshSupportInput",
     "RequiredDocument",
     "ResultSubmittedTrigger",
     "ReviewIssue",
@@ -2594,7 +2295,6 @@ __all__ = [
     "SupportCheck",
     "SupportCompletionStatus",
     "SupportCriterionResult",
-    "SupportLookupGoal",
     "SupportMatchStatus",
     "SupportMatchUpdateCandidate",
     "SupportProgramRef",
@@ -2604,4 +2304,6 @@ __all__ = [
     "VerifiedTextSpan",
     "canonical_digest",
     "validate_case_field_value",
+    "validate_procedure_registry",
+    "validate_restoration_state",
 ]

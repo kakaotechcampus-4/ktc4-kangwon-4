@@ -1,5 +1,12 @@
-"""Opt-in exact lookup of reviewed local support Wiki notes."""
+"""Contract for exact lookup of reviewed support Wiki entries."""
 
-from .store import MarkdownSupportWikiStore, SupportWikiStore
+from typing import Protocol
 
-__all__ = ["MarkdownSupportWikiStore", "SupportWikiStore"]
+from app.agent.schemas import SupportProgramRef
+from app.agent.support_agent.models import ReviewedSupportCatalog
+
+__all__ = ["SupportWikiStore"]
+
+
+class SupportWikiStore(Protocol):
+    async def lookup(self, ref: SupportProgramRef) -> ReviewedSupportCatalog | None: ...

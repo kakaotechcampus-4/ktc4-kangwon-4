@@ -1,4 +1,0 @@
-# Keep personal window layout, cache, deleted notes and plugin state local.
-.obsidian/*
-!.obsidian/app.json
-.trash/

@@ -18,7 +18,7 @@ from uuid import UUID, uuid4
 from langgraph.graph import END, START, StateGraph
 
 from app.agent.enrichment import build_confirmed_conflict_overlay, build_fact_overlays
-from app.agent.llm import LLMCallBudget, current_call_budget
+from app.agent.llm import current_call_budget
 from app.agent.run_scope import current_deadline
 from app.agent.schemas import (
     CASE_FIELD_SPECS,
@@ -29,6 +29,8 @@ from app.agent.schemas import (
     ConflictConfirmedTrigger,
     ConflictOutcome,
     DiscoverSupportInput,
+    FactChangeSourceType,
+    FactStatus,
     InfoAnalysisInput,
     InfoAnalysisResult,
     InvocationMeta,
@@ -37,7 +39,6 @@ from app.agent.schemas import (
     PlanningContext,
     ProcedureLookupInput,
     ProcedureLookupResult,
-    RefreshSupportInput,
     ReviewedPlanOutcome,
     ReviewIssue,
     ReviewProof,
@@ -50,8 +51,8 @@ from app.agent.schemas import (
     SupervisorDraft,
     SupportAgentInput,
     SupportAnalysisResult,
-    SupportRefreshTrigger,
     canonical_digest,
+    validate_procedure_registry,
 )
 from app.agent.state import AgentGraphState
 from app.agent.tracing import (
@@ -114,7 +115,6 @@ class AgentGraph:
         uuid_factory: Callable[[], UUID] = uuid4,
         trace_sink: TraceSink | None = None,
         max_review_revisions: int = 2,
-        call_budget: LLMCallBudget | None = None,
         usage: UsageAccumulator | None = None,
     ) -> None:
         if max_review_revisions < 0 or max_review_revisions > 2:
@@ -124,18 +124,18 @@ class AgentGraph:
         self._support_agent = support_agent
         self._supervisor = supervisor
         self._review_tool = review_tool
-        self._known_procedure_steps = list(known_procedure_steps)
+        self._known_procedure_steps = [
+            step.model_copy(deep=True) for step in known_procedure_steps
+        ]
+        validate_procedure_registry(self._known_procedure_steps)
         self._clock = clock
         self._uuid = uuid_factory
         self._trace_sink = trace_sink or NullTraceSink()
         self._max_review_revisions = max_review_revisions
-        self._call_budget = call_budget
         self._usage = usage
         self.compiled = self._compile()
 
     async def run(self, request: AgentGraphInput) -> AgentGraphOutput:
-        if self._call_budget is not None:
-            self._call_budget.reset()
         if self._usage is not None:
             # Usage a previous run recorded but never drained would otherwise be
             # attributed to this run's first component.
@@ -250,7 +250,7 @@ class AgentGraph:
         builder.add_conditional_edges(
             "confirmed_conflict",
             self._route_after_component,
-            {"continue": "support_analysis", "failure": "safe_failure"},
+            {"continue": "procedure_lookup", "failure": "safe_failure"},
         )
         builder.add_conditional_edges(
             "procedure_lookup",
@@ -317,8 +317,11 @@ class AgentGraph:
     async def _info_node(self, state: AgentGraphState) -> dict[str, Any]:
         request = state["request"]
         trigger_input = getattr(request.trigger, "input", None)
-        if trigger_input is None:
-            return {"phase": "INFO_ANALYSIS", "fact_overlays": []}
+        confirmed_overlays = [
+            item
+            for item in state.get("fact_overlays", [])
+            if item.source_type == FactChangeSourceType.CONFIRMED_CONFLICT
+        ]
 
         procedure_sources = [
             item
@@ -337,8 +340,11 @@ class AgentGraph:
         component_input = InfoAnalysisInput(
             input=trigger_input,
             case_snapshot=request.case_snapshot,
+            fact_overlays=confirmed_overlays,
             allowed_field_paths=list(CASE_FIELD_SPECS),
-            known_procedure_steps=self._known_procedure_steps,
+            known_procedure_steps=[
+                step.model_copy(deep=True) for step in self._known_procedure_steps
+            ],
             source_call_id=meta.call_id,
             procedure_lookup_call_id=procedure_source.meta.call_id,
             procedure_lookup_result=procedure_source.output,
@@ -354,12 +360,15 @@ class AgentGraph:
                 output_digest=canonical_digest(output),
                 output=output,
             )
-            overlays = build_fact_overlays(
-                request.case_snapshot,
-                output,
-                meta.call_id,
-                uuid_factory=self._uuid,
-            )
+            overlays = [
+                *confirmed_overlays,
+                *build_fact_overlays(
+                    request.case_snapshot,
+                    output,
+                    meta.call_id,
+                    uuid_factory=self._uuid,
+                ),
+            ]
         except Exception as exc:  # noqa: BLE001 - graph must fail closed
             self._emit(meta, started, "ERROR", exc)
             return self._failure(exc, Component.INFO_AGENT)
@@ -379,14 +388,38 @@ class AgentGraph:
         if len(info_sources) != 1:
             raise RuntimeError("conflict outcome requires one Info result")
         info = info_sources[0].output
+        evidence_by_id = {}
+        for evidence in [
+            *state["request"].case_snapshot.evidence_records,
+            *info.evidence_records,
+        ]:
+            existing = evidence_by_id.get(evidence.evidence_id)
+            if existing is not None and existing != evidence:
+                raise ValueError("conflict evidence ID has conflicting content")
+            evidence_by_id[evidence.evidence_id] = evidence
+        evidence_records = []
+        pending = [
+            ref for conflict in info.conflicts for ref in conflict.source_evidence_refs
+        ]
+        included = set()
+        while pending:
+            ref = pending.pop()
+            if ref in included:
+                continue
+            evidence = evidence_by_id.get(ref)
+            if evidence is None:
+                raise ValueError("conflict evidence reference cannot be resolved")
+            included.add(ref)
+            evidence_records.append(evidence)
+            pending.extend(evidence.parent_evidence_refs)
         outcome = ConflictOutcome(
             outcome_type="CONFLICT",
             run_id=state["run_id"],
             case_id=state["request"].case_snapshot.case_id,
             trigger=state["request"].trigger,
             snapshot_id=state["request"].case_snapshot.snapshot_id,
-            case_version=state["request"].case_snapshot.case_version,
             conflicts=info.conflicts,
+            evidence_records=evidence_records,
             message_code="CONFIRM_CONFLICT",
         )
         return {"phase": "COMPLETED", "outcome": outcome}
@@ -465,30 +498,11 @@ class AgentGraph:
             case_snapshot=request.case_snapshot,
             fact_overlays=state.get("fact_overlays", []),
         )
-        procedure_steps = [
-            item.procedure_step
-            for source in state.get("source_results", [])
-            if source.meta.component == Component.INFO_AGENT
-            for item in source.output.procedure_findings
-            if item.relevance.value in {"RELEVANT", "POSSIBLY_RELEVANT"}
-        ]
-        if isinstance(request.trigger, SupportRefreshTrigger):
-            component_input: SupportAgentInput = RefreshSupportInput(
-                lookup_goal="REFRESH_STALE",
-                planning_context=context,
-                related_steps=procedure_steps,
-                as_of=request.trigger.as_of,
-                review_feedback=state.get("review_feedback", []),
-                support_programs=request.trigger.support_programs,
-            )
-        else:
-            component_input = DiscoverSupportInput(
-                lookup_goal="DISCOVER_RELEVANT",
-                planning_context=context,
-                related_steps=procedure_steps,
-                as_of=self._as_of(request),
-                review_feedback=state.get("review_feedback", []),
-            )
+        component_input: SupportAgentInput = DiscoverSupportInput(
+            planning_context=context,
+            as_of=self._as_of(request),
+            review_feedback=state.get("review_feedback", []),
+        )
         started = time.monotonic()
         try:
             self._check_deadline()
@@ -525,6 +539,9 @@ class AgentGraph:
             component_input = SupervisorAgentInput(
                 trigger=state["request"].trigger,
                 case_snapshot=state["request"].case_snapshot,
+                known_procedure_steps=[
+                    step.model_copy(deep=True) for step in self._known_procedure_steps
+                ],
                 source_results=state["source_results"],
                 draft_version=state.get("revision_count", 0) + 1,
                 review_feedback=state.get("review_feedback", []),
@@ -553,6 +570,9 @@ class AgentGraph:
                 case_id=state["request"].case_snapshot.case_id,
                 trigger=state["request"].trigger,
                 snapshot=state["request"].case_snapshot,
+                known_procedure_steps=[
+                    step.model_copy(deep=True) for step in self._known_procedure_steps
+                ],
                 source_results=state["source_results"],
                 supervisor_draft=state["current_draft"],
             )
@@ -689,7 +709,6 @@ class AgentGraph:
             case_id=request.case_snapshot.case_id,
             trigger=request.trigger,
             snapshot_id=request.case_snapshot.snapshot_id,
-            case_version=request.case_snapshot.case_version,
             failure_code=failure.get("failure_code", "COMPONENT_UNAVAILABLE"),
             message_code=failure.get(
                 "failure_message_code", "AGENT_COMPONENT_UNAVAILABLE"
@@ -719,8 +738,6 @@ class AgentGraph:
         trigger = state["request"].trigger
         if isinstance(trigger, ConflictConfirmedTrigger):
             return "confirmed_conflict"
-        if isinstance(trigger, SupportRefreshTrigger):
-            return "support"
         return "procedure"
 
     @staticmethod
@@ -827,8 +844,6 @@ class AgentGraph:
     @staticmethod
     def _as_of(request: AgentGraphInput) -> date:
         trigger = request.trigger
-        if isinstance(trigger, SupportRefreshTrigger):
-            return trigger.as_of
         if isinstance(trigger, ConflictConfirmedTrigger):
             return trigger.confirmed_at.date()
         return trigger.submitted_at.date()
@@ -902,30 +917,50 @@ class AgentGraph:
 
     @staticmethod
     def _procedure_queries(request: AgentGraphInput) -> list[str]:
-        """Build bounded PII-free queries from canonical values and safe hints.
-
-        Redacted user text is never copied into a provider query.  A small,
-        deterministic keyword map may only select one of the static queries
-        below, which lets the first natural-language turn discover an
-        industry-specific official procedure before Info analysis has produced
-        a Case fact candidate.
-        """
+        """Select at most four static topics without copying user text or facts."""
 
         confirmed = {
             fact.field_path.value: fact.value
             for fact in request.case_snapshot.facts
             if fact.status.value == "CONFIRMED"
         }
+        if isinstance(request.trigger, ConflictConfirmedTrigger):
+            conflict = request.trigger.confirmed_conflict
+            if conflict.proposed_status == FactStatus.CONFIRMED:
+                confirmed[conflict.field_path.value] = conflict.proposed_value
+            else:
+                confirmed.pop(conflict.field_path.value, None)
         trigger_input = getattr(request.trigger, "input", None)
         redacted_text = trigger_input.redacted_text if trigger_input is not None else ""
 
-        queries = ["사업자 폐업 신고 절차 국세청"]
+        queries: list[str] = []
+        if (
+            confirmed.get("lease_status") in {"LEASED_PAID", "LEASED_FREE"}
+            or any(
+                keyword in redacted_text
+                for keyword in ("임차", "임대", "원상복구", "원상회복", "철거", "반환")
+            )
+            or (
+                isinstance(request.trigger, ConflictConfirmedTrigger)
+                and request.trigger.confirmed_conflict.field_path.value
+                in {
+                    "lease_status",
+                    "restoration_status",
+                    "restoration_scope",
+                    "demolition_required",
+                }
+            )
+        ):
+            queries.append("임차 상가 원상복구 범위 확인 철거 절차")
+
         # Entity type is not a CASE field in schema_table.md. Explicit wording
         # may select a lookup topic, but never creates or confirms a Case fact.
         if "개인사업자" in redacted_text:
             queries.append("개인사업자 폐업 신고 절차 국세청")
         elif "법인사업자" in redacted_text or "법인 사업자" in redacted_text:
             queries.append("법인 사업자 폐업 신고 절차 국세청")
+        else:
+            queries.append("사업자 폐업 신고 절차 국세청")
 
         business_type = confirmed.get("business_type")
         if business_type is None:
@@ -937,7 +972,11 @@ class AgentGraph:
                 business_type = "RESTAURANT"
         business_queries = {
             "CAFE": "휴게음식점 폐업 신고 절차 정부24",
+            "카페": "휴게음식점 폐업 신고 절차 정부24",
+            "휴게음식점": "휴게음식점 폐업 신고 절차 정부24",
             "RESTAURANT": "일반음식점 폐업 신고 절차 정부24",
+            "식당": "일반음식점 폐업 신고 절차 정부24",
+            "일반음식점": "일반음식점 폐업 신고 절차 정부24",
         }
         business_query = business_queries.get(business_type)
         if business_query is not None:
@@ -949,7 +988,7 @@ class AgentGraph:
         )
         if (type(employee_count) is int and employee_count > 0) or employee_hint:
             queries.append("4대보험 탈퇴 사업장 폐업 신고 절차")
-        return list(dict.fromkeys(queries))[:4]
+        return queries
 
     def _emit(
         self,

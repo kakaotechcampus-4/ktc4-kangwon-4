@@ -1,14 +1,4 @@
-"""Reviewed procedure snapshot — the only source the request path may read.
-
-The MVP serves closure procedures from documents that were fetched once and
-then approved by a person.  Fetching an official site while a user waits makes
-the answer depend on that site being up and on us not being rate-limited, and a
-reviewed snapshot removes both risks.  The live fetch still exists, but only in
-the offline refresh command that *builds* this snapshot.
-
-Nothing in this module performs I/O.  A store is loaded once and then answers
-from memory, so a lookup during a user request costs no network call.
-"""
+"""Procedure records and the caller-supplied, in-memory lookup contract."""
 
 from __future__ import annotations
 
@@ -39,7 +29,11 @@ __all__ = [
 
 
 class ProcedureStoreError(RuntimeError):
-    """Raised when a snapshot cannot be loaded or fails its own contract."""
+    """Raised when a snapshot cannot be loaded or fails its own contract.
+
+    Only the local, gitignored JSON-file loader raises this -- the tracked
+    request-path runtime never reads a snapshot from disk.
+    """
 
 
 class ReviewedProcedureRecord(AgentSchema):
@@ -170,7 +164,11 @@ class ReviewedProcedureRecord(AgentSchema):
 
 
 class ReviewedProcedureSnapshot(AgentSchema):
-    """A whole snapshot file: a version, when it was built, and its records."""
+    """A whole snapshot file: a version, when it was built, and its records.
+
+    Only the local, gitignored JSON-file loader constructs this -- the
+    tracked request-path runtime is handed records directly.
+    """
 
     snapshot_version: NonEmptyStr = Field(
         description="Version recorded on every document served from this snapshot."
@@ -193,12 +191,7 @@ class ReviewedProcedureSnapshot(AgentSchema):
 
 
 class ReviewedProcedureStore(Protocol):
-    """What the lookup tool needs from a snapshot source.
-
-    A JSON file backs this today.  When BE exposes the procedure master, a
-    database-backed reader implements this same method and nothing above it
-    changes.
-    """
+    """Read preloaded records; the caller owns persistence and review."""
 
     @property
     def snapshot_version(self) -> str: ...

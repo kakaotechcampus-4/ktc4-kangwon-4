@@ -11,7 +11,6 @@ the graph does not know or care which one it was given.
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from app.agent.guardrails import ensure_no_sensitive_text
@@ -19,27 +18,27 @@ from app.agent.procedure_tool.store import (
     ReviewedProcedureRecord,
     ReviewedProcedureStore,
 )
-from app.agent.procedure_tool.tool import ProcedureLookupInputError
 from app.agent.schemas import (
     EvidenceRecord,
     FreshnessStatus,
     ProcedureLookupInput,
     ProcedureLookupResult,
     ProcedureLookupWarning,
-    ProcedureProviderSearchSummary,
-    ProcedureSearchProvider,
-    ProcedureSearchSummary,
     ProcedureSourceDocument,
 )
 
-__all__ = ["StoredProcedureLookupTool"]
+__all__ = ["ProcedureLookupInputError", "StoredProcedureLookupTool"]
 
-_PROVIDER = ProcedureSearchProvider.REVIEWED_PROCEDURE_STORE
 _MAX_QUERY_LENGTH = 200
 
 
-def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+class ProcedureLookupInputError(RuntimeError):
+    """Invalid procedure input with safe operational metadata."""
+
+    def __init__(self, message: str, *, code: str, retryable: bool) -> None:
+        super().__init__(message)
+        self.code = code
+        self.retryable = retryable
 
 
 class StoredProcedureLookupTool:
@@ -49,19 +48,16 @@ class StoredProcedureLookupTool:
         self,
         store: ReviewedProcedureStore,
         *,
-        clock: Callable[[], datetime] = _utc_now,
         uuid_factory: Callable[[], UUID] = uuid4,
     ) -> None:
         self._store = store
-        self._clock = clock
         self._uuid = uuid_factory
 
     async def aclose(self) -> None:
-        """Match the live tool's lifecycle so callers can swap the two freely."""
+        """No resource to release; kept so the runtime can close every tool."""
 
     async def lookup(self, request: ProcedureLookupInput) -> ProcedureLookupResult:
         self._validate_request(request)
-        searched_at = self._aware_now()
 
         # First query that matches a record owns it: the query is what binds a
         # document to a canonical step downstream, so it must stay stable.
@@ -119,42 +115,16 @@ class StoredProcedureLookupTool:
                     content_hash=record.content_hash,
                     evidence_ref=evidence_id,
                     search_query=query,
-                    discovery_provider=_PROVIDER,
+                    step_codes=list(record.step_codes),
                 )
             )
 
         requested = len(request.search_queries)
         document_count = len(documents)
-        # A snapshot read cannot fail: every query is answered, and a query with
-        # no match is an empty answer, not an error. That is why this tool has no
-        # PARTIAL outcome -- there is nothing that can partly fail.
-        summary = ProcedureSearchSummary(
-            provider_order=[_PROVIDER],
-            provider_summaries=[
-                ProcedureProviderSearchSummary(
-                    provider=_PROVIDER,
-                    attempted_query_count=requested,
-                    successful_query_count=requested,
-                    failed_query_count=0,
-                    provider_result_count=document_count,
-                )
-            ],
-            fallback_query_count=0,
-            requested_query_count=requested,
-            successful_query_count=requested,
-            failed_query_count=0,
-            provider_result_count=document_count,
-            official_candidate_count=document_count,
-            fetched_document_count=document_count,
-            rejected_result_count=0,
-            fetch_failure_count=0,
-            searched_at=searched_at,
-        )
         return ProcedureLookupResult(
             completion_status="COMPLETE" if documents else "NO_RESULTS",
             lookup_id=self._uuid(),
             documents=documents,
-            search_summary=summary,
             warnings=self._warnings(
                 document_count=document_count,
                 unmatched_query_count=requested - len(matched_queries),
@@ -213,20 +183,6 @@ class StoredProcedureLookupTool:
 
     @staticmethod
     def _validate_request(request: ProcedureLookupInput) -> None:
-        # Mirrors the live tool: the same inputs must be refused by both, or
-        # swapping the source would quietly widen what a caller may ask for.
-        if request.lookup_goal != "BUSINESS_CLOSURE":
-            raise ProcedureLookupInputError(
-                "procedure lookup goal is not supported",
-                code="UNSUPPORTED_LOOKUP_GOAL",
-                retryable=False,
-            )
-        if request.source_policy != "OFFICIAL_ONLY":
-            raise ProcedureLookupInputError(
-                "procedure lookup requires the official-only source policy",
-                code="UNSUPPORTED_SOURCE_POLICY",
-                retryable=False,
-            )
         queries: Sequence[str] = request.search_queries
         for query in queries:
             if len(query) > _MAX_QUERY_LENGTH:
@@ -242,9 +198,3 @@ class StoredProcedureLookupTool:
                     retryable=False,
                 )
         ensure_no_sensitive_text(queries)
-
-    def _aware_now(self) -> datetime:
-        value = self._clock()
-        if value.tzinfo is None or value.utcoffset() is None:
-            raise ValueError("procedure store clock must return an aware datetime")
-        return value

@@ -71,7 +71,7 @@ Case 생성 → Blocker 1개 판단 → Next Action 1개 제시
 행동을 내놓으면 "혼자 계획을 다시 맞춰야 하는 문제"를 우리가 다시 만드는 것입니다.
 그리고 **판단마다 무엇을 근거로 그랬는지 남깁니다.**
 
-Agent를 몇 개 어떤 경계로 둘지는 구현 결정이므로 `docs/architecture.md`에서 관리합니다.
+Agent를 몇 개 어떤 경계로 둘지는 구현 결정이므로 `docs/agent/architecture.md`에서 관리합니다.
 
 어느 층에도 두지 않는 것:
 
@@ -131,7 +131,7 @@ JSON API 필드는 `camelCase`, DB 컬럼은 `snake_case`. `Task` 대신 `Next A
 작업에 필요한 것만 봅니다.
 
 - API 추가·변경 전 `docs/interface-spec.md` / 물리 DB 구조 변경 전 `docs/schema/schema_table.md`
-- 시스템 경계·Agent 구성 변경 전 `docs/architecture.md` / 사용자 흐름 변경 전 `docs/hero-scenario.md`
+- 시스템 경계·Agent 구성 변경 전 `docs/agent/architecture.md` / 사용자 흐름 변경 전 `docs/hero-scenario.md`
 - PRD(Notion) — 요구사항·지표·리스크 원본. **초안이며 계속 바뀝니다**
 
 `main`·`develop`에 직접 커밋하지 않습니다 (상세는 `docs/git-convention.md`).

@@ -1,54 +1,86 @@
-# Agent 문서
+# Agent 범위
 
-> 소유: AI · 기준일: 2026-09-20
+Agent는 폐업 Case의 확인된 사실과 근거로 **Blocker 1개·Next Action 1개**를 판단한다.
+사용자가 현실에서 실행한 결과를 입력하면 같은 Case를 다시 판단한다.
+모든 정상 판단은 독립 Review를 거치며 Case 저장은 BE가 담당한다.
 
-Agent(=폐업 계획을 만드는 AI 부분) 관련 문서를 모아둔 폴더입니다.
-팀 공통 문서(`../architecture.md`, `../hero-scenario.md`, `../schema/`, `../tech-stack.md`)는
-`docs/` 바로 아래에 그대로 있습니다.
+**데이터의 절대 기준은 [schema_table.md](../schema/schema_table.md)다.**
+필드·타입·enum·NULL·기본값·관계·상태 전이는 이 기준을 따르고,
+Agent가 다르면 Agent를 고친다. MVP 단순화를 이유로 제약을 완화하지 않는다.
+낙관적 락은 쓰지 않는다 — Agent는 `CASE.case_version`과 이를 참조하는 버전 컬럼을 구현하지 않고,
+같은 Case인지는 `snapshot_id`와 필드의 기존값으로 확인한다.
+`schema_table.md`의 해당 컬럼 정의는 아직 이 결정을 반영하지 않은 상태다 — 정리는 별도 확인 중이다.
 
-## 무엇부터 보면 되나
+**규칙은 문서가 아니라 코드에 둔다.** 각 문서는 해당 구성요소의 사실만 담고 코드를 가리킨다.
+문서와 코드가 다르면 코드가 맞다.
 
-| 알고 싶은 것 | 문서 |
+| 구성요소 | 문서 | 코드 |
+|---|---|---|
+| 최종 판단(Blocker·Next Action) | [supervisor.md](./supervisor.md) | `supervisor/agent.py` |
+| 사실 추출·충돌 감지 | [info-agent.md](./info-agent.md) | `info_agent/agent.py` |
+| 절차 조회·실행 가능 판정 | [procedure-tool.md](./procedure-tool.md) | `procedure_tool/` |
+| 지원조건 비교 | [support-agent.md](./support-agent.md) | `support_agent/agent.py` |
+| 독립 검수 | [review-tool.md](./review-tool.md) | `review_tool/tool.py` |
+| 근거·개인정보·상태 차단 | [guardrails.md](./guardrails.md) | `claim_safety.py`, `guardrails.py`, `projection.py`, `enrichment.py` |
+
+입출력 타입·enum·불변식은 [`schemas.py`](../../backend/app/agent/schemas.py)(검증자가 계약이다),
+호출 순서·재작업·실패 경로는 [`graph.py`](../../backend/app/agent/graph.py),
+호출·시간 한도는 [`runtime.py`](../../backend/app/agent/runtime.py)·[`llm.py`](../../backend/app/agent/llm.py)가 기준이다.
+
+Agent는 SQL·ORM으로 DB를 직접 읽거나 쓰지 않는다 — 저장·재조회는 이 저장소의 Agent 범위 밖이다.
+판단 방향은 [팀 원칙](../../CLAUDE.md), 사용자 흐름은 [Hero Scenario](../hero-scenario.md),
+호출 구조는 [architecture.md](./architecture.md)를 따른다.
+
+## 실행 경계
+
+[`build_runtime`](../../backend/app/agent/runtime.py)은 호출자가 준비한 실제 절차 목록
+(`known_procedure_steps`), 검수 지원 자료(`support_catalog`), 메모리에 적재한 절차 자료
+(`procedure_store`)를 받는다. 자료가 없으면 빈 결과를 유지하며 임의 사업·조건으로 채우지 않는다.
+환경변수는 [`.env.example`](../../.env.example)를 따르고, 공용 runtime은 요청마다
+`run_planning(AgentGraphInput)`으로 실행한 뒤 애플리케이션 종료 시 `aclose()`로 정리한다.
+
+현재 [`app/main.py`](../../backend/app/main.py)는 Agent 실행을 연결하지 않는다.
+권한을 확인한 Case snapshot 제공, 검수된 변경 후보의 저장·재조회는 호출자의 책임이다.
+`CONFLICT_CONFIRMED`에는 서버가 보관한 원래 충돌 후보를 전달하며, 클라이언트가 보내온
+임의 후보를 그대로 신뢰하지 않는다. Agent의 `REVIEWED_PLAN`은 DB 저장 완료를 뜻하지 않는다.
+
+## 포함 기능
+
+- **사실 추출:** 허용된 Case 필드의 변경 후보와 입력 근거를 만든다. Agent가 Case를 직접 수정하지 않는다.
+- **근거 조회:** 실제 절차·지원사업 식별자와 사람이 검수한 자료만 사용한다.
+- **한 판단 지점:** Supervisor가 Blocker와 Next Action을 결정한다. 하위 Agent·Tool은 분석과 근거만 반환한다.
+- **필수 Review:** 모든 정상 판단을 독립 검수한다.
+- **재계획:** 같은 Case의 행동 결과를 반영한 후보와 새 판단을 만든다.
+- **충돌 확인:** 확정값과 새 입력이 다르면 사용자 선택 전 반영하지 않는다.
+- **안전 실패:** 근거 부족·Review 실패를 성공으로 바꾸지 않고 검수 전 초안을 내보내지 않는다.
+
+## 제외 기능
+
+- Chroma·임베딩·S3·Wiki miss RAG와 새 지식 관리 화면
+- 공식 문서 자동 수집·갱신·첨부파일 파싱·배치
+- 일반화된 자율 Tool 선택 계획과 Agent 구성 확장
+- 비용·반송률 대시보드, 관측된 결함과 무관한 성능·정규식 고도화
+- 전체 폐업 완료 자동 판정, 업종·지원사업 범위 확대
+
+Review·충돌 보호·근거·개인정보 검증은 축소하지 않는다.
+폐업 결정·최적 폐업일·법률/세무/자격의 최종 판단·신청/계약/외부 연락 실행은
+[팀 공통 제외 범위](../../CLAUDE.md)를 따른다.
+
+## 완료 기준
+
+`AgentRuntime.run_planning`의 입력부터 출력까지 실제 Graph·Info·Support·Supervisor·Review 경로로 검증한다.
+
+| 확인 항목 | 통과 기준 |
 |---|---|
-| **작업을 이어받을 때 먼저 읽을 문서** | [`handoff.md`](./handoff.md) |
-| **AI 티켓 중 무엇을 마쳤고 무엇이 남았나** | [`implementation-status.md`](./implementation-status.md) |
-| **실제 API 호출·MySQL 조회로 확인한 것은 무엇인가** | [`live-verification.md`](./live-verification.md) |
-| **공식 폐업 절차·기관·출처는 무엇인가** | [`official-closure-procedure.md`](./official-closure-procedure.md) |
-| **뭐가 아직 안 정해졌나** | [`open-decisions.md`](./open-decisions.md) |
-| **BE에 넘길 스키마 요청 (테이블·컬럼·enum)** | [`be-schema-request.md`](./be-schema-request.md) |
-| BE에 뭘 요청해야 하나 (배경·논의) | [`be-requests.md`](./be-requests.md) |
-| 절차 정보를 어디서 읽나 | [`procedure-knowledge.md`](./procedure-knowledge.md) |
-| 지원사업 정보를 어디서 읽나 | [`support-knowledge.md`](./support-knowledge.md) |
-| 지원사업 Wiki를 ID·UUID로 연결하는 방법 | [`support-wiki.md`](./support-wiki.md) |
-| 프로젝트 Obsidian Vault 열기·공고 검수 | [`obsidian/README.md`](./obsidian/README.md) |
-| 실제 미검수 공고 색인·검색 및 A8 남은 범위 | [`support-retrieval.md`](./support-retrieval.md) |
-| 한 번 실행에 얼마나 쓰나 | [`runtime-limits.md`](./runtime-limits.md) |
-| 어떻게 실행하나, 환경변수는 | [`standalone-runtime.md`](./standalone-runtime.md) |
-| 각 Agent·Tool의 정확한 입출력 | [`tool-io-schema.md`](./tool-io-schema.md) |
-| 공식 데이터 출처와 수집 계획 | [`official-data-sources.md`](./official-data-sources.md) |
-| BE 연동 계약(검토 중) | [`be-integration-requirements.md`](./be-integration-requirements.md) |
-| 누가 무엇을 호출하나 | [`../architecture.md`](../architecture.md) |
+| 최초 판단 | Blocker 1개와 실행할 Next Action 1개를 만들고 Review를 통과한다 |
+| 핵심 재계획 | 행동 결과를 읽기 상태에 적용해 새 Next Action을 검수하고 근거가 연결된 후보와 함께 반환한다 |
+| 충돌 | `NOT_REQUIRED`와 `REQUIRED`가 충돌하면 후보·근거를 반환하고 멈춘다. 유효한 확인 뒤 재계획·Review를 수행한다 |
+| 추가 질문 | 판단에 필요한 값이 없으면 미확인을 유지하고 이해할 수 있는 확인 질문을 낸다 |
+| 지원 근거 | 검수 Wiki의 조건만 사용한다. 조회만으로 신청 이력이 생기지 않는다 |
+| 실패·오래된 입력 | 한도 소진은 미검수 초안 없는 `SAFE_FAILURE`로 끝낸다. snapshot·현재값이 다른 충돌 확인은 거부한다 |
 
-## 지켜지는 규칙
-
-- **데이터 기준은 [`../schema/schema_table.md`](../schema/schema_table.md)입니다.** 테이블·컬럼·타입·키·
-  nullable·기본값·enum·관계는 코드나 과거 회의 메모가 이 문서를 덮어쓰지 않습니다.
-  필요한 변경은 근거와 영향 범위를 [`be-requests.md`](./be-requests.md)에 건의하고 협의합니다.
-- **미정 항목은 `open-decisions.md` 한 곳에만 씁니다.** 다른 문서에 "TBD"라고만 적지 않습니다.
-- **숫자는 한 곳에만 씁니다.** 호출 수·시간 상한은 `runtime-limits.md`, 환경변수는
-  `standalone-runtime.md`가 단일 출처입니다.
-- 현재 구현 여부는 코드로, 실제 동작은 출처가 기록된 실측으로 확인합니다. 더미 금지 이전의 테스트
-  통과를 현재 실제 서비스 검증으로 옮겨 적지 않습니다. **스키마와 다른 구현이 발견되면 불일치이지 새 기준이 아닙니다.**
-  목표 구조를 현재 상태처럼 적지 않습니다.
-
-## API 계약은 어디 있나
-
-`docs/interface-spec.md`는 **삭제했습니다.** 내용 없이 "이 파일은 API 명세가 아닙니다"라고만
-적힌 안내 파일이었습니다. 찾던 내용은 여기 있습니다.
-
-- 외부 HTTP·DTO 제안과 아직 정할 항목: [`be-integration-requirements.md`](./be-integration-requirements.md)
-- 그중 결정 대기 항목: [`open-decisions.md`](./open-decisions.md)
-- Agent 내부 입출력: [`tool-io-schema.md`](./tool-io-schema.md)
-
-승인된 Agent 연동 API 계약은 아직 **0개**입니다. OpenAPI와 실제 route도 위 스키마를 준수하는
-공동 계약에 맞춰야 합니다. 내부 DTO와 실제 테이블 저장 형식이 같다는 뜻은 아닙니다.
+첫 행동과 현실 결과 이후 행동의 **차이**를 확인한다.
+실행 횟수·코드 존재·외부 API의 HTTP 200으로 대신하지 않는다.
+서비스 전체의 완료 증거는 같은 Case의 최초 판단 → 결과 입력 → 재계획 → 저장·재조회이며,
+Agent 응답 자체는 저장 성공이 아니다.
+로컬 검증 코드·실행 기록은 Git 추적에서 제외한다.

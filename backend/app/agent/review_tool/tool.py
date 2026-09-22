@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -11,6 +10,7 @@ from uuid import UUID
 from pydantic import BaseModel, ValidationError
 
 from app.agent.claim_safety import (
+    REQUIRED_CLAIM_SOURCES,
     expand_evidence,
     has_confirmation_caveat,
     has_explicit_eligibility_language,
@@ -19,14 +19,19 @@ from app.agent.claim_safety import (
     high_risk_metadata,
     is_overconfident,
     references_other_known_label,
-    required_sources_for_claim,
 )
+from app.agent.enrichment import build_confirmed_conflict_overlay
 from app.agent.guardrails import GuardrailViolation, ensure_no_sensitive_text
-from app.agent.projection import ensure_projection_has_no_obvious_sensitive_text
+from app.agent.procedure_tool.rules import procedure_plan_constraints
+from app.agent.projection import (
+    ensure_projection_has_no_obvious_sensitive_text,
+    to_model_projection,
+)
 from app.agent.prompts import review_messages
 from app.agent.schemas import (
     ClaimType,
     Component,
+    ConflictConfirmedTrigger,
     DecisionType,
     EvidenceRecord,
     FactChangeSourceType,
@@ -38,6 +43,7 @@ from app.agent.schemas import (
     ProcedureActionTarget,
     ProcedureFinding,
     ProcedureLookupResult,
+    ProcedureProgressStatus,
     ReviewIssue,
     ReviewIssueCode,
     ReviewResult,
@@ -74,6 +80,7 @@ class StructuredReviewClient(Protocol):
         schema_name: str | None = None,
         max_retries: int | None = None,
         temperature: float | None = None,
+        enum_constraints: Mapping[str, Sequence[str]] | None = None,
     ) -> BaseModel: ...
 
 
@@ -180,13 +187,12 @@ class ReviewTool:
                 messages,
                 schema_name="reborn_review_output",
                 max_retries=self._provider_max_retries,
-                temperature=0,
+                enum_constraints={"evidence_refs": sorted(context.evidence_by_id)},
             )
             try:
                 model_output = _coerce_model_output(
                     raw_output,
                     subject,
-                    context.support_program_names,
                 )
                 _validate_model_output(
                     model_output,
@@ -210,40 +216,12 @@ class ReviewTool:
 def _coerce_model_output(
     value: BaseModel | Mapping[str, Any],
     subject: ReviewSubject,
-    support_program_names: frozenset[str] = frozenset(),
 ) -> ReviewModelOutput:
     try:
         if isinstance(value, ReviewModelOutput):
             return value
         if isinstance(value, ReviewProviderOutput):
             payload = value.model_dump(mode="python")
-            # Asking for an explicitly unknown value is not itself a factual
-            # claim.  Provider reviewers repeatedly classified these question
-            # strings as unsupported claims even though deterministic review
-            # separately catches factual assertions embedded in questions.
-            original_issue_count = len(payload["issues"])
-            original_missing_count = len(payload["missing_evidence"])
-            payload["issues"] = [
-                issue
-                for issue in payload["issues"]
-                if not (
-                    issue["issue_code"] == ReviewIssueCode.MISSING_EVIDENCE
-                    and _is_exempt_from_evidence(
-                        subject, issue["target_path"], support_program_names
-                    )
-                )
-            ]
-            payload["missing_evidence"] = [
-                item
-                for item in payload["missing_evidence"]
-                if not _is_exempt_from_evidence(
-                    subject, item["claim_path"], support_program_names
-                )
-            ]
-            dropped_question_finding = (
-                len(payload["issues"]) != original_issue_count
-                or len(payload["missing_evidence"]) != original_missing_count
-            )
             derived_targets: set[Component] = set()
             for issue in payload["issues"]:
                 owner_component, owner_call_id = _issue_owner_for_path(
@@ -269,174 +247,12 @@ def _coerce_model_output(
                 )
                 if component in derived_targets
             ]
-            if (
-                dropped_question_finding
-                and not any(
-                    issue["severity"] == "BLOCKING" for issue in payload["issues"]
-                )
-                and not payload["missing_evidence"]
-            ):
-                payload["verdict"] = ReviewVerdict.PASS
             return ReviewModelOutput.model_validate(payload)
         if isinstance(value, BaseModel):
             value = value.model_dump(mode="python")
         return ReviewModelOutput.model_validate(value)
     except (ValidationError, TypeError, ValueError) as exc:
         raise ReviewOutputViolation("review model output violates its schema") from exc
-
-
-_PENDING_DECISION_PATHS = (
-    ["supervisor_draft", "decision"],
-    ["supervisor_draft", "decision", "blocker"],
-)
-
-
-def _is_pending_decision_path(path: str) -> bool:
-    tokens = _json_pointer_tokens(path)
-    if list(tokens) in [list(item) for item in _PENDING_DECISION_PATHS]:
-        return True
-    return list(tokens[:3]) == ["supervisor_draft", "decision", "blocker"] and tokens[
-        3:
-    ] in ([], ["title"], ["description"])
-
-
-def _is_not_yet_known_blocker(
-    subject: ReviewSubject,
-    path: str,
-    support_program_names: frozenset[str],
-) -> bool:
-    """Recognize a blocker whose whole content is "this is not known yet".
-
-    A ``NEEDS_MORE_INFO`` decision exists because the Case does not yet hold
-    what a next action would need.  Its blocker names what is missing, and no
-    evidence can show that something is unknown -- the Case state is what shows
-    it.  Provider reviewers nonetheless asked for evidence here, and since the
-    Supervisor cannot supply any, the rework limit was spent and the user got
-    nothing back.  Measured runs failed this way more than any other.
-
-    The exemption is deliberately narrow.  It applies only when the Case really
-    does hold an unconfirmed fact, and only while the blocker text asserts
-    nothing on its own: an amount, date, legal, tax or eligibility statement
-    makes it a claim again, and deterministic review keeps checking it either
-    way.
-    """
-
-    if not _is_pending_decision_path(path):
-        return False
-    decision = subject.supervisor_draft.decision
-    if decision.decision_type != DecisionType.NEEDS_MORE_INFO:
-        return False
-    if not any(fact.status == FactStatus.UNKNOWN for fact in subject.snapshot.facts):
-        return False
-    blocker = getattr(decision, "blocker", None)
-    if blocker is None:
-        return False
-    text = f"{blocker.title} {blocker.description}"
-    risks, _ = high_risk_metadata(text, support_program_names)
-    return not risks and not is_overconfident(text)
-
-
-def _is_exempt_from_evidence(
-    subject: ReviewSubject,
-    path: str,
-    support_program_names: frozenset[str],
-) -> bool:
-    """Paths where asking for supporting evidence is a category error."""
-
-    return _is_unassertive_information_question(subject, path) or (
-        _is_not_yet_known_blocker(subject, path, support_program_names)
-    )
-
-
-def _is_question_path(path: str) -> bool:
-    tokens = _json_pointer_tokens(path)
-    return (
-        (
-            len(tokens) == 3
-            and tokens == ["supervisor_draft", "decision", "questions_for_user"]
-        )
-        or (
-            len(tokens) == 4
-            and tokens[:3] == ["supervisor_draft", "decision", "questions_for_user"]
-            and tokens[3].isdigit()
-        )
-        or (
-            len(tokens) == 4
-            and tokens
-            == [
-                "supervisor_draft",
-                "decision",
-                "next_action",
-                "questions_to_ask",
-            ]
-        )
-        or (
-            len(tokens) == 5
-            and tokens[:4]
-            == [
-                "supervisor_draft",
-                "decision",
-                "next_action",
-                "questions_to_ask",
-            ]
-            and tokens[4].isdigit()
-        )
-    )
-
-
-_ASSUMPTIVE_QUESTION_PATTERN = re.compile(
-    r"(?:이미|벌써|당연|확실|분명|받으셨죠|하셨죠|했죠|됐죠|맞죠|"
-    r"완료했(?:다고|으니)|완료됐(?:다고|으니))",
-    re.IGNORECASE,
-)
-_INFORMATION_QUESTION_PATTERN = re.compile(
-    r"(?:무엇|어떤|언제|어디|어떻게|왜|누구|몇|얼마|여부|내용|상태|범위|사항|"
-    r"확인|알려|입력|제공|필요|"
-    r"what|which|when|where|how|who)",
-    re.IGNORECASE,
-)
-_INFORMATION_REQUEST_ENDING_PATTERN = re.compile(
-    r"(?:알려|입력해|제공해|답변해|확인해)\s*(?:주(?:세요|십시오|시겠습니까)|달라)\s*[.!]?$",
-    re.IGNORECASE,
-)
-_QUESTION_WITH_OPTIONAL_EXAMPLE_PATTERN = re.compile(
-    r"\?(?:\s*예(?:시)?\)?\s*[:.)]?\s*[^?]{0,200})?$",
-    re.IGNORECASE,
-)
-
-
-def _is_unassertive_information_text(value: object) -> bool:
-    if not isinstance(value, str):
-        return False
-    text = value.strip()
-    return (
-        (
-            _QUESTION_WITH_OPTIONAL_EXAMPLE_PATTERN.search(text) is not None
-            or _INFORMATION_REQUEST_ENDING_PATTERN.search(text) is not None
-        )
-        and _INFORMATION_QUESTION_PATTERN.search(text) is not None
-        and _ASSUMPTIVE_QUESTION_PATTERN.search(text) is None
-        and not is_overconfident(text)
-    )
-
-
-def _is_unassertive_information_question(
-    subject: ReviewSubject,
-    path: str,
-) -> bool:
-    """Recognize only plainly interrogative, non-presuppositional questions."""
-
-    if not _is_question_path(path):
-        return False
-    try:
-        value = _resolve_json_pointer(subject, path)
-    except ReviewOutputViolation:
-        return False
-    if isinstance(value, list):
-        return bool(value) and all(
-            _is_unassertive_information_text(item) for item in value
-        )
-    return _is_unassertive_information_text(value)
 
 
 def _validate_integrity(subject: ReviewSubject) -> _ReviewContext:
@@ -523,10 +339,37 @@ def _validate_mutation_provenance(
     mutations = subject.supervisor_draft.mutations
     snapshot_facts = {fact.field_path: fact for fact in subject.snapshot.facts}
     for candidate in mutations.fact_changes:
+        if candidate.source_type == FactChangeSourceType.CONFIRMED_CONFLICT:
+            if not isinstance(subject.trigger, ConflictConfirmedTrigger):
+                raise ReviewIntegrityError(
+                    "confirmed-conflict mutation requires its confirmation trigger"
+                )
+            conflict = subject.trigger.confirmed_conflict
+            try:
+                conflict.assert_integrity()
+                expected = build_confirmed_conflict_overlay(
+                    subject.snapshot,
+                    conflict,
+                    uuid_factory=lambda candidate_id=candidate.candidate_id: (
+                        candidate_id
+                    ),
+                )
+            except (AttributeError, TypeError, ValueError) as exc:
+                raise ReviewIntegrityError(
+                    "confirmed-conflict provenance is invalid"
+                ) from exc
+            snapshot_evidence = {
+                item.evidence_id for item in subject.snapshot.evidence_records
+            }
+            if not set(conflict.source_evidence_refs).issubset(snapshot_evidence):
+                raise ReviewIntegrityError("confirmed-conflict evidence is missing")
+            if canonical_digest(candidate) != canonical_digest(expected):
+                raise ReviewIntegrityError(
+                    "mutation differs from the confirmed conflict"
+                )
+            continue
         if candidate.source_type != FactChangeSourceType.INFO_ANALYSIS:
-            raise ReviewIntegrityError(
-                "confirmed-conflict fact mutation lacks a verifiable standalone trigger"
-            )
+            raise ReviewIntegrityError("fact mutation has an unsupported source type")
         if candidate.source_call_id is None:
             raise ReviewIntegrityError("fact mutation is missing its Info source call")
         source = _require_source_output(
@@ -602,7 +445,11 @@ def _validate_mutation_provenance(
             ),
             None,
         )
-        before_status = snapshot_progress.status if snapshot_progress else None
+        before_status = (
+            snapshot_progress.status
+            if snapshot_progress
+            else ProcedureProgressStatus.NOT_STARTED
+        )
         if (
             candidate.before_status != before_status
             or finding.current_status != before_status
@@ -674,11 +521,21 @@ def _validate_procedure_analysis_provenance(
             record.evidence_id: record
             for record in lookup_source.output.evidence_records
         }
+        source_steps = {
+            document.evidence_ref: set(document.step_codes)
+            for document in lookup_source.output.documents
+        }
         for finding in info.procedure_findings:
             for evidence_ref in finding.evidence_refs:
                 if evidence_ref not in lookup_evidence:
                     raise ReviewIntegrityError(
                         "Info procedure finding evidence is not from its raw lookup"
+                    )
+                if finding.procedure_step.step_code not in source_steps.get(
+                    evidence_ref, set()
+                ):
+                    raise ReviewIntegrityError(
+                        "Info procedure finding is not bound to its reviewed source step"
                     )
 
 
@@ -701,11 +558,9 @@ def _strictly_equal_nullable(left: Any, right: Any) -> bool:
 
 
 _PROMPT_EXCLUDED_KEYS = {
-    "application_id",
     "candidate_id",
     "captured_at",
     "case_id",
-    "case_version",
     "checked_at",
     "claim_id",
     "client_event_id",
@@ -733,7 +588,6 @@ _PROMPT_EXCLUDED_KEYS = {
     "snapshot_id",
     "source_fact_candidate_id",
     "source_ref",
-    "searched_at",
     "submitted_at",
     "trace_id",
     "updated_at",
@@ -825,6 +679,7 @@ def _review_prompt_projection(
         "review_attempt": subject.review_attempt,
         "trigger": trigger,
         "snapshot": snapshot_payload,
+        "known_procedure_steps": to_model_projection(subject.known_procedure_steps),
         "source_results": source_payloads,
         "supervisor_draft": _minimize_prompt_value(supervisor_payload),
     }
@@ -856,15 +711,9 @@ def _validate_action_shape(
             raise ReviewIntegrityError("ACTION requires exactly one blocker and action")
         if decision.questions_for_user:
             raise ReviewIntegrityError("ACTION cannot also be a user-question branch")
-    elif decision.decision_type == DecisionType.NEEDS_MORE_INFO:
+    else:
         if decision.blocker is None or decision.next_action is not None:
             raise ReviewIntegrityError("NEEDS_MORE_INFO shape is invalid")
-    else:
-        if decision.blocker is not None or decision.next_action is not None:
-            raise ReviewIntegrityError("CASE_COMPLETE cannot contain blocker/action")
-        raise ReviewIntegrityError(
-            "CASE_COMPLETE is unavailable without authoritative procedure coverage"
-        )
 
 
 def _deterministic_safety_review(
@@ -925,7 +774,7 @@ def _deterministic_safety_review(
                     )
                 )
 
-        required_sources = required_sources_for_claim(claim.claim_type)
+        required_sources = REQUIRED_CLAIM_SOURCES
         has_required_source = any(
             evidence.source_type in required_sources
             for evidence in expanded_claim_evidence
@@ -1013,6 +862,18 @@ def _deterministic_safety_review(
             )
 
     issues.extend(_action_target_findings(subject, context))
+    for path, reason in procedure_plan_constraints(
+        subject.known_procedure_steps, subject.snapshot, draft.mutations, draft.decision
+    ):
+        issues.append(
+            _issue(
+                code="PROCEDURE_CONFLICT",
+                category="PROCEDURE",
+                path="/supervisor_draft" + path,
+                reason=reason,
+                evidence_refs=[],
+            )
+        )
     return _SafetyFindings(
         issues=tuple(_deduplicate_models(issues)),
         missing_evidence=tuple(_deduplicate_models(missing)),
@@ -1409,12 +1270,7 @@ def _visible_draft_strings(subject: ReviewSubject) -> list[tuple[str, str]]:
         (f"{base}/selection_summary", decision.selection_summary)
     ]
     if decision.blocker is not None:
-        values.extend(
-            [
-                (f"{base}/blocker/title", decision.blocker.title),
-                (f"{base}/blocker/description", decision.blocker.description),
-            ]
-        )
+        values.append((f"{base}/blocker/description", decision.blocker.description))
     if decision.next_action is not None:
         action_base = f"{base}/next_action"
         values.extend(

@@ -1,6 +1,6 @@
 # RE:BORN 기술 스택과 현재 사용 상태
 
-> 기준일: 2026-09-19
+> 기준일: 2026-09-23
 >
 > 이 문서의 책임: 패키지 선언 버전과 현재 코드의 실제 사용 여부
 
@@ -9,13 +9,12 @@
 ## 1. 먼저 보는 결론
 
 - 현재 Agent 실행은 **Pydantic, LangGraph, httpx**를 사용한다.
-- LLM은 LangChain이나 OpenAI SDK가 아니라 `httpx`로 OpenAI-compatible endpoint를 호출한다. endpoint는 하나로 고정돼 있지 않다 — `SUPERVISOR_*` 환경변수를 설정하면 Supervisor만 별도 provider·model을 쓰는 client를 따로 받고, 설정하지 않으면 전 구성요소가 공용 endpoint 하나를 그대로 공유한다(환경변수는 `agent/standalone-runtime.md`가 단일 출처).
-- LangChain과 OpenAI SDK는 설치 목록에 있지만 현재 Agent 실행에서는 사용하지 않는다. Chroma도 **요청 처리 경로에는 연결돼 있지 않다** — 미검수 공고를 오프라인에서 색인·검색하는 별도 CLI에서만 쓴다(`app.agent.support_agent.rag.cli`). Langfuse는 credential이 설정된 경우에만 metadata 전송에 사용한다.
+- LLM은 LangChain이나 OpenAI SDK가 아니라 `httpx`로 OpenAI-compatible endpoint를 호출한다. `SUPERVISOR_*` 환경변수를 설정하면 Supervisor와 독립 Review 호출이 같은 별도 client를 사용하고, 미설정 시 공용 endpoint 설정을 사용한다. 환경변수는 [`.env.example`](../.env.example)을 따른다.
+- LangChain·OpenAI SDK·Chroma는 `backend/requirements.txt`에 고정돼 있지만 Agent 코드에 import가 없다. Langfuse는 credential이 설정된 경우에만 metadata 전송에 사용한다.
 - 루트 `docker-compose.yml`은 **MySQL 8.0 DB만** 실행한다. Backend와 Agent container는 없다.
-- `develop`에는 BE의 SQLModel 테이블 정의 11개가 있다. FastAPI route, migration, 인증과 실제 Case 읽기·쓰기는 아직 `develop`에 없다.
+- 현재 작업 트리에는 SQLModel 테이블, DB 세션, FastAPI 진입점과 카카오 인증 라우터가 있다. Agent를 호출하는 라우터와 Case 저장·재조회 연동, migration은 아직 없다.
 - Support Agent는 생성 시 주입된 검수 catalog를 사용한다.
-- 기업마당 raw 공고조회는 구현됐지만 전체 Agent 흐름에 연결되지 않았다.
-- 공식 문서 crawler와 RAG도 아직 구현되지 않았다.
+- 기업마당 adapter·공식 문서 crawler·RAG는 Agent에 없다. 지원·절차 자료는 사람이 검수해 주입한다.
 
 ## 2. 상태를 읽는 기준
 
@@ -46,7 +45,7 @@
 #### httpx `0.28.1`
 
 - **상태:** 현재 코드에서 사용
-- **용도:** LLM, 공식 절차 원문과 기업마당 API 호출
+- **용도:** LLM 호출
 
 #### python-dotenv `1.2.3`
 
@@ -85,75 +84,52 @@ Agent standalone은 MySQL을 사용하지 않는다. manifest와 lockfile은 설
 - **langchain `1.4.0`:** 버전만 선언. Agent runtime import 없음
 - **langchain-openai `1.6.0`:** 버전만 선언. Agent runtime import 없음
 - **openai `3.8.0`:** 버전만 선언. Agent runtime import 없음
-- **pydantic-settings `2.15.0`:** 루트 `config.py`에서는 사용하지만 현재 Agent runtime은 import하지 않음
+- **pydantic-settings `2.15.0`:** `backend/app/common/config.py`에서 사용하지만 Agent runtime은 import하지 않음
 
 ### Application·DB 관련 패키지
 
-- **FastAPI `0.141.1`:** `develop`에 `backend/app/main.py`와 route가 없음(다른 브랜치에서 작업 중)
-- **Uvicorn `0.52.4`:** 실행 가능한 FastAPI app이 `develop`에 없음
-- **SQLAlchemy `2.0.52`:** `backend/app/be/models/`에 SQLModel 테이블 정의 11개가 있음. session은 `develop`에 없음
-- **PyMySQL `1.2.0`:** application DB 연결이 `develop`에 없음
+- **FastAPI `0.141.1`:** `backend/app/main.py`가 인증 라우터와 health 경로를 연결
+- **Uvicorn `0.52.4`:** FastAPI 실행 서버로 선언
+- **SQLModel `0.0.42`:** `backend/app/be/models/`의 테이블과 `app/be/db.py`의 DB 세션에 사용. SQLAlchemy를 내부적으로 사용
+- **PyMySQL `1.2.0`:** MySQL 연결에 사용
 - **Alembic `1.19.2`:** migration 미구현
-- **PyJWT `2.13.0`:** Kakao OAuth와 서비스 JWT route·정책이 `develop`에 없음
+- **PyJWT `2.13.0`:** `backend/app/be/services/auth.py`에서 서비스 JWT 발급에 사용
 
-⚠️ **`sqlmodel`이 `backend/requirements.txt`에 없다.** 모든 BE 모델이 import하는데 고정돼 있지 않아, 깨끗한 환경에서 설치하면 `app.be.models`를 import할 수 없다 — [`agent/be-requests.md`](./agent/be-requests.md) 5번.
-
-MySQL은 container 설정만 존재한다. migration, transaction과 통합 테스트가 생겨야 DB 기능이 구현됐다고 판단한다.
+DB 연결 코드의 존재가 Agent 변경 후보의 저장·재조회 완료를 뜻하지는 않는다.
 
 ### 후속 AI 기능용 패키지
 
 - **Langfuse `4.15.1`:** `LangfuseTraceSink`로 metadata 전송 구현. 비용 금액 산출은 없음
-- **langchain-chroma `1.1.0`:** 미사용. `rag/`는 chromadb를 직접 쓴다
-- **ChromaDB `1.5.9`:** 별도 오프라인 CLI에서 미검수 공고 색인·검색에 사용. **운영 Graph의 조회 경로에는 미연결**이며 Support Agent의 `rag_used`는 false 그대로다
+- **langchain-chroma `1.1.0` / ChromaDB `1.5.9`:** Agent 코드에 import가 없다. MVP 제외 범위라 `backend/requirements.txt`에서 빼도 되는지 BE 확인 필요
 
 ### 개발 도구
 
 - **pytest `9.1.1`:** 현재 Agent 테스트에 사용
 - **testcontainers[mysql] `4.15.0`:** 버전만 선언. DB 통합 테스트는 아직 없음
 
-## 5. 아직 없거나 연결되지 않은 기능
-
-### Application과 DB
-
-- FastAPI app과 API route
-- SQLAlchemy model, DB session과 repository
-- Alembic migration과 transaction
-- Kakao OAuth와 서비스 JWT 인증
-- 실제 Case snapshot adapter, 동시성 제어, 저장과 재조회
-- Compose의 Backend·Agent service
-- 저장소에 없는 `app.main:app` 실행 진입점
-- 아직 결정되지 않은 운영 호스팅과 배포 방식
 
 ### Agent와 공식 데이터
 
-전체 목록은 [`architecture.md`](./architecture.md) §8, 아직 정하지 못한 항목은 [`agent/open-decisions.md`](./agent/open-decisions.md)에 둔다. 여기서는 패키지와 직접 관련된 것만 적는다.
+Agent 호출 구조는 [`agent/architecture.md`](./agent/architecture.md), 포함·제외 범위는 [`agent/README.md`](./agent/README.md)를 따른다. 여기서는 패키지와 직접 관련된 것만 적는다.
 
-- **구현됐지만 미연결:** 기업마당 API의 raw 공고 후보를 조회하는 독립 adapter
-- **구현됐지만 미연결:** 미검수 공고의 corpus·index·검색(`chromadb`). 별도 CLI로만 실행하며 검수 corpus·S3 원문·운영 Graph에는 잇지 않았다. 상세는 [`agent/support-retrieval.md`](./agent/support-retrieval.md)
-- **미구현:** 승인된 공식 원문 crawler와 parser, 검수 corpus의 versioned index·retriever와 요청 경로 RAG 연결
+- **MVP 제외:** 기업마당 adapter, 미검수 공고 corpus·index·검색(`chromadb`), 공식 원문 crawler·parser, 요청 경로 RAG. 범위는 [`agent/README.md`](./agent/README.md)
 - **미구현:** Langfuse 비용 금액 산출, masking 정책 승인
 
-Support Agent의 현재 입력은 생성 시 주입된 reviewed catalog다. 검수 corpus, versioned index, retriever 평가, Evidence 변환과 Graph 연결이 모두 있어야 RAG가 완료됐다고 판단한다.
+Support Agent의 입력은 생성 시 주입된 reviewed catalog뿐이다.
 
-### Frontend
-
-- 현재 `frontend/src`에서 별도 API client 또는 fetch 경계는 확인되지 않았다.
 
 ## 6. 관련 문서
 
 - **Agent 문서 전체:** [`agent/README.md`](./agent/README.md)
-- **Agent 호출 구조:** [`architecture.md`](./architecture.md)
-- **Agent·Tool 공개 호출 입·출력:** [`agent/tool-io-schema.md`](./agent/tool-io-schema.md)
-- **standalone 실행과 검증:** [`agent/standalone-runtime.md`](./agent/standalone-runtime.md)
-- **공식 API·crawler·RAG 계획:** [`agent/official-data-sources.md`](./agent/official-data-sources.md)
-- **외부 연동 공동 검토 요청:** [`agent/be-integration-requirements.md`](./agent/be-integration-requirements.md)
+- **Agent 호출 구조:** [`agent/architecture.md`](./agent/architecture.md)
+- **Agent·Tool 입·출력:** `backend/app/agent/schemas.py` (문서가 아니라 검증자가 계약이다)
+- **Agent 실행 경계:** [`agent/README.md`](./agent/README.md#실행-경계), [`runtime.py`](../backend/app/agent/runtime.py)
 
 ## 7. 버전과 상태의 근거
 
 - **Python package:** `backend/requirements.txt`, `backend/requirements-dev.txt`
 - **Frontend package:** `frontend/package.json`과 lockfile
 - **Agent 실제 import와 호출:** `backend/app/agent/`
-- **Agent 회귀 테스트:** `backend/tests/agent/`
 - **Python·container 설정:** `backend/.python-version`, `backend/Dockerfile`, `docker-compose.yml`
 
 `==` 또는 frontend version range는 설치 요청 버전이다. 실제 기능 사용 여부는 import, 호출 경로와 테스트로 별도 확인한다.

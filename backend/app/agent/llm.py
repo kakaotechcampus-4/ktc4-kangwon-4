@@ -594,25 +594,6 @@ class StructuredLLMClient:
             status_code=last_status_code,
         )
 
-    async def complete_structured(
-        self,
-        messages: Sequence[Mapping[str, Any]],
-        response_model: type[ResponseModelT],
-        *,
-        schema_name: str | None = None,
-        max_retries: int | None = None,
-        temperature: float | None = None,
-    ) -> ResponseModelT:
-        """Keyword-friendly alias for callers that place messages first."""
-
-        return await self.generate(
-            response_model,
-            messages,
-            schema_name=schema_name,
-            max_retries=max_retries,
-            temperature=temperature,
-        )
-
     def _build_payload(
         self,
         *,

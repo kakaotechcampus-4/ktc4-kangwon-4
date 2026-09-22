@@ -7,9 +7,11 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.agent.schemas import (
+    CASE_FIELD_SPECS,
     CaseFieldKey,
     CriterionStatus,
     EvidenceRecord,
+    FactValueType,
     FreshnessStatus,
     NonEmptyStr,
     NonNullStrictScalar,
@@ -19,6 +21,7 @@ from app.agent.schemas import (
     SupportProgramRef,
     Uncertainty,
     UpperSnakeCode,
+    validate_case_field_value,
 )
 
 
@@ -54,9 +57,21 @@ class SupportCriterionDefinition(SupportCatalogModel):
     evidence_refs: Annotated[tuple[NonEmptyStr, ...], Field(min_length=1)]
 
     @model_validator(mode="after")
-    def validate_operator_arity(self) -> SupportCriterionDefinition:
+    def validate_definition(self) -> SupportCriterionDefinition:
         if self.operator != "IN" and len(self.required_values) != 1:
             raise ValueError(f"{self.operator} requires exactly one required value")
+        value_type = CASE_FIELD_SPECS[self.field_path][0]
+        if self.operator not in {"EQ", "IN"} and value_type not in {
+            FactValueType.INTEGER,
+            FactValueType.DATE,
+        }:
+            raise ValueError(
+                "ordered support criteria require an integer or date field"
+            )
+        for value in self.required_values:
+            validate_case_field_value(
+                self.field_path, value_type, value, allow_null=False
+            )
         return self
 
 

@@ -77,3 +77,7 @@ langfuse_data/
 *.sqlite3
 *.db
 .terraform/
+
+# ── 개인 로컬 파일 (팀 공용 아님) ──────────────────────
+/handoff.md
+/AGENTS.md

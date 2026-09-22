@@ -1,19 +1,4 @@
-"""Composition root: build the Agent once, then run it per request.
-
-Until now the only way to run a planning pass was the CLI, which assembled the
-graph inline.  A backend route has nothing to call.  This module is that call.
-
-Two things are deliberately separated:
-
-* **Build once** -- clients, the reviewed procedure store and the trace sink are
-  expensive to create and safe to share, so they are built when the process
-  starts.
-* **Scope per run** -- the call budget and the time limit belong to one run, so
-  each ``run_planning`` installs its own.  Sharing them, as the CLI used to,
-  means two overlapping requests spend one counter and neither reading is
-  right.  That was harmless while only a CLI existed and stops being harmless
-  the moment a route serves two users at once.
-"""
+"""Build shared Agent clients and isolate each request's budget and deadline."""
 
 from __future__ import annotations
 
@@ -35,7 +20,6 @@ from app.agent.llm import (
     resolve_max_calls_per_run,
 )
 from app.agent.procedure_tool import (
-    JsonFileProcedureStore,
     ReviewedProcedureStore,
     StoredProcedureLookupTool,
 )
@@ -69,12 +53,7 @@ def _repo_root() -> Path:
 
 @dataclass(frozen=True, slots=True)
 class RuntimeLimits:
-    """What one run may spend: provider calls, and wall-clock time.
-
-    Both are cost stops of different kinds. The call cap bounds money; the
-    deadline bounds how long a person sits looking at a spinner. Neither
-    implies the other, so both are needed.
-    """
+    """Provider-call and wall-clock limits for one planning run."""
 
     max_llm_calls_per_run: int
     run_deadline_seconds: float
@@ -160,12 +139,7 @@ class AgentRuntime:
         *,
         deadline_seconds: float | None = None,
     ) -> AgentGraphOutput:
-        """Run one planning pass under this run's own budget and deadline.
-
-        ``deadline_seconds`` lets a caller that already has its own timeout --
-        an HTTP gateway, say -- hand down whatever time is actually left,
-        instead of this runtime assuming it owns the whole window.
-        """
+        """Run with an isolated budget and the caller's remaining time limit."""
 
         seconds = (
             self._limits.run_deadline_seconds
@@ -199,28 +173,15 @@ async def build_runtime(
     *,
     known_procedure_steps: Sequence[KnownProcedureStep],
     support_catalog: ReviewedSupportCatalog,
-    procedure_store: ReviewedProcedureStore | None = None,
+    procedure_store: ReviewedProcedureStore,
     support_wiki: SupportWikiStore | None = None,
     limits: RuntimeLimits | None = None,
 ) -> AgentRuntime:
-    """Assemble the Agent from environment configuration.
+    """Assemble the Agent with reviewed data supplied by the caller.
 
-    ``known_procedure_steps`` and ``support_catalog`` stay parameters rather
-    than being read here: they are the two inputs that must come from reviewed
-    team data. The caller supplies actual backend references; this function
-    never generates Case or support identifiers to replace missing data.
-
-    ``procedure_store`` accepts an already loaded snapshot whose ``records()``
-    and ``snapshot_version`` are synchronous in-memory reads. The caller must
-    preload backend data through agreed BE functions; the Agent executes no
-    SQL. Omitting this store retains the environment-configured JSON source.
-
-    ``support_wiki`` optionally resolves exact support ID/UUID pairs from
-    reviewed notes before comparison. Misses remain unavailable; they never
-    silently use catalog rules or an unimplemented RAG fallback.
-
-    Async only so a half-built runtime can close the transports it already
-    opened; nothing here awaits I/O.
+    Preload ``procedure_store`` through agreed BE functions; its reads must
+    stay in memory. No local JSON fallback or SQL runs here. An optional Wiki
+    source must resolve existing support IDs; misses remain unavailable.
     """
 
     resolved = limits or RuntimeLimits(
@@ -242,12 +203,7 @@ async def build_runtime(
             usage_sink=scoped_usage.record,
         )
         clients.append(supervisor_client)
-        resolved_store = (
-            JsonFileProcedureStore.from_env()
-            if procedure_store is None
-            else procedure_store
-        )
-        procedure_tool = StoredProcedureLookupTool(resolved_store)
+        procedure_tool = StoredProcedureLookupTool(procedure_store)
         trace_sink = LangfuseTraceSink.from_env()
         graph = AgentGraph(
             info_agent=InfoAnalysisAgent(client),
@@ -256,7 +212,7 @@ async def build_runtime(
                 client, support_catalog, wiki_store=support_wiki
             ),
             supervisor=SupervisorAgent(supervisor_client),
-            review_tool=ReviewTool(client),
+            review_tool=ReviewTool(supervisor_client),
             known_procedure_steps=known_procedure_steps,
             # No budget or usage object is handed to the graph: both belong to
             # a run, and run_planning installs them per run.

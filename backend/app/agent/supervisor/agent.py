@@ -10,6 +10,7 @@ from uuid import UUID, uuid4
 from pydantic import Field, StrictBool, StrictInt, StrictStr, model_validator
 
 from app.agent.claim_safety import (
+    REQUIRED_CLAIM_SOURCES,
     expand_evidence,
     has_confirmation_caveat,
     has_explicit_eligibility_language,
@@ -18,7 +19,6 @@ from app.agent.claim_safety import (
     high_risk_metadata,
     is_overconfident,
     references_other_known_label,
-    required_sources_for_claim,
 )
 from app.agent.enrichment import build_fact_overlays
 from app.agent.guardrails import (
@@ -26,6 +26,10 @@ from app.agent.guardrails import (
     ensure_known_refs,
     ensure_no_sensitive_text,
     resolve_evidence_aliases,
+)
+from app.agent.procedure_tool.rules import (
+    procedure_constraints,
+    procedure_plan_constraints,
 )
 from app.agent.projection import (
     ensure_projection_has_no_obvious_sensitive_text,
@@ -36,9 +40,6 @@ from app.agent.schemas import (
     ActionDecisionDraft,
     AgentSchema,
     Blocker,
-    CaseCompleteDecisionDraft,
-    CaseStatus,
-    CaseStatusChangeCandidate,
     ClaimType,
     DecisionType,
     EvidenceRecord,
@@ -53,6 +54,7 @@ from app.agent.schemas import (
     ProcedureFinding,
     ProcedureLookupResult,
     ProcedureProgressChangeCandidate,
+    ProcedureProgressStatus,
     ReviewSourceResult,
     SupervisorAgentInput,
     SupervisorDraft,
@@ -115,7 +117,6 @@ class GroundedClaimModelOutput(AgentSchema):
     claim_type: ClaimType
     target_kind: Literal[
         "SELECTION_SUMMARY",
-        "BLOCKER_TITLE",
         "BLOCKER_DESCRIPTION",
         "NEXT_ACTION_TITLE",
         "NEXT_ACTION_REASON",
@@ -168,11 +169,6 @@ class SupervisorSemanticDraft(AgentSchema):
                 raise ValueError("NEEDS_MORE_INFO requires blocker and no action")
             if not self.requires_human or not self.questions_for_user:
                 raise ValueError("NEEDS_MORE_INFO requires a human question")
-        else:
-            if self.blocker is not None or self.next_action is not None:
-                raise ValueError("CASE_COMPLETE has no blocker or action")
-            if self.requires_human or self.questions_for_user:
-                raise ValueError("CASE_COMPLETE has no human question")
         return self
 
 
@@ -217,6 +213,21 @@ class SupervisorAgent:
                     "component result does not match the Supervisor snapshot"
                 )
         self._validate_procedure_analysis_sources(source_results)
+        if fact_overlays is None:
+            fact_overlays = [
+                candidate
+                for source in source_results
+                if isinstance(source.output, InfoAnalysisResult)
+                for candidate in build_fact_overlays(
+                    request.case_snapshot,
+                    source.output,
+                    source.meta.call_id,
+                    uuid_factory=self._uuid,
+                )
+            ]
+        mutations = self._build_mutations(
+            request, list(source_results), fact_overlays=fact_overlays
+        )
         evidence_registry = self._evidence(source_results, request)
         # The model picks evidence from a list we supply, so it should pick by a
         # short handle rather than copy a stored identifier. Measured runs had
@@ -233,6 +244,20 @@ class SupervisorAgent:
         prompt_input = {
             "trigger": to_model_projection(request.trigger),
             "case_snapshot": to_model_projection(request.case_snapshot),
+            "fact_overlays": to_model_projection(list(fact_overlays or [])),
+            "known_procedure_steps": to_model_projection(request.known_procedure_steps),
+            "procedure_constraints": [
+                {
+                    "procedure_step": step.procedure_step.model_dump(mode="json"),
+                    "blocking_reasons": procedure_constraints(
+                        step,
+                        request.case_snapshot,
+                        mutations.fact_changes,
+                        mutations.procedure_progress_changes,
+                    ),
+                }
+                for step in request.known_procedure_steps
+            ],
             "component_results": [
                 {
                     "component": item.meta.component.value,
@@ -255,7 +280,6 @@ class SupervisorAgent:
                 "eligibility_assertion_level": "NEEDS_CONFIRMATION",
                 "claim_target_kinds": [
                     "SELECTION_SUMMARY",
-                    "BLOCKER_TITLE",
                     "BLOCKER_DESCRIPTION",
                     "NEXT_ACTION_TITLE",
                     "NEXT_ACTION_REASON",
@@ -264,7 +288,6 @@ class SupervisorAgent:
                 ],
                 "claim_text_and_path_are_runtime_injected": True,
                 "support_eligibility_is_final": False,
-                "case_complete_is_allowed": False,
                 "action_target_kinds": ["PROCEDURE", "SUPPORT_PROGRAM"],
                 "action_requires_exactly_one_target": True,
                 "high_risk_visible_text_requires_exact_grounded_claim": [
@@ -330,8 +353,6 @@ class SupervisorAgent:
                             "For ACTION, return one blocker, one next_action, and an empty "
                             "questions_for_user list. For NEEDS_MORE_INFO, return a blocker, "
                             "no next_action, requires_human=true, and at least one question. "
-                            "Do not return CASE_COMPLETE: bounded internet lookup cannot prove "
-                            "complete procedure coverage. "
                             "Every ACTION must select exactly one canonical target. Use "
                             "target_kind=PROCEDURE with a procedure_step from an Info finding, "
                             "or target_kind=SUPPORT_PROGRAM with a support_program from a "
@@ -356,6 +377,16 @@ class SupervisorAgent:
                 SupervisorModelOutput,
                 messages,
                 schema_name="reborn_supervisor_draft",
+                # ponytail: no temperature=0 here -- the configured Supervisor
+                # model (see SUPERVISOR_MODEL) rejects any non-default value
+                # with HTTP 400 ("Only the default (1) value is supported"),
+                # confirmed against the real provider 2026-09-23. `seed` was
+                # tried too and does not help either -- confirmed against the
+                # real provider 2026-09-23 with an identical prompt + seed
+                # producing a different decision_type on replay. Supervisor
+                # has no sampling-level determinism lever; the BE-side
+                # decision cache (case_id + snapshot_id) is what makes
+                # repeated requests idempotent, not this call.
                 # Same reason as the Info Agent: the evidence list is closed, so
                 # the provider is not allowed to name anything outside it.
                 enum_constraints={"evidence_refs": sorted(evidence_by_alias)},
@@ -376,7 +407,7 @@ class SupervisorAgent:
                     list(source_results),
                     semantic,
                     draft_version=draft_version,
-                    fact_overlays=fact_overlays,
+                    mutations=mutations,
                 )
             except (GuardrailViolation, ValueError):
                 continue
@@ -387,7 +418,7 @@ class SupervisorAgent:
                 list(source_results),
                 fallback,
                 draft_version=draft_version,
-                fact_overlays=fact_overlays,
+                mutations=mutations,
             )
         raise SupervisorGuardrailError(
             "Supervisor failed deterministic provenance checks"
@@ -422,7 +453,7 @@ class SupervisorAgent:
                 "EXPERT_CONFIRMATION",
                 "SYSTEM_RECORD",
             }
-            and any(path in evidence.excerpt for path in missing_paths)
+            and any(path in (evidence.excerpt or "") for path in missing_paths)
         ]
         if not preferred_refs:
             preferred_refs = [
@@ -444,8 +475,6 @@ class SupervisorAgent:
             requires_human=True,
             evidence_refs=evidence_refs,
             blocker=Blocker(
-                blocker_code="MISSING_CASE_INFORMATION",
-                title="확인할 정보가 있습니다",
                 description="입력에서 확인되지 않은 항목이 있어 다음 판단을 보류합니다.",
                 evidence_refs=evidence_refs,
             ),
@@ -472,8 +501,6 @@ class SupervisorAgent:
         blocker = None
         if decision.blocker is not None:
             blocker = {
-                "blocker_code": decision.blocker.blocker_code,
-                "title": decision.blocker.title,
                 "description": decision.blocker.description,
                 "evidence_refs": list(decision.blocker.evidence_refs),
             }
@@ -506,7 +533,7 @@ class SupervisorAgent:
         semantic: SupervisorSemanticDraft,
         *,
         draft_version: int,
-        fact_overlays: Sequence[FactChangeCandidate] | None,
+        mutations: MutationSet,
     ) -> SupervisorDraft:
         evidence = self._evidence(sources, request)
         known_evidence = set(evidence)
@@ -695,7 +722,7 @@ class SupervisorAgent:
                 questions_for_user=[],
                 **common,
             )
-        elif semantic.decision_type == DecisionType.NEEDS_MORE_INFO:
+        else:
             assert semantic.blocker is not None
             decision = NeedsMoreInfoDecisionDraft(
                 decision_type=DecisionType.NEEDS_MORE_INFO,
@@ -704,22 +731,15 @@ class SupervisorAgent:
                 questions_for_user=semantic.questions_for_user,
                 **common,
             )
-        else:
-            self._ensure_complete_is_supported(request, sources)
-            decision = CaseCompleteDecisionDraft(
-                decision_type=DecisionType.CASE_COMPLETE,
-                blocker=None,
-                next_action=None,
-                questions_for_user=[],
-                **common,
-            )
 
-        mutations = self._build_mutations(
-            request,
-            sources,
-            decision,
-            fact_overlays=fact_overlays,
+        violations = procedure_plan_constraints(
+            request.known_procedure_steps, request.case_snapshot, mutations, decision
         )
+        if violations:
+            raise SupervisorGuardrailError(
+                "procedure master rules block this plan: "
+                + "; ".join(reason for _, reason in violations)
+            )
         grounded_claims = [
             GroundedClaim(claim_id=self._uuid(), **item.model_dump(mode="python"))
             for item in semantic.grounded_claims
@@ -774,7 +794,7 @@ class SupervisorAgent:
                     raise SupervisorGuardrailError(
                         "non-current evidence requires an explicit confirmation caveat"
                     )
-            allowed_sources = required_sources_for_claim(claim.claim_type)
+            allowed_sources = REQUIRED_CLAIM_SOURCES
             if not any(item.source_type in allowed_sources for item in expanded):
                 raise SupervisorGuardrailError(
                     "grounded claim lacks an allowed authoritative source"
@@ -811,9 +831,6 @@ class SupervisorAgent:
         self,
         request: SupervisorAgentInput,
         sources: list[ReviewSourceResult],
-        decision: ActionDecisionDraft
-        | NeedsMoreInfoDecisionDraft
-        | CaseCompleteDecisionDraft,
         *,
         fact_overlays: Sequence[FactChangeCandidate] | None,
     ) -> MutationSet:
@@ -856,7 +873,9 @@ class SupervisorAgent:
                     if observation.requires_confirmation or finding is None:
                         continue
                     prior = progress.get(key)
-                    before_status = prior.status if prior else None
+                    before_status = (
+                        prior.status if prior else ProcedureProgressStatus.NOT_STARTED
+                    )
                     if finding.current_status != before_status:
                         raise SupervisorGuardrailError(
                             "procedure finding current status differs from snapshot"
@@ -884,20 +903,10 @@ class SupervisorAgent:
                     for check in output.support_checks
                 )
 
-        status_change = None
-        if decision.decision_type == DecisionType.CASE_COMPLETE:
-            status_change = CaseStatusChangeCandidate(
-                candidate_id=self._uuid(),
-                before_status=CaseStatus.IN_PROGRESS,
-                proposed_status=CaseStatus.COMPLETED,
-                reason_summary=decision.selection_summary,
-                evidence_refs=decision.evidence_refs,
-            )
         return MutationSet(
             fact_changes=fact_changes,
             procedure_progress_changes=progress_changes,
             support_match_updates=support_updates,
-            case_status_change=status_change,
         )
 
     @staticmethod
@@ -953,16 +962,6 @@ class SupervisorAgent:
                         )
 
     @staticmethod
-    def _ensure_complete_is_supported(
-        request: SupervisorAgentInput,
-        sources: Sequence[ReviewSourceResult],
-    ) -> None:
-        del request, sources
-        raise SupervisorGuardrailError(
-            "CASE_COMPLETE is unavailable without authoritative procedure coverage"
-        )
-
-    @staticmethod
     def _validate_claim_targets(draft: SupervisorDraft) -> None:
         root = {"supervisor_draft": draft.model_dump(mode="json")}
         for claim in draft.grounded_claims:
@@ -998,11 +997,6 @@ class SupervisorAgent:
             "SELECTION_SUMMARY": (
                 f"{base}/selection_summary",
                 output.selection_summary,
-            ),
-            "BLOCKER_TITLE": (
-                (f"{base}/blocker/title", output.blocker.title)
-                if output.blocker is not None
-                else None
             ),
             "BLOCKER_DESCRIPTION": (
                 (f"{base}/blocker/description", output.blocker.description)
@@ -1059,7 +1053,7 @@ class SupervisorAgent:
         decision = draft.decision
         values = [decision.selection_summary]
         if decision.blocker is not None:
-            values.extend([decision.blocker.title, decision.blocker.description])
+            values.append(decision.blocker.description)
         if decision.next_action is not None:
             values.extend(
                 [
@@ -1078,12 +1072,7 @@ class SupervisorAgent:
         base = "/supervisor_draft/decision"
         values = [(f"{base}/selection_summary", decision.selection_summary)]
         if decision.blocker is not None:
-            values.extend(
-                [
-                    (f"{base}/blocker/title", decision.blocker.title),
-                    (f"{base}/blocker/description", decision.blocker.description),
-                ]
-            )
+            values.append((f"{base}/blocker/description", decision.blocker.description))
         if decision.next_action is not None:
             action_base = f"{base}/next_action"
             values.extend(

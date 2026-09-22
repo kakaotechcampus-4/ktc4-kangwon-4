@@ -17,10 +17,12 @@ from app.agent.guardrails import GuardrailViolation, ensure_no_sensitive_text
 from app.agent.prompts import support_messages
 from app.agent.run_scope import RunDeadlineExceededError, current_deadline
 from app.agent.schemas import (
+    CASE_FIELD_SPECS,
     CaseFieldKey,
     CriterionStatus,
     EvidenceRecord,
     FactChangeCandidate,
+    FactValueType,
     FreshnessStatus,
     RequiredDocument,
     SourcedText,
@@ -146,12 +148,9 @@ class SupportAgent:
         catalog, wiki_lookup, source_uncertainties = await self._resolve_wiki(
             request, catalog
         )
-        selected = (
-            list(catalog.programs)
-            if wiki_lookup != "NOT_REQUESTED"
-            and _text(request.lookup_goal) != "DISCOVER_RELEVANT"
-            else self._select_programs(request, catalog)
-        )
+        # ponytail: the MVP catalog is small, so every reviewed program is
+        # compared. Narrow by procedure step only if it grows.
+        selected = list(catalog.programs)
         checked_at = self._checked_at()
         if not selected:
             return SupportAnalysisResult(
@@ -187,6 +186,7 @@ class SupportAgent:
                 SupportProviderOutput,
                 messages,
                 schema_name="support_analysis",
+                temperature=0,
             )
             try:
                 draft = self._validated_draft(raw_draft)
@@ -225,12 +225,7 @@ class SupportAgent:
 
         if self._wiki_store is None:
             return catalog, "NOT_REQUESTED", []
-        if _text(request.lookup_goal) == "DISCOVER_RELEVANT":
-            refs = [
-                item.support_program for item in self._select_programs(request, catalog)
-            ]
-        else:
-            refs = list(getattr(request, "support_programs", []))
+        refs = [item.support_program for item in catalog.programs]
         if not refs:
             return catalog, "NOT_REQUESTED", []
         if len(refs) > _MAX_WIKI_LOOKUPS:
@@ -399,44 +394,6 @@ class SupportAgent:
         )
 
     @staticmethod
-    def _select_programs(
-        request: SupportAgentInput,
-        catalog: ReviewedSupportCatalog,
-    ) -> list[ReviewedSupportProgram]:
-        programs_by_id = {
-            item.support_program.support_program_id: item for item in catalog.programs
-        }
-        goal = _text(request.lookup_goal)
-        if goal == "DISCOVER_RELEVANT":
-            requested_steps = {_step_key(item) for item in request.related_steps}
-            if not requested_steps:
-                return list(catalog.programs)
-            return [
-                item
-                for item in catalog.programs
-                if requested_steps.intersection(
-                    _step_key(step) for step in item.related_steps
-                )
-            ]
-
-        requested_refs = list(getattr(request, "support_programs", []))
-        keys = [_program_key(item) for item in requested_refs]
-        if len(keys) != len(set(keys)):
-            raise SupportAnalysisInputError("support program references must be unique")
-
-        selected: list[ReviewedSupportProgram] = []
-        for requested in requested_refs:
-            program = programs_by_id.get(requested.support_program_id)
-            if program is None or _program_key(program.support_program) != _program_key(
-                requested
-            ):
-                raise SupportAnalysisInputError(
-                    "request references a program outside the reviewed catalog"
-                )
-            selected.append(program)
-        return selected
-
-    @staticmethod
     def _resolved_facts(
         request: SupportAgentInput,
     ) -> dict[CaseFieldKey, _ResolvedFact]:
@@ -526,7 +483,6 @@ class SupportAgent:
             )
 
         return {
-            "lookup_goal": _text(request.lookup_goal),
             "catalog_version": catalog.catalog_version,
             "required_completion_status": "COMPLETE",
             "review_feedback": feedback,
@@ -858,6 +814,12 @@ def _evaluate_criterion(
         return "UNKNOWN"
     actual = fact.value
     expected_values = definition.required_values
+    if CASE_FIELD_SPECS[definition.field_path][0] == FactValueType.DATE:
+        actual = date.fromisoformat(actual) if isinstance(actual, str) else actual
+        expected_values = tuple(
+            date.fromisoformat(value) if isinstance(value, str) else value
+            for value in expected_values
+        )
     if definition.operator == "EQ":
         matched = _strictly_equal(actual, expected_values[0])
     elif definition.operator == "IN":
@@ -936,10 +898,6 @@ def _sourced_text(value: CatalogSourcedText | None) -> SourcedText | None:
 
 def _program_key(value: SupportProgramRef) -> tuple[int, UUID]:
     return value.support_program_id, value.wiki_uuid
-
-
-def _step_key(value: Any) -> tuple[int, str]:
-    return value.procedure_step_id, _text(value.step_code)
 
 
 def _strictly_equal(left: Any, right: Any) -> bool:

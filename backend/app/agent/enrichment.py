@@ -20,7 +20,7 @@ from app.agent.schemas import (
 class StaleConfirmationError(ValueError):
     """Raised when a confirmation no longer describes the Case it was made on.
 
-    A confirmation is an answer to one question asked about one version of the
+    A confirmation is an answer to one question asked about one snapshot of the
     Case.  If the Case moved on, applying it anyway would silently overwrite
     whatever changed in between -- the exact thing the team rule against
     automatic overwrite exists to prevent.
@@ -49,11 +49,6 @@ def build_confirmed_conflict_overlay(
         raise StaleConfirmationError(
             "confirmation was made against a different Case snapshot"
         )
-    if conflict.case_version != snapshot.case_version:
-        raise StaleConfirmationError(
-            "confirmation was made against a different Case version"
-        )
-
     current = next(
         (item for item in snapshot.facts if item.field_path == conflict.field_path),
         None,

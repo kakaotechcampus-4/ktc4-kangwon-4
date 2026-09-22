@@ -12,7 +12,7 @@ import os
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
@@ -58,16 +58,6 @@ class TraceSink(Protocol):
 class NullTraceSink:
     def emit(self, event: TraceEvent) -> None:
         del event
-
-
-@dataclass(slots=True)
-class MemoryTraceSink:
-    """Test-only sink that retains metadata, never prompt or evidence content."""
-
-    events: list[TraceEvent] = field(default_factory=list)
-
-    def emit(self, event: TraceEvent) -> None:
-        self.events.append(event)
 
 
 @dataclass(slots=True)

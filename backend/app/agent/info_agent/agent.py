@@ -1,4 +1,4 @@
-"""Grounded extraction of closure-case facts from one redacted input."""
+"""Grounded closure-case fact extraction and official procedure analysis."""
 
 from __future__ import annotations
 
@@ -28,6 +28,7 @@ from app.agent.projection import ensure_projection_has_no_obvious_sensitive_text
 from app.agent.prompts import info_messages
 from app.agent.schemas import (
     CASE_FIELD_SPECS,
+    REQUIRED_CASE_FIELDS,
     AgentSchema,
     CaseFieldKey,
     ConflictCandidate,
@@ -55,6 +56,7 @@ from app.agent.schemas import (
     Uncertainty,
     VerifiedTextSpan,
     validate_case_field_value,
+    validate_restoration_state,
 )
 
 
@@ -138,6 +140,8 @@ _FACT_VALUE_CUES: dict[tuple[CaseFieldKey, object], tuple[str, ...]] = {
     ),
     (CaseFieldKey.RESTORATION_STATUS, "COMPLETED"): (
         "원상복구완료",
+        "원상복구를완료",
+        "원상복구와철거를모두완료",
         "원상복구를마쳤",
         "원상복구를끝냈",
     ),
@@ -362,7 +366,7 @@ class InfoAnalysisAgent:
                 code
                 for document in request.procedure_lookup_result.documents
                 for code in self._candidate_step_codes(
-                    document.search_query,
+                    document.step_codes,
                     request.known_procedure_steps,
                 )
             }
@@ -388,9 +392,7 @@ class InfoAnalysisAgent:
                                 "A deterministic check rejected these fields "
                                 "because the proposed value is not stated in "
                                 "the exact source_text: "
-                                + ", ".join(
-                                    field.value for field in rejected_fields
-                                )
+                                + ", ".join(field.value for field in rejected_fields)
                                 + ". Do not propose them again. If the text "
                                 "only hints at them, leave them out and list "
                                 "them as missing fields instead."
@@ -425,6 +427,7 @@ class InfoAnalysisAgent:
                 InfoProviderOutput,
                 messages,
                 schema_name="reborn_info_analysis",
+                temperature=0,
                 # The provider cannot emit a reference we did not offer, so a
                 # made-up or mistyped one is never generated. Validation below
                 # is unchanged; this only stops the wasted generation.
@@ -479,17 +482,31 @@ class InfoAnalysisAgent:
             # had it cited as support for a procedure finding. Nothing the model
             # returns needs it: evidence for an extracted fact is built by the
             # runtime from the span the model quotes.
-            "input": request.input.model_dump(mode="json", exclude={"input_event_id"}),
+            "input": (
+                request.input.model_dump(mode="json", exclude={"input_event_id"})
+                if request.input is not None
+                else None
+            ),
             "snapshot_facts": [
                 fact.model_dump(mode="json")
                 for fact in request.case_snapshot.facts
                 if fact.field_path in allowed
+            ],
+            "fact_overlays": [
+                {
+                    "field_path": item.field_path.value,
+                    "proposed_status": item.proposed_status.value,
+                    "proposed_value": item.proposed_value,
+                }
+                for item in request.fact_overlays
+                if item.field_path in allowed
             ],
             "allowed_field_paths": [item.value for item in request.allowed_field_paths],
             "canonical_field_registry": {
                 key.value: {
                     "value_type": spec[0].value,
                     "allowed_values": sorted(spec[1]) if spec[1] is not None else None,
+                    "clear_allowed": key not in REQUIRED_CASE_FIELDS,
                 }
                 for key, spec in CASE_FIELD_SPECS.items()
                 if key in allowed
@@ -513,7 +530,7 @@ class InfoAnalysisAgent:
                         "search_query": item.search_query,
                         "candidate_step_codes": (
                             InfoAnalysisAgent._candidate_step_codes(
-                                item.search_query,
+                                item.step_codes,
                                 request.known_procedure_steps,
                             )
                         ),
@@ -559,23 +576,17 @@ class InfoAnalysisAgent:
 
     @staticmethod
     def _candidate_step_codes(
-        search_query: str,
+        step_codes: list[str],
         known_steps: list[Any],
     ) -> list[str]:
-        """Return canonical steps explicitly named by a trusted static query.
+        """Preserve reviewed source bindings without guessing from query wording."""
 
-        This is an Info-owned conservative hint, not a Procedure Tool decision.
-        An empty result leaves semantic mapping to Info; a non-empty result stops
-        unrelated evidence, such as a tax source, being attached to restoration.
-        """
-
-        normalized_query = search_query.casefold()
-        matches: list[str] = []
-        for step in known_steps:
-            labels = (step.step_name, *step.utterance_aliases)
-            if any(label.casefold() in normalized_query for label in labels):
-                matches.append(step.procedure_step.step_code)
-        return matches
+        return [
+            step.procedure_step.step_code
+            for step in known_steps
+            if step.deprecated_at is None
+            and step.procedure_step.step_code in step_codes
+        ]
 
     @staticmethod
     def _compact_text(value: str) -> str:
@@ -610,7 +621,7 @@ class InfoAnalysisAgent:
             CaseFieldKey.RESTORATION_SCOPE,
         } or (
             fact.field_path == CaseFieldKey.RESTORATION_STATUS
-            and fact.value == "NOT_REQUIRED"
+            and fact.value in {"NOT_REQUIRED", "COMPLETED"}
         ):
             # Schema-aligned values describe asserted lease terms and scope.
             # Read the containing sentence too: quoting only "유상으로 임차"
@@ -694,13 +705,17 @@ class InfoAnalysisAgent:
         return False
 
     @classmethod
-    def _schema_enum_is_asserted(
-        cls, fact: ExtractedFactDraft, statement: str
-    ) -> bool:
+    def _schema_enum_is_asserted(cls, fact: ExtractedFactDraft, statement: str) -> bool:
         """Reject negation/uncertainty for the schema-aligned enum cues only."""
 
         compact = cls._compact_text(statement)
         if "?" in statement or _SCHEMA_FACT_UNCERTAINTY.search(compact):
+            return False
+        if (
+            fact.field_path == CaseFieldKey.RESTORATION_STATUS
+            and fact.value == "COMPLETED"
+            and re.search(r"(?:나요|습니까|까요)\s*[.!]?\s*$", statement)
+        ):
             return False
         # NOT_REQUIRED is itself expressed with negation. Remove only the
         # exact supported cue, then reject additional negation such as
@@ -761,6 +776,10 @@ class InfoAnalysisAgent:
         request: InfoAnalysisInput,
         draft: InfoAnalysisDraft,
     ) -> InfoAnalysisResult:
+        if request.input is None and (draft.facts or draft.procedure_observations):
+            raise InfoAnalysisGuardrailError(
+                "new facts and procedure progress require redacted input"
+            )
         allowed = set(request.allowed_field_paths)
         known_steps = {
             item.procedure_step.step_code: item.procedure_step
@@ -799,7 +818,10 @@ class InfoAnalysisAgent:
                 # require the model to fabricate a user-text source span.
                 continue
             if not self._fact_source_supports_value(
-                semantic, input_text=request.input.redacted_text
+                semantic,
+                input_text=(
+                    request.input.redacted_text if request.input is not None else ""
+                ),
             ):
                 raise InfoAnalysisGuardrailError(
                     "fact value is not explicit in its source text",
@@ -831,6 +853,27 @@ class InfoAnalysisAgent:
                 reason_summary=semantic.reason_summary,
             )
             fact_candidates.append(candidate)
+
+        validate_restoration_state(
+            {
+                **{
+                    item.field_path: item.status for item in request.case_snapshot.facts
+                },
+                **{
+                    item.field_path: item.proposed_status
+                    for item in request.fact_overlays
+                },
+                **{
+                    item.field_path: (
+                        FactStatus.UNKNOWN
+                        if item.operation == FactOperation.CLEAR
+                        else FactStatus.CONFIRMED
+                    )
+                    for item in fact_candidates
+                    if not item.requires_confirmation
+                },
+            }
+        )
 
         observations: list[ProcedureProgressObservation] = []
         for semantic in draft.procedure_observations:
@@ -989,7 +1032,7 @@ class InfoAnalysisAgent:
         candidate_steps_by_evidence = {
             item.evidence_ref: set(
                 self._candidate_step_codes(
-                    item.search_query,
+                    item.step_codes,
                     request.known_procedure_steps,
                 )
             )
@@ -1016,17 +1059,12 @@ class InfoAnalysisAgent:
                 raise InfoAnalysisGuardrailError(
                     "procedure finding references evidence outside lookup result"
                 )
-            constrained_step_sets = [
-                candidate_steps_by_evidence[ref]
+            if any(
+                semantic.step_code not in candidate_steps_by_evidence.get(ref, set())
                 for ref in refs
-                if candidate_steps_by_evidence.get(ref)
-            ]
-            if constrained_step_sets and any(
-                semantic.step_code not in candidates
-                for candidates in constrained_step_sets
             ):
                 raise InfoAnalysisGuardrailError(
-                    "procedure finding does not match its query-derived canonical step"
+                    "procedure finding does not match its reviewed source step codes"
                 )
             if (
                 any(
@@ -1052,7 +1090,8 @@ class InfoAnalysisAgent:
                     summary=semantic.summary,
                     relevance=semantic.relevance,
                     current_status=progress_by_step.get(
-                        (known.procedure_step_id, known.step_code)
+                        (known.procedure_step_id, known.step_code),
+                        ProcedureProgressStatus.NOT_STARTED,
                     ),
                     decision_authority=semantic.decision_authority,
                     requires_confirmation=True,
@@ -1087,7 +1126,9 @@ class InfoAnalysisAgent:
             return (
                 bool(refs)
                 and refs.issubset(finding_refs)
-                and any(detail.text in evidence_by_id[ref].excerpt for ref in refs)
+                and any(
+                    detail.text in (evidence_by_id[ref].excerpt or "") for ref in refs
+                )
             )
 
         required_actions = [
@@ -1099,7 +1140,7 @@ class InfoAnalysisAgent:
             if set(document.evidence_refs).issubset(finding_refs)
             and all(
                 any(
-                    text in evidence_by_id[ref].excerpt
+                    text in (evidence_by_id[ref].excerpt or "")
                     for ref in document.evidence_refs
                 )
                 for text in (
@@ -1174,7 +1215,7 @@ class InfoAnalysisAgent:
         )
         for detail in exact_details:
             if not any(
-                detail.text in evidence_by_id[ref].excerpt
+                detail.text in (evidence_by_id[ref].excerpt or "")
                 for ref in detail.evidence_refs
             ):
                 raise InfoAnalysisGuardrailError(
@@ -1193,7 +1234,7 @@ class InfoAnalysisAgent:
                 document_details.append(document.submission_stage)
             for detail in document_details:
                 if not any(
-                    detail in evidence_by_id[ref].excerpt
+                    detail in (evidence_by_id[ref].excerpt or "")
                     for ref in document.evidence_refs
                 ):
                     raise InfoAnalysisGuardrailError(
@@ -1212,6 +1253,8 @@ class InfoAnalysisAgent:
         request: InfoAnalysisInput,
         source_text: str,
     ) -> tuple[VerifiedTextSpan, EvidenceRecord]:
+        if request.input is None:
+            raise InfoAnalysisGuardrailError("source text requires redacted input")
         start, end = exact_span(request.input.redacted_text, source_text)
         span = VerifiedTextSpan(
             input_event_id=request.input.input_event_id,
@@ -1247,10 +1290,10 @@ class InfoAnalysisAgent:
         source_call_id: UUID,
     ) -> ConflictCandidate:
         candidate_id = self._uuid()
-        return ConflictCandidate.create_standalone(
+        return ConflictCandidate.create(
+            conflict_ref=f"cf_{candidate_id.hex}",
             candidate_id=candidate_id,
             snapshot_id=request.case_snapshot.snapshot_id,
-            case_version=request.case_snapshot.case_version,
             field_path=semantic.field_path,
             committed_status=FactStatus.CONFIRMED,
             committed_value=committed_value,
