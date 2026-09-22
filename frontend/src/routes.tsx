@@ -1,6 +1,7 @@
 import { createBrowserRouter, Navigate } from 'react-router'
 
 import { RequireAuth } from './components/RequireAuth'
+import { CaseCreatePage } from './pages/CaseCreatePage'
 import { ConfirmChangePage } from './pages/ConfirmChangePage'
 import { CurrentCasePage } from './pages/CurrentCasePage'
 import { EntryPage } from './pages/EntryPage'
@@ -15,6 +16,7 @@ import { StartPage } from './pages/StartPage'
  *   /login     로그인         인증 가드 밖에 있는 유일한 화면
  *   /          진입 분기      보낼 곳만 정하고 화면은 없다
  *   /start     시작 화면      Case가 없는 사용자만 본다
+ *   /cases/new Case 생성      사장님이 이미 아는 것만 묻는다
  *   /case      현재 Case      지금 무엇이 막혀 있고 무엇을 할 차례인가
  *   /results   결과 입력      실행한 결과를 한 줄로 말한다
  *   /confirm   충돌 확인      기존 기록과 어긋날 때만 들른다 (CONFLICT)
@@ -36,6 +38,7 @@ export const router = createBrowserRouter([
     children: [
       { path: '/', element: <EntryPage /> },
       { path: '/start', element: <StartPage /> },
+      { path: '/cases/new', element: <CaseCreatePage /> },
       { path: '/case', element: <CurrentCasePage /> },
       { path: '/results', element: <ResultInputPage /> },
       { path: '/confirm', element: <ConfirmChangePage /> },
