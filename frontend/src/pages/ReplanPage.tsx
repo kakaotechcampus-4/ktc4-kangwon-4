@@ -15,13 +15,13 @@ const MOCKS: Record<string, ReplanView> = {
 }
 
 /**
- * ⑤ 재계획 결과.
+ * 재계획 결과.
  *
- * ③에서 라우터 state로 결과를 받는다. URL에 담지 않는 것은 변경 내역과 판단이
+ * `/results`에서 라우터 state로 결과를 받는다. URL에 담지 않는 것은 변경 내역과 판단이
  * 전부 주소창에 드러나기 때문이다.
  *
  * 대신 주소만으로는 열 수 없다. 개발·Preview에서는 Mock으로 그려 링크 확인이
- * 가능하게 하고, 그 외에는 ②로 보낸다.
+ * 가능하게 하고, 그 외에는 진입 분기로 보낸다.
  *
  * TODO(API): 라우터 state는 `window.history.state`에 남아 새로고침해도 유지된다.
  * 편해 보이지만 반대로 오래된 판단이 계속 살아 있다는 뜻이기도 하다 — 루프를 더 돈 뒤
@@ -70,7 +70,7 @@ export function ReplanPage() {
       {nextAction && !blocker && <NoBlockerCard />}
 
       <Link
-        to={{ pathname: '/', search }}
+        to={{ pathname: '/case', search }}
         className="flex min-h-13 items-center justify-center rounded-xl border border-gray-300 bg-white text-base font-bold text-gray-900"
       >
         현재 상황 보기
