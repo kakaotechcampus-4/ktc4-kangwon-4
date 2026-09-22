@@ -40,7 +40,7 @@ const TWO_CONFLICTS: ConfirmView = {
 function renderWith(view: ConfirmView | null) {
   const router = createMemoryRouter(
     [
-      { path: '/', element: <p>현재 Case</p> },
+      { path: '/', element: <p>진입 분기</p> },
       { path: '/results', element: <p>결과 입력</p> },
       { path: '/confirm', element: <ConfirmChangePage /> },
       { path: '/replan', element: <p>재계획 결과</p> },
@@ -102,10 +102,10 @@ describe('ConfirmChangePage', () => {
   })
 
   /** 고를 것이 없으면 이 화면의 존재 이유가 없다. 막다른 골목이 되지 않게 돌려보낸다 */
-  it('충돌 항목이 비어 있으면 현재 Case로 돌려보낸다', async () => {
+  it('충돌 항목이 비어 있으면 진입 분기로 돌려보낸다', async () => {
     renderWith({ rawInput: '철거해야 한대요.', conflicts: [] })
 
-    expect(await screen.findByText('현재 Case')).toBeInTheDocument()
+    expect(await screen.findByText('진입 분기')).toBeInTheDocument()
   })
 
   /**

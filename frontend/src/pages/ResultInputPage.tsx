@@ -41,7 +41,7 @@ export function ResultInputPage() {
   }, [])
 
   // 어느 할 일의 결과인지는 앞 화면이 알려준다. 주소로 직접 열었을 때는 없으므로
-  // 개발·Preview에서만 Mock으로 떨어지고, 그 외에는 현재 Case로 돌린다 —
+  // 개발·Preview에서만 Mock으로 떨어지고, 그 외에는 진입 분기로 돌린다 —
   // 없는 할 일을 지어내 보여주면 사용자가 엉뚱한 대상에 결과를 보고하게 된다.
   const nextAction =
     (routeState as NextAction | null) ?? (MOCK_SWITCH_ENABLED ? resultInput.nextAction : null)

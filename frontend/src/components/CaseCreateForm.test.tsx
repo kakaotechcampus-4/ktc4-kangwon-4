@@ -68,6 +68,22 @@ describe('CaseCreateForm', () => {
     expect(renderForm(FILLED, true)).toBeDisabled()
   })
 
+  /**
+   * 음수·소수를 넣으면 브라우저가 제출을 가로챈다. 그건 React의 `onSubmit`보다 먼저라
+   * 화면에는 아무 반응이 없다 — 버튼이 열려 있는 채로 눌러도 안 되는 상태가 된다.
+   */
+  it('직원 수가 음수면 시작할 수 없다', () => {
+    expect(renderForm({ ...FILLED, employeeCount: '-3' })).toBeDisabled()
+  })
+
+  it('직원 수가 소수면 시작할 수 없다', () => {
+    expect(renderForm({ ...FILLED, employeeCount: '1.5' })).toBeDisabled()
+  })
+
+  it('직원 수가 0이면 시작할 수 있다', () => {
+    expect(renderForm({ ...FILLED, employeeCount: '0' })).toBeEnabled()
+  })
+
   /** 고른 값이 그대로 올라오지 않으면 화면만 멀쩡하고 서버에는 엉뚱한 값이 간다 */
   it('선택지를 고르면 그 값을 그대로 올려보낸다', () => {
     const onChange = vi.fn()

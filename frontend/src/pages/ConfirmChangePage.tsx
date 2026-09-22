@@ -43,7 +43,7 @@ export function ConfirmChangePage() {
 
   if (!view) return <Navigate to={{ pathname: '/', search }} replace />
   // 고를 것이 없으면 이 화면의 존재 이유가 없다. 서버가 빈 목록을 보내도 막다른 골목이
-  // 되지 않게 현재 Case로 돌린다.
+  // 되지 않게 진입 분기로 돌린다 — 거기서 지금 상태에 맞는 화면을 다시 고른다.
   if (view.conflicts.length === 0) return <Navigate to={{ pathname: '/', search }} replace />
 
   const { rawInput, conflicts } = view

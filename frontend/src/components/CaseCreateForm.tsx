@@ -76,11 +76,22 @@ function ChoiceGroup<T extends string | boolean>({
  * 필수 세 개를 먼저 두고 선택 두 개를 뒤에 둔다. 모르는 것이 앞에 나오면 거기서 멈춘다.
  */
 export function CaseCreateForm({ value, onChange, onSubmit, disabled }: CaseCreateFormProps) {
+  /**
+   * 비워두는 것은 괜찮지만 음수나 소수는 안 된다.
+   *
+   * 여기서 막지 않으면 버튼이 열린 채로 브라우저가 제출을 가로챈다. 그건 React의
+   * `onSubmit`보다 먼저 일어나서 화면은 아무 반응이 없고, 브라우저 기본 안내만
+   * 저 위 입력칸에 잠깐 뜬다 — 이 폼이 막으려던 "눌렀는데 아무 일이 없다"가 된다.
+   */
+  const employeeCountFilled = value.employeeCount.trim().length > 0
+  const employeeCountValid = !employeeCountFilled || /^\d+$/.test(value.employeeCount.trim())
+
   const canSubmit =
     !disabled &&
     value.businessType.trim().length > 0 &&
     value.franchiseStatus !== null &&
-    value.leaseStatus !== null
+    value.leaseStatus !== null &&
+    employeeCountValid
 
   return (
     <form
