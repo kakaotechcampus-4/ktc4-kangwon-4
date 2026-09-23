@@ -12,7 +12,9 @@ import json
 import math
 import os
 import re
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -22,6 +24,8 @@ from urllib.parse import urlsplit, urlunsplit
 import httpx
 from dotenv import dotenv_values
 from pydantic import BaseModel, ValidationError
+
+from app.agent.run_scope import current_deadline
 
 ResponseModelT = TypeVar("ResponseModelT", bound=BaseModel)
 SleepCallable = Callable[[float], Awaitable[None]]
@@ -98,12 +102,13 @@ class LLMUsage:
 class LLMCallBudget:
     """Provider-call allowance shared by every client used within one run.
 
-    Each HTTP attempt costs money, so retries consume the allowance too. The
-    graph resets the counter when a run starts, which makes the cap per-run.
+    Each HTTP attempt costs money, so retries consume the allowance too. One
+    instance belongs to one run: ``run_planning`` builds a fresh budget and
+    installs it with ``call_budget_scope``, and the clients hold a
+    ``ScopedCallBudget`` that reads whichever run is in scope. Concurrent runs
+    therefore never share a counter.
     """
 
-    # TODO: a single shared instance is not safe once one process serves
-    # concurrent runs; scope it per run (contextvar) when the server is wired.
     def __init__(self, max_calls: int = _DEFAULT_MAX_CALLS_PER_RUN) -> None:
         if type(max_calls) is not int or max_calls < 1:
             raise ValueError("max_calls must be a positive integer")
@@ -130,6 +135,92 @@ class LLMCallBudget:
                 attempts=self._spent,
             )
         self._spent += 1
+
+
+_CURRENT_BUDGET: ContextVar[LLMCallBudget | None] = ContextVar(
+    "agent_llm_call_budget",
+    default=None,
+)
+
+
+def current_call_budget() -> LLMCallBudget | None:
+    """Return the budget of the run in progress, if one was installed."""
+
+    return _CURRENT_BUDGET.get()
+
+
+@contextmanager
+def call_budget_scope(budget: LLMCallBudget) -> Iterator[LLMCallBudget]:
+    """Install ``budget`` as the allowance for work done inside this block.
+
+    ``asyncio`` copies the context into each task, so concurrent runs each see
+    their own budget instead of racing on one shared counter.
+    """
+
+    token = _CURRENT_BUDGET.set(budget)
+    try:
+        yield budget
+    finally:
+        _CURRENT_BUDGET.reset(token)
+
+
+class ScopedCallBudget:
+    """Budget stand-in that defers to whichever run is currently in scope.
+
+    A client is built once and serves many runs, so it cannot hold one run's
+    counter.  It holds this instead, which looks up the active run's budget at
+    the moment of the call.  Outside any run scope it does not charge anything,
+    which keeps a direct client call in a test or a script working unchanged.
+    """
+
+    __slots__ = ()
+
+    def consume(self) -> None:
+        budget = _CURRENT_BUDGET.get()
+        if budget is not None:
+            budget.consume()
+
+
+def resolve_max_calls_per_run(
+    *,
+    env_file: str | Path | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> int:
+    """Read ``AGENT_MAX_LLM_CALLS_PER_RUN``, falling back to the default.
+
+    The cap belongs to a run rather than to one client -- both clients share it
+    -- so it is resolved here instead of on ``LLMConfig``.  It is configurable
+    because the right number is found by measuring real runs, not by reasoning
+    about worst cases.
+    """
+
+    environment = os.environ if environ is None else environ
+    dotenv_path = Path(env_file) if env_file is not None else _repo_root() / ".env"
+    file_values: Mapping[str, str | None] = {}
+    if dotenv_path.is_file():
+        try:
+            file_values = dotenv_values(dotenv_path)
+        except (OSError, ValueError) as exc:
+            raise configuration_error(
+                "Agent LLM environment file could not be read"
+            ) from exc
+    raw = environment.get("AGENT_MAX_LLM_CALLS_PER_RUN")
+    if raw is None:
+        raw = file_values.get("AGENT_MAX_LLM_CALLS_PER_RUN")
+    text = str(raw).strip() if raw is not None else ""
+    if not text:
+        return _DEFAULT_MAX_CALLS_PER_RUN
+    try:
+        value = int(text)
+    except ValueError as exc:
+        raise configuration_error(
+            "AGENT_MAX_LLM_CALLS_PER_RUN must be a positive integer"
+        ) from exc
+    if value < 1:
+        raise configuration_error(
+            "AGENT_MAX_LLM_CALLS_PER_RUN must be a positive integer"
+        )
+    return value
 
 
 class LLMRequestError(LLMClientError):
@@ -161,21 +252,21 @@ class LLMConfig:
         object.__setattr__(self, "base_url", _validate_base_url(self.base_url))
 
         if not self.api_token.strip():
-            raise _configuration_error("PROXY_TOKEN is required")
+            raise configuration_error("PROXY_TOKEN is required")
         if not self.model.strip():
-            raise _configuration_error("OPENAI_MODEL is required")
+            raise configuration_error("OPENAI_MODEL is required")
         if (
             type(self.timeout_seconds) not in {int, float}
             or isinstance(self.timeout_seconds, bool)
             or not math.isfinite(self.timeout_seconds)
             or self.timeout_seconds <= 0
         ):
-            raise _configuration_error("Agent LLM timeout must be finite and positive")
+            raise configuration_error("Agent LLM timeout must be finite and positive")
         if (
             type(self.max_retries) is not int
             or not 0 <= self.max_retries <= _MAX_ALLOWED_RETRIES
         ):
-            raise _configuration_error(
+            raise configuration_error(
                 f"Agent LLM retries must be between 0 and {_MAX_ALLOWED_RETRIES}"
             )
         if (
@@ -188,14 +279,14 @@ class LLMConfig:
                 self.retry_backoff_seconds * (2 ** (_MAX_ALLOWED_RETRIES - 1))
             )
         ):
-            raise _configuration_error(
+            raise configuration_error(
                 "Agent LLM retry backoff must be finite and between 0 and 60 seconds"
             )
         if (
             type(self.max_response_bytes) is not int
             or not _MIN_RESPONSE_BYTES <= self.max_response_bytes <= _MAX_RESPONSE_BYTES
         ):
-            raise _configuration_error(
+            raise configuration_error(
                 "Agent LLM response limit must be between 1024 and 10000000 bytes"
             )
 
@@ -227,7 +318,7 @@ class LLMConfig:
             try:
                 file_values = dotenv_values(dotenv_path)
             except (OSError, ValueError) as exc:
-                raise _configuration_error(
+                raise configuration_error(
                     "Agent environment file could not be read"
                 ) from exc
         else:
@@ -261,7 +352,7 @@ class LLMConfig:
             and value(f"{env_prefix}CHAT_PROXY_URL")
             and not value(f"{env_prefix}PROXY_TOKEN")
         ):
-            raise _configuration_error(
+            raise configuration_error(
                 f"{env_prefix}PROXY_TOKEN is required when "
                 f"{env_prefix}CHAT_PROXY_URL overrides the shared endpoint"
             )
@@ -275,7 +366,7 @@ class LLMConfig:
             if configured is None
         ]
         if missing:
-            raise _configuration_error(
+            raise configuration_error(
                 "Missing Agent LLM configuration: " + ", ".join(missing)
             )
 
@@ -322,7 +413,7 @@ class StructuredLLMClient:
         client: httpx.AsyncClient | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
         sleep: SleepCallable = asyncio.sleep,
-        call_budget: LLMCallBudget | None = None,
+        call_budget: LLMCallBudget | ScopedCallBudget | None = None,
         usage_sink: UsageSink | None = None,
     ) -> None:
         if client is not None and transport is not None:
@@ -348,7 +439,7 @@ class StructuredLLMClient:
         client: httpx.AsyncClient | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
         sleep: SleepCallable = asyncio.sleep,
-        call_budget: LLMCallBudget | None = None,
+        call_budget: LLMCallBudget | ScopedCallBudget | None = None,
         usage_sink: UsageSink | None = None,
     ) -> StructuredLLMClient:
         return cls(
@@ -382,6 +473,7 @@ class StructuredLLMClient:
         schema_name: str | None = None,
         max_retries: int | None = None,
         temperature: float | None = None,
+        enum_constraints: Mapping[str, Sequence[str]] | None = None,
     ) -> ResponseModelT:
         """Return a locally validated Pydantic model.
 
@@ -403,19 +495,27 @@ class StructuredLLMClient:
             messages=normalized_messages,
             schema_name=schema_name,
             temperature=temperature,
+            enum_constraints=enum_constraints,
         )
         total_attempts = retries + 1
         last_status_code: int | None = None
         last_failure_code = "MALFORMED_RESPONSE"
 
+        deadline = current_deadline()
         for attempt_index in range(total_attempts):
             attempt = attempt_index + 1
             response: httpx.Response | None = None
             should_retry = False
             try:
+                # Checked before the budget is charged: a call that cannot
+                # finish inside the run's remaining time should not cost one.
+                attempt_timeout = self.config.timeout_seconds
+                if deadline is not None:
+                    deadline.check()
+                    attempt_timeout = min(attempt_timeout, deadline.remaining_seconds())
                 if self._call_budget is not None:
                     self._call_budget.consume()
-                async with asyncio.timeout(self.config.timeout_seconds):
+                async with asyncio.timeout(attempt_timeout):
                     request = self._client.build_request(
                         "POST",
                         _chat_completions_url(self.config.base_url),
@@ -425,7 +525,7 @@ class StructuredLLMClient:
                             "Accept-Encoding": "identity",
                         },
                         json=payload,
-                        timeout=self.config.timeout_seconds,
+                        timeout=attempt_timeout,
                     )
                     response = await self._client.send(request, stream=True)
                     last_status_code = response.status_code
@@ -494,25 +594,6 @@ class StructuredLLMClient:
             status_code=last_status_code,
         )
 
-    async def complete_structured(
-        self,
-        messages: Sequence[Mapping[str, Any]],
-        response_model: type[ResponseModelT],
-        *,
-        schema_name: str | None = None,
-        max_retries: int | None = None,
-        temperature: float | None = None,
-    ) -> ResponseModelT:
-        """Keyword-friendly alias for callers that place messages first."""
-
-        return await self.generate(
-            response_model,
-            messages,
-            schema_name=schema_name,
-            max_retries=max_retries,
-            temperature=temperature,
-        )
-
     def _build_payload(
         self,
         *,
@@ -520,10 +601,13 @@ class StructuredLLMClient:
         messages: list[dict[str, Any]],
         schema_name: str | None,
         temperature: float | None,
+        enum_constraints: Mapping[str, Sequence[str]] | None = None,
     ) -> dict[str, Any]:
         schema = sanitize_json_schema(
             response_model.model_json_schema(mode="validation")
         )
+        if enum_constraints:
+            schema = restrict_string_enums(schema, enum_constraints)
         payload: dict[str, Any] = {
             "model": self.config.model,
             "messages": messages,
@@ -559,6 +643,60 @@ class StructuredLLMClient:
         delay = self.config.retry_backoff_seconds * (2**attempt_index)
         if delay > 0:
             await self._sleep(delay)
+
+
+def restrict_string_enums(
+    schema: Mapping[str, Any],
+    constraints: Mapping[str, Sequence[str]],
+) -> dict[str, Any]:
+    """Limit named string properties to a supplied set of values.
+
+    Validating a bad value after the fact costs a whole generation and the
+    budget it spent.  An enum in the request schema is enforced by the provider
+    while the answer is produced, so the wrong value is never generated in the
+    first place.  Used for references the caller offers a closed list of, such
+    as which supplied document supports a finding.
+
+    The local Pydantic model still validates every response; this only narrows
+    what the provider is allowed to emit.
+    """
+
+    usable = {
+        name: sorted(set(values)) for name, values in constraints.items() if values
+    }
+    if not usable:
+        return dict(schema)
+
+    def restrict(node: Any, allowed: Sequence[str]) -> Any:
+        if not isinstance(node, dict):
+            return node
+        narrowed = dict(node)
+        if narrowed.get("type") == "array" and isinstance(narrowed.get("items"), dict):
+            narrowed["items"] = {"type": "string", "enum": list(allowed)}
+        elif narrowed.get("type") == "string":
+            narrowed["enum"] = list(allowed)
+        return narrowed
+
+    def walk(node: Any) -> Any:
+        if isinstance(node, list):
+            return [walk(item) for item in node]
+        if not isinstance(node, dict):
+            return node
+        result: dict[str, Any] = {}
+        for key, value in node.items():
+            if key == "properties" and isinstance(value, dict):
+                properties = {}
+                for name, child in value.items():
+                    allowed = usable.get(name)
+                    properties[name] = (
+                        restrict(child, allowed) if allowed else walk(child)
+                    )
+                result[key] = properties
+            else:
+                result[key] = walk(value)
+        return result
+
+    return walk(dict(schema))
 
 
 def sanitize_json_schema(schema: Mapping[str, Any]) -> dict[str, Any]:
@@ -823,17 +961,17 @@ def _validate_base_url(value: str) -> str:
     raw = value.strip().rstrip("/")
     parsed = urlsplit(raw)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        raise _configuration_error("CHAT_PROXY_URL must be an absolute HTTP(S) URL")
+        raise configuration_error("CHAT_PROXY_URL must be an absolute HTTP(S) URL")
     if parsed.scheme != "https" and parsed.hostname not in {
         "localhost",
         "127.0.0.1",
         "::1",
     }:
-        raise _configuration_error(
+        raise configuration_error(
             "CHAT_PROXY_URL must use HTTPS except for a loopback development server"
         )
     if parsed.username or parsed.password or parsed.query or parsed.fragment:
-        raise _configuration_error(
+        raise configuration_error(
             "CHAT_PROXY_URL must not contain credentials, query, or fragment"
         )
     return urlunsplit((parsed.scheme, parsed.netloc, parsed.path.rstrip("/"), "", ""))
@@ -845,7 +983,7 @@ def _parse_float(raw: str | None, *, default: float, setting_name: str) -> float
     try:
         return float(raw)
     except ValueError as exc:
-        raise _configuration_error(f"{setting_name} must be numeric") from exc
+        raise configuration_error(f"{setting_name} must be numeric") from exc
 
 
 def _parse_int(raw: str | None, *, default: int, setting_name: str) -> int:
@@ -854,10 +992,16 @@ def _parse_int(raw: str | None, *, default: int, setting_name: str) -> int:
     try:
         return int(raw)
     except ValueError as exc:
-        raise _configuration_error(f"{setting_name} must be an integer") from exc
+        raise configuration_error(f"{setting_name} must be an integer") from exc
 
 
-def _configuration_error(message: str) -> LLMConfigurationError:
+def configuration_error(message: str) -> LLMConfigurationError:
+    """Build the error raised for any unusable Agent setting.
+
+    Shared with the runtime so a bad limit and a bad endpoint fail the same
+    way, rather than one raising a typed error and the other a bare ValueError.
+    """
+
     return LLMConfigurationError(
         message,
         code="INVALID_CONFIGURATION",
@@ -873,6 +1017,12 @@ __all__ = [
     "LLMConfigurationError",
     "LLMRequestError",
     "LLMResponseError",
+    "ScopedCallBudget",
     "StructuredLLMClient",
+    "call_budget_scope",
+    "configuration_error",
+    "current_call_budget",
+    "resolve_max_calls_per_run",
+    "restrict_string_enums",
     "sanitize_json_schema",
 ]
