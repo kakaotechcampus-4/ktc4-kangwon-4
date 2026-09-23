@@ -17,3 +17,12 @@ import { afterEach } from 'vitest'
  * 없으면 앞 테스트의 화면이 남아 같은 역할이 여러 개로 잡힌다.
  */
 afterEach(cleanup)
+
+/**
+ * 로그인 여부와 Case 유무를 `sessionStorage`에 두고 있어서, 지우지 않으면 앞 테스트의
+ * 상태가 다음 테스트로 샌다. 화면이 실제로 어떤 판단을 하는지가 실행 순서에 따라
+ * 달라지므로, 통과하던 테스트가 파일 하나 추가했다고 깨진다.
+ */
+afterEach(() => {
+  window.sessionStorage.clear()
+})
