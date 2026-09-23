@@ -1,7 +1,7 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Column, DateTime, Enum, ForeignKey, String, Text
-from sqlmodel import Field, Relationship, SQLModel
+from sqlalchemy import BigInteger, Column, DateTime, Enum, ForeignKey, String, Text, UniqueConstraint
+from sqlmodel import Field, Relationship
 
 from app.be.models.mixins import CreatedAtMixin
 
@@ -46,21 +46,29 @@ class Evidence(CreatedAtMixin, table=True):
     case: "Case" = Relationship(back_populates="evidence_records")
 
 
-class EvidenceLineage(SQLModel, table=True):
-    """EVIDENCE 간 파생 관계 (N:M 접합 테이블). 자체 PK 없이 두 FK로 복합 PK를 구성.
+class EvidenceLineage(CreatedAtMixin, table=True):
+    """EVIDENCE 간 파생 관계 (N:M 접합 테이블).
+
+    다른 모든 테이블과 동일하게 surrogate id를 PK로 쓰고, "중복 파생 관계 방지"는
+    UniqueConstraint로 강제한다 (나중에 이 관계에 컬럼이 추가되거나 다른 테이블/API가
+    특정 lineage 행을 참조해야 할 때 복합 PK → surrogate PK 마이그레이션 비용을 피하기 위함).
 
     두 컬럼 모두 EVIDENCE.id를 참조하는 자기참조 패턴이라, StepDependency와 동일하게
     Relationship()은 걸지 않는다 (양쪽 FK를 구분해서 자동 매핑할 명확한 기준이 없음).
     """
 
     __tablename__ = "evidence_lineage"
+    __table_args__ = (
+        UniqueConstraint("evidence_id", "parent_evidence_id", name="uk_evidence_lineage"),
+    )
 
+    id: int | None = Field(default=None, sa_column=Column(BigInteger, primary_key=True, autoincrement=True))
     evidence_id: int = Field(
-        sa_column=Column(BigInteger, ForeignKey("evidence.id"), primary_key=True, nullable=False),
+        sa_column=Column(BigInteger, ForeignKey("evidence.id"), nullable=False),
         description="파생된 근거(child) — EVIDENCE.id 참조 (evidence.evidence_id 아님)",
     )
     parent_evidence_id: int = Field(
-        sa_column=Column(BigInteger, ForeignKey("evidence.id"), primary_key=True, nullable=False),
+        sa_column=Column(BigInteger, ForeignKey("evidence.id"), nullable=False),
         description="원본 근거(parent) — EVIDENCE.id 참조",
     )
 

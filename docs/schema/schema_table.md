@@ -337,12 +337,15 @@ Agent 판단의 근거가 되는 출처 기록.
 
 ### EVIDENCE_LINEAGE
 
-EVIDENCE 간 파생 관계를 나타내는 N:M 접합 테이블. **자체 PK 없음, 두 FK로만 구성.**
+EVIDENCE 간 파생 관계를 나타내는 N:M 접합 테이블. 다른 모든 테이블과 동일하게 surrogate `id`를
+PK로 쓰고, 중복 파생 관계 방지는 `(evidence_id, parent_evidence_id)` UNIQUE 제약으로 강제한다.
 
 | 컬럼 | 타입 | 키 | 제약조건 | 예시 값 | 설명 |
 |---|---|---|---|---|---|
-| evidence_id | **BIGINT** | FK (복합 PK) | NOT NULL | `1` | 파생된 근거 (child) — **`EVIDENCE.id` 참조 (evidence_id 아님)** |
-| parent_evidence_id | **BIGINT** | FK (복합 PK) | NOT NULL | `2` | 원본 근거 (parent) — **`EVIDENCE.id` 참조** |
+| id | BIGINT | PK | NOT NULL, AUTO_INCREMENT | 1 | 내부 식별자 |
+| evidence_id | **BIGINT** | FK, UK(복합) | NOT NULL | `1` | 파생된 근거 (child) — **`EVIDENCE.id` 참조 (evidence_id 아님)** |
+| parent_evidence_id | **BIGINT** | FK, UK(복합) | NOT NULL | `2` | 원본 근거 (parent) — **`EVIDENCE.id` 참조** |
+| created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP ⚠️ 추정 | `2026-09-10 10:00:00` | |
 
 ### CONFLICT_REFERENCE
 
