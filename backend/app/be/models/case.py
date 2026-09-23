@@ -1,15 +1,16 @@
 from datetime import date, datetime
 
 from sqlalchemy import BigInteger, Column, Date, DateTime, Enum, ForeignKey, String
-from sqlalchemy.sql import func
-from sqlmodel import Field, Relationship, SQLModel
+from sqlmodel import Field, Relationship
+
+from app.be.models.mixins import TimestampMixin
 
 
-class Case(SQLModel, table=True):
+class Case(TimestampMixin, table=True):
     __tablename__ = "case"
 
     id: int | None = Field(default=None, sa_column=Column(BigInteger, primary_key=True, autoincrement=True))
-    member_id: int = Field(sa_column=Column(BigInteger, ForeignKey("members.id"), nullable=False))
+    member_id: int = Field(sa_column=Column(BigInteger, ForeignKey("members.id"), nullable=False, unique=True))
 
     business_type: str = Field(max_length=50)
     franchise_status: bool = Field(default=False)
@@ -26,8 +27,10 @@ class Case(SQLModel, table=True):
         ),
     )
     restoration_status: str = Field(
+        default="UNKNOWN",
         sa_column=Column(
-            Enum("NOT_STARTED", "IN_PROGRESS", "COMPLETED", "NOT_REQUIRED", name="restoration_status_enum"),
+            Enum("UNKNOWN", "NOT_STARTED", "IN_PROGRESS", "COMPLETED", "NOT_REQUIRED", name="restoration_status_enum"),
+            server_default="UNKNOWN",
             nullable=False,
         ),
     )
@@ -51,10 +54,6 @@ class Case(SQLModel, table=True):
 
     planned_closure_date: date | None = Field(default=None, sa_column=Column(Date, nullable=True))
     completed_at: datetime | None = Field(default=None, sa_column=Column(DateTime, nullable=True))
-    created_at: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, server_default=func.now(), nullable=False))
-    updated_at: datetime | None = Field(
-        default=None, sa_column=Column(DateTime, server_default=func.now(), onupdate=func.now())
-    )
 
     member: "Member" = Relationship()
     histories: list["CaseHistory"] = Relationship(back_populates="case")

@@ -43,12 +43,17 @@ Case 생성 → Blocker 1개 판정 → Next Action 1개 제시
 
    *(정상 경로에는 확인 단계가 없다. `UPDATED` 응답은 서버가 이미 반영을 마친
    결과이므로 프론트가 되물을 수 있는 시점이 아니다. "후보 제시 → 확인 → 반영"
-   2단계로 갈지는 BE 계약 확인이 필요하다 — `docs/interface-spec.md` §5 참고.)*
+   2단계로 갈지는 BE 계약 확인이 필요하다 — `docs/be-agent-integration-requirements.md`
+   §4의 P0 결정 목록에 미확정으로 올라 있다.)*
 
 4. **`result` 7종을 전부 분기한다. 미처리 분기를 남기지 않는다.**
    `UPDATED` / `NO_CHANGE` / `NEEDS_MORE_INFO` / `CONFLICT` /
    `INVALID_TRANSITION` / `REPLAN_FAILED` / `CASE_NOT_FOUND`
    응답 타입은 discriminated union으로 정의해 컴파일 단계에서 누락이 잡히게 한다.
+
+   **이 목록은 확정 전이다.** `docs/be-agent-integration-requirements.md` §6.3이
+   `CONFLICT`를 200 또는 409로 두고 `VERSION_CONFLICT`·`SAFE_FAILURE`를 후보로
+   추가했다. 409가 확정되면 아래 "본문으로 분기한다"도 함께 다시 본다.
 
    **`res.ok`가 아니라 본문의 `result`로 분기한다.** 검증 실패도 HTTP 200으로
    오고, 404는 `CASE_NOT_FOUND`뿐이다.

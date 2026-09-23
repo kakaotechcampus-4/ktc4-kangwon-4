@@ -1,11 +1,10 @@
-from datetime import datetime
+from sqlalchemy import BigInteger, Column, Enum, ForeignKey, String, Text
+from sqlmodel import Field, Relationship
 
-from sqlalchemy import BigInteger, Column, DateTime, Enum, ForeignKey, String, Text
-from sqlalchemy.sql import func
-from sqlmodel import Field, Relationship, SQLModel
+from app.be.models.mixins import CreatedAtMixin
 
 
-class CaseHistory(SQLModel, table=True):
+class CaseHistory(CreatedAtMixin, table=True):
     __tablename__ = "case_history"
 
     id: int | None = Field(default=None, sa_column=Column(BigInteger, primary_key=True, autoincrement=True))
@@ -21,8 +20,6 @@ class CaseHistory(SQLModel, table=True):
     priority_blocker_id: int | None = Field(
         default=None, sa_column=Column(BigInteger, ForeignKey("blocker.id", use_alter=True, name="fk_case_history_priority_blocker"), nullable=True)
     )
-
-    created_at: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, server_default=func.now(), nullable=False))
 
     case: "Case" = Relationship(back_populates="histories")
     procedure_step_histories: list["CaseProcedureStepHistory"] = Relationship(back_populates="case_history")
