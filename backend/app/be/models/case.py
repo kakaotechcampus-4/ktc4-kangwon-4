@@ -57,7 +57,12 @@ class Case(TimestampMixin, table=True):
 
     member: "Member" = Relationship()
     histories: list["CaseHistory"] = Relationship(back_populates="case")
+    field_histories: list["CaseFieldHistory"] = Relationship(back_populates="case")
     blockers: list["Blocker"] = Relationship(back_populates="case")
     case_procedure_steps: list["CaseProcedureStep"] = Relationship(back_populates="case")
     case_procedure_step_histories: list["CaseProcedureStepHistory"] = Relationship(back_populates="case")
     support_item_applications: list["SupportItemApplication"] = Relationship(back_populates="case")
+    support_matches: list["SupportMatch"] = Relationship(back_populates="case")
+    evidence_records: list["Evidence"] = Relationship(back_populates="case")
+    conflict_references: list["ConflictReference"] = Relationship(back_populates="case")
+    decision_records: list["DecisionRecord"] = Relationship(back_populates="case")

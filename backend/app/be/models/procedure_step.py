@@ -1,4 +1,6 @@
-from sqlalchemy import JSON, BigInteger, Column, Enum, ForeignKey, String, Text, UniqueConstraint
+from datetime import datetime
+
+from sqlalchemy import JSON, BigInteger, Column, DateTime, Enum, ForeignKey, String, Text, UniqueConstraint
 from sqlmodel import Field, Relationship
 
 from app.be.models.mixins import CreatedAtMixin, TimestampMixin
@@ -9,6 +11,19 @@ class ProcedureStep(TimestampMixin, table=True):
 
     id: int | None = Field(default=None, sa_column=Column(BigInteger, primary_key=True, autoincrement=True))
     step_code: str = Field(max_length=100, unique=True)
+    step_name: str = Field(max_length=255, description="화면 표시용 이름")
+    utterance_aliases: list | None = Field(
+        default=None, sa_column=Column(JSON, nullable=True), description="발화 매칭용 별칭 목록"
+    )
+    registry_version: str = Field(max_length=50, description="절차 레지스트리 버전")
+    deprecated_at: datetime | None = Field(
+        default=None, sa_column=Column(DateTime, nullable=True), description="폐기 시각"
+    )
+    replaced_by_procedure_step_id: int | None = Field(
+        default=None,
+        sa_column=Column(BigInteger, ForeignKey("procedure_step.id"), nullable=True),
+        description="이 절차를 대체하는 절차",
+    )
     responsible_agency: str | None = Field(default=None, max_length=255)
     deadline_rule: str | None = Field(default=None, max_length=255)
     required_documents: dict | list | None = Field(default=None, sa_column=Column(JSON, nullable=True))
