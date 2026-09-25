@@ -203,10 +203,16 @@ async def build_runtime(
             usage_sink=scoped_usage.record,
         )
         clients.append(supervisor_client)
+        info_client = StructuredLLMClient.from_env(
+            env_prefix="INFO_",
+            call_budget=scoped_budget,
+            usage_sink=scoped_usage.record,
+        )
+        clients.append(info_client)
         procedure_tool = StoredProcedureLookupTool(procedure_store)
         trace_sink = LangfuseTraceSink.from_env()
         graph = AgentGraph(
-            info_agent=InfoAnalysisAgent(client),
+            info_agent=InfoAnalysisAgent(info_client),
             procedure_tool=procedure_tool,
             support_agent=SupportAgent(
                 client, support_catalog, wiki_store=support_wiki

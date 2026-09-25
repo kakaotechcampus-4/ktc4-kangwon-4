@@ -247,6 +247,8 @@ class LLMConfig:
     max_retries: int = _DEFAULT_MAX_RETRIES
     retry_backoff_seconds: float = _DEFAULT_RETRY_BACKOFF_SECONDS
     max_response_bytes: int = _DEFAULT_MAX_RESPONSE_BYTES
+    max_completion_tokens: int | None = None
+    stream: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "base_url", _validate_base_url(self.base_url))
@@ -255,6 +257,15 @@ class LLMConfig:
             raise configuration_error("PROXY_TOKEN is required")
         if not self.model.strip():
             raise configuration_error("OPENAI_MODEL is required")
+        if type(self.stream) is not bool:
+            raise configuration_error("AGENT_LLM_STREAM must be true or false")
+        if self.max_completion_tokens is not None and (
+            type(self.max_completion_tokens) is not int
+            or self.max_completion_tokens <= 0
+        ):
+            raise configuration_error(
+                "AGENT_LLM_MAX_COMPLETION_TOKENS must be a positive integer"
+            )
         if (
             type(self.timeout_seconds) not in {int, float}
             or isinstance(self.timeout_seconds, bool)
@@ -305,10 +316,10 @@ class LLMConfig:
 
         ``env_prefix`` reads component-specific overrides: ``SUPERVISOR_MODEL``
         for the shared ``OPENAI_MODEL``, and ``SUPERVISOR_CHAT_PROXY_URL`` /
-        ``SUPERVISOR_PROXY_TOKEN`` for their same-named shared keys. The model
-        is the one key whose override drops the ``OPENAI_`` part. Each key
-        falls back on its own, so a component can override only the model —
-        but overriding the endpoint requires its own token.
+        ``SUPERVISOR_PROXY_TOKEN`` for their same-named shared keys.
+        ``SUPERVISOR_REASONING_EFFORT`` overrides ``OPENAI_REASONING_EFFORT``.
+        Each key falls back on its own, so a component can override only the
+        model or effort — but overriding the endpoint requires its own token.
         """
 
         environment = os.environ if environ is None else environ
@@ -390,16 +401,31 @@ class LLMConfig:
             default=_DEFAULT_MAX_RESPONSE_BYTES,
             setting_name="AGENT_LLM_MAX_RESPONSE_BYTES",
         )
+        raw_completion_tokens = value("AGENT_LLM_MAX_COMPLETION_TOKENS")
+        max_completion_tokens = (
+            _parse_int(
+                raw_completion_tokens,
+                default=1,
+                setting_name="AGENT_LLM_MAX_COMPLETION_TOKENS",
+            )
+            if raw_completion_tokens is not None
+            else None
+        )
+        raw_stream = value("AGENT_LLM_STREAM")
+        if raw_stream is not None and raw_stream.lower() not in {"true", "false"}:
+            raise configuration_error("AGENT_LLM_STREAM must be true or false")
 
         return cls(
             base_url=base_url or "",
             api_token=api_token or "",
             model=model or "",
-            reasoning_effort=value("OPENAI_REASONING_EFFORT"),
+            reasoning_effort=overridable("OPENAI_REASONING_EFFORT", "REASONING_EFFORT"),
             timeout_seconds=timeout_seconds,
             max_retries=max_retries,
             retry_backoff_seconds=retry_backoff_seconds,
             max_response_bytes=max_response_bytes,
+            max_completion_tokens=max_completion_tokens,
+            stream=raw_stream is not None and raw_stream.lower() == "true",
         )
 
 
@@ -547,6 +573,8 @@ class StructuredLLMClient:
                             response,
                             max_bytes=self.config.max_response_bytes,
                         )
+                        if self.config.stream:
+                            body = _assemble_streamed_response(body)
                         parsed, usage = _parse_response(
                             body, response_model, self.config.model
                         )
@@ -624,6 +652,10 @@ class StructuredLLMClient:
         }
         if temperature is not None:
             payload["temperature"] = temperature
+        if self.config.max_completion_tokens is not None:
+            payload["max_completion_tokens"] = self.config.max_completion_tokens
+        if self.config.stream:
+            payload["stream"] = True
         if self.config.reasoning_effort and _supports_reasoning_effort(
             self.config.model
         ):
@@ -778,6 +810,76 @@ def _extract_usage(body: Mapping[str, Any], fallback_model: str) -> LLMUsage:
     )
 
 
+def _assemble_streamed_response(body: bytes) -> bytes:
+    """Accept only a complete SSE answer; reuse the ordinary JSON/model parser."""
+    try:
+        text = body.decode("utf-8-sig").replace("\r\n", "\n").replace("\r", "\n")
+    except UnicodeDecodeError:
+        raise _InvalidStructuredResponse("INVALID_PROVIDER_STREAM") from None
+    content: list[str] = []
+    refusals: list[str] = []
+    data_lines: list[str] = []
+    finish_reason = None
+    done = False
+    envelope: dict[str, Any] = {}
+    for line in text.splitlines():
+        if line:
+            if line.startswith("data:"):
+                data_lines.append(line[5:].removeprefix(" "))
+            elif line.startswith("event:") and line[6:].strip() == "error":
+                raise _InvalidStructuredResponse("INVALID_PROVIDER_STREAM")
+            continue
+        if not data_lines:
+            continue
+        data = "\n".join(data_lines)
+        data_lines.clear()
+        if done:
+            raise _InvalidStructuredResponse("INVALID_PROVIDER_STREAM")
+        if data == "[DONE]":
+            done = True
+            continue
+        try:
+            chunk = json.loads(data)
+        except (ValueError, TypeError):
+            raise _InvalidStructuredResponse("INVALID_PROVIDER_STREAM") from None
+        if not isinstance(chunk, Mapping) or chunk.get("error"):
+            raise _InvalidStructuredResponse("INVALID_PROVIDER_STREAM")
+        for key in ("model", "usage"):
+            if chunk.get(key) is not None:
+                envelope[key] = chunk[key]
+        choices = chunk.get("choices")
+        if not isinstance(choices, list):
+            raise _InvalidStructuredResponse("INVALID_PROVIDER_STREAM")
+        if not choices:  # A final usage-only chunk may follow the finish chunk.
+            continue
+        if len(choices) != 1 or not isinstance(choices[0], Mapping) or finish_reason:
+            raise _InvalidStructuredResponse("INVALID_PROVIDER_STREAM")
+        choice = choices[0]
+        delta = choice.get("delta")
+        if choice.get("index", 0) != 0 or not isinstance(delta, Mapping):
+            raise _InvalidStructuredResponse("INVALID_PROVIDER_STREAM")
+        for key, parts in (("content", content), ("refusal", refusals)):
+            value = delta.get(key)
+            if value is not None:
+                if not isinstance(value, str):
+                    raise _InvalidStructuredResponse("INVALID_PROVIDER_STREAM")
+                parts.append(value)
+        finish_reason = choice.get("finish_reason")
+        if finish_reason == "content_filter":
+            raise _InvalidStructuredResponse("PROVIDER_REFUSAL", retryable=False)
+        if finish_reason not in (None, "stop", "length"):
+            raise _InvalidStructuredResponse("INVALID_PROVIDER_STREAM")
+    if data_lines or not done or finish_reason is None:
+        raise _InvalidStructuredResponse("INCOMPLETE_PROVIDER_STREAM")
+    envelope["choices"] = [
+        {
+            "finish_reason": finish_reason,
+            "message": {"content": "".join(content), "refusal": "".join(refusals)},
+        }
+    ]
+    return json.dumps(envelope).encode("utf-8")
+
+
 def _parse_response(
     response_body: bytes,
     response_model: type[ResponseModelT],
@@ -796,6 +898,8 @@ def _parse_response(
     choice = choices[0]
     if not isinstance(choice, Mapping):
         raise _InvalidStructuredResponse("INVALID_PROVIDER_CHOICE")
+    if choice.get("finish_reason") == "length":
+        raise _InvalidStructuredResponse("OUTPUT_TOKEN_LIMIT", retryable=False)
     message = choice.get("message")
     if not isinstance(message, Mapping):
         raise _InvalidStructuredResponse("MISSING_PROVIDER_MESSAGE")

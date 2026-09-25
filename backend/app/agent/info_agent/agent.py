@@ -427,7 +427,6 @@ class InfoAnalysisAgent:
                 InfoProviderOutput,
                 messages,
                 schema_name="reborn_info_analysis",
-                temperature=0,
                 # The provider cannot emit a reference we did not offer, so a
                 # made-up or mistyped one is never generated. Validation below
                 # is unchanged; this only stops the wasted generation.
