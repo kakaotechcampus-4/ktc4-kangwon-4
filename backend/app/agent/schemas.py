@@ -1368,8 +1368,20 @@ NextActionTarget: TypeAlias = Annotated[
 ]
 
 
+ActionCode: TypeAlias = Literal[
+    "CONFIRM_RESTORATION_SCOPE",
+    "CONFIRM_TAX_CLOSURE_REQUIREMENTS",
+    "FILE_TAX_BUSINESS_CLOSURE",
+    "CONFIRM_FOOD_SERVICE_CLOSURE_REQUIREMENTS",
+    "FILE_FOOD_SERVICE_CLOSURE",
+    "CONFIRM_WORKPLACE_INSURANCE_CLOSURE_REQUIREMENTS",
+    "REPORT_WORKPLACE_INSURANCE_CLOSURE",
+    "CONFIRM_SUPPORT_PROGRAM_REQUIREMENTS",
+]
+
+
 class NextAction(AgentSchema):
-    action_code: UpperSnakeCode
+    action_code: ActionCode
     sequence: PositiveStrictInt
     title: NonEmptyStr
     reason: NonEmptyStr
@@ -2199,6 +2211,7 @@ DiscoverSupportInput.model_rebuild()
 __all__ = [
     "CASE_FIELD_SPECS",
     "REQUIRED_CASE_FIELDS",
+    "ActionCode",
     "ActionDecisionDraft",
     "AgentGraphInput",
     "AgentGraphOutput",

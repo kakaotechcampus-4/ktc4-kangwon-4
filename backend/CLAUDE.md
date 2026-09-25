@@ -9,7 +9,7 @@
 - FastAPI + SQLModel(SQLAlchemy 기반) + pymysql (MySQL). Alembic은 설치돼 있으며 마이그레이션은 미구현
 - 인증: 카카오 OAuth + 자체 발급 Access/Refresh JWT (PyJWT). 비밀번호 해싱 라이브러리는 없음(카카오 OAuth만 사용)
 - 카카오 API(토큰 교환·사용자정보) 호출: httpx
-- Agent: 현재 `httpx` 직접 LLM 호출 + LangGraph. Supervisor·독립 Review는 선택적으로 별도 endpoint·model을 쓰고(미설정 시 공용 설정), 두 client는 실행당 LLM 호출 예산 하나를 공유합니다. LangChain은 설치만 됐고 runtime 미사용. Langfuse는 credential이 있을 때만 metadata를 전송합니다
+- Agent: 현재 `httpx` 직접 LLM 호출 + LangGraph. Info와 Supervisor·독립 Review는 선택적으로 별도 endpoint·model을 쓰고(미설정 시 공용 설정), 모든 client는 실행당 LLM 호출 예산 하나를 공유합니다. LangChain은 설치만 됐고 runtime 미사용. Langfuse는 credential이 있을 때만 metadata를 전송합니다
 
 ## 런타임/버전
 
@@ -52,7 +52,7 @@ Redis는 이 확정 스택에 포함되어 있지 않습니다.
     - `wiki/` — 호출자가 주입하는 검수 Wiki 조회 인터페이스. 조회 실패 시 다른 자료로 채우지 않음
   - `procedure_tool/` — 호출자가 메모리에 적재한 공식 절차 자료 조회와 절차 실행 제약 검사. 요청 중 인터넷 수집을 하지 않으며 우선순위·Next Action은 결정하지 않음
   - `review_tool/` — 제공된 초안·Evidence만 독립 검토하는 필수 Tool. 검색·직접 수정·자체 루프 없음
-  - `llm.py`, `tracing.py` — OpenAI-compatible `httpx` client(공용 1개 + Supervisor·Review용 선택 1개), 두 client가 공유하는 실행당 호출 예산(`LLMCallBudget`, 기본 40회), metadata-only trace interface와 `LangfuseTraceSink`(credential이 있을 때만 활성화)
+  - `llm.py`, `tracing.py` — OpenAI-compatible `httpx` client(공용·Info·Supervisor/Review 설정), 모든 client가 공유하는 실행당 호출 예산(`LLMCallBudget`, 기본 40회), metadata-only trace interface와 `LangfuseTraceSink`(credential이 있을 때만 활성화)
 - 독립된 `app/rules/` Rule 엔진은 두지 않는다. 입력·상태 전이·출력의 결정 가능한 제약은 코드 Guardrail로, 절차 정보 조회는 절차조회 Tool로 분리한다.
 
 ## Case / 검증 규칙

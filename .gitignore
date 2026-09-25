@@ -81,3 +81,60 @@ langfuse_data/
 # ── 개인 로컬 파일 (팀 공용 아님) ──────────────────────
 /handoff.md
 /AGENTS.md
+/docs/agent/handoof.md
+
+# ── Agent 로컬 도구·수집 데이터 ────────────────────────
+# Local pre-integration tools and collected data. Runtime must not import these.
+/backend/app/agent/cli.py
+/backend/app/agent/procedure_tool/json_store.py
+/backend/app/agent/procedure_tool/models.py
+/backend/app/agent/procedure_tool/refresh.py
+/backend/app/agent/procedure_tool/tool.py
+/backend/app/agent/procedure_tool/data/
+/backend/app/agent/support_agent/discovery_models.py
+/backend/app/agent/support_agent/discovery_tool.py
+/backend/app/agent/support_agent/json_store.py
+/backend/app/agent/support_agent/store.py
+/backend/app/agent/support_agent/refresh.py
+/backend/app/agent/support_agent/data/
+/backend/app/agent/support_agent/rag/
+/backend/app/agent/support_agent/wiki/store.py
+/backend/app/agent/support_agent/wiki/import_notices.py
+/backend/app/agent/local/
+
+# ── Agent 로컬 검증·개인 문서 ─────────────────────────
+# Agent development checks and their local pytest bootstrap.
+/backend/tests/agent/
+/backend/tests/conftest.py
+# Personal implementation notes and pre-BE verification material.
+/docs/agent/obsidian/
+/docs/agent/local/
+
+# ── Frontend 전용 규칙 (하위 디렉터리 포함) ─────────────
+# Logs
+/frontend/**/logs
+/frontend/**/*.log
+/frontend/**/npm-debug.log*
+/frontend/**/yarn-debug.log*
+/frontend/**/yarn-error.log*
+/frontend/**/pnpm-debug.log*
+/frontend/**/lerna-debug.log*
+
+/frontend/**/node_modules
+/frontend/**/dist
+/frontend/**/dist-ssr
+/frontend/**/*.local
+
+# Editor directories and files
+/frontend/.vscode/*
+!/frontend/.vscode/extensions.json
+/frontend/**/.idea
+/frontend/**/.DS_Store
+/frontend/**/*.suo
+/frontend/**/*.ntvs*
+/frontend/**/*.njsproj
+/frontend/**/*.sln
+/frontend/**/*.sw?
+
+# Vercel CLI가 만드는 로컬 연결 정보 (프로젝트·조직 ID)
+/frontend/**/.vercel
