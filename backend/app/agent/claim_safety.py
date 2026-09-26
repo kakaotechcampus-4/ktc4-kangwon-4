@@ -7,7 +7,13 @@ from collections.abc import Iterable, Mapping, Sequence
 
 from app.agent.schemas import ClaimType, EvidenceRecord, EvidenceSourceType
 
-_AMOUNT_PATTERN = re.compile(r"(?<!\d)\d[\d,]*(?:\.\d+)?\s*(?:원|만원|억원)\b")
+# Korean particles are word characters, so a Unicode word boundary alone
+# misses monetary claims in sentences. Keep an explicit suffix allowlist to
+# avoid treating any word beginning with 원 as a currency expression.
+_AMOUNT_PATTERN = re.compile(
+    r"(?<!\d)\d[\d,]*(?:\.\d+)?\s*(?:억원|만원|원)"
+    r"(?=\W|$|은|는|이|가|을|를|의|에|과|와|도|만|씩|부터|까지|보다|으로)"
+)
 _DATE_PATTERN = re.compile(
     r"(?:\b20\d{2}[-./]\d{1,2}(?:[-./]\d{1,2})?\b|"
     r"20\d{2}년\s*\d{1,2}월(?:\s*\d{1,2}일)?|"
@@ -59,18 +65,14 @@ _SUPPORT_ACTION_CONTEXT_PATTERN = re.compile(
 )
 
 
-def required_sources_for_claim(
-    claim_type: ClaimType,
-) -> frozenset[EvidenceSourceType]:
-    """Return the Review-authoritative source allowlist for a claim type."""
-
-    official = frozenset(
-        {
-            EvidenceSourceType.OFFICIAL_DOCUMENT,
-            EvidenceSourceType.OFFICIAL_API,
-        }
-    )
-    return official
+# Every claim type Review can authorise needs an official source; there is no
+# per-type allowlist to configure.
+REQUIRED_CLAIM_SOURCES = frozenset(
+    {
+        EvidenceSourceType.OFFICIAL_DOCUMENT,
+        EvidenceSourceType.OFFICIAL_API,
+    }
+)
 
 
 def high_risk_metadata(
@@ -202,6 +204,7 @@ def expand_evidence(
 
 
 __all__ = [
+    "REQUIRED_CLAIM_SOURCES",
     "expand_evidence",
     "has_confirmation_caveat",
     "has_explicit_eligibility_language",
@@ -210,5 +213,4 @@ __all__ = [
     "high_risk_metadata",
     "is_overconfident",
     "references_other_known_label",
-    "required_sources_for_claim",
 ]

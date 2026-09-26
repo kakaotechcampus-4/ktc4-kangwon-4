@@ -17,7 +17,7 @@ import type { ConfirmView, ConflictSide } from '../types/view'
  * 그래서 한 항목이라도 고르지 않으면 진행할 수 없게 한다.
  */
 export function ConfirmChangePage() {
-  const { state } = useLocation()
+  const { search, state } = useLocation()
   const navigate = useNavigate()
 
   const view = (state as ConfirmView | null) ?? (MOCK_SWITCH_ENABLED ? conflictConfirm : null)
@@ -41,10 +41,10 @@ export function ConfirmChangePage() {
     }
   }, [])
 
-  if (!view) return <Navigate to="/" replace />
+  if (!view) return <Navigate to={{ pathname: '/', search }} replace />
   // 고를 것이 없으면 이 화면의 존재 이유가 없다. 서버가 빈 목록을 보내도 막다른 골목이
-  // 되지 않게 현재 Case로 돌린다.
-  if (view.conflicts.length === 0) return <Navigate to="/" replace />
+  // 되지 않게 진입 분기로 돌린다 — 거기서 지금 상태에 맞는 화면을 다시 고른다.
+  if (view.conflicts.length === 0) return <Navigate to={{ pathname: '/', search }} replace />
 
   const { rawInput, conflicts } = view
   const allDecided = conflicts.every((conflict) => choices[conflict.key])
@@ -57,7 +57,8 @@ export function ConfirmChangePage() {
     // 진행 중인 요청 자체를 끊는 것은 그때 AbortController로 처리한다.
     //
     // 이 요청에는 동시성 보호가 없다 — `/results`의 expectedVersion에 해당하는 필드가
-    // 계약에 빠져 있다(interface-spec.md §5에 확정 필요로 기록됨). 같은 결정이 두 번
+    // 계약에 빠져 있다(be-agent-integration-requirements.md §4에 P0 결정으로 기록됨).
+    // 같은 결정이 두 번
     // 도착해도 서버가 걸러낼 수단이 없으므로, 보호 방식이 정해지면 함께 맞춘다.
     // 실패 시 대기 상태에서 빠져나올 경로도 그때 함께 만든다 — 지금은 Mock이라
     // 실패하지 않지만, fetch로 바꾸면 오류가 나도 화면이 잠긴 채로 남는다.
@@ -66,7 +67,7 @@ export function ConfirmChangePage() {
     // 이미 해결한 충돌 화면으로 뒤로 돌아가 같은 결정을 다시 제출하는 일을 막는다.
     // 히스토리에서 이 항목을 지우는 것이라 확인을 마친 경우에만 해당한다 —
     // 아직 고르지 않고 떠난 충돌은 그대로 남아 다시 들어올 수 있다.
-    navigate('/replan', { state: replan, replace: true })
+    navigate({ pathname: '/replan', search }, { state: replan, replace: true })
   }
 
   return (

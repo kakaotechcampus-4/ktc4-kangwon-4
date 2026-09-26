@@ -9,10 +9,12 @@ only when both Langfuse credentials resolve.
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
-from dataclasses import dataclass, field
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from dotenv import dotenv_values
 
@@ -29,6 +31,20 @@ class TraceEvent:
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     error_code: str | None = None
+    # How many provider HTTP calls this event covers. ``attempt`` is the
+    # component's semantic attempt number, which can hide several HTTP calls,
+    # so it cannot answer "how much of the run budget did this spend".
+    provider_calls: int | None = None
+    outcome_type: str | None = None
+    # A successful Review call may return REVISE; status describes execution,
+    # while this bounded value records the independent review decision.
+    review_verdict: Literal["PASS", "REVISE"] | None = None
+    # RUN-only totals: returned verdicts, returned REVISE verdicts, and distinct
+    # rework rounds that actually reached a component call after its deadline check.
+    # Failed review calls are not verdicts and do not enter review_count.
+    review_count: int | None = None
+    review_revise_count: int | None = None
+    rework_count: int | None = None
 
 
 def _repo_root() -> Path:
@@ -42,16 +58,6 @@ class TraceSink(Protocol):
 class NullTraceSink:
     def emit(self, event: TraceEvent) -> None:
         del event
-
-
-@dataclass(slots=True)
-class MemoryTraceSink:
-    """Test-only sink that retains metadata, never prompt or evidence content."""
-
-    events: list[TraceEvent] = field(default_factory=list)
-
-    def emit(self, event: TraceEvent) -> None:
-        self.events.append(event)
 
 
 @dataclass(slots=True)
@@ -85,6 +91,50 @@ class UsageAccumulator:
         taken = (self.model, self.prompt_tokens, self.completion_tokens)
         self.reset()
         return taken
+
+
+_CURRENT_USAGE: ContextVar[UsageAccumulator | None] = ContextVar(
+    "agent_usage_accumulator",
+    default=None,
+)
+
+
+@contextmanager
+def usage_scope(usage: UsageAccumulator) -> Iterator[UsageAccumulator]:
+    """Install ``usage`` as the accumulator for work done inside this block."""
+
+    token = _CURRENT_USAGE.set(usage)
+    try:
+        yield usage
+    finally:
+        _CURRENT_USAGE.reset(token)
+
+
+@dataclass(slots=True)
+class ScopedUsageAccumulator:
+    """Usage stand-in that defers to whichever run is currently in scope.
+
+    Same reason as the call budget: a client is built once and serves many
+    runs, so token counts must follow the run rather than sit on the client.
+    Outside any run scope it records nothing, which keeps direct client use in
+    tests and scripts working unchanged.
+    """
+
+    def record(self, usage: Any) -> None:
+        accumulator = _CURRENT_USAGE.get()
+        if accumulator is not None:
+            accumulator.record(usage)
+
+    def reset(self) -> None:
+        accumulator = _CURRENT_USAGE.get()
+        if accumulator is not None:
+            accumulator.reset()
+
+    def drain(self) -> tuple[str | None, int | None, int | None]:
+        accumulator = _CURRENT_USAGE.get()
+        if accumulator is None:
+            return (None, None, None)
+        return accumulator.drain()
 
 
 class LangfuseTraceSink:
@@ -126,7 +176,10 @@ class LangfuseTraceSink:
             raw = environment.get(key) or file_values.get(key) or ""
             return str(raw).strip()
 
-        public_key, secret_key = value("LANGFUSE_PUBLIC_KEY"), value("LANGFUSE_SECRET_KEY")
+        public_key, secret_key = (
+            value("LANGFUSE_PUBLIC_KEY"),
+            value("LANGFUSE_SECRET_KEY"),
+        )
         if not (public_key and secret_key):
             return None
         try:
@@ -156,16 +209,28 @@ class LangfuseTraceSink:
                 usage["input_tokens"] = event.prompt_tokens
             if event.completion_tokens is not None:
                 usage["output_tokens"] = event.completion_tokens
+            metadata = {
+                "run_id": event.run_id,
+                "call_id": event.call_id,
+                "status": event.status,
+                "latency_ms": event.latency_ms,
+                "attempt": event.attempt,
+                "error_code": event.error_code,
+                "provider_calls": event.provider_calls,
+                "outcome_type": event.outcome_type,
+            }
+            for key in (
+                "review_verdict",
+                "review_count",
+                "review_revise_count",
+                "rework_count",
+            ):
+                value = getattr(event, key)
+                if value is not None:
+                    metadata[key] = value
             try:
                 observation.update(
-                    metadata={
-                        "run_id": event.run_id,
-                        "call_id": event.call_id,
-                        "status": event.status,
-                        "latency_ms": event.latency_ms,
-                        "attempt": event.attempt,
-                        "error_code": event.error_code,
-                    },
+                    metadata=metadata,
                     **({"usage_details": usage} if usage else {}),
                 )
             finally:

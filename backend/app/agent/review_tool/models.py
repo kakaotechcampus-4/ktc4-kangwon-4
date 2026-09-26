@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import Annotated, Literal
 from uuid import UUID
 
+from pydantic import BaseModel, ConfigDict, Field, StrictStr, model_validator
+
 from app.agent.schemas import (
     Component,
     EvidenceSourceType,
@@ -15,7 +17,6 @@ from app.agent.schemas import (
     ReviewIssueCode,
     ReviewVerdict,
 )
-from pydantic import BaseModel, ConfigDict, Field, StrictStr, model_validator
 
 
 class ReviewIssueModelOutput(BaseModel):

@@ -55,7 +55,6 @@ class Settings(BaseSettings):
 
     # 4. 인프라
     database_url: str | None = Field(default=None, alias="DATABASE_URL")
-    redis_url: str | None = Field(default=None, alias="REDIS_URL")
 
     # 5. 인증 — 카카오 OAuth + 자체 발급 JWT (pyjwt, 2026-09 BE 확정. BE기술스택.html §1 참고)
     kakao_client_id: str | None = Field(default=None, alias="KAKAO_CLIENT_ID")

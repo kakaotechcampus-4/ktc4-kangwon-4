@@ -43,12 +43,17 @@ Case 생성 → Blocker 1개 판정 → Next Action 1개 제시
 
    *(정상 경로에는 확인 단계가 없다. `UPDATED` 응답은 서버가 이미 반영을 마친
    결과이므로 프론트가 되물을 수 있는 시점이 아니다. "후보 제시 → 확인 → 반영"
-   2단계로 갈지는 BE 계약 확인이 필요하다 — `docs/interface-spec.md` §5 참고.)*
+   2단계로 갈지는 BE 계약 확인이 필요하다 — `docs/be-agent-integration-requirements.md`
+   §4의 P0 결정 목록에 미확정으로 올라 있다.)*
 
 4. **`result` 7종을 전부 분기한다. 미처리 분기를 남기지 않는다.**
    `UPDATED` / `NO_CHANGE` / `NEEDS_MORE_INFO` / `CONFLICT` /
    `INVALID_TRANSITION` / `REPLAN_FAILED` / `CASE_NOT_FOUND`
    응답 타입은 discriminated union으로 정의해 컴파일 단계에서 누락이 잡히게 한다.
+
+   **이 목록은 확정 전이다.** `docs/be-agent-integration-requirements.md` §6.3이
+   `CONFLICT`를 200 또는 409로 두고 `VERSION_CONFLICT`·`SAFE_FAILURE`를 후보로
+   추가했다. 409가 확정되면 아래 "본문으로 분기한다"도 함께 다시 본다.
 
    **`res.ok`가 아니라 본문의 `result`로 분기한다.** 검증 실패도 HTTP 200으로
    오고, 404는 `CASE_NOT_FOUND`뿐이다.
@@ -88,6 +93,24 @@ Case 생성 → Blocker 1개 판정 → Next Action 1개 제시
 
     이 레포는 공개되어 있다. 인증이 필요한 값은 서버가 보관한다.
     사용하는 환경변수는 `src/vite-env.d.ts` 에 선언해 한곳에서 볼 수 있게 한다.
+
+## 테스트
+
+- **가짜 타이머(`vi.useFakeTimers`)를 쓰는 테스트에서는 `fireEvent`로 클릭한다.**
+  `userEvent`는 동작 사이에 내부 지연을 두는데, 그 지연이 가짜 타이머에 걸려 흘러가지
+  않아서 클릭이 끝나지 않는다. 테스트는 실패가 아니라 **타임아웃까지 멈춘다.**
+  `advanceTimers` 옵션으로도 풀리지 않는다.
+
+- **테스트가 통과하면 한 번은 일부러 깨뜨려 본다.** 지키려는 코드를 고쳐서
+  그 테스트만 실패하는지 확인한다. 아무것도 검증하지 않는 테스트는
+  통과하기 때문에 눈으로는 구분되지 않는다.
+
+- **화면 데이터는 Mock이 아니라 테스트가 들고 있는다.** `mocks/`는 화면을 눈으로 보려고
+  만든 데이터라 언제든 바뀐다. 거기 기대면 Mock을 손볼 때 관계없는 테스트가 깨진다.
+  Mock 폴백이 동작하는지 보는 테스트만 화면당 하나 남긴다.
+
+- **역할과 상태로 찾는다** (`getByRole`, `toBeDisabled`). 문구나 클래스 이름을 비교하지
+  않는다. 접근 이름은 마크업 구조에 따라 붙으므로 그 모양에 기대지 않는다.
 
 ## 문서
 

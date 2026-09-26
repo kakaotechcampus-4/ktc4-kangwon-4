@@ -7,7 +7,17 @@ from datetime import datetime, timezone
 from typing import Annotated, Any, Literal, Protocol
 from uuid import UUID, uuid4
 
+from pydantic import Field, StrictBool, StrictInt, StrictStr, model_validator
+
+from app.agent.action_catalog import build_action_candidates
+from app.agent.blocker_candidates import (
+    build_blocker_candidates,
+    candidate_decision_fields,
+    candidate_decision_violations,
+    missing_info_fields,
+)
 from app.agent.claim_safety import (
+    REQUIRED_CLAIM_SOURCES,
     expand_evidence,
     has_confirmation_caveat,
     has_explicit_eligibility_language,
@@ -16,7 +26,6 @@ from app.agent.claim_safety import (
     high_risk_metadata,
     is_overconfident,
     references_other_known_label,
-    required_sources_for_claim,
 )
 from app.agent.enrichment import build_fact_overlays
 from app.agent.guardrails import (
@@ -24,18 +33,20 @@ from app.agent.guardrails import (
     ensure_known_refs,
     ensure_no_sensitive_text,
 )
+from app.agent.procedure_tool.rules import (
+    procedure_constraints,
+    procedure_plan_constraints,
+)
 from app.agent.projection import (
     ensure_projection_has_no_obvious_sensitive_text,
     to_model_projection,
 )
 from app.agent.prompts import supervisor_messages
 from app.agent.schemas import (
+    ActionCode,
     ActionDecisionDraft,
     AgentSchema,
     Blocker,
-    CaseCompleteDecisionDraft,
-    CaseStatus,
-    CaseStatusChangeCandidate,
     ClaimType,
     DecisionType,
     EvidenceRecord,
@@ -50,6 +61,7 @@ from app.agent.schemas import (
     ProcedureFinding,
     ProcedureLookupResult,
     ProcedureProgressChangeCandidate,
+    ProcedureProgressStatus,
     ReviewSourceResult,
     SupervisorAgentInput,
     SupervisorDraft,
@@ -59,7 +71,6 @@ from app.agent.schemas import (
     SupportMatchStatus,
     SupportMatchUpdateCandidate,
 )
-from pydantic import Field, StrictBool, StrictInt, StrictStr, model_validator
 
 
 class StructuredGenerator(Protocol):
@@ -76,7 +87,7 @@ class SupervisorGuardrailError(GuardrailViolation):
 
 
 class NextActionSemantic(AgentSchema):
-    action_code: Annotated[StrictStr, Field(pattern=r"^[A-Z][A-Z0-9_]*$")]
+    action_code: ActionCode
     title: Annotated[StrictStr, Field(min_length=1)]
     reason: Annotated[StrictStr, Field(min_length=1)]
     questions_to_ask: list[Annotated[StrictStr, Field(min_length=1)]]
@@ -113,7 +124,6 @@ class GroundedClaimModelOutput(AgentSchema):
     claim_type: ClaimType
     target_kind: Literal[
         "SELECTION_SUMMARY",
-        "BLOCKER_TITLE",
         "BLOCKER_DESCRIPTION",
         "NEXT_ACTION_TITLE",
         "NEXT_ACTION_REASON",
@@ -131,6 +141,7 @@ class SupervisorModelOutput(AgentSchema):
     """Provider-facing shape; runtime applies conditional invariants next."""
 
     decision_type: DecisionType
+    blocker_candidate_id: StrictStr | None = None
     selection_summary: Annotated[StrictStr, Field(min_length=1)]
     requires_human: StrictBool
     evidence_refs: Annotated[
@@ -166,11 +177,6 @@ class SupervisorSemanticDraft(AgentSchema):
                 raise ValueError("NEEDS_MORE_INFO requires blocker and no action")
             if not self.requires_human or not self.questions_for_user:
                 raise ValueError("NEEDS_MORE_INFO requires a human question")
-        else:
-            if self.blocker is not None or self.next_action is not None:
-                raise ValueError("CASE_COMPLETE has no blocker or action")
-            if self.requires_human or self.questions_for_user:
-                raise ValueError("CASE_COMPLETE has no human question")
         return self
 
 
@@ -215,11 +221,63 @@ class SupervisorAgent:
                     "component result does not match the Supervisor snapshot"
                 )
         self._validate_procedure_analysis_sources(source_results)
+        if fact_overlays is None:
+            fact_overlays = [
+                candidate
+                for source in source_results
+                if isinstance(source.output, InfoAnalysisResult)
+                for candidate in build_fact_overlays(
+                    request.case_snapshot,
+                    source.output,
+                    source.meta.call_id,
+                    uuid_factory=self._uuid,
+                )
+            ]
+        mutations = self._build_mutations(
+            request, list(source_results), fact_overlays=fact_overlays
+        )
         evidence_registry = self._evidence(source_results, request)
+        blocker_candidates = build_blocker_candidates(
+            request.case_snapshot,
+            request.known_procedure_steps,
+            source_results,
+            mutations,
+            evidence_registry,
+        )
+        action_candidates = [
+            action
+            for candidate in blocker_candidates
+            for action in candidate["actions"]
+        ]
+        # The model picks evidence from a list we supply, so it should pick by a
+        # short handle rather than copy a stored identifier. Measured runs had
+        # Review reject a draft because the blocker cited an ID that was not in
+        # the supplied set, which then burned three Supervisor reworks.
+        aliases_by_evidence = {
+            evidence_id: f"e{index}"
+            for index, evidence_id in enumerate(evidence_registry, start=1)
+        }
+        evidence_by_alias = {
+            alias: evidence_id for evidence_id, alias in aliases_by_evidence.items()
+        }
 
         prompt_input = {
             "trigger": to_model_projection(request.trigger),
             "case_snapshot": to_model_projection(request.case_snapshot),
+            "fact_overlays": to_model_projection(list(fact_overlays or [])),
+            "known_procedure_steps": to_model_projection(request.known_procedure_steps),
+            "procedure_constraints": [
+                {
+                    "procedure_step": step.procedure_step.model_dump(mode="json"),
+                    "blocking_reasons": procedure_constraints(
+                        step,
+                        request.case_snapshot,
+                        mutations.fact_changes,
+                        mutations.procedure_progress_changes,
+                    ),
+                }
+                for step in request.known_procedure_steps
+            ],
             "component_results": [
                 {
                     "component": item.meta.component.value,
@@ -242,7 +300,6 @@ class SupervisorAgent:
                 "eligibility_assertion_level": "NEEDS_CONFIRMATION",
                 "claim_target_kinds": [
                     "SELECTION_SUMMARY",
-                    "BLOCKER_TITLE",
                     "BLOCKER_DESCRIPTION",
                     "NEXT_ACTION_TITLE",
                     "NEXT_ACTION_REASON",
@@ -251,9 +308,10 @@ class SupervisorAgent:
                 ],
                 "claim_text_and_path_are_runtime_injected": True,
                 "support_eligibility_is_final": False,
-                "case_complete_is_allowed": False,
                 "action_target_kinds": ["PROCEDURE", "SUPPORT_PROGRAM"],
                 "action_requires_exactly_one_target": True,
+                "allowed_actions": action_candidates,
+                "blocker_candidates": blocker_candidates,
                 "high_risk_visible_text_requires_exact_grounded_claim": [
                     "support program",
                     "amount",
@@ -272,7 +330,7 @@ class SupervisorAgent:
                 },
                 "allowed_evidence_refs": [
                     {
-                        "evidence_ref": evidence.evidence_id,
+                        "evidence_ref": aliases_by_evidence[evidence.evidence_id],
                         "source_type": evidence.source_type.value,
                         "freshness_status": evidence.freshness_status.value,
                     }
@@ -317,14 +375,12 @@ class SupervisorAgent:
                             "For ACTION, return one blocker, one next_action, and an empty "
                             "questions_for_user list. For NEEDS_MORE_INFO, return a blocker, "
                             "no next_action, requires_human=true, and at least one question. "
-                            "Do not return CASE_COMPLETE: bounded internet lookup cannot prove "
-                            "complete procedure coverage. "
                             "Every ACTION must select exactly one canonical target. Use "
                             "target_kind=PROCEDURE with a procedure_step from an Info finding, "
                             "or target_kind=SUPPORT_PROGRAM with a support_program from a "
                             "Support check. Never mix both kinds in one action. "
                             "Every ELIGIBILITY claim must use NEEDS_CONFIRMATION. Select only "
-                            "evidence_ref values listed in contract.allowed_evidence_refs; never "
+                            "short evidence_ref handles listed in contract.allowed_evidence_refs; never "
                             "use a call, candidate, finding, document, or question UUID as evidence. "
                             "Select only an available grounded-claim target_kind and use a zero-based "
                             "target_index only for an existing question. For NEEDS_MORE_INFO about "
@@ -343,95 +399,145 @@ class SupervisorAgent:
                 SupervisorModelOutput,
                 messages,
                 schema_name="reborn_supervisor_draft",
+                # ponytail: no temperature=0 here -- the configured Supervisor
+                # model (see SUPERVISOR_MODEL) rejects any non-default value
+                # with HTTP 400 ("Only the default (1) value is supported"),
+                # confirmed against the real provider 2026-09-23. `seed` was
+                # tried too and does not help either -- confirmed against the
+                # real provider 2026-09-23 with an identical prompt + seed
+                # producing a different decision_type on replay. Supervisor
+                # has no sampling-level determinism guarantee. Runtime reuse
+                # separately checks the full request, evidence and configuration.
+                # Same reason as the Info Agent: the evidence list is closed, so
+                # the provider is not allowed to name anything outside it.
+                enum_constraints={
+                    "evidence_refs": sorted(evidence_by_alias),
+                    "action_code": [item["action_code"] for item in action_candidates],
+                    "blocker_candidate_id": [
+                        item["candidate_id"] for item in blocker_candidates
+                    ],
+                },
             )
             try:
-                semantic_payload = model_output.model_dump(mode="python")
-                semantic_payload["grounded_claims"] = [
-                    self._materialize_model_claim(model_output, claim)
-                    for claim in model_output.grounded_claims
-                ]
-                semantic = SupervisorSemanticDraft.model_validate(semantic_payload)
+                semantic = self._candidate_semantic(
+                    model_output,
+                    blocker_candidates,
+                    request,
+                    mutations,
+                )
                 return self._materialize(
                     request,
                     list(source_results),
                     semantic,
                     draft_version=draft_version,
-                    fact_overlays=fact_overlays,
+                    mutations=mutations,
                 )
             except (GuardrailViolation, ValueError):
                 continue
-        fallback = self._missing_info_fallback(source_results, evidence_registry)
+        fallback = (
+            self._missing_info_fallback(request, mutations)
+            if not blocker_candidates
+            else None
+        )
         if fallback is not None:
             return self._materialize(
                 request,
                 list(source_results),
                 fallback,
                 draft_version=draft_version,
-                fact_overlays=fact_overlays,
+                mutations=mutations,
             )
         raise SupervisorGuardrailError(
             "Supervisor failed deterministic provenance checks"
         ) from None
 
     @staticmethod
+    def _candidate_semantic(
+        output: SupervisorModelOutput,
+        candidates: list[dict[str, Any]],
+        request: SupervisorAgentInput,
+        mutations: MutationSet,
+    ) -> SupervisorSemanticDraft:
+        if output.decision_type == DecisionType.NEEDS_MORE_INFO:
+            if candidates or output.blocker_candidate_id is not None:
+                raise SupervisorGuardrailError(
+                    "an available blocker candidate requires ACTION"
+                )
+            fields = missing_info_fields(
+                request.case_snapshot, request.source_results, mutations
+            )
+            if fields is None:
+                raise SupervisorGuardrailError("no grounded question fallback")
+            return SupervisorSemanticDraft(**fields, grounded_claims=[])
+        candidate = next(
+            (
+                item
+                for item in candidates
+                if item["candidate_id"] == output.blocker_candidate_id
+            ),
+            None,
+        )
+        if candidate is None or output.next_action is None:
+            raise SupervisorGuardrailError(
+                "Supervisor must select an available blocker candidate"
+            )
+        fields = candidate_decision_fields(
+            candidate,
+            output.next_action.action_code,
+            output.next_action.target.model_dump(mode="json"),
+        )
+        action = fields["next_action"]
+        base = "/supervisor_draft/decision"
+        texts = {
+            f"{base}/selection_summary": fields["selection_summary"],
+            f"{base}/blocker/description": fields["blocker"]["description"],
+            f"{base}/next_action/title": action["title"],
+            f"{base}/next_action/reason": action["reason"],
+            **{
+                f"{base}/next_action/questions_to_ask/{index}": text
+                for index, text in enumerate(action["questions_to_ask"])
+            },
+        }
+        names = frozenset(
+            check.program_name
+            for source in request.source_results
+            if isinstance(source.output, SupportAnalysisResult)
+            for check in source.output.support_checks
+        )
+        claims = []
+        for path, text in texts.items():
+            kinds, _ = high_risk_metadata(text, names)
+            claim_type = (
+                ClaimType.ELIGIBILITY
+                if ClaimType.ELIGIBILITY in kinds
+                else ClaimType.TAX
+                if ClaimType.TAX in kinds
+                else ClaimType.PROCEDURE
+            )
+            claims.append(
+                GroundedClaimSemantic(
+                    claim_type=claim_type,
+                    target_path=path,
+                    text=text,
+                    assertion_level="NEEDS_CONFIRMATION",
+                    evidence_refs=fields["evidence_refs"],
+                )
+            )
+        return SupervisorSemanticDraft(**fields, grounded_claims=claims)
+
+    @staticmethod
     def _missing_info_fallback(
-        sources: Sequence[ReviewSourceResult],
-        evidence_by_id: dict[str, EvidenceRecord],
+        request: SupervisorAgentInput,
+        mutations: MutationSet,
     ) -> SupervisorSemanticDraft | None:
         """Build a conservative question-only draft after bounded model failure."""
-
-        questions: list[str] = []
-        missing_paths: set[str] = set()
-        for source in sources:
-            if not isinstance(source.output, InfoAnalysisResult):
-                continue
-            missing_paths.update(
-                item.field_path.value for item in source.output.missing_fields
-            )
-            questions.extend(item.text for item in source.output.question_candidates)
-        questions = list(dict.fromkeys(questions))
-        if not questions:
-            return None
-
-        preferred_refs = [
-            evidence.evidence_id
-            for evidence in evidence_by_id.values()
-            if evidence.source_type.value
-            in {
-                "USER_INPUT",
-                "EXPERT_CONFIRMATION",
-                "SYSTEM_RECORD",
-            }
-            and any(path in evidence.excerpt for path in missing_paths)
-        ]
-        if not preferred_refs:
-            preferred_refs = [
-                evidence.evidence_id
-                for evidence in evidence_by_id.values()
-                if evidence.source_type.value
-                in {
-                    "USER_INPUT",
-                    "EXPERT_CONFIRMATION",
-                    "SYSTEM_RECORD",
-                }
-            ]
-        if not preferred_refs:
-            return None
-        evidence_refs = list(dict.fromkeys(preferred_refs))
-        return SupervisorSemanticDraft(
-            decision_type="NEEDS_MORE_INFO",
-            selection_summary="누락된 정보를 먼저 확인해 주세요.",
-            requires_human=True,
-            evidence_refs=evidence_refs,
-            blocker=Blocker(
-                blocker_code="MISSING_CASE_INFORMATION",
-                title="확인할 정보가 있습니다",
-                description="입력에서 확인되지 않은 항목이 있어 다음 판단을 보류합니다.",
-                evidence_refs=evidence_refs,
-            ),
-            next_action=None,
-            questions_for_user=questions,
-            grounded_claims=[],
+        fields = missing_info_fields(
+            request.case_snapshot, request.source_results, mutations
+        )
+        return (
+            SupervisorSemanticDraft(**fields, grounded_claims=[])
+            if fields is not None
+            else None
         )
 
     @staticmethod
@@ -452,8 +558,6 @@ class SupervisorAgent:
         blocker = None
         if decision.blocker is not None:
             blocker = {
-                "blocker_code": decision.blocker.blocker_code,
-                "title": decision.blocker.title,
                 "description": decision.blocker.description,
                 "evidence_refs": list(decision.blocker.evidence_refs),
             }
@@ -486,7 +590,7 @@ class SupervisorAgent:
         semantic: SupervisorSemanticDraft,
         *,
         draft_version: int,
-        fact_overlays: Sequence[FactChangeCandidate] | None,
+        mutations: MutationSet,
     ) -> SupervisorDraft:
         evidence = self._evidence(sources, request)
         known_evidence = set(evidence)
@@ -498,6 +602,23 @@ class SupervisorAgent:
         for claim in semantic.grounded_claims:
             refs.extend(claim.evidence_refs)
         ensure_known_refs(refs, known_evidence, label="evidence")
+
+        selected_action = None
+        if semantic.next_action is not None:
+            action = semantic.next_action
+            selected_action = next(
+                (
+                    candidate
+                    for candidate in build_action_candidates(sources, evidence)
+                    if candidate["action_code"] == action.action_code
+                    and candidate["target"] == action.target.model_dump(mode="json")
+                ),
+                None,
+            )
+            if selected_action is None:
+                raise SupervisorGuardrailError(
+                    "action code and target are not an allowed action"
+                )
 
         findings_by_step: dict[
             tuple[int, str], list[tuple[UUID, ProcedureFinding]]
@@ -650,6 +771,8 @@ class SupervisorAgent:
         if semantic.decision_type == DecisionType.ACTION:
             assert semantic.blocker is not None and semantic.next_action is not None
             action_values = semantic.next_action.model_dump(mode="python")
+            assert selected_action is not None
+            action_values["action_code"] = selected_action["action_code"]
             target_evidence_refs: list[str] = []
             if target_finding is not None:
                 target_evidence_refs.extend(target_finding.evidence_refs)
@@ -675,7 +798,7 @@ class SupervisorAgent:
                 questions_for_user=[],
                 **common,
             )
-        elif semantic.decision_type == DecisionType.NEEDS_MORE_INFO:
+        else:
             assert semantic.blocker is not None
             decision = NeedsMoreInfoDecisionDraft(
                 decision_type=DecisionType.NEEDS_MORE_INFO,
@@ -684,22 +807,28 @@ class SupervisorAgent:
                 questions_for_user=semantic.questions_for_user,
                 **common,
             )
-        else:
-            self._ensure_complete_is_supported(request, sources)
-            decision = CaseCompleteDecisionDraft(
-                decision_type=DecisionType.CASE_COMPLETE,
-                blocker=None,
-                next_action=None,
-                questions_for_user=[],
-                **common,
-            )
 
-        mutations = self._build_mutations(
-            request,
-            sources,
-            decision,
-            fact_overlays=fact_overlays,
+        violations = procedure_plan_constraints(
+            request.known_procedure_steps, request.case_snapshot, mutations, decision
         )
+        violations.extend(
+            candidate_decision_violations(
+                decision,
+                build_blocker_candidates(
+                    request.case_snapshot,
+                    request.known_procedure_steps,
+                    sources,
+                    mutations,
+                    evidence,
+                ),
+                missing_info_fields(request.case_snapshot, sources, mutations),
+            )
+        )
+        if violations:
+            raise SupervisorGuardrailError(
+                "procedure master rules block this plan: "
+                + "; ".join(reason for _, reason in violations)
+            )
         grounded_claims = [
             GroundedClaim(claim_id=self._uuid(), **item.model_dump(mode="python"))
             for item in semantic.grounded_claims
@@ -754,7 +883,7 @@ class SupervisorAgent:
                     raise SupervisorGuardrailError(
                         "non-current evidence requires an explicit confirmation caveat"
                     )
-            allowed_sources = required_sources_for_claim(claim.claim_type)
+            allowed_sources = REQUIRED_CLAIM_SOURCES
             if not any(item.source_type in allowed_sources for item in expanded):
                 raise SupervisorGuardrailError(
                     "grounded claim lacks an allowed authoritative source"
@@ -791,9 +920,6 @@ class SupervisorAgent:
         self,
         request: SupervisorAgentInput,
         sources: list[ReviewSourceResult],
-        decision: ActionDecisionDraft
-        | NeedsMoreInfoDecisionDraft
-        | CaseCompleteDecisionDraft,
         *,
         fact_overlays: Sequence[FactChangeCandidate] | None,
     ) -> MutationSet:
@@ -836,7 +962,9 @@ class SupervisorAgent:
                     if observation.requires_confirmation or finding is None:
                         continue
                     prior = progress.get(key)
-                    before_status = prior.status if prior else None
+                    before_status = (
+                        prior.status if prior else ProcedureProgressStatus.NOT_STARTED
+                    )
                     if finding.current_status != before_status:
                         raise SupervisorGuardrailError(
                             "procedure finding current status differs from snapshot"
@@ -864,20 +992,10 @@ class SupervisorAgent:
                     for check in output.support_checks
                 )
 
-        status_change = None
-        if decision.decision_type == DecisionType.CASE_COMPLETE:
-            status_change = CaseStatusChangeCandidate(
-                candidate_id=self._uuid(),
-                before_status=CaseStatus.IN_PROGRESS,
-                proposed_status=CaseStatus.COMPLETED,
-                reason_summary=decision.selection_summary,
-                evidence_refs=decision.evidence_refs,
-            )
         return MutationSet(
             fact_changes=fact_changes,
             procedure_progress_changes=progress_changes,
             support_match_updates=support_updates,
-            case_status_change=status_change,
         )
 
     @staticmethod
@@ -933,16 +1051,6 @@ class SupervisorAgent:
                         )
 
     @staticmethod
-    def _ensure_complete_is_supported(
-        request: SupervisorAgentInput,
-        sources: Sequence[ReviewSourceResult],
-    ) -> None:
-        del request, sources
-        raise SupervisorGuardrailError(
-            "CASE_COMPLETE is unavailable without authoritative procedure coverage"
-        )
-
-    @staticmethod
     def _validate_claim_targets(draft: SupervisorDraft) -> None:
         root = {"supervisor_draft": draft.model_dump(mode="json")}
         for claim in draft.grounded_claims:
@@ -967,79 +1075,11 @@ class SupervisorAgent:
                 )
 
     @staticmethod
-    def _materialize_model_claim(
-        output: SupervisorModelOutput,
-        claim: GroundedClaimModelOutput,
-    ) -> dict[str, Any]:
-        """Resolve a constrained selector to a runtime-owned path and exact text."""
-
-        base = "/supervisor_draft/decision"
-        scalar_targets: dict[str, tuple[str, str] | None] = {
-            "SELECTION_SUMMARY": (
-                f"{base}/selection_summary",
-                output.selection_summary,
-            ),
-            "BLOCKER_TITLE": (
-                (f"{base}/blocker/title", output.blocker.title)
-                if output.blocker is not None
-                else None
-            ),
-            "BLOCKER_DESCRIPTION": (
-                (f"{base}/blocker/description", output.blocker.description)
-                if output.blocker is not None
-                else None
-            ),
-            "NEXT_ACTION_TITLE": (
-                (f"{base}/next_action/title", output.next_action.title)
-                if output.next_action is not None
-                else None
-            ),
-            "NEXT_ACTION_REASON": (
-                (f"{base}/next_action/reason", output.next_action.reason)
-                if output.next_action is not None
-                else None
-            ),
-        }
-        resolved = scalar_targets.get(claim.target_kind)
-        if resolved is not None:
-            if claim.target_index is not None:
-                raise SupervisorGuardrailError(
-                    "scalar grounded-claim target must not include an index"
-                )
-            target_path, text = resolved
-        else:
-            if claim.target_kind == "NEXT_ACTION_QUESTION":
-                questions = (
-                    output.next_action.questions_to_ask
-                    if output.next_action is not None
-                    else []
-                )
-                path_prefix = f"{base}/next_action/questions_to_ask"
-            elif claim.target_kind == "USER_QUESTION":
-                questions = output.questions_for_user
-                path_prefix = f"{base}/questions_for_user"
-            else:
-                raise SupervisorGuardrailError("grounded-claim target is unavailable")
-            if claim.target_index is None or claim.target_index >= len(questions):
-                raise SupervisorGuardrailError(
-                    "grounded-claim question index is unavailable"
-                )
-            target_path = f"{path_prefix}/{claim.target_index}"
-            text = questions[claim.target_index]
-        return {
-            "claim_type": claim.claim_type,
-            "target_path": target_path,
-            "text": text,
-            "assertion_level": claim.assertion_level,
-            "evidence_refs": claim.evidence_refs,
-        }
-
-    @staticmethod
     def _free_text(draft: SupervisorDraft) -> list[str]:
         decision = draft.decision
         values = [decision.selection_summary]
         if decision.blocker is not None:
-            values.extend([decision.blocker.title, decision.blocker.description])
+            values.append(decision.blocker.description)
         if decision.next_action is not None:
             values.extend(
                 [
@@ -1058,12 +1098,7 @@ class SupervisorAgent:
         base = "/supervisor_draft/decision"
         values = [(f"{base}/selection_summary", decision.selection_summary)]
         if decision.blocker is not None:
-            values.extend(
-                [
-                    (f"{base}/blocker/title", decision.blocker.title),
-                    (f"{base}/blocker/description", decision.blocker.description),
-                ]
-            )
+            values.append((f"{base}/blocker/description", decision.blocker.description))
         if decision.next_action is not None:
             action_base = f"{base}/next_action"
             values.extend(

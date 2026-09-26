@@ -41,14 +41,14 @@ export function ResultInputPage() {
   }, [])
 
   // 어느 할 일의 결과인지는 앞 화면이 알려준다. 주소로 직접 열었을 때는 없으므로
-  // 개발·Preview에서만 Mock으로 떨어지고, 그 외에는 현재 Case로 돌린다 —
+  // 개발·Preview에서만 Mock으로 떨어지고, 그 외에는 진입 분기로 돌린다 —
   // 없는 할 일을 지어내 보여주면 사용자가 엉뚱한 대상에 결과를 보고하게 된다.
   const nextAction =
     (routeState as NextAction | null) ?? (MOCK_SWITCH_ENABLED ? resultInput.nextAction : null)
   const isPending = state.kind === 'PENDING'
   const canRetry = text.trim().length > 0
 
-  if (!nextAction) return <Navigate to="/" replace />
+  if (!nextAction) return <Navigate to={{ pathname: '/', search }} replace />
 
   async function handleSubmit() {
     // "다시 시도" 버튼도 이 함수를 부른다. 폼에만 검증을 두면 그 경로로 빈 입력이 나간다
@@ -72,10 +72,10 @@ export function ResultInputPage() {
 
     switch (outcome.kind) {
       case 'REPLAN':
-        navigate('/replan', { state: outcome.view })
+        navigate({ pathname: '/replan', search }, { state: outcome.view })
         return
       case 'CONFIRM':
-        navigate('/confirm', { state: outcome.view })
+        navigate({ pathname: '/confirm', search }, { state: outcome.view })
         return
       case 'STAY':
         setState(outcome.state)

@@ -1,23 +1,34 @@
-"""Grounded extraction of closure-case facts from one redacted input."""
+"""Grounded closure-case fact extraction and official procedure analysis."""
 
 from __future__ import annotations
 
 import hashlib
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import date, datetime, timezone
 from typing import Annotated, Any, Literal, Protocol
 from uuid import UUID, uuid4
+
+from pydantic import (
+    Field,
+    StrictBool,
+    StrictInt,
+    StrictStr,
+    ValidationError,
+    model_validator,
+)
 
 from app.agent.guardrails import (
     GuardrailViolation,
     ensure_no_sensitive_text,
     exact_span,
+    resolve_evidence_aliases,
 )
 from app.agent.projection import ensure_projection_has_no_obvious_sensitive_text
 from app.agent.prompts import info_messages
 from app.agent.schemas import (
     CASE_FIELD_SPECS,
+    REQUIRED_CASE_FIELDS,
     AgentSchema,
     CaseFieldKey,
     ConflictCandidate,
@@ -45,14 +56,7 @@ from app.agent.schemas import (
     Uncertainty,
     VerifiedTextSpan,
     validate_case_field_value,
-)
-from pydantic import (
-    Field,
-    StrictBool,
-    StrictInt,
-    StrictStr,
-    ValidationError,
-    model_validator,
+    validate_restoration_state,
 )
 
 
@@ -66,11 +70,52 @@ class StructuredGenerator(Protocol):
 
 
 class InfoAnalysisGuardrailError(GuardrailViolation):
-    """Raised when a syntactically valid model result is not grounded."""
+    """Raised when a syntactically valid model result is not grounded.
+
+    ``rejected_fields`` names the canonical fields a deterministic check turned
+    down, so the bounded retry can say which ones to drop instead of repeating
+    "something was wrong". Only field names travel: a value or a source excerpt
+    would carry the user's own words, and this reaches the provider on retry.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        rejected_fields: Sequence[CaseFieldKey] = (),
+        omitted_procedure_codes: Sequence[str] = (),
+        procedure_source_errors: Sequence[str] = (),
+        rejected_observation_codes: Sequence[str] = (),
+    ) -> None:
+        super().__init__(message)
+        self.rejected_fields = tuple(rejected_fields)
+        self.omitted_procedure_codes = tuple(omitted_procedure_codes)
+        self.procedure_source_errors = tuple(procedure_source_errors)
+        self.rejected_observation_codes = tuple(rejected_observation_codes)
 
 
+def _with_particles(prefix: str, suffix: str) -> tuple[str, ...]:
+    """Same assertion, different Korean particle.
+
+    "원상복구 범위는 일부", "범위가 일부", "범위를 일부로" all assert the same
+    scope; only the particle moves. Listing one form and missing the others
+    rejected a user who said it the second way. The particle set is explicit
+    rather than a wildcard so an unrelated sentence cannot slip through.
+    """
+
+    return tuple(
+        f"{prefix}{particle}{suffix}"
+        for particle in ("은", "는", "이", "가", "을", "를", "")
+    )
+
+
+# Only BOOLEAN and ENUM fields belong here: the table maps a canonical value
+# to the words that assert it. business_type is neither -- schema_table.md
+# defines it as VARCHAR whose own example is "카페" -- so it previously sat
+# here under a canonical "CAFE" that exists nowhere in the schema. Any value
+# the model proposed then lost to that phantom, and the STRING branch below
+# could never be reached, which made business_type impossible to extract.
 _FACT_VALUE_CUES: dict[tuple[CaseFieldKey, object], tuple[str, ...]] = {
-    (CaseFieldKey.BUSINESS_TYPE, "CAFE"): ("카페", "커피전문점"),
     (CaseFieldKey.FRANCHISE_STATUS, True): ("프랜차이즈", "가맹점"),
     (CaseFieldKey.FRANCHISE_STATUS, False): (
         "비프랜차이즈",
@@ -78,31 +123,19 @@ _FACT_VALUE_CUES: dict[tuple[CaseFieldKey, object], tuple[str, ...]] = {
         "가맹점이아니",
         "독립매장",
     ),
-    (CaseFieldKey.LEASE_STATUS, "ACTIVE"): ("임차중", "임대차중", "세입자"),
-    (CaseFieldKey.LEASE_STATUS, "TERMINATION_NOTIFIED"): (
-        "계약해지통보",
-        "해지한다고알렸",
+    (CaseFieldKey.LEASE_STATUS, "LEASED_PAID"): (
+        "유상임차",
+        "유상으로임차",
+        "임대료를내고임차",
+        "임차료를내고사용",
     ),
-    (CaseFieldKey.LEASE_STATUS, "TERMINATED"): (
-        "임대차종료",
-        "계약해지완료",
-        "계약종료",
+    (CaseFieldKey.LEASE_STATUS, "LEASED_FREE"): (
+        "무상임차",
+        "무상으로임차",
+        "임대료없이임차",
+        "임차료없이사용",
     ),
     (CaseFieldKey.LEASE_STATUS, "OWNED"): ("자가", "본인소유", "직접소유"),
-    (CaseFieldKey.ENTITY_TYPE, "SOLE_PROPRIETOR"): ("개인사업자",),
-    (CaseFieldKey.ENTITY_TYPE, "CORPORATION"): ("법인사업자", "법인"),
-    (CaseFieldKey.BUILDING_USE_TYPE, "NEIGHBORHOOD_LIVING"): ("근린생활시설",),
-    (CaseFieldKey.BUILDING_USE_TYPE, "OTHER"): ("기타용도",),
-    (CaseFieldKey.PREVIOUS_SUPPORT_HISTORY, "NONE"): (
-        "지원받은적없",
-        "지원금을받은적없",
-        "수혜이력없",
-    ),
-    (CaseFieldKey.PREVIOUS_SUPPORT_HISTORY, "RECEIVED"): (
-        "지원받았",
-        "지원금을받았",
-        "수혜이력있",
-    ),
     (CaseFieldKey.RESTORATION_STATUS, "NOT_STARTED"): (
         "원상복구시작전",
         "원상복구를시작하지않",
@@ -113,27 +146,27 @@ _FACT_VALUE_CUES: dict[tuple[CaseFieldKey, object], tuple[str, ...]] = {
     ),
     (CaseFieldKey.RESTORATION_STATUS, "COMPLETED"): (
         "원상복구완료",
+        "원상복구를완료",
+        "원상복구와철거를모두완료",
         "원상복구를마쳤",
         "원상복구를끝냈",
     ),
-    (CaseFieldKey.RESTORATION_SCOPE, "AGREEMENT_REQUIRED"): (
-        "원상복구협의필요",
-        "원상복구합의필요",
+    (CaseFieldKey.RESTORATION_STATUS, "NOT_REQUIRED"): (
+        "원상복구불필요",
+        "원상복구가필요하지않",
+        "원상복구필요없",
     ),
-    (CaseFieldKey.RESTORATION_SCOPE, "TENANT_ALL"): (
-        "임차인전부부담",
-        "세입자전부부담",
-        "임차인부담",
+    (CaseFieldKey.RESTORATION_SCOPE, "PARTIAL"): (
+        *_with_particles("원상복구범위", "일부"),
+        *_with_particles("원상복구", "일부"),
+        "부분원상복구",
+        "일부만원상복구",
     ),
-    (CaseFieldKey.RESTORATION_SCOPE, "LANDLORD_ALL"): (
-        "임대인전부부담",
-        "건물주전부부담",
-        "임대인부담",
-    ),
-    (CaseFieldKey.RESTORATION_SCOPE, "SHARED"): (
-        "공동부담",
-        "나눠부담",
-        "분담",
+    (CaseFieldKey.RESTORATION_SCOPE, "FULL"): (
+        *_with_particles("원상복구범위", "전체"),
+        *_with_particles("원상복구", "전체"),
+        "전체원상복구",
+        "전면원상복구",
     ),
     (CaseFieldKey.RESTORATION_SCOPE, "NOT_REQUIRED"): (
         "원상복구불필요",
@@ -157,9 +190,6 @@ _FIELD_CUES: dict[CaseFieldKey, tuple[str, ...]] = {
     CaseFieldKey.FRANCHISE_STATUS: ("프랜차이즈", "가맹"),
     CaseFieldKey.EMPLOYEE_COUNT: ("직원", "근로자", "종업원"),
     CaseFieldKey.LEASE_STATUS: ("임차", "임대차", "계약", "자가", "소유"),
-    CaseFieldKey.ENTITY_TYPE: ("개인사업자", "법인", "사업자형태"),
-    CaseFieldKey.BUILDING_USE_TYPE: ("건축물용도", "건물용도", "근린생활"),
-    CaseFieldKey.PREVIOUS_SUPPORT_HISTORY: ("지원", "수혜"),
     CaseFieldKey.RESTORATION_STATUS: ("원상복구",),
     CaseFieldKey.RESTORATION_SCOPE: ("원상복구",),
     CaseFieldKey.RESTORATION_SCOPE_DETAIL: ("원상복구", "범위"),
@@ -167,6 +197,12 @@ _FIELD_CUES: dict[CaseFieldKey, tuple[str, ...]] = {
     CaseFieldKey.PLANNED_CLOSURE_DATE: ("폐업", "종료", "예정일"),
 }
 _CLEAR_CUES = ("삭제", "지워", "제거", "입력취소", "잘못입력")
+_SCHEMA_FACT_UNCERTAINTY = re.compile(
+    r"인지|여부|모르|모릅|모름|불확실|미확인|추정|가능성"
+    r"|확인(?:이)?필요|확인(?:해봐야|해야)"
+    r"|(?:일|할)수도|(?:인|한|일|할)것같"
+)
+_SCHEMA_FACT_NEGATION = re.compile(r"아니|아닌|아님|아닙|아닐|않|못|없|불필요")
 _COMPLETED_OBSERVATION = re.compile(
     r"(?:완료|끝냈|마쳤|처리했|신고했|제출했|반납했|해지했|탈퇴했|확인했|종료했)"
 )
@@ -327,15 +363,95 @@ class InfoAnalysisAgent:
 
     async def analyze(self, request: InfoAnalysisInput) -> InfoAnalysisResult:
         prompt_input = self._prompt_input(request)
+        evidence_by_alias = {
+            alias: evidence_id
+            for evidence_id, alias in self._procedure_evidence_aliases(request).items()
+        }
+        permitted_step_codes = sorted(
+            {
+                code
+                for document in request.procedure_lookup_result.documents
+                for code in self._candidate_step_codes(
+                    document.step_codes,
+                    request.known_procedure_steps,
+                )
+            }
+        )
         try:
             ensure_projection_has_no_obvious_sensitive_text(prompt_input)
         except GuardrailViolation:
             raise InfoAnalysisGuardrailError(
                 "information-analysis input failed sensitive-data preflight"
             ) from None
+        rejected_fields: tuple[CaseFieldKey, ...] = ()
+        omitted_procedure_codes: tuple[str, ...] = ()
+        procedure_source_errors: tuple[str, ...] = ()
+        rejected_observation_codes: tuple[str, ...] = ()
         for attempt in range(1, self._max_local_attempts + 1):
             messages = info_messages(prompt_input)
             if attempt > 1:
+                if rejected_observation_codes:
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                "Rejected procedure_observations for: "
+                                + ", ".join(rejected_observation_codes)
+                                + ". A progress observation must quote an exact substring of "
+                                "input.redacted_text stating the user's own execution result. "
+                                "Official instructions and missing information are not user progress. "
+                                "If the input states no execution, return procedure_observations=[]. "
+                                "Still analyze the documents in procedure_findings; do not remove "
+                                "a finding because its progress observation was rejected."
+                            ),
+                        }
+                    )
+                if procedure_source_errors:
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                "The previous finding violated procedure source requirements. "
+                                + " ".join(procedure_source_errors)
+                                + " Rebuild that finding using only its allowed documents. This applies "
+                                "to summary, actions, documents, channel, URL and deadline, not only the "
+                                "top-level evidence_refs. Leave unsupported optional details empty; never "
+                                "copy another procedure's channel or deadline. Do not invent source text."
+                            ),
+                        }
+                    )
+                if omitted_procedure_codes:
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                "The previous analysis omitted supplied unfinished procedure topics: "
+                                + ", ".join(omitted_procedure_codes)
+                                + ". Analyze their supplied documents against the entire Case, not only "
+                                "the latest utterance. Return grounded findings, or an uncertainty with "
+                                "the document_path and its evidence_ref if the source cannot support a "
+                                "finding. Do not invent procedure content or assert applicability."
+                            ),
+                        }
+                    )
+                if rejected_fields:
+                    # Without this the retry only learns that something was
+                    # rejected, so it proposes the same field again and the
+                    # whole draft is discarded once per attempt.
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                "A deterministic check rejected these fields "
+                                "because the proposed value is not stated in "
+                                "the exact source_text: "
+                                + ", ".join(field.value for field in rejected_fields)
+                                + ". Do not propose them again. If the text "
+                                "only hints at them, leave them out and list "
+                                "them as missing fields instead."
+                            ),
+                        }
+                    )
                 messages.append(
                     {
                         "role": "system",
@@ -345,8 +461,9 @@ class InfoAnalysisAgent:
                             "value_type, and allowed enum value to canonical_field_registry; "
                             "CLEAR requires null and SET requires a non-null value. "
                             "NEEDS_USER_INPUT requires at least one missing field. Use only "
-                            "allowed fields, known procedure steps, and supplied procedure "
-                            "evidence IDs. Copy fact source_text and procedure detail text "
+                            "allowed fields, known procedure steps, and the evidence_ref "
+                            "handles shown on the supplied documents. Copy fact source_text "
+                            "and procedure detail text "
                             "from the supplied source. A document may bind only to one of "
                             "its candidate_step_codes. UNKNOWN or STALE evidence requires "
                             "relevance=UNDETERMINED. Do not SET or CLEAR a fact merely "
@@ -363,11 +480,35 @@ class InfoAnalysisAgent:
                 InfoProviderOutput,
                 messages,
                 schema_name="reborn_info_analysis",
+                # The provider cannot emit a reference we did not offer, so a
+                # made-up or mistyped one is never generated. Validation below
+                # is unchanged; this only stops the wasted generation.
+                enum_constraints={
+                    "evidence_refs": sorted(evidence_by_alias),
+                    # A finding may only bind to a step one of the supplied
+                    # documents actually covers. Offering the union here stops
+                    # the model naming a step no document supports; the
+                    # per-document check below still rejects a mismatched pair.
+                    "step_code": permitted_step_codes,
+                },
             )
             try:
-                draft = self._validated_draft(provider_output)
+                draft = InfoAnalysisDraft.model_validate(
+                    resolve_evidence_aliases(
+                        self._validated_draft(provider_output).model_dump(
+                            mode="python"
+                        ),
+                        evidence_by_alias,
+                    )
+                )
                 return self._materialize(request, draft)
-            except (GuardrailViolation, ValueError):
+            except (GuardrailViolation, ValueError) as exc:
+                rejected_fields = getattr(exc, "rejected_fields", ())
+                omitted_procedure_codes = getattr(exc, "omitted_procedure_codes", ())
+                procedure_source_errors = getattr(exc, "procedure_source_errors", ())
+                rejected_observation_codes = getattr(
+                    exc, "rejected_observation_codes", ()
+                )
                 continue
         raise InfoAnalysisGuardrailError(
             "information analysis failed deterministic semantic or grounding checks"
@@ -391,18 +532,51 @@ class InfoAnalysisAgent:
     @staticmethod
     def _prompt_input(request: InfoAnalysisInput) -> dict[str, Any]:
         allowed = set(request.allowed_field_paths)
+        aliases_by_evidence = InfoAnalysisAgent._procedure_evidence_aliases(request)
         return {
-            "input": request.input.model_dump(mode="json"),
+            # The input event ID is a runtime handle, not evidence. Showing it
+            # gave the model a second identifier to reach for, and measured runs
+            # had it cited as support for a procedure finding. Nothing the model
+            # returns needs it: evidence for an extracted fact is built by the
+            # runtime from the span the model quotes.
+            "input": (
+                request.input.model_dump(mode="json", exclude={"input_event_id"})
+                if request.input is not None
+                else None
+            ),
             "snapshot_facts": [
-                fact.model_dump(mode="json")
-                for fact in request.case_snapshot.facts
-                if fact.field_path in allowed
+                fact.model_dump(mode="json") for fact in request.case_snapshot.facts
+            ],
+            "snapshot_procedure_progress": [
+                item.model_dump(mode="json")
+                for item in request.case_snapshot.procedure_progress
+            ],
+            "procedure_analysis_step_codes": sorted(
+                InfoAnalysisAgent._analysis_step_codes(request)
+            ),
+            "procedure_evidence_by_step": {
+                step.procedure_step.step_code: [
+                    aliases_by_evidence[document.evidence_ref]
+                    for document in request.procedure_lookup_result.documents
+                    if step.procedure_step.step_code in document.step_codes
+                ]
+                for step in request.known_procedure_steps
+                if step.deprecated_at is None
+            },
+            "fact_overlays": [
+                {
+                    "field_path": item.field_path.value,
+                    "proposed_status": item.proposed_status.value,
+                    "proposed_value": item.proposed_value,
+                }
+                for item in request.fact_overlays
             ],
             "allowed_field_paths": [item.value for item in request.allowed_field_paths],
             "canonical_field_registry": {
                 key.value: {
                     "value_type": spec[0].value,
                     "allowed_values": sorted(spec[1]) if spec[1] is not None else None,
+                    "clear_allowed": key not in REQUIRED_CASE_FIELDS,
                 }
                 for key, spec in CASE_FIELD_SPECS.items()
                 if key in allowed
@@ -417,16 +591,17 @@ class InfoAnalysisAgent:
                 ),
                 "documents": [
                     {
+                        "document_path": f"/procedure_lookup_result/documents/{index}",
                         "title": item.title,
                         "authority_name": item.authority_name,
                         "canonical_url": item.canonical_url,
                         "excerpt": item.excerpt,
                         "freshness_status": item.freshness_status.value,
-                        "evidence_ref": item.evidence_ref,
+                        "evidence_ref": aliases_by_evidence[item.evidence_ref],
                         "search_query": item.search_query,
                         "candidate_step_codes": (
                             InfoAnalysisAgent._candidate_step_codes(
-                                item.search_query,
+                                item.step_codes,
                                 request.known_procedure_steps,
                             )
                         ),
@@ -436,7 +611,9 @@ class InfoAnalysisAgent:
                             else ["UNDETERMINED"]
                         ),
                     }
-                    for item in request.procedure_lookup_result.documents
+                    for index, item in enumerate(
+                        request.procedure_lookup_result.documents
+                    )
                 ],
                 "warnings": [
                     item.model_dump(mode="json")
@@ -449,24 +626,100 @@ class InfoAnalysisAgent:
         }
 
     @staticmethod
-    def _candidate_step_codes(
-        search_query: str,
-        known_steps: list[Any],
-    ) -> list[str]:
-        """Return canonical steps explicitly named by a trusted static query.
+    def _analysis_step_codes(request: InfoAnalysisInput) -> set[str]:
+        """Require consideration of supplied topics, never infer their legal content."""
+        values = {
+            item.field_path: item.value
+            for item in request.case_snapshot.facts
+            if item.status == FactStatus.CONFIRMED
+        }
+        for overlay in request.fact_overlays:
+            values[overlay.field_path] = overlay.proposed_value
+        completed = {
+            item.procedure_step.step_code
+            for item in request.case_snapshot.procedure_progress
+            if item.status == ProcedureProgressStatus.COMPLETED
+        }
+        restoration_not_required = (
+            values.get(CaseFieldKey.RESTORATION_SCOPE) == "NOT_REQUIRED"
+            or values.get(CaseFieldKey.RESTORATION_STATUS) == "NOT_REQUIRED"
+        )
+        if values.get(CaseFieldKey.RESTORATION_STATUS) == "COMPLETED" or (
+            restoration_not_required
+            and values.get(CaseFieldKey.DEMOLITION_REQUIRED)
+            in {"REQUIRED", "NOT_REQUIRED"}
+        ):
+            completed.add("CONFIRM_RESTORATION_SCOPE")
+        supplied = {
+            code
+            for document in request.procedure_lookup_result.documents
+            if document.freshness_status.value == "CURRENT"
+            for code in document.step_codes
+        }
+        return {
+            step.procedure_step.step_code
+            for step in request.known_procedure_steps
+            if step.deprecated_at is None
+            and step.procedure_step.step_code in supplied
+            and step.procedure_step.step_code not in completed
+            and step.applicable_business_type
+            in {"ALL", values.get(CaseFieldKey.BUSINESS_TYPE)}
+        }
 
-        This is an Info-owned conservative hint, not a Procedure Tool decision.
-        An empty result leaves semantic mapping to Info; a non-empty result stops
-        unrelated evidence, such as a tax source, being attached to restoration.
+    @classmethod
+    def _validate_procedure_coverage(
+        cls, request: InfoAnalysisInput, draft: InfoAnalysisDraft
+    ) -> None:
+        accounted_for = {item.step_code for item in draft.procedure_findings}
+        for index, document in enumerate(request.procedure_lookup_result.documents):
+            if any(
+                item.target_path == f"/procedure_lookup_result/documents/{index}"
+                and document.evidence_ref in item.evidence_refs
+                for item in draft.uncertainties
+            ):
+                accounted_for.update(document.step_codes)
+        omitted = cls._analysis_step_codes(request) - accounted_for
+        if omitted:
+            raise InfoAnalysisGuardrailError(
+                "supplied procedure topics were not analyzed",
+                omitted_procedure_codes=sorted(omitted),
+            )
+
+    @staticmethod
+    def _procedure_evidence_aliases(request: InfoAnalysisInput) -> dict[str, str]:
+        """Map a short per-request handle to each procedure evidence ID.
+
+        The model has to name which document supports a finding.  Making it
+        copy the stored identifier means copying a 55-character UUID exactly,
+        and a single wrong character throws the whole result away.  Measured
+        runs failed that way more than any other: the document chosen was
+        right, the identifier was mistyped.
+
+        A handle is short enough to reproduce reliably and is translated back
+        here, so nothing downstream -- or stored -- ever sees it.
         """
 
-        normalized_query = search_query.casefold()
-        matches: list[str] = []
-        for step in known_steps:
-            labels = (step.step_name, *step.utterance_aliases)
-            if any(label.casefold() in normalized_query for label in labels):
-                matches.append(step.procedure_step.step_code)
-        return matches
+        return {
+            document.evidence_ref: f"doc{index}"
+            for index, document in enumerate(
+                request.procedure_lookup_result.documents,
+                start=1,
+            )
+        }
+
+    @staticmethod
+    def _candidate_step_codes(
+        step_codes: list[str],
+        known_steps: list[Any],
+    ) -> list[str]:
+        """Preserve reviewed source bindings without guessing from query wording."""
+
+        return [
+            step.procedure_step.step_code
+            for step in known_steps
+            if step.deprecated_at is None
+            and step.procedure_step.step_code in step_codes
+        ]
 
     @staticmethod
     def _compact_text(value: str) -> str:
@@ -475,7 +728,9 @@ class InfoAnalysisAgent:
         return re.sub(r"[^0-9a-z가-힣]+", "", value.casefold())
 
     @classmethod
-    def _fact_source_supports_value(cls, fact: ExtractedFactDraft) -> bool:
+    def _fact_source_supports_value(
+        cls, fact: ExtractedFactDraft, *, input_text: str | None = None
+    ) -> bool:
         """Require the proposed operation and value inside the exact source span.
 
         Exact substring grounding alone proves only that the model copied user text.
@@ -493,6 +748,29 @@ class InfoAnalysisAgent:
             return any(cue in compact_source for cue in field_cues) and any(
                 cls._compact_text(cue) in compact_source for cue in _CLEAR_CUES
             )
+
+        if fact.field_path in {
+            CaseFieldKey.LEASE_STATUS,
+            CaseFieldKey.RESTORATION_SCOPE,
+        } or (
+            fact.field_path == CaseFieldKey.RESTORATION_STATUS
+            and fact.value in {"NOT_REQUIRED", "COMPLETED"}
+        ):
+            # Schema-aligned values describe asserted lease terms and scope.
+            # Read the containing sentence too: quoting only "유상으로 임차"
+            # cannot erase the user's following "한 것은 아닙니다".
+            statement = fact.source_text
+            if input_text is not None:
+                start, end = exact_span(input_text, fact.source_text)
+                left = max(input_text.rfind(mark, 0, start) for mark in ".!?\n")
+                if input_text[end - 1] in ".!?\n":
+                    right = end
+                else:
+                    boundary = re.search(r"[.!?\n]", input_text[end:])
+                    right = end + boundary.end() if boundary else len(input_text)
+                statement = input_text[left + 1 : right]
+            if not cls._schema_enum_is_asserted(fact, statement):
+                return False
 
         value_matches: list[tuple[int, int, object]] = []
         for (field_path, candidate_value), cues in _FACT_VALUE_CUES.items():
@@ -559,6 +837,27 @@ class InfoAnalysisAgent:
         # Missing registry coverage is intentionally fail-closed.
         return False
 
+    @classmethod
+    def _schema_enum_is_asserted(cls, fact: ExtractedFactDraft, statement: str) -> bool:
+        """Reject negation/uncertainty for the schema-aligned enum cues only."""
+
+        compact = cls._compact_text(statement)
+        if "?" in statement or _SCHEMA_FACT_UNCERTAINTY.search(compact):
+            return False
+        if (
+            fact.field_path == CaseFieldKey.RESTORATION_STATUS
+            and fact.value == "COMPLETED"
+            and re.search(r"(?:나요|습니까|까요)\s*[.!]?\s*$", statement)
+        ):
+            return False
+        # NOT_REQUIRED is itself expressed with negation. Remove only the
+        # exact supported cue, then reject additional negation such as
+        # "원상복구 불필요는 아닙니다". A bare "필요하지 않습니다" still passes.
+        cues = _FACT_VALUE_CUES.get((fact.field_path, fact.value), ())
+        for cue in sorted(cues, key=len, reverse=True):
+            compact = compact.replace(cls._compact_text(cue), "")
+        return _SCHEMA_FACT_NEGATION.search(compact) is None
+
     @staticmethod
     def _same_value_casefolded(left: object, right: object) -> bool:
         if type(left) is str and type(right) is str:
@@ -610,6 +909,10 @@ class InfoAnalysisAgent:
         request: InfoAnalysisInput,
         draft: InfoAnalysisDraft,
     ) -> InfoAnalysisResult:
+        if request.input is None and (draft.facts or draft.procedure_observations):
+            raise InfoAnalysisGuardrailError(
+                "new facts and procedure progress require redacted input"
+            )
         allowed = set(request.allowed_field_paths)
         known_steps = {
             item.procedure_step.step_code: item.procedure_step
@@ -647,9 +950,15 @@ class InfoAnalysisAgent:
                 # Re-stating an already unknown fact is not a mutation and must not
                 # require the model to fabricate a user-text source span.
                 continue
-            if not self._fact_source_supports_value(semantic):
+            if not self._fact_source_supports_value(
+                semantic,
+                input_text=(
+                    request.input.redacted_text if request.input is not None else ""
+                ),
+            ):
                 raise InfoAnalysisGuardrailError(
-                    "fact value is not explicit in its source text"
+                    "fact value is not explicit in its source text",
+                    rejected_fields=(semantic.field_path,),
                 )
             span, evidence = self._ground_text(request, semantic.source_text)
             evidence_by_span[(span.start_offset, span.end_offset)] = evidence
@@ -678,6 +987,27 @@ class InfoAnalysisAgent:
             )
             fact_candidates.append(candidate)
 
+        validate_restoration_state(
+            {
+                **{
+                    item.field_path: item.status for item in request.case_snapshot.facts
+                },
+                **{
+                    item.field_path: item.proposed_status
+                    for item in request.fact_overlays
+                },
+                **{
+                    item.field_path: (
+                        FactStatus.UNKNOWN
+                        if item.operation == FactOperation.CLEAR
+                        else FactStatus.CONFIRMED
+                    )
+                    for item in fact_candidates
+                    if not item.requires_confirmation
+                },
+            }
+        )
+
         observations: list[ProcedureProgressObservation] = []
         for semantic in draft.procedure_observations:
             step = known_steps.get(semantic.step_code)
@@ -685,14 +1015,29 @@ class InfoAnalysisAgent:
                 raise InfoAnalysisGuardrailError(
                     "model returned an unknown procedure step"
                 )
+            if any(
+                progress.procedure_step == step
+                and progress.status == semantic.observed_status
+                for progress in request.case_snapshot.procedure_progress
+            ):
+                # An already committed status is not a new execution result.
+                # As with unchanged facts, retain the Case's existing evidence.
+                continue
             if not self._procedure_observation_is_explicit(
                 semantic,
                 known_step_definitions[semantic.step_code],
             ):
                 raise InfoAnalysisGuardrailError(
-                    "procedure progress status is not explicit in its source text"
+                    "procedure progress status is not explicit in its source text",
+                    rejected_observation_codes=(semantic.step_code,),
                 )
-            span, evidence = self._ground_text(request, semantic.source_text)
+            try:
+                span, evidence = self._ground_text(request, semantic.source_text)
+            except GuardrailViolation as exc:
+                raise InfoAnalysisGuardrailError(
+                    "procedure progress must quote the user input",
+                    rejected_observation_codes=(semantic.step_code,),
+                ) from exc
             evidence_by_span[(span.start_offset, span.end_offset)] = evidence
             observations.append(
                 ProcedureProgressObservation(
@@ -707,12 +1052,41 @@ class InfoAnalysisAgent:
             )
 
         procedure_findings = self._procedure_findings(request, draft, known_steps)
+        if not conflicts:
+            self._validate_procedure_coverage(request, draft)
+
+        values = {
+            item.field_path: item.value
+            for item in request.case_snapshot.facts
+            if item.status == FactStatus.CONFIRMED
+        }
+        values.update(
+            {item.field_path: item.proposed_value for item in request.fact_overlays}
+        )
+        values.update(
+            {
+                item.field_path: item.value
+                for item in fact_candidates
+                if not item.requires_confirmation
+            }
+        )
+        restoration_finished = values.get(
+            CaseFieldKey.RESTORATION_SCOPE
+        ) == "NOT_REQUIRED" or values.get(CaseFieldKey.RESTORATION_STATUS) in {
+            "NOT_REQUIRED",
+            "COMPLETED",
+        }
 
         missing_fields: list[MissingField] = []
         questions: list[QuestionCandidate] = []
         for missing in draft.missing_fields:
             if missing.field_path not in allowed:
                 raise InfoAnalysisGuardrailError("missing field is outside allowlist")
+            if (
+                missing.field_path == CaseFieldKey.RESTORATION_SCOPE_DETAIL
+                and restoration_finished
+            ):
+                continue
             question_id = self._uuid()
             questions.append(
                 QuestionCandidate(
@@ -790,6 +1164,12 @@ class InfoAnalysisAgent:
             status = InfoCompletionStatus.NEEDS_USER_INPUT
         elif lookup_status != ProcedureCompletionStatus.COMPLETE:
             status = InfoCompletionStatus.PARTIAL
+        elif status == InfoCompletionStatus.NEEDS_USER_INPUT:
+            status = (
+                InfoCompletionStatus.PARTIAL
+                if uncertainties
+                else InfoCompletionStatus.COMPLETE
+            )
 
         known_evidence = (
             {item.evidence_id for item in request.case_snapshot.evidence_records}
@@ -835,7 +1215,7 @@ class InfoAnalysisAgent:
         candidate_steps_by_evidence = {
             item.evidence_ref: set(
                 self._candidate_step_codes(
-                    item.search_query,
+                    item.step_codes,
                     request.known_procedure_steps,
                 )
             )
@@ -850,6 +1230,29 @@ class InfoAnalysisAgent:
         }
         findings: list[ProcedureFinding] = []
         seen_steps: set[str] = set()
+        invalid_summary_steps = [
+            item.step_code
+            for item in draft.procedure_findings
+            if not any(
+                ref in evidence_by_id
+                and item.summary.text in (evidence_by_id[ref].excerpt or "")
+                for ref in item.summary.evidence_refs
+            )
+        ]
+        if invalid_summary_steps:
+            raise InfoAnalysisGuardrailError(
+                "procedure summary is not a permitted source quotation",
+                procedure_source_errors=(
+                    (
+                        f"{', '.join(invalid_summary_steps)}: summaries must copy complete "
+                        "consecutive sentences VERBATIM from their own allowed document excerpt, "
+                        "preserving the subject, conditions and exceptions. Do not paraphrase, combine separate "
+                        "sentences or add a citation label to the text. Apply this to ALL findings "
+                        "in every retry. Keep source conditions and exceptions. Do not move rejected claims "
+                        "into required_actions or deadline; leave unverified details empty."
+                    ),
+                ),
+            )
         for semantic in draft.procedure_findings:
             known = known_steps.get(semantic.step_code)
             if known is None or semantic.step_code in seen_steps:
@@ -862,17 +1265,27 @@ class InfoAnalysisAgent:
                 raise InfoAnalysisGuardrailError(
                     "procedure finding references evidence outside lookup result"
                 )
-            constrained_step_sets = [
-                candidate_steps_by_evidence[ref]
+            if any(
+                semantic.step_code not in candidate_steps_by_evidence.get(ref, set())
                 for ref in refs
-                if candidate_steps_by_evidence.get(ref)
-            ]
-            if constrained_step_sets and any(
-                semantic.step_code not in candidates
-                for candidates in constrained_step_sets
             ):
+                aliases = self._procedure_evidence_aliases(request)
+                permitted = sorted(
+                    aliases[ref]
+                    for ref, codes in candidate_steps_by_evidence.items()
+                    if semantic.step_code in codes
+                )
+                rejected = sorted(
+                    aliases[ref]
+                    for ref in refs
+                    if semantic.step_code
+                    not in candidate_steps_by_evidence.get(ref, set())
+                )
                 raise InfoAnalysisGuardrailError(
-                    "procedure finding does not match its query-derived canonical step"
+                    "procedure finding does not match its reviewed source step codes",
+                    procedure_source_errors=(
+                        f"{semantic.step_code}: rejected {rejected}; allowed {permitted}.",
+                    ),
                 )
             if (
                 any(
@@ -898,7 +1311,8 @@ class InfoAnalysisAgent:
                     summary=semantic.summary,
                     relevance=semantic.relevance,
                     current_status=progress_by_step.get(
-                        (known.procedure_step_id, known.step_code)
+                        (known.procedure_step_id, known.step_code),
+                        ProcedureProgressStatus.NOT_STARTED,
                     ),
                     decision_authority=semantic.decision_authority,
                     requires_confirmation=True,
@@ -919,9 +1333,9 @@ class InfoAnalysisAgent:
     ) -> ProcedureFindingDraft:
         """Drop optional model details that are not exact source text.
 
-        A paraphrased summary remains explicitly unverified and confirmation-only,
-        while action/document/channel/deadline fields are executable details and
-        therefore survive only when the cited official excerpt contains them.
+        The required summary is validated as a source quotation separately.
+        Optional action/document/channel/deadline fields survive only when the
+        cited official excerpt contains them; all findings need confirmation.
         """
 
         finding_refs = set(finding.evidence_refs)
@@ -933,7 +1347,9 @@ class InfoAnalysisAgent:
             return (
                 bool(refs)
                 and refs.issubset(finding_refs)
-                and any(detail.text in evidence_by_id[ref].excerpt for ref in refs)
+                and any(
+                    detail.text in (evidence_by_id[ref].excerpt or "") for ref in refs
+                )
             )
 
         required_actions = [
@@ -945,7 +1361,7 @@ class InfoAnalysisAgent:
             if set(document.evidence_refs).issubset(finding_refs)
             and all(
                 any(
-                    text in evidence_by_id[ref].excerpt
+                    text in (evidence_by_id[ref].excerpt or "")
                     for ref in document.evidence_refs
                 )
                 for text in (
@@ -1009,7 +1425,7 @@ class InfoAnalysisAgent:
                 raise InfoAnalysisGuardrailError(
                     "required document references evidence outside its finding"
                 )
-        exact_details = [*finding.required_actions]
+        exact_details = [finding.summary, *finding.required_actions]
         exact_details.extend(
             item
             for item in (
@@ -1020,7 +1436,7 @@ class InfoAnalysisAgent:
         )
         for detail in exact_details:
             if not any(
-                detail.text in evidence_by_id[ref].excerpt
+                detail.text in (evidence_by_id[ref].excerpt or "")
                 for ref in detail.evidence_refs
             ):
                 raise InfoAnalysisGuardrailError(
@@ -1039,7 +1455,7 @@ class InfoAnalysisAgent:
                 document_details.append(document.submission_stage)
             for detail in document_details:
                 if not any(
-                    detail in evidence_by_id[ref].excerpt
+                    detail in (evidence_by_id[ref].excerpt or "")
                     for ref in document.evidence_refs
                 ):
                     raise InfoAnalysisGuardrailError(
@@ -1058,6 +1474,8 @@ class InfoAnalysisAgent:
         request: InfoAnalysisInput,
         source_text: str,
     ) -> tuple[VerifiedTextSpan, EvidenceRecord]:
+        if request.input is None:
+            raise InfoAnalysisGuardrailError("source text requires redacted input")
         start, end = exact_span(request.input.redacted_text, source_text)
         span = VerifiedTextSpan(
             input_event_id=request.input.input_event_id,
@@ -1093,10 +1511,10 @@ class InfoAnalysisAgent:
         source_call_id: UUID,
     ) -> ConflictCandidate:
         candidate_id = self._uuid()
-        return ConflictCandidate.create_standalone(
+        return ConflictCandidate.create(
+            conflict_ref=f"cf_{candidate_id.hex}",
             candidate_id=candidate_id,
             snapshot_id=request.case_snapshot.snapshot_id,
-            case_version=request.case_snapshot.case_version,
             field_path=semantic.field_path,
             committed_status=FactStatus.CONFIRMED,
             committed_value=committed_value,
