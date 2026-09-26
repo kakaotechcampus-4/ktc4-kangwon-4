@@ -9,6 +9,12 @@ from uuid import UUID
 
 from pydantic import BaseModel, ValidationError
 
+from app.agent.action_catalog import ACTION_DEFINITIONS, build_action_candidates
+from app.agent.blocker_candidates import (
+    build_blocker_candidates,
+    candidate_decision_violations,
+    missing_info_fields,
+)
 from app.agent.claim_safety import (
     REQUIRED_CLAIM_SOURCES,
     expand_evidence,
@@ -45,7 +51,6 @@ from app.agent.schemas import (
     ProcedureLookupResult,
     ProcedureProgressStatus,
     ReviewIssue,
-    ReviewIssueCode,
     ReviewResult,
     ReviewSubject,
     ReviewVerdict,
@@ -136,6 +141,16 @@ class ReviewTool:
                 "review input failed sensitive-data preflight"
             ) from None
         base_messages = review_messages(model_input)
+        base_messages[0]["content"] += (
+            "\n행동 코드별 의미:\n"
+            + "\n".join(
+                f"- {code}: {definition.description}"
+                for code, definition in ACTION_DEFINITIONS.items()
+            )
+            + "\n선택된 action_code의 의미와 제목·이유·질문을 대조하세요. "
+            "확인 코드인데 신고서 제출 등 실행을 지시하는 경우처럼 의미가 다르면 "
+            "CONTRACT_VIOLATION으로 반려하세요. 코드가 같아도 내용 검수는 생략하지 마세요."
+        )
         base_messages[0]["content"] += (
             "\n- Every issue.target_path and missing_evidence.claim_path must be an "
             "exact canonical JSON Pointer into the projected ReviewSubject in "
@@ -862,6 +877,44 @@ def _deterministic_safety_review(
             )
 
     issues.extend(_action_target_findings(subject, context))
+    candidates = build_blocker_candidates(
+        subject.snapshot,
+        subject.known_procedure_steps,
+        subject.source_results,
+        draft.mutations,
+        context.evidence_by_id,
+    )
+    for path, reason in candidate_decision_violations(
+        draft.decision,
+        candidates,
+        missing_info_fields(subject.snapshot, subject.source_results, draft.mutations),
+    ):
+        issues.append(
+            _issue(
+                code="CONTRACT_VIOLATION",
+                category="CONTRACT",
+                path="/supervisor_draft" + path,
+                reason=reason,
+                evidence_refs=[],
+            )
+        )
+    action = draft.decision.next_action
+    if action is not None and not any(
+        candidate["action_code"] == action.action_code
+        and candidate["target"] == action.target.model_dump(mode="json")
+        for candidate in build_action_candidates(
+            subject.source_results, context.evidence_by_id
+        )
+    ):
+        issues.append(
+            _issue(
+                code="CONTRACT_VIOLATION",
+                category="CONTRACT",
+                path="/supervisor_draft/decision/next_action/action_code",
+                reason="행동 코드와 대상이 현재 근거에서 허용된 행동 조합이 아닙니다.",
+                evidence_refs=action.evidence_refs,
+            )
+        )
     for path, reason in procedure_plan_constraints(
         subject.known_procedure_steps, subject.snapshot, draft.mutations, draft.decision
     ):
@@ -1095,7 +1148,8 @@ def _action_target_findings(
         != FreshnessStatus.CURRENT
     ]
     confirmation_only_action = (
-        finding.requires_confirmation
+        ACTION_DEFINITIONS[action.action_code].confirmation_only
+        and finding.requires_confirmation
         and decision.requires_human
         and bool(action.questions_to_ask)
     )

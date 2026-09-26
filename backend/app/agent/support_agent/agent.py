@@ -186,7 +186,6 @@ class SupportAgent:
                 SupportProviderOutput,
                 messages,
                 schema_name="support_analysis",
-                temperature=0,
             )
             try:
                 draft = self._validated_draft(raw_draft)

@@ -49,6 +49,15 @@ BE가 실제 절차 ID 목록·검수 지원 catalog·절차 store를 `build_run
 환경변수는 [`.env.example`](../../.env.example), 한도·자원 정리는
 [`runtime.py`](../../backend/app/agent/runtime.py)를 따른다.
 
+같은 runtime에서는 동일 요청의 검수 완료 결과를 최대 128개, 5분 동안 재사용한다.
+현재 구현은 원래 스냅샷·이벤트까지 같은 요청에 한정한다. Case 값·진행·근거·자료 버전·
+모델 설정·프롬프트가 달라지면 다시 실행하며, 날짜가 바뀌거나 자료가 오래되면
+재사용하지 않는다. 변경 후보가 있는 결과·충돌·실패는 저장하지 않는다.
+재사용 결과는 원래 실행 ID와 Review 증명을 유지한다. 새 판단이나 DB 저장으로 표시하지 않는다.
+저장소는 프로세스 메모리이며 코드 배포 등으로 재시작하면 비워진다. 버전 계약이 없는 Wiki를 사용하면 재사용하지 않는다.
+오답을 다시 평가할 때는 `run_planning(..., use_cache=False)` 또는
+`runtime.decision_cache.invalidate_case(case_id)`를 사용한다.
+
 Case snapshot은 한 실행 동안 바꾸지 않는다. 추출·사용자 확인으로 얻은 변경 후보는
 `fact_overlays`로 별도 전달하고, 저장 전까지 snapshot의 확정 사실로 덮어쓰지 않는다.
 절차·정책 자료는 요청 중 인터넷에서 수집하지 않으며 검수 상태와 최신성을 보존한다.
