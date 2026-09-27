@@ -50,6 +50,8 @@ class AgentGraphState(TypedDict, total=False):
     failure_message_code: str
     failed_component: Component | None
     retryable: bool
+    # Set only when a failure has a more useful follow-up than retry-or-nothing.
+    recovery_action_code: str
 
 
 __all__ = ["AgentGraphState", "GraphPhase"]

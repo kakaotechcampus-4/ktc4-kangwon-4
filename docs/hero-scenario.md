@@ -1,6 +1,6 @@
 # RE:BORN Hero Scenario
 
-> 사용자 시나리오 및 Hero Loop 상세 흐름. 물리 DB 초안은 `docs/schema/schema_table.md`, Agent·Tool 책임은 `docs/architecture.md`, 외부 API는 `docs/interface-spec.md`를 참고합니다.
+> 사용자 시나리오 및 Hero Loop 상세 흐름. 물리 DB 초안은 `docs/schema/schema_table.md`, Agent·Tool 책임은 `docs/architecture.md`, 외부 API는 `docs/agent/be-integration-requirements.md`를 참고합니다.
 
 ## 1. 한 줄 소개
 

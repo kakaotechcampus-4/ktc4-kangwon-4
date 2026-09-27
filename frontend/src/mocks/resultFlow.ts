@@ -169,7 +169,7 @@ const OUTCOMES: Record<string, SubmitOutcome> = {
  * `?mock=` 키에 따라 제출 결과를 돌려준다.
  *
  * 사용자가 친 문장을 함께 받아 충돌 화면에 그대로 싣는다. 서버는 이 문장을 응답에
- * 돌려주지 않으므로(`docs/interface-spec.md` §5), 연동 후에도 프론트가 자기가 보낸
+ * 돌려주지 않으므로(`docs/be-agent-integration-requirements.md` §6.1), 연동 후에도 프론트가 자기가 보낸
  * 문장을 넘겨야 한다.
  *
  * 지연을 두는 것은 처리 중 화면을 눌러볼 수 있게 하려는 것이다.

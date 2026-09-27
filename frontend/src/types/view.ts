@@ -164,3 +164,36 @@ export type SubmitOutcome =
   | { kind: 'CONFIRM'; view: ConfirmView }
   /** 화면에 머문다 */
   | { kind: 'STAY'; state: SubmitState }
+
+/**
+ * 점포 형태. 서버 `lease_status`와 같은 값이다.
+ *
+ * TODO(계약): AI 쪽은 같은 이름으로 계약 단계(`ACTIVE` · `TERMINATION_NOTIFIED` …)를
+ * 담고 있어 뜻이 다르다. 칸이 둘로 갈릴 수 있고 PM 판단을 기다리는 중이다.
+ */
+export type LeaseStatus =
+  /** 임차 — 임대료를 낸다 */
+  | 'LEASED_PAID'
+  /** 임차 — 임대료를 내지 않는다 (무상임차) */
+  | 'LEASED_FREE'
+  /** 자가 */
+  | 'OWNED'
+
+/**
+ * Case 생성 폼이 들고 있는 값.
+ *
+ * 아직 아무것도 고르지 않은 상태를 `null`로 둔다. `false`나 빈 문자열을 기본값으로
+ * 두면 "아니오를 골랐다"와 "아직 안 골랐다"가 같아져서 제출을 막을 근거가 사라진다.
+ *
+ * 직원 수와 폐업 예정일이 문자열인 것은 입력 중간 상태 때문이다. 숫자로 들고 있으면
+ * 사용자가 지우는 순간 값을 뭘로 둘지 애매해진다. 숫자 변환은 보낼 때 한 번만 한다.
+ */
+export interface CaseDraft {
+  businessType: string
+  franchiseStatus: boolean | null
+  leaseStatus: LeaseStatus | null
+  /** 선택 항목. 비어 있으면 모른다는 뜻이고 서버에는 `null`로 간다 */
+  employeeCount: string
+  /** 선택 항목. `YYYY-MM-DD` */
+  plannedClosureDate: string
+}

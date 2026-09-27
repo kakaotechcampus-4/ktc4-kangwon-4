@@ -50,6 +50,11 @@ jobs:
       - name: Run lint
         run: npm run lint
 
+      # build보다 앞에 둔다. 타입이 맞아도 분기가 틀릴 수 있어서,
+      # 빌드가 통과하는 것과 화면이 맞게 그려지는 것은 다른 문제다.
+      - name: Run test
+        run: npm run test
+
       # build = tsc -b && vite build
       # TypeScript 타입 검사도 이 단계에 포함된다.
       - name: Run build

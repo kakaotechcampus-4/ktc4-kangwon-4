@@ -36,13 +36,24 @@ Mobile-first 반응형, 기준 폭 375px.
 
 | 경로 | 화면 | 내용 |
 |---|---|---|
-| `/` | 현재 Case | 지금 막혀 있는 것과 다음에 할 일 |
+| `/login` | 로그인 | 카카오. 인증 가드 밖에 있는 유일한 화면 |
+| `/` | 진입 분기 | 보낼 곳만 정하고 화면은 없다 |
+| `/start` | 시작 화면 | Case가 없는 사용자만 본다 |
+| `/cases/new` | Case 생성 | 사장님이 이미 아는 것만 묻는다 |
+| `/case` | 현재 Case | 지금 막혀 있는 것과 다음에 할 일 |
 | `/results` | 결과 입력 | 실행 결과를 한 줄로 전달 |
 | `/confirm` | 충돌 확인 | 기존 기록과 어긋날 때만 들른다 |
 | `/replan` | 재계획 결과 | 무엇이 바뀌었고 다음은 무엇인가 |
 
+`/login`을 뺀 전부가 인증 가드 아래에 있습니다. 로그인하지 않고 열면 `/login`으로 갑니다.
+
+`/`는 화면이 아니라 분기입니다. 로그인 여부와 Case 유무를 보고 `/login`·`/start`·`/case` 중
+하나로 보냅니다. 판단을 한곳에 모아두면 새 화면이 늘어도 규칙이 갈라지지 않습니다.
+
 `/results`·`/confirm`·`/replan`은 이전 화면에서 라우터 state로 데이터를 받습니다. 주소로 직접 열면
 개발·Preview에서는 Mock으로, 그 외에는 `/`로 이동합니다.
+
+로그인 상태와 Case 생성 여부는 서버 연동 전까지 `sessionStorage`에 둡니다. 탭을 닫으면 풀립니다.
 
 ## npm script
 
@@ -81,6 +92,8 @@ Preview 배포에서는 URL 쿼리로 예외 화면을 확인할 수 있습니�
 Preview 환경에만 설정하기 때문이며, Production에서는 항상 정상 화면만 나옵니다.
 
 ```
+/?mock=logged-out           로그인 안 된 상태
+/?mock=no-case              Case가 없는 사용자 (시작 화면)
 /?mock=no-blocker           막고 있는 것 없음
 /?mock=insufficient         정보 부족
 /results?mock=conflict      제출하면 충돌 확인으로
@@ -89,6 +102,9 @@ Preview 환경에만 설정하기 때문이며, Production에서는 항상 정�
 /results?mock=failed        재시도 안내
 /replan?mock=no-change      바뀐 것 없음
 ```
+
+**먼저 한 번 로그인해야 합니다.** 위 링크는 로그인한 상태를 전제로 하고, 안 되어 있으면
+`/login`으로 갑니다. 버튼을 한 번 누르면 그 탭에서는 유지됩니다.
 
 `/` 에서 붙인 `?mock=` 은 "결과 알려주기"를 눌러도 이어집니다. `/?mock=conflict` 로 들어가면
 클릭만으로 충돌 흐름 끝까지 볼 수 있습니다.
@@ -123,7 +139,7 @@ frontend/
 └─ vite.config.ts
 ```
 
-화면이 5개 규모라 `features/` 없이 `pages/` + `components/` 로 나눈다.
+화면이 8개 규모라 `features/` 없이 `pages/` + `components/` 로 나눈다.
 데이터를 구하는 것은 페이지가, 그리는 것은 컴포넌트가 맡는다.
 `types/api.ts`(서버 계약)와 `adapters/`는 서버 스키마가 확정되면 추가한다.
 

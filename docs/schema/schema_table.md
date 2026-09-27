@@ -51,7 +51,6 @@ MEMBERS ──1:N──► CASE ──1:N──► CASE_FIELD_HISTORY
 |---|---|---|---|---|---|
 | id | BIGINT | PK | NOT NULL, AUTO_INCREMENT | 1 | |
 | member_id | BIGINT | FK | NOT NULL | 1 | |
-| case_version | **BIGINT** | | NOT NULL, DEFAULT 1 ⚠️ 추정 (타입은 ERD 확정) | `3` | 낙관적 동시성 제어용 버전, 동시 수정 충돌 방지 |
 | business_type | VARCHAR | | NOT NULL | `"카페"` | |
 | franchise_status | BOOLEAN | | NOT NULL, DEFAULT false | `false` | |
 | employee_count | INT | | NULLABLE | `2` | |
@@ -79,7 +78,6 @@ CASE의 필드 단위 변경 이력 (감사 추적용). `CASE_HISTORY`(발화·�
 | after_value | VARCHAR | | NOT NULL | `"FULL"` | 변경 후 값 |
 | source | VARCHAR | | NOT NULL ⚠️ 값 목록 P0 미정 | `"USER_INPUT"` | 변경 출처 |
 | reason | VARCHAR | | NULLABLE | `"사용자가 원상복구 범위 확정함"` | 변경 사유 |
-| resulting_case_version | **BIGINT** | | NOT NULL | `3` | 변경 결과로 생성된 `case_version` (CASE.case_version과 동일 타입) |
 | created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP ⚠️ 추정 | `2026-09-10 09:11:00` | |
 
 ---
@@ -339,12 +337,15 @@ Agent 판단의 근거가 되는 출처 기록.
 
 ### EVIDENCE_LINEAGE
 
-EVIDENCE 간 파생 관계를 나타내는 N:M 접합 테이블. **자체 PK 없음, 두 FK로만 구성.**
+EVIDENCE 간 파생 관계를 나타내는 N:M 접합 테이블. 다른 모든 테이블과 동일하게 surrogate `id`를
+PK로 쓰고, 중복 파생 관계 방지는 `(evidence_id, parent_evidence_id)` UNIQUE 제약으로 강제한다.
 
 | 컬럼 | 타입 | 키 | 제약조건 | 예시 값 | 설명 |
 |---|---|---|---|---|---|
-| evidence_id | **BIGINT** | FK (복합 PK) | NOT NULL | `1` | 파생된 근거 (child) — **`EVIDENCE.id` 참조 (evidence_id 아님)** |
-| parent_evidence_id | **BIGINT** | FK (복합 PK) | NOT NULL | `2` | 원본 근거 (parent) — **`EVIDENCE.id` 참조** |
+| id | BIGINT | PK | NOT NULL, AUTO_INCREMENT | 1 | 내부 식별자 |
+| evidence_id | **BIGINT** | FK, UK(복합) | NOT NULL | `1` | 파생된 근거 (child) — **`EVIDENCE.id` 참조 (evidence_id 아님)** |
+| parent_evidence_id | **BIGINT** | FK, UK(복합) | NOT NULL | `2` | 원본 근거 (parent) — **`EVIDENCE.id` 참조** |
+| created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP ⚠️ 추정 | `2026-09-10 10:00:00` | |
 
 ### CONFLICT_REFERENCE
 
@@ -355,7 +356,6 @@ CASE 필드 값 충돌을 확인하기 위한 1회성 참조.
 | id | BIGINT | PK | NOT NULL, AUTO_INCREMENT | 1 | 내부 식별자 |
 | conflict_ref | VARCHAR | UK | NOT NULL, UNIQUE ⚠️ 추정 | `"cf_7d8e9f"` | opaque 참조값 — `id`와 별개의 비즈니스 키 |
 | case_id | BIGINT | FK | NOT NULL | 1 | 대상 케이스 |
-| case_version | BIGINT | | NOT NULL | `3` | 대상 케이스 시점 버전 |
 | canonical_field | VARCHAR | | NOT NULL | `"restoration_scope"` | 충돌이 발생한 필드 |
 | committed_value | VARCHAR | | NULLABLE ⚠️ 추정 | `"UNKNOWN"` | 기존 값 |
 | proposed_value | VARCHAR | | NOT NULL ⚠️ 추정 | `"FULL"` | 새로 제안된 값 |
@@ -372,7 +372,6 @@ Agent의 판단·리뷰 결과 기록.
 |---|---|---|---|---|---|
 | id | BIGINT | PK | NOT NULL, AUTO_INCREMENT | 1 | |
 | case_id | BIGINT | FK | NOT NULL | 1 | 대상 케이스 |
-| case_version | BIGINT | | NOT NULL | `3` | 대상 케이스 시점 버전 |
 | run_id | VARCHAR | | NOT NULL ⚠️ 추정 | `"run_20260910_01"` | 실행 단위 ID |
 | trace_id | VARCHAR | | NULLABLE | `NULL` | 추적 ID (nullable) |
 | review_subject_id | VARCHAR | | NOT NULL ⚠️ 추정 | `"blocker_5"` | 리뷰 대상 ID |

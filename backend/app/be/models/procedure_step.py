@@ -1,15 +1,29 @@
 from datetime import datetime
 
 from sqlalchemy import JSON, BigInteger, Column, DateTime, Enum, ForeignKey, String, Text, UniqueConstraint
-from sqlalchemy.sql import func
-from sqlmodel import Field, Relationship, SQLModel
+from sqlmodel import Field, Relationship
+
+from app.be.models.mixins import CreatedAtMixin, TimestampMixin
 
 
-class ProcedureStep(SQLModel, table=True):
+class ProcedureStep(TimestampMixin, table=True):
     __tablename__ = "procedure_step"
 
     id: int | None = Field(default=None, sa_column=Column(BigInteger, primary_key=True, autoincrement=True))
     step_code: str = Field(max_length=100, unique=True)
+    step_name: str = Field(max_length=255, description="화면 표시용 이름")
+    utterance_aliases: list | None = Field(
+        default=None, sa_column=Column(JSON, nullable=True), description="발화 매칭용 별칭 목록"
+    )
+    registry_version: str = Field(max_length=50, description="절차 레지스트리 버전")
+    deprecated_at: datetime | None = Field(
+        default=None, sa_column=Column(DateTime, nullable=True), description="폐기 시각"
+    )
+    replaced_by_procedure_step_id: int | None = Field(
+        default=None,
+        sa_column=Column(BigInteger, ForeignKey("procedure_step.id"), nullable=True),
+        description="이 절차를 대체하는 절차",
+    )
     responsible_agency: str | None = Field(default=None, max_length=255)
     deadline_rule: str | None = Field(default=None, max_length=255)
     required_documents: dict | list | None = Field(default=None, sa_column=Column(JSON, nullable=True))
@@ -21,16 +35,11 @@ class ProcedureStep(SQLModel, table=True):
         sa_column=Column(Enum("ALL", "CAFE", name="applicable_business_type_enum"), server_default="ALL", nullable=False),
     )
 
-    created_at: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, server_default=func.now(), nullable=False))
-    updated_at: datetime | None = Field(
-        default=None, sa_column=Column(DateTime, server_default=func.now(), onupdate=func.now())
-    )
-
     case_procedure_steps: list["CaseProcedureStep"] = Relationship(back_populates="procedure_step")
     case_procedure_step_histories: list["CaseProcedureStepHistory"] = Relationship(back_populates="procedure_step")
 
 
-class CaseProcedureStep(SQLModel, table=True):
+class CaseProcedureStep(TimestampMixin, table=True):
     __tablename__ = "case_procedure_step"
     __table_args__ = (UniqueConstraint("case_id", "procedure_step_id", name="uk_case_procedure_step"),)
 
@@ -46,16 +55,11 @@ class CaseProcedureStep(SQLModel, table=True):
         ),
     )
 
-    created_at: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, server_default=func.now(), nullable=False))
-    updated_at: datetime | None = Field(
-        default=None, sa_column=Column(DateTime, server_default=func.now(), onupdate=func.now())
-    )
-
     case: "Case" = Relationship(back_populates="case_procedure_steps")
     procedure_step: "ProcedureStep" = Relationship(back_populates="case_procedure_steps")
 
 
-class CaseProcedureStepHistory(SQLModel, table=True):
+class CaseProcedureStepHistory(CreatedAtMixin, table=True):
     __tablename__ = "case_procedure_step_history"
 
     id: int | None = Field(default=None, sa_column=Column(BigInteger, primary_key=True, autoincrement=True))
@@ -72,14 +76,12 @@ class CaseProcedureStepHistory(SQLModel, table=True):
         sa_column=Column(Enum("NOT_STARTED", "IN_PROGRESS", "COMPLETED", name="new_step_status_enum"), nullable=False)
     )
 
-    created_at: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, server_default=func.now(), nullable=False))
-
     case: "Case" = Relationship(back_populates="case_procedure_step_histories")
     procedure_step: "ProcedureStep" = Relationship(back_populates="case_procedure_step_histories")
     case_history: "CaseHistory" = Relationship(back_populates="procedure_step_histories")
 
 
-class StepDependency(SQLModel, table=True):
+class StepDependency(TimestampMixin, table=True):
     __tablename__ = "step_dependency"
 
     id: int | None = Field(default=None, sa_column=Column(BigInteger, primary_key=True, autoincrement=True))
@@ -89,21 +91,11 @@ class StepDependency(SQLModel, table=True):
     )
     dependency_type: str = Field(max_length=50)
 
-    created_at: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, server_default=func.now(), nullable=False))
-    updated_at: datetime | None = Field(
-        default=None, sa_column=Column(DateTime, server_default=func.now(), onupdate=func.now())
-    )
 
-
-class StepEligibility(SQLModel, table=True):
+class StepEligibility(TimestampMixin, table=True):
     __tablename__ = "step_eligibility"
 
     id: int | None = Field(default=None, sa_column=Column(BigInteger, primary_key=True, autoincrement=True))
     procedure_step_id: int = Field(sa_column=Column(BigInteger, ForeignKey("procedure_step.id"), nullable=False))
     condition_key: str = Field(max_length=100)
     condition_value: str = Field(max_length=255)
-
-    created_at: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime, server_default=func.now(), nullable=False))
-    updated_at: datetime | None = Field(
-        default=None, sa_column=Column(DateTime, server_default=func.now(), onupdate=func.now())
-    )

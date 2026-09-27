@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.agent.guardrails import ensure_no_sensitive_text
 from pydantic import BaseModel
+
+from app.agent.guardrails import ensure_no_sensitive_text
 
 
 def to_model_projection(value: BaseModel | dict[str, Any] | list[Any]) -> Any:
