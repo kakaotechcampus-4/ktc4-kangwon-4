@@ -11,8 +11,9 @@ import { saveTokens } from '../lib/auth'
  * 사용자가 볼 일이 거의 없는 화면이다. 성공하면 곧바로 진입 분기로 넘어가고,
  * 남아 있는 것은 실패했을 때뿐이다.
  *
- * 카카오는 실패해도 이 주소로 돌려보내면서 `error`를 붙인다. 로그인 창에서 "취소"를
- * 누른 경우가 그렇다. 잘못을 알리기보다 다시 시도할 길을 준다.
+ * 카카오는 실패해도 이 주소로 돌려보낸다 — 로그인 창에서 "취소"를 누른 경우가 그렇다.
+ * 그때는 `code` 대신 `error`가 붙어 오므로, `code`가 없다는 것만 보면 둘 다 걸러진다.
+ * 사용자에게는 어느 쪽이든 "로그인이 안 됐다" 하나이고 할 수 있는 일도 다시 시도뿐이다.
  */
 export function LoginCallbackPage() {
   const [params] = useSearchParams()
@@ -20,7 +21,6 @@ export function LoginCallbackPage() {
   const [failed, setFailed] = useState(false)
 
   const code = params.get('code')
-  const error = params.get('error')
 
   /**
    * `code`는 한 번만 쓸 수 있다.
@@ -48,7 +48,7 @@ export function LoginCallbackPage() {
       })
   }, [code, navigate])
 
-  if (failed || error !== null || code === null) {
+  if (failed || code === null) {
     return (
       <AppShell title="로그인하지 못했습니다">
         <section className="rounded-2xl bg-white p-5">
