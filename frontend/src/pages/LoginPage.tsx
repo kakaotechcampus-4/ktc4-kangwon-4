@@ -1,7 +1,7 @@
 import { Navigate, useLocation, useNavigate } from 'react-router'
 
 import { AppShell } from '../components/AppShell'
-import { isLoggedIn, logIn } from '../lib/auth'
+import { isLoggedIn, logInWithMock } from '../lib/auth'
 
 /**
  * 로그인. 인증 가드 밖에 있는 유일한 화면이다.
@@ -24,7 +24,7 @@ export function LoginPage() {
   if (isLoggedIn(search)) return <Navigate to={{ pathname: '/', search }} replace />
 
   function handleLogin() {
-    logIn()
+    logInWithMock()
     // 로그인한 화면이 뒤로가기에 남으면 다시 돌아와 로그인 버튼을 마주한다
     navigate('/', { replace: true })
   }

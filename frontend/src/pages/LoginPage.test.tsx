@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { RouterProvider, createMemoryRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
 
-import { isLoggedIn, logIn } from '../lib/auth'
+import { isLoggedIn, saveTokens } from '../lib/auth'
 import { LoginPage } from './LoginPage'
 
 function renderAt(path: string) {
@@ -38,7 +38,7 @@ describe('LoginPage', () => {
 
   /** 뒤로가기로는 닿을 수 없고 주소를 직접 열었을 때만 생기는 경로다 */
   it('이미 로그인했으면 로그인 화면을 그리지 않는다', async () => {
-    logIn()
+    saveTokens('access', 'refresh')
     renderAt('/login')
 
     expect(await screen.findByText('진입 분기')).toBeInTheDocument()
@@ -50,7 +50,7 @@ describe('LoginPage', () => {
    * 한 번 로그인한 리뷰어는 이 화면을 다시 볼 방법이 없다.
    */
   it('로그인했어도 ?mock=logged-out이면 로그인 화면을 보여준다', () => {
-    logIn()
+    saveTokens('access', 'refresh')
     renderAt('/login?mock=logged-out')
 
     expect(kakaoButton()).toBeInTheDocument()
