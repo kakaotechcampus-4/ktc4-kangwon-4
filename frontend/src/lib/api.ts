@@ -70,6 +70,16 @@ export async function request(path: string, { method = 'GET', body }: RequestOpt
   return response
 }
 
+/**
+ * 카카오 로그인 화면으로 가는 주소.
+ *
+ * `fetch`로 부를 수 없다. 서버가 303으로 카카오에 넘기는데, 그 리다이렉트를 따라가는 것은
+ * 브라우저가 할 일이다. 주소를 만드는 규칙은 여기 두고 화면은 이동만 시킨다.
+ */
+export function loginFormUrl(): string {
+  return `${API_BASE}/login/form`
+}
+
 export interface LoginResult {
   accessToken: string
   refreshToken: string

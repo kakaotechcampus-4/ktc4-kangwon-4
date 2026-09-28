@@ -1,7 +1,9 @@
 import { Navigate, useLocation, useNavigate } from 'react-router'
 
 import { AppShell } from '../components/AppShell'
+import { loginFormUrl } from '../lib/api'
 import { isLoggedIn, logInWithMock } from '../lib/auth'
+import { MOCK_SWITCH_ENABLED } from '../lib/mockSwitch'
 
 /**
  * 로그인. 인증 가드 밖에 있는 유일한 화면이다.
@@ -11,9 +13,7 @@ import { isLoggedIn, logInWithMock } from '../lib/auth'
  * 로그아웃한 사용자가 여기로 오는 길은 따로 만들지 않는다. `RequireAuth`가 보호된
  * 경로를 전부 막고 있어서, 로그인 상태가 풀리면 다음 이동에서 저절로 이 화면에 닿는다.
  *
- * TODO(API): 실제 흐름은 `GET /login/form`이 카카오로 303 리다이렉트하는 구조라
- * `fetch`로 부를 수 없다 — 리다이렉트가 CORS에 막힌다. `window.location`으로 이동해야 한다.
- * 카카오가 돌려주는 `code`를 FE와 BE 중 누가 받는지(`redirect_uri`)는 아직 확인 중이다.
+ * 카카오로 넘어갔다가 `/login/callback`으로 돌아온다.
  */
 export function LoginPage() {
   const navigate = useNavigate()
@@ -23,7 +23,15 @@ export function LoginPage() {
   // 뒤로가기로는 닿을 수 없고 주소를 직접 열었을 때만 생기는 경로다
   if (isLoggedIn(search)) return <Navigate to={{ pathname: '/', search }} replace />
 
-  function handleLogin() {
+  /**
+   * 라우터가 아니라 브라우저를 움직인다. 우리 화면 안에서 이동하는 것이 아니라
+   * 카카오라는 다른 사이트로 나가는 것이라, 서버가 주는 303을 브라우저가 따라가야 한다.
+   */
+  function handleKakaoLogin() {
+    window.location.assign(loginFormUrl())
+  }
+
+  function handleMockLogin() {
     logInWithMock()
     // 로그인한 화면이 뒤로가기에 남으면 다시 돌아와 로그인 버튼을 마주한다
     navigate('/', { replace: true })
@@ -47,11 +55,26 @@ export function LoginPage() {
       */}
       <button
         type="button"
-        onClick={handleLogin}
+        onClick={handleKakaoLogin}
         className="flex min-h-13 w-full items-center justify-center rounded-xl bg-[#FEE500] text-base font-bold text-black/85"
       >
         카카오로 시작하기
       </button>
+
+      {/*
+        카카오는 돌아올 주소를 정확히 일치하는 것만 허용해서, 주소가 매번 다른 feature 브랜치
+        Preview 에서는 진짜 로그인을 할 수 없다. 리뷰어가 화면을 보려면 우회로가 필요하다.
+        Production 빌드에서는 이 블록 자체가 사라진다.
+      */}
+      {MOCK_SWITCH_ENABLED && (
+        <button
+          type="button"
+          onClick={handleMockLogin}
+          className="flex min-h-13 w-full items-center justify-center rounded-xl border border-gray-300 bg-white text-base font-bold text-gray-600"
+        >
+          가짜로 로그인 (미리보기용)
+        </button>
+      )}
     </AppShell>
   )
 }
