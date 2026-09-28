@@ -1,8 +1,18 @@
 # RE:BORN 배포용 docker-compose (EC2에서 실행).
 # 루트 docker-compose.yml(로컬 전용, DB만)과는 별개 파일이다 — 그 파일은 건드리지 않는다.
 # 필요한 값은 이 파일과 같은 위치의 .env.prod에 채운다(git에는 올리지 않음, .gitignore의 .env.* 규칙으로 이미 제외됨).
+# mysql_health.cnf도 이 파일과 같은 위치에 EC2에서 직접 만든다(git에 올리지 않음) —
+# healthcheck가 root 비밀번호를 커맨드라인 인자로 노출하지 않게 하려고 별도 파일로 분리했다.
+#   [client]
+#   user=root
+#   password=<MYSQL_ROOT_PASSWORD와 동일한 값>
+# 파일 권한은 chmod 600으로 좁혀둔다.
 #
 # 실행: docker compose -f docker-compose.prod.yml up -d --build
+
+secrets:
+  mysql_health_cnf:
+    file: ./mysql_health.cnf
 
 services:
   mysql:
@@ -12,12 +22,14 @@ services:
       MYSQL_DATABASE: closure_agent
     env_file:
       - .env.prod
+    secrets:
+      - mysql_health_cnf
     ports:
       - "127.0.0.1:3306:3306" # 외부 인터넷 노출 안 함 — 보안그룹에서도 3306은 열지 않는다
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$$MYSQL_ROOT_PASSWORD"]
+      test: ["CMD", "mysqladmin", "--defaults-extra-file=/run/secrets/mysql_health_cnf", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
