@@ -194,6 +194,19 @@ class SnapshotStore:
         return self._records
 
 
+# A step's name and aliases are how the Agent recognises "I already did that"
+# in the user's own words. Using the scraped document title instead made
+# "원상복구 범위를 확인했다" unrecognisable, and Info burned every retry on a
+# progress observation the guard could not accept. BE owns the real names;
+# these mirror the labels the Agent itself already uses.
+_STEP_NAMES = {
+    "CONFIRM_RESTORATION_SCOPE": ("임대차 원상복구 범위 확인", ["원상복구", "철거"]),
+    "FILE_TAX_BUSINESS_CLOSURE": ("사업자 폐업신고", ["폐업신고", "사업자"]),
+    "FILE_FOOD_SERVICE_CLOSURE": ("식품영업 폐업신고", ["식품영업", "영업신고"]),
+    "REPORT_WORKPLACE_INSURANCE_CLOSURE": ("사업장 탈퇴 신고", ["사업장", "4대보험"]),
+}
+
+
 def build_registry(store: SnapshotStore) -> list[KnownProcedureStep]:
     """One registry entry per step_code the reviewed documents cover.
 
@@ -204,13 +217,14 @@ def build_registry(store: SnapshotStore) -> list[KnownProcedureStep]:
     steps: list[KnownProcedureStep] = []
     for record in store.records():
         for code in record.step_codes:
+            name, aliases = _STEP_NAMES.get(code, (record.title, []))
             steps.append(
                 KnownProcedureStep(
                     procedure_step=dict(
                         procedure_step_id=len(steps) + 1, step_code=code
                     ),
-                    step_name=record.title,
-                    utterance_aliases=[],
+                    step_name=name,
+                    utterance_aliases=list(aliases),
                     registry_version="LOCAL_TEST_IDS_NOT_PERSISTED",
                     applicable_business_type="ALL",
                     deprecated_at=None,
