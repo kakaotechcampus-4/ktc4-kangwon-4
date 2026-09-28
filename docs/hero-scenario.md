@@ -1,6 +1,6 @@
 # RE:BORN Hero Scenario
 
-> 사용자 시나리오 및 Hero Loop 상세 흐름. 물리 DB 초안은 `docs/schema/schema_table.md`, Agent·Tool 책임은 `docs/architecture.md`, 외부 API는 `docs/agent/be-integration-requirements.md`를 참고합니다.
+> 사용자 시나리오 및 Hero Loop 상세 흐름. 물리 DB 초안은 `docs/schema/schema_table.md`, Agent·Tool 책임은 `docs/agent/architecture.md`를 참고합니다. BE 연동 요청서(`docs/agent/be-integration-requirements.md`)는 삭제되어 더 이상 없습니다 — BE와의 계약은 FastAPI 코드와 `backend/app/agent/schemas.py`가 기준입니다.
 
 ## 1. 한 줄 소개
 
