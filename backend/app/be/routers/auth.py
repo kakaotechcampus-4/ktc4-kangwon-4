@@ -41,7 +41,7 @@ def logout(member_id: int = Depends(get_current_member_id), session: Session = D
 @router.post("/reissue")
 def reissue(
     response: Response,
-    refresh_token: str = Header(alias="Refresh-Token"),
+    refresh_token: str | None = Header(default=None, alias="Refresh-Token"),
     member_id: int = Depends(get_refresh_member_id),
     session: Session = Depends(get_db),
 ):
