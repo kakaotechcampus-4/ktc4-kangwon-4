@@ -1,5 +1,5 @@
 import { readMockKey } from './mockSwitch'
-import { createSessionFlag } from './sessionFlag'
+import { createSessionFlag } from './sessionStore'
 
 /**
  * 로그인 상태.
