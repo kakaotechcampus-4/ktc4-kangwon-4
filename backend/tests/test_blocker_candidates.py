@@ -25,6 +25,7 @@ from test_action_codes import (
     NOW,
     REF,
     StubModel,
+    evidence,
     source,
     supervisor_request,
     support_sources,
@@ -312,6 +313,57 @@ def test_model_state_invention_is_replaced_and_review_cannot_override_guard():
         )
 
     asyncio.run(run())
+
+
+def test_uncertain_restoration_scope_still_allows_landlord_confirmation():
+    async def run():
+        request = request_with_state()
+        info = request.source_results[1].output
+        for finding in info.procedure_findings:
+            finding.relevance = "POSSIBLY_RELEVANT"
+        request.source_results[1] = source(info)
+
+        draft = await SupervisorAgent(ChoiceModel(), max_local_attempts=1).draft(
+            request
+        )
+        assert draft.decision.decision_type == "ACTION"
+        assert draft.decision.next_action.action_code == "CONFIRM_RESTORATION_SCOPE"
+        assert draft.decision.next_action.questions_to_ask == [
+            "원상복구해야 할 범위는 어디까지인가요?",
+            "철거가 필요한가요?",
+        ]
+        assert draft.mutations.fact_changes == []
+        result = await ReviewTool(
+            ChoiceModel(), max_output_attempts=1, provider_max_retries=0
+        ).review(subject(request, draft))
+        assert result.verdict == "PASS"
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("lease_status", ["LEASED_PAID", "OWNED"])
+def test_unestablished_procedure_relevance_keeps_candidates_empty(lease_status):
+    request = request_with_state(lease_status=lease_status)
+    for finding in request.source_results[1].output.procedure_findings:
+        finding.relevance = (
+            "UNDETERMINED" if lease_status == "LEASED_PAID" else "POSSIBLY_RELEVANT"
+        )
+    assert candidates(request) == []
+
+
+@pytest.mark.parametrize("stale_parent", [False, True])
+def test_uncertain_restoration_requires_current_source_chain(stale_parent):
+    request = request_with_state()
+    request.source_results[1].output.procedure_findings[-1].relevance = (
+        "POSSIBLY_RELEVANT"
+    )
+    records = request.source_results[0].output.evidence_records
+    if stale_parent:
+        records[0].parent_evidence_refs = ["parent"]
+        records.append(evidence(evidence_id="parent", freshness_status="STALE"))
+    else:
+        records[0].freshness_status = "STALE"
+    assert candidates(request) == []
 
 
 def test_invented_candidate_is_rejected_without_replacing_available_action():

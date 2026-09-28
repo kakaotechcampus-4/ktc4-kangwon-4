@@ -8,6 +8,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from app.agent.action_catalog import ACTION_DEFINITIONS, build_action_candidates
+from app.agent.claim_safety import expand_evidence
 from app.agent.procedure_tool.rules import procedure_plan_constraints
 from app.agent.schemas import (
     ActionDecisionDraft,
@@ -151,9 +152,21 @@ def build_blocker_candidates(
             reference = target["procedure_step"]
             step_code = reference["step_code"]
             finding = findings[(reference["procedure_step_id"], step_code)]
-            # A stale/undetermined finding cannot establish a current blocker.
+            # An uncertain scope is the reason to ask the landlord, not a reason
+            # to drop that confirmation. Execution still requires relevance.
             if finding.relevance != "RELEVANT":
-                continue
+                if not (
+                    restoration_first
+                    and row["action_code"] == "CONFIRM_RESTORATION_SCOPE"
+                    and finding.relevance == "POSSIBLY_RELEVANT"
+                ):
+                    continue
+                evidence = expand_evidence(
+                    [evidence_by_id[ref] for ref in finding.evidence_refs],
+                    evidence_by_id,
+                )
+                if any(item.freshness_status != "CURRENT" for item in evidence):
+                    continue
             key = f"procedure:{reference['procedure_step_id']}"
             refs = list(finding.evidence_refs)
             if step_code == "CONFIRM_RESTORATION_SCOPE":
