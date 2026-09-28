@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -6,7 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    ENVIRONMENT: str = "dev"
+    ENVIRONMENT: Literal["dev", "prod"]
 
     DATABASE_URL: str = "mysql+pymysql://root:devpassword@localhost:3306/closure_agent?charset=utf8mb4"
 
