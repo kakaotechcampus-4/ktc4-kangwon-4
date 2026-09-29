@@ -1,9 +1,15 @@
 # Agent 범위
 
 Agent는 폐업 Case의 확인된 사실과 근거로 **Blocker 최대 1개·Next Action 1개** 판단.
-해당 행동을 막는 조건이 없는 정상 `ACTION`은 `blocker=null` 반환. 근거와 Review 유지.
+Case의 후속 진행을 막는 조건이 없는 정상 `ACTION`은 `blocker=null` 반환. 근거와 Review 유지.
 사용자가 현실에서 실행한 결과를 입력하면 같은 Case를 다시 판단한다.
 모든 정상 판단은 독립 Review를 거치며 Case 저장은 BE가 담당한다.
+
+원상복구 범위·철거 필요 여부의 미확인은 Case의 후속 진척을 막는 조건이며, 이를 해소할
+임대인 확인 행동은 실행 가능하다. 확인 행동을 할 수 있다는 이유만으로 이 Blocker를 제거하지 않는다.
+반면 요건이 확인된 일반 신고 절차가 아직 미완료라는 이유만으로 Blocker를 만들지는 않는다.
+
+지원사업은 MVP 구현·정상 동작 검증 범위에서 제외. 기존 지원사업 코드와 자료는 유지.
 
 **데이터의 절대 기준은 [schema_table.md](../schema/schema_table.md)다.**
 필드·타입·enum·NULL·기본값·관계·상태 전이는 이 기준을 따르고,
@@ -82,10 +88,6 @@ BE가 조회한 `ProcedureStep`·`StepDependency`·`StepEligibility` 행을 변�
 
 ### DB 칸에 맞추기
 
-원상복구 범위·철거 필요 여부의 미확인은 Case의 후속 진척을 막는 조건이며, 이를 해소할
-임대인 확인 행동은 실행 가능하다. 확인 행동을 할 수 있다는 이유만으로 이 Blocker를 제거하지 않는다.
-반면 요건이 확인된 일반 신고 절차가 아직 미완료라는 이유만으로 Blocker를 만들지는 않는다.
-
 Agent가 만드는 값은 BE가 그대로 DB에 넣는다. 그래서 칸의 길이·형식을
 [`schemas.py`](../../backend/app/agent/schemas.py)의 타입에 그대로 박아두었다.
 넘치는 값은 MySQL이 자르기 전에 Agent에서 먼저 막히고, 실행은 재시도 경로를 탄다.
@@ -126,7 +128,8 @@ Review·충돌 보호·근거·개인정보 검증은 축소하지 않는다.
 
 ## 완료 기준
 
-`AgentRuntime.run_planning`의 입력부터 출력까지 실제 Graph·Info·Support·Supervisor·Review 경로로 검증한다.
+`AgentRuntime.run_planning`의 입력부터 출력까지 실제 Graph·Info·Supervisor·Review 경로로 검증한다.
+현재 MVP 검증에서는 지원 자료를 빈 목록으로 전달하며 지원사업 정상 동작은 통과 조건에서 제외한다.
 Agent 동작 검증에는 실제 LLM 호출 필수. 모의 응답 테스트나 `--validate-only`만으로 완료 처리 금지.
 응답 재사용 비활성화와 호출별 모델·`schema_name`·HTTP 상태·최종 Review 결과 확인.
 

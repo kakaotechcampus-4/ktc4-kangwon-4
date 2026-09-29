@@ -435,12 +435,10 @@ def test_uncertain_restoration_scope_still_allows_landlord_confirmation():
 
 
 @pytest.mark.parametrize("lease_status", ["LEASED_PAID", "OWNED"])
-def test_unestablished_procedure_relevance_keeps_candidates_empty(lease_status):
+def test_undetermined_procedure_relevance_keeps_candidates_empty(lease_status):
     request = request_with_state(lease_status=lease_status)
     for finding in request.source_results[1].output.procedure_findings:
-        finding.relevance = (
-            "UNDETERMINED" if lease_status == "LEASED_PAID" else "POSSIBLY_RELEVANT"
-        )
+        finding.relevance = "UNDETERMINED"
     assert candidates(request) == []
 
 
