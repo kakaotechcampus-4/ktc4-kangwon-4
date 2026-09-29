@@ -195,7 +195,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", type=Path, action="append", required=True)
     parser.add_argument("--model-prefix", action="append")
-    parser.add_argument("--review-prefix", default="SUPERVISOR_")
+    parser.add_argument("--review-prefix", default="")
     parser.add_argument("--repeats", type=int, choices=range(1, 11), default=3)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--validate-only", action="store_true")
