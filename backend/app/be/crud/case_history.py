@@ -11,3 +11,9 @@ def create_case_history(session: Session, case_history: CaseHistory) -> CaseHist
 
 def get_case_histories_by_case_id(session: Session, case_id: int) -> list[CaseHistory]:
     return session.exec(select(CaseHistory).where(CaseHistory.case_id == case_id)).all()
+
+
+def get_case_created_history(session: Session, case_id: int) -> CaseHistory | None:
+    return session.exec(
+        select(CaseHistory).where(CaseHistory.case_id == case_id, CaseHistory.source == "CASE_CREATED")
+    ).one_or_none()

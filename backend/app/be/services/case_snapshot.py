@@ -5,6 +5,8 @@ from sqlmodel import Session
 
 from app.agent.schemas import (
     CASE_FIELD_SPECS,
+    AgentGraphInput,
+    CaseCreatedTrigger,
     CaseFact,
     CaseFieldKey,
     CaseSnapshot,
@@ -13,11 +15,14 @@ from app.agent.schemas import (
     EvidenceSourceType,
     FactStatus,
     FreshnessStatus,
+    InputSourceType,
     ProcedureProgress,
     ProcedureProgressStatus,
     ProcedureStepRef,
+    RedactedInput,
 )
 from app.be.crud import case as case_crud
+from app.be.crud import case_history as case_history_crud
 from app.be.crud import evidence as evidence_crud
 from app.be.crud import procedure_step as procedure_step_crud
 from app.be.models.case import Case
@@ -31,6 +36,38 @@ _UNKNOWN_SENTINEL_FIELDS = {
     CaseFieldKey.RESTORATION_SCOPE,
     CaseFieldKey.DEMOLITION_REQUIRED,
 }
+
+
+def build_case_created_input(session: Session, case_id: int) -> AgentGraphInput:
+    """case 생성 직후 첫 판단을 요청할 때 AI에 넘기는 입력 한 벌(트리거 + 스냅샷)."""
+
+    history = case_history_crud.get_case_created_history(session, case_id)
+    if history is None:
+        raise ValueError(f"case {case_id} has no CASE_CREATED history")
+
+    # AI 쪽은 timezone 있는 시각만 받는다. DB는 naive라 UTC로 간주하고 붙인다(_build_procedure_progress와 동일).
+    submitted_at = history.created_at.replace(tzinfo=UTC)
+    input_event_id = f"case_history:{history.id}"
+
+    return AgentGraphInput(
+        trigger=CaseCreatedTrigger(
+            trigger_type="CASE_CREATED",
+            input_event_id=input_event_id,
+            # TODO: 프론트가 자기 쪽 이벤트 식별자를 보내주기로 하면 그 값을 넣는다. 아직 미협의.
+            client_event_id=None,
+            input=RedactedInput(
+                input_event_id=input_event_id,
+                source_type=InputSourceType.USER_INPUT,
+                redacted_text=history.raw_input,
+                # case 생성 폼은 업종/임차형태 같은 정해진 값만 받아서 지울 개인정보가 없다.
+                # 자유 입력을 받는 화면이 생기면 그때 민감정보 제거 목록을 채워야 한다.
+                redactions=[],
+                submitted_at=submitted_at,
+            ),
+            submitted_at=submitted_at,
+        ),
+        case_snapshot=build_case_snapshot(session, case_id),
+    )
 
 
 def build_case_snapshot(session: Session, case_id: int) -> CaseSnapshot:
