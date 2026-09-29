@@ -8,6 +8,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from app.agent.action_catalog import ACTION_DEFINITIONS, build_action_candidates
+from app.agent.claim_safety import expand_evidence
 from app.agent.procedure_tool.rules import procedure_plan_constraints
 from app.agent.schemas import (
     ActionDecisionDraft,
@@ -145,15 +146,29 @@ def build_blocker_candidates(
             description = "지원조건과 신청 전 증빙의 확인이 필요합니다."
             title = f"{check.program_name}의 현재 조건과 신청 전 증빙을 확인하세요."
             reason = "제공된 지원 안내의 현재 조건을 담당 기관에 확인해야 합니다."
-            questions = ["현재 조건과 신청 전에 준비할 증빙은 무엇인가요?"]
+            # 확인 문구를 넣어야 최신이 아닌 지원 자료에서도 이 질문이 살아남는다.
+            # 절차 쪽 확인 질문과 같은 형태다.
+            questions = ["현재 조건과 신청 전에 준비할 증빙을 확인해 주시겠습니까?"]
             refs = list(check.evidence_refs)
         else:
             reference = target["procedure_step"]
             step_code = reference["step_code"]
             finding = findings[(reference["procedure_step_id"], step_code)]
-            # A stale/undetermined finding cannot establish a current blocker.
+            # An uncertain scope is the reason to ask the landlord, not a reason
+            # to drop that confirmation. Execution still requires relevance.
             if finding.relevance != "RELEVANT":
-                continue
+                if not (
+                    restoration_first
+                    and row["action_code"] == "CONFIRM_RESTORATION_SCOPE"
+                    and finding.relevance == "POSSIBLY_RELEVANT"
+                ):
+                    continue
+                evidence = expand_evidence(
+                    [evidence_by_id[ref] for ref in finding.evidence_refs],
+                    evidence_by_id,
+                )
+                if any(item.freshness_status != "CURRENT" for item in evidence):
+                    continue
             key = f"procedure:{reference['procedure_step_id']}"
             refs = list(finding.evidence_refs)
             if step_code == "CONFIRM_RESTORATION_SCOPE":
