@@ -1,5 +1,5 @@
 import { readMockKey } from './mockSwitch'
-import { createSessionFlag } from './sessionFlag'
+import { createSessionFlag } from './sessionStore'
 
 /**
  * Case를 이미 만들었는지.
