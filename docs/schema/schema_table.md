@@ -106,8 +106,8 @@ CASE에 대한 발화·이벤트 원본 이력.
 |---|---|---|---|---|---|
 | id | BIGINT | PK | NOT NULL, AUTO_INCREMENT | 1 | |
 | case_id | BIGINT | FK | NOT NULL | 1 | |
-| raw_input | TEXT | | NOT NULL | `"임대인이랑 얘기 끝났어요, 다음 달까지 나가기로 했어요"` | 입력 원문 (사용자 발화 또는 배치가 에이전트에 전달한 지시문) |
-| source | ENUM | | NOT NULL | `USER_INPUT` | `USER_INPUT` / `SYSTEM_BATCH` |
+| raw_input | TEXT | | NOT NULL | `"임대인이랑 얘기 끝났어요, 다음 달까지 나가기로 했어요"` | 입력 원문 (사용자 발화, Case 생성 요청, 또는 배치가 에이전트에 전달한 지시문) |
+| source | ENUM | | NOT NULL | `USER_INPUT` | `USER_INPUT` / `SYSTEM_BATCH` / `CASE_CREATED` — `CASE_CREATED`는 Case 생성 직후 첫 Blocker/Next Action 판단 |
 | next_action | VARCHAR | | NULLABLE | `"부가가치세 확정신고를 진행하세요"` | 다음 액션 제안, 판단이 발생한 경우에만 채워짐 |
 | priority_blocker_id | BIGINT | FK | NULLABLE | `NULL` | 이 시점에 최우선인 블로커 참조 |
 | created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-09-10 09:10:00` | |
