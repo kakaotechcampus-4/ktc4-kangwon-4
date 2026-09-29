@@ -1,8 +1,13 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 
+import { toCaseCreateRequest } from '../adapters/case'
 import { AppShell } from '../components/AppShell'
 import { CaseCreateForm } from '../components/CaseCreateForm'
+import { NoticeCard } from '../components/NoticeCard'
+import { PendingCard } from '../components/PendingCard'
+import { ApiError, request, UnauthorizedError } from '../lib/api'
+import { isMockSession } from '../lib/auth'
 import type { CaseDraft } from '../types/view'
 
 const EMPTY_DRAFT: CaseDraft = {
@@ -12,6 +17,21 @@ const EMPTY_DRAFT: CaseDraft = {
   employeeCount: '',
   plannedClosureDate: '',
 }
+
+/**
+ * 기다리는 동안 보여줄 문구.
+ *
+ * 저장만 하면 금방이지만, 서버가 이어서 AI에게 판단을 맡기고 그 결과까지 담아 응답한다.
+ * 몇 초에서 길면 수십 초가 걸릴 수 있어 멈춘 것처럼 보이지 않게 단계를 알린다.
+ */
+const PENDING_MESSAGES = [
+  '가게 상황을 저장하고 있습니다',
+  '어떤 절차가 필요한지 살펴보는 중입니다',
+  '받으실 수 있는 지원이 있는지 찾아보는 중입니다',
+  '먼저 하실 일을 정리하고 있습니다',
+]
+
+type SubmitState = 'IDLE' | 'PENDING' | 'FAILED'
 
 /**
  * Case 생성. 입력값을 들고 있고, 그리는 일은 폼에 맡긴다.
@@ -25,27 +45,77 @@ const EMPTY_DRAFT: CaseDraft = {
 export function CaseCreatePage() {
   const navigate = useNavigate()
   const [draft, setDraft] = useState<CaseDraft>(EMPTY_DRAFT)
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [submit, setSubmit] = useState<SubmitState>('IDLE')
+
+  /**
+   * 기다리는 사이 화면을 떠날 수 있다. 떠난 화면의 상태를 바꾸지 않는다.
+   *
+   * 정리 함수만 두면 StrictMode의 이중 실행에서 첫 마운트가 곧바로 false가 되므로
+   * 실행할 때마다 다시 true로 세운다.
+   */
+  const alive = useRef(true)
+
+  useEffect(() => {
+    alive.current = true
+    return () => {
+      alive.current = false
+    }
+  }, [])
 
   function handleSubmit() {
-    setIsSubmitting(true)
+    const body = toCaseCreateRequest(draft)
+    // 폼이 이미 막고 있다. 여기서 한 번 더 거르는 것은 잘못된 요청을 서버까지 보내지 않으려는 것
+    if (body === null) return
 
-    /**
-     * TODO(API): `POST /cases`로 보낸다. 빈 문자열은 `null`로 바꿔 보낸다 —
-     * 서버에서 `employee_count`와 `planned_closure_date`가 nullable이다.
-     * 이미 Case가 있으면 409가 오는데, 그때도 `/case`로 보내면 된다.
-     * 두 탭에서 동시에 만들거나 뒤로가기로 폼에 되돌아온 경우다.
-     */
-    navigate('/case', { replace: true })
+    setSubmit('PENDING')
+
+    // 가짜 세션은 서버에 없는 사용자라 401이 온다. Preview에서 화면만 보려는 경우다
+    if (isMockSession()) {
+      navigate('/case', { replace: true })
+      return
+    }
+
+    request('/cases', { method: 'POST', body })
+      .then(() => {
+        navigate('/case', { replace: true })
+      })
+      .catch((error: unknown) => {
+        if (error instanceof UnauthorizedError) return navigate('/login', { replace: true })
+
+        /**
+         * 회원당 Case는 하나다. 두 탭에서 동시에 만들거나, 요청이 오래 걸리다 끊겨
+         * 다시 눌렀을 때 온다. 이미 만들어졌다는 뜻이므로 실패가 아니라 도착이다.
+         */
+        if (error instanceof ApiError && error.status === 409) {
+          return navigate('/case', { replace: true })
+        }
+
+        if (!alive.current) return
+        setSubmit('FAILED')
+      })
   }
 
   return (
     <AppShell title="가게 상황 알려주기" subtitle="다섯 가지만 여쭤봅니다">
+      {submit === 'PENDING' && <PendingCard messages={PENDING_MESSAGES} />}
+
+      {submit === 'FAILED' && (
+        <NoticeCard
+          tone="NEUTRAL"
+          title="저장하지 못했습니다."
+          description="잠시 후 다시 시도해 주세요. 입력하신 내용은 그대로 있습니다."
+        />
+      )}
+
+      {/*
+        기다리는 동안에도 폼을 감추지 않고 잠근다. 적어 넣은 값이 눈앞에 남아 있어야
+        무엇을 보내는 중인지 알 수 있고, 실패해서 돌아왔을 때 화면이 흔들리지 않는다.
+      */}
       <CaseCreateForm
         value={draft}
         onChange={setDraft}
         onSubmit={handleSubmit}
-        disabled={isSubmitting}
+        disabled={submit === 'PENDING'}
       />
     </AppShell>
   )
