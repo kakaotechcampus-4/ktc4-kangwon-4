@@ -315,6 +315,99 @@ def test_model_state_invention_is_replaced_and_review_cannot_override_guard():
     asyncio.run(run())
 
 
+@pytest.mark.parametrize(
+    "state",
+    [
+        {"restoration_scope": "PARTIAL", "restoration_status": "COMPLETED"},
+        {"restoration_scope": "PARTIAL", "demolition_required": "NOT_REQUIRED"},
+    ],
+)
+def test_ready_procedure_keeps_evidence_without_an_invented_blocker(state):
+    async def run():
+        request = request_with_state(**state)
+        rows = candidates(request)
+        assert rows and all(row["blocker"] is None for row in rows)
+        assert all(row["evidence_refs"] == [REF] for row in rows)
+
+        # ChoiceModel invents a demolition blocker; only the verified candidate
+        # determines whether a blocker exists in the reviewed output.
+        draft = await SupervisorAgent(ChoiceModel(), max_local_attempts=1).draft(
+            request
+        )
+        assert draft.decision.decision_type == "ACTION"
+        assert draft.decision.blocker is None
+        assert draft.decision.next_action is not None
+        assert draft.decision.evidence_refs == [REF]
+        assert draft.decision.next_action.evidence_refs == [REF]
+        assert draft.decision.questions_for_user == []
+        assert not any(
+            "/blocker/" in claim.target_path for claim in draft.grounded_claims
+        )
+        assert request.case_snapshot.case_status == "IN_PROGRESS"
+        result = await ReviewTool(
+            ChoiceModel(), max_output_attempts=1, provider_max_retries=0
+        ).review(subject(request, draft))
+        assert result.verdict == "PASS"
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("blocker_kind", ["restoration", "support"])
+def test_review_rejects_removing_a_verified_blocker_even_when_model_passes(
+    blocker_kind,
+):
+    async def run():
+        request = request_with_state(
+            **({"demolition_required": "REQUIRED"} if blocker_kind == "support" else {})
+        )
+        if blocker_kind == "support":
+            request.source_results.append(
+                source(support_sources()[0].output, "SUPPORT_AGENT", 6)
+            )
+        draft = await SupervisorAgent(ChoiceModel(), max_local_attempts=1).draft(
+            request
+        )
+        assert draft.decision.blocker is not None
+        draft.decision.blocker = None
+        # Keep claim paths valid so the independent candidate check is the
+        # reason for rejecting the hidden blocker, even with a model PASS.
+        draft.grounded_claims = [
+            claim
+            for claim in draft.grounded_claims
+            if "/blocker/" not in claim.target_path
+        ]
+        result = await ReviewTool(
+            ChoiceModel(), max_output_attempts=1, provider_max_retries=0
+        ).review(subject(request, draft))
+        assert result.verdict == "REVISE"
+        assert any(
+            issue.issue_code == "CONTRACT_VIOLATION"
+            and issue.target_path == "/supervisor_draft/decision/blocker"
+            for issue in result.issues
+        )
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("freshness", ["UNKNOWN", "STALE"])
+@pytest.mark.parametrize("stale_parent", [False, True])
+def test_unverified_procedure_source_cannot_claim_no_blocker(freshness, stale_parent):
+    request = request_with_state(restoration_status="COMPLETED")
+    records = request.source_results[0].output.evidence_records
+    if stale_parent:
+        records[0].parent_evidence_refs = ["parent"]
+        records.append(evidence(evidence_id="parent", freshness_status=freshness))
+    else:
+        records[0].freshness_status = freshness
+    rows = candidates(request)
+    assert rows and all(row["blocker"] is not None for row in rows)
+    assert all(
+        action["action_code"] == "CONFIRM_TAX_CLOSURE_REQUIREMENTS"
+        for row in rows
+        for action in row["actions"]
+    )
+
+
 def test_uncertain_restoration_scope_still_allows_landlord_confirmation():
     async def run():
         request = request_with_state()

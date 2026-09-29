@@ -43,7 +43,7 @@ def fixture(case_id=1, freshness="CURRENT"):
         published_at=None,
         retrieved_at=NOW,
         freshness_status=freshness,
-        content_hash="sha256:" + "0" * 64,
+        content_hash="0" * 64,
     )
     facts = [
         ("business_type", "STRING", "카페"),
@@ -220,9 +220,7 @@ def test_changed_typed_case_input_and_evidence_never_share_a_key(changed):
             }
         ]
     elif changed == "hash":
-        data["case_snapshot"]["evidence_records"][0]["content_hash"] = (
-            "sha256:" + "1" * 64
-        )
+        data["case_snapshot"]["evidence_records"][0]["content_hash"] = "1" * 64
     elif changed == "freshness":
         data["case_snapshot"]["evidence_records"][0]["freshness_status"] = "STALE"
     else:

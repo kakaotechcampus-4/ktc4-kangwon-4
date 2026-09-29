@@ -2,12 +2,17 @@
 
 import asyncio
 from datetime import datetime, timezone
+from unittest.mock import AsyncMock
 from uuid import UUID
 
 import pytest
 from app.agent.action_catalog import build_action_candidates
+from app.agent.graph import AgentGraph
 from app.agent.review_tool import ReviewTool
 from app.agent.schemas import (
+    AgentGraphInput,
+    AgentGraphOutput,
+    Blocker,
     EvidenceRecord,
     InfoAnalysisResult,
     NextAction,
@@ -26,7 +31,7 @@ from app.agent.supervisor.agent import (
     SupervisorGuardrailError,
     SupervisorModelOutput,
 )
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
 NOW = datetime(2026, 9, 25, tzinfo=timezone.utc)
 REF = "synthetic-document"
@@ -47,7 +52,7 @@ def evidence(**changes):
             "published_at": None,
             "retrieved_at": NOW,
             "freshness_status": "CURRENT",
-            "content_hash": "sha256:" + "0" * 64,
+            "content_hash": "0" * 64,
         }
         | changes
     )
@@ -442,5 +447,126 @@ def test_review_blocks_wrong_target_even_when_its_model_returns_pass():
             and issue.target_path.endswith("/next_action/action_code")
             for issue in result.issues
         )
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("action_code", [CONFIRM_TAX, TAX])
+@pytest.mark.parametrize("invented_blocker", [False, True])
+def test_review_checks_optional_blocker_against_verified_candidate(
+    action_code, invented_blocker
+):
+    async def run():
+        request = supervisor_request()
+        draft = await SupervisorAgent(
+            StubModel(action_code), max_local_attempts=1
+        ).draft(request)
+        assert draft.decision.blocker is None
+        assert draft.decision.next_action.action_code == action_code
+        assert draft.decision.questions_for_user == []
+        assert not any(
+            "/blocker/" in claim.target_path for claim in draft.grounded_claims
+        )
+        if invented_blocker:
+            draft.decision.blocker = Blocker(
+                description="준비할 항목이 확인되지 않았습니다.", evidence_refs=[REF]
+            )
+        subject = ReviewSubject.create(
+            schema_version="agent-io/2.0",
+            review_subject_id=UUID(int=9),
+            review_attempt=1,
+            run_id=UUID(int=2),
+            case_id=1,
+            trigger=request.trigger,
+            snapshot=request.case_snapshot,
+            known_procedure_steps=request.known_procedure_steps,
+            source_results=request.source_results,
+            supervisor_draft=draft,
+        )
+        subject = ReviewSubject.model_validate_json(subject.model_dump_json())
+        client = StubModel()
+        result = await ReviewTool(
+            client, max_output_attempts=1, provider_max_retries=0
+        ).review(subject)
+        assert client.calls == 1
+        if invented_blocker:
+            assert result.verdict == "REVISE"
+            assert any(
+                issue.issue_code == "CONTRACT_VIOLATION"
+                and issue.target_path == "/supervisor_draft/decision/blocker"
+                for issue in result.issues
+            )
+        else:
+            assert subject.supervisor_draft.decision.blocker is None
+            assert result.verdict == "PASS"
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("trigger_type", ["CASE_CREATED", "RESULT_SUBMITTED"])
+def test_graph_releases_a_reviewed_action_without_a_blocker(trigger_type):
+    async def run():
+        template = supervisor_request()
+        request = AgentGraphInput(
+            trigger=template.trigger.model_dump() | {"trigger_type": trigger_type},
+            case_snapshot=template.case_snapshot,
+        )
+        original = request.model_dump_json()
+        lookup = template.source_results[0].output
+
+        async def analyze_info(component_input):
+            return InfoAnalysisResult.model_validate(
+                template.source_results[1].output.model_dump()
+                | {
+                    "based_on_procedure_lookup_call_id": component_input.procedure_lookup_call_id,
+                    "based_on_procedure_lookup_digest": canonical_digest(
+                        component_input.procedure_lookup_result
+                    ),
+                }
+            )
+
+        support = SupportAnalysisResult.model_validate(
+            support_sources()[0].output.model_dump()
+            | {
+                "completion_status": "NO_CANDIDATE",
+                "support_checks": [],
+                "no_candidate_reason_code": "NO_REVIEWED_CANDIDATE",
+            }
+        )
+        procedure_runner = AsyncMock()
+        procedure_runner.lookup.return_value = lookup
+        info_runner = AsyncMock()
+        info_runner.analyze.side_effect = analyze_info
+        support_runner = AsyncMock()
+        support_runner.analyze.return_value = support
+        review_client = StubModel()
+        graph = AgentGraph(
+            procedure_tool=procedure_runner,
+            info_agent=info_runner,
+            support_agent=support_runner,
+            supervisor=SupervisorAgent(StubModel(), clock=lambda: NOW),
+            review_tool=ReviewTool(review_client),
+            known_procedure_steps=template.known_procedure_steps,
+            clock=lambda: NOW,
+            max_review_revisions=0,
+        )
+        outcome = await graph.run(request)
+        assert outcome.outcome_type == "REVIEWED_PLAN", outcome
+        restored = TypeAdapter(AgentGraphOutput).validate_json(outcome.model_dump_json())
+        restored.assert_integrity()
+        decision = restored.review_subject.supervisor_draft.decision
+        assert decision.decision_type == "ACTION"
+        assert decision.blocker is None
+        assert decision.next_action.action_code == CONFIRM_TAX
+        assert decision.evidence_refs and decision.next_action.evidence_refs
+        assert restored.review_proof.snapshot_id == request.case_snapshot.snapshot_id
+        assert review_client.calls == 1
+        for runner, method in (
+            (procedure_runner, "lookup"),
+            (info_runner, "analyze"),
+            (support_runner, "analyze"),
+        ):
+            getattr(runner, method).assert_awaited_once()
+        assert request.model_dump_json() == original
 
     asyncio.run(run())

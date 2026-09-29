@@ -1,4 +1,4 @@
-"""Repeat the whole planning path from a frontend intake payload and compare answers.
+"""Repeat planning from a frontend intake payload or AgentGraphInput and compare answers.
 
 Run from the repository root with PYTHONPATH=backend. Every trial builds a fresh
 runtime with the decision cache off, so a repeat really calls the provider again
@@ -116,7 +116,7 @@ def build_case_snapshot(payload: dict) -> tuple[CaseSnapshot, str]:
         published_at=None,
         retrieved_at=FIXED_TIME,
         freshness_status="CURRENT",
-        content_hash=digest(normalized),
+        content_hash=hashlib.sha256(text.encode()).hexdigest(),
     )
     fields = [
         ("business_type", "STRING", request.business_type),
@@ -284,9 +284,11 @@ class RecordingTransport(httpx.AsyncBaseTransport):
 
     async def handle_async_request(self, request):
         body = json.loads(await request.aread())
+        schema = (body.get("response_format") or {}).get("json_schema") or {}
         record = {
             "role": self._role,
             "model": body.get("model"),
+            "schema_name": schema.get("name"),
             "reasoning_effort": body.get("reasoning_effort"),
             "max_completion_tokens": body.get("max_completion_tokens"),
             "stream": body.get("stream", False),
@@ -351,12 +353,15 @@ def decision_summary(outcome) -> dict:
         }
     subject = outcome.review_subject
     decision = subject.supervisor_draft.decision
+    blocker = decision.blocker
     action = decision.next_action
     changes = subject.supervisor_draft.mutations.fact_changes
     return {
         "decision_type": as_text(decision.decision_type),
-        "blocker_digest": canonical_digest(
-            decision.blocker, exclude={"evidence_refs"}
+        "blocker_digest": (
+            None
+            if blocker is None
+            else canonical_digest(blocker, exclude={"evidence_refs"})
         ),
         "next_action_digest": (
             None
@@ -364,7 +369,7 @@ def decision_summary(outcome) -> dict:
             else canonical_digest(action, exclude={"evidence_refs"})
         ),
         # Read by a person; the digests above already gate the comparison.
-        "blocker": decision.blocker.description,
+        "blocker": None if blocker is None else blocker.description,
         "action_code": None if action is None else as_text(action.action_code),
         "next_action": None if action is None else action.model_dump(mode="json"),
         "questions_for_user": list(decision.questions_for_user),
@@ -414,6 +419,7 @@ async def trial(case: str, request: AgentGraphInput, store, registry, catalog) -
         result["status"] = as_text(outcome.outcome_type)
         result.update(decision_summary(outcome))
     except Exception as exc:  # noqa: BLE001 - provider messages may carry bodies
+        result["status"] = "ERROR"
         result["error"] = {
             "type": type(exc).__name__,
             "code": getattr(exc, "code", None),
@@ -437,12 +443,16 @@ def verdict(rows: list[dict]) -> dict:
     Mixing them would let one HTTP 503 read as "the answer was unstable".
     """
 
-    planned = [row for row in rows if row["status"] == "REVIEWED_PLAN"]
+    planned = [
+        row for row in rows
+        if row["status"] == "REVIEWED_PLAN" and "error" not in row
+    ]
 
     def same(key: str) -> bool:
         return len({canonical(row.get(key)) for row in planned}) <= 1
 
     checks = {
+        "no_errors": all("error" not in row for row in rows),
         "all_reviewed_plan": len(planned) == len(rows),
         "same_graph_input": len({row["graph_input_digest"] for row in rows}) == 1,
         "same_decision_type": same("decision_type"),
@@ -473,6 +483,10 @@ def verdict(rows: list[dict]) -> dict:
 
 
 async def run(args) -> None:
+    graph_input_path = getattr(args, "graph_input", None)
+    if graph_input_path is not None and (args.case or args.result_input is not None):
+        raise SystemExit("--graph-input cannot be combined with --case or --result-input")
+
     store = SnapshotStore(args.procedure_snapshot)
     registry = build_registry(store)
     catalog = load_catalog(args.support_catalog)
@@ -490,16 +504,26 @@ async def run(args) -> None:
         if configured.get(role) != model
     }
 
-    cases = args.case or sorted(CASES)
-    result_text = None if args.result_input is None else RESULT_INPUTS[args.result_input]
-    requests = {
-        case: build_graph_input(CASES[case], result_text=result_text) for case in cases
-    }
+    if graph_input_path is not None:
+        case = graph_input_path.stem
+        cases = [case]
+        requests = {
+            case: AgentGraphInput.model_validate_json(graph_input_path.read_bytes())
+        }
+        # Report the source and digest, never the supplied snapshot or user input.
+        case_inputs = {case: {"graph_input_file": str(graph_input_path)}}
+    else:
+        cases = args.case or sorted(CASES)
+        result_text = None if args.result_input is None else RESULT_INPUTS[args.result_input]
+        requests = {
+            case: build_graph_input(CASES[case], result_text=result_text) for case in cases
+        }
+        case_inputs = {case: CASES[case] for case in cases}
     manifest = {
-        "trigger": "CASE_CREATED" if result_text is None else "RESULT_SUBMITTED",
+        "trigger": as_text(requests[cases[0]].trigger.trigger_type),
         "result_input": args.result_input,
         "repeats": args.repeats,
-        "cases": {case: CASES[case] for case in cases},
+        "cases": case_inputs,
         "graph_input_digests": {
             case: canonical_digest(request) for case, request in requests.items()
         },
@@ -509,7 +533,7 @@ async def run(args) -> None:
         "decision_cache_enabled": False,
         "sources": source_manifest(store, registry, catalog, args.support_catalog),
         "scope": (
-            "화면 입력을 Agent 입력으로 바꿔 전체 판단 경로를 반복 실행한다. "
+            "지정한 Agent 입력으로 전체 판단 경로를 반복 실행한다. "
             "FE HTTP·로그인·DB 저장은 포함하지 않는다."
         ),
     }
@@ -574,6 +598,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--procedure-snapshot", type=Path, required=True)
     parser.add_argument("--support-catalog", type=Path)
+    parser.add_argument(
+        "--graph-input", type=Path,
+        help="AgentGraphInput JSON; cannot be combined with --case or --result-input",
+    )
     parser.add_argument("--case", action="append", choices=sorted(CASES))
     parser.add_argument("--result-input", choices=sorted(RESULT_INPUTS))
     parser.add_argument("--repeats", type=int, choices=range(1, 11), default=3)

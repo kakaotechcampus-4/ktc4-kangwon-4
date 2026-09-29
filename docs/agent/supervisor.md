@@ -1,7 +1,7 @@
 # Supervisor Agent
 
-최종 판단 지점. 하위 결과(Info·Procedure·Support)를 종합해 **Blocker 1개·Next Action 1개**를
-결정한다. Case를 직접 읽거나 쓰지 않고, 검증된 `SupervisorAgentInput`만 받는다.
+최종 판단 지점. 하위 결과(Info·Procedure·Support)를 종합해 **Blocker 최대 1개·Next Action 1개** 결정.
+Case 직접 접근 없이 검증된 `SupervisorAgentInput` 사용.
 
 ## 입력 → 출력
 
@@ -11,7 +11,7 @@
 
 | 값 | 조건 | 모양 |
 |---|---|---|
-| `ACTION` | 근거 있는 행동 가능 | `blocker` + `next_action` 둘 다 있음, `questions_for_user=[]` |
+| `ACTION` | 근거 있는 행동 가능 | `next_action` 1개, 막는 조건이 없으면 `blocker=null`, `questions_for_user=[]` |
 | `NEEDS_MORE_INFO` | 근거 있는 행동 불가 | `blocker`만 있음, `next_action=None`, `questions_for_user` 1개 이상, `requires_human=True` |
 
 `CASE_COMPLETE`는 없다 — schema_table.md의 `DECISION_RECORD.decision_type`에도 없고,
@@ -24,12 +24,17 @@ Agent 출력은 판단 근거를 연결하는 `evidence_refs`도 함께 반환�
 `title`·`blocker_code`는 없다 — 물리 컬럼에 없어서 뺐다.
 Blocker 해소(`RESOLVED`) 판정은 Supervisor가 하지 않는다. BE가 다음 판단에서 처리한다.
 
+일반 절차가 미완료라는 이유만으로 Blocker 생성 금지. 현재 근거와 절차 제약을 통과하고
+해당 행동을 막는 조건이 없으면 `blocker=null` 반환. 원상복구 미확인·지원조건 확인의
+Blocker 유지. `null`은 전체 Case 완료나 모든 정보의 확인을 의미하지 않으며, 판단·행동 근거와
+필수 Review 유지. BE 저장 시 새 Blocker 행 미생성, 해당 판단의 `priority_blocker_id=NULL` 처리.
+
 [`blocker_candidates.py`](../../backend/app/agent/blocker_candidates.py)가 확인된 Case 값과
 현재 절차·지원 분석에서 최대 3개 후보를 만든다. 기존 업무 순서와 절차 제약을 적용하고,
 각 후보에 허용된 행동 코드·대상을 연결한다. Supervisor는 후보와 행동을 선택하며,
 선택한 후보의 상태 설명·확인 질문을 코드에서 채운다. 따라서 미확인을 실제 미결정으로
 바꾸거나 이미 확인한 항목을 다시 묻는 표현을 모델이 추가하지 않는다.
-Review도 같은 후보·상태 문장을 재검증한다. 후보가 없으면 추가 확인 질문을 반환한다.
+Review도 후보의 Blocker 유무·상태 문장 재검증. 후보가 없으면 추가 확인 질문 반환.
 
 절차 finding이 `RELEVANT`가 아니면 후보에서 제외한다. 단 임대인 확인이 먼저인 상황의
 `CONFIRM_RESTORATION_SCOPE`만은 `POSSIBLY_RELEVANT`도 남긴다 — 범위가 불확실하다는 것이
