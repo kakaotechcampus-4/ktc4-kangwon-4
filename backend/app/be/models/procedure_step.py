@@ -36,7 +36,6 @@ class ProcedureStep(TimestampMixin, table=True):
     )
 
     case_procedure_steps: list["CaseProcedureStep"] = Relationship(back_populates="procedure_step")
-    case_procedure_step_histories: list["CaseProcedureStepHistory"] = Relationship(back_populates="procedure_step")
 
 
 class CaseProcedureStep(TimestampMixin, table=True):
@@ -57,14 +56,16 @@ class CaseProcedureStep(TimestampMixin, table=True):
 
     case: "Case" = Relationship(back_populates="case_procedure_steps")
     procedure_step: "ProcedureStep" = Relationship(back_populates="case_procedure_steps")
+    histories: list["CaseProcedureStepHistory"] = Relationship(back_populates="case_procedure_step")
 
 
 class CaseProcedureStepHistory(CreatedAtMixin, table=True):
     __tablename__ = "case_procedure_step_history"
 
     id: int | None = Field(default=None, sa_column=Column(BigInteger, primary_key=True, autoincrement=True))
-    case_id: int = Field(sa_column=Column(BigInteger, ForeignKey("case.id"), nullable=False))
-    procedure_step_id: int = Field(sa_column=Column(BigInteger, ForeignKey("procedure_step.id"), nullable=False))
+    case_procedure_step_id: int = Field(
+        sa_column=Column(BigInteger, ForeignKey("case_procedure_step.id"), nullable=False)
+    )
     case_history_id: int | None = Field(
         default=None, sa_column=Column(BigInteger, ForeignKey("case_history.id"), nullable=True)
     )
@@ -76,8 +77,7 @@ class CaseProcedureStepHistory(CreatedAtMixin, table=True):
         sa_column=Column(Enum("NOT_STARTED", "IN_PROGRESS", "COMPLETED", name="new_step_status_enum"), nullable=False)
     )
 
-    case: "Case" = Relationship(back_populates="case_procedure_step_histories")
-    procedure_step: "ProcedureStep" = Relationship(back_populates="case_procedure_step_histories")
+    case_procedure_step: "CaseProcedureStep" = Relationship(back_populates="histories")
     case_history: "CaseHistory" = Relationship(back_populates="procedure_step_histories")
 
 

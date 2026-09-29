@@ -199,8 +199,8 @@ PROCEDURE_STEP ◄──┬── STEP_DEPENDENCY   (단계 간 순서 규칙)
 "그 상태가 어떻게 변해왔는지"를 기록합니다. PROGRESS는 현재 스냅샷, HISTORY는 변경 이력입니다.
 
 ```
-CASE ──1:N──► CASE_PROCEDURE_STEP           (현재 상태, 단계당 1 row)
-CASE ──1:N──► CASE_PROCEDURE_STEP_HISTORY   (상태 변경마다 새 row 누적)
+CASE ──1:N──► CASE_PROCEDURE_STEP                    (현재 상태, 단계당 1 row)
+CASE_PROCEDURE_STEP ──1:N──► CASE_PROCEDURE_STEP_HISTORY   (상태 변경마다 새 row 누적)
                         │
                         └── case_history_id로 "이 변화가 어떤 판단 때문에 일어났는지" 역추적 가능
 ```
@@ -223,13 +223,14 @@ CASE ──1:N──► CASE_PROCEDURE_STEP_HISTORY   (상태 변경마다 새 r
 
 ### CASE_PROCEDURE_STEP_HISTORY
 
-CASE_PROCEDURE_STEP 상태 변화 이력.
+CASE_PROCEDURE_STEP 상태 변화 이력. `EVIDENCE_LINEAGE`가 `EVIDENCE.id`만 참조하고 `case_id`를
+다시 갖지 않는 것과 같은 이유로, 여기서도 `case_id`/`procedure_step_id`를 따로 두지 않고
+변화 대상인 `CASE_PROCEDURE_STEP` row의 PK 하나만 참조한다.
 
 | 컬럼 | 타입 | 키 | 제약조건 | 예시 값 | 설명 |
 |---|---|---|---|---|---|
 | id | BIGINT | PK | NOT NULL, AUTO_INCREMENT | 1 | |
-| case_id | BIGINT | FK | NOT NULL | 1 | |
-| procedure_step_id | BIGINT | FK | NOT NULL | 1 | 상태가 바뀐 절차 하나 |
+| case_procedure_step_id | BIGINT | FK | NOT NULL | 1 | 상태가 바뀐 `CASE_PROCEDURE_STEP` row — `case_id`/`procedure_step_id`는 이 FK로 조인해서 얻는다 |
 | case_history_id | BIGINT | FK | NULLABLE | 5 | 이 변화를 유발한 케이스 이력 (nullable) |
 | previous_status | ENUM | | NOT NULL | `NOT_STARTED` | `NOT_STARTED` / `IN_PROGRESS` / `COMPLETED` (변경 전 상태) |
 | new_status | ENUM | | NOT NULL | `IN_PROGRESS` | `NOT_STARTED` / `IN_PROGRESS` / `COMPLETED` (변경 후 상태) |
