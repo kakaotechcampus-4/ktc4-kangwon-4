@@ -1,6 +1,6 @@
 from sqlmodel import Session, select
 
-from app.be.models.evidence import Evidence, EvidenceLineage
+from app.be.models.evidence import DecisionRecord, Evidence, EvidenceLineage
 
 
 def creation_form_evidence_id(case_id: int) -> str:
@@ -23,3 +23,9 @@ def create_evidence_lineage(session: Session, evidence_lineage: EvidenceLineage)
     session.add(evidence_lineage)
     session.flush()
     return evidence_lineage
+
+
+def create_decision_record(session: Session, decision_record: DecisionRecord) -> DecisionRecord:
+    session.add(decision_record)
+    session.flush()
+    return decision_record
