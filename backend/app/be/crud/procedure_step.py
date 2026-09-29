@@ -17,3 +17,7 @@ def create_case_procedure_step(session: Session, case_procedure_step: CaseProced
     session.add(case_procedure_step)
     session.flush()
     return case_procedure_step
+
+
+def get_case_procedure_steps_by_case_id(session: Session, case_id: int) -> list[CaseProcedureStep]:
+    return session.exec(select(CaseProcedureStep).where(CaseProcedureStep.case_id == case_id)).all()

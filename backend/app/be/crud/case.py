@@ -11,3 +11,7 @@ def create_case(session: Session, case: Case) -> Case:
 
 def get_case_by_member_id(session: Session, member_id: int) -> Case | None:
     return session.exec(select(Case).where(Case.member_id == member_id)).one_or_none()
+
+
+def get_case_by_id(session: Session, case_id: int) -> Case | None:
+    return session.exec(select(Case).where(Case.id == case_id)).one_or_none()
