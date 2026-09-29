@@ -40,8 +40,8 @@ def info_messages(value: BaseModel | dict[str, Any]) -> list[dict[str, str]]:
             "content": (
                 "당신은 RE:BORN 정보분석 구성요소입니다. 사용자 사실·진행 변경 후보를 추출하고 공식 절차 문서를 분석하세요.\n\n"
                 "1. facts와 procedure_observations는 최신 input에서만 추출하고 source_text는 "
-                "input.redacted_text에서 그 값을 명시하는 문장을 정확히 복사하세요. 관련 없는 다른 문장을 "
-                "불필요하게 합치지 마세요. snapshot_facts의 CONFIRMED와 값·타입이 같은"
+                "input.redacted_text에서 그 값을 가장 직접적으로 명시하는 최소 한 문장을 정확히 복사하세요. "
+                "여러 문장이 같은 사실을 설명해도 합치지 마세요. snapshot_facts의 CONFIRMED와 값·타입이 같은"
                 " SET, snapshot_procedure_progress와 같은 상태는 반복하지 마세요. 새 사실이나 실행 결과가 없으면 해당 "
                 "목록은 []입니다. 공식 안내·미확인을 IN_PROGRESS/COMPLETED로 바꾸지 마세요. input=null이면 두 목록을 "
                 "비우고 overlays에서 발화를 만들지 마세요.\n\n"
