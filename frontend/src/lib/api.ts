@@ -9,7 +9,10 @@ import { getAccessToken, logOut } from './auth'
  * 응답을 `Response` 그대로 돌려준다. 토큰이 본문이 아니라 **헤더**로 오기 때문에
  * 여기서 JSON으로 바꿔버리면 로그인이 헤더를 읽을 방법이 없어진다.
  */
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '/api'
+// `??` 가 아니라 `||` 다. `.env` 에 `VITE_API_BASE_URL=` 처럼 이름만 두면 Vite 가
+// `undefined` 가 아니라 빈 문자열로 읽는데, 그러면 요청이 FE 자기 주소로 나가
+// 화면 경로에 부딪힌다 — 오류 없이 아무 일도 일어나지 않는 것처럼 보인다
+const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
 
 /** 서버가 2xx가 아닌 것을 돌려줬을 때 */
 export class ApiError extends Error {

@@ -49,13 +49,45 @@ describe('request', () => {
     expect(calledWith(fetchMock).headers.has('Access-Token')).toBe(false)
   })
 
-  /** 환경변수를 두지 않으면 같은 출처로 보낸다. 배포 화면이 HTTPS라 프록시를 거쳐야 한다 */
-  it('기본 주소는 /api 다', async () => {
+  /**
+   * 주소를 정하는 규칙만 따로 본다.
+   *
+   * 이 값은 모듈을 읽어 들일 때 한 번 계산되고, 개발자마다 `.env.local` 이 달라서
+   * 그냥 두면 "내 컴퓨터에서만 깨지는" 테스트가 된다. 환경을 직접 세우고 다시 읽는다.
+   */
+  async function loadApiWith(base: string | undefined) {
+    vi.stubEnv('VITE_API_BASE_URL', base as string)
+    vi.resetModules()
+    return import('./api')
+  }
+
+  async function urlFor(base: string | undefined) {
+    const { request: freshRequest } = await loadApiWith(base)
     const fetchMock = mockFetch(jsonResponse({}))
 
-    await request('/cases')
+    await freshRequest('/cases')
 
-    expect(calledWith(fetchMock).url).toBe('/api/cases')
+    vi.unstubAllEnvs()
+    vi.resetModules()
+    return calledWith(fetchMock).url
+  }
+
+  /** 배포 화면이 HTTPS 라 프록시를 거쳐야 한다. 그때는 같은 출처로 보낸다 */
+  it('환경변수가 없으면 /api 로 보낸다', async () => {
+    expect(await urlFor(undefined)).toBe('/api/cases')
+  })
+
+  /**
+   * `.env.example` 을 그대로 복사하면 이름만 있고 값이 없는 상태가 되는데, Vite 는 그걸
+   * `undefined` 가 아니라 빈 문자열로 읽는다. 빈 문자열이 통과하면 요청이 FE 자기 주소로
+   * 나가 화면 경로에 부딪히고, 오류 없이 아무 일도 없는 것처럼 보인다.
+   */
+  it('환경변수가 비어 있어도 /api 로 보낸다', async () => {
+    expect(await urlFor('')).toBe('/api/cases')
+  })
+
+  it('환경변수가 있으면 그 주소로 보낸다', async () => {
+    expect(await urlFor('http://localhost:8000')).toBe('http://localhost:8000/cases')
   })
 
   /**
