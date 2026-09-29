@@ -77,9 +77,12 @@ export function CaseCreatePage() {
 
     request('/cases', { method: 'POST', body })
       .then(() => {
+        if (!alive.current) return
         navigate('/case', { replace: true })
       })
       .catch((error: unknown) => {
+        // 떠난 화면에서 이동을 실행하면, 사용자가 보고 있던 다른 화면에서 끌려 나온다
+        if (!alive.current) return
         if (error instanceof UnauthorizedError) return navigate('/login', { replace: true })
 
         /**
@@ -90,7 +93,6 @@ export function CaseCreatePage() {
           return navigate('/case', { replace: true })
         }
 
-        if (!alive.current) return
         setSubmit('FAILED')
       })
   }

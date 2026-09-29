@@ -24,9 +24,13 @@ export function StartPage() {
   const { search } = useLocation()
   const query = useCase()
 
-  if (query.status === 'LOADING') return null
-  // 서버를 못 불렀으면 Case 가 있는지 알 수 없다. 그때는 이 화면을 그대로 두고,
-  // 만들기를 누르면 서버가 409로 막아 현재 Case 로 돌려보낸다
+  /**
+   * 답을 기다리는 동안에도 화면을 그린다. 내용이 고정이라 기다릴 이유가 없고,
+   * 진입 분기도 빈 화면이라 여기서까지 비우면 흰 화면이 두 번 이어진다.
+   *
+   * 서버를 못 불렀을 때도 그대로 둔다. Case 가 있는지 알 수 없다고 화면을 막으면
+   * 처음 온 사장님이 아무것도 못 한다 — 만들기를 누르면 서버가 409로 막아 돌려보낸다.
+   */
   if (query.status === 'READY') return <Navigate to={{ pathname: '/case', search }} replace />
 
   return (

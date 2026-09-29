@@ -79,10 +79,16 @@ describe('toFacts', () => {
    * 서버가 우리가 모르는 값을 보낼 수 있다 — 선택지가 넷으로 늘어나는 경우가 그렇다.
    * 그때 문구를 지어내면 사장님이 틀린 정보를 읽는다. 미확인으로 두는 편이 정직하다.
    */
-  it('모르는 값이 오면 지어내지 않고 미확인으로 둔다', () => {
-    const unknownValue = { ...SERVER_CASE, lease_status: 'SUBLEASE' } as unknown as CaseResponse
+  it.each([
+    ['lease_status', 'SUBLEASE'],
+    ['restoration_scope', 'IN_PROGRESS'],
+    ['demolition_required', 'MAYBE'],
+  ])('%s 에 모르는 값이 오면 지어내지 않고 미확인으로 둔다', (field, value) => {
+    const unknownValue = { ...SERVER_CASE, [field]: value } as unknown as CaseResponse
+    const fact = factFor(unknownValue, field === 'lease_status' ? 'lease_status' : field)
 
-    expect(factFor(unknownValue, 'lease_status').status).toBe('UNKNOWN')
+    expect(fact.status).toBe('UNKNOWN')
+    expect(fact.value).toBeUndefined()
   })
 
   /** 진행 단계는 사용자가 답할 수 있는 것이 아니라 할 일 목록에 섞이면 안 된다 */
@@ -136,6 +142,15 @@ describe('toCaseCreateRequest', () => {
     expect(toCaseCreateRequest({ ...FILLED_DRAFT, businessType: '  카페  ' })).toMatchObject({
       business_type: '카페',
     })
+  })
+
+  /**
+   * `Number()` 가 `NaN` 을 내면 JSON 으로 바뀌며 `null` 이 된다. 잘못 적은 값이 조용히
+   * "모른다"로 저장되는데, 사장님은 자기가 적은 숫자가 사라진 것을 모른다.
+   */
+  it('직원 수가 숫자가 아니면 보내지 않는다', () => {
+    expect(toCaseCreateRequest({ ...FILLED_DRAFT, employeeCount: '두 명' })).toBeNull()
+    expect(toCaseCreateRequest({ ...FILLED_DRAFT, employeeCount: '1.5' })).toBeNull()
   })
 
   /** 폼이 이미 막고 있지만, 보내는 쪽에서 한 번 더 걸러야 잘못된 요청이 서버까지 안 간다 */

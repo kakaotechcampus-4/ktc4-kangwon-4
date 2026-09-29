@@ -34,9 +34,13 @@ const DEMOLITION_LABEL: Record<DemolitionRequired, string | null> = {
 /**
  * 값이 없으면 미확인으로 둔다. 빈 문자열로 채우거나 목록에서 빼지 않는다 —
  * 모르는 것은 모른다고 보여주는 것이 이 제품의 약속이다.
+ *
+ * `undefined`까지 받는 것은 표에서 못 찾은 경우 때문이다. 서버가 우리가 모르는 값을
+ * 보내면 조회 결과가 `undefined`인데, 그것을 확인된 값으로 취급하면 화면에 빈 줄이
+ * "확인됨"으로 뜨고 "확인 N · 미확인 M" 숫자까지 틀어진다.
  */
-function toFact(key: string, label: string, value: string | null): Fact {
-  if (value === null) return { key, label, status: 'UNKNOWN' }
+function toFact(key: string, label: string, value: string | null | undefined): Fact {
+  if (value === null || value === undefined) return { key, label, status: 'UNKNOWN' }
   return { key, label, value, status: 'CONFIRMED' }
 }
 
@@ -97,10 +101,15 @@ export function toCaseCreateRequest(draft: CaseDraft): CaseCreateRequest | null 
   if (draft.franchiseStatus === null) return null
   if (draft.leaseStatus === null) return null
 
+  // 비운 것은 "모른다"라 그대로 보내지만, 숫자가 아닌 값은 보내지 않는다.
+  // `Number()`가 `NaN`을 내면 JSON으로 바뀌며 `null`이 되어, 잘못 적은 값이 "모른다"로 저장된다
+  const parsedEmployeeCount = employeeCount.length === 0 ? null : Number(employeeCount)
+  if (parsedEmployeeCount !== null && !Number.isInteger(parsedEmployeeCount)) return null
+
   return {
     business_type: businessType,
     franchise_status: draft.franchiseStatus,
-    employee_count: employeeCount.length === 0 ? null : Number(employeeCount),
+    employee_count: parsedEmployeeCount,
     lease_status: draft.leaseStatus,
     planned_closure_date: draft.plannedClosureDate || null,
   }

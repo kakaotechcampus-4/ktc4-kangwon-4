@@ -54,6 +54,19 @@ describe('StartPage', () => {
   })
 
   /**
+   * 진입 분기가 이미 빈 화면이다. 여기서까지 비우면 흰 화면이 두 번 이어진다.
+   * 내용이 고정이라 답을 기다릴 이유가 없다.
+   */
+  it('답을 기다리는 동안에도 화면을 그린다', () => {
+    saveTokens('access-1', 'refresh-1')
+    // 응답을 주지 않는다 — 계속 기다리는 상태
+    vi.stubGlobal('fetch', vi.fn().mockReturnValue(new Promise(() => {})))
+    renderAt('/start')
+
+    expect(screen.getByRole('link', { name: '시작하기' })).toBeInTheDocument()
+  })
+
+  /**
    * 서버를 못 불렀으면 Case가 있는지 알 수 없다. 화면을 막아버리면 처음 온 사장님이
    * 아무것도 못 하므로, 그대로 두고 만들기를 누르면 서버가 409로 막게 한다.
    */

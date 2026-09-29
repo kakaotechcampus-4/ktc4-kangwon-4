@@ -13,18 +13,20 @@ import { defineConfig } from 'vitest/config'
  */
 const API_SERVER = 'http://52.79.222.103'
 
+/** 개발 서버(`dev`)와 빌드 확인용 서버(`preview`)가 같은 규칙을 써야 한다 */
+const API_PROXY = {
+  '/api': {
+    target: API_SERVER,
+    changeOrigin: true,
+    rewrite: (path: string) => path.replace(/^\/api/, ''),
+  },
+}
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  server: {
-    proxy: {
-      '/api': {
-        target: API_SERVER,
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, ''),
-      },
-    },
-  },
+  server: { proxy: API_PROXY },
+  preview: { proxy: API_PROXY },
   test: {
     /** 화면을 렌더해 역할·상태로 찾는 테스트라 DOM이 필요하다 */
     environment: 'jsdom',
