@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
@@ -201,9 +202,13 @@ class AgentRuntime:
             return outcome
 
     async def aclose(self) -> None:
-        for client in self._clients:
-            await client.aclose()
-        await self._procedure_tool.aclose()
+        # Cleanup must attempt every transport and must not discard a reviewed
+        # outcome because one provider's connection failed to close.
+        await asyncio.gather(
+            *(client.aclose() for client in self._clients),
+            self._procedure_tool.aclose(),
+            return_exceptions=True,
+        )
 
     def flush(self) -> None:
         flush = getattr(self._trace_sink, "flush", None)
@@ -273,8 +278,9 @@ async def build_runtime(
     except Exception:
         # The caller never received the runtime, so nothing else can close
         # these transports.
-        for opened in clients:
-            await opened.aclose()
+        await asyncio.gather(
+            *(opened.aclose() for opened in clients), return_exceptions=True
+        )
         raise
 
     def cache_context() -> Mapping[str, object] | None:

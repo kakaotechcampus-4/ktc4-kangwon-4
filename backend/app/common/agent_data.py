@@ -12,6 +12,7 @@ from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, tzinfo
+from uuid import UUID
 
 from app.agent.procedure_tool.store import (
     ReviewedProcedureRecord,
@@ -30,10 +31,12 @@ from app.be.models.procedure_step import (
     StepDependency,
     StepEligibility,
 )
+from app.be.models.support_item import SupportItem
 
 __all__ = [
     "InMemoryReviewedProcedureStore",
     "build_known_procedure_steps",
+    "build_reviewed_support_catalog",
     "load_reviewed_procedure_store",
     "load_reviewed_support_catalog",
 ]
@@ -214,6 +217,53 @@ def load_reviewed_support_catalog(
         else payload
     )
     return ReviewedSupportCatalog.model_validate(source).model_copy(deep=True)
+
+
+def build_reviewed_support_catalog(
+    support_items: Sequence[SupportItem],
+    reviewed_catalog: ReviewedSupportCatalog | Mapping[str, object],
+) -> ReviewedSupportCatalog:
+    """Bind reviewed programs to persisted BE IDs by their exact Wiki UUID."""
+
+    catalog = load_reviewed_support_catalog(reviewed_catalog)
+    items_by_uuid: dict[UUID, tuple[int, SupportItem]] = {}
+    seen_ids: set[int] = set()
+    for item in support_items:
+        item_id = _persisted_id(item.id, "support_item.id")
+        if item_id in seen_ids:
+            raise ValueError(f"duplicate support_item.id: {item_id}")
+        seen_ids.add(item_id)
+        try:
+            wiki_uuid = UUID(item.uuid)
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise ValueError(
+                f"support_item {item_id} has an invalid Wiki UUID"
+            ) from exc
+        if wiki_uuid in items_by_uuid:
+            raise ValueError(f"duplicate support_item.uuid: {wiki_uuid}")
+        items_by_uuid[wiki_uuid] = (item_id, item)
+
+    payload = catalog.model_dump(mode="python")
+    for program, program_payload in zip(catalog.programs, payload["programs"]):
+        wiki_uuid = program.support_program.wiki_uuid
+        matched = items_by_uuid.get(wiki_uuid)
+        if matched is None:
+            raise ValueError(f"reviewed support program has no BE row: {wiki_uuid}")
+        item_id, item = matched
+        if item.program_name != program.program_name:
+            raise ValueError(
+                f"support program name mismatch for Wiki UUID {wiki_uuid}"
+            )
+        if (
+            item.catalog_version is not None
+            and item.catalog_version != catalog.catalog_version
+        ):
+            raise ValueError(
+                f"support catalog version mismatch for Wiki UUID {wiki_uuid}"
+            )
+        program_payload["support_program"]["support_program_id"] = item_id
+
+    return ReviewedSupportCatalog.model_validate(payload)
 
 
 def _persisted_id(value: int | None, field_name: str) -> int:
