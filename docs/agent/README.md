@@ -82,6 +82,10 @@ BE가 조회한 `ProcedureStep`·`StepDependency`·`StepEligibility` 행을 변�
 
 ### DB 칸에 맞추기
 
+원상복구 범위·철거 필요 여부의 미확인은 Case의 후속 진척을 막는 조건이며, 이를 해소할
+임대인 확인 행동은 실행 가능하다. 확인 행동을 할 수 있다는 이유만으로 이 Blocker를 제거하지 않는다.
+반면 요건이 확인된 일반 신고 절차가 아직 미완료라는 이유만으로 Blocker를 만들지는 않는다.
+
 Agent가 만드는 값은 BE가 그대로 DB에 넣는다. 그래서 칸의 길이·형식을
 [`schemas.py`](../../backend/app/agent/schemas.py)의 타입에 그대로 박아두었다.
 넘치는 값은 MySQL이 자르기 전에 Agent에서 먼저 막히고, 실행은 재시도 경로를 탄다.
