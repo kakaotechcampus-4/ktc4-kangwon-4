@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Column, DateTime, Enum, ForeignKey, String
+from sqlalchemy import JSON, BigInteger, Column, DateTime, Enum, ForeignKey, String
 from sqlmodel import Field, Relationship
 
 from app.be.models.mixins import TimestampMixin
@@ -25,6 +25,9 @@ class Blocker(TimestampMixin, table=True):
     )
 
     description: str = Field(max_length=500)
+    blocker_evidence_refs: list | None = Field(
+        default=None, sa_column=Column(JSON, nullable=True), description="Blocker 판단의 근거 evidence_id 목록"
+    )
     status: str = Field(
         default="ACTIVE",
         sa_column=Column(Enum("ACTIVE", "RESOLVED", name="blocker_status_enum"), server_default="ACTIVE"),

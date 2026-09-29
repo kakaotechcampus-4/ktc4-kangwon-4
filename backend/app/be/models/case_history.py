@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, Column, Enum, ForeignKey, String, Text
+from sqlalchemy import JSON, BigInteger, Column, Enum, ForeignKey, String, Text
 from sqlmodel import Field, Relationship
 
 from app.be.models.mixins import CreatedAtMixin
@@ -16,6 +16,19 @@ class CaseHistory(CreatedAtMixin, table=True):
     )
     next_action: str | None = Field(
         default=None, sa_column=Column(String(500), nullable=True), description="nullable, 판단이 발생한 경우에만"
+    )
+    next_action_reason: str | None = Field(
+        default=None, sa_column=Column(String(500), nullable=True), description="다음 행동을 해야 하는 이유"
+    )
+    next_action_questions_to_ask: list | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+        description="사용자가 임대인·기관에 물어볼 질문 목록. 다음 행동이 없으면 NULL",
+    )
+    next_action_evidence_refs: list | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+        description="다음 행동의 근거 evidence_id 목록. 다음 행동이 없으면 NULL",
     )
     priority_blocker_id: int | None = Field(
         default=None, sa_column=Column(BigInteger, ForeignKey("blocker.id", use_alter=True, name="fk_case_history_priority_blocker"), nullable=True)
