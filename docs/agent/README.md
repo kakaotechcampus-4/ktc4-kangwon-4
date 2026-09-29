@@ -161,3 +161,23 @@ digest로 비교한다. 근거 ID는 실행마다 새로 발급되므로 비교�
 이 기록으로 말할 수 없는 것: 네 입력 모두 원상복구·철거가 미확인이라 규칙 적용 후 후보가
 하나뿐이었다. 여러 후보 사이의 선택이 일관적인지는 증명하지 않는다.
 모델은 표본 수준의 재현성을 보장하지 않으므로 이 결과는 측정이지 보장이 아니다.
+
+### 2026-09-29 로컬 BE 연결 검증
+
+AI 코드 `a7c78d8`, BE 브랜치 `d5e050a` 기준. 카카오 로그인·지원사업 정상 동작은 검증 범위에서 제외.
+합성 Case snapshot과 격리 MySQL의 절차 행을 새 `run_case_planning` 함수에 전달해 실제 LLM 호출.
+최종 실행 16회 모두 `gpt-5.6-sol`·`xhigh`, HTTP 200. 모의 LLM 응답·판단 재사용 없음.
+
+| 흐름 | 최종 실행 결과 |
+|---|---|
+| 최초 판단 | 원상복구 확인 Blocker·Next Action 생성, Review PASS |
+| Blocker 없는 상태 | `blocker=null`과 신고 요건 확인 행동 생성, Review PASS |
+| 결과 입력 | 원상복구·철거 불필요 변경 후보 3개와 새 행동 생성, Review PASS |
+| 확정값과 충돌 | `CONFLICT` 반환, 자동 변경 없이 확인 후보 보존 |
+| 충돌 확인 | `CONFIRMED_CONFLICT` 출처의 변경 후보·새 행동 생성, Review PASS |
+| 공식 근거 부족 | `NEEDS_MORE_INFO`·확인 질문 반환, Next Action 없음, Review PASS |
+
+실제 HTTP `POST /cases`·`GET /cases`는 200, 저장된 Case의 재조회 일치, 중복 생성은 409 확인.
+**서버 → AI → 판단 저장 → 재조회 연결은 미완료.** 현재 BE에는 입력 근거·snapshot 생성,
+Agent 호출, 판단 저장 함수가 없으며 POST/GET은 Case 열만 반환. HTTP 호출 뒤 입력 이력·근거·판단 기록은
+각각 0건. 위 AI 함수 직접 호출 검증은 서버 전체 연결의 통과 증거가 아님.
