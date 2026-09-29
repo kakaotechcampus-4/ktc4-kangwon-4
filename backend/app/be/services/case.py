@@ -1,9 +1,16 @@
+import json
+from datetime import datetime
+
 from fastapi import HTTPException
 from sqlmodel import Session
 
 from app.be.crud import case as case_crud
+from app.be.crud import case_history as case_history_crud
+from app.be.crud import evidence as evidence_crud
 from app.be.crud import procedure_step as procedure_step_crud
 from app.be.models.case import Case
+from app.be.models.case_history import CaseHistory
+from app.be.models.evidence import Evidence
 from app.be.models.procedure_step import CaseProcedureStep, ProcedureStep
 from app.be.schemas.case import CaseCreateRequest
 
@@ -22,9 +29,35 @@ def create_case(session: Session, member_id: int, case_request: CaseCreateReques
     )
     case = case_crud.create_case(session, case)
     _fill_temp_case_procedure_steps(session, case.id)
+    _create_case_creation_evidence(session, case, case_request)
     session.commit()
     session.refresh(case)
     return case
+
+
+def _create_case_creation_evidence(session: Session, case: Case, case_request: CaseCreateRequest) -> None:
+    # case 생성 폼 입력값(business_type/franchise_status/lease_status)을 AI 쪽에서 CONFIRMED로
+    # 인정하려면 evidence_refs가 있어야 한다(CaseFact.validate_fact_state). 세 필드가 이 evidence
+    # 하나를 같이 참조해도 된다고 AI팀 확인함.
+    history = case_history_crud.create_case_history(
+        session,
+        CaseHistory(
+            case_id=case.id,
+            raw_input=json.dumps(case_request.model_dump(mode="json"), ensure_ascii=False),
+            source="CASE_CREATED",
+        ),
+    )
+    evidence_crud.create_evidence(
+        session,
+        Evidence(
+            evidence_id=f"case_{case.id}_creation_form",
+            case_id=case.id,
+            source_type="USER_INPUT",
+            source_ref=f"case_history:{history.id}",
+            retrieved_at=datetime.now(),
+            freshness_status="CURRENT",
+        ),
+    )
 
 
 def _fill_temp_case_procedure_steps(session: Session, case_id: int) -> None:
