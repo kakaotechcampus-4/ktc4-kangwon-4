@@ -74,3 +74,16 @@ export function logInWithMock(): void {
 export function isMockSession(): boolean {
   return accessToken.read() === MOCK_TOKEN
 }
+
+/**
+ * 이 화면이 서버 대신 Mock 을 봐야 하는지.
+ *
+ * `?mock=` 은 리뷰어가 링크 하나로 예외 화면을 보는 길이고, 가짜 세션은 Preview 에서
+ * 진짜 카카오 로그인을 할 수 없어 만들어 둔 우회로다.
+ *
+ * 이 판단이 화면마다 흩어지면 한 곳이 달라진다. 실제로 Case 생성 화면만 `?mock=` 을
+ * 빠뜨려서, Mock 링크를 따라가던 사람이 서버에 진짜 Case 를 만들고 있었다.
+ */
+export function usesMockData(search: string): boolean {
+  return readMockKey(search) !== '' || isMockSession()
+}

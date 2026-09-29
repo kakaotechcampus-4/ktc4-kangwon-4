@@ -13,14 +13,14 @@ function mockPost(status: number) {
   return fetchMock
 }
 
-function renderPage() {
+function renderPage(path = '/cases/new') {
   const router = createMemoryRouter(
     [
       { path: '/cases/new', element: <CaseCreatePage /> },
       { path: '/case', element: <p>현재 Case</p> },
       { path: '/login', element: <p>로그인 화면</p> },
     ],
-    { initialEntries: ['/cases/new'] },
+    { initialEntries: [path] },
   )
 
   render(<RouterProvider router={router} />)
@@ -111,6 +111,22 @@ describe('CaseCreatePage', () => {
 
     expect(await screen.findByText('저장하지 못했습니다.')).toBeInTheDocument()
     expect(screen.getByLabelText('어떤 가게인가요?')).toHaveValue('카페')
+  })
+
+  /**
+   * 다른 화면이 전부 Mock 인데 여기서만 진짜 Case 를 만들면, 회원당 하나라 지울 수도 없는
+   * Case 가 서버에 남는다. Mock 링크를 따라가던 개발자가 실수로 밟기 쉬운 길이다.
+   */
+  it('?mock= 을 따라온 경우에도 서버를 부르지 않는다', async () => {
+    saveTokens('access-1', 'refresh-1')
+    const fetchMock = mockPost(200)
+    renderPage('/cases/new?mock=no-case')
+
+    fillRequired()
+    fireEvent.click(submitButton())
+
+    expect(await screen.findByText('현재 Case')).toBeInTheDocument()
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   /** Preview에서 가짜 로그인으로 화면을 보는 리뷰어다. 서버를 부르면 401로 막힌다 */

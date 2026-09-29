@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router'
 
 import { toCurrentCaseView } from '../adapters/case'
 import { request, UnauthorizedError } from '../lib/api'
-import { isMockSession } from '../lib/auth'
+import { usesMockData } from '../lib/auth'
 import { readMockKey } from '../lib/mockSwitch'
 import { insufficientCase, noBlockerCase, normalCase } from '../mocks/currentCase'
 import type { CasesEnvelope } from '../types/api'
@@ -51,14 +51,8 @@ export function useCase(): CaseQuery {
 
   const mockKey = readMockKey(search)
 
-  /**
-   * Mock 을 쓰는 두 경우.
-   *
-   * `?mock=` 은 리뷰어가 링크 하나로 예외 화면을 보는 길이고, 가짜 세션은 Preview 에서
-   * 진짜 카카오 로그인을 할 수 없어 만들어 둔 우회로다. 가짜 토큰으로 서버를 부르면
-   * 곧바로 401 이라, 그 경우에는 아예 부르지 않는다.
-   */
-  const usesMock = mockKey !== '' || isMockSession()
+  // 가짜 토큰으로 서버를 부르면 곧바로 401 이라, 그 경우에는 아예 부르지 않는다
+  const usesMock = usesMockData(search)
 
   /** 응답을 기다리는 사이 화면을 떠날 수 있다. 떠난 화면의 상태를 바꾸지 않는다 */
   const alive = useRef(true)

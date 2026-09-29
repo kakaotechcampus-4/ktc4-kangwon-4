@@ -151,6 +151,7 @@ describe('toCaseCreateRequest', () => {
   it('직원 수가 숫자가 아니면 보내지 않는다', () => {
     expect(toCaseCreateRequest({ ...FILLED_DRAFT, employeeCount: '두 명' })).toBeNull()
     expect(toCaseCreateRequest({ ...FILLED_DRAFT, employeeCount: '1.5' })).toBeNull()
+    expect(toCaseCreateRequest({ ...FILLED_DRAFT, employeeCount: '-3' })).toBeNull()
   })
 
   /** 폼이 이미 막고 있지만, 보내는 쪽에서 한 번 더 걸러야 잘못된 요청이 서버까지 안 간다 */

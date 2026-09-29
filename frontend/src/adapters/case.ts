@@ -104,7 +104,8 @@ export function toCaseCreateRequest(draft: CaseDraft): CaseCreateRequest | null 
   // 비운 것은 "모른다"라 그대로 보내지만, 숫자가 아닌 값은 보내지 않는다.
   // `Number()`가 `NaN`을 내면 JSON으로 바뀌며 `null`이 되어, 잘못 적은 값이 "모른다"로 저장된다
   const parsedEmployeeCount = employeeCount.length === 0 ? null : Number(employeeCount)
-  if (parsedEmployeeCount !== null && !Number.isInteger(parsedEmployeeCount)) return null
+  if (parsedEmployeeCount !== null && (!Number.isInteger(parsedEmployeeCount) || parsedEmployeeCount < 0))
+    return null
 
   return {
     business_type: businessType,

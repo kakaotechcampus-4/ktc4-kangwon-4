@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router'
+import { useLocation, useNavigate } from 'react-router'
 
 import { toCaseCreateRequest } from '../adapters/case'
 import { AppShell } from '../components/AppShell'
@@ -7,7 +7,7 @@ import { CaseCreateForm } from '../components/CaseCreateForm'
 import { NoticeCard } from '../components/NoticeCard'
 import { PendingCard } from '../components/PendingCard'
 import { ApiError, request, UnauthorizedError } from '../lib/api'
-import { isMockSession } from '../lib/auth'
+import { usesMockData } from '../lib/auth'
 import type { CaseDraft } from '../types/view'
 
 const EMPTY_DRAFT: CaseDraft = {
@@ -44,6 +44,7 @@ type SubmitState = 'IDLE' | 'PENDING' | 'FAILED'
  */
 export function CaseCreatePage() {
   const navigate = useNavigate()
+  const { search } = useLocation()
   const [draft, setDraft] = useState<CaseDraft>(EMPTY_DRAFT)
   const [submit, setSubmit] = useState<SubmitState>('IDLE')
 
@@ -69,8 +70,12 @@ export function CaseCreatePage() {
 
     setSubmit('PENDING')
 
-    // 가짜 세션은 서버에 없는 사용자라 401이 온다. Preview에서 화면만 보려는 경우다
-    if (isMockSession()) {
+    /**
+     * 가짜 세션은 서버에 없는 사용자라 401이 온다. `?mock=` 을 따라온 경우도 마찬가지로
+     * 서버를 부르지 않는다 — 다른 화면이 전부 Mock 인데 여기서만 진짜 Case 를 만들면,
+     * 회원당 하나라 지울 수도 없는 Case 가 남는다.
+     */
+    if (usesMockData(search)) {
       navigate('/case', { replace: true })
       return
     }
