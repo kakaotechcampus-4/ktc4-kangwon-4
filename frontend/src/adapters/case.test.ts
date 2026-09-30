@@ -4,23 +4,19 @@ import type { CaseResponse } from '../types/api'
 import type { CaseDraft } from '../types/view'
 import { toCaseCreateRequest, toCurrentCaseView, toFacts } from './case'
 
-/** 서버가 주는 Case 한 건. 필요한 칸만 바꿔 가며 쓴다 */
+/** `GET /cases` 가 주는 Case 한 건. 필요한 칸만 바꿔 가며 쓴다 */
 const SERVER_CASE: CaseResponse = {
   id: 1,
   member_id: 42,
   business_type: '카페',
   franchise_status: false,
   employee_count: 2,
-  case_status: 'IN_PROGRESS',
   lease_status: 'LEASED_PAID',
   restoration_status: 'UNKNOWN',
   restoration_scope: 'UNKNOWN',
   restoration_scope_detail: null,
   demolition_required: 'UNKNOWN',
   planned_closure_date: '2026-12-31',
-  completed_at: null,
-  created_at: '2026-09-20T10:00:00',
-  updated_at: '2026-09-21T15:30:00',
 }
 
 function factFor(serverCase: CaseResponse, key: string) {

@@ -39,14 +39,17 @@ export interface CaseCreateRequest {
   planned_closure_date: string | null
 }
 
-/** Case 한 건. `POST /cases` 응답과 `GET /cases` 안에 담겨 온다 */
-export interface CaseResponse {
+/**
+ * Case 를 이루는 값들. 두 응답이 공통으로 담는 부분이다.
+ *
+ * 화면이 실제로 읽는 것은 여기까지다 — `adapters/case.ts` 가 이 모양만 보면 된다.
+ */
+interface CaseFields {
   id: number
   member_id: number
   business_type: string
   franchise_status: boolean
   employee_count: number | null
-  case_status: CaseStatus
   lease_status: LeaseStatus
   restoration_status: RestorationStatus
   restoration_scope: RestorationScope
@@ -54,6 +57,25 @@ export interface CaseResponse {
   demolition_required: DemolitionRequired
   /** `YYYY-MM-DD` */
   planned_closure_date: string | null
+}
+
+/**
+ * `GET /cases` 안에 담겨 오는 Case.
+ *
+ * 서버가 조회용과 생성용 응답을 나눴다. 조회 쪽에는 진행 상태와 시각이 빠져 있다.
+ * 하나로 합쳐두면 실제로는 안 오는 필드를 있는 것처럼 적게 되고, 그 필드를 쓰는
+ * 코드가 생기면 `undefined` 를 값으로 다루게 된다.
+ */
+export type CaseResponse = CaseFields
+
+/**
+ * `POST /cases` 응답. 조회보다 네 개가 더 온다.
+ *
+ * 지금은 생성 직후 `/case` 로 옮겨 가며 다시 조회하므로 FE 가 읽는 값이 없다.
+ * 그래도 모양은 적어둔다 — 서버가 무엇을 주는지가 이 파일의 일이다.
+ */
+export interface CaseCreateResponse extends CaseFields {
+  case_status: CaseStatus
   completed_at: string | null
   created_at: string
   updated_at: string
@@ -71,3 +93,15 @@ export interface CaseResponse {
 export interface CasesEnvelope {
   case: CaseResponse | null
 }
+
+/**
+ * Agent 가 이 Case 를 어디까지 판단했는지.
+ *
+ * TODO(API): 아직 읽지 않는다. 서버가 판단을 실제로 채우기 시작하면(BE #47)
+ * `CasesEnvelope` 에 넣고 대기·재시도 화면을 여기에 맞춘다.
+ *   PENDING          판단 중 — 잠시 후 다시 물어봐야 한다
+ *   DONE             판단 완료
+ *   NEEDS_MORE_INFO  물어볼 질문이 따로 온다
+ *   FAILED           판단 실패 — 다시 시도 안내
+ */
+export type JudgmentStatus = 'PENDING' | 'DONE' | 'NEEDS_MORE_INFO' | 'FAILED'
