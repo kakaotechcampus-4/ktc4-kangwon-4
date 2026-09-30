@@ -11,6 +11,7 @@ from pathlib import Path
 from dotenv import dotenv_values
 
 from app.agent import prompts
+from app.agent.action_catalog import ProcedureBindings, resolve_procedure_bindings
 from app.agent.decision_cache import DecisionCache, fingerprint
 from app.agent.graph import AgentGraph
 from app.agent.info_agent import InfoAnalysisAgent
@@ -218,6 +219,7 @@ async def build_runtime(
     known_procedure_steps: Sequence[KnownProcedureStep],
     support_catalog: ReviewedSupportCatalog,
     procedure_store: ReviewedProcedureStore,
+    procedure_bindings: ProcedureBindings | None = None,
     support_wiki: SupportWikiStore | None = None,
     limits: RuntimeLimits | None = None,
     use_decision_cache: bool = True,
@@ -229,6 +231,7 @@ async def build_runtime(
     source must resolve existing support IDs; misses remain unavailable.
     """
 
+    bindings = resolve_procedure_bindings(known_procedure_steps, procedure_bindings)
     resolved = limits or RuntimeLimits(
         max_llm_calls_per_run=resolve_max_calls_per_run(),
         run_deadline_seconds=resolve_run_deadline_seconds(),
@@ -257,13 +260,13 @@ async def build_runtime(
         procedure_tool = StoredProcedureLookupTool(procedure_store)
         trace_sink = LangfuseTraceSink.from_env()
         graph = AgentGraph(
-            info_agent=InfoAnalysisAgent(info_client),
+            info_agent=InfoAnalysisAgent(info_client, procedure_bindings=bindings),
             procedure_tool=procedure_tool,
             support_agent=SupportAgent(
                 client, support_catalog, wiki_store=support_wiki
             ),
-            supervisor=SupervisorAgent(supervisor_client),
-            review_tool=ReviewTool(client),
+            supervisor=SupervisorAgent(supervisor_client, procedure_bindings=bindings),
+            review_tool=ReviewTool(client, procedure_bindings=bindings),
             known_procedure_steps=known_procedure_steps,
             # No budget or usage object is handed to the graph: both belong to
             # a run, and run_planning installs them per run.
@@ -296,6 +299,10 @@ async def build_runtime(
             "registry": [
                 step.model_dump(mode="json") for step in known_procedure_steps
             ],
+            "procedure_bindings": {
+                key: reference.model_dump(mode="json")
+                for key, reference in bindings.items()
+            },
             "catalog": support_catalog.model_dump(mode="json"),
             "store_version": procedure_store.snapshot_version,
             "procedure_records": [record.model_dump(mode="json") for record in records],

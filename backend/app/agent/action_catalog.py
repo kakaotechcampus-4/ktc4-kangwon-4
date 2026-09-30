@@ -2,6 +2,7 @@
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any
 
 from app.agent.claim_safety import REQUIRED_CLAIM_SOURCES, expand_evidence
@@ -9,7 +10,9 @@ from app.agent.schemas import (
     EvidenceRecord,
     FreshnessStatus,
     InfoAnalysisResult,
+    KnownProcedureStep,
     ProcedureRelevance,
+    ProcedureStepRef,
     ReviewSourceResult,
     SupportAnalysisResult,
     SupportMatchStatus,
@@ -19,8 +22,20 @@ from app.agent.schemas import (
 @dataclass(frozen=True)
 class ActionDefinition:
     description: str
-    procedure_step_code: str | None
+    procedure_logical_code: str | None
     confirmation_only: bool
+
+
+ProcedureBindings = Mapping[str, ProcedureStepRef]
+
+_PROCEDURE_LOGICAL_CODES = frozenset(
+    {
+        "CONFIRM_RESTORATION_SCOPE",
+        "FILE_TAX_BUSINESS_CLOSURE",
+        "FILE_FOOD_SERVICE_CLOSURE",
+        "REPORT_WORKPLACE_INSURANCE_CLOSURE",
+    }
+)
 
 
 ACTION_DEFINITIONS: dict[str, ActionDefinition] = {
@@ -67,6 +82,59 @@ ACTION_DEFINITIONS: dict[str, ActionDefinition] = {
 }
 
 
+def _step_key(step: ProcedureStepRef) -> tuple[int, str]:
+    return step.procedure_step_id, step.step_code
+
+
+def resolve_procedure_bindings(
+    known_steps: Sequence[KnownProcedureStep],
+    bindings: Mapping[str, ProcedureStepRef] | None = None,
+) -> ProcedureBindings:
+    """Validate and freeze caller-supplied logical-to-physical step bindings.
+
+    ``None`` keeps legacy callers working only when the registry already uses an
+    exact logical code. An explicit empty mapping stays empty. Names and aliases
+    are deliberately ignored because they cannot disambiguate similar closure
+    procedures.
+    """
+
+    known_by_ref = {
+        _step_key(item.procedure_step): item.procedure_step for item in known_steps
+    }
+    supplied = (
+        {
+            item.procedure_step.step_code: item.procedure_step
+            for item in known_steps
+            if item.procedure_step.step_code in _PROCEDURE_LOGICAL_CODES
+        }
+        if bindings is None
+        else dict(bindings)
+    )
+    unknown = set(supplied) - _PROCEDURE_LOGICAL_CODES
+    if unknown:
+        raise ValueError(
+            "unknown logical procedure binding codes: " + ", ".join(sorted(unknown))
+        )
+
+    resolved: dict[str, ProcedureStepRef] = {}
+    used_refs: set[tuple[int, str]] = set()
+    for logical_code, supplied_ref in supplied.items():
+        if not isinstance(supplied_ref, ProcedureStepRef):
+            raise TypeError("procedure binding values must be ProcedureStepRef")
+        ref_key = _step_key(supplied_ref)
+        if ref_key not in known_by_ref:
+            raise ValueError(
+                f"procedure binding {logical_code} references an unknown id+code"
+            )
+        if ref_key in used_refs:
+            raise ValueError("one procedure step cannot have multiple logical bindings")
+        used_refs.add(ref_key)
+        resolved[logical_code] = ProcedureStepRef.model_validate(
+            known_by_ref[ref_key].model_dump(mode="python")
+        )
+    return MappingProxyType(resolved)
+
+
 def _evidence(
     refs: Sequence[str],
     evidence_by_id: Mapping[str, EvidenceRecord],
@@ -87,12 +155,35 @@ def _evidence(
     )
 
 
+def _source_procedure_bindings(
+    sources: Sequence[ReviewSourceResult],
+    bindings: ProcedureBindings | None,
+) -> ProcedureBindings:
+    if bindings is not None:
+        return bindings
+    derived: dict[str, ProcedureStepRef] = {}
+    for source in sources:
+        if not isinstance(source.output, InfoAnalysisResult):
+            continue
+        for finding in source.output.procedure_findings:
+            ref = finding.procedure_step
+            if ref.step_code not in _PROCEDURE_LOGICAL_CODES:
+                continue
+            previous = derived.get(ref.step_code)
+            if previous is not None and _step_key(previous) != _step_key(ref):
+                raise ValueError("canonical procedure code resolves to multiple steps")
+            derived[ref.step_code] = ref
+    return MappingProxyType(derived)
+
+
 def build_action_candidates(
     sources: Sequence[ReviewSourceResult],
     evidence_by_id: Mapping[str, EvidenceRecord],
+    procedure_bindings: ProcedureBindings | None = None,
 ) -> list[dict[str, Any]]:
     """List grounded action kinds; existing plan guards check Case constraints."""
 
+    resolved_bindings = _source_procedure_bindings(sources, procedure_bindings)
     candidates: list[dict[str, Any]] = []
 
     def append(code: str, target: dict[str, Any]) -> None:
@@ -126,9 +217,14 @@ def build_action_candidates(
                     )
                 )
                 for code, definition in ACTION_DEFINITIONS.items():
+                    bound_step = (
+                        resolved_bindings.get(definition.procedure_logical_code)
+                        if definition.procedure_logical_code is not None
+                        else None
+                    )
                     if (
-                        definition.procedure_step_code
-                        == finding.procedure_step.step_code
+                        bound_step is not None
+                        and _step_key(bound_step) == _step_key(finding.procedure_step)
                         and (definition.confirmation_only or executable)
                     ):
                         append(

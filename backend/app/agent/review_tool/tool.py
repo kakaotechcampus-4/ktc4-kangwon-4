@@ -4,12 +4,18 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any, Protocol
 from uuid import UUID
 
 from pydantic import BaseModel, ValidationError
 
-from app.agent.action_catalog import ACTION_DEFINITIONS, build_action_candidates
+from app.agent.action_catalog import (
+    ACTION_DEFINITIONS,
+    ProcedureBindings,
+    build_action_candidates,
+    resolve_procedure_bindings,
+)
 from app.agent.blocker_candidates import (
     build_blocker_candidates,
     candidate_decision_violations,
@@ -118,6 +124,7 @@ class ReviewTool:
         self,
         client: StructuredReviewClient,
         *,
+        procedure_bindings: ProcedureBindings | None = None,
         max_output_attempts: int = 2,
         provider_max_retries: int = 1,
     ) -> None:
@@ -126,12 +133,27 @@ class ReviewTool:
         if not 0 <= provider_max_retries <= 2:
             raise ValueError("provider_max_retries must be between 0 and 2")
         self._client = client
+        self._procedure_bindings = (
+            None
+            if procedure_bindings is None
+            else MappingProxyType(
+                {
+                    code: type(ref).model_validate(ref.model_dump(mode="python"))
+                    for code, ref in procedure_bindings.items()
+                }
+            )
+        )
         self._max_output_attempts = max_output_attempts
         self._provider_max_retries = provider_max_retries
 
     async def review(self, subject: ReviewSubject) -> ReviewResult:
         context = _validate_integrity(subject)
-        deterministic = _deterministic_safety_review(subject, context)
+        procedure_bindings = resolve_procedure_bindings(
+            subject.known_procedure_steps, self._procedure_bindings
+        )
+        deterministic = _deterministic_safety_review(
+            subject, context, procedure_bindings
+        )
 
         model_input = _review_prompt_projection(subject, context)
         try:
@@ -736,6 +758,7 @@ def _validate_action_shape(
 def _deterministic_safety_review(
     subject: ReviewSubject,
     context: _ReviewContext,
+    procedure_bindings: ProcedureBindings,
 ) -> _SafetyFindings:
     issues: list[ReviewIssue] = []
     missing: list[MissingEvidence] = []
@@ -885,11 +908,17 @@ def _deterministic_safety_review(
         subject.source_results,
         draft.mutations,
         context.evidence_by_id,
+        procedure_bindings,
     )
     for path, reason in candidate_decision_violations(
         draft.decision,
         candidates,
-        missing_info_fields(subject.snapshot, subject.source_results, draft.mutations),
+        missing_info_fields(
+            subject.snapshot,
+            subject.source_results,
+            draft.mutations,
+            procedure_bindings,
+        ),
     ):
         issues.append(
             _issue(
@@ -905,7 +934,7 @@ def _deterministic_safety_review(
         candidate["action_code"] == action.action_code
         and candidate["target"] == action.target.model_dump(mode="json")
         for candidate in build_action_candidates(
-            subject.source_results, context.evidence_by_id
+            subject.source_results, context.evidence_by_id, procedure_bindings
         )
     ):
         issues.append(

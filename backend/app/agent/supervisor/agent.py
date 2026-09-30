@@ -9,7 +9,11 @@ from uuid import UUID, uuid4
 
 from pydantic import Field, StrictBool, StrictInt, StrictStr, model_validator
 
-from app.agent.action_catalog import build_action_candidates
+from app.agent.action_catalog import (
+    ProcedureBindings,
+    build_action_candidates,
+    resolve_procedure_bindings,
+)
 from app.agent.blocker_candidates import (
     build_blocker_candidates,
     candidate_decision_fields,
@@ -191,6 +195,7 @@ class SupervisorAgent:
         self,
         llm: StructuredGenerator,
         *,
+        procedure_bindings: ProcedureBindings | None = None,
         clock: Callable[[], datetime] = _now,
         uuid_factory: Callable[[], UUID] = uuid4,
         max_local_attempts: int = 3,
@@ -198,6 +203,12 @@ class SupervisorAgent:
         if max_local_attempts < 1 or max_local_attempts > 3:
             raise ValueError("max_local_attempts must be between 1 and 3")
         self._llm = llm
+        self._procedure_bindings = (
+            None if procedure_bindings is None else {
+                key: reference.model_copy(deep=True)
+                for key, reference in procedure_bindings.items()
+            }
+        )
         self._clock = clock
         self._uuid = uuid_factory
         self._max_local_attempts = max_local_attempts
@@ -243,6 +254,7 @@ class SupervisorAgent:
             source_results,
             mutations,
             evidence_registry,
+            self._bindings(request),
         )
         action_candidates = [
             action
@@ -457,8 +469,13 @@ class SupervisorAgent:
             "Supervisor failed deterministic provenance checks"
         ) from None
 
-    @staticmethod
+    def _bindings(self, request: SupervisorAgentInput) -> ProcedureBindings:
+        return resolve_procedure_bindings(
+            request.known_procedure_steps, self._procedure_bindings
+        )
+
     def _candidate_semantic(
+        self,
         output: SupervisorModelOutput,
         candidates: list[dict[str, Any]],
         request: SupervisorAgentInput,
@@ -470,7 +487,8 @@ class SupervisorAgent:
                     "an available blocker candidate requires ACTION"
                 )
             fields = missing_info_fields(
-                request.case_snapshot, request.source_results, mutations
+                request.case_snapshot, request.source_results, mutations,
+                self._bindings(request),
             )
             if fields is None:
                 raise SupervisorGuardrailError("no grounded question fallback")
@@ -531,14 +549,15 @@ class SupervisorAgent:
             )
         return SupervisorSemanticDraft(**fields, grounded_claims=claims)
 
-    @staticmethod
     def _missing_info_fallback(
+        self,
         request: SupervisorAgentInput,
         mutations: MutationSet,
     ) -> SupervisorSemanticDraft | None:
         """Build a conservative question-only draft after bounded model failure."""
         fields = missing_info_fields(
-            request.case_snapshot, request.source_results, mutations
+            request.case_snapshot, request.source_results, mutations,
+            self._bindings(request),
         )
         return (
             SupervisorSemanticDraft(**fields, grounded_claims=[])
@@ -611,7 +630,9 @@ class SupervisorAgent:
             selected_action = next(
                 (
                     candidate
-                    for candidate in build_action_candidates(sources, evidence)
+                    for candidate in build_action_candidates(
+                        sources, evidence, self._bindings(request)
+                    )
                     if candidate["action_code"] == action.action_code
                     and candidate["target"] == action.target.model_dump(mode="json")
                 ),
@@ -821,8 +842,11 @@ class SupervisorAgent:
                     sources,
                     mutations,
                     evidence,
+                    self._bindings(request),
                 ),
-                missing_info_fields(request.case_snapshot, sources, mutations),
+                missing_info_fields(
+                    request.case_snapshot, sources, mutations, self._bindings(request)
+                ),
             )
         )
         if violations:
