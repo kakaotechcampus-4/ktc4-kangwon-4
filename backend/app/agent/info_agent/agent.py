@@ -24,6 +24,7 @@ from app.agent.guardrails import (
     exact_span,
     resolve_evidence_aliases,
 )
+from app.agent.procedure_tool.rules import business_type_code
 from app.agent.projection import ensure_projection_has_no_obvious_sensitive_text
 from app.agent.prompts import info_messages
 from app.agent.schemas import (
@@ -662,7 +663,7 @@ class InfoAnalysisAgent:
             and step.procedure_step.step_code in supplied
             and step.procedure_step.step_code not in completed
             and step.applicable_business_type
-            in {"ALL", values.get(CaseFieldKey.BUSINESS_TYPE)}
+            in {"ALL", business_type_code(values.get(CaseFieldKey.BUSINESS_TYPE))}
         }
 
     @classmethod
@@ -1497,7 +1498,7 @@ class InfoAnalysisAgent:
             published_at=None,
             retrieved_at=self._clock(),
             freshness_status="CURRENT",
-            content_hash="sha256:" + fingerprint,
+            content_hash=fingerprint,  # EVIDENCE.content_hash is the bare digest.
         )
         return span, evidence
 

@@ -23,6 +23,7 @@ from uuid import UUID
 from pydantic import (
     AwareDatetime,
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
     StrictBool,
@@ -58,6 +59,26 @@ Digest = Annotated[
     StrictStr,
     StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$"),
 ]
+def _normalize_content_hash(value: Any) -> Any:
+    """Accept BE's prefixed SHA-256 input and keep the DB value at 64 characters."""
+    return value.removeprefix("sha256:") if isinstance(value, str) else value
+
+
+# BE snapshots may include "sha256:"; normalize before validating so every
+# serialized EVIDENCE.content_hash still fits VARCHAR(64). Integrity Digest
+# values remain prefixed and are not normalized by this type.
+ContentHash = Annotated[
+    StrictStr,
+    StringConstraints(pattern=r"^[0-9a-f]{64}$"),
+    BeforeValidator(_normalize_content_hash),
+]
+# Widths copied from backend/app/be/models/. A value that would not fit its
+# column is rejected here, where the run can still retry, instead of being
+# truncated by MySQL after Review has already passed it.
+Varchar50 = Annotated[StrictStr, Field(min_length=1, max_length=50)]
+Varchar100 = Annotated[StrictStr, Field(min_length=1, max_length=100)]
+Varchar255 = Annotated[StrictStr, Field(min_length=1, max_length=255)]
+Varchar500 = Annotated[StrictStr, Field(min_length=1, max_length=500)]
 PositiveStrictInt = Annotated[StrictInt, Field(gt=0)]
 NonNegativeStrictInt = Annotated[StrictInt, Field(ge=0)]
 ConfidenceBps = Annotated[StrictInt, Field(ge=0, le=10_000)]
@@ -194,6 +215,15 @@ REQUIRED_CASE_FIELDS = frozenset(
 )
 
 
+# CASE column widths for the two free-text fields; the rest are enums,
+# integers or dates. CASE_FIELD_HISTORY.before_value/after_value are
+# VARCHAR(1000), so a value that fits its CASE column fits its history row too.
+CASE_FIELD_MAX_LENGTHS: dict[CaseFieldKey, int] = {
+    CaseFieldKey.BUSINESS_TYPE: 50,
+    CaseFieldKey.RESTORATION_SCOPE_DETAIL: 1000,
+}
+
+
 def validate_case_field_value(
     field_path: CaseFieldKey,
     value_type: FactValueType,
@@ -237,6 +267,9 @@ def validate_case_field_value(
     if allowed_values is not None and value not in allowed_values:
         allowed = ", ".join(sorted(allowed_values))
         raise ValueError(f"{field_path.value} must be one of: {allowed}")
+    limit = CASE_FIELD_MAX_LENGTHS.get(field_path)
+    if limit is not None and type(value) is str and len(value) > limit:
+        raise ValueError(f"{field_path.value} must be at most {limit} characters")
 
 
 def _is_iso_date(value: str) -> bool:
@@ -277,21 +310,23 @@ class InvocationMeta(AgentSchema):
     component: Component
     attempt: PositiveStrictInt
     requested_at: RuntimeDateTime
-    trace_id: NonEmptyStr | None
+    trace_id: Varchar100 | None
 
 
 class EvidenceRecord(AgentSchema):
-    evidence_id: NonEmptyStr
+    """One source record, shaped to fit the EVIDENCE table it is stored in."""
+
+    evidence_id: Varchar100
     source_type: EvidenceSourceType
-    source_ref: NonEmptyStr
-    source_version: NonEmptyStr | None
-    locator: NonEmptyStr | None
-    excerpt: NonEmptyStr | None
+    source_ref: Varchar500
+    source_version: Varchar100 | None
+    locator: Varchar255 | None
+    excerpt: NonEmptyStr | None  # EVIDENCE.excerpt is TEXT.
     parent_evidence_refs: list[NonEmptyStr]
     published_at: AwareDatetime | None
     retrieved_at: RuntimeDateTime
     freshness_status: FreshnessStatus
-    content_hash: Digest | None
+    content_hash: ContentHash | None
 
     @model_validator(mode="after")
     def validate_lineage(self) -> EvidenceRecord:
@@ -511,7 +546,7 @@ class FactChangeCandidate(AgentSchema):
     proposed_status: FactStatus
     proposed_value: StrictScalar
     candidate_status: Literal["READY_FOR_REVIEW"]
-    reason_summary: NonEmptyStr
+    reason_summary: Varchar500  # CASE_FIELD_HISTORY.reason
     source_evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
     source_call_id: RuntimeUUID | None
     confirmed_conflict_ref: NonEmptyStr | None
@@ -663,7 +698,7 @@ class ProcedureProgressObservation(AgentSchema):
 
 class ConflictCandidate(AgentSchema):
     conflict_ref: Annotated[
-        NonEmptyStr,
+        Varchar100,
         Field(
             description=(
                 "Opaque runtime-generated conflict reference. BE must persist its "
@@ -1202,7 +1237,7 @@ class ProcedureSourceDocument(AgentSchema):
     published_at: AwareDatetime | None
     retrieved_at: RuntimeDateTime
     freshness_status: FreshnessStatus
-    content_hash: Digest
+    content_hash: ContentHash
     evidence_ref: NonEmptyStr
     search_query: NonEmptyStr
     step_codes: list[UpperSnakeCode] = Field(
@@ -1345,7 +1380,7 @@ class ProcedureFinding(AgentSchema):
 
 
 class Blocker(AgentSchema):
-    description: NonEmptyStr
+    description: Varchar500  # BLOCKER.description
     evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
 
 
@@ -1383,7 +1418,7 @@ ActionCode: TypeAlias = Literal[
 class NextAction(AgentSchema):
     action_code: ActionCode
     sequence: PositiveStrictInt
-    title: NonEmptyStr
+    title: Varchar500  # CASE_HISTORY.next_action
     reason: NonEmptyStr
     questions_to_ask: list[NonEmptyStr]
     target: NextActionTarget
@@ -1407,7 +1442,7 @@ class ActionDecisionDraft(AgentSchema):
     evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
     based_on_call_ids: Annotated[list[RuntimeUUID], Field(min_length=1)]
     created_at: RuntimeDateTime
-    blocker: Blocker
+    blocker: Blocker = Field(description="One grounded Blocker, required by the MVP contract.")
     next_action: NextAction
     questions_for_user: list[NonEmptyStr]
 
@@ -1528,7 +1563,7 @@ class SupervisorDraft(AgentSchema):
     """Complete success schema returned by ``SupervisorAgent.draft``."""
 
     decision: DecisionDraft = Field(
-        description="Exactly one Blocker/Next Action or needs-more-information decision."
+        description="Exactly one Blocker and one Next Action, or a needs-more-information decision."
     )
     mutations: MutationSet = Field(
         description="Uncommitted Case changes that require a matching Review PASS."
@@ -1555,7 +1590,7 @@ class SupervisorDraft(AgentSchema):
         return self
 
     @property
-    def blocker(self) -> Blocker | None:
+    def blocker(self) -> Blocker:
         return self.decision.blocker
 
     @property
@@ -1630,7 +1665,7 @@ class AgentGraphInput(AgentSchema):
     case_snapshot: CaseSnapshot = Field(
         description="Immutable Case read view used throughout this Graph run."
     )
-    trace_id: NonEmptyStr | None = Field(
+    trace_id: Varchar100 | None = Field(
         default=None,
         description=(
             "Optional caller correlation identifier propagated to invocation metadata; "
@@ -2124,7 +2159,7 @@ class SafeFailureOutcome(AgentSchema):
     failed_component: Component | None = Field(
         description="Component that failed, or null for a Graph-level failure."
     )
-    trace_id: NonEmptyStr | None = Field(
+    trace_id: Varchar100 | None = Field(
         description="Optional caller trace identifier copied from AgentGraphInput."
     )
 
@@ -2209,6 +2244,7 @@ DiscoverSupportInput.model_rebuild()
 
 
 __all__ = [
+    "CASE_FIELD_MAX_LENGTHS",
     "CASE_FIELD_SPECS",
     "REQUIRED_CASE_FIELDS",
     "ActionCode",
@@ -2229,6 +2265,7 @@ __all__ = [
     "ConflictCandidate",
     "ConflictConfirmedTrigger",
     "ConflictOutcome",
+    "ContentHash",
     "CriterionStatus",
     "DecisionAuthority",
     "DecisionDraft",
@@ -2314,6 +2351,10 @@ __all__ = [
     "SupportSearchSummary",
     "Uncertainty",
     "UpperSnakeCode",
+    "Varchar50",
+    "Varchar100",
+    "Varchar255",
+    "Varchar500",
     "VerifiedTextSpan",
     "canonical_digest",
     "validate_case_field_value",

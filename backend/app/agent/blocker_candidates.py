@@ -60,7 +60,7 @@ def _decision_fields(
         "decision_type": "ACTION",
         "selection_summary": action["title"],
         "requires_human": True,
-        "evidence_refs": candidate["blocker"]["evidence_refs"],
+        "evidence_refs": candidate["evidence_refs"],
         "blocker": candidate["blocker"],
         "next_action": action,
         "questions_for_user": [],
@@ -215,12 +215,11 @@ def build_blocker_candidates(
         action.update(
             title=title, reason=reason, questions_to_ask=questions, evidence_refs=refs
         )
+        decision_refs = list(dict.fromkeys([*state_refs, *refs]))
         candidate = {
             "candidate_id": key,
-            "blocker": {
-                "description": description,
-                "evidence_refs": list(dict.fromkeys([*state_refs, *refs])),
-            },
+            "evidence_refs": decision_refs,
+            "blocker": {"description": description, "evidence_refs": decision_refs},
             "actions": [action],
         }
         # Reuse the exact registry, dependency, applicability and completion guard

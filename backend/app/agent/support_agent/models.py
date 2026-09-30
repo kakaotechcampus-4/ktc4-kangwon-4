@@ -21,6 +21,7 @@ from app.agent.schemas import (
     SupportProgramRef,
     Uncertainty,
     UpperSnakeCode,
+    Varchar50,
     validate_case_field_value,
 )
 
@@ -123,7 +124,7 @@ class ReviewedSupportProgram(SupportCatalogModel):
 class ReviewedSupportCatalog(SupportCatalogModel):
     """Complete immutable snapshot supplied by a trusted, read-only resolver."""
 
-    catalog_version: NonEmptyStr
+    catalog_version: Varchar50  # SUPPORT_ITEM/SUPPORT_MATCH.catalog_version
     programs: tuple[ReviewedSupportProgram, ...]
     evidence_records: tuple[EvidenceRecord, ...]
 

@@ -18,6 +18,25 @@ from ..schemas import (
     validate_case_field_value,
 )
 
+# CASE.business_type holds the words the user typed ("카페"), while
+# PROCEDURE_STEP.applicable_business_type holds a code ("CAFE"). Comparing them
+# raw filters out every business-specific procedure, so convert first.
+_BUSINESS_TYPE_CODES: dict[str, str] = {
+    "카페": "CAFE",
+    "휴게음식점": "CAFE",
+    "식당": "RESTAURANT",
+    "음식점": "RESTAURANT",
+    "일반음식점": "RESTAURANT",
+}
+
+
+def business_type_code(value: object) -> object:
+    """Return the procedure code for a Case business_type, else the value itself."""
+
+    if type(value) is not str:
+        return value
+    return _BUSINESS_TYPE_CODES.get(value.strip(), value)
+
 
 def procedure_constraints(
     step: KnownProcedureStep,
@@ -50,7 +69,8 @@ def procedure_constraints(
         reasons.append("procedure is deprecated")
     if (
         step.applicable_business_type != "ALL"
-        and values.get(CaseFieldKey.BUSINESS_TYPE) != step.applicable_business_type
+        and business_type_code(values.get(CaseFieldKey.BUSINESS_TYPE))
+        != step.applicable_business_type
     ):
         reasons.append("applicable_business_type is not confirmed for this Case")
     for dependency in step.dependencies:

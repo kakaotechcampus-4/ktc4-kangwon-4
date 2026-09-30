@@ -290,7 +290,8 @@ class SupportAgent:
         version = hashlib.sha256("\0".join(sorted(versions)).encode()).hexdigest()
         return (
             ReviewedSupportCatalog(
-                catalog_version=f"wiki:{version}",
+                # SUPPORT_ITEM/SUPPORT_MATCH.catalog_version is VARCHAR(50).
+                catalog_version=f"wiki:{version[:32]}",
                 programs=tuple(programs),
                 evidence_records=tuple(evidence.values()),
             ),

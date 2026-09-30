@@ -1,6 +1,7 @@
 # Agent 범위
 
-Agent는 폐업 Case의 확인된 사실과 근거로 **Blocker 1개·Next Action 1개**를 판단한다.
+Agent는 폐업 Case의 확인된 사실과 근거로 **Blocker 1개·Next Action 1개** 판단.
+현재 MVP의 정상 판단에는 근거 있는 Blocker가 항상 1개 있다.
 사용자가 현실에서 실행한 결과를 입력하면 같은 Case를 다시 판단한다.
 모든 정상 판단은 독립 Review를 거치며 Case 저장은 BE가 담당한다.
 
@@ -41,6 +42,25 @@ Agent는 SQL·ORM으로 DB를 직접 읽거나 쓰지 않는다 — 저장·재�
 권한을 확인한 Case snapshot 제공, 검수된 변경 후보의 저장·재조회는 호출자의 책임이다.
 `CONFLICT_CONFIRMED`에는 서버가 보관한 원래 충돌 후보를 전달하며, 클라이언트가 보내온
 임의 후보를 그대로 신뢰하지 않는다. Agent의 `REVIEWED_PLAN`은 DB 저장 완료를 뜻하지 않는다.
+
+### DB 칸에 맞추기
+
+Agent가 만드는 값은 BE가 그대로 DB에 넣는다. 그래서 칸의 길이·형식을
+[`schemas.py`](../../backend/app/agent/schemas.py)의 타입에 그대로 박아두었다.
+넘치는 값은 MySQL이 자르기 전에 Agent에서 먼저 막히고, 실행은 재시도 경로를 탄다.
+
+- `EVIDENCE.content_hash`는 VARCHAR(64)라 출력·저장 값은 64자 hex로 유지한다.
+  BE 입력의 `sha256:` 접두사는 타입 검증 시 제거하고 길이·문자를 검증한다.
+  무결성 확인용 `subject_digest`·`conflict_digest`는 VARCHAR(255) 칸에
+  들어가므로 접두사를 유지한다.
+- `SUPPORT_ITEM`·`SUPPORT_MATCH`의 `catalog_version`은 VARCHAR(50)이다.
+- `CASE.business_type`에는 사용자가 쓴 말(`"카페"`)이 들어가고
+  `PROCEDURE_STEP.applicable_business_type`에는 코드(`"CAFE"`)가 들어간다. 그대로 비교하면
+  업종 전용 절차가 전부 걸러지므로 `procedure_tool/rules.py`의 `business_type_code`로
+  바꾼 뒤 비교한다.
+- `restoration_status`·`restoration_scope`·`demolition_required`의 `UNKNOWN`은 Agent에서
+  `status=UNKNOWN`·`value=null`로 표현한다. BE는 저장할 때 `UNKNOWN` 문자열로 바꾸고,
+  snapshot을 만들 때 다시 `status=UNKNOWN`·`value=null`로 되돌린다.
 
 ## 포함 기능
 

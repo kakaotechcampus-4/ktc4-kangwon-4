@@ -147,7 +147,7 @@ class SupervisorModelOutput(AgentSchema):
     evidence_refs: Annotated[
         list[Annotated[StrictStr, Field(min_length=1)]], Field(min_length=1)
     ]
-    blocker: Blocker | None
+    blocker: Blocker
     next_action: NextActionSemantic | None
     questions_for_user: list[Annotated[StrictStr, Field(min_length=1)]]
     grounded_claims: list[GroundedClaimModelOutput]
@@ -160,7 +160,7 @@ class SupervisorSemanticDraft(AgentSchema):
     evidence_refs: Annotated[
         list[Annotated[StrictStr, Field(min_length=1)]], Field(min_length=1)
     ]
-    blocker: Blocker | None
+    blocker: Blocker
     next_action: NextActionSemantic | None
     questions_for_user: list[Annotated[StrictStr, Field(min_length=1)]]
     grounded_claims: list[GroundedClaimSemantic]
@@ -168,8 +168,8 @@ class SupervisorSemanticDraft(AgentSchema):
     @model_validator(mode="after")
     def validate_variant(self) -> SupervisorSemanticDraft:
         if self.decision_type == DecisionType.ACTION:
-            if self.blocker is None or self.next_action is None:
-                raise ValueError("ACTION requires one blocker and one next action")
+            if self.next_action is None:
+                raise ValueError("ACTION requires one next action")
             if self.questions_for_user:
                 raise ValueError("ACTION questions_for_user must be empty")
         elif self.decision_type == DecisionType.NEEDS_MORE_INFO:
@@ -294,7 +294,12 @@ class SupervisorAgent:
             ),
             "contract": {
                 "action_count": 1,
-                "blocker_count": 1,
+                "blocker_count": {"ACTION": [1], "NEEDS_MORE_INFO": [1]},
+                # Both land in VARCHAR(500) columns (BLOCKER.description,
+                # CASE_HISTORY.next_action). Over-length fails validation and
+                # burns a retry, so the limit is stated up front.
+                "blocker_description_max_characters": 500,
+                "next_action_title_max_characters": 500,
                 "action_questions_for_user": [],
                 "needs_more_info_requires_human": True,
                 "eligibility_assertion_level": "NEEDS_CONFIRMATION",
@@ -372,7 +377,8 @@ class SupervisorAgent:
                         "role": "system",
                         "content": (
                             "The prior draft failed deterministic contract validation. "
-                            "For ACTION, return one blocker, one next_action, and an empty "
+                            "For ACTION, use exactly one selected candidate's blocker, "
+                            "one next_action, and an empty "
                             "questions_for_user list. For NEEDS_MORE_INFO, return a blocker, "
                             "no next_action, requires_human=true, and at least one question. "
                             "Every ACTION must select exactly one canonical target. Use "
@@ -555,12 +561,10 @@ class SupervisorAgent:
                 "target": to_model_projection(decision.next_action.target),
                 "evidence_refs": list(decision.next_action.evidence_refs),
             }
-        blocker = None
-        if decision.blocker is not None:
-            blocker = {
-                "description": decision.blocker.description,
-                "evidence_refs": list(decision.blocker.evidence_refs),
-            }
+        blocker = {
+            "description": decision.blocker.description,
+            "evidence_refs": list(decision.blocker.evidence_refs),
+        }
         return {
             "decision": {
                 "decision_type": decision.decision_type.value,
@@ -594,9 +598,7 @@ class SupervisorAgent:
     ) -> SupervisorDraft:
         evidence = self._evidence(sources, request)
         known_evidence = set(evidence)
-        refs = [*semantic.evidence_refs]
-        if semantic.blocker is not None:
-            refs.extend(semantic.blocker.evidence_refs)
+        refs = [*semantic.evidence_refs, *semantic.blocker.evidence_refs]
         if semantic.next_action is not None:
             refs.extend(semantic.next_action.evidence_refs)
         for claim in semantic.grounded_claims:
@@ -769,7 +771,7 @@ class SupervisorAgent:
             "created_at": now,
         }
         if semantic.decision_type == DecisionType.ACTION:
-            assert semantic.blocker is not None and semantic.next_action is not None
+            assert semantic.next_action is not None
             action_values = semantic.next_action.model_dump(mode="python")
             assert selected_action is not None
             action_values["action_code"] = selected_action["action_code"]
@@ -799,7 +801,6 @@ class SupervisorAgent:
                 **common,
             )
         else:
-            assert semantic.blocker is not None
             decision = NeedsMoreInfoDecisionDraft(
                 decision_type=DecisionType.NEEDS_MORE_INFO,
                 blocker=semantic.blocker,
@@ -1077,9 +1078,7 @@ class SupervisorAgent:
     @staticmethod
     def _free_text(draft: SupervisorDraft) -> list[str]:
         decision = draft.decision
-        values = [decision.selection_summary]
-        if decision.blocker is not None:
-            values.append(decision.blocker.description)
+        values = [decision.selection_summary, decision.blocker.description]
         if decision.next_action is not None:
             values.extend(
                 [
@@ -1096,9 +1095,10 @@ class SupervisorAgent:
     def _visible_draft_strings(draft: SupervisorDraft) -> list[tuple[str, str]]:
         decision = draft.decision
         base = "/supervisor_draft/decision"
-        values = [(f"{base}/selection_summary", decision.selection_summary)]
-        if decision.blocker is not None:
-            values.append((f"{base}/blocker/description", decision.blocker.description))
+        values = [
+            (f"{base}/selection_summary", decision.selection_summary),
+            (f"{base}/blocker/description", decision.blocker.description),
+        ]
         if decision.next_action is not None:
             action_base = f"{base}/next_action"
             values.extend(
