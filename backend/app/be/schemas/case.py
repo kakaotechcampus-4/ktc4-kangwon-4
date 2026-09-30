@@ -8,6 +8,7 @@ CaseStatus = Literal["IN_PROGRESS", "COMPLETED"]
 RestorationStatus = Literal["UNKNOWN", "NOT_STARTED", "IN_PROGRESS", "COMPLETED", "NOT_REQUIRED"]
 RestorationScope = Literal["UNKNOWN", "PARTIAL", "FULL", "NOT_REQUIRED"]
 DemolitionRequired = Literal["UNKNOWN", "REQUIRED", "NOT_REQUIRED"]
+JudgmentStatus = Literal["PENDING", "DONE", "NEEDS_MORE_INFO", "FAILED"]
 
 
 class CaseCreateRequest(BaseModel):
@@ -18,7 +19,7 @@ class CaseCreateRequest(BaseModel):
     planned_closure_date: date | None = None
 
 
-class CaseResponse(BaseModel):
+class CaseCreateResponse(BaseModel):
     model_config = {"from_attributes": True}
 
     id: int
@@ -36,3 +37,27 @@ class CaseResponse(BaseModel):
     completed_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    
+    
+class CaseGetDetailResponse(BaseModel):
+    model_config = {"from_attributes": True}
+
+    id: int
+    member_id: int
+    business_type: str
+    franchise_status: bool
+    employee_count: int | None
+    lease_status: LeaseStatus
+    restoration_status: RestorationStatus
+    restoration_scope: RestorationScope
+    restoration_scope_detail: str | None
+    demolition_required: DemolitionRequired
+    planned_closure_date: date | None
+
+
+class CaseGetResponse(BaseModel):
+    case: CaseGetDetailResponse | None
+    blocker: str | None
+    next_action: str | None
+    judgment_status: JudgmentStatus | None
+    questions_for_user: list[str] | None
