@@ -31,9 +31,9 @@ Blocker 해소(`RESOLVED`) 판정은 Supervisor가 하지 않는다. BE가 다�
 바꾸거나 이미 확인한 항목을 다시 묻는 표현을 모델이 추가하지 않는다.
 Review도 같은 후보·상태 문장을 재검증한다. 후보가 없으면 추가 확인 질문을 반환한다.
 
-절차 finding이 `RELEVANT`가 아니면 후보에서 제외한다. 단 임대인 확인이 먼저인 상황의
-`CONFIRM_RESTORATION_SCOPE`만은 `POSSIBLY_RELEVANT`도 남긴다 — 범위가 불확실하다는 것이
-임대인에게 물어야 하는 이유 자체이기 때문이다. 이때도 그 finding이 참조하는 근거와
+절차 finding이 `RELEVANT`가 아니면 후보에서 제외한다. 단 확인 행동은 공식 안내가 있고
+`requires_confirmation=true`인 `POSSIBLY_RELEVANT`도 남긴다 — 적용 여부의 확인 자체가
+다음 행동이기 때문이다. 이때도 그 finding이 참조하는 근거와
 상위 근거 전체가 `CURRENT`여야 하며, `UNDETERMINED`는 예외 대상이 아니다.
 
 ## ACTION의 next_action 규칙
