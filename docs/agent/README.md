@@ -33,6 +33,43 @@ Agent는 SQL·ORM으로 DB를 직접 읽거나 쓰지 않는다 — 저장·재�
 
 ## 실행 경계
 
+BE가 가져다 쓰는 입출력 DTO는 [`app.common.agent_dto`](../../backend/app/common/agent_dto.py)에서
+공개한다. 기존 검증 모델을 그대로 사용하며 입력은 `AgentGraphInput`, 출력은
+`AgentGraphOutput`이다. 출력의 `outcome_type`은 `REVIEWED_PLAN` / `CONFLICT` /
+`SAFE_FAILURE` 중 하나다. 필드 구성과 BE의 처리 책임은 해당 모듈 설명을 따른다.
+
+BE 호출 함수는 [`app.common.agent_service.run_case_planning`](../../backend/app/common/agent_service.py)이다.
+`build_planning_input`은 저장된 입력 이벤트의 ID·시각·비식별 문장과 Case snapshot으로
+`CASE_CREATED` 또는 `RESULT_SUBMITTED` 입력을 조립한다. `build_conflict_input`은 BE가
+보관한 원래 충돌 후보와 확인 시각으로 `CONFLICT_CONFIRMED` 입력을 조립한다.
+
+```python
+request = build_planning_input(
+    trigger_type="CASE_CREATED", case_snapshot=snapshot, user_input=redacted_input,
+)
+outcome = await run_case_planning(
+    request, known_procedure_steps=registry, procedure_bindings=bindings,
+    procedure_store=reviewed_store, support_catalog=reviewed_catalog,
+)
+```
+
+이 함수는 실제 runtime 생성·호출·종료까지 처리하며 판단 재사용은 하지 않는다.
+반환된 `AgentGraphOutput`은 아직 저장되지 않은 결과다. 이 브랜치의 기준 develop(`6bd7b8a`)에는
+snapshot 조회·판단 저장 함수가 없으므로 해당 함수의 인자를 가정하거나 Agent에서 SQL 저장을 대신하지 않는다.
+
+[`app.common.agent_data`](../../backend/app/common/agent_data.py)의 `build_known_procedure_steps`는
+BE가 조회한 `ProcedureStep`·`StepDependency`·`StepEligibility` 행을 변환한다.
+시간대 없는 DB 시각에는 호출자가 전달한 `db_timezone`을 적용한다. 공식 절차 자료와 지원 자료는
+각각 `load_reviewed_procedure_store`·`load_reviewed_support_catalog`로 검증한다.
+현재 BE 모델에 없는 검수·조건·근거 필드를 만들어 채우지는 않는다.
+
+`procedure_bindings`의 키는 AI의 기존 절차 의미 코드, 값은 BE의 실제 `ProcedureStepRef`다.
+예를 들어 `"FILE_FOOD_SERVICE_CLOSURE"`에 BE에서 조회한 식품영업 폐업 절차의 ID·코드를 연결한다.
+행동 대상·진행 상태·근거 조회에는 BE 코드가 그대로 남는다. `TEMP_*` 이름이나 절차명으로
+의미를 추정하지 않으며, 다른 절차에 같은 ID·코드를 중복 연결하거나 미등록 대상을 연결하면 거부한다.
+새 호출 함수에는 명시적 매핑이 필수이고 `{}`는 매핑 없음이다. 기존 `build_runtime` 호출에서만
+매핑 생략 시 이미 등록된 코드가 AI 의미 코드와 정확히 같은 항목을 사용한다.
+
 [`build_runtime`](../../backend/app/agent/runtime.py)은 호출자가 준비한 실제 절차 목록
 (`known_procedure_steps`), 검수 지원 자료(`support_catalog`), 메모리에 적재한 절차 자료
 (`procedure_store`)를 받는다. 자료가 없으면 빈 결과를 유지하며 임의 사업·조건으로 채우지 않는다.
@@ -114,3 +151,23 @@ digest로 비교한다. 근거 ID는 실행마다 새로 발급되므로 비교�
 이 기록으로 말할 수 없는 것: 네 입력 모두 원상복구·철거가 미확인이라 규칙 적용 후 후보가
 하나뿐이었다. 여러 후보 사이의 선택이 일관적인지는 증명하지 않는다.
 모델은 표본 수준의 재현성을 보장하지 않으므로 이 결과는 측정이지 보장이 아니다.
+
+### 2026-09-29 로컬 BE 연결 검증
+
+AI 코드 `a7c78d8`, BE 브랜치 `d5e050a` 기준. 카카오 로그인·지원사업 정상 동작은 검증 범위에서 제외.
+합성 Case snapshot과 격리 MySQL의 절차 행을 새 `run_case_planning` 함수에 전달해 실제 LLM 호출.
+최종 실행 16회 모두 `gpt-5.6-sol`·`xhigh`, HTTP 200. 모의 LLM 응답·판단 재사용 없음.
+
+| 흐름 | 최종 실행 결과 |
+|---|---|
+| 최초 판단 | 원상복구 확인 Blocker·Next Action 생성, Review PASS |
+| 신고 요건 확인 | 당시 `blocker=null`로 검증. 현재 MVP 계약은 Blocker 필수이며 해당 출력은 사용하지 않음 |
+| 결과 입력 | 원상복구·철거 불필요 변경 후보 3개와 새 행동 생성, Review PASS |
+| 확정값과 충돌 | `CONFLICT` 반환, 자동 변경 없이 확인 후보 보존 |
+| 충돌 확인 | `CONFIRMED_CONFLICT` 출처의 변경 후보·새 행동 생성, Review PASS |
+| 공식 근거 부족 | `NEEDS_MORE_INFO`·확인 질문 반환, Next Action 없음, Review PASS |
+
+실제 HTTP `POST /cases`·`GET /cases`는 200, 저장된 Case의 재조회 일치, 중복 생성은 409 확인.
+**서버 → AI → 판단 저장 → 재조회 연결은 이 검증에서 미완료.** 검증에 사용한 BE(`d5e050a`)에는
+입력 근거·snapshot 생성, Agent 호출, 판단 저장 함수가 없으며 POST/GET은 Case 열만 반환. HTTP 호출 뒤 입력 이력·근거·판단 기록은
+각각 0건. 위 AI 함수 직접 호출 검증은 서버 전체 연결의 통과 증거가 아님.
