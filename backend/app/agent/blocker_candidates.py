@@ -204,15 +204,15 @@ def build_blocker_candidates(
                     [evidence_by_id[ref] for ref in finding.evidence_refs],
                     evidence_by_id,
                 )
-                # An applicable, unfinished procedure is work to do, not itself
-                # a blocker. Unverified source freshness still needs confirmation.
-                description = (
-                    None
-                    if all(item.freshness_status == "CURRENT" for item in evidence)
-                    else f"{label} 안내의 현재 적용 여부를 확인할 필요가 있습니다."
-                )
                 confirmation = definition.confirmation_only
                 applicability_unknown = finding.relevance == "POSSIBLY_RELEVANT"
+                description = (
+                    f"{label} 안내의 현재 적용 여부를 확인할 필요가 있습니다."
+                    if any(item.freshness_status != "CURRENT" for item in evidence)
+                    else f"{label} 대상 여부와 준비사항을 확인할 필요가 있습니다."
+                    if applicability_unknown
+                    else f"{label}의 진행 상태와 준비사항을 확인할 필요가 있습니다."
+                )
                 title = (
                     f"담당 기관에 {label} 대상 여부와 준비사항을 확인하세요."
                     if applicability_unknown
@@ -249,11 +249,7 @@ def build_blocker_candidates(
         candidate = {
             "candidate_id": key,
             "evidence_refs": decision_refs,
-            "blocker": (
-                {"description": description, "evidence_refs": decision_refs}
-                if description is not None
-                else None
-            ),
+            "blocker": {"description": description, "evidence_refs": decision_refs},
             "actions": [action],
         }
         # Reuse the exact registry, dependency, applicability and completion guard

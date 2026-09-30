@@ -13,7 +13,14 @@ from uuid import UUID, uuid4
 
 import pytest
 from app.agent.procedure_tool.rules import procedure_constraints
-from app.agent.schemas import Blocker, CaseSnapshot, EvidenceRecord, KnownProcedureStep
+from app.agent.schemas import (
+    Blocker,
+    CaseSnapshot,
+    EvidenceRecord,
+    KnownProcedureStep,
+    ProcedureLookupResult,
+    ProcedureSourceDocument,
+)
 from app.agent.support_agent.agent import SupportAgent
 from app.agent.support_agent.models import ReviewedSupportCatalog
 from pydantic import ValidationError
@@ -95,8 +102,64 @@ BUSINESS_TYPE_REASON = "applicable_business_type is not confirmed for this Case"
 # 1. EVIDENCE.content_hash is VARCHAR(64); a bare sha-256 hex digest is exactly 64.
 def test_evidence_content_hash_fits_its_column():
     assert len(evidence().content_hash) <= 64
+
+
+@pytest.mark.parametrize("content_hash", [HASH, "sha256:" + HASH])
+def test_be_evidence_hash_is_normalized_for_db_and_json(content_hash):
+    record = evidence(content_hash=content_hash)
+    assert record.content_hash == HASH
+    assert record.model_dump(mode="json")["content_hash"] == HASH
+    assert EvidenceRecord.model_validate_json(record.model_dump_json()).content_hash == HASH
+
+
+def test_be_case_snapshot_accepts_prefixed_evidence_hash():
+    payload = snapshot().model_dump(mode="json")
+    payload["evidence_records"][0]["content_hash"] = "sha256:" + HASH
+    case_snapshot = CaseSnapshot.model_validate(payload)
+    assert case_snapshot.evidence_records[0].content_hash == HASH
+    assert case_snapshot.model_dump(mode="json")["evidence_records"][0]["content_hash"] == HASH
+
+
+@pytest.mark.parametrize("content_hash", [
+    "sha256:" + HASH[:-1],
+    "sha256:" + HASH + "0",
+    "sha256:sha256:" + HASH,
+    "sha256:" + "g" * 64,
+    "sha256:" + HASH.upper(),
+    123,
+])
+def test_invalid_prefixed_evidence_hash_is_rejected(content_hash):
     with pytest.raises(ValidationError):
-        evidence(content_hash="sha256:" + HASH)
+        evidence(content_hash=content_hash)
+
+
+def test_procedure_document_hash_matches_normalized_evidence_hash():
+    record = evidence(content_hash=HASH)
+    document = ProcedureSourceDocument.model_validate({
+        "document_id": UUID(int=3),
+        "authority_name": "합성 공식 기관",
+        "canonical_url": record.source_ref,
+        "source_domain": "example.org",
+        "title": "합성 절차",
+        "excerpt": record.excerpt,
+        "published_at": None,
+        "retrieved_at": NOW,
+        "freshness_status": "CURRENT",
+        "content_hash": "sha256:" + HASH,
+        "evidence_ref": REF,
+        "search_query": "합성 절차",
+        "step_codes": ["FILE_FOOD_SERVICE_CLOSURE"],
+    })
+    lookup = ProcedureLookupResult(
+        completion_status="COMPLETE",
+        lookup_id=UUID(int=4),
+        documents=[document],
+        warnings=[],
+        evidence_records=[record],
+        based_on_snapshot_id=UUID(int=1),
+        as_of=NOW.date(),
+    )
+    assert lookup.documents[0].content_hash == lookup.evidence_records[0].content_hash == HASH
 
 
 # 2. SUPPORT_ITEM/SUPPORT_MATCH.catalog_version is VARCHAR(50).

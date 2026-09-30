@@ -358,18 +358,14 @@ def decision_summary(outcome) -> dict:
     changes = subject.supervisor_draft.mutations.fact_changes
     return {
         "decision_type": as_text(decision.decision_type),
-        "blocker_digest": (
-            None
-            if blocker is None
-            else canonical_digest(blocker, exclude={"evidence_refs"})
-        ),
+        "blocker_digest": canonical_digest(blocker, exclude={"evidence_refs"}),
         "next_action_digest": (
             None
             if action is None
             else canonical_digest(action, exclude={"evidence_refs"})
         ),
         # Read by a person; the digests above already gate the comparison.
-        "blocker": None if blocker is None else blocker.description,
+        "blocker": blocker.description,
         "action_code": None if action is None else as_text(action.action_code),
         "next_action": None if action is None else action.model_dump(mode="json"),
         "questions_for_user": list(decision.questions_for_user),

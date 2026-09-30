@@ -453,7 +453,7 @@ def test_review_blocks_wrong_target_even_when_its_model_returns_pass():
 
 @pytest.mark.parametrize("action_code", [CONFIRM_TAX, TAX])
 @pytest.mark.parametrize("invented_blocker", [False, True])
-def test_review_checks_optional_blocker_against_verified_candidate(
+def test_review_checks_required_blocker_against_verified_candidate(
     action_code, invented_blocker
 ):
     async def run():
@@ -461,10 +461,11 @@ def test_review_checks_optional_blocker_against_verified_candidate(
         draft = await SupervisorAgent(
             StubModel(action_code), max_local_attempts=1
         ).draft(request)
-        assert draft.decision.blocker is None
+        assert draft.decision.blocker is not None
+        assert draft.decision.blocker.evidence_refs == [REF]
         assert draft.decision.next_action.action_code == action_code
         assert draft.decision.questions_for_user == []
-        assert not any(
+        assert any(
             "/blocker/" in claim.target_path for claim in draft.grounded_claims
         )
         if invented_blocker:
@@ -497,14 +498,14 @@ def test_review_checks_optional_blocker_against_verified_candidate(
                 for issue in result.issues
             )
         else:
-            assert subject.supervisor_draft.decision.blocker is None
+            assert subject.supervisor_draft.decision.blocker is not None
             assert result.verdict == "PASS"
 
     asyncio.run(run())
 
 
 @pytest.mark.parametrize("trigger_type", ["CASE_CREATED", "RESULT_SUBMITTED"])
-def test_graph_releases_a_reviewed_action_without_a_blocker(trigger_type):
+def test_graph_releases_a_reviewed_action_with_one_blocker(trigger_type):
     async def run():
         template = supervisor_request()
         request = AgentGraphInput(
@@ -556,7 +557,8 @@ def test_graph_releases_a_reviewed_action_without_a_blocker(trigger_type):
         restored.assert_integrity()
         decision = restored.review_subject.supervisor_draft.decision
         assert decision.decision_type == "ACTION"
-        assert decision.blocker is None
+        assert decision.blocker is not None
+        assert decision.blocker.evidence_refs == [REF]
         assert decision.next_action.action_code == CONFIRM_TAX
         assert decision.evidence_refs and decision.next_action.evidence_refs
         assert restored.review_proof.snapshot_id == request.case_snapshot.snapshot_id

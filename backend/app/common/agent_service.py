@@ -2,7 +2,7 @@
 
 Pass a BE-built CaseSnapshot and reviewed reference data. This module does not
 query SQL, manufacture evidence from a Case row, or claim an outcome was saved.
-The current BE branch has no snapshot loader or outcome writer to call yet.
+BE remains responsible for loading the snapshot and persisting the outcome.
 """
 
 from collections.abc import Sequence
@@ -111,8 +111,8 @@ async def run_case_planning(
 
     REVIEWED_PLAN carries a PASS proof and uncommitted mutations. CONFLICT
     carries candidates for BE to retain. SAFE_FAILURE carries recovery fields.
-    TODO: Wire the agreed BE outcome writer once it exists; returning this
-    result is deliberately not reported as database persistence.
+    The BE caller rechecks the current Case and persists the reviewed outcome;
+    returning this result does not report database persistence.
     """
     owned_request = AgentGraphInput.model_validate(request.model_dump(mode="python"))
     if isinstance(owned_request.trigger, (CaseCreatedTrigger, ResultSubmittedTrigger)):

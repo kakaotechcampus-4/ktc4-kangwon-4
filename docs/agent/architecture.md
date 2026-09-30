@@ -9,7 +9,7 @@ Agent는 확인된 Case와 근거로 다음 행동을 판단한다. 실행 경�
 
 | 구성요소 | 책임 |
 |---|---|
-| Supervisor Agent | 절차·사실·지원조건을 종합해 Blocker 최대 1개·Next Action 1개 또는 확인 질문과 변경 후보 생성 |
+| Supervisor Agent | 절차·사실·지원조건을 종합해 Blocker 1개·Next Action 1개 또는 확인 질문과 변경 후보 생성 |
 | 정보분석 Agent | 비식별 입력에서 근거가 있는 사실·진행·충돌 후보를 추출하고 Case에 맞는 절차를 분석한다 |
 | 지원금 Agent | 검수된 지원조건을 Case와 비교하고 관련성·미확인 조건·공식 근거를 반환한다 |
 | 절차조회 Tool | 주입된 절차 자료에서 원문·출처·검수 상태를 조회한다. 우선순위나 Next Action을 결정하지 않는다 |
@@ -74,8 +74,9 @@ Case snapshot은 한 실행 동안 바꾸지 않는다. 추출·사용자 확인
 `NEEDS_MORE_INFO`는 Review를 거치는 정상 판단이다. Blocker와 확인 질문을 반환하며
 없는 Next Action이나 확정값을 만들어 넣지 않는다.
 
-`ACTION`은 Next Action 1개 필수, 해당 행동을 막는 조건이 없으면 `blocker=null` 허용.
-이 경우에도 판단·행동 근거와 Review 필수. 전체 Case 완료의 자동 판정은 범위에서 제외.
+현재 MVP에서 `ACTION`은 Blocker 1개·Next Action 1개가 필수다.
+`NEEDS_MORE_INFO`도 Blocker 1개를 유지하며, 모든 정상 판단의 근거와 Review가 필수다.
+전체 Case 완료의 자동 판정은 범위에서 제외.
 
 초안·선행 결과가 달라지면 이전 Review PASS를 재사용하지 않는다.
 허용된 단계부터 재작업하되 `runtime.py`·`llm.py`의 호출·시간·재작업 상한을 넘기지 않는다.

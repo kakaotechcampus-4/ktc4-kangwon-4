@@ -1,13 +1,14 @@
 # Agent 범위
 
-Agent는 폐업 Case의 확인된 사실과 근거로 **Blocker 최대 1개·Next Action 1개** 판단.
-Case의 후속 진행을 막는 조건이 없는 정상 `ACTION`은 `blocker=null` 반환. 근거와 Review 유지.
+Agent는 폐업 Case의 확인된 사실과 근거로 **Blocker 1개·Next Action 1개** 판단.
+현재 MVP의 정상 판단에는 근거 있는 Blocker가 항상 1개 있다.
 사용자가 현실에서 실행한 결과를 입력하면 같은 Case를 다시 판단한다.
 모든 정상 판단은 독립 Review를 거치며 Case 저장은 BE가 담당한다.
 
 원상복구 범위·철거 필요 여부의 미확인은 Case의 후속 진척을 막는 조건이며, 이를 해소할
 임대인 확인 행동은 실행 가능하다. 확인 행동을 할 수 있다는 이유만으로 이 Blocker를 제거하지 않는다.
-반면 요건이 확인된 일반 신고 절차가 아직 미완료라는 이유만으로 Blocker를 만들지는 않는다.
+일반 절차는 공식 안내에 따른 진행 상태와 준비사항 확인을 Blocker로 제시하며,
+확인된 사실과 후보에 없는 차단 조건을 만들어내지 않는다.
 
 지원사업은 MVP 구현·정상 동작 검증 범위에서 제외. 기존 지원사업 코드와 자료는 유지.
 
@@ -92,8 +93,9 @@ Agent가 만드는 값은 BE가 그대로 DB에 넣는다. 그래서 칸의 길�
 [`schemas.py`](../../backend/app/agent/schemas.py)의 타입에 그대로 박아두었다.
 넘치는 값은 MySQL이 자르기 전에 Agent에서 먼저 막히고, 실행은 재시도 경로를 탄다.
 
-- `EVIDENCE.content_hash`는 VARCHAR(64)라 근거의 `content_hash`는 `sha256:` 접두사 없이
-  64자 hex만 담는다. 무결성 확인용 `subject_digest`·`conflict_digest`는 VARCHAR(255) 칸에
+- `EVIDENCE.content_hash`는 VARCHAR(64)라 출력·저장 값은 64자 hex로 유지한다.
+  BE 입력의 `sha256:` 접두사는 타입 검증 시 제거하고 길이·문자를 검증한다.
+  무결성 확인용 `subject_digest`·`conflict_digest`는 VARCHAR(255) 칸에
   들어가므로 접두사를 유지한다.
 - `SUPPORT_ITEM`·`SUPPORT_MATCH`의 `catalog_version`은 VARCHAR(50)이다.
 - `CASE.business_type`에는 사용자가 쓴 말(`"카페"`)이 들어가고
@@ -171,7 +173,7 @@ AI 코드 `a7c78d8`, BE 브랜치 `d5e050a` 기준. 카카오 로그인·지원�
 | 흐름 | 최종 실행 결과 |
 |---|---|
 | 최초 판단 | 원상복구 확인 Blocker·Next Action 생성, Review PASS |
-| Blocker 없는 상태 | `blocker=null`과 신고 요건 확인 행동 생성, Review PASS |
+| 신고 요건 확인 | 당시 `blocker=null`로 검증. 현재 MVP 계약은 Blocker 필수이며 해당 출력은 사용하지 않음 |
 | 결과 입력 | 원상복구·철거 불필요 변경 후보 3개와 새 행동 생성, Review PASS |
 | 확정값과 충돌 | `CONFLICT` 반환, 자동 변경 없이 확인 후보 보존 |
 | 충돌 확인 | `CONFIRMED_CONFLICT` 출처의 변경 후보·새 행동 생성, Review PASS |

@@ -743,6 +743,8 @@ def _validate_action_shape(
     sources_by_call_id: dict[UUID, Any],
 ) -> None:
     decision = subject.supervisor_draft.decision
+    if decision.blocker is None:
+        raise ReviewIntegrityError("MVP decisions require exactly one blocker")
     if decision.decision_type == DecisionType.ACTION:
         if decision.next_action is None:
             raise ReviewIntegrityError("ACTION requires exactly one next action")
@@ -1350,10 +1352,9 @@ def _visible_draft_strings(subject: ReviewSubject) -> list[tuple[str, str]]:
     decision = subject.supervisor_draft.decision
     base = "/supervisor_draft/decision"
     values: list[tuple[str, str]] = [
-        (f"{base}/selection_summary", decision.selection_summary)
+        (f"{base}/selection_summary", decision.selection_summary),
+        (f"{base}/blocker/description", decision.blocker.description),
     ]
-    if decision.blocker is not None:
-        values.append((f"{base}/blocker/description", decision.blocker.description))
     if decision.next_action is not None:
         action_base = f"{base}/next_action"
         values.extend(

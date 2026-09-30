@@ -151,7 +151,7 @@ class SupervisorModelOutput(AgentSchema):
     evidence_refs: Annotated[
         list[Annotated[StrictStr, Field(min_length=1)]], Field(min_length=1)
     ]
-    blocker: Blocker | None
+    blocker: Blocker
     next_action: NextActionSemantic | None
     questions_for_user: list[Annotated[StrictStr, Field(min_length=1)]]
     grounded_claims: list[GroundedClaimModelOutput]
@@ -164,7 +164,7 @@ class SupervisorSemanticDraft(AgentSchema):
     evidence_refs: Annotated[
         list[Annotated[StrictStr, Field(min_length=1)]], Field(min_length=1)
     ]
-    blocker: Blocker | None
+    blocker: Blocker
     next_action: NextActionSemantic | None
     questions_for_user: list[Annotated[StrictStr, Field(min_length=1)]]
     grounded_claims: list[GroundedClaimSemantic]
@@ -306,7 +306,7 @@ class SupervisorAgent:
             ),
             "contract": {
                 "action_count": 1,
-                "blocker_count": {"ACTION": [0, 1], "NEEDS_MORE_INFO": [1]},
+                "blocker_count": {"ACTION": [1], "NEEDS_MORE_INFO": [1]},
                 # Both land in VARCHAR(500) columns (BLOCKER.description,
                 # CASE_HISTORY.next_action). Over-length fails validation and
                 # burns a retry, so the limit is stated up front.
@@ -389,7 +389,7 @@ class SupervisorAgent:
                         "role": "system",
                         "content": (
                             "The prior draft failed deterministic contract validation. "
-                            "For ACTION, use the selected candidate's blocker (possibly null), "
+                            "For ACTION, use exactly one selected candidate's blocker, "
                             "one next_action, and an empty "
                             "questions_for_user list. For NEEDS_MORE_INFO, return a blocker, "
                             "no next_action, requires_human=true, and at least one question. "
@@ -514,6 +514,7 @@ class SupervisorAgent:
         base = "/supervisor_draft/decision"
         texts = {
             f"{base}/selection_summary": fields["selection_summary"],
+            f"{base}/blocker/description": fields["blocker"]["description"],
             f"{base}/next_action/title": action["title"],
             f"{base}/next_action/reason": action["reason"],
             **{
@@ -521,8 +522,6 @@ class SupervisorAgent:
                 for index, text in enumerate(action["questions_to_ask"])
             },
         }
-        if fields["blocker"] is not None:
-            texts[f"{base}/blocker/description"] = fields["blocker"]["description"]
         names = frozenset(
             check.program_name
             for source in request.source_results
@@ -581,12 +580,10 @@ class SupervisorAgent:
                 "target": to_model_projection(decision.next_action.target),
                 "evidence_refs": list(decision.next_action.evidence_refs),
             }
-        blocker = None
-        if decision.blocker is not None:
-            blocker = {
-                "description": decision.blocker.description,
-                "evidence_refs": list(decision.blocker.evidence_refs),
-            }
+        blocker = {
+            "description": decision.blocker.description,
+            "evidence_refs": list(decision.blocker.evidence_refs),
+        }
         return {
             "decision": {
                 "decision_type": decision.decision_type.value,
@@ -620,9 +617,7 @@ class SupervisorAgent:
     ) -> SupervisorDraft:
         evidence = self._evidence(sources, request)
         known_evidence = set(evidence)
-        refs = [*semantic.evidence_refs]
-        if semantic.blocker is not None:
-            refs.extend(semantic.blocker.evidence_refs)
+        refs = [*semantic.evidence_refs, *semantic.blocker.evidence_refs]
         if semantic.next_action is not None:
             refs.extend(semantic.next_action.evidence_refs)
         for claim in semantic.grounded_claims:
@@ -827,7 +822,6 @@ class SupervisorAgent:
                 **common,
             )
         else:
-            assert semantic.blocker is not None
             decision = NeedsMoreInfoDecisionDraft(
                 decision_type=DecisionType.NEEDS_MORE_INFO,
                 blocker=semantic.blocker,
@@ -1108,9 +1102,7 @@ class SupervisorAgent:
     @staticmethod
     def _free_text(draft: SupervisorDraft) -> list[str]:
         decision = draft.decision
-        values = [decision.selection_summary]
-        if decision.blocker is not None:
-            values.append(decision.blocker.description)
+        values = [decision.selection_summary, decision.blocker.description]
         if decision.next_action is not None:
             values.extend(
                 [
@@ -1127,9 +1119,10 @@ class SupervisorAgent:
     def _visible_draft_strings(draft: SupervisorDraft) -> list[tuple[str, str]]:
         decision = draft.decision
         base = "/supervisor_draft/decision"
-        values = [(f"{base}/selection_summary", decision.selection_summary)]
-        if decision.blocker is not None:
-            values.append((f"{base}/blocker/description", decision.blocker.description))
+        values = [
+            (f"{base}/selection_summary", decision.selection_summary),
+            (f"{base}/blocker/description", decision.blocker.description),
+        ]
         if decision.next_action is not None:
             action_base = f"{base}/next_action"
             values.extend(

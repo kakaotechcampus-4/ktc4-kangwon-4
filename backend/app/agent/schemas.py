@@ -23,6 +23,7 @@ from uuid import UUID
 from pydantic import (
     AwareDatetime,
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
     StrictBool,
@@ -58,12 +59,18 @@ Digest = Annotated[
     StrictStr,
     StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$"),
 ]
-# EVIDENCE.content_hash is VARCHAR(64), so the hash of a fetched body travels as
-# the bare hex digest. Digest keeps its "sha256:" prefix because the integrity
-# digests that use it land in VARCHAR(255) columns instead.
+def _normalize_content_hash(value: Any) -> Any:
+    """Accept BE's prefixed SHA-256 input and keep the DB value at 64 characters."""
+    return value.removeprefix("sha256:") if isinstance(value, str) else value
+
+
+# BE snapshots may include "sha256:"; normalize before validating so every
+# serialized EVIDENCE.content_hash still fits VARCHAR(64). Integrity Digest
+# values remain prefixed and are not normalized by this type.
 ContentHash = Annotated[
     StrictStr,
     StringConstraints(pattern=r"^[0-9a-f]{64}$"),
+    BeforeValidator(_normalize_content_hash),
 ]
 # Widths copied from backend/app/be/models/. A value that would not fit its
 # column is rejected here, where the run can still retry, instead of being
@@ -1435,9 +1442,7 @@ class ActionDecisionDraft(AgentSchema):
     evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
     based_on_call_ids: Annotated[list[RuntimeUUID], Field(min_length=1)]
     created_at: RuntimeDateTime
-    blocker: Blocker | None = Field(
-        description="Confirmed blocking condition, or null when the selected action has none."
-    )
+    blocker: Blocker = Field(description="One grounded Blocker, required by the MVP contract.")
     next_action: NextAction
     questions_for_user: list[NonEmptyStr]
 
@@ -1558,7 +1563,7 @@ class SupervisorDraft(AgentSchema):
     """Complete success schema returned by ``SupervisorAgent.draft``."""
 
     decision: DecisionDraft = Field(
-        description="One Next Action with an optional Blocker, or a needs-more-information decision."
+        description="Exactly one Blocker and one Next Action, or a needs-more-information decision."
     )
     mutations: MutationSet = Field(
         description="Uncommitted Case changes that require a matching Review PASS."
@@ -1585,7 +1590,7 @@ class SupervisorDraft(AgentSchema):
         return self
 
     @property
-    def blocker(self) -> Blocker | None:
+    def blocker(self) -> Blocker:
         return self.decision.blocker
 
     @property

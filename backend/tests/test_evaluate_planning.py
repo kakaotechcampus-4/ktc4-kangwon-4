@@ -58,21 +58,23 @@ def summary(blocker):
     return decision_summary(outcome)
 
 
-def test_action_without_blocker_remains_reportable():
-    report = json.loads(json.dumps(summary(None)))
+def test_action_with_one_blocker_remains_reportable():
+    report = json.loads(json.dumps(summary(
+        Blocker(description="합성 조건 미충족", evidence_refs=["synthetic-evidence"])
+    )))
 
-    assert report["blocker"] is None
-    assert report["blocker_digest"] is None
+    assert report["blocker"] == "합성 조건 미충족"
+    assert report["blocker_digest"] is not None
     assert report["action_code"] == "FILE_TAX_BUSINESS_CLOSURE"
     assert report["next_action_digest"] is not None
 
 
-@pytest.mark.parametrize("has_blocker", [False, True])
-def test_comparison_distinguishes_no_blocker_from_a_reported_blocker(has_blocker):
-    blocker = (
-        Blocker(description="합성 조건 미충족", evidence_refs=["synthetic-evidence"])
-        if has_blocker
-        else None
+@pytest.mark.parametrize("same_blocker", [False, True])
+def test_comparison_distinguishes_different_blockers(same_blocker):
+    first = Blocker(description="합성 조건 미충족", evidence_refs=["synthetic-evidence"])
+    second = Blocker(
+        description="합성 조건 미충족" if same_blocker else "다른 합성 조건 미충족",
+        evidence_refs=["synthetic-evidence"],
     )
     rows = [
         {
@@ -81,15 +83,15 @@ def test_comparison_distinguishes_no_blocker_from_a_reported_blocker(has_blocker
             "calls_by_role": {"supervisor": 1},
             **summary(item),
         }
-        for item in (None, blocker)
+        for item in (first, second)
     ]
 
     result = verdict(rows)
 
-    assert result["same_blocker"] is (not has_blocker)
+    assert result["same_blocker"] is same_blocker
     assert result["same_next_action"] is True
     assert result["reliability"] == "PASS"
-    assert result["verdict"] == ("FAIL" if has_blocker else "PASS")
+    assert result["verdict"] == ("PASS" if same_blocker else "FAIL")
 
 
 def test_blocker_comparison_ignores_per_run_evidence_ids():
