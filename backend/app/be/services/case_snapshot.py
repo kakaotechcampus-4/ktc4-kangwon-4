@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import datetime
 from uuid import uuid4
 
 from sqlmodel import Session
@@ -27,6 +27,7 @@ from app.be.crud import evidence as evidence_crud
 from app.be.crud import procedure_step as procedure_step_crud
 from app.be.models.case import Case
 from app.be.models.evidence import Evidence
+from app.be.models.mixins import KST
 from app.be.models.procedure_step import CaseProcedureStep
 
 # restoration_status/restoration_scope/demolition_required는 DB에서 "UNKNOWN"이라는 enum 값 자체가
@@ -45,8 +46,8 @@ def build_case_created_input(session: Session, case_id: int) -> AgentGraphInput:
     if history is None:
         raise ValueError(f"case {case_id} has no CASE_CREATED history")
 
-    # AI 쪽은 timezone 있는 시각만 받는다. DB는 naive라 UTC로 간주하고 붙인다(_build_procedure_progress와 동일).
-    submitted_at = history.created_at.replace(tzinfo=UTC)
+    # DB에는 한국 시각을 저장하고(mixins.kst_now) AI 쪽은 timezone이 붙은 시각만 받으므로 tzinfo만 붙인다.
+    submitted_at = history.created_at.replace(tzinfo=KST)
     input_event_id = f"case_history:{history.id}"
 
     return AgentGraphInput(
@@ -87,7 +88,7 @@ def build_case_snapshot(session: Session, case_id: int) -> CaseSnapshot:
         facts=_build_facts(case, evidences),
         procedure_progress=[_build_procedure_progress(step) for step in case_procedure_steps],
         evidence_records=[_build_evidence_record(e) for e in evidences],
-        captured_at=datetime.now(UTC),
+        captured_at=datetime.now(KST),
     )
 
 
@@ -130,9 +131,7 @@ def _build_procedure_progress(step: CaseProcedureStep) -> ProcedureProgress:
         procedure_step=ProcedureStepRef(procedure_step_id=step.procedure_step_id, step_code=step.procedure_step.step_code),
         status=ProcedureProgressStatus(step.status),
         evidence_refs=[],
-        # TODO: DB의 updated_at은 timezone 정보가 없는 naive datetime(mixins.py 기준). UTC라고
-        # 가정하고 tzinfo만 붙인다 — 서버가 실제로 UTC로 안 돌면 어긋날 수 있음(이 함수만의 문제는 아님).
-        updated_at=step.updated_at.replace(tzinfo=UTC),
+        updated_at=step.updated_at.replace(tzinfo=KST),
     )
 
 
@@ -145,8 +144,9 @@ def _build_evidence_record(evidence: Evidence) -> EvidenceRecord:
         locator=evidence.locator,
         excerpt=evidence.excerpt,
         parent_evidence_refs=[],
-        published_at=evidence.published_at.replace(tzinfo=UTC) if evidence.published_at else None,
-        retrieved_at=evidence.retrieved_at.replace(tzinfo=UTC),
+        published_at=evidence.published_at.replace(tzinfo=KST) if evidence.published_at else None,
+        retrieved_at=evidence.retrieved_at.replace(tzinfo=KST),
         freshness_status=FreshnessStatus(evidence.freshness_status),
-        content_hash=evidence.content_hash,
+        # DB는 64자 hex만 저장하고, AI 쪽은 "sha256:" 접두사가 붙은 형식만 받는다.
+        content_hash=f"sha256:{evidence.content_hash}" if evidence.content_hash else None,
     )

@@ -1,5 +1,5 @@
+import hashlib
 import json
-from datetime import datetime
 
 from fastapi import HTTPException
 from sqlmodel import Session
@@ -11,6 +11,7 @@ from app.be.crud import procedure_step as procedure_step_crud
 from app.be.models.case import Case
 from app.be.models.case_history import CaseHistory
 from app.be.models.evidence import Evidence
+from app.be.models.mixins import kst_now
 from app.be.models.procedure_step import CaseProcedureStep, ProcedureStep
 from app.be.schemas.case import CaseCreateRequest
 
@@ -39,13 +40,10 @@ def _create_case_creation_evidence(session: Session, case: Case, case_request: C
     # case 생성 폼 입력값(business_type/franchise_status/lease_status)을 AI 쪽에서 CONFIRMED로
     # 인정하려면 evidence_refs가 있어야 한다(CaseFact.validate_fact_state). 세 필드가 이 evidence
     # 하나를 같이 참조해도 된다고 AI팀 확인함.
+    submitted = json.dumps(case_request.model_dump(mode="json"), ensure_ascii=False)
     history = case_history_crud.create_case_history(
         session,
-        CaseHistory(
-            case_id=case.id,
-            raw_input=json.dumps(case_request.model_dump(mode="json"), ensure_ascii=False),
-            source="CASE_CREATED",
-        ),
+        CaseHistory(case_id=case.id, raw_input=submitted, source="CASE_CREATED"),
     )
     evidence_crud.create_evidence(
         session,
@@ -54,7 +52,11 @@ def _create_case_creation_evidence(session: Session, case: Case, case_request: C
             case_id=case.id,
             source_type="USER_INPUT",
             source_ref=f"case_history:{history.id}",
-            retrieved_at=datetime.now(),
+            # 근거 행 하나만 봐도 무엇을 근거로 삼았는지 알 수 있게 입력 내용을 그대로 남긴다.
+            excerpt=submitted,
+            # DB에는 접두사 없이 64자만 저장한다(스키마 문서). AI에 넘길 때 "sha256:"을 붙인다.
+            content_hash=hashlib.sha256(submitted.encode("utf-8")).hexdigest(),
+            retrieved_at=kst_now(),
             freshness_status="CURRENT",
         ),
     )

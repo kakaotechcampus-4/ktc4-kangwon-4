@@ -6,7 +6,6 @@ AI가 존재하지 않는 출처를 근거로 안내하게 되므로, 비어 있
 """
 
 from collections.abc import Sequence
-from datetime import UTC
 
 from sqlmodel import Session
 
@@ -20,6 +19,7 @@ from app.agent.schemas import (
 )
 from app.agent.support_agent import ReviewedSupportCatalog
 from app.be.crud import procedure_step as procedure_step_crud
+from app.be.models.mixins import KST
 
 
 class EmptyProcedureStore:
@@ -67,7 +67,7 @@ def build_known_procedure_steps(session: Session) -> list[KnownProcedureStep]:
             utterance_aliases=step.utterance_aliases or [],
             registry_version=step.registry_version,
             applicable_business_type=step.applicable_business_type,
-            deprecated_at=step.deprecated_at.replace(tzinfo=UTC) if step.deprecated_at else None,
+            deprecated_at=step.deprecated_at.replace(tzinfo=KST) if step.deprecated_at else None,
             dependencies=dependencies_by_step.get(step.id, []),
             eligibility_conditions=eligibilities_by_step.get(step.id, []),
         )
