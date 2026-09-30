@@ -445,9 +445,14 @@ class InfoAnalysisAgent:
                                 "because the proposed value is not stated in "
                                 "the exact source_text: "
                                 + ", ".join(field.value for field in rejected_fields)
-                                + ". Do not propose them again. If the text "
-                                "only hints at them, leave them out and list "
-                                "them as missing fields instead."
+                                + ". If the input explicitly states a supported value, "
+                                "retry using the single exact sentence that asserts it; "
+                                "do not combine it with another sentence. Preserve any "
+                                "negation or uncertainty in that sentence. A clear value "
+                                "different from the snapshot is still a candidate for "
+                                "code-level conflict detection, not permission to overwrite. "
+                                "If no exact statement supports the value, omit the "
+                                "candidate and request clarification instead."
                             ),
                         }
                     )
