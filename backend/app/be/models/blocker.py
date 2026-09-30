@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import JSON, BigInteger, Column, DateTime, Enum, ForeignKey, String
+from sqlalchemy import JSON, BigInteger, Column, DateTime, Enum, ForeignKey, Text
 from sqlmodel import Field, Relationship
 
 from app.be.models.mixins import TimestampMixin
@@ -24,7 +24,9 @@ class Blocker(TimestampMixin, table=True):
         ),
     )
 
-    description: str = Field(max_length=500)
+    # AI가 내는 문장에는 길이 제한이 없다. VARCHAR(500)이면 긴 답이 왔을 때 MySQL strict 모드가
+    # 에러를 내고, 그 예외를 라우터가 삼켜서 판단이 통째로 사라진다.
+    description: str = Field(sa_column=Column(Text, nullable=False))
     blocker_evidence_refs: list | None = Field(
         default=None, sa_column=Column(JSON, nullable=True), description="Blocker 판단의 근거 evidence_id 목록"
     )

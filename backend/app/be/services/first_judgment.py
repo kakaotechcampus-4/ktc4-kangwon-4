@@ -6,6 +6,7 @@
 from sqlmodel import Session
 
 from app.agent.schemas import AgentGraphOutput
+from app.be.crud import case_history as case_history_crud
 from app.be.models.evidence import DecisionRecord
 from app.be.services import agent_runtime as agent_runtime_service
 from app.be.services import case_snapshot as case_snapshot_service
@@ -16,6 +17,12 @@ async def run_first_judgment(
     session: Session, case_id: int
 ) -> tuple[AgentGraphOutput, DecisionRecord | None]:
     """판단 결과와, 저장된 검수 기록(정상 판단일 때만)을 함께 돌려준다."""
+
+    # 이번 판단이 어느 입력에 대한 것인지는 여기서 정한다. Case 생성 판단이므로
+    # CASE_CREATED 이력이고, 결과 입력 판단이 붙으면 그때 그 입력의 이력을 넘기면 된다.
+    history = case_history_crud.get_case_created_history(session, case_id)
+    if history is None:
+        raise ValueError(f"case {case_id} has no CASE_CREATED history")
 
     graph_input = case_snapshot_service.build_case_created_input(session, case_id)
 
@@ -36,4 +43,4 @@ async def run_first_judgment(
         # 호출한 쪽에 무엇을 어떻게 돌려줄지는 아직 정하지 않았다.
         return outcome, None
 
-    return outcome, decision_record_service.save_reviewed_plan(session, case_id, outcome)
+    return outcome, decision_record_service.save_reviewed_plan(session, history, outcome)

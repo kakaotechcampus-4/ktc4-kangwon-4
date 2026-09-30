@@ -1,4 +1,4 @@
-from sqlalchemy import JSON, BigInteger, Column, Enum, ForeignKey, String, Text
+from sqlalchemy import JSON, BigInteger, Column, Enum, ForeignKey, Text
 from sqlmodel import Field, Relationship
 
 from app.be.models.mixins import CreatedAtMixin
@@ -14,11 +14,12 @@ class CaseHistory(CreatedAtMixin, table=True):
     source: str = Field(
         sa_column=Column(Enum("USER_INPUT", "SYSTEM_BATCH", "CASE_CREATED", name="case_history_source_enum"), nullable=False)
     )
+    # AI가 내는 문장에는 길이 제한이 없어서 TEXT로 둔다(blocker.description과 같은 이유).
     next_action: str | None = Field(
-        default=None, sa_column=Column(String(500), nullable=True), description="nullable, 판단이 발생한 경우에만"
+        default=None, sa_column=Column(Text, nullable=True), description="nullable, 판단이 발생한 경우에만"
     )
     next_action_reason: str | None = Field(
-        default=None, sa_column=Column(String(500), nullable=True), description="다음 행동을 해야 하는 이유"
+        default=None, sa_column=Column(Text, nullable=True), description="다음 행동을 해야 하는 이유"
     )
     next_action_questions_to_ask: list | None = Field(
         default=None,

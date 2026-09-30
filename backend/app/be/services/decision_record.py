@@ -4,29 +4,29 @@ CONFLICT와 SAFE_FAILURE는 저장하지 않는다(AI팀 스펙: "CONFLICT·SAFE
 결과 저장 제외"). 사용자 확인 전 충돌값을 Case에 반영하면 안 되기 때문이다.
 """
 
-from datetime import UTC
 
 from sqlmodel import Session
 
 from app.agent.schemas import ReviewedPlanOutcome
 from app.be.crud import blocker as blocker_crud
-from app.be.crud import case_history as case_history_crud
 from app.be.crud import evidence as evidence_crud
 from app.be.models.blocker import Blocker
+from app.be.models.case_history import CaseHistory
 from app.be.models.evidence import DecisionRecord
+from app.be.models.mixins import KST
 
 
 def save_reviewed_plan(
-    session: Session, case_id: int, outcome: ReviewedPlanOutcome, *, trace_id: str | None = None
+    session: Session, history: CaseHistory, outcome: ReviewedPlanOutcome, *, trace_id: str | None = None
 ) -> DecisionRecord:
-    """판단 이력·Blocker·검수 기록을 한 트랜잭션으로 저장한다."""
+    """판단 이력·Blocker·검수 기록을 한 트랜잭션으로 저장한다.
+
+    `history`는 이번 판단을 일으킨 입력 이력이다. 어느 입력에 대한 판단인지는 부르는 쪽이
+    정한다 — 이 함수는 Case 생성 판단인지 결과 입력 판단인지 알 필요가 없다.
+    """
 
     # 저장 직전에 검수 증거를 다시 대조한다(AI팀 스펙의 처리 설명).
     outcome.assert_integrity()
-
-    history = case_history_crud.get_case_created_history(session, case_id)
-    if history is None:
-        raise ValueError(f"case {case_id} has no CASE_CREATED history")
 
     decision = outcome.review_subject.supervisor_draft.decision
     proof = outcome.review_proof
@@ -34,7 +34,7 @@ def save_reviewed_plan(
     blocker = blocker_crud.create_blocker(
         session,
         Blocker(
-            case_id=case_id,
+            case_id=history.case_id,
             created_from_case_history_id=history.id,
             description=decision.blocker.description,
             blocker_evidence_refs=list(decision.blocker.evidence_refs),
@@ -55,7 +55,7 @@ def save_reviewed_plan(
     record = evidence_crud.create_decision_record(
         session,
         DecisionRecord(
-            case_id=case_id,
+            case_id=history.case_id,
             case_history_id=history.id,
             run_id=str(proof.run_id),
             snapshot_id=str(proof.snapshot_id),
@@ -68,8 +68,8 @@ def save_reviewed_plan(
             summary=decision.selection_summary,
             questions_for_user=list(decision.questions_for_user) or None,
             human_confirmation_required=decision.requires_human,
-            # DB는 timezone 없는 시각을 쓰므로 UTC로 맞춘 뒤 tzinfo를 뗀다.
-            reviewed_at=proof.reviewed_at.astimezone(UTC).replace(tzinfo=None),
+            # DB는 timezone 없는 시각을 쓰므로 한국 시각으로 맞춘 뒤 tzinfo를 뗀다.
+            reviewed_at=proof.reviewed_at.astimezone(KST).replace(tzinfo=None),
         ),
     )
 

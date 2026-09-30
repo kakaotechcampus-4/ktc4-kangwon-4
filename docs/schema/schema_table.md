@@ -108,8 +108,8 @@ CASE에 대한 발화·이벤트 원본 이력.
 | case_id | BIGINT | FK | NOT NULL | 1 | |
 | raw_input | TEXT | | NOT NULL | `"임대인이랑 얘기 끝났어요, 다음 달까지 나가기로 했어요"` | 입력 원문 (사용자 발화, Case 생성 요청, 또는 배치가 에이전트에 전달한 지시문) |
 | source | ENUM | | NOT NULL | `USER_INPUT` | `USER_INPUT` / `SYSTEM_BATCH` / `CASE_CREATED` — `CASE_CREATED`는 Case 생성 직후 첫 Blocker/Next Action 판단 |
-| next_action | VARCHAR | | NULLABLE | `"부가가치세 확정신고를 진행하세요"` | 다음 액션 제안, 판단이 발생한 경우에만 채워짐 |
-| next_action_reason | VARCHAR | | NULLABLE | `"신고 기한이 폐업일로부터 25일이기 때문입니다"` | 다음 행동을 해야 하는 이유 |
+| next_action | TEXT | | NULLABLE | `"부가가치세 확정신고를 진행하세요"` | 다음 액션 제안, 판단이 발생한 경우에만 채워짐 (AI 문장은 길이 제한이 없어 TEXT) |
+| next_action_reason | TEXT | | NULLABLE | `"신고 기한이 폐업일로부터 25일이기 때문입니다"` | 다음 행동을 해야 하는 이유 |
 | next_action_questions_to_ask | JSON | | NULLABLE | `["원상복구 범위가 어디까지인지 확인해 주세요"]` | 사용자가 임대인·기관에 물어볼 질문 목록. 다음 행동이 없으면 NULL |
 | next_action_evidence_refs | JSON | | NULLABLE | `["procedure:reviewed:NTS_CLOSURE"]` | 다음 행동의 근거 evidence_id 목록. 다음 행동이 없으면 NULL |
 | priority_blocker_id | BIGINT | FK | NULLABLE | `NULL` | 이 시점에 최우선인 블로커 참조 |
@@ -125,7 +125,7 @@ CASE 진행을 막는 이슈. CASE_HISTORY에서 생성/해소된다.
 | case_id | BIGINT | FK | NOT NULL | 1 | |
 | created_from_case_history_id | BIGINT | FK | NOT NULL | 5 | 이 blocker를 생성시킨 판단 로그 |
 | resolved_from_case_history_id | BIGINT | FK | NULLABLE | `NULL` | 이 blocker를 해소시킨 판단 로그 |
-| description | VARCHAR | | NOT NULL | `"원상복구 범위가 아직 확정되지 않았습니다"` | 블로커 내용 본문 — 사용자에게 보여줄 핵심 필드 |
+| description | TEXT | | NOT NULL | `"원상복구 범위가 아직 확정되지 않았습니다"` | 블로커 내용 본문 — 사용자에게 보여줄 핵심 필드 (AI 문장은 길이 제한이 없어 TEXT) |
 | blocker_evidence_refs | JSON | | NULLABLE | `["case_1_creation_form"]` | 이 블로커 판단의 근거 evidence_id 목록 |
 | status | ENUM | | NOT NULL, DEFAULT `ACTIVE` | `ACTIVE` | `ACTIVE` / `RESOLVED` |
 | created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-09-10 09:10:05` | |
