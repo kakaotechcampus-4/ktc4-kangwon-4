@@ -21,6 +21,15 @@ from ..schemas import (
 # CASE.business_type holds the words the user typed ("카페"), while
 # PROCEDURE_STEP.applicable_business_type holds a code ("CAFE"). Comparing them
 # raw filters out every business-specific procedure, so convert first.
+#
+# Two known gaps, both owned outside the agent (see PR #45 review):
+#   * This matches the whole typed value only.  FE takes business_type as free
+#     text, so "개인 카페" or "커피숍" still miss every CAFE-only procedure.
+#     Growing this dict is not the fix; FE offering a choice, or BE storing a
+#     code, is.  Do not widen it here without agreeing that with FE/BE first.
+#   * RESTAURANT cannot match anything yet: PROCEDURE_STEP
+#     .applicable_business_type is Enum("ALL", "CAFE"), so no RESTAURANT row can
+#     exist.  A 일반음식점 Case silently gets zero procedure candidates.
 _BUSINESS_TYPE_CODES: dict[str, str] = {
     "카페": "CAFE",
     "휴게음식점": "CAFE",

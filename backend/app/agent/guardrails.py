@@ -28,6 +28,10 @@ _SENSITIVE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     # matches runs inside SHA-256 evidence digests and official document IDs,
     # which would fail a run on its own grounding.
     ("BUSINESS_REGISTRATION_NUMBER", re.compile(r"(?<!\d)\d{3}-\d{2}-\d{5}(?!\d)")),
+    # Hyphens are required here for the same reason as above: a digit-only form
+    # matches runs inside SHA-256 evidence digests.  A Case freely names other
+    # people ("the landlord said ..."), so their number can arrive unredacted.
+    ("PHONE_NUMBER", re.compile(r"(?<!\d)01[016789]-\d{3,4}-\d{4}(?!\d)")),
     ("BEARER_TOKEN", re.compile(r"(?i)\bbearer\s+[a-z0-9._~+/=-]{12,}")),
     ("API_KEY", re.compile(r"(?i)\b(?:sk|pk)-[a-z0-9_-]{12,}")),
 )

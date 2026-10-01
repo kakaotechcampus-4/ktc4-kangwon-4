@@ -44,7 +44,10 @@ def build_planning_input(
     """Use the persisted input event's ID/time, not invented run-time values.
 
     BE must authorize the Case and redact the submitted text before calling.
-    Obvious unredacted identifiers are rejected before any provider request.
+    The guardrail here is a last resort, not the redaction step: it rejects only
+    a national ID, business registration number, mobile number or credential
+    string.  Email, address, name and bank account are not checked, so BE must
+    still redact them before calling.
     """
     if trigger_type not in {"CASE_CREATED", "RESULT_SUBMITTED"}:
         raise ValueError("input trigger must be CASE_CREATED or RESULT_SUBMITTED")

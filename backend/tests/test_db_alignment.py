@@ -9,9 +9,11 @@ not silently truncated at INSERT time. Synthetic data only.
 import asyncio
 import hashlib
 from datetime import datetime, timezone
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import pytest
+from pydantic import ValidationError
+
 from app.agent.procedure_tool.rules import procedure_constraints
 from app.agent.schemas import (
     Blocker,
@@ -23,7 +25,8 @@ from app.agent.schemas import (
 )
 from app.agent.support_agent.agent import SupportAgent
 from app.agent.support_agent.models import ReviewedSupportCatalog
-from pydantic import ValidationError
+from app.be.models.blocker import Blocker as BlockerRow
+from app.be.models.evidence import Evidence as EvidenceRow
 from scripts.evaluate_planning import CASES, build_case_snapshot
 
 NOW = datetime(2026, 9, 29, tzinfo=timezone.utc)
@@ -229,19 +232,21 @@ def test_all_applies_to_every_business_type():
     assert procedure_constraints(step("ALL"), snapshot("카페")) == []
 
 
-# 4. BLOCKER.description is VARCHAR(500).
+# 4. BLOCKER.description.  The limit is read from the column, not repeated
+# here, so shrinking the column without shrinking the agent fails this test.
 def test_blocker_description_fits_its_column():
-    assert Blocker(description="가" * 500, evidence_refs=[REF]).description
+    limit = BlockerRow.__table__.c.description.type.length
+    assert Blocker(description="가" * limit, evidence_refs=[REF]).description
     with pytest.raises(ValidationError):
-        Blocker(description="가" * 501, evidence_refs=[REF])
+        Blocker(description="가" * (limit + 1), evidence_refs=[REF])
 
 
-# 5. The remaining columns the agent writes into, same rule.
+# 5. The remaining columns the agent writes into, same rule, same source.
 @pytest.mark.parametrize(
-    "field,limit",
-    [("evidence_id", 100), ("source_ref", 500), ("source_version", 100), ("locator", 255)],
+    "field", ["evidence_id", "source_ref", "source_version", "locator"]
 )
-def test_evidence_text_fits_its_column(field, limit):
+def test_evidence_text_fits_its_column(field):
+    limit = EvidenceRow.__table__.c[field].type.length
     assert evidence(**{field: "a" * limit})
     with pytest.raises(ValidationError):
         evidence(**{field: "a" * (limit + 1)})
