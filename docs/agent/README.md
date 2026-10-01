@@ -5,6 +5,13 @@ Agent는 폐업 Case의 확인된 사실과 근거로 **Blocker 1개·Next Actio
 사용자가 현실에서 실행한 결과를 입력하면 같은 Case를 다시 판단한다.
 모든 정상 판단은 독립 Review를 거치며 Case 저장은 BE가 담당한다.
 
+원상복구 범위·철거 필요 여부의 미확인은 Case의 후속 진척을 막는 조건이며, 이를 해소할
+임대인 확인 행동은 실행 가능하다. 확인 행동을 할 수 있다는 이유만으로 이 Blocker를 제거하지 않는다.
+일반 절차는 공식 안내에 따른 진행 상태와 준비사항 확인을 Blocker로 제시하며,
+확인된 사실과 후보에 없는 차단 조건을 만들어내지 않는다.
+
+지원사업은 MVP 구현·정상 동작 검증 범위에서 제외. 기존 지원사업 코드와 자료는 유지.
+
 **데이터의 절대 기준은 [schema_table.md](../schema/schema_table.md)다.**
 필드·타입·enum·NULL·기본값·관계·상태 전이는 이 기준을 따르고,
 Agent가 다르면 Agent를 고친다. MVP 단순화를 이유로 제약을 완화하지 않는다.
@@ -123,7 +130,10 @@ Review·충돌 보호·근거·개인정보 검증은 축소하지 않는다.
 
 ## 완료 기준
 
-`AgentRuntime.run_planning`의 입력부터 출력까지 실제 Graph·Info·Support·Supervisor·Review 경로로 검증한다.
+`AgentRuntime.run_planning`의 입력부터 출력까지 실제 Graph·Info·Supervisor·Review 경로로 검증한다.
+현재 MVP 검증에서는 지원 자료를 빈 목록으로 전달하며 지원사업 정상 동작은 통과 조건에서 제외한다.
+Agent 동작 검증에는 실제 LLM 호출 필수. 모의 응답 테스트나 `--validate-only`만으로 완료 처리 금지.
+응답 재사용 비활성화와 호출별 모델·`schema_name`·HTTP 상태·최종 Review 결과 확인.
 
 | 확인 항목 | 통과 기준 | 2026-09-28 실행 |
 |---|---|---|
@@ -144,6 +154,8 @@ Agent 응답 자체는 저장 성공이 아니다.
 함께 비교한다. Supervisor 단독 비교, 전체 Graph 실행, 판단 재사용은 구분해서 검증한다.
 
 위 실행은 [`evaluate_planning.py`](../../backend/scripts/evaluate_planning.py)로 재현한다.
+이미 확인된 Case 상태는 `--graph-input <AgentGraphInput JSON 경로>`로 전달 가능.
+`--case`·`--result-input`과 동시 사용 불가. 합성 입력·호출 기록은 Git 추적에서 제외.
 같은 판단인지는 Blocker 설명과 Next Action 전체(행동 코드·대상·제목·이유·확인 질문)를
 digest로 비교한다. 근거 ID는 실행마다 새로 발급되므로 비교에서 제외한다.
 실행마다 새 runtime을 만들고 판단 재사용을 꺼서, 반복이 실제로 다시 호출하도록 한다.

@@ -163,13 +163,13 @@ def build_blocker_candidates(
             finding = findings[(reference["procedure_step_id"], step_code)]
             definition = ACTION_DEFINITIONS[row["action_code"]]
             logical_code = definition.procedure_logical_code
-            # An uncertain scope is the reason to ask the landlord, not a reason
-            # to drop that confirmation. Execution still requires relevance.
+            # A current source can support asking whether a procedure applies.
+            # Submission still requires established relevance and master rules.
             if finding.relevance != "RELEVANT":
                 if not (
-                    restoration_first
-                    and row["action_code"] == "CONFIRM_RESTORATION_SCOPE"
+                    definition.confirmation_only
                     and finding.relevance == "POSSIBLY_RELEVANT"
+                    and finding.requires_confirmation
                 ):
                     continue
                 evidence = expand_evidence(
@@ -200,22 +200,42 @@ def build_blocker_candidates(
                     continue
                 assert logical_code is not None
                 label = _PROCEDURE_LABELS[logical_code]
-                description = (
-                    f"{label}의 진행 상태와 준비사항을 확인할 필요가 있습니다."
+                evidence = expand_evidence(
+                    [evidence_by_id[ref] for ref in finding.evidence_refs],
+                    evidence_by_id,
                 )
                 confirmation = definition.confirmation_only
+                applicability_unknown = finding.relevance == "POSSIBLY_RELEVANT"
+                description = (
+                    f"{label} 안내의 현재 적용 여부를 확인할 필요가 있습니다."
+                    if any(item.freshness_status != "CURRENT" for item in evidence)
+                    else f"{label} 대상 여부와 준비사항을 확인할 필요가 있습니다."
+                    if applicability_unknown
+                    else f"{label}의 진행 상태와 준비사항을 확인할 필요가 있습니다."
+                )
                 title = (
-                    f"담당 기관에 {label} 준비사항을 확인하세요."
+                    f"담당 기관에 {label} 대상 여부와 준비사항을 확인하세요."
+                    if applicability_unknown
+                    else f"담당 기관에 {label} 준비사항을 확인하세요."
                     if confirmation
                     else f"{label}를 제출하세요."
                 )
                 reason = (
-                    f"제공된 공식 안내를 바탕으로 {label}에 필요한 준비를 확인하세요."
+                    "제공된 공식 안내가 가게에 적용되는지 담당 기관에 확인할 필요가 있습니다."
+                    if applicability_unknown
+                    else f"제공된 공식 안내를 바탕으로 {label}에 필요한 준비를 확인하세요."
                     if confirmation
                     else finding.required_actions[0].text
                 )
                 questions = (
-                    [f"{label}에 필요한 서류와 제출 방법을 확인해 주시겠습니까?"]
+                    [
+                        (
+                            f"제 가게가 {label} 대상인지, 해당하면 필요한 서류와 제출 방법은 "
+                            "무엇인지 확인해 주시겠습니까?"
+                        )
+                    ]
+                    if applicability_unknown
+                    else [f"{label}에 필요한 서류와 제출 방법을 확인해 주시겠습니까?"]
                     if confirmation
                     else [
                         "제출한 신고서와 첨부서류가 접수되었는지 확인해 주시겠습니까?"

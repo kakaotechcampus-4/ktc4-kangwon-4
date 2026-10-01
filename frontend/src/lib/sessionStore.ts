@@ -44,22 +44,3 @@ export function createSessionValue(key: string): SessionValue {
     },
   }
 }
-
-export interface SessionFlag {
-  read: () => boolean
-  write: (value: boolean) => void
-}
-
-/**
- * 참/거짓만 담는 자리. 값 저장 위에 얹은 얇은 껍데기다.
- *
- * `'true'` 문자열과 비교하는 것은 저장소에 무엇이 들어 있든 참은 하나뿐이게 하려는 것이다.
- */
-export function createSessionFlag(key: string): SessionFlag {
-  const value = createSessionValue(key)
-
-  return {
-    read: () => value.read() === 'true',
-    write: (next) => value.write(String(next)),
-  }
-}

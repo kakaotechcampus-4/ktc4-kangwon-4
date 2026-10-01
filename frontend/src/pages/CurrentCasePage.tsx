@@ -1,4 +1,4 @@
-import { useLocation } from 'react-router'
+import { Navigate, useLocation } from 'react-router'
 
 import { AppShell } from '../components/AppShell'
 import { BlockerCard } from '../components/BlockerCard'
@@ -6,26 +6,57 @@ import { FactList } from '../components/FactList'
 import { InsufficientInfoCard } from '../components/InsufficientInfoCard'
 import { NextActionCard } from '../components/NextActionCard'
 import { NoBlockerCard } from '../components/NoBlockerCard'
-import { readMockKey } from '../lib/mockSwitch'
-import { insufficientCase, noBlockerCase, normalCase } from '../mocks/currentCase'
-import type { CurrentCaseView } from '../types/view'
+import { NoticeCard } from '../components/NoticeCard'
+import { useCase } from '../hooks/useCase'
 
 /**
- * 이 화면에서 볼 수 있는 Mock.
+ * 현재 Case. 사용자가 돌아올 곳이고, 이 제품에서 유일하게 "지금 상황"을 보여주는 화면이다.
  *
- * TODO(API): 계약이 확정되면 `GET /cases/{caseId}` 응답을 어댑터로 변환해 쓴다.
- * 그때 이 목록은 테스트 픽스처로 옮긴다.
+ * 그래서 들어올 때마다 서버에 다시 묻는다. 앞 화면에서 받은 값을 들고 오면 편하지만,
+ * 그 값이 히스토리에 남아 오래된 Case가 지금 상황인 척 다시 뜬다.
  */
-const MOCKS: Record<string, CurrentCaseView> = {
-  'no-blocker': noBlockerCase,
-  insufficient: insufficientCase,
-}
-
 export function CurrentCasePage() {
   const { search } = useLocation()
-  const mockKey = readMockKey(search)
-  const view: CurrentCaseView = Object.hasOwn(MOCKS, mockKey) ? MOCKS[mockKey] : normalCase
-  const { facts, blocker, nextAction } = view
+  const query = useCase()
+
+  if (query.status === 'LOADING') {
+    return (
+      <AppShell title="내 폐업 준비">
+        <section className="rounded-2xl bg-white p-5" role="status" aria-live="polite">
+          <p className="text-base leading-relaxed text-gray-600">불러오는 중입니다.</p>
+        </section>
+      </AppShell>
+    )
+  }
+
+  /**
+   * 아직 Case를 만들지 않은 사용자가 주소로 직접 들어온 경우다.
+   * 빈 화면을 보여주는 대신 만들러 보낸다.
+   */
+  if (query.status === 'EMPTY') return <Navigate to={{ pathname: '/start', search }} replace />
+
+  if (query.status === 'FAILED') {
+    return (
+      <AppShell title="내 폐업 준비">
+        <NoticeCard
+          tone="NEUTRAL"
+          title="지금 상황을 불러오지 못했습니다."
+          description="잠시 후 다시 시도해 주세요. 입력하신 내용은 그대로 있습니다."
+        />
+
+        {/* 라우터로 옮겨도 같은 화면이라 다시 받아올 수 없다. 페이지를 새로 연다 */}
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          className="min-h-13 w-full rounded-xl bg-gray-900 text-base font-bold text-white"
+        >
+          다시 시도
+        </button>
+      </AppShell>
+    )
+  }
+
+  const { facts, blocker, nextAction } = query.view
 
   const confirmed = facts.filter((fact) => fact.status === 'CONFIRMED')
   const pending = facts.filter((fact) => fact.status !== 'CONFIRMED')

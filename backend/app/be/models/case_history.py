@@ -1,4 +1,6 @@
-from sqlalchemy import BigInteger, Column, Enum, ForeignKey, String, Text
+from typing import Optional
+
+from sqlalchemy import JSON, BigInteger, Column, Enum, ForeignKey, String, Text
 from sqlmodel import Field, Relationship
 
 from app.be.models.mixins import CreatedAtMixin
@@ -20,8 +22,17 @@ class CaseHistory(CreatedAtMixin, table=True):
     priority_blocker_id: int | None = Field(
         default=None, sa_column=Column(BigInteger, ForeignKey("blocker.id", use_alter=True, name="fk_case_history_priority_blocker"), nullable=True)
     )
+    judgment_status: str = Field(
+        sa_column=Column(
+            Enum("PENDING", "DONE", "NEEDS_MORE_INFO", "FAILED", name="judgment_status_enum"), nullable=False
+        )
+    )
+    questions_for_user: list[str] | None = Field(default=None, sa_column=Column(JSON, nullable=True))
 
     case: "Case" = Relationship(back_populates="histories")
     procedure_step_histories: list["CaseProcedureStepHistory"] = Relationship(back_populates="case_history")
+    priority_blocker: Optional["Blocker"] = Relationship(
+        sa_relationship_kwargs={"foreign_keys": "CaseHistory.priority_blocker_id"}
+    )
 
 

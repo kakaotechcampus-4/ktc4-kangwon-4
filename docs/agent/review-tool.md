@@ -3,10 +3,10 @@
 모든 정상 판단을 독립 검수하는 필수 관문. 검색하지 않고 초안을 직접 고치지 않는다 —
 반송 사유만 내고, 해당 구성요소가 다시 판단한다.
 
-공용 모델 설정(`.env.example`의 `PROXY_TOKEN`·`OPENAI_MODEL`)으로 호출하며 Supervisor의
-`SUPERVISOR_*` 설정을 따르지 않는다 — 초안을 쓴 모델과 검수하는 모델이 같으면 같은 실수를
-그대로 통과시킬 수 있다. 별도 프롬프트·별도 호출로 검수하며,
-Supervisor의 응답이나 대화 이력을 재사용하지 않고 `ReviewSubject`만 받는다.
+공용 모델 설정(`OPENAI_MODEL=gpt-5.6-sol`, `OPENAI_REASONING_EFFORT=xhigh`)으로 호출.
+Supervisor를 포함한 모든 LLM 호출도 같은 모델·추론 강도로 통일.
+Review 독립성은 다른 모델 사용이 아니라 별도 프롬프트·별도 호출로 확보.
+Supervisor의 응답이나 대화 이력을 재사용하지 않고 `ReviewSubject`만 입력으로 사용.
 
 ## 입력 → 출력
 

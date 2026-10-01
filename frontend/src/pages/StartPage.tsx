@@ -1,7 +1,7 @@
 import { Link, Navigate, useLocation } from 'react-router'
 
 import { AppShell } from '../components/AppShell'
-import { hasCase } from '../lib/caseState'
+import { useCase } from '../hooks/useCase'
 
 /**
  * 시작 화면. Case가 없는 사용자만 본다.
@@ -12,7 +12,7 @@ import { hasCase } from '../lib/caseState'
  * Case가 있는 사용자는 진입 분기에서 `/case`로 바로 간다. 이 화면을 매번 거치게 하면
  * 할 일 하나를 보기까지 버튼을 한 번 더 눌러야 한다.
  *
- * 그래도 여기서 한 번 더 확인하는 이유는 뒤로가기 때문이다. Case를 만들고 `/case`에서
+ * 그래도 여기서 한 번 더 서버에 묻는 이유는 뒤로가기 때문이다. Case를 만들고 `/case`에서
  * 뒤로 누르면 이 화면이 다시 나오는데, 그때 "시작하기"가 살아 있으면 두 번째 Case를
  * 만들려 든다 — 서버에서는 회원당 하나라 409로 막힌다.
  *
@@ -22,8 +22,16 @@ import { hasCase } from '../lib/caseState'
 export function StartPage() {
   // ?mock= 을 이어준다. 예외 화면을 링크만으로 따라갈 수 있어야 리뷰가 된다
   const { search } = useLocation()
+  const query = useCase()
 
-  if (hasCase(search)) return <Navigate to={{ pathname: '/case', search }} replace />
+  /**
+   * 답을 기다리는 동안에도 화면을 그린다. 내용이 고정이라 기다릴 이유가 없고,
+   * 진입 분기도 빈 화면이라 여기서까지 비우면 흰 화면이 두 번 이어진다.
+   *
+   * 서버를 못 불렀을 때도 그대로 둔다. Case 가 있는지 알 수 없다고 화면을 막으면
+   * 처음 온 사장님이 아무것도 못 한다 — 만들기를 누르면 서버가 409로 막아 돌려보낸다.
+   */
+  if (query.status === 'READY') return <Navigate to={{ pathname: '/case', search }} replace />
 
   return (
     <AppShell title="폐업 준비 시작하기">
