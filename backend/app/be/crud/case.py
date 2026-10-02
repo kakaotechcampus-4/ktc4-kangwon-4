@@ -4,6 +4,10 @@ from sqlmodel import Session, select
 from app.be.models.case import Case
 from app.be.models.case_history import CaseHistory
 
+# 배치(SYSTEM_BATCH)가 만든 이력에는 next_action·priority_blocker가 없을 수 있어서
+# 화면에 보여줄 최신 판단을 찾을 때는 사용자 입력에서 비롯된 것만 본다.
+_USER_DRIVEN_SOURCES = ("CASE_CREATED", "USER_INPUT")
+
 
 def create_case(session: Session, case: Case) -> Case:
     session.add(case)
@@ -15,20 +19,22 @@ def get_case_by_member_id(session: Session, member_id: int) -> Case | None:
     return session.exec(select(Case).where(Case.member_id == member_id)).one_or_none()
 
 
-def get_latest_case_history_by_case_id_and_source(
-    session: Session, case_id: int, source: str
-) -> CaseHistory | None:
-    """case_id와 source가 모두 일치하는 CaseHistory 중 created_at 기준 가장 최근 1개. 없으면 None.
+def get_case_by_id(session: Session, case_id: int) -> Case | None:
+    return session.exec(select(Case).where(Case.id == case_id)).one_or_none()
 
-    priority_blocker/next_action을 채우는 용도로 쓸 때는 source="USER_INPUT"으로
-    호출한다 — SYSTEM_BATCH는 이 값들이 없을 수 있다(배치 기능 자체가 아직 미구현이라 지금은 실질적으로 없는 값이지만, 
-    나중에 생겨도 이 조회에 안 섞이도록 호출부에서 명시적으로 걸러야 한다).
+
+def get_latest_user_driven_case_history(session: Session, case_id: int) -> CaseHistory | None:
+    """화면에 보여줄 가장 최근 판단 이력. 없으면 None.
+
+    Case 생성 판단(CASE_CREATED)과 결과 입력 판단(USER_INPUT)을 모두 보고 그중 최신을
+    고른다. 배치가 생기더라도 이 조회에는 섞이지 않는다.
     """
+
     return session.exec(
         select(CaseHistory)
         .options(joinedload(CaseHistory.priority_blocker))
         .where(CaseHistory.case_id == case_id)
-        .where(CaseHistory.source == source)
+        .where(CaseHistory.source.in_(_USER_DRIVEN_SOURCES))
         .order_by(CaseHistory.created_at.desc())
         .limit(1)
-    ).one_or_none()
+    ).first()

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Column, DateTime, Enum, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import JSON, BigInteger, Column, DateTime, Enum, ForeignKey, String, Text, UniqueConstraint
 from sqlmodel import Field, Relationship
 
 from app.be.models.mixins import CreatedAtMixin
@@ -101,8 +101,14 @@ class DecisionRecord(CreatedAtMixin, table=True):
 
     id: int | None = Field(default=None, sa_column=Column(BigInteger, primary_key=True, autoincrement=True))
     case_id: int = Field(sa_column=Column(BigInteger, ForeignKey("case.id"), nullable=False), description="대상 케이스")
+    case_history_id: int = Field(
+        sa_column=Column(
+            BigInteger, ForeignKey("case_history.id"), nullable=False, comment="이 판단을 일으킨 입력 이력"
+        )
+    )
 
     run_id: str = Field(max_length=100, description="실행 단위 ID")
+    snapshot_id: str = Field(max_length=36, description="판단에 사용한 Case 상태 스냅샷 ID(UUID)")
     trace_id: str | None = Field(default=None, max_length=100, description="추적 ID")
     review_subject_id: str = Field(max_length=100, description="리뷰 대상 ID")
     review_attempt: int = Field(default=1, description="리뷰 시도 횟수")
