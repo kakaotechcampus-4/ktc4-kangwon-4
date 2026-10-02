@@ -6,6 +6,7 @@ import hashlib
 import re
 from collections.abc import Callable, Sequence
 from datetime import date, datetime, timezone
+from types import MappingProxyType
 from typing import Annotated, Any, Literal, Protocol
 from uuid import UUID, uuid4
 
@@ -18,12 +19,14 @@ from pydantic import (
     model_validator,
 )
 
+from app.agent.action_catalog import ProcedureBindings, resolve_procedure_bindings
 from app.agent.guardrails import (
     GuardrailViolation,
     ensure_no_sensitive_text,
     exact_span,
     resolve_evidence_aliases,
 )
+from app.agent.procedure_tool.rules import business_type_code
 from app.agent.projection import ensure_projection_has_no_obvious_sensitive_text
 from app.agent.prompts import info_messages
 from app.agent.schemas import (
@@ -347,6 +350,7 @@ class InfoAnalysisAgent:
         self,
         llm: StructuredGenerator,
         *,
+        procedure_bindings: ProcedureBindings | None = None,
         clock: Callable[[], datetime] = _now,
         uuid_factory: Callable[[], UUID] = uuid4,
         parser_version: str = "info-agent/1.0",
@@ -355,13 +359,26 @@ class InfoAnalysisAgent:
         if max_local_attempts < 1 or max_local_attempts > 3:
             raise ValueError("max_local_attempts must be between 1 and 3")
         self._llm = llm
+        self._procedure_bindings = (
+            None
+            if procedure_bindings is None
+            else MappingProxyType(
+                {
+                    code: type(ref).model_validate(ref.model_dump(mode="python"))
+                    for code, ref in procedure_bindings.items()
+                }
+            )
+        )
         self._clock = clock
         self._uuid = uuid_factory
         self._parser_version = parser_version
         self._max_local_attempts = max_local_attempts
 
     async def analyze(self, request: InfoAnalysisInput) -> InfoAnalysisResult:
-        prompt_input = self._prompt_input(request)
+        procedure_bindings = resolve_procedure_bindings(
+            request.known_procedure_steps, self._procedure_bindings
+        )
+        prompt_input = self._prompt_input(request, procedure_bindings)
         evidence_by_alias = {
             alias: evidence_id
             for evidence_id, alias in self._procedure_evidence_aliases(request).items()
@@ -505,7 +522,7 @@ class InfoAnalysisAgent:
                         evidence_by_alias,
                     )
                 )
-                return self._materialize(request, draft)
+                return self._materialize(request, draft, procedure_bindings)
             except (GuardrailViolation, ValueError) as exc:
                 rejected_fields = getattr(exc, "rejected_fields", ())
                 omitted_procedure_codes = getattr(exc, "omitted_procedure_codes", ())
@@ -534,7 +551,10 @@ class InfoAnalysisAgent:
             ) from None
 
     @staticmethod
-    def _prompt_input(request: InfoAnalysisInput) -> dict[str, Any]:
+    def _prompt_input(
+        request: InfoAnalysisInput,
+        procedure_bindings: ProcedureBindings | None = None,
+    ) -> dict[str, Any]:
         allowed = set(request.allowed_field_paths)
         aliases_by_evidence = InfoAnalysisAgent._procedure_evidence_aliases(request)
         return {
@@ -556,7 +576,7 @@ class InfoAnalysisAgent:
                 for item in request.case_snapshot.procedure_progress
             ],
             "procedure_analysis_step_codes": sorted(
-                InfoAnalysisAgent._analysis_step_codes(request)
+                InfoAnalysisAgent._analysis_step_codes(request, procedure_bindings)
             ),
             "procedure_evidence_by_step": {
                 step.procedure_step.step_code: [
@@ -630,8 +650,14 @@ class InfoAnalysisAgent:
         }
 
     @staticmethod
-    def _analysis_step_codes(request: InfoAnalysisInput) -> set[str]:
+    def _analysis_step_codes(
+        request: InfoAnalysisInput,
+        procedure_bindings: ProcedureBindings | None = None,
+    ) -> set[str]:
         """Require consideration of supplied topics, never infer their legal content."""
+        resolved_bindings = resolve_procedure_bindings(
+            request.known_procedure_steps, procedure_bindings
+        )
         values = {
             item.field_path: item.value
             for item in request.case_snapshot.facts
@@ -640,7 +666,10 @@ class InfoAnalysisAgent:
         for overlay in request.fact_overlays:
             values[overlay.field_path] = overlay.proposed_value
         completed = {
-            item.procedure_step.step_code
+            (
+                item.procedure_step.procedure_step_id,
+                item.procedure_step.step_code,
+            )
             for item in request.case_snapshot.procedure_progress
             if item.status == ProcedureProgressStatus.COMPLETED
         }
@@ -653,7 +682,14 @@ class InfoAnalysisAgent:
             and values.get(CaseFieldKey.DEMOLITION_REQUIRED)
             in {"REQUIRED", "NOT_REQUIRED"}
         ):
-            completed.add("CONFIRM_RESTORATION_SCOPE")
+            restoration_step = resolved_bindings.get("CONFIRM_RESTORATION_SCOPE")
+            if restoration_step is not None:
+                completed.add(
+                    (
+                        restoration_step.procedure_step_id,
+                        restoration_step.step_code,
+                    )
+                )
         supplied = {
             code
             for document in request.procedure_lookup_result.documents
@@ -665,14 +701,21 @@ class InfoAnalysisAgent:
             for step in request.known_procedure_steps
             if step.deprecated_at is None
             and step.procedure_step.step_code in supplied
-            and step.procedure_step.step_code not in completed
+            and (
+                step.procedure_step.procedure_step_id,
+                step.procedure_step.step_code,
+            )
+            not in completed
             and step.applicable_business_type
-            in {"ALL", values.get(CaseFieldKey.BUSINESS_TYPE)}
+            in {"ALL", business_type_code(values.get(CaseFieldKey.BUSINESS_TYPE))}
         }
 
     @classmethod
     def _validate_procedure_coverage(
-        cls, request: InfoAnalysisInput, draft: InfoAnalysisDraft
+        cls,
+        request: InfoAnalysisInput,
+        draft: InfoAnalysisDraft,
+        procedure_bindings: ProcedureBindings | None = None,
     ) -> None:
         accounted_for = {item.step_code for item in draft.procedure_findings}
         for index, document in enumerate(request.procedure_lookup_result.documents):
@@ -682,7 +725,9 @@ class InfoAnalysisAgent:
                 for item in draft.uncertainties
             ):
                 accounted_for.update(document.step_codes)
-        omitted = cls._analysis_step_codes(request) - accounted_for
+        omitted = (
+            cls._analysis_step_codes(request, procedure_bindings) - accounted_for
+        )
         if omitted:
             raise InfoAnalysisGuardrailError(
                 "supplied procedure topics were not analyzed",
@@ -913,6 +958,7 @@ class InfoAnalysisAgent:
         self,
         request: InfoAnalysisInput,
         draft: InfoAnalysisDraft,
+        procedure_bindings: ProcedureBindings,
     ) -> InfoAnalysisResult:
         if request.input is None and (draft.facts or draft.procedure_observations):
             raise InfoAnalysisGuardrailError(
@@ -1058,7 +1104,7 @@ class InfoAnalysisAgent:
 
         procedure_findings = self._procedure_findings(request, draft, known_steps)
         if not conflicts:
-            self._validate_procedure_coverage(request, draft)
+            self._validate_procedure_coverage(request, draft, procedure_bindings)
 
         values = {
             item.field_path: item.value
@@ -1502,7 +1548,7 @@ class InfoAnalysisAgent:
             published_at=None,
             retrieved_at=self._clock(),
             freshness_status="CURRENT",
-            content_hash="sha256:" + fingerprint,
+            content_hash=fingerprint,  # EVIDENCE.content_hash is the bare digest.
         )
         return span, evidence
 

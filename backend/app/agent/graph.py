@@ -19,6 +19,7 @@ from langgraph.graph import END, START, StateGraph
 
 from app.agent.enrichment import build_confirmed_conflict_overlay, build_fact_overlays
 from app.agent.llm import current_call_budget
+from app.agent.procedure_tool.rules import business_type_code
 from app.agent.run_scope import current_deadline
 from app.agent.schemas import (
     CASE_FIELD_SPECS,
@@ -962,7 +963,7 @@ class AgentGraph:
         else:
             queries.append("사업자 폐업 신고 절차 국세청")
 
-        business_type = confirmed.get("business_type")
+        business_type = business_type_code(confirmed.get("business_type"))
         if business_type is None:
             if any(keyword in redacted_text for keyword in ("카페", "휴게음식점")):
                 business_type = "CAFE"
@@ -972,11 +973,7 @@ class AgentGraph:
                 business_type = "RESTAURANT"
         business_queries = {
             "CAFE": "휴게음식점 폐업 신고 절차 정부24",
-            "카페": "휴게음식점 폐업 신고 절차 정부24",
-            "휴게음식점": "휴게음식점 폐업 신고 절차 정부24",
             "RESTAURANT": "일반음식점 폐업 신고 절차 정부24",
-            "식당": "일반음식점 폐업 신고 절차 정부24",
-            "일반음식점": "일반음식점 폐업 신고 절차 정부24",
         }
         business_query = business_queries.get(business_type)
         if business_query is not None:

@@ -5,6 +5,7 @@ import json
 from uuid import UUID
 
 import pytest
+from pydantic import ValidationError
 from app.agent.blocker_candidates import build_blocker_candidates, missing_info_fields
 from app.agent.review_tool import ReviewTool
 from app.agent.schemas import (
@@ -241,7 +242,10 @@ class ChoiceModel(StubModel):
                     "selection_summary": "이미 정해지지 않았습니다.",
                     "requires_human": True,
                     "evidence_refs": [REF],
-                    "blocker": None,
+                    "blocker": {
+                        "description": "판단에 필요한 정보를 확인해 주세요.",
+                        "evidence_refs": [REF],
+                    },
                     "next_action": None,
                     "questions_for_user": [],
                     "grounded_claims": [],
@@ -311,6 +315,67 @@ def test_model_state_invention_is_replaced_and_review_cannot_override_guard():
         assert any(
             issue.target_path.endswith("/next_action") for issue in result.issues
         )
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        {"restoration_scope": "PARTIAL", "restoration_status": "COMPLETED"},
+        {"restoration_scope": "PARTIAL", "demolition_required": "NOT_REQUIRED"},
+    ],
+)
+def test_ready_procedure_keeps_one_verified_confirmation_blocker(state):
+    async def run():
+        request = request_with_state(**state)
+        rows = candidates(request)
+        assert rows and all(row["blocker"] is not None for row in rows)
+        assert all("확인할 필요" in row["blocker"]["description"] for row in rows)
+        assert all(row["evidence_refs"] == [REF] for row in rows)
+
+        # ChoiceModel invents a demolition blocker; only the verified candidate
+        # supplies the MVP's one evidence-backed blocker in the reviewed output.
+        draft = await SupervisorAgent(ChoiceModel(), max_local_attempts=1).draft(
+            request
+        )
+        assert draft.decision.decision_type == "ACTION"
+        assert draft.decision.blocker.description == rows[0]["blocker"]["description"]
+        assert "철거" not in draft.decision.blocker.description
+        assert draft.decision.next_action is not None
+        assert draft.decision.evidence_refs == [REF]
+        assert draft.decision.next_action.evidence_refs == [REF]
+        assert draft.decision.questions_for_user == []
+        assert any(
+            "/blocker/" in claim.target_path for claim in draft.grounded_claims
+        )
+        assert request.case_snapshot.case_status == "IN_PROGRESS"
+        result = await ReviewTool(
+            ChoiceModel(), max_output_attempts=1, provider_max_retries=0
+        ).review(subject(request, draft))
+        assert result.verdict == "PASS"
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("blocker_kind", ["restoration", "support"])
+def test_mvp_schema_rejects_removing_a_verified_blocker(
+    blocker_kind,
+):
+    async def run():
+        request = request_with_state(
+            **({"demolition_required": "REQUIRED"} if blocker_kind == "support" else {})
+        )
+        if blocker_kind == "support":
+            request.source_results.append(
+                source(support_sources()[0].output, "SUPPORT_AGENT", 6)
+            )
+        draft = await SupervisorAgent(ChoiceModel(), max_local_attempts=1).draft(
+            request
+        )
+        assert draft.decision.blocker is not None
+        with pytest.raises(ValidationError):
+            draft.decision.blocker = None
 
     asyncio.run(run())
 

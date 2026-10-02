@@ -116,7 +116,7 @@ def build_case_snapshot(payload: dict) -> tuple[CaseSnapshot, str]:
         published_at=None,
         retrieved_at=FIXED_TIME,
         freshness_status="CURRENT",
-        content_hash=digest(normalized),
+        content_hash=hashlib.sha256(text.encode()).hexdigest(),
     )
     fields = [
         ("business_type", "STRING", request.business_type),
