@@ -4,11 +4,19 @@ from fastapi import Header, HTTPException
 from app.common.config import get_settings
 
 
-def get_current_member_id(access_token: str = Header(alias="Access-Token")) -> int:
+def get_current_member_id(
+    access_token: str | None = Header(default=None, alias="Access-Token"),
+) -> int:
+    if access_token is None:
+        raise HTTPException(status_code=401, detail="Access-Token 헤더가 필요합니다.")
     return _decode_token(access_token, expected_type="access")
 
 
-def get_refresh_member_id(refresh_token: str = Header(alias="Refresh-Token")) -> int:
+def get_refresh_member_id(
+    refresh_token: str | None = Header(default=None, alias="Refresh-Token"),
+) -> int:
+    if refresh_token is None:
+        raise HTTPException(status_code=401, detail="Refresh-Token 헤더가 필요합니다.")
     return _decode_token(refresh_token, expected_type="refresh")
 
 

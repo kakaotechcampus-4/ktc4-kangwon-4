@@ -86,6 +86,9 @@ class StoredProcedureLookupTool:
                 stale += 1
             document_id = self._uuid()
             evidence_id = f"procedure:reviewed:{document_id}"
+            # The snapshot keeps the "sha256:" prefix; EVIDENCE.content_hash is
+            # VARCHAR(64), so only the hex digest leaves this tool.
+            content_hash = record.content_hash.removeprefix("sha256:")
             evidence_records.append(
                 EvidenceRecord(
                     evidence_id=evidence_id,
@@ -98,7 +101,7 @@ class StoredProcedureLookupTool:
                     published_at=record.published_at,
                     retrieved_at=record.retrieved_at,
                     freshness_status=freshness,
-                    content_hash=record.content_hash,
+                    content_hash=content_hash,
                 )
             )
             documents.append(
@@ -112,7 +115,7 @@ class StoredProcedureLookupTool:
                     published_at=record.published_at,
                     retrieved_at=record.retrieved_at,
                     freshness_status=freshness,
-                    content_hash=record.content_hash,
+                    content_hash=content_hash,
                     evidence_ref=evidence_id,
                     search_query=query,
                     step_codes=list(record.step_codes),

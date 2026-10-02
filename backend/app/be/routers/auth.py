@@ -12,7 +12,7 @@ router = APIRouter()
 
 
 @router.get("/login/form")
-def login_form():
+def login_form(state: str | None = None):
     settings = get_settings()
     kakao_auth_url = (
         "https://kauth.kakao.com/oauth/authorize"
@@ -20,6 +20,7 @@ def login_form():
         f"&redirect_uri={settings.KAKAO_REDIRECT_URI}"
         "&response_type=code"
         "&scope=profile_nickname"
+        + (f"&state={state}" if state else "")
     )
     return RedirectResponse(url=kakao_auth_url, status_code=303)
 
@@ -41,7 +42,7 @@ def logout(member_id: int = Depends(get_current_member_id), session: Session = D
 @router.post("/reissue")
 def reissue(
     response: Response,
-    refresh_token: str = Header(alias="Refresh-Token"),
+    refresh_token: str | None = Header(default=None, alias="Refresh-Token"),
     member_id: int = Depends(get_refresh_member_id),
     session: Session = Depends(get_db),
 ):

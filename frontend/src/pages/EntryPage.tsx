@@ -1,6 +1,6 @@
 import { Navigate, useLocation } from 'react-router'
 
-import { hasCase } from '../lib/caseState'
+import { useCase } from '../hooks/useCase'
 
 /**
  * 진입 분기. 화면이 없고 보낼 곳만 정한다.
@@ -16,9 +16,17 @@ import { hasCase } from '../lib/caseState'
  */
 export function EntryPage() {
   const { search } = useLocation()
+  const query = useCase()
 
-  // TODO(API): 연동하면 `GET /cases` 응답을 기다리는 로딩 상태가 생긴다
-  const next = hasCase(search) ? '/case' : '/start'
+  // 곧 다른 화면으로 옮겨 갈 자리라 로딩 안내를 두지 않는다.
+  // 여기서 뭔가 보여주면 다음 화면의 안내와 겹쳐 두 번 깜빡인다
+  if (query.status === 'LOADING') return null
+
+  /**
+   * 서버를 못 불렀으면 Case 가 있는지 알 수 없다. 그래도 현재 Case 로 보낸다 —
+   * 실패 안내를 두 화면에 만들지 않고 한 곳에서만 한다.
+   */
+  const next = query.status === 'EMPTY' ? '/start' : '/case'
 
   return <Navigate to={{ pathname: next, search }} replace />
 }

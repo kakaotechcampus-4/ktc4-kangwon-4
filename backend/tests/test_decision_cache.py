@@ -43,7 +43,7 @@ def fixture(case_id=1, freshness="CURRENT"):
         published_at=None,
         retrieved_at=NOW,
         freshness_status=freshness,
-        content_hash="sha256:" + "0" * 64,
+        content_hash="0" * 64,
     )
     facts = [
         ("business_type", "STRING", "카페"),
@@ -220,9 +220,7 @@ def test_changed_typed_case_input_and_evidence_never_share_a_key(changed):
             }
         ]
     elif changed == "hash":
-        data["case_snapshot"]["evidence_records"][0]["content_hash"] = (
-            "sha256:" + "1" * 64
-        )
+        data["case_snapshot"]["evidence_records"][0]["content_hash"] = "1" * 64
     elif changed == "freshness":
         data["case_snapshot"]["evidence_records"][0]["freshness_status"] = "STALE"
     else:
@@ -393,16 +391,25 @@ def test_build_runtime_tracks_actual_config_data_prompts_and_disables_unversione
         config = LLMConfig(
             base_url="https://example.org/test",
             api_token="synthetic",
-            model="synthetic",
+            model="gpt-5.6-luna",
+            reasoning_effort="xhigh",
         )
         clients = []
+        clients_by_prefix = {}
 
         async def close():
             pass
 
         def client_factory(**kwargs):
-            client = SimpleNamespace(config=config, aclose=close)
+            prefix = kwargs.get("env_prefix", "")
+            client_config = (
+                replace(config, model="gpt-5.6-sol")
+                if prefix == "SUPERVISOR_"
+                else config
+            )
+            client = SimpleNamespace(config=client_config, aclose=close)
             clients.append(client)
+            clients_by_prefix[prefix] = client
             return client
 
         monkeypatch.setattr(
@@ -410,7 +417,13 @@ def test_build_runtime_tracks_actual_config_data_prompts_and_disables_unversione
         )
         monkeypatch.setattr(runtime_module.LangfuseTraceSink, "from_env", lambda: None)
         graph = GraphStub(outcome)
-        monkeypatch.setattr(runtime_module, "AgentGraph", lambda **kwargs: graph)
+        graph_components = {}
+
+        def graph_factory(**kwargs):
+            graph_components.update(kwargs)
+            return graph
+
+        monkeypatch.setattr(runtime_module, "AgentGraph", graph_factory)
         store = SimpleNamespace(snapshot_version="before", records=list)
         catalog = ReviewedSupportCatalog(
             catalog_version="synthetic", programs=(), evidence_records=()
@@ -421,6 +434,20 @@ def test_build_runtime_tracks_actual_config_data_prompts_and_disables_unversione
             procedure_store=store,
             limits=RuntimeLimits(1, 60),
         )
+        assert graph_components["info_agent"]._llm is clients_by_prefix["INFO_"]
+        assert graph_components["support_agent"]._llm is clients_by_prefix[""]
+        assert graph_components["supervisor"]._llm is clients_by_prefix["SUPERVISOR_"]
+        assert graph_components["review_tool"]._client is clients_by_prefix[""]
+        assert (
+            graph_components["review_tool"]._client
+            is not clients_by_prefix["SUPERVISOR_"]
+        )
+        assert [client.config.model for client in clients] == [
+            "gpt-5.6-luna",
+            "gpt-5.6-sol",
+            "gpt-5.6-luna",
+        ]
+        assert all(client.config.reasoning_effort == "xhigh" for client in clients)
         await runtime.run_planning(request)
         await runtime.run_planning(request)
         assert graph.calls == 1

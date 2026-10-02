@@ -106,9 +106,12 @@ CASE에 대한 발화·이벤트 원본 이력.
 |---|---|---|---|---|---|
 | id | BIGINT | PK | NOT NULL, AUTO_INCREMENT | 1 | |
 | case_id | BIGINT | FK | NOT NULL | 1 | |
-| raw_input | TEXT | | NOT NULL | `"임대인이랑 얘기 끝났어요, 다음 달까지 나가기로 했어요"` | 입력 원문 (사용자 발화 또는 배치가 에이전트에 전달한 지시문) |
-| source | ENUM | | NOT NULL | `USER_INPUT` | `USER_INPUT` / `SYSTEM_BATCH` |
-| next_action | VARCHAR | | NULLABLE | `"부가가치세 확정신고를 진행하세요"` | 다음 액션 제안, 판단이 발생한 경우에만 채워짐 |
+| raw_input | TEXT | | NOT NULL | `"임대인이랑 얘기 끝났어요, 다음 달까지 나가기로 했어요"` | 입력 원문 (사용자 발화, Case 생성 요청, 또는 배치가 에이전트에 전달한 지시문) |
+| source | ENUM | | NOT NULL | `USER_INPUT` | `USER_INPUT` / `SYSTEM_BATCH` / `CASE_CREATED` — `CASE_CREATED`는 Case 생성 직후 첫 Blocker/Next Action 판단 |
+| next_action | TEXT | | NULLABLE | `"부가가치세 확정신고를 진행하세요"` | 다음 액션 제안, 판단이 발생한 경우에만 채워짐 (AI 문장은 길이 제한이 없어 TEXT) |
+| next_action_reason | TEXT | | NULLABLE | `"신고 기한이 폐업일로부터 25일이기 때문입니다"` | 다음 행동을 해야 하는 이유 |
+| next_action_questions_to_ask | JSON | | NULLABLE | `["원상복구 범위가 어디까지인지 확인해 주세요"]` | 사용자가 임대인·기관에 물어볼 질문 목록. 다음 행동이 없으면 NULL |
+| next_action_evidence_refs | JSON | | NULLABLE | `["procedure:reviewed:NTS_CLOSURE"]` | 다음 행동의 근거 evidence_id 목록. 다음 행동이 없으면 NULL |
 | priority_blocker_id | BIGINT | FK | NULLABLE | `NULL` | 이 시점에 최우선인 블로커 참조 |
 | created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-09-10 09:10:00` | |
 
@@ -122,7 +125,8 @@ CASE 진행을 막는 이슈. CASE_HISTORY에서 생성/해소된다.
 | case_id | BIGINT | FK | NOT NULL | 1 | |
 | created_from_case_history_id | BIGINT | FK | NOT NULL | 5 | 이 blocker를 생성시킨 판단 로그 |
 | resolved_from_case_history_id | BIGINT | FK | NULLABLE | `NULL` | 이 blocker를 해소시킨 판단 로그 |
-| description | VARCHAR | | NOT NULL | `"원상복구 범위가 아직 확정되지 않았습니다"` | 블로커 내용 본문 — 사용자에게 보여줄 핵심 필드 |
+| description | TEXT | | NOT NULL | `"원상복구 범위가 아직 확정되지 않았습니다"` | 블로커 내용 본문 — 사용자에게 보여줄 핵심 필드 (AI 문장은 길이 제한이 없어 TEXT) |
+| blocker_evidence_refs | JSON | | NULLABLE | `["case_1_creation_form"]` | 이 블로커 판단의 근거 evidence_id 목록 |
 | status | ENUM | | NOT NULL, DEFAULT `ACTIVE` | `ACTIVE` | `ACTIVE` / `RESOLVED` |
 | created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-09-10 09:10:05` | |
 | updated_at | DATETIME | | NOT NULL, ON UPDATE CURRENT_TIMESTAMP | `2026-09-10 09:10:05` | |
@@ -199,8 +203,8 @@ PROCEDURE_STEP ◄──┬── STEP_DEPENDENCY   (단계 간 순서 규칙)
 "그 상태가 어떻게 변해왔는지"를 기록합니다. PROGRESS는 현재 스냅샷, HISTORY는 변경 이력입니다.
 
 ```
-CASE ──1:N──► CASE_PROCEDURE_STEP           (현재 상태, 단계당 1 row)
-CASE ──1:N──► CASE_PROCEDURE_STEP_HISTORY   (상태 변경마다 새 row 누적)
+CASE ──1:N──► CASE_PROCEDURE_STEP                    (현재 상태, 단계당 1 row)
+CASE_PROCEDURE_STEP ──1:N──► CASE_PROCEDURE_STEP_HISTORY   (상태 변경마다 새 row 누적)
                         │
                         └── case_history_id로 "이 변화가 어떤 판단 때문에 일어났는지" 역추적 가능
 ```
@@ -223,13 +227,14 @@ CASE ──1:N──► CASE_PROCEDURE_STEP_HISTORY   (상태 변경마다 새 r
 
 ### CASE_PROCEDURE_STEP_HISTORY
 
-CASE_PROCEDURE_STEP 상태 변화 이력.
+CASE_PROCEDURE_STEP 상태 변화 이력. `EVIDENCE_LINEAGE`가 `EVIDENCE.id`만 참조하고 `case_id`를
+다시 갖지 않는 것과 같은 이유로, 여기서도 `case_id`/`procedure_step_id`를 따로 두지 않고
+변화 대상인 `CASE_PROCEDURE_STEP` row의 PK 하나만 참조한다.
 
 | 컬럼 | 타입 | 키 | 제약조건 | 예시 값 | 설명 |
 |---|---|---|---|---|---|
 | id | BIGINT | PK | NOT NULL, AUTO_INCREMENT | 1 | |
-| case_id | BIGINT | FK | NOT NULL | 1 | |
-| procedure_step_id | BIGINT | FK | NOT NULL | 1 | 상태가 바뀐 절차 하나 |
+| case_procedure_step_id | BIGINT | FK | NOT NULL | 1 | 상태가 바뀐 `CASE_PROCEDURE_STEP` row — `case_id`/`procedure_step_id`는 이 FK로 조인해서 얻는다 |
 | case_history_id | BIGINT | FK | NULLABLE | 5 | 이 변화를 유발한 케이스 이력 (nullable) |
 | previous_status | ENUM | | NOT NULL | `NOT_STARTED` | `NOT_STARTED` / `IN_PROGRESS` / `COMPLETED` (변경 전 상태) |
 | new_status | ENUM | | NOT NULL | `IN_PROGRESS` | `NOT_STARTED` / `IN_PROGRESS` / `COMPLETED` (변경 후 상태) |
@@ -312,7 +317,7 @@ EVIDENCE ◄──┬── EVIDENCE_LINEAGE (근거 간 파생관계, N:M, EVID
             │
 CASE ──────┴── CONFLICT_REFERENCE (필드값 충돌 1회성 참조)
    │
-   └── DECISION_RECORD (Agent 판단·리뷰 결과)
+   └── DECISION_RECORD (Agent 판단·리뷰 결과, 어느 입력에 대한 판단인지 CASE_HISTORY.id도 참조)
 ```
 
 ### EVIDENCE
@@ -372,7 +377,9 @@ Agent의 판단·리뷰 결과 기록.
 |---|---|---|---|---|---|
 | id | BIGINT | PK | NOT NULL, AUTO_INCREMENT | 1 | |
 | case_id | BIGINT | FK | NOT NULL | 1 | 대상 케이스 |
+| case_history_id | BIGINT | FK | NOT NULL | 1 | 이 판단을 일으킨 입력 이력 (어느 입력에 대한 판단인지) |
 | run_id | VARCHAR | | NOT NULL ⚠️ 추정 | `"run_20260910_01"` | 실행 단위 ID |
+| snapshot_id | VARCHAR(36) | | NOT NULL | `"b73ccadf-c2d7-46dc-b679-e85d7abfb159"` | 판단에 사용한 Case 상태 스냅샷 ID(UUID) |
 | trace_id | VARCHAR | | NULLABLE | `NULL` | 추적 ID (nullable) |
 | review_subject_id | VARCHAR | | NOT NULL ⚠️ 추정 | `"blocker_5"` | 리뷰 대상 ID |
 | review_attempt | INT | | NOT NULL, DEFAULT 1 ⚠️ 추정 | `1` | 리뷰 시도 횟수 |
@@ -380,6 +387,7 @@ Agent의 판단·리뷰 결과 기록.
 | verdict | **VARCHAR** | | NOT NULL | `"PASS"` | 판정 결과 — **ENUM 아니라 VARCHAR (ERD 확정)**, 문서상 `PASS`만 규정됨 |
 | decision_type | **VARCHAR** | | NOT NULL | `"ACTION"` | **ENUM 아니라 VARCHAR (ERD 확정)** — `ACTION`(블로커+다음액션 제시) / `NEEDS_MORE_INFO`(추가 질문만 제시) |
 | summary | TEXT | | NULLABLE ⚠️ 추정 | `"원상복구 범위 미확정, 사용자 확인 필요"` | 판단 요약 |
+| questions_for_user | JSON | | NULLABLE | `["확인한 원상복구 범위가 있으면 알려주세요."]` | 행동을 정하기 전 사용자에게 되묻는 질문 목록. 없으면 NULL |
 | human_confirmation_required | BOOLEAN | | NOT NULL, DEFAULT false ⚠️ 추정 | `false` | 사람 확인 필요 여부 |
 | reviewed_at | DATETIME | | NOT NULL ⚠️ 추정 | `2026-09-10 10:05:00` | 리뷰 완료 시각 |
 | created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP ⚠️ 추정 | `2026-09-10 10:00:00` | (updated_at 없음 — ERD 확정) |

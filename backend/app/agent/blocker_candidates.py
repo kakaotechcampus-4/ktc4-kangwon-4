@@ -7,7 +7,13 @@ confirmation questions come from code, so UNKNOWN never becomes 'undecided'.
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from app.agent.action_catalog import ACTION_DEFINITIONS, build_action_candidates
+from app.agent.action_catalog import (
+    ACTION_DEFINITIONS,
+    ProcedureBindings,
+    build_action_candidates,
+    resolve_procedure_bindings,
+)
+from app.agent.claim_safety import expand_evidence
 from app.agent.procedure_tool.rules import procedure_plan_constraints
 from app.agent.schemas import (
     ActionDecisionDraft,
@@ -59,7 +65,7 @@ def _decision_fields(
         "decision_type": "ACTION",
         "selection_summary": action["title"],
         "requires_human": True,
-        "evidence_refs": candidate["blocker"]["evidence_refs"],
+        "evidence_refs": candidate["evidence_refs"],
         "blocker": candidate["blocker"],
         "next_action": action,
         "questions_for_user": [],
@@ -88,8 +94,10 @@ def build_blocker_candidates(
     sources: Sequence[ReviewSourceResult],
     mutations: MutationSet,
     evidence_by_id: Mapping[str, EvidenceRecord],
+    procedure_bindings: ProcedureBindings | None = None,
 ) -> list[dict[str, Any]]:
     """Apply the priority already specified in supervisor_messages, then cap at 3."""
+    resolved_bindings = resolve_procedure_bindings(steps, procedure_bindings)
     values = _values(snapshot, mutations)
     state_refs = list(
         dict.fromkeys(ref for fact in snapshot.facts for ref in fact.evidence_refs)
@@ -132,7 +140,7 @@ def build_blocker_candidates(
         for check in source.output.support_checks
     }
     groups: dict[str, dict[str, Any]] = {}
-    for row in build_action_candidates(sources, evidence_by_id):
+    for row in build_action_candidates(sources, evidence_by_id, resolved_bindings):
         target = row["target"]
         is_support = target["target_kind"] == "SUPPORT_PROGRAM"
         if support_first and not is_support:
@@ -145,18 +153,34 @@ def build_blocker_candidates(
             description = "지원조건과 신청 전 증빙의 확인이 필요합니다."
             title = f"{check.program_name}의 현재 조건과 신청 전 증빙을 확인하세요."
             reason = "제공된 지원 안내의 현재 조건을 담당 기관에 확인해야 합니다."
-            questions = ["현재 조건과 신청 전에 준비할 증빙은 무엇인가요?"]
+            # 확인 문구를 넣어야 최신이 아닌 지원 자료에서도 이 질문이 살아남는다.
+            # 절차 쪽 확인 질문과 같은 형태다.
+            questions = ["현재 조건과 신청 전에 준비할 증빙을 확인해 주시겠습니까?"]
             refs = list(check.evidence_refs)
         else:
             reference = target["procedure_step"]
             step_code = reference["step_code"]
             finding = findings[(reference["procedure_step_id"], step_code)]
-            # A stale/undetermined finding cannot establish a current blocker.
+            definition = ACTION_DEFINITIONS[row["action_code"]]
+            logical_code = definition.procedure_logical_code
+            # A current source can support asking whether a procedure applies.
+            # Submission still requires established relevance and master rules.
             if finding.relevance != "RELEVANT":
-                continue
+                if not (
+                    definition.confirmation_only
+                    and finding.relevance == "POSSIBLY_RELEVANT"
+                    and finding.requires_confirmation
+                ):
+                    continue
+                evidence = expand_evidence(
+                    [evidence_by_id[ref] for ref in finding.evidence_refs],
+                    evidence_by_id,
+                )
+                if any(item.freshness_status != "CURRENT" for item in evidence):
+                    continue
             key = f"procedure:{reference['procedure_step_id']}"
             refs = list(finding.evidence_refs)
-            if step_code == "CONFIRM_RESTORATION_SCOPE":
+            if logical_code == "CONFIRM_RESTORATION_SCOPE":
                 if not restoration_first:
                     continue
                 subject = "와 ".join(missing)
@@ -174,23 +198,44 @@ def build_blocker_candidates(
             else:
                 if restoration_first:
                     continue
-                label = _PROCEDURE_LABELS[step_code]
-                description = (
-                    f"{label}의 진행 상태와 준비사항을 확인할 필요가 있습니다."
+                assert logical_code is not None
+                label = _PROCEDURE_LABELS[logical_code]
+                evidence = expand_evidence(
+                    [evidence_by_id[ref] for ref in finding.evidence_refs],
+                    evidence_by_id,
                 )
-                confirmation = ACTION_DEFINITIONS[row["action_code"]].confirmation_only
+                confirmation = definition.confirmation_only
+                applicability_unknown = finding.relevance == "POSSIBLY_RELEVANT"
+                description = (
+                    f"{label} 안내의 현재 적용 여부를 확인할 필요가 있습니다."
+                    if any(item.freshness_status != "CURRENT" for item in evidence)
+                    else f"{label} 대상 여부와 준비사항을 확인할 필요가 있습니다."
+                    if applicability_unknown
+                    else f"{label}의 진행 상태와 준비사항을 확인할 필요가 있습니다."
+                )
                 title = (
-                    f"담당 기관에 {label} 준비사항을 확인하세요."
+                    f"담당 기관에 {label} 대상 여부와 준비사항을 확인하세요."
+                    if applicability_unknown
+                    else f"담당 기관에 {label} 준비사항을 확인하세요."
                     if confirmation
                     else f"{label}를 제출하세요."
                 )
                 reason = (
-                    f"제공된 공식 안내를 바탕으로 {label}에 필요한 준비를 확인하세요."
+                    "제공된 공식 안내가 가게에 적용되는지 담당 기관에 확인할 필요가 있습니다."
+                    if applicability_unknown
+                    else f"제공된 공식 안내를 바탕으로 {label}에 필요한 준비를 확인하세요."
                     if confirmation
                     else finding.required_actions[0].text
                 )
                 questions = (
-                    [f"{label}에 필요한 서류와 제출 방법을 확인해 주시겠습니까?"]
+                    [
+                        (
+                            f"제 가게가 {label} 대상인지, 해당하면 필요한 서류와 제출 방법은 "
+                            "무엇인지 확인해 주시겠습니까?"
+                        )
+                    ]
+                    if applicability_unknown
+                    else [f"{label}에 필요한 서류와 제출 방법을 확인해 주시겠습니까?"]
                     if confirmation
                     else [
                         "제출한 신고서와 첨부서류가 접수되었는지 확인해 주시겠습니까?"
@@ -200,12 +245,11 @@ def build_blocker_candidates(
         action.update(
             title=title, reason=reason, questions_to_ask=questions, evidence_refs=refs
         )
+        decision_refs = list(dict.fromkeys([*state_refs, *refs]))
         candidate = {
             "candidate_id": key,
-            "blocker": {
-                "description": description,
-                "evidence_refs": list(dict.fromkeys([*state_refs, *refs])),
-            },
+            "evidence_refs": decision_refs,
+            "blocker": {"description": description, "evidence_refs": decision_refs},
             "actions": [action],
         }
         # Reuse the exact registry, dependency, applicability and completion guard
@@ -233,6 +277,7 @@ def missing_info_fields(
     snapshot: CaseSnapshot,
     sources: Sequence[ReviewSourceResult],
     mutations: MutationSet,
+    procedure_bindings: ProcedureBindings | None = None,
 ) -> dict[str, Any] | None:
     """A bounded question fallback without re-asking confirmed Case fields."""
     values = _values(snapshot, mutations)
@@ -250,11 +295,30 @@ def missing_info_fields(
         )
         for item in mutations.procedure_progress_changes
     )
+    restoration_ref = (
+        procedure_bindings.get("CONFIRM_RESTORATION_SCOPE")
+        if procedure_bindings is not None
+        else None
+    )
     restoration_questions_resolved = values.get(
         "restoration_status"
     ) == "COMPLETED" or any(
-        code == "CONFIRM_RESTORATION_SCOPE" and status == "COMPLETED"
-        for (_, code), status in progress.items()
+        status == "COMPLETED"
+        and (
+            (
+                restoration_ref is not None
+                and (step_id, code)
+                == (
+                    restoration_ref.procedure_step_id,
+                    restoration_ref.step_code,
+                )
+            )
+            or (
+                procedure_bindings is None
+                and code == "CONFIRM_RESTORATION_SCOPE"
+            )
+        )
+        for (step_id, code), status in progress.items()
     )
     restoration_detail_unnecessary = (
         values.get("restoration_status") == "NOT_REQUIRED"

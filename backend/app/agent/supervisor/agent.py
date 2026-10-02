@@ -9,7 +9,11 @@ from uuid import UUID, uuid4
 
 from pydantic import Field, StrictBool, StrictInt, StrictStr, model_validator
 
-from app.agent.action_catalog import build_action_candidates
+from app.agent.action_catalog import (
+    ProcedureBindings,
+    build_action_candidates,
+    resolve_procedure_bindings,
+)
 from app.agent.blocker_candidates import (
     build_blocker_candidates,
     candidate_decision_fields,
@@ -147,7 +151,7 @@ class SupervisorModelOutput(AgentSchema):
     evidence_refs: Annotated[
         list[Annotated[StrictStr, Field(min_length=1)]], Field(min_length=1)
     ]
-    blocker: Blocker | None
+    blocker: Blocker
     next_action: NextActionSemantic | None
     questions_for_user: list[Annotated[StrictStr, Field(min_length=1)]]
     grounded_claims: list[GroundedClaimModelOutput]
@@ -160,7 +164,7 @@ class SupervisorSemanticDraft(AgentSchema):
     evidence_refs: Annotated[
         list[Annotated[StrictStr, Field(min_length=1)]], Field(min_length=1)
     ]
-    blocker: Blocker | None
+    blocker: Blocker
     next_action: NextActionSemantic | None
     questions_for_user: list[Annotated[StrictStr, Field(min_length=1)]]
     grounded_claims: list[GroundedClaimSemantic]
@@ -168,8 +172,8 @@ class SupervisorSemanticDraft(AgentSchema):
     @model_validator(mode="after")
     def validate_variant(self) -> SupervisorSemanticDraft:
         if self.decision_type == DecisionType.ACTION:
-            if self.blocker is None or self.next_action is None:
-                raise ValueError("ACTION requires one blocker and one next action")
+            if self.next_action is None:
+                raise ValueError("ACTION requires one next action")
             if self.questions_for_user:
                 raise ValueError("ACTION questions_for_user must be empty")
         elif self.decision_type == DecisionType.NEEDS_MORE_INFO:
@@ -191,6 +195,7 @@ class SupervisorAgent:
         self,
         llm: StructuredGenerator,
         *,
+        procedure_bindings: ProcedureBindings | None = None,
         clock: Callable[[], datetime] = _now,
         uuid_factory: Callable[[], UUID] = uuid4,
         max_local_attempts: int = 3,
@@ -198,6 +203,12 @@ class SupervisorAgent:
         if max_local_attempts < 1 or max_local_attempts > 3:
             raise ValueError("max_local_attempts must be between 1 and 3")
         self._llm = llm
+        self._procedure_bindings = (
+            None if procedure_bindings is None else {
+                key: reference.model_copy(deep=True)
+                for key, reference in procedure_bindings.items()
+            }
+        )
         self._clock = clock
         self._uuid = uuid_factory
         self._max_local_attempts = max_local_attempts
@@ -243,6 +254,7 @@ class SupervisorAgent:
             source_results,
             mutations,
             evidence_registry,
+            self._bindings(request),
         )
         action_candidates = [
             action
@@ -294,7 +306,12 @@ class SupervisorAgent:
             ),
             "contract": {
                 "action_count": 1,
-                "blocker_count": 1,
+                "blocker_count": {"ACTION": [1], "NEEDS_MORE_INFO": [1]},
+                # Both land in VARCHAR(500) columns (BLOCKER.description,
+                # CASE_HISTORY.next_action). Over-length fails validation and
+                # burns a retry, so the limit is stated up front.
+                "blocker_description_max_characters": 500,
+                "next_action_title_max_characters": 500,
                 "action_questions_for_user": [],
                 "needs_more_info_requires_human": True,
                 "eligibility_assertion_level": "NEEDS_CONFIRMATION",
@@ -372,7 +389,8 @@ class SupervisorAgent:
                         "role": "system",
                         "content": (
                             "The prior draft failed deterministic contract validation. "
-                            "For ACTION, return one blocker, one next_action, and an empty "
+                            "For ACTION, use exactly one selected candidate's blocker, "
+                            "one next_action, and an empty "
                             "questions_for_user list. For NEEDS_MORE_INFO, return a blocker, "
                             "no next_action, requires_human=true, and at least one question. "
                             "Every ACTION must select exactly one canonical target. Use "
@@ -451,8 +469,13 @@ class SupervisorAgent:
             "Supervisor failed deterministic provenance checks"
         ) from None
 
-    @staticmethod
+    def _bindings(self, request: SupervisorAgentInput) -> ProcedureBindings:
+        return resolve_procedure_bindings(
+            request.known_procedure_steps, self._procedure_bindings
+        )
+
     def _candidate_semantic(
+        self,
         output: SupervisorModelOutput,
         candidates: list[dict[str, Any]],
         request: SupervisorAgentInput,
@@ -464,7 +487,8 @@ class SupervisorAgent:
                     "an available blocker candidate requires ACTION"
                 )
             fields = missing_info_fields(
-                request.case_snapshot, request.source_results, mutations
+                request.case_snapshot, request.source_results, mutations,
+                self._bindings(request),
             )
             if fields is None:
                 raise SupervisorGuardrailError("no grounded question fallback")
@@ -525,14 +549,15 @@ class SupervisorAgent:
             )
         return SupervisorSemanticDraft(**fields, grounded_claims=claims)
 
-    @staticmethod
     def _missing_info_fallback(
+        self,
         request: SupervisorAgentInput,
         mutations: MutationSet,
     ) -> SupervisorSemanticDraft | None:
         """Build a conservative question-only draft after bounded model failure."""
         fields = missing_info_fields(
-            request.case_snapshot, request.source_results, mutations
+            request.case_snapshot, request.source_results, mutations,
+            self._bindings(request),
         )
         return (
             SupervisorSemanticDraft(**fields, grounded_claims=[])
@@ -555,12 +580,10 @@ class SupervisorAgent:
                 "target": to_model_projection(decision.next_action.target),
                 "evidence_refs": list(decision.next_action.evidence_refs),
             }
-        blocker = None
-        if decision.blocker is not None:
-            blocker = {
-                "description": decision.blocker.description,
-                "evidence_refs": list(decision.blocker.evidence_refs),
-            }
+        blocker = {
+            "description": decision.blocker.description,
+            "evidence_refs": list(decision.blocker.evidence_refs),
+        }
         return {
             "decision": {
                 "decision_type": decision.decision_type.value,
@@ -594,9 +617,7 @@ class SupervisorAgent:
     ) -> SupervisorDraft:
         evidence = self._evidence(sources, request)
         known_evidence = set(evidence)
-        refs = [*semantic.evidence_refs]
-        if semantic.blocker is not None:
-            refs.extend(semantic.blocker.evidence_refs)
+        refs = [*semantic.evidence_refs, *semantic.blocker.evidence_refs]
         if semantic.next_action is not None:
             refs.extend(semantic.next_action.evidence_refs)
         for claim in semantic.grounded_claims:
@@ -609,7 +630,9 @@ class SupervisorAgent:
             selected_action = next(
                 (
                     candidate
-                    for candidate in build_action_candidates(sources, evidence)
+                    for candidate in build_action_candidates(
+                        sources, evidence, self._bindings(request)
+                    )
                     if candidate["action_code"] == action.action_code
                     and candidate["target"] == action.target.model_dump(mode="json")
                 ),
@@ -769,7 +792,7 @@ class SupervisorAgent:
             "created_at": now,
         }
         if semantic.decision_type == DecisionType.ACTION:
-            assert semantic.blocker is not None and semantic.next_action is not None
+            assert semantic.next_action is not None
             action_values = semantic.next_action.model_dump(mode="python")
             assert selected_action is not None
             action_values["action_code"] = selected_action["action_code"]
@@ -799,7 +822,6 @@ class SupervisorAgent:
                 **common,
             )
         else:
-            assert semantic.blocker is not None
             decision = NeedsMoreInfoDecisionDraft(
                 decision_type=DecisionType.NEEDS_MORE_INFO,
                 blocker=semantic.blocker,
@@ -820,8 +842,11 @@ class SupervisorAgent:
                     sources,
                     mutations,
                     evidence,
+                    self._bindings(request),
                 ),
-                missing_info_fields(request.case_snapshot, sources, mutations),
+                missing_info_fields(
+                    request.case_snapshot, sources, mutations, self._bindings(request)
+                ),
             )
         )
         if violations:
@@ -1077,9 +1102,7 @@ class SupervisorAgent:
     @staticmethod
     def _free_text(draft: SupervisorDraft) -> list[str]:
         decision = draft.decision
-        values = [decision.selection_summary]
-        if decision.blocker is not None:
-            values.append(decision.blocker.description)
+        values = [decision.selection_summary, decision.blocker.description]
         if decision.next_action is not None:
             values.extend(
                 [
@@ -1096,9 +1119,10 @@ class SupervisorAgent:
     def _visible_draft_strings(draft: SupervisorDraft) -> list[tuple[str, str]]:
         decision = draft.decision
         base = "/supervisor_draft/decision"
-        values = [(f"{base}/selection_summary", decision.selection_summary)]
-        if decision.blocker is not None:
-            values.append((f"{base}/blocker/description", decision.blocker.description))
+        values = [
+            (f"{base}/selection_summary", decision.selection_summary),
+            (f"{base}/blocker/description", decision.blocker.description),
+        ]
         if decision.next_action is not None:
             action_base = f"{base}/next_action"
             values.extend(
