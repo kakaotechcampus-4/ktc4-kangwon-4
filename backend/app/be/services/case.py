@@ -13,7 +13,7 @@ from app.be.models.case_history import CaseHistory
 from app.be.models.evidence import Evidence
 from app.be.models.mixins import kst_now
 from app.be.models.procedure_step import CaseProcedureStep, ProcedureStep
-from app.be.schemas.case import CaseCreateRequest
+from app.be.schemas.case import CaseCreateRequest, CaseGetDetailResponse, CaseGetResponse
 
 
 def create_case(session: Session, member_id: int, case_request: CaseCreateRequest) -> Case:
@@ -36,6 +36,34 @@ def create_case(session: Session, member_id: int, case_request: CaseCreateReques
     return case
 
 
+def get_case(session: Session, member_id: int) -> CaseGetResponse:
+    case = case_crud.get_case_by_member_id(session, member_id)
+    if case is None:
+        return CaseGetResponse(
+            case=None, blocker=None, next_action=None, judgment_status=None, questions_for_user=None
+        )
+
+    latest_history = case_crud.get_latest_user_driven_case_history(session, case.id)
+    if latest_history is None:
+        raise HTTPException(status_code=500, detail="Case에 대한 최초 판단 기록이 없습니다.")
+
+    if latest_history.judgment_status == "DONE" and (
+        latest_history.next_action is None or latest_history.priority_blocker is None
+    ):
+        raise HTTPException(status_code=500, detail="판단 완료(DONE) 상태인데 Blocker·Next Action이 없습니다.")
+
+    if latest_history.judgment_status == "NEEDS_MORE_INFO" and not latest_history.questions_for_user:
+        raise HTTPException(status_code=500, detail="정보 부족(NEEDS_MORE_INFO) 상태인데 questions_for_user가 없습니다.")
+
+    return CaseGetResponse(
+        case=CaseGetDetailResponse(**case.model_dump()),
+        blocker=latest_history.priority_blocker.description if latest_history.priority_blocker else None,
+        next_action=latest_history.next_action,
+        judgment_status=latest_history.judgment_status,
+        questions_for_user=latest_history.questions_for_user,
+    )
+
+
 def _create_case_creation_evidence(session: Session, case: Case, case_request: CaseCreateRequest) -> None:
     # case 생성 폼 입력값(business_type/franchise_status/lease_status)을 AI 쪽에서 CONFIRMED로
     # 인정하려면 evidence_refs가 있어야 한다(CaseFact.validate_fact_state). 세 필드가 이 evidence
@@ -43,7 +71,9 @@ def _create_case_creation_evidence(session: Session, case: Case, case_request: C
     submitted = json.dumps(case_request.model_dump(mode="json"), ensure_ascii=False)
     history = case_history_crud.create_case_history(
         session,
-        CaseHistory(case_id=case.id, raw_input=submitted, source="CASE_CREATED"),
+        # 판단은 뒤에서 돌기 때문에 지금은 결과가 없다. 화면이 "분석 중"을 보여줄 수 있도록
+        # PENDING으로 만들어두고, 판단이 끝나면 이 행을 갱신한다.
+        CaseHistory(case_id=case.id, raw_input=submitted, source="CASE_CREATED", judgment_status="PENDING"),
     )
     evidence_crud.create_evidence(
         session,
@@ -80,7 +110,3 @@ def _fill_temp_case_procedure_steps(session: Session, case_id: int) -> None:
         procedure_step_crud.create_case_procedure_step(
             session, CaseProcedureStep(case_id=case_id, procedure_step_id=step.id)
         )
-
-
-def get_case(session: Session, member_id: int) -> Case | None:
-    return case_crud.get_case_by_member_id(session, member_id)

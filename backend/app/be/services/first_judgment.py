@@ -3,14 +3,38 @@
 입력 조립(case_snapshot) → AI 호출 → 결과 저장(decision_record)을 한 줄로 잇는다.
 """
 
+import logging
+
 from sqlmodel import Session
 
 from app.agent.schemas import AgentGraphOutput
 from app.be.crud import case_history as case_history_crud
+from app.be.db import _engine
 from app.be.models.evidence import DecisionRecord
 from app.be.services import agent_runtime as agent_runtime_service
 from app.be.services import case_snapshot as case_snapshot_service
 from app.be.services import decision_record as decision_record_service
+
+logger = logging.getLogger(__name__)
+
+
+async def run_first_judgment_in_background(case_id: int) -> None:
+    """응답을 보낸 뒤 뒤에서 도는 진입점.
+
+    요청에 딸린 세션은 응답과 함께 닫히므로 여기서 세션을 새로 연다. 실패해도 사용자에게
+    돌려줄 응답이 이미 나갔기 때문에, 예외를 밖으로 던지지 않고 판단 상태만 FAILED로 남긴다.
+    """
+
+    try:
+        with Session(_engine) as session:
+            await run_first_judgment(session, case_id)
+    except Exception:
+        logger.exception("case %s 첫 판단 실패", case_id)
+        try:
+            with Session(_engine) as session:
+                decision_record_service.mark_judgment_failed(session, case_id)
+        except Exception:
+            logger.exception("case %s 판단 실패 상태 기록도 실패", case_id)
 
 
 async def run_first_judgment(
@@ -38,9 +62,11 @@ async def run_first_judgment(
         await runtime.aclose()
 
     if outcome.outcome_type != "REVIEWED_PLAN":
-        # TODO: CONFLICT는 사용자에게 되물어 확인받는 흐름이 필요하고, SAFE_FAILURE는 실패
-        # 이유를 화면에 보여줘야 한다. 둘 다 저장 스펙상 정상 결과로는 저장하지 않는데,
-        # 호출한 쪽에 무엇을 어떻게 돌려줄지는 아직 정하지 않았다.
+        # CONFLICT는 사용자에게 되물어 확인받는 흐름이 필요하고, SAFE_FAILURE는 실패 이유를
+        # 보여줘야 한다. 둘 다 정상 결과로는 저장하지 않지만, 화면이 계속 "분석 중"에
+        # 머물지 않도록 상태만은 FAILED로 남긴다.
+        # TODO: CONFLICT를 FAILED로 뭉뚱그리지 않고 재확인 흐름으로 잇는다.
+        decision_record_service.mark_judgment_failed(session, case_id)
         return outcome, None
 
     return outcome, decision_record_service.save_reviewed_plan(session, history, outcome)

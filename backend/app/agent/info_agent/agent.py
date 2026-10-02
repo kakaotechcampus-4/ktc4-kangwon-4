@@ -174,14 +174,13 @@ _FACT_VALUE_CUES: dict[tuple[CaseFieldKey, object], tuple[str, ...]] = {
         "원상복구필요없",
     ),
     (CaseFieldKey.DEMOLITION_REQUIRED, "REQUIRED"): (
-        "철거필요",
-        "철거가필요",
-        "철거해야",
+        *_with_particles("철거", "필요"),
+        *_with_particles("철거", "해야"),
     ),
     (CaseFieldKey.DEMOLITION_REQUIRED, "NOT_REQUIRED"): (
-        "철거불필요",
-        "철거가필요하지않",
-        "철거필요없",
+        *_with_particles("철거", "불필요"),
+        *_with_particles("철거", "필요하지않"),
+        *_with_particles("철거", "필요없"),
         "철거하지않아도",
     ),
 }
@@ -446,9 +445,14 @@ class InfoAnalysisAgent:
                                 "because the proposed value is not stated in "
                                 "the exact source_text: "
                                 + ", ".join(field.value for field in rejected_fields)
-                                + ". Do not propose them again. If the text "
-                                "only hints at them, leave them out and list "
-                                "them as missing fields instead."
+                                + ". If the input explicitly states a supported value, "
+                                "retry using the single exact sentence that asserts it; "
+                                "do not combine it with another sentence. Preserve any "
+                                "negation or uncertainty in that sentence. A clear value "
+                                "different from the snapshot is still a candidate for "
+                                "code-level conflict detection, not permission to overwrite. "
+                                "If no exact statement supports the value, omit the "
+                                "candidate and request clarification instead."
                             ),
                         }
                     )
@@ -752,6 +756,7 @@ class InfoAnalysisAgent:
         if fact.field_path in {
             CaseFieldKey.LEASE_STATUS,
             CaseFieldKey.RESTORATION_SCOPE,
+            CaseFieldKey.DEMOLITION_REQUIRED,
         } or (
             fact.field_path == CaseFieldKey.RESTORATION_STATUS
             and fact.value in {"NOT_REQUIRED", "COMPLETED"}

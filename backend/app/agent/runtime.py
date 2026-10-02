@@ -263,7 +263,7 @@ async def build_runtime(
                 client, support_catalog, wiki_store=support_wiki
             ),
             supervisor=SupervisorAgent(supervisor_client),
-            review_tool=ReviewTool(supervisor_client),
+            review_tool=ReviewTool(client),
             known_procedure_steps=known_procedure_steps,
             # No budget or usage object is handed to the graph: both belong to
             # a run, and run_planning installs them per run.

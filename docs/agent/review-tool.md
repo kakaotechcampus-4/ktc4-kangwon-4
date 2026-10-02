@@ -3,8 +3,10 @@
 모든 정상 판단을 독립 검수하는 필수 관문. 검색하지 않고 초안을 직접 고치지 않는다 —
 반송 사유만 내고, 해당 구성요소가 다시 판단한다.
 
-Supervisor와 같은 설정의 클라이언트를 사용하되, 별도 프롬프트·별도 호출로 검수한다.
-Supervisor의 응답이나 대화 이력을 재사용하지 않고 `ReviewSubject`만 받는다.
+공용 모델 설정(`OPENAI_MODEL=gpt-5.6-sol`, `OPENAI_REASONING_EFFORT=xhigh`)으로 호출.
+Supervisor를 포함한 모든 LLM 호출도 같은 모델·추론 강도로 통일.
+Review 독립성은 다른 모델 사용이 아니라 별도 프롬프트·별도 호출로 확보.
+Supervisor의 응답이나 대화 이력을 재사용하지 않고 `ReviewSubject`만 입력으로 사용.
 
 ## 입력 → 출력
 

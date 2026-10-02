@@ -9,7 +9,7 @@
 ## 1. 먼저 보는 결론
 
 - 현재 Agent 실행은 **Pydantic, LangGraph, httpx**를 사용한다.
-- LLM은 LangChain이나 OpenAI SDK가 아니라 `httpx`로 OpenAI-compatible endpoint를 호출한다. `SUPERVISOR_*` 환경변수를 설정하면 Supervisor와 독립 Review 호출이 같은 별도 client를 사용하고, 미설정 시 공용 endpoint 설정을 사용한다. 환경변수는 [`.env.example`](../.env.example)을 따른다.
+- LLM은 LangChain이나 OpenAI SDK가 아니라 `httpx`로 OpenAI-compatible endpoint를 호출한다. `SUPERVISOR_*`·`INFO_*` 환경변수를 설정하면 Supervisor와 정보분석이 각각 별도 client를 사용하고, 미설정 시 공용 endpoint 설정을 사용한다. 지원금 Agent와 독립 Review는 항상 공용 설정을 사용한다. 환경변수는 [`.env.example`](../.env.example)을 따른다.
 - LangChain·OpenAI SDK·Chroma는 `backend/requirements.txt`에 고정돼 있지만 Agent 코드에 import가 없다. Langfuse는 credential이 설정된 경우에만 metadata 전송에 사용한다.
 - 루트 `docker-compose.yml`은 **MySQL 8.0 DB만** 실행한다. Backend와 Agent container는 없다.
 - 현재 작업 트리에는 SQLModel 테이블, DB 세션, FastAPI 진입점과 카카오 인증 라우터가 있다. Agent를 호출하는 라우터와 Case 저장·재조회 연동, migration은 아직 없다.

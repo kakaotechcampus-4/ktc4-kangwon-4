@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react'
 import { RouterProvider, createMemoryRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
 
-import { logIn } from '../lib/auth'
+import { saveTokens } from '../lib/auth'
 import { RequireAuth } from './RequireAuth'
 
 function renderAt(path: string) {
@@ -37,7 +37,7 @@ describe('RequireAuth', () => {
   })
 
   it('로그인했으면 그대로 통과시킨다', async () => {
-    logIn()
+    saveTokens('access', 'refresh')
     renderAt('/case')
 
     expect(await screen.findByText('현재 Case')).toBeInTheDocument()
@@ -45,7 +45,7 @@ describe('RequireAuth', () => {
 
   /** 로그인 화면을 다시 보려고 만든 Mock이다. 저장된 상태를 이기지 못하면 쓸 수 없다 */
   it('로그인했어도 ?mock=logged-out이면 막는다', async () => {
-    logIn()
+    saveTokens('access', 'refresh')
     renderAt('/case?mock=logged-out')
 
     expect(await screen.findByText('로그인')).toBeInTheDocument()

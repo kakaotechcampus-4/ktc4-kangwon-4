@@ -118,11 +118,6 @@ class DecisionRecord(CreatedAtMixin, table=True):
         max_length=50, description="ACTION(블로커+다음액션) / NEEDS_MORE_INFO(추가 질문) — ENUM 아님"
     )
     summary: str | None = Field(default=None, sa_column=Column(Text, nullable=True), description="판단 요약")
-    questions_for_user: list | None = Field(
-        default=None,
-        sa_column=Column(JSON, nullable=True),
-        description="행동을 정하기 전 사용자에게 되묻는 질문 목록. 없으면 NULL",
-    )
     human_confirmation_required: bool = Field(default=False, description="사람 확인 필요 여부")
     reviewed_at: datetime = Field(sa_column=Column(DateTime, nullable=False), description="리뷰 완료 시각")
 

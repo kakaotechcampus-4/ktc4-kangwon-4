@@ -9,6 +9,7 @@ from sqlmodel import Session
 
 from app.agent.schemas import ReviewedPlanOutcome
 from app.be.crud import blocker as blocker_crud
+from app.be.crud import case_history as case_history_crud
 from app.be.crud import evidence as evidence_crud
 from app.be.models.blocker import Blocker
 from app.be.models.case_history import CaseHistory
@@ -51,6 +52,11 @@ def save_reviewed_plan(
     history.next_action_questions_to_ask = list(next_action.questions_to_ask) if next_action else None
     history.next_action_evidence_refs = list(next_action.evidence_refs) if next_action else None
     history.priority_blocker_id = blocker.id
+    # 화면이 읽는 값들은 case_history 한 행에 모아둔다(GET /cases가 이 행만 조회한다).
+    history.questions_for_user = list(decision.questions_for_user) or None
+    history.judgment_status = (
+        "NEEDS_MORE_INFO" if decision.decision_type.value == "NEEDS_MORE_INFO" else "DONE"
+    )
 
     record = evidence_crud.create_decision_record(
         session,
@@ -66,7 +72,6 @@ def save_reviewed_plan(
             verdict=proof.verdict.value,
             decision_type=decision.decision_type.value,
             summary=decision.selection_summary,
-            questions_for_user=list(decision.questions_for_user) or None,
             human_confirmation_required=decision.requires_human,
             # DB는 timezone 없는 시각을 쓰므로 한국 시각으로 맞춘 뒤 tzinfo를 뗀다.
             reviewed_at=proof.reviewed_at.astimezone(KST).replace(tzinfo=None),
@@ -83,3 +88,17 @@ def save_reviewed_plan(
     session.commit()
     session.refresh(record)
     return record
+
+
+def mark_judgment_failed(session: Session, case_id: int) -> None:
+    """판단이 정상 결과로 끝나지 않았음을 화면이 알 수 있게 상태만 남긴다.
+
+    판단 내용은 저장하지 않는다(AI팀 스펙: CONFLICT·SAFE_FAILURE는 정상 결과로 저장하지
+    않음). 다만 상태를 PENDING으로 두면 화면이 영영 "분석 중"에 머물게 된다.
+    """
+
+    history = case_history_crud.get_case_created_history(session, case_id)
+    if history is None:
+        return
+    history.judgment_status = "FAILED"
+    session.commit()
