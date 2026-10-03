@@ -5,8 +5,6 @@ from sqlmodel import Session
 
 from app.agent.schemas import (
     CASE_FIELD_SPECS,
-    AgentGraphInput,
-    CaseCreatedTrigger,
     CaseFact,
     CaseFieldKey,
     CaseSnapshot,
@@ -22,10 +20,10 @@ from app.agent.schemas import (
     RedactedInput,
 )
 from app.be.crud import case as case_crud
-from app.be.crud import case_history as case_history_crud
 from app.be.crud import evidence as evidence_crud
 from app.be.crud import procedure_step as procedure_step_crud
 from app.be.models.case import Case
+from app.be.models.case_history import CaseHistory
 from app.be.models.evidence import Evidence
 from app.be.models.mixins import KST
 from app.be.models.procedure_step import CaseProcedureStep
@@ -39,35 +37,22 @@ _UNKNOWN_SENTINEL_FIELDS = {
 }
 
 
-def build_case_created_input(session: Session, case_id: int) -> AgentGraphInput:
-    """case 생성 직후 첫 판단을 요청할 때 AI에 넘기는 입력 한 벌(트리거 + 스냅샷)."""
+def build_user_input(history: CaseHistory) -> RedactedInput:
+    """사용자가 넣은 입력 한 건을 AI가 받는 모양으로 바꾼다.
 
-    history = case_history_crud.get_case_created_history(session, case_id)
-    if history is None:
-        raise ValueError(f"case {case_id} has no CASE_CREATED history")
+    트리거(= 왜 판단을 부르는가)로 감싸는 일은 AI팀 입구(app/common/agent_service.py)가 한다.
+    """
 
-    # DB에는 한국 시각을 저장하고(mixins.kst_now) AI 쪽은 timezone이 붙은 시각만 받으므로 tzinfo만 붙인다.
-    submitted_at = history.created_at.replace(tzinfo=KST)
-    input_event_id = f"case_history:{history.id}"
-
-    return AgentGraphInput(
-        trigger=CaseCreatedTrigger(
-            trigger_type="CASE_CREATED",
-            input_event_id=input_event_id,
-            # TODO: 프론트가 자기 쪽 이벤트 식별자를 보내주기로 하면 그 값을 넣는다. 아직 미협의.
-            client_event_id=None,
-            input=RedactedInput(
-                input_event_id=input_event_id,
-                source_type=InputSourceType.USER_INPUT,
-                redacted_text=history.raw_input,
-                # case 생성 폼은 업종/임차형태 같은 정해진 값만 받아서 지울 개인정보가 없다.
-                # 자유 입력을 받는 화면이 생기면 그때 민감정보 제거 목록을 채워야 한다.
-                redactions=[],
-                submitted_at=submitted_at,
-            ),
-            submitted_at=submitted_at,
-        ),
-        case_snapshot=build_case_snapshot(session, case_id),
+    return RedactedInput(
+        input_event_id=f"case_history:{history.id}",
+        source_type=InputSourceType.USER_INPUT,
+        redacted_text=history.raw_input,
+        # case 생성 폼은 업종/임차형태 같은 정해진 값만 받아서 지울 개인정보가 없다.
+        # 자유 입력을 받는 화면이 생기면 그때 민감정보 제거 목록을 채워야 한다.
+        redactions=[],
+        # DB에는 한국 시각을 저장하고(mixins.kst_now) AI 쪽은 timezone이 붙은 시각만 받으므로
+        # tzinfo만 붙인다.
+        submitted_at=history.created_at.replace(tzinfo=KST),
     )
 
 
