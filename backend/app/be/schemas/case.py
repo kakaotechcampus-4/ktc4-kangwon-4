@@ -78,3 +78,20 @@ class CaseGetResponse(BaseModel):
     requested_field_paths: list[str] | None
     retryable: bool | None
     changes: list[FieldChangeResponse] | None
+
+
+NextScreen = Literal["CONFLICT_CONFIRM", "RESULT_INPUT_PENDING", "RESULT_INPUT"]
+
+
+class ConflictItemResponse(BaseModel):
+    id: int
+    field: str
+    stored_value: str | None
+    proposed_value: str
+
+
+class CaseResultsEntryResponse(BaseModel):
+    next_screen: NextScreen
+    raw_input: str | None = None
+    conflicts: list[ConflictItemResponse] | None = None
+    next_action: NextActionResponse | None = None
