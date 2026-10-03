@@ -2,7 +2,7 @@
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "destination": "http://52.79.222.103/$1"
+      "destination": "https://reborn-ktc.duckdns.org/$1"
     },
     {
       "source": "/(.*)",

@@ -14,6 +14,9 @@ import { saveTokens } from '../lib/auth'
  * 카카오는 실패해도 이 주소로 돌려보낸다 — 로그인 창에서 "취소"를 누른 경우가 그렇다.
  * 그때는 `code` 대신 `error`가 붙어 오므로, `code`가 없다는 것만 보면 둘 다 걸러진다.
  * 사용자에게는 어느 쪽이든 "로그인이 안 됐다" 하나이고 할 수 있는 일도 다시 시도뿐이다.
+ *
+ * `state`가 어긋난 경우도 같은 실패로 묶는다. 우리가 시작하지 않은 로그인이라는 뜻인데,
+ * 그걸 설명해도 사용자가 할 수 있는 일은 역시 다시 로그인뿐이다.
  */
 export function LoginCallbackPage() {
   const [params] = useSearchParams()
@@ -21,6 +24,9 @@ export function LoginCallbackPage() {
   const [failed, setFailed] = useState(false)
 
   const code = params.get('code')
+
+  // 우리가 보낸 값이 그대로 실려 돌아온다. 맞춰보는 것은 `postLogin` 이 한다
+  const state = params.get('state')
 
   /**
    * `code`는 한 번만 쓸 수 있다.
@@ -37,7 +43,7 @@ export function LoginCallbackPage() {
 
     sent.current = true
 
-    postLogin(code)
+    postLogin(code, state)
       .then(({ accessToken, refreshToken }) => {
         saveTokens(accessToken, refreshToken)
         // 다 쓴 code 가 주소에 남아 있어, 뒤로 가면 실패한 로그인을 다시 시도하게 된다
@@ -46,7 +52,7 @@ export function LoginCallbackPage() {
       .catch(() => {
         setFailed(true)
       })
-  }, [code, navigate])
+  }, [code, state, navigate])
 
   if (failed || code === null) {
     return (
