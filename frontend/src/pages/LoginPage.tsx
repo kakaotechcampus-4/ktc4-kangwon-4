@@ -2,7 +2,7 @@ import { Navigate, useLocation, useNavigate } from 'react-router'
 
 import { AppShell } from '../components/AppShell'
 import { loginFormUrl } from '../lib/api'
-import { isLoggedIn, logInWithMock } from '../lib/auth'
+import { createOAuthState, isLoggedIn, logInWithMock } from '../lib/auth'
 import { MOCK_SWITCH_ENABLED } from '../lib/mockSwitch'
 
 /**
@@ -26,9 +26,12 @@ export function LoginPage() {
   /**
    * 라우터가 아니라 브라우저를 움직인다. 우리 화면 안에서 이동하는 것이 아니라
    * 카카오라는 다른 사이트로 나가는 것이라, 서버가 주는 303을 브라우저가 따라가야 한다.
+   *
+   * 나가기 직전에 state 를 만든다. 화면을 열 때 만들면, 열어두고 한참 뒤에 누른 탭이나
+   * 두 탭을 번갈아 쓴 경우에 먼저 만든 값이 덮여 로그인이 막힌다.
    */
   function handleKakaoLogin() {
-    window.location.assign(loginFormUrl())
+    window.location.assign(loginFormUrl(createOAuthState()))
   }
 
   function handleMockLogin() {
