@@ -81,6 +81,10 @@ class ConflictReference(CreatedAtMixin, table=True):
         max_length=100, unique=True, description="opaque 참조값 — id와 별개의 비즈니스 키"
     )
     case_id: int = Field(sa_column=Column(BigInteger, ForeignKey("case.id"), nullable=False), description="대상 케이스")
+    case_history_id: int = Field(
+        sa_column=Column(BigInteger, ForeignKey("case_history.id"), nullable=False),
+        description="이 충돌을 일으킨 제출(raw_input)의 이력 — /confirm이 '이번에 하신 말씀'을 보여줄 때 씀",
+    )
 
     canonical_field: str = Field(max_length=100, description="충돌이 발생한 필드")
     committed_value: str | None = Field(
@@ -94,6 +98,7 @@ class ConflictReference(CreatedAtMixin, table=True):
     )
 
     case: "Case" = Relationship(back_populates="conflict_references")
+    case_history: "CaseHistory" = Relationship()
 
 
 class DecisionRecord(CreatedAtMixin, table=True):

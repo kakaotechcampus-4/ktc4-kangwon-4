@@ -35,6 +35,8 @@ def get_latest_user_driven_case_history(session: Session, case_id: int) -> CaseH
         .options(joinedload(CaseHistory.priority_blocker))
         .where(CaseHistory.case_id == case_id)
         .where(CaseHistory.source.in_(_USER_DRIVEN_SOURCES))
-        .order_by(CaseHistory.created_at.desc())
+        # created_at은 MySQL DATETIME이라 초 단위까지만 저장돼 같은 초에 두 이력이 생기면
+        # 동률이 난다. id(auto-increment)는 항상 생성 순서를 정확히 반영하므로 2차 기준으로 쓴다.
+        .order_by(CaseHistory.created_at.desc(), CaseHistory.id.desc())
         .limit(1)
     ).first()

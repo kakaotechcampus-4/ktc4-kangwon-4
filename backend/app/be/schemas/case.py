@@ -61,3 +61,19 @@ class CaseGetResponse(BaseModel):
     next_action: str | None
     judgment_status: JudgmentStatus | None
     questions_for_user: list[str] | None
+
+
+NextScreen = Literal["CONFLICT_CONFIRM", "RESULT_INPUT_PENDING", "RESULT_INPUT"]
+
+
+class ConflictItem(BaseModel):
+    field: str
+    stored_value: str | None
+    proposed_value: str
+
+
+class CaseResultsEntryResponse(BaseModel):
+    next_screen: NextScreen
+    raw_input: str | None = None
+    conflicts: list[ConflictItem] | None = None
+    next_action_title: str | None = None
