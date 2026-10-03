@@ -45,7 +45,7 @@ services:
     env_file:
       - .env.prod
     ports:
-      - "0.0.0.0:80:8000" # 외부 접근 허용
+      - "127.0.0.1:8000:8000" # 외부에 직접 노출하지 않음 — Caddy가 80/443에서 받아 이 포트로 리버스 프록시
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 10s
