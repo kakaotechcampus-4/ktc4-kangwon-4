@@ -80,10 +80,35 @@ BE가 조회한 `ProcedureStep`·`StepDependency`·`StepEligibility` 행을 변�
 매핑 생략 시 이미 등록된 코드가 AI 의미 코드와 정확히 같은 항목을 사용한다.
 
 [`build_runtime`](../../backend/app/agent/runtime.py)은 호출자가 준비한 실제 절차 목록
-(`known_procedure_steps`), 검수 지원 자료(`support_catalog`), 메모리에 적재한 절차 자료
-(`procedure_store`)를 받는다. 자료가 없으면 빈 결과를 유지하며 임의 사업·조건으로 채우지 않는다.
+(`known_procedure_steps`), 검수 지원 자료(`support_catalog`), 절차 검수 목록
+(`procedure_store`)을 받는다. 절차 검수 목록이 비어 있으면 동봉 JSON을 검수·검색 메타정보로
+읽는다. 절차 원문과 근거 ID는 BE가 조회한 `CaseSnapshot.evidence_records`에서 가져오며,
+DB 근거가 없으면 JSON 본문으로 대신하지 않고 빈 결과를 반환한다.
 환경변수는 [`.env.example`](../../.env.example)를 따르고, 공용 runtime은 요청마다
 `run_planning(AgentGraphInput)`으로 실행한 뒤 애플리케이션 종료 시 `aclose()`로 정리한다.
+
+### 검수 절차 자료 저장·조회
+
+자료 PR의 `app/common/reviewed-procedures.ko-KR.json`이 먼저 필요하다. 기존 Case에 자료를
+넣을 때는 backend 디렉토리에서 다음 명령을 실행한다. `123`은 실제 존재하는 Case ID로 바꾼다.
+
+```bash
+.venv/bin/python -m scripts.import_reviewed_procedures --case-id 123
+```
+
+[`import_reviewed_procedures`](../../backend/app/common/agent_data.py)는 기존 BE의
+`create_evidence()`로 Case별 발췌·출처·버전·해시·시각·상태를 저장한다. CLI가 전체 자료를
+한 번에 commit하며 실패하면 rollback한다. 같은 ID와 내용의 재실행은 건너뛰고,
+같은 ID에 다른 내용이 있으면 덮어쓰지 않는다. 새 버전은 새 근거로 남는다.
+검수자·검수 시각·유효기간·검색어·절차 연결은 승인 JSON에 유지한다.
+
+BE의 기존 `get_evidence_by_case_id()` → `build_case_snapshot()` 조회 결과를 Graph가 Tool에
+전달한다. Tool은 승인 목록과 출처·버전·해시·발췌가 일치하는 DB 근거만 사용하며,
+DB의 `evidence_id`를 그대로 반환한다. Agent는 전달받은 자료를 다시 DB에서 조회하지 않는다.
+
+현재 새 Case 생성 경로는 이 적재 함수를 호출하지 않는다. 자동 공급에는 BE에서
+Case 생성 트랜잭션 안에 적재 함수를 호출하고, 첫 snapshot 생성 전에 저장을 마쳐야 한다.
+`TEMP_*` 절차와 AI 의미 코드의 대응도 아직 필요하므로 수동 적재 성공을 서비스 전체 연결로 보지 않는다.
 
 권한을 확인한 Case snapshot 제공, 검수된 변경 후보의 저장·재조회는 호출자의 책임이다.
 `CONFLICT_CONFIRMED`에는 서버가 보관한 원래 충돌 후보를 전달하며, 클라이언트가 보내온
@@ -155,11 +180,14 @@ Agent 응답 자체는 저장 성공이 아니다.
 반복 평가에서는 입력·근거·Review 설정을 고정하고, 행동 코드·대상과 실제 확인 항목을
 함께 비교한다. Supervisor 단독 비교, 전체 Graph 실행, 판단 재사용은 구분해서 검증한다.
 
-위 실행은 [`evaluate_planning.py`](../../backend/scripts/evaluate_planning.py)로 재현한다.
-이미 확인된 Case 상태는 `--graph-input <AgentGraphInput JSON 경로>`로 전달 가능.
+위 기록은 당시 입력 방식의 결과다. 현재 DB 근거 조회를 평가하려면
+[`evaluate_planning.py`](../../backend/scripts/evaluate_planning.py)에 BE가 조회한 공식 근거를
+포함한 `--graph-input <AgentGraphInput JSON 경로>`를 전달한다. 기본 `--case` 입력은
+공식 DB 근거가 없으므로 검수 파일만 지정해도 공식 문서를 반환하지 않는다.
 `--case`·`--result-input`과 동시 사용 불가. 합성 입력·호출 기록은 Git 추적에서 제외.
 같은 판단인지는 Blocker 설명과 Next Action 전체(행동 코드·대상·제목·이유·확인 질문)를
-digest로 비교한다. 근거 ID는 실행마다 새로 발급되므로 비교에서 제외한다.
+digest로 비교한다. 공식 근거는 DB ID를 유지하지만 파생 근거는 실행마다 ID가 달라질 수 있어
+판단 문구 비교에서는 근거 ID를 제외한다. DB 근거 보존 여부는 별도로 검증한다.
 실행마다 새 runtime을 만들고 판단 재사용을 꺼서, 반복이 실제로 다시 호출하도록 한다.
 
 이 기록으로 말할 수 없는 것: 네 입력 모두 원상복구·철거가 미확인이라 규칙 적용 후 후보가
@@ -225,5 +253,7 @@ Supervisor·Review는 5~8초다. 당시 한도 `AGENT_LLM_TIMEOUT_SECONDS=150`·
 BE의 [`first_judgment.py`](../../backend/app/be/services/first_judgment.py)는
 `run_case_planning` 대신 `AgentRuntime.run_planning`을 직접 호출한다.
 [`case.py`](../../backend/app/be/services/case.py)는 임시 `TEMP_*` 절차 3개를 생성한다.
-다만 `TEMP_*`는 AI 절차 의미 코드와 연결되지 않고, BE는 공식 절차 자료에 빈 store를 넘긴다.
+다만 `TEMP_*`는 AI 절차 의미 코드와 연결되지 않고, BE는 절차 검수 목록에 빈 store를 넘긴다.
+현재 Agent는 이 경우 동봉 JSON을 검수 메타정보로 읽지만, 새 Case에 공식 근거를 저장하는
+호출은 아직 없어 자동으로 공식 문서가 공급되지는 않는다.
 코드 확인 결과이며, 서버 전체 실행 검증은 아니다.

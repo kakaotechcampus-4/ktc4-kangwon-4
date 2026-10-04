@@ -1,20 +1,34 @@
 # 절차조회(Procedure) Tool
 
-사전에 주입된 검수 스냅샷만 읽는다. 요청 처리 중 인터넷·DB·파일을 읽지 않는다.
+BE가 Case snapshot에 담아 준 공식 근거를 사전에 읽은 승인 목록과 대조한다.
+Tool 조회 중 인터넷·DB·파일을 읽지 않는다. 빈 승인 목록을 받은 runtime은 조립할 때
+동봉 JSON을 검수·검색 메타정보로 읽지만, DB 근거가 없으면 JSON 원문으로 대체하지 않는다.
 적용 여부·우선순위·Next Action은 결정하지 않는다 — Supervisor의 일이다.
 
 ## 조회 (`StoredProcedureLookupTool`)
 
-`ProcedureLookupInput`(조회어·기준일) → `ProcedureLookupResult`(문서·Evidence·상태·경고).
-읽기는 부분 실패가 없다 — `completion_status`는 `COMPLETE` 아니면 `NO_RESULTS`뿐이다.
+`ProcedureLookupInput`(Case의 공식 Evidence·조회어·기준일) →
+`ProcedureLookupResult`(문서·Evidence·상태·경고).
+정상 반환의 `completion_status`는 `COMPLETE` 아니면 `NO_RESULTS`이며,
+원문 불일치나 검수 상태 오류는 Graph가 `SAFE_FAILURE`로 처리한다.
 
-| 자료 상태 | freshness |
+- 승인 목록과 URL·버전이 같은 DB 자료의 발췌·해시가 일치해야 한다. 같은 URL·버전의
+  중복 자료나 원문·해시 불일치는 `PROCEDURE_SOURCE_MISMATCH` 오류다.
+- 현재 승인 버전의 DB 자료가 없으면 조회 결과에서 제외하고 경고한다. 이전 버전의 DB 근거를
+  현재 버전으로 바꾸거나, 없는 원문을 파일에서 채우지 않는다.
+- 제목·기관명·검색어·절차 코드는 승인 목록에서, 발췌·출처·해시·시각은 DB 근거에서 읽는다.
+  검색과 URL 중복 제거 후에도 DB `evidence_id`와 Evidence 내용은 그대로 유지한다.
+
+| 승인 목록과 DB 상태 | 처리 |
 |---|---|
-| `reviewed_by`/`reviewed_at` 둘 다 없음 | `UNKNOWN` |
-| 검수 완료 + `review_valid_days` 이내 | `CURRENT` |
-| 검수 완료 + 기간 초과 | `STALE` |
+| DB 자료와 대응하는 승인 목록에 검수 정보 없음 | `PROCEDURE_REVIEW_REQUIRED` 오류 |
+| 검수 유효기간 초과인데 DB는 `CURRENT` | 같은 오류로 차단, 자료 갱신 필요 |
+| 검수 유효기간 내이고 DB도 `CURRENT` | `CURRENT` 그대로 반환 |
+| 검수 정보가 있고 DB는 `STALE` 또는 `UNKNOWN` | DB 상태와 근거를 그대로 반환하고 경고 |
 
-(`procedure_tool/store.py`의 `ReviewedProcedureRecord.freshness()`. 두 필드는 항상 같이 채워야 한다 — 하나만 채우면 검증 오류.)
+검수 유효기간은 `ReviewedProcedureRecord.freshness()`로 요청 기준일에 대해 검사한다.
+DB 상태를 Tool 안에서 `CURRENT`로 올리거나, 같은 근거 ID에 다른 상태를 덮어쓰지 않는다.
+`reviewed_by`와 `reviewed_at`은 둘 다 있어야 하며 하나만 있으면 승인 목록 검증 오류다.
 
 ## 실행 가능 판정 (`procedure_tool/rules.py`)
 
