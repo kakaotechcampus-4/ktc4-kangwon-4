@@ -1,4 +1,4 @@
-"""Pure adapters from BE-owned data into the Agent's reviewed input contracts.
+"""Adapters and a bundled-file loader for the Agent's reviewed input contracts.
 
 This module never opens a database session.  BE loaders must supply complete ORM
 row sets and complete, human-reviewed payloads.  The adapters validate those
@@ -8,13 +8,16 @@ or timestamps.
 
 from __future__ import annotations
 
+import json
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, tzinfo
+from pathlib import Path
 from uuid import UUID
 
 from app.agent.procedure_tool.store import (
+    ProcedureStoreError,
     ReviewedProcedureRecord,
     ReviewedProcedureSnapshot,
 )
@@ -38,6 +41,7 @@ __all__ = [
     "build_known_procedure_steps",
     "build_reviewed_support_catalog",
     "load_reviewed_procedure_store",
+    "load_reviewed_procedures",
     "load_reviewed_support_catalog",
 ]
 
@@ -204,6 +208,15 @@ def load_reviewed_procedure_store(
     )
     snapshot = ReviewedProcedureSnapshot.model_validate(source)
     return InMemoryReviewedProcedureStore.from_snapshot(snapshot)
+
+
+def load_reviewed_procedures() -> InMemoryReviewedProcedureStore:
+    """동봉된 문서를 검증해 적재한다. BE 저장소가 생기면 이 함수와 JSON을 제거한다."""
+    path = Path(__file__).with_name("reviewed-procedures.ko-KR.json")
+    try:
+        return load_reviewed_procedure_store(json.loads(path.read_text(encoding="utf-8")))
+    except (OSError, ValueError) as exc:
+        raise ProcedureStoreError("검수 절차 파일을 읽거나 검증하지 못했습니다.") from exc
 
 
 def load_reviewed_support_catalog(
