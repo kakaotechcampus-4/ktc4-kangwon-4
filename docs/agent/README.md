@@ -61,8 +61,10 @@ outcome = await run_case_planning(
 ```
 
 이 함수는 실제 runtime 생성·호출·종료까지 처리하며 판단 재사용은 하지 않는다.
-반환된 `AgentGraphOutput`은 아직 저장되지 않은 결과다. 이 브랜치의 기준 develop(`6bd7b8a`)에는
-snapshot 조회·판단 저장 함수가 없으므로 해당 함수의 인자를 가정하거나 Agent에서 SQL 저장을 대신하지 않는다.
+반환된 `AgentGraphOutput`은 아직 저장되지 않은 결과다. BE의
+[`case_snapshot.py`](../../backend/app/be/services/case_snapshot.py)가 저장된 Case로 snapshot을 만들고,
+[`decision_record.py`](../../backend/app/be/services/decision_record.py)가 검수된 판단을 저장한다.
+Blocker·Next Action·검수 기록을 저장하며, 판단 중 생성한 근거 본문·Case 변경 후보 저장은 아직 남아 있다.
 
 [`app.common.agent_data`](../../backend/app/common/agent_data.py)의 `build_known_procedure_steps`는
 BE가 조회한 `ProcedureStep`·`StepDependency`·`StepEligibility` 행을 변환한다.
@@ -218,5 +220,10 @@ Supervisor·Review는 5~8초다. 당시 한도 `AGENT_LLM_TIMEOUT_SECONDS=150`·
 성공 호출 최대치(102초)와 150초가 너무 가까워서다. 코드 상한은 600초라 둘 다 유효하다.
 세 번 모두 503이면 여전히 `SAFE_FAILURE`로 끝나는데, 그건 제공자 장애라 맞는 동작이다.
 
-**서버 → AI 연결은 여전히 미완료다.** `app/be`에는 `run_case_planning`을 부르는 코드가 없고,
-`procedure_step` 행을 넣는 코드도 저장소에 없다. 절차 행이 없으면 후보가 만들어지지 않는다.
+위 검증 당시에는 서버 연결과 절차 행 생성이 미완료였다. 현재 코드(`ceda32f`)에는
+`POST /cases` 뒤 백그라운드 최초 판단과 저장, `GET /cases`의 판단 결과 조회가 연결되어 있다.
+BE의 [`first_judgment.py`](../../backend/app/be/services/first_judgment.py)는
+`run_case_planning` 대신 `AgentRuntime.run_planning`을 직접 호출한다.
+[`case.py`](../../backend/app/be/services/case.py)는 임시 `TEMP_*` 절차 3개를 생성한다.
+다만 `TEMP_*`는 AI 절차 의미 코드와 연결되지 않고, BE는 공식 절차 자료에 빈 store를 넘긴다.
+코드 확인 결과이며, 서버 전체 실행 검증은 아니다.
