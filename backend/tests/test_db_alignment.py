@@ -232,13 +232,16 @@ def test_all_applies_to_every_business_type():
     assert procedure_constraints(step("ALL"), snapshot("카페")) == []
 
 
-# 4. BLOCKER.description.  The limit is read from the column, not repeated
-# here, so shrinking the column without shrinking the agent fails this test.
+# 4. BLOCKER.description may be TEXT (no declared character limit) or VARCHAR.
+# A bounded column must still fit the Agent's entire accepted range.
 def test_blocker_description_fits_its_column():
-    limit = BlockerRow.__table__.c.description.type.length
-    assert Blocker(description="가" * limit, evidence_refs=[REF]).description
+    agent_limit = Blocker.model_json_schema()["properties"]["description"]["maxLength"]
+    column_limit = BlockerRow.__table__.c.description.type.length
+    if column_limit is not None:
+        assert agent_limit <= column_limit
+    assert Blocker(description="가" * agent_limit, evidence_refs=[REF]).description
     with pytest.raises(ValidationError):
-        Blocker(description="가" * (limit + 1), evidence_refs=[REF])
+        Blocker(description="가" * (agent_limit + 1), evidence_refs=[REF])
 
 
 # 5. The remaining columns the agent writes into, same rule, same source.
