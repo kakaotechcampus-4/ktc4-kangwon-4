@@ -34,7 +34,11 @@ Blocker 해소(`RESOLVED`) 판정은 Supervisor가 하지 않는다. BE가 다�
 각 후보에 허용된 행동 코드·대상을 연결한다. Supervisor는 후보와 행동을 선택하며,
 선택한 후보의 상태 설명·확인 질문을 코드에서 채운다. 따라서 미확인을 실제 미결정으로
 바꾸거나 이미 확인한 항목을 다시 묻는 표현을 모델이 추가하지 않는다.
-Review도 필수 Blocker와 후보의 상태 문장을 재검증. 후보가 없으면 Blocker와 추가 확인 질문 반환.
+Review도 필수 Blocker와 후보의 상태 문장을 재검증한다. 후보가 없으면 Info의 판단 차단 항목 중
+실제 미확인 조건 하나의 Blocker·질문을 반환한다. 선택 날짜·확정된 사실을 다시 묻거나
+질문 근거 없이 안내문 제출을 요구하지 않는다. 기존 지원 우선 분기는 지원 안내 확인 질문을 유지한다.
+공식 문서는 있지만 절차 대응이 0개이고 행동 후보도 없으면 구성 오류로 종료하며,
+사용자 추가 입력으로 해결할 수 있다고 안내하지 않는다.
 
 절차 finding이 `RELEVANT`가 아니면 후보에서 제외한다. 단 확인 행동은 공식 안내가 있고
 `requires_confirmation=true`인 `POSSIBLY_RELEVANT`도 남긴다 — 적용 여부의 확인 자체가
@@ -55,15 +59,16 @@ Review도 필수 Blocker와 후보의 상태 문장을 재검증. 후보가 없�
 
 1. `demolition_required=REQUIRED` 확정 + `restoration_status≠COMPLETED` → 철거 지원조건 확인 우선
 2. 그 외 `restoration_scope`·철거 필요 여부가 미확정 → 임대인 확인을 Info finding 기반으로 우선
-3. 근거 있는 행동이 없으면 `NEEDS_MORE_INFO`
+3. 근거 있는 행동이 없고 확인할 조건이 있으면 `NEEDS_MORE_INFO`
 
 이미 확정된 사실은 다시 묻지 않고, `restoration_status=COMPLETED` 뒤 철거 전 행동을 반복하지 않는다.
 
 ## 미검수 자료의 처리
 
 절차 문서가 미검수(`freshness=UNKNOWN`)면 Info가 `relevance=UNDETERMINED`로 낼 수밖에 없고,
-Supervisor는 그 finding으로 ACTION을 만들 수 없다. 근거 있는 다른 행동이 없으면
-`NEEDS_MORE_INFO`를 반환한다. 검수 완료된 현재 자료의 동작과 구분해야 한다.
+Supervisor는 그 finding으로 ACTION을 만들 수 없다. 근거 있는 다른 행동이 없을 때
+실제 확인할 조건이 있어야 `NEEDS_MORE_INFO`를 반환한다. 이를 충족하지 못하면
+미검수 초안 없이 실패한다. 검수 완료된 현재 자료의 동작과 구분해야 한다.
 
 코드: [`supervisor/agent.py`](../../backend/app/agent/supervisor/agent.py),
 프롬프트: [`prompts.py`](../../backend/app/agent/prompts.py)의 `supervisor_messages`,

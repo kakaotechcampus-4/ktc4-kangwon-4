@@ -110,6 +110,15 @@ DB의 `evidence_id`를 그대로 반환한다. Agent는 전달받은 자료를 �
 Case 생성 트랜잭션 안에 적재 함수를 호출하고, 첫 snapshot 생성 전에 저장을 마쳐야 한다.
 `TEMP_*` 절차와 AI 의미 코드의 대응도 아직 필요하므로 수동 적재 성공을 서비스 전체 연결로 보지 않는다.
 
+자료가 있지만 절차 대응이 0개이고 실행 가능한 행동 후보도 없으면 Supervisor는
+`AGENT_PROCEDURE_BINDINGS_MISSING`으로 종료한다. 복구 안내는 `CONTACT_SUPPORT`이며,
+사용자에게 입력 필드를 요구하거나 Supervisor·Review LLM 호출을 반복하지 않는다.
+실제 사용자 정보 부족은 Info가 판단을 막는다고 표시한 미확인 조건 하나를 질문한다.
+
+남은 BE 요청은 실제 절차 ID·코드와 Case 연결 확정, 신규 Case 자동 자료 적재다.
+TODO: 대응 확정 후 조회 문서의 절차 코드를 실제 DB 코드에 연결하고,
+신규 Case 생성 → 실제 LLM 검수 → 판단 저장 → 새 세션 조회를 확인한다.
+
 권한을 확인한 Case snapshot 제공, 검수된 변경 후보의 저장·재조회는 호출자의 책임이다.
 `CONFLICT_CONFIRMED`에는 서버가 보관한 원래 충돌 후보를 전달하며, 클라이언트가 보내온
 임의 후보를 그대로 신뢰하지 않는다. Agent의 `REVIEWED_PLAN`은 DB 저장 완료를 뜻하지 않는다.
