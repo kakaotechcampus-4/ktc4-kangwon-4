@@ -90,6 +90,10 @@ class SupervisorGuardrailError(GuardrailViolation):
     """Raised when a Supervisor draft references data it did not receive."""
 
 
+class ProcedureBindingConfigurationError(RuntimeError):
+    """Official documents are available but no procedure mapping is configured."""
+
+
 class NextActionSemantic(AgentSchema):
     action_code: ActionCode
     title: Annotated[StrictStr, Field(min_length=1)]
@@ -248,14 +252,26 @@ class SupervisorAgent:
             request, list(source_results), fact_overlays=fact_overlays
         )
         evidence_registry = self._evidence(source_results, request)
+        bindings = self._bindings(request)
         blocker_candidates = build_blocker_candidates(
             request.case_snapshot,
             request.known_procedure_steps,
             source_results,
             mutations,
             evidence_registry,
-            self._bindings(request),
+            bindings,
         )
+        if (
+            not blocker_candidates
+            and not bindings
+            and any(
+                isinstance(source.output, ProcedureLookupResult) and source.output.documents
+                for source in source_results
+            )
+        ):
+            raise ProcedureBindingConfigurationError(
+                "Reviewed documents require a configured procedure mapping"
+            )
         action_candidates = [
             action
             for candidate in blocker_candidates
