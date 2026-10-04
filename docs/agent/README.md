@@ -78,6 +78,9 @@ BE가 조회한 `ProcedureStep`·`StepDependency`·`StepEligibility` 행을 변�
 의미를 추정하지 않으며, 다른 절차에 같은 ID·코드를 중복 연결하거나 미등록 대상을 연결하면 거부한다.
 새 호출 함수에는 명시적 매핑이 필수이고 `{}`는 매핑 없음이다. 기존 `build_runtime` 호출에서만
 매핑 생략 시 이미 등록된 코드가 AI 의미 코드와 정확히 같은 항목을 사용한다.
+runtime은 검증한 대응표를 절차조회 Tool에도 전달한다. Tool은 반환 문서의 `step_codes`만
+실제 DB 코드로 바꾸며, 대응이 없는 코드로는 행동 대상을 연결하지 않는다.
+승인 JSON과 DB Evidence의 원문·해시·근거 ID는 바꾸지 않는다.
 
 [`build_runtime`](../../backend/app/agent/runtime.py)은 호출자가 준비한 실제 절차 목록
 (`known_procedure_steps`), 검수 지원 자료(`support_catalog`), 절차 검수 목록
@@ -116,7 +119,8 @@ Case 생성 트랜잭션 안에 적재 함수를 호출하고, 첫 snapshot 생�
 실제 사용자 정보 부족은 Info가 판단을 막는다고 표시한 미확인 조건 하나를 질문한다.
 
 남은 BE 요청은 실제 절차 ID·코드와 Case 연결 확정, 신규 Case 자동 자료 적재다.
-TODO: 대응 확정 후 조회 문서의 절차 코드를 실제 DB 코드에 연결하고,
+전달된 대응표를 적용하는 Agent 코드는 구현했으며, 실제 운영 대응값은 아직 미확정이다.
+TODO: 확정된 실제 대응값을 전달하고,
 신규 Case 생성 → 실제 LLM 검수 → 판단 저장 → 새 세션 조회를 확인한다.
 
 권한을 확인한 Case snapshot 제공, 검수된 변경 후보의 저장·재조회는 호출자의 책임이다.
