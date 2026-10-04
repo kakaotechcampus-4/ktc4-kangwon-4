@@ -12,6 +12,16 @@ interface ImportMetaEnv {
    * Vercel의 Preview 환경에만 설정하고 Production에는 두지 않는다.
    */
   readonly VITE_ENABLE_MOCK_SWITCH?: string
+
+  /**
+   * 서버를 부를 때 앞에 붙이는 주소. 끝에 `/`를 붙이지 않는다.
+   *
+   * 비워두면 `/api`를 쓴다 — 같은 출처로 요청해 `vercel.json`의 프록시가 서버로 넘긴다.
+   * 배포된 화면은 HTTPS인데 서버가 HTTP라, 직접 부르면 브라우저가 차단하기 때문이다.
+   *
+   * 로컬 개발은 `.env.local`에 서버 주소를 직접 넣는다. 서버 주소는 비밀이 아니다.
+   */
+  readonly VITE_API_BASE_URL?: string
 }
 
 interface ImportMeta {

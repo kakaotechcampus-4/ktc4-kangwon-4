@@ -10,6 +10,9 @@ services:
     environment:
       MYSQL_DATABASE: closure_agent
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-devpassword}
+      # DB에는 한국 시각을 저장한다. updated_at의 onupdate는 DB가 값을 넣으므로
+      # 컨테이너 시간대를 맞춰야 파이썬이 넣는 값과 기준이 어긋나지 않는다.
+      TZ: Asia/Seoul
     ports:
       - "3306:3306"
     volumes:

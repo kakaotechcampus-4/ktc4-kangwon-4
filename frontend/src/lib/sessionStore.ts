@@ -1,5 +1,5 @@
 /**
- * 탭 하나 동안만 사는 참/거짓 값.
+ * 탭 하나 동안만 사는 값.
  *
  * `sessionStorage`를 쓰는 이유는 탭을 닫으면 같이 끝나기 때문이다. 공용 PC나 가게
  * 컴퓨터에서 쓰는 사용자가 있을 수 있어 브라우저를 껐다 켜도 남아 있게 두지 않는다.
@@ -9,13 +9,14 @@
  * 조용히 사라지므로, 한 번이라도 실패하면 그 뒤로는 메모리에 든 값만 믿는다.
  * 새로고침하면 풀리지만, 눌러도 아무 일이 없는 화면보다는 낫다.
  */
-export interface SessionFlag {
-  read: () => boolean
-  write: (value: boolean) => void
+export interface SessionValue {
+  read: () => string | null
+  /** `null`을 넣으면 지운다 */
+  write: (value: string | null) => void
 }
 
-export function createSessionFlag(key: string): SessionFlag {
-  let fallback = false
+export function createSessionValue(key: string): SessionValue {
+  let fallback: string | null = null
   let storageUsable = true
 
   return {
@@ -23,7 +24,7 @@ export function createSessionFlag(key: string): SessionFlag {
       if (!storageUsable) return fallback
 
       try {
-        return window.sessionStorage.getItem(key) === 'true'
+        return window.sessionStorage.getItem(key)
       } catch {
         storageUsable = false
         return fallback
@@ -35,7 +36,8 @@ export function createSessionFlag(key: string): SessionFlag {
       if (!storageUsable) return
 
       try {
-        window.sessionStorage.setItem(key, String(value))
+        if (value === null) window.sessionStorage.removeItem(key)
+        else window.sessionStorage.setItem(key, value)
       } catch {
         storageUsable = false
       }

@@ -3,6 +3,7 @@ import { createBrowserRouter, Navigate } from 'react-router'
 import { RequireAuth } from './components/RequireAuth'
 import { CaseCreatePage } from './pages/CaseCreatePage'
 import { ConfirmChangePage } from './pages/ConfirmChangePage'
+import { LoginCallbackPage } from './pages/LoginCallbackPage'
 import { CurrentCasePage } from './pages/CurrentCasePage'
 import { EntryPage } from './pages/EntryPage'
 import { LoginPage } from './pages/LoginPage'
@@ -13,7 +14,8 @@ import { StartPage } from './pages/StartPage'
 /**
  * Hero Loop의 화면 순서가 그대로 경로가 된다.
  *
- *   /login     로그인         인증 가드 밖에 있는 유일한 화면
+ *   /login          로그인      인증 가드 밖에 있다
+ *   /login/callback 로그인 처리  카카오가 돌려보내는 자리. 역시 가드 밖이다
  *   /          진입 분기      보낼 곳만 정하고 화면은 없다
  *   /start     시작 화면      Case가 없는 사용자만 본다
  *   /cases/new Case 생성      사장님이 이미 아는 것만 묻는다
@@ -25,7 +27,7 @@ import { StartPage } from './pages/StartPage'
  * `/confirm`은 `/results`와 `/replan` 사이의 단계가 아니라 예외 분기다.
  * 정상 경로는 `/results`에서 `/replan`으로 바로 간다.
  *
- * `/login`을 뺀 전부가 `RequireAuth` 아래에 있다. 화면마다 로그인을 검사하지 않고
+ * 로그인 화면 둘을 뺀 전부가 `RequireAuth` 아래에 있다. 화면마다 로그인을 검사하지 않고
  * 구조에 한 번 끼워 두면, 새 화면을 추가할 때 보호를 빠뜨릴 수 없다.
  *
  * 모르는 경로는 `/`로 보낸다. 거기서 지금 상태에 맞는 화면을 다시 고른다 —
@@ -33,6 +35,7 @@ import { StartPage } from './pages/StartPage'
  */
 export const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
+  { path: '/login/callback', element: <LoginCallbackPage /> },
   {
     element: <RequireAuth />,
     children: [

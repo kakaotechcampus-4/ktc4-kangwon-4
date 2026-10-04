@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
@@ -11,6 +12,7 @@ from pathlib import Path
 from dotenv import dotenv_values
 
 from app.agent import prompts
+from app.agent.action_catalog import ProcedureBindings, resolve_procedure_bindings
 from app.agent.decision_cache import DecisionCache, fingerprint
 from app.agent.graph import AgentGraph
 from app.agent.info_agent import InfoAnalysisAgent
@@ -28,11 +30,7 @@ from app.agent.procedure_tool import (
 )
 from app.agent.review_tool import ReviewTool
 from app.agent.run_scope import RunDeadline, current_deadline, run_deadline_scope
-from app.agent.schemas import (
-    AgentGraphInput,
-    AgentGraphOutput,
-    KnownProcedureStep,
-)
+from app.agent.schemas import KnownProcedureStep
 from app.agent.supervisor import SupervisorAgent
 from app.agent.support_agent import ReviewedSupportCatalog, SupportAgent
 from app.agent.support_agent.wiki import SupportWikiStore
@@ -43,6 +41,7 @@ from app.agent.tracing import (
     UsageAccumulator,
     usage_scope,
 )
+from app.common.agent_dto import AgentGraphInput, AgentGraphOutput
 
 __all__ = ["AgentRuntime", "RuntimeLimits", "build_runtime"]
 
@@ -203,9 +202,13 @@ class AgentRuntime:
             return outcome
 
     async def aclose(self) -> None:
-        for client in self._clients:
-            await client.aclose()
-        await self._procedure_tool.aclose()
+        # Cleanup must attempt every transport and must not discard a reviewed
+        # outcome because one provider's connection failed to close.
+        await asyncio.gather(
+            *(client.aclose() for client in self._clients),
+            self._procedure_tool.aclose(),
+            return_exceptions=True,
+        )
 
     def flush(self) -> None:
         flush = getattr(self._trace_sink, "flush", None)
@@ -218,6 +221,7 @@ async def build_runtime(
     known_procedure_steps: Sequence[KnownProcedureStep],
     support_catalog: ReviewedSupportCatalog,
     procedure_store: ReviewedProcedureStore,
+    procedure_bindings: ProcedureBindings | None = None,
     support_wiki: SupportWikiStore | None = None,
     limits: RuntimeLimits | None = None,
     use_decision_cache: bool = True,
@@ -229,6 +233,7 @@ async def build_runtime(
     source must resolve existing support IDs; misses remain unavailable.
     """
 
+    bindings = resolve_procedure_bindings(known_procedure_steps, procedure_bindings)
     resolved = limits or RuntimeLimits(
         max_llm_calls_per_run=resolve_max_calls_per_run(),
         run_deadline_seconds=resolve_run_deadline_seconds(),
@@ -257,13 +262,13 @@ async def build_runtime(
         procedure_tool = StoredProcedureLookupTool(procedure_store)
         trace_sink = LangfuseTraceSink.from_env()
         graph = AgentGraph(
-            info_agent=InfoAnalysisAgent(info_client),
+            info_agent=InfoAnalysisAgent(info_client, procedure_bindings=bindings),
             procedure_tool=procedure_tool,
             support_agent=SupportAgent(
                 client, support_catalog, wiki_store=support_wiki
             ),
-            supervisor=SupervisorAgent(supervisor_client),
-            review_tool=ReviewTool(supervisor_client),
+            supervisor=SupervisorAgent(supervisor_client, procedure_bindings=bindings),
+            review_tool=ReviewTool(client, procedure_bindings=bindings),
             known_procedure_steps=known_procedure_steps,
             # No budget or usage object is handed to the graph: both belong to
             # a run, and run_planning installs them per run.
@@ -273,8 +278,9 @@ async def build_runtime(
     except Exception:
         # The caller never received the runtime, so nothing else can close
         # these transports.
-        for opened in clients:
-            await opened.aclose()
+        await asyncio.gather(
+            *(opened.aclose() for opened in clients), return_exceptions=True
+        )
         raise
 
     def cache_context() -> Mapping[str, object] | None:
@@ -296,6 +302,10 @@ async def build_runtime(
             "registry": [
                 step.model_dump(mode="json") for step in known_procedure_steps
             ],
+            "procedure_bindings": {
+                key: reference.model_dump(mode="json")
+                for key, reference in bindings.items()
+            },
             "catalog": support_catalog.model_dump(mode="json"),
             "store_version": procedure_store.snapshot_version,
             "procedure_records": [record.model_dump(mode="json") for record in records],

@@ -18,6 +18,34 @@ from ..schemas import (
     validate_case_field_value,
 )
 
+# CASE.business_type holds the words the user typed ("카페"), while
+# PROCEDURE_STEP.applicable_business_type holds a code ("CAFE"). Comparing them
+# raw filters out every business-specific procedure, so convert first.
+#
+# Two known gaps, both owned outside the agent (see PR #45 review):
+#   * This matches the whole typed value only.  FE takes business_type as free
+#     text, so "개인 카페" or "커피숍" still miss every CAFE-only procedure.
+#     Growing this dict is not the fix; FE offering a choice, or BE storing a
+#     code, is.  Do not widen it here without agreeing that with FE/BE first.
+#   * RESTAURANT cannot match anything yet: PROCEDURE_STEP
+#     .applicable_business_type is Enum("ALL", "CAFE"), so no RESTAURANT row can
+#     exist.  A 일반음식점 Case silently gets zero procedure candidates.
+_BUSINESS_TYPE_CODES: dict[str, str] = {
+    "카페": "CAFE",
+    "휴게음식점": "CAFE",
+    "식당": "RESTAURANT",
+    "음식점": "RESTAURANT",
+    "일반음식점": "RESTAURANT",
+}
+
+
+def business_type_code(value: object) -> object:
+    """Return the procedure code for a Case business_type, else the value itself."""
+
+    if type(value) is not str:
+        return value
+    return _BUSINESS_TYPE_CODES.get(value.strip(), value)
+
 
 def procedure_constraints(
     step: KnownProcedureStep,
@@ -50,7 +78,8 @@ def procedure_constraints(
         reasons.append("procedure is deprecated")
     if (
         step.applicable_business_type != "ALL"
-        and values.get(CaseFieldKey.BUSINESS_TYPE) != step.applicable_business_type
+        and business_type_code(values.get(CaseFieldKey.BUSINESS_TYPE))
+        != step.applicable_business_type
     ):
         reasons.append("applicable_business_type is not confirmed for this Case")
     for dependency in step.dependencies:

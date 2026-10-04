@@ -5,6 +5,7 @@ import json
 from uuid import UUID
 
 import pytest
+from pydantic import ValidationError
 from app.agent.blocker_candidates import build_blocker_candidates, missing_info_fields
 from app.agent.review_tool import ReviewTool
 from app.agent.schemas import (
@@ -25,6 +26,7 @@ from test_action_codes import (
     NOW,
     REF,
     StubModel,
+    evidence,
     source,
     supervisor_request,
     support_sources,
@@ -240,7 +242,10 @@ class ChoiceModel(StubModel):
                     "selection_summary": "이미 정해지지 않았습니다.",
                     "requires_human": True,
                     "evidence_refs": [REF],
-                    "blocker": None,
+                    "blocker": {
+                        "description": "판단에 필요한 정보를 확인해 주세요.",
+                        "evidence_refs": [REF],
+                    },
                     "next_action": None,
                     "questions_for_user": [],
                     "grounded_claims": [],
@@ -312,6 +317,136 @@ def test_model_state_invention_is_replaced_and_review_cannot_override_guard():
         )
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        {"restoration_scope": "PARTIAL", "restoration_status": "COMPLETED"},
+        {"restoration_scope": "PARTIAL", "demolition_required": "NOT_REQUIRED"},
+    ],
+)
+def test_ready_procedure_keeps_one_verified_confirmation_blocker(state):
+    async def run():
+        request = request_with_state(**state)
+        rows = candidates(request)
+        assert rows and all(row["blocker"] is not None for row in rows)
+        assert all("확인할 필요" in row["blocker"]["description"] for row in rows)
+        assert all(row["evidence_refs"] == [REF] for row in rows)
+
+        # ChoiceModel invents a demolition blocker; only the verified candidate
+        # supplies the MVP's one evidence-backed blocker in the reviewed output.
+        draft = await SupervisorAgent(ChoiceModel(), max_local_attempts=1).draft(
+            request
+        )
+        assert draft.decision.decision_type == "ACTION"
+        assert draft.decision.blocker.description == rows[0]["blocker"]["description"]
+        assert "철거" not in draft.decision.blocker.description
+        assert draft.decision.next_action is not None
+        assert draft.decision.evidence_refs == [REF]
+        assert draft.decision.next_action.evidence_refs == [REF]
+        assert draft.decision.questions_for_user == []
+        assert any(
+            "/blocker/" in claim.target_path for claim in draft.grounded_claims
+        )
+        assert request.case_snapshot.case_status == "IN_PROGRESS"
+        result = await ReviewTool(
+            ChoiceModel(), max_output_attempts=1, provider_max_retries=0
+        ).review(subject(request, draft))
+        assert result.verdict == "PASS"
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("blocker_kind", ["restoration", "support"])
+def test_mvp_schema_rejects_removing_a_verified_blocker(
+    blocker_kind,
+):
+    async def run():
+        request = request_with_state(
+            **({"demolition_required": "REQUIRED"} if blocker_kind == "support" else {})
+        )
+        if blocker_kind == "support":
+            request.source_results.append(
+                source(support_sources()[0].output, "SUPPORT_AGENT", 6)
+            )
+        draft = await SupervisorAgent(ChoiceModel(), max_local_attempts=1).draft(
+            request
+        )
+        assert draft.decision.blocker is not None
+        with pytest.raises(ValidationError):
+            draft.decision.blocker = None
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("freshness", ["UNKNOWN", "STALE"])
+@pytest.mark.parametrize("stale_parent", [False, True])
+def test_unverified_procedure_source_keeps_source_confirmation_blocker(freshness, stale_parent):
+    request = request_with_state(restoration_status="COMPLETED")
+    records = request.source_results[0].output.evidence_records
+    if stale_parent:
+        records[0].parent_evidence_refs = ["parent"]
+        records.append(evidence(evidence_id="parent", freshness_status=freshness))
+    else:
+        records[0].freshness_status = freshness
+    rows = candidates(request)
+    assert rows and all(row["blocker"] is not None for row in rows)
+    assert all("안내의 현재 적용 여부" in row["blocker"]["description"] for row in rows)
+    assert all(
+        action["action_code"] == "CONFIRM_TAX_CLOSURE_REQUIREMENTS"
+        for row in rows
+        for action in row["actions"]
+    )
+
+
+def test_uncertain_restoration_scope_still_allows_landlord_confirmation():
+    async def run():
+        request = request_with_state()
+        info = request.source_results[1].output
+        for finding in info.procedure_findings:
+            finding.relevance = "POSSIBLY_RELEVANT"
+        request.source_results[1] = source(info)
+
+        draft = await SupervisorAgent(ChoiceModel(), max_local_attempts=1).draft(
+            request
+        )
+        assert draft.decision.decision_type == "ACTION"
+        assert draft.decision.next_action.action_code == "CONFIRM_RESTORATION_SCOPE"
+        assert draft.decision.next_action.questions_to_ask == [
+            "원상복구해야 할 범위는 어디까지인가요?",
+            "철거가 필요한가요?",
+        ]
+        assert draft.mutations.fact_changes == []
+        result = await ReviewTool(
+            ChoiceModel(), max_output_attempts=1, provider_max_retries=0
+        ).review(subject(request, draft))
+        assert result.verdict == "PASS"
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("lease_status", ["LEASED_PAID", "OWNED"])
+def test_undetermined_procedure_relevance_keeps_candidates_empty(lease_status):
+    request = request_with_state(lease_status=lease_status)
+    for finding in request.source_results[1].output.procedure_findings:
+        finding.relevance = "UNDETERMINED"
+    assert candidates(request) == []
+
+
+@pytest.mark.parametrize("stale_parent", [False, True])
+def test_uncertain_restoration_requires_current_source_chain(stale_parent):
+    request = request_with_state()
+    request.source_results[1].output.procedure_findings[-1].relevance = (
+        "POSSIBLY_RELEVANT"
+    )
+    records = request.source_results[0].output.evidence_records
+    if stale_parent:
+        records[0].parent_evidence_refs = ["parent"]
+        records.append(evidence(evidence_id="parent", freshness_status="STALE"))
+    else:
+        records[0].freshness_status = "STALE"
+    assert candidates(request) == []
 
 
 def test_invented_candidate_is_rejected_without_replacing_available_action():
@@ -444,3 +579,29 @@ def test_fallback_does_not_reask_unnecessary_restoration_details(resolution):
     else:
         assert result["questions_for_user"] == ["직원이 몇 명인가요?"]
     assert result["next_action"] is None
+
+
+@pytest.mark.parametrize("freshness", ["CURRENT", "STALE"])
+def test_possible_procedure_applies_only_as_current_confirmation(freshness):
+    request = request_with_state(lease_status="OWNED")
+    info = request.source_results[1].output
+    for finding in info.procedure_findings:
+        finding.relevance = "POSSIBLY_RELEVANT"
+    request.source_results[1] = source(info)
+    request.source_results[0].output.evidence_records[0].freshness_status = freshness
+
+    rows = candidates(request)
+
+    if freshness != "CURRENT":
+        assert rows == []
+        return
+    assert len(rows) == 1
+    tax = rows[0]
+    assert tax["blocker"]["description"] == (
+        "사업자 폐업신고 대상 여부와 준비사항을 확인할 필요가 있습니다."
+    )
+    assert [action["action_code"] for action in tax["actions"]] == [
+        "CONFIRM_TAX_CLOSURE_REQUIREMENTS"
+    ]
+    assert "대상 여부" in tax["actions"][0]["title"]
+    assert "대상인지" in tax["actions"][0]["questions_to_ask"][0]
