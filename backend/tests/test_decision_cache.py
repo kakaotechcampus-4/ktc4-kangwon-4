@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
+
 from app.agent import decision_cache as cache_module
 from app.agent import runtime as runtime_module
 from app.agent.decision_cache import DecisionCache
@@ -425,13 +426,14 @@ def test_build_runtime_tracks_actual_config_data_prompts_and_disables_unversione
 
         monkeypatch.setattr(runtime_module, "AgentGraph", graph_factory)
         store = SimpleNamespace(snapshot_version="before", records=list)
+        monkeypatch.setattr(runtime_module, "load_reviewed_procedures", lambda: store)
         catalog = ReviewedSupportCatalog(
             catalog_version="synthetic", programs=(), evidence_records=()
         )
         runtime = await runtime_module.build_runtime(
             known_procedure_steps=[],
             support_catalog=catalog,
-            procedure_store=store,
+            procedure_store=SimpleNamespace(snapshot_version="unused", records=list),
             limits=RuntimeLimits(1, 60),
         )
         assert graph_components["info_agent"]._llm is clients_by_prefix["INFO_"]

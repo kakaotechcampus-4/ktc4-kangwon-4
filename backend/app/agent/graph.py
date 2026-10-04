@@ -461,6 +461,10 @@ class AgentGraph:
         )
         component_input = ProcedureLookupInput(
             lookup_goal="BUSINESS_CLOSURE",
+            evidence_records=[
+                item for item in request.case_snapshot.evidence_records
+                if item.source_type == "OFFICIAL_DOCUMENT"
+            ],
             search_queries=self._procedure_queries(request),
             as_of=self._as_of(request),
             locale="ko-KR",
