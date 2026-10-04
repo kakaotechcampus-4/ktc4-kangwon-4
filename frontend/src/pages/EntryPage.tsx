@@ -16,7 +16,7 @@ import { useCase } from '../hooks/useCase'
  */
 export function EntryPage() {
   const { search } = useLocation()
-  const query = useCase()
+  const { query } = useCase()
 
   // 곧 다른 화면으로 옮겨 갈 자리라 로딩 안내를 두지 않는다.
   // 여기서 뭔가 보여주면 다음 화면의 안내와 겹쳐 두 번 깜빡인다

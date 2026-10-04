@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import type { CaseResponse } from '../types/api'
+import type { CasesEnvelope, CaseResponse } from '../types/api'
 import type { CaseDraft } from '../types/view'
 import { toCaseCreateRequest, toCurrentCaseView, toFacts } from './case'
 
@@ -93,14 +93,24 @@ describe('toFacts', () => {
   })
 })
 
-describe('toCurrentCaseView', () => {
-  /** 서버가 아직 판단을 주지 않는다. 지어내지 않고 없는 대로 둔다 */
-  it('판단이 없으면 blocker 와 nextAction 을 비워 둔다', () => {
-    const view = toCurrentCaseView(SERVER_CASE)
+/** 봉투에서 판단만 바꿔 끼운다. 가게 칸은 어느 상태에서나 같은 것이 와야 한다 */
+function envelopeOf(judgment: Partial<CasesEnvelope>): CasesEnvelope {
+  return {
+    case: SERVER_CASE,
+    blocker: null,
+    next_action: null,
+    judgment_status: null,
+    questions_for_user: null,
+    ...judgment,
+  }
+}
 
-    expect(view.blocker).toBeNull()
-    expect(view.nextAction).toBeNull()
-    expect(view.facts).toHaveLength(6)
+describe('toCurrentCaseView', () => {
+  it('가게 정보는 판단 상태와 무관하게 담는다', () => {
+    const view = toCurrentCaseView(envelopeOf({ judgment_status: 'PENDING' }), SERVER_CASE)
+
+    expect(view.judgment.status).toBe('PENDING')
+    expect(view.facts).toHaveLength(7)
   })
 })
 

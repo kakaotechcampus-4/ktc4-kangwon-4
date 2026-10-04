@@ -16,6 +16,14 @@ const SERVER_CASE: Partial<CaseResponse> = {
   demolition_required: 'UNKNOWN',
 }
 
+/** 판단 칸이 전부 비어 있는 봉투. 테스트마다 필요한 칸만 덮어쓴다 */
+const EMPTY_JUDGMENT = {
+  blocker: null,
+  next_action: null,
+  judgment_status: null,
+  questions_for_user: null,
+}
+
 function mockFetch(body: unknown, status = 200) {
   const fetchMock = vi
     .fn()
@@ -26,10 +34,11 @@ function mockFetch(body: unknown, status = 200) {
 
 /** 훅이 돌려준 상태를 글자로 드러내는 최소한의 화면 */
 function Probe() {
-  const query = useCase()
+  const { query } = useCase()
 
   if (query.status === 'READY') {
-    return <p>{`READY ${query.view.facts.find((fact) => fact.key === 'business_type')?.value}`}</p>
+    const businessType = query.view.facts.find((fact) => fact.key === 'business_type')?.value
+    return <p>{`READY ${query.view.judgment.status} ${businessType}`}</p>
   }
   return <p>{query.status}</p>
 }
@@ -58,15 +67,15 @@ afterEach(() => {
 describe('useCase', () => {
   it('서버가 준 Case 를 화면 모양으로 돌려준다', async () => {
     saveTokens('access-1', 'refresh-1')
-    mockFetch({ case: SERVER_CASE })
+    mockFetch({ ...EMPTY_JUDGMENT, case: SERVER_CASE, judgment_status: 'PENDING' })
     renderAt('/case')
 
-    expect(await screen.findByText('READY 카페')).toBeInTheDocument()
+    expect(await screen.findByText('READY PENDING 카페')).toBeInTheDocument()
   })
 
   it('Case 가 없으면 EMPTY 다', async () => {
     saveTokens('access-1', 'refresh-1')
-    mockFetch({ case: null })
+    mockFetch({ ...EMPTY_JUDGMENT, case: null })
     renderAt('/case')
 
     expect(await screen.findByText('EMPTY')).toBeInTheDocument()
@@ -89,7 +98,7 @@ describe('useCase', () => {
     mockFetch(null, 500)
     renderAt('/case')
 
-    expect(await screen.findByText('FAILED')).toBeInTheDocument()
+    expect(await screen.findByText('LOAD_FAILED')).toBeInTheDocument()
   })
 
   /**
@@ -98,7 +107,7 @@ describe('useCase', () => {
    */
   it('가짜 세션이면 서버를 부르지 않는다', async () => {
     logInWithMock()
-    const fetchMock = mockFetch({ case: SERVER_CASE })
+    const fetchMock = mockFetch({ ...EMPTY_JUDGMENT, case: SERVER_CASE })
     renderAt('/case')
 
     expect(await screen.findByText(/^READY/)).toBeInTheDocument()
@@ -108,7 +117,7 @@ describe('useCase', () => {
   /** 리뷰어가 링크 하나로 예외 화면을 보는 길이다. 진짜 세션에서도 살아 있어야 한다 */
   it('?mock= 이 있으면 서버 대신 그 화면을 쓴다', async () => {
     saveTokens('access-1', 'refresh-1')
-    const fetchMock = mockFetch({ case: SERVER_CASE })
+    const fetchMock = mockFetch({ ...EMPTY_JUDGMENT, case: SERVER_CASE })
     renderAt('/case?mock=no-case')
 
     expect(await screen.findByText('EMPTY')).toBeInTheDocument()
