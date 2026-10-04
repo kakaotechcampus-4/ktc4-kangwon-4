@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from uuid import UUID, uuid4
 
+from app.agent.action_catalog import ProcedureBindings
 from app.agent.guardrails import ensure_no_sensitive_text
 from app.agent.procedure_tool.store import (
     ReviewedProcedureRecord,
@@ -40,9 +41,19 @@ class StoredProcedureLookupTool:
         self,
         store: ReviewedProcedureStore,
         *,
+        procedure_bindings: ProcedureBindings | None = None,
         uuid_factory: Callable[[], UUID] = uuid4,
     ) -> None:
         self._store = store
+        # The runtime validates IDs and codes; copy strings so caller mutations
+        # cannot change the document-to-procedure correspondence during a run.
+        self._step_codes = (
+            None
+            if procedure_bindings is None
+            else {
+                logical: ref.step_code for logical, ref in procedure_bindings.items()
+            }
+        )
         self._uuid = uuid_factory
 
     async def aclose(self) -> None:
@@ -123,7 +134,15 @@ class StoredProcedureLookupTool:
                     content_hash=evidence.content_hash,
                     evidence_ref=evidence.evidence_id,
                     search_query=query,
-                    step_codes=list(record.step_codes),
+                    step_codes=(
+                        list(record.step_codes)
+                        if self._step_codes is None
+                        else [
+                            self._step_codes[code]
+                            for code in record.step_codes
+                            if code in self._step_codes
+                        ]
+                    ),
                 )
             )
 

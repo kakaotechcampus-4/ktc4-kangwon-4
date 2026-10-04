@@ -11,13 +11,10 @@ from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
-from sqlmodel import Session, SQLModel, create_engine
-from testcontainers.community.mysql import MySqlContainer
-
 from app.agent import runtime as runtime_module
 from app.agent.procedure_tool.store import ProcedureStoreError
 from app.agent.procedure_tool.stored_tool import StoredProcedureLookupTool
-from app.agent.schemas import ProcedureLookupInput
+from app.agent.schemas import ProcedureLookupInput, ProcedureStepRef
 from app.be.crud import evidence as evidence_crud
 from app.be.crud.case_history import get_case_created_history
 from app.be.crud.member import create_member
@@ -30,6 +27,8 @@ from app.common.agent_data import (
     import_reviewed_procedures,
     load_reviewed_procedure_store,
 )
+from sqlmodel import Session, SQLModel, create_engine
+from testcontainers.community.mysql import MySqlContainer
 
 AS_OF = date(2026, 10, 4)
 RETRIEVED = datetime(2026, 10, 4, 1, 2, 3, 456789, tzinfo=timezone.utc)
@@ -109,6 +108,12 @@ def lookup_request(snapshot):
 
 
 def test_committed_rows_reach_tool_without_new_evidence_ids(mysql_engine, approved_store):
+    bindings = {
+        record.step_codes[0]: ProcedureStepRef(
+            procedure_step_id=index, step_code=f"SYNTHETIC_BE_STEP_{index}",
+        )
+        for index, record in enumerate(approved_store.records(), start=1)
+    }
     case_ids = [create_test_case(mysql_engine) for _ in range(2)]
     ids_by_case = []
     for case_id in case_ids:
@@ -134,11 +139,14 @@ def test_committed_rows_reach_tool_without_new_evidence_ids(mysql_engine, approv
                     tzinfo=None, microsecond=0
                 )
             snapshot = build_case_snapshot(session, case_id)
-            result = asyncio.run(StoredProcedureLookupTool(approved_store).lookup(
-                lookup_request(snapshot)
-            ))
+            result = asyncio.run(StoredProcedureLookupTool(
+                approved_store, procedure_bindings=bindings,
+            ).lookup(lookup_request(snapshot)))
             assert result.completion_status == "COMPLETE"
             assert len(result.documents) == 2
+            assert {code for document in result.documents for code in document.step_codes} == {
+                ref.step_code for ref in bindings.values()
+            }
             originals = {record.evidence_id: record for record in snapshot.evidence_records}
             assert {record.evidence_id for record in result.evidence_records} == ids_by_case[-1]
             for record in result.evidence_records:
@@ -277,6 +285,8 @@ def test_existing_be_runtime_uses_db_rows_with_empty_store(
     with Session(mysql_engine) as session:
         found = asyncio.run(lookup_from_be(session))
         assert found.completion_status == "COMPLETE"
+        assert len(found.documents) == 2
+        assert all(document.step_codes == [] for document in found.documents)
         assert {item.evidence_id for item in found.evidence_records} == {
             row.evidence_id for row in official_rows(session, case_id)
         }

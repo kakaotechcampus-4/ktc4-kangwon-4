@@ -262,7 +262,9 @@ async def build_runtime(
             usage_sink=scoped_usage.record,
         )
         clients.append(info_client)
-        procedure_tool = StoredProcedureLookupTool(procedure_store)
+        procedure_tool = StoredProcedureLookupTool(
+            procedure_store, procedure_bindings=bindings
+        )
         trace_sink = LangfuseTraceSink.from_env()
         graph = AgentGraph(
             info_agent=InfoAnalysisAgent(info_client, procedure_bindings=bindings),
