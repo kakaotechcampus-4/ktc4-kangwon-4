@@ -1,4 +1,4 @@
-"""Agent values must fit the DB columns in docs/schema/schema_table.md.
+"""Agent values must match the DB columns in backend/app/be/models/.
 
 The agent produces the strings that BE writes into MySQL, so every limit here
 mirrors one column in backend/app/be/models/. Failing in the agent is the
@@ -8,11 +8,14 @@ not silently truncated at INSERT time. Synthetic data only.
 
 import asyncio
 import hashlib
+import json
 from datetime import datetime, timezone
 from uuid import UUID
 
 import pytest
 from pydantic import ValidationError
+from sqlalchemy import Text
+from test_action_codes import StubModel, action_payload, supervisor_request
 
 from app.agent.procedure_tool.rules import procedure_constraints
 from app.agent.schemas import (
@@ -20,12 +23,15 @@ from app.agent.schemas import (
     CaseSnapshot,
     EvidenceRecord,
     KnownProcedureStep,
+    NextAction,
     ProcedureLookupResult,
     ProcedureSourceDocument,
 )
+from app.agent.supervisor.agent import SupervisorAgent
 from app.agent.support_agent.agent import SupportAgent
 from app.agent.support_agent.models import ReviewedSupportCatalog
 from app.be.models.blocker import Blocker as BlockerRow
+from app.be.models.case_history import CaseHistory
 from app.be.models.evidence import Evidence as EvidenceRow
 from scripts.evaluate_planning import CASES, build_case_snapshot
 
@@ -232,16 +238,33 @@ def test_all_applies_to_every_business_type():
     assert procedure_constraints(step("ALL"), snapshot("카페")) == []
 
 
-# 4. BLOCKER.description may be TEXT (no declared character limit) or VARCHAR.
-# A bounded column must still fit the Agent's entire accepted range.
-def test_blocker_description_fits_its_column():
-    agent_limit = Blocker.model_json_schema()["properties"]["description"]["maxLength"]
-    column_limit = BlockerRow.__table__.c.description.type.length
-    if column_limit is not None:
-        assert agent_limit <= column_limit
-    assert Blocker(description="가" * agent_limit, evidence_refs=[REF]).description
-    with pytest.raises(ValidationError):
-        Blocker(description="가" * (agent_limit + 1), evidence_refs=[REF])
+# 4. BE stores judgment text in TEXT columns, without a 500-character limit.
+@pytest.mark.parametrize("model,field,column,values", [
+    (Blocker, "description", BlockerRow.__table__.c.description, {"evidence_refs": [REF]}),
+    (NextAction, "title", CaseHistory.__table__.c.next_action, action_payload() | {"sequence": 1}),
+])
+def test_judgment_text_matches_be_text_columns(model, field, column, values):
+    assert isinstance(column.type, Text)
+    for length in (501, 2000):
+        text = "가" * length
+        result = model.model_validate(values | {field: text})
+        restored = model.model_validate_json(result.model_dump_json())
+        assert getattr(restored, field) == text
+    assert "maxLength" not in model.model_json_schema()["properties"][field]
+    for invalid in ("", None, 123):
+        with pytest.raises(ValidationError):
+            model.model_validate(values | {field: invalid})
+
+
+def test_supervisor_does_not_request_obsolete_text_limits():
+    class Model(StubModel):
+        async def generate(self, model, messages, **kwargs):
+            contract = json.loads(messages[1]["content"].removeprefix("INPUT_JSON="))["contract"]
+            assert "blocker_description_max_characters" not in contract
+            assert "next_action_title_max_characters" not in contract
+            return await super().generate(model, messages, **kwargs)
+
+    asyncio.run(SupervisorAgent(Model(), max_local_attempts=1).draft(supervisor_request()))
 
 
 # 5. The remaining columns the agent writes into, same rule, same source.
