@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { RouterProvider, createMemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -35,10 +35,24 @@ const DONE = envelope({
   next_action: '임대인에게 원상복구 범위를 확인하세요.',
 })
 
+function response(body: unknown, status = 200) {
+  return new Response(status === 200 ? JSON.stringify(body) : null, { status })
+}
+
 function mockCase(body: unknown, status = 200) {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response(body, status)))
+}
+
+/** 처음엔 받아오고 그 뒤로는 실패한다. 갱신만 실패한 상태를 만들 때 쓴다 */
+function mockThenFail(body: unknown) {
+  let called = false
   vi.stubGlobal(
     'fetch',
-    vi.fn().mockResolvedValue(new Response(status === 200 ? JSON.stringify(body) : null, { status })),
+    vi.fn().mockImplementation(() => {
+      const first = !called
+      called = true
+      return Promise.resolve(first ? response(body) : response(null, 500))
+    }),
   )
 }
 
@@ -170,6 +184,42 @@ describe('CurrentCasePage', () => {
       saveTokens('access-1', 'refresh-1')
       mockCase(body)
       renderAt('/case')
+
+      expect(await recheckButton()).toBeEnabled()
+    })
+  })
+
+  /**
+   * 갱신에 실패하면 지금 들고 있는 판단이 최신인지 알 수 없다. 그 상태로 결과를 보내면
+   * 사장님은 이미 지난 할 일에 대해 답하게 된다. 그렇다고 지우면 적어낸 내용이 날아간
+   * 줄 알기 때문에, 남겨두고 제출만 막는다.
+   */
+  describe('갱신에 실패했을 때', () => {
+    async function renderStale() {
+      saveTokens('access-1', 'refresh-1')
+      mockThenFail(DONE)
+      renderAt('/case')
+
+      fireEvent.click(await recheckButton())
+      return screen.findByText('최신 상태를 확인하지 못했어요.')
+    }
+
+    it('마지막으로 받은 가게 정보를 남긴다', async () => {
+      await renderStale()
+
+      expect(screen.getByText('분식집')).toBeInTheDocument()
+    })
+
+    it('결과 알려주기를 잠근다', async () => {
+      await renderStale()
+
+      expect(screen.queryByRole('link', { name: '결과 알려주기' })).not.toBeInTheDocument()
+      expect(screen.getByText('최신 상태를 확인한 뒤에 알려주실 수 있어요')).toBeInTheDocument()
+    })
+
+    /** 조회까지 막으면 회복할 길이 없어진다 */
+    it('다시 확인은 계속 누를 수 있다', async () => {
+      await renderStale()
 
       expect(await recheckButton()).toBeEnabled()
     })

@@ -132,11 +132,24 @@ function JudgmentSection({ judgment, locked, onRefresh, refreshing }: JudgmentSe
         />
       )
 
+    /*
+      여기만 안내 카드가 아니라 할 일 카드가 주인공이라, 조회 버튼을 따로 둔다.
+      `locked` 로 결과 제출이 막힌 상태에서 이 버튼까지 없으면 빠져나갈 길이 사라진다.
+    */
     case 'DONE':
       return (
         <>
           <NextActionCard nextAction={judgment.nextAction} locked={locked} />
           <BlockerCard blocker={judgment.blocker} />
+
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={refreshing}
+            className="min-h-13 w-full rounded-xl border border-gray-300 bg-white text-base font-bold text-gray-700 disabled:text-gray-400"
+          >
+            {recheck.label}
+          </button>
         </>
       )
 

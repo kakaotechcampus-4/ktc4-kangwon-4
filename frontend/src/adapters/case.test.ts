@@ -87,6 +87,29 @@ describe('toFacts', () => {
     expect(fact.value).toBeUndefined()
   })
 
+  /**
+   * 사장님이 직접 적어 넣은 값인데 지금까지 어디에도 보이지 않았다.
+   *
+   * `Date` 로 바꾸지 않는 것이 중요하다. `new Date('2026-12-31')` 은 UTC 자정이라
+   * 한국보다 느린 시간대에서 읽으면 하루 앞 날짜가 된다.
+   */
+  it('폐업 예정일을 점으로 구분해 보여준다', () => {
+    expect(factFor(SERVER_CASE, 'planned_closure_date').value).toBe('2026.12.31')
+  })
+
+  it.each([
+    ['비어 있으면', null],
+    ['칸 자체가 안 오면', undefined],
+  ])('폐업 예정일이 %s 미확인으로 둔다', (_name, value) => {
+    const fact = factFor(
+      { ...SERVER_CASE, planned_closure_date: value as string | null },
+      'planned_closure_date',
+    )
+
+    expect(fact.status).toBe('UNKNOWN')
+    expect(fact.value).toBeUndefined()
+  })
+
   /** 진행 단계는 사용자가 답할 수 있는 것이 아니라 할 일 목록에 섞이면 안 된다 */
   it('원상복구 진행 상태는 목록에 넣지 않는다', () => {
     expect(toFacts(SERVER_CASE).map((fact) => fact.key)).not.toContain('restoration_status')
@@ -111,6 +134,81 @@ describe('toCurrentCaseView', () => {
 
     expect(view.judgment.status).toBe('PENDING')
     expect(view.facts).toHaveLength(7)
+  })
+
+  it('판단이 끝났으면 막힌 것과 할 일을 담는다', () => {
+    const view = toCurrentCaseView(
+      envelopeOf({
+        judgment_status: 'DONE',
+        blocker: '원상복구 범위가 아직 확인되지 않았습니다.',
+        next_action: '임대인에게 원상복구 범위를 확인하세요.',
+      }),
+      SERVER_CASE,
+    )
+
+    if (view.judgment.status !== 'DONE') throw new Error('DONE 이어야 한다')
+    expect(view.judgment.blocker.title).toBe('원상복구 범위가 아직 확인되지 않았습니다.')
+    expect(view.judgment.nextAction.title).toBe('임대인에게 원상복구 범위를 확인하세요.')
+  })
+
+  /**
+   * 서버가 제목만 보낸다. 이유와 순번을 지어내면 사장님이 서버가 판단한 것으로 읽는다 —
+   * 특히 순번은 "지금 1번째구나" 하고 전체 진행도를 짐작하게 만든다.
+   */
+  it('서버에 없는 이유와 순번을 지어내지 않는다', () => {
+    const view = toCurrentCaseView(
+      envelopeOf({ judgment_status: 'DONE', blocker: '막힘', next_action: '할 일' }),
+      SERVER_CASE,
+    )
+
+    if (view.judgment.status !== 'DONE') throw new Error('DONE 이어야 한다')
+    expect(view.judgment.nextAction.reason).toBe('')
+    expect(view.judgment.nextAction.seq).toBeUndefined()
+  })
+
+  it('되물을 것이 있으면 질문을 그대로 담는다', () => {
+    const view = toCurrentCaseView(
+      envelopeOf({ judgment_status: 'NEEDS_MORE_INFO', questions_for_user: ['철거까지 하시나요?'] }),
+      SERVER_CASE,
+    )
+
+    expect(view.judgment).toEqual({
+      status: 'NEEDS_MORE_INFO',
+      questions: ['철거까지 하시나요?'],
+    })
+  })
+
+  /**
+   * 상태와 내용이 어긋난 응답을 **다른 상태로 바꿔 보여주지 않는다.**
+   *
+   * `DONE` 인데 할 일이 비어 있는 것을 "정보 부족"으로 그리면, 서버가 틀린 것을 사장님이
+   * 덜 적어낸 탓으로 읽는다. 서버가 지금은 이 조합들을 500 으로 막지만 그쪽이 바뀔 수 있다.
+   */
+  describe('계약이 어긋난 응답', () => {
+    it.each([
+      ['DONE 인데 할 일이 없다', { judgment_status: 'DONE' as const, blocker: '막힘' }],
+      ['DONE 인데 막힌 것이 없다', { judgment_status: 'DONE' as const, next_action: '할 일' }],
+      ['되묻는다면서 질문이 없다', { judgment_status: 'NEEDS_MORE_INFO' as const }],
+      [
+        '되묻는다면서 질문이 빈 목록이다',
+        { judgment_status: 'NEEDS_MORE_INFO' as const, questions_for_user: [] },
+      ],
+      ['판단 상태가 아예 없다', {}],
+    ])('%s 면 알 수 없는 것으로 둔다', (_name, judgment) => {
+      const view = toCurrentCaseView(envelopeOf(judgment), SERVER_CASE)
+
+      expect(view.judgment.status).toBe('UNRECOGNIZED')
+    })
+
+    /** BE 가 `CONFLICT` 추가를 건의해 둔 상태다. 그쪽이 먼저 배포되면 바로 겪는다 */
+    it('우리가 모르는 판단 상태도 알 수 없는 것으로 둔다', () => {
+      const view = toCurrentCaseView(
+        envelopeOf({ judgment_status: 'CONFLICT' as never }),
+        SERVER_CASE,
+      )
+
+      expect(view.judgment.status).toBe('UNRECOGNIZED')
+    })
   })
 })
 
