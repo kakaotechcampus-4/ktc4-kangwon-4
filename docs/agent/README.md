@@ -117,6 +117,9 @@ DB 근거가 없으면 JSON 본문으로 대신하지 않고 빈 결과를 반�
 
 ### 검수 절차 자료 저장·조회
 
+공식 안내문을 수집·발췌한 뒤 개발자가 내용을 검수·승인한 자료를 사용한다.
+승인된 자료는 JSON으로 관리하며, 적재 함수를 통해 DB에 저장한다.
+
 아래 적재·조회 동작에는 [코드 PR #53](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/53)과
 [검수 데이터 PR #54](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/54)의
 `app/common/reviewed-procedures.ko-KR.json`이 함께 필요하다.
@@ -197,7 +200,7 @@ Agent가 만드는 값은 BE가 그대로 DB에 넣는다. 그래서 칸의 길�
 ## 포함 기능
 
 - **사실 추출:** 허용된 Case 필드의 변경 후보와 입력 근거를 만든다. Agent가 Case를 직접 수정하지 않는다.
-- **근거 조회:** 실제 절차·지원사업 식별자와 사람이 검수한 자료만 사용한다.
+- **근거 조회:** 실제 절차·지원사업 식별자와 개발자가 내용을 검수·승인한 자료만 사용한다.
 - **한 판단 지점:** Supervisor가 Blocker와 Next Action을 결정한다. 하위 Agent·Tool은 분석과 근거만 반환한다.
 - **필수 Review:** 모든 정상 판단을 독립 검수한다.
 - **재계획:** 같은 Case의 행동 결과를 반영한 후보와 새 판단을 만든다.
