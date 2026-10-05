@@ -27,7 +27,7 @@ export function FollowUpQuestionCard({
   description = '아래만 알려주시면 바로 이어서 안내해 드릴 수 있어요.',
 }: FollowUpQuestionCardProps) {
   return (
-    <section className="rounded-2xl border border-gray-300 bg-white p-5">
+    <section className="rounded-2xl border border-gray-200 bg-white p-5">
       <h2 className="text-sm font-bold tracking-wide text-gray-500">{label}</h2>
 
       <p className="mt-3 text-lg font-bold text-gray-900">{title}</p>
