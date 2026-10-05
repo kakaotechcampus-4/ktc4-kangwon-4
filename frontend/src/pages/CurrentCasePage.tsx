@@ -24,7 +24,7 @@ import type { JudgmentView } from '../types/view'
  */
 export function CurrentCasePage() {
   const { search } = useLocation()
-  const { query, refresh, refreshing } = useCase()
+  const { query, refresh, refreshing, waitedTooLong } = useCase()
 
   if (query.status === 'LOADING') {
     return (
@@ -85,6 +85,7 @@ export function CurrentCasePage() {
           <JudgmentSection
             judgment={judgment}
             locked={stale}
+            waitedTooLong={waitedTooLong}
             onRefresh={refresh}
             refreshing={refreshing}
           />
@@ -108,6 +109,8 @@ interface JudgmentSectionProps {
   judgment: JudgmentView
   /** 지금 들고 있는 판단이 최신인지 확신할 수 없다 */
   locked: boolean
+  /** 판단을 기다린 지 상한을 넘겨 자동 조회가 멈췄다 */
+  waitedTooLong: boolean
   onRefresh: () => void
   refreshing: boolean
 }
@@ -118,12 +121,30 @@ interface JudgmentSectionProps {
  * 다섯 갈래를 전부 적는다. `switch`가 아니라 `if`로 흘려두면 새 상태가 늘었을 때
  * 아무 화면도 안 나오고 조용히 빈 자리가 생긴다.
  */
-function JudgmentSection({ judgment, locked, onRefresh, refreshing }: JudgmentSectionProps) {
+function JudgmentSection({
+  judgment,
+  locked,
+  waitedTooLong,
+  onRefresh,
+  refreshing,
+}: JudgmentSectionProps) {
   const recheck = { label: '상태 다시 확인', onClick: onRefresh, disabled: refreshing }
 
   switch (judgment.status) {
+    /*
+      오래 기다린 화면을 따로 둔다. 판단 도중 서버가 다시 뜨면 그 Case 는 계속
+      `PENDING` 으로 남아(#40) 끝나지 않는데, 그때까지 "곧 됩니다" 라고 말하면
+      사장님은 언제까지 기다려야 하는지 모른 채 화면만 붙들고 있게 된다.
+    */
     case 'PENDING':
-      return (
+      return waitedTooLong ? (
+        <NoticeCard
+          tone="NEUTRAL"
+          title="판단이 오래 걸리고 있어요."
+          description="가게 정보는 그대로 있어요. 지금은 저희 쪽에서 더 확인이 필요한 상태라, 창을 닫으셨다가 나중에 다시 들러 주세요."
+          action={recheck}
+        />
+      ) : (
         <NoticeCard
           tone="NEUTRAL"
           title="다음 할 일을 정하고 있어요."
@@ -175,12 +196,20 @@ function JudgmentSection({ judgment, locked, onRefresh, refreshing }: JudgmentSe
         </>
       )
 
+    /*
+      "잠시 후 다시" 라고 말하지 않는다. 실패한 Case 를 다시 판단하는 수단이 아직 없어서
+      (#57) 몇 번을 눌러도 같은 실패가 돌아온다. 기다리면 된다고 하면 사장님은 언제
+      되는지 모른 채 계속 들어와 보게 된다.
+
+      TODO(기획): 실패 원인별 문구와 버튼은 #55 에서 정한다. 그때까지는 상태를 있는
+      그대로 알리고, 되지 않는 일을 약속하지 않는다.
+    */
     case 'FAILED':
       return (
         <NoticeCard
           tone="NEUTRAL"
           title="다음 할 일을 정하지 못했어요."
-          description="가게 정보는 저장되어 있어요. 잠시 후 상태를 다시 확인해 주세요."
+          description="가게 정보는 그대로 있어요. 다시 판단해 드리는 기능을 준비하고 있습니다."
           action={recheck}
         />
       )

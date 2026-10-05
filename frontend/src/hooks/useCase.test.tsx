@@ -75,13 +75,21 @@ function setTabHidden(hidden: boolean) {
 
 /** 훅이 돌려준 상태를 글자로 드러내는 최소한의 화면 */
 function Probe() {
-  const { query } = useCase()
+  const { query, refresh, waitedTooLong } = useCase()
 
-  if (query.status === 'READY') {
-    const businessType = query.view.facts.find((fact) => fact.key === 'business_type')?.value
-    return <p>{`READY ${query.view.judgment.status} ${businessType}`}</p>
-  }
-  return <p>{query.status}</p>
+  return (
+    <>
+      {query.status === 'READY' ? (
+        <p>{`READY ${query.view.judgment.status} ${query.view.facts.find((fact) => fact.key === 'business_type')?.value}`}</p>
+      ) : (
+        <p>{query.status}</p>
+      )}
+      {waitedTooLong && <p>오래 기다림</p>}
+      <button type="button" onClick={refresh}>
+        다시 묻기
+      </button>
+    </>
+  )
 }
 
 function renderAt(path: string) {
@@ -209,6 +217,62 @@ describe('useCase 폴링', () => {
 
     await advance(1_000)
     expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  /**
+   * 판단은 길어도 7분이면 끝나지만, 판단 도중 서버가 다시 뜨면 그 Case 는 계속
+   * `PENDING` 으로 남는다. 상한이 없으면 화면은 끝나지 않을 답을 영원히 묻는다.
+   */
+  it('상한을 넘기면 저절로 묻는 것을 멈춘다', async () => {
+    saveTokens('access-1', 'refresh-1')
+    // 응답 본문은 한 번만 읽을 수 있다. 여러 번 묻는 테스트는 매번 새 응답을 만들어야
+    // 하고, 그러지 않으면 두 번째 조회가 실패해 **상한이 아니라 조회 실패로** 멈춘다
+    const fetchMock = mockFetchSequence(() => response(PENDING))
+    vi.useFakeTimers()
+    renderAt('/case')
+
+    await advance(0)
+    // 10분 동안은 10초마다 묻는다
+    for (let elapsed = 0; elapsed < 10 * 60 * 1000; elapsed += 10_000) await advance(10_000)
+    const atLimit = fetchMock.mock.calls.length
+    expect(atLimit).toBeGreaterThan(1)
+
+    // 넘긴 뒤로는 시간이 아무리 지나도 늘지 않는다
+    await advance(60 * 60 * 1000)
+    expect(fetchMock).toHaveBeenCalledTimes(atLimit)
+  })
+
+  /** 화면이 "곧 됩니다" 대신 다른 말을 할 수 있어야 한다. 그 신호를 훅이 내준다 */
+  it('상한을 넘기면 오래 기다렸다고 알린다', async () => {
+    saveTokens('access-1', 'refresh-1')
+    mockFetchSequence(() => response(PENDING))
+    vi.useFakeTimers()
+    renderAt('/case')
+
+    await advance(0)
+    expect(screen.queryByText('오래 기다림')).not.toBeInTheDocument()
+
+    for (let elapsed = 0; elapsed < 10 * 60 * 1000; elapsed += 10_000) await advance(10_000)
+
+    expect(screen.getByText('오래 기다림')).toBeInTheDocument()
+  })
+
+  /** 자동으로 묻는 것만 멈춘다. 그사이 판단이 끝났을 수도 있어 직접 누르는 길은 남는다 */
+  it('상한을 넘겨도 직접 누르면 다시 묻는다', async () => {
+    saveTokens('access-1', 'refresh-1')
+    const fetchMock = mockFetchSequence(() => response(PENDING))
+    vi.useFakeTimers()
+    renderAt('/case')
+
+    await advance(0)
+    for (let elapsed = 0; elapsed < 10 * 60 * 1000; elapsed += 10_000) await advance(10_000)
+    const atLimit = fetchMock.mock.calls.length
+
+    await act(async () => {
+      screen.getByRole('button', { name: '다시 묻기' }).click()
+    })
+
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(atLimit)
   })
 
   /** 끝난 판단을 계속 물으면 사장님 데이터 요금만 쓴다 */

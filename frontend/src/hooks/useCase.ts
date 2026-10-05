@@ -49,6 +49,12 @@ export interface CaseQueryResult {
   refresh: () => void
   /** 조회가 나가 있는 동안. 버튼을 잠그는 데 쓴다 */
   refreshing: boolean
+  /**
+   * 판단을 기다린 지 상한을 넘겼다. 자동으로 다시 묻는 것은 멈춘 상태다.
+   *
+   * 화면은 "곧 됩니다" 가 아니라 오래 걸리고 있다고 알려야 한다 — 끝나지 않을 수도 있다.
+   */
+  waitedTooLong: boolean
 }
 
 /**
@@ -67,9 +73,20 @@ class MalformedResponseError extends Error {}
  */
 const POLL_INTERVAL_MS = 10_000
 
+/**
+ * 판단이 끝나기를 기다리는 상한. 넘기면 자동으로 묻는 것을 멈춘다.
+ *
+ * 판단은 길어도 7분이면 끝난다(#52). 그보다 짧게 끊으면 정상인데 실패처럼 보여서
+ * 넉넉히 둔다. 그래도 상한이 필요한 것은 **끝나지 않는 경우가 있기 때문이다** —
+ * 판단 도중 서버가 다시 뜨면 그 Case 는 계속 `PENDING` 으로 남는다(#40).
+ * 그때 상한이 없으면 화면은 한 시간에 360번을 묻고도 그대로다.
+ */
+const POLL_TIMEOUT_MS = 10 * 60 * 1000
+
 /** `?mock=` 으로 불러낼 수 있는 화면들 */
 const MOCKS: Record<string, CurrentCaseView> = {
   pending: pendingCase,
+  'pending-long': pendingCase,
   'more-info': moreInfoCase,
   'judgment-failed': judgmentFailedCase,
   unrecognized: unrecognizedCase,
@@ -91,6 +108,7 @@ export function useCase(): CaseQueryResult {
   const [fetched, setFetched] = useState<CaseQuery>({ status: 'LOADING' })
   const [refreshing, setRefreshing] = useState(false)
   const [visible, setVisible] = useState(() => !document.hidden)
+  const [waitedTooLong, setWaitedTooLong] = useState(false)
 
   const mockKey = readMockKey(search)
   // 가짜 토큰으로 서버를 부르면 곧바로 401 이라, 그 경우에는 아예 부르지 않는다
@@ -106,6 +124,9 @@ export function useCase(): CaseQueryResult {
 
   /** 수동 조회와 자동 조회가 겹치지 않게 한다 */
   const inFlight = useRef(false)
+
+  /** 판단을 기다리기 시작한 때. 판단 중이 아니면 `null` */
+  const pendingSince = useRef<number | null>(null)
 
   /** 탭을 떠나 있다 돌아왔는지. 그때는 다음 간격을 기다리지 않는다 */
   const resumed = useRef(false)
@@ -196,6 +217,17 @@ export function useCase(): CaseQueryResult {
     const judging = fetched.status === 'READY' && fetched.view.judgment.status === 'PENDING'
     const refreshFailed = fetched.status === 'READY' && fetched.stale
 
+    // 기다리기 시작한 때를 기억한다. 판단 중이 아니게 되면 잊는다 — 다음에 또 `PENDING`
+    // 이 되면 거기서 다시 센다. 이어서 세면 한 번 오래 걸린 Case 가 그 뒤로 영영
+    // 상한을 넘긴 것으로 남는다
+    if (!judging) pendingSince.current = null
+    else if (pendingSince.current === null) pendingSince.current = Date.now()
+
+    const timedOut =
+      judging && pendingSince.current !== null && Date.now() - pendingSince.current >= POLL_TIMEOUT_MS
+
+    if (timedOut !== waitedTooLong) setWaitedTooLong(timedOut)
+
     /** 다음 조회까지 기다릴 시간. `null` 이면 묻지 않는다 */
     function nextDelay(): number | null {
       if (fetched.status === 'LOADING' || leftMock.current) return 0
@@ -208,6 +240,10 @@ export function useCase(): CaseQueryResult {
       // 같은 실패를 쌓을 뿐이라, 사장님이 직접 누를 때까지 기다린다
       if (refreshFailed) return null
 
+      // 상한을 넘기면 저절로 묻지 않는다. 사장님이 직접 누르는 길은 남겨 둔다 —
+      // 그사이 판단이 끝났을 수도 있다
+      if (timedOut) return null
+
       return judging ? POLL_INTERVAL_MS : null
     }
 
@@ -218,14 +254,19 @@ export function useCase(): CaseQueryResult {
 
     const timer = window.setTimeout(() => void load(), delay)
     return () => window.clearTimeout(timer)
-  }, [fetched, usesMock, visible, load])
+  }, [fetched, usesMock, visible, load, waitedTooLong])
 
   const refresh = useCallback(() => void load(), [load])
 
   if (usesMock) {
-    // 서버를 안 부르니 다시 부를 것도 없다
-    return { query: mockQuery(mockKey), refresh: () => {}, refreshing: false }
+    // 서버를 안 부르니 다시 부를 것도 없다. 오래 기다린 화면은 `?mock=pending-long` 으로 본다
+    return {
+      query: mockQuery(mockKey),
+      refresh: () => {},
+      refreshing: false,
+      waitedTooLong: mockKey === 'pending-long',
+    }
   }
 
-  return { query: fetched, refresh, refreshing }
+  return { query: fetched, refresh, refreshing, waitedTooLong }
 }
