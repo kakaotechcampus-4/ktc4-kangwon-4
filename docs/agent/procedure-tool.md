@@ -9,12 +9,13 @@ Tool 조회 중 인터넷·DB·파일을 읽지 않는다. 빈 승인 목록을 
 
 `ProcedureLookupInput`(Case의 공식 Evidence·조회어·기준일) →
 `ProcedureLookupResult`(문서·Evidence·상태·경고).
+`evidence_records`는 기본값 없는 필수 필드다. Tool 직접 호출 시에도 전달해야 하며 빈 목록은 허용한다.
 정상 반환의 `completion_status`는 `COMPLETE` 아니면 `NO_RESULTS`이며,
 원문 불일치나 검수 상태 오류는 Graph가 `SAFE_FAILURE`로 처리한다.
 
 - 승인 목록과 URL·버전이 같은 DB 자료의 발췌·해시가 일치해야 한다. 같은 URL·버전의
   중복 자료나 원문·해시 불일치는 `PROCEDURE_SOURCE_MISMATCH` 오류다.
-- 현재 승인 버전의 DB 자료가 없으면 조회 대상에서 제외한다. 검색어에 맞는 자료가 하나도 없을 때
+- 현재 승인 버전의 DB 자료가 없으면 조회 대상에서 제외한다. 각 조회어별로 일치하는 문서가 없으면
   경고하며, 개별 자료 누락마다 경고하지는 않는다. 이전 버전의 DB 근거를 현재 버전으로 바꾸거나,
   없는 원문을 파일에서 채우지 않는다.
 - 제목·기관명·검색어·절차 코드는 승인 목록에서, 발췌·출처·해시·시각은 DB 근거에서 읽는다.

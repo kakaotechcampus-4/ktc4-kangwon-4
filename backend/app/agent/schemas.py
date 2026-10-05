@@ -397,9 +397,11 @@ class ProcedureProgress(AgentSchema):
 class CaseSnapshot(AgentSchema):
     snapshot_id: RuntimeUUID = Field(
         description=(
-            "Caller-issued identity of this Case read view. Retain the ID used to "
-            "produce a conflict and reuse it when confirming that same Case state. "
-            "A new ID causes STALE_CONFLICT_CONFIRMATION; current values are also checked."
+            "Caller-issued identity of the Case read view used for this planning run "
+            "and its review proof. Conflict confirmation must match the original "
+            "candidate's snapshot ID and current field state/value; a mismatch causes "
+            "STALE_CONFLICT_CONFIRMATION. How the caller stores and reuses this ID "
+            "and the conflict candidate is a separate integration decision."
         )
     )
     case_id: PositiveStrictInt

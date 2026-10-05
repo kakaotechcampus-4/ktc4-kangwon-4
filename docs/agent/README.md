@@ -12,11 +12,12 @@ Agent는 폐업 Case의 확인된 사실과 근거로 **Blocker 1개·Next Actio
 
 지원사업은 MVP 구현·정상 동작 검증 범위에서 제외. 기존 지원사업 코드와 자료는 유지.
 
-**데이터의 절대 기준은 [schema_table.md](../schema/schema_table.md)다.**
-필드·타입·enum·NULL·기본값·관계·상태 전이는 이 기준을 따르고,
-Agent가 다르면 Agent를 고친다. MVP 단순화를 이유로 제약을 완화하지 않는다.
+필드·타입·enum·NULL·기본값·관계·상태 전이는 실제 DTO·BE 모델·검증 코드가 기준이다.
+[schema_table.md](../schema/schema_table.md)는 설계 배경으로 참고하며 코드와 다르면 실제 코드를 확인한다.
+MVP 단순화를 이유로 제약을 완화하지 않는다.
 낙관적 락은 쓰지 않는다 — Agent는 `CASE.case_version`과 이를 참조하는 버전 컬럼을 구현하지 않고,
-같은 Case인지는 `snapshot_id`와 필드의 기존값으로 확인한다.
+각 결과가 같은 Case 조회 상태를 기준으로 했는지는 `snapshot_id`로 확인한다.
+충돌 확인에서는 대상 필드의 기존 상태·값도 대조한다.
 
 **규칙은 문서가 아니라 코드에 둔다.** 각 문서는 해당 구성요소의 사실만 담고 코드를 가리킨다.
 문서와 코드가 다르면 코드가 맞다.
@@ -93,8 +94,11 @@ DB 근거가 없으면 JSON 본문으로 대신하지 않고 빈 결과를 반�
 ### 검수 절차 자료 저장·조회
 
 아래 적재·조회 동작에는 [코드 PR #53](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/53)과
-자료 브랜치 `feature/reviewed-procedure-data`의 `app/common/reviewed-procedures.ko-KR.json`이
-함께 필요하다. 기존 Case에 자료를 넣을 때는 backend 디렉토리에서 다음 명령을 실행한다.
+[검수 데이터 PR #54](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/54)의
+`app/common/reviewed-procedures.ko-KR.json`이 함께 필요하다.
+빈 절차 검수 목록으로 runtime을 만들 때 JSON이 없거나 잘못됐으면 생성 단계에서 실패한다.
+따라서 #54를 먼저 반영하거나 #53과 같은 배포에 포함한다.
+기존 Case에 자료를 넣을 때는 backend 디렉토리에서 다음 명령을 실행한다.
 `123`은 실제 존재하는 Case ID로 바꾼다.
 
 ```bash
@@ -120,7 +124,7 @@ Case 생성 트랜잭션 안에 적재 함수를 호출하고, 첫 snapshot 생�
 사용자에게 입력 필드를 요구하거나 Supervisor·Review LLM 호출을 반복하지 않는다.
 실제 사용자 정보 부족은 Info가 판단을 막는다고 표시한 미확인 조건 하나를 질문한다.
 
-남은 BE 요청은 실제 절차 ID·코드와 Case 연결 확정, 신규 Case 자동 자료 적재다.
+자료 공급에 남은 BE 요청은 실제 절차 ID·코드와 Case 연결 확정, 신규 Case 자동 자료 적재다.
 전달된 대응표를 적용하는 Agent 코드는 구현했으며, 실제 운영 대응값은 아직 미확정이다.
 TODO: 확정된 실제 대응값을 전달하고,
 신규 Case 생성 → 실제 LLM 검수 → 판단 저장 → 새 세션 조회를 확인한다.
@@ -128,6 +132,16 @@ TODO: 확정된 실제 대응값을 전달하고,
 권한을 확인한 Case snapshot 제공, 검수된 변경 후보의 저장·재조회는 호출자의 책임이다.
 `CONFLICT_CONFIRMED`에는 서버가 보관한 원래 충돌 후보를 전달하며, 클라이언트가 보내온
 임의 후보를 그대로 신뢰하지 않는다. Agent의 `REVIEWED_PLAN`은 DB 저장 완료를 뜻하지 않는다.
+
+### 충돌 확인의 구현 상태
+
+[PM의 PR #48 결정](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/48#issuecomment-5945630407)은
+`CONFLICT`일 때 확인 화면을 두고, `UPDATED`는 다시 묻지 않는 것이다.
+Agent에는 확정값과 다른 새 입력을 `CONFLICT`로 반환하고, 확인 입력 뒤 재계획하는 경로가 있다.
+현재 BE의 `first_judgment.py`는 `CONFLICT`도 `FAILED`로 처리하므로 사용자 확인 연결은 남아 있다.
+`case_snapshot.py`는 매번 새 UUID를 발급하며, 충돌 후보·snapshot의 보관 및 재사용 방식은
+BE·AI가 함께 확정해야 한다. 기존 Agent는 원래 후보의 snapshot ID와 대상 필드의 현재 상태·값을
+검사한다. 이 검사 조건을 설명한 것이며, BE 보관 정책이나 서비스 연결을 구현한 것은 아니다.
 
 ### DB 칸에 맞추기
 
