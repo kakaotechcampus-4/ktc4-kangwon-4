@@ -45,7 +45,7 @@ BE가 가져다 쓰는 입출력 DTO는 [`app.common.agent_dto`](../../backend/a
 `AgentGraphOutput`이다. 출력의 `outcome_type`은 `REVIEWED_PLAN` / `CONFLICT` /
 `SAFE_FAILURE` 중 하나다. 필드 구성과 BE의 처리 책임은 해당 모듈 설명을 따른다.
 
-BE 호출 함수는 [`app.common.agent_service.run_case_planning`](../../backend/app/common/agent_service.py)이다.
+BE에 제공하는 공용 호출 함수는 [`app.common.agent_service.run_case_planning`](../../backend/app/common/agent_service.py)이다.
 `build_planning_input`은 저장된 입력 이벤트의 ID·시각·비식별 문장과 Case snapshot으로
 `CASE_CREATED` 또는 `RESULT_SUBMITTED` 입력을 조립한다. `build_conflict_input`은 BE가
 보관한 원래 충돌 후보와 확인 시각으로 `CONFLICT_CONFIRMED` 입력을 조립한다.
@@ -92,8 +92,10 @@ DB 근거가 없으면 JSON 본문으로 대신하지 않고 빈 결과를 반�
 
 ### 검수 절차 자료 저장·조회
 
-자료 PR의 `app/common/reviewed-procedures.ko-KR.json`이 먼저 필요하다. 기존 Case에 자료를
-넣을 때는 backend 디렉토리에서 다음 명령을 실행한다. `123`은 실제 존재하는 Case ID로 바꾼다.
+아래 적재·조회 동작에는 [코드 PR #53](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/53)과
+자료 브랜치 `feature/reviewed-procedure-data`의 `app/common/reviewed-procedures.ko-KR.json`이
+함께 필요하다. 기존 Case에 자료를 넣을 때는 backend 디렉토리에서 다음 명령을 실행한다.
+`123`은 실제 존재하는 Case ID로 바꾼다.
 
 ```bash
 .venv/bin/python -m scripts.import_reviewed_procedures --case-id 123
@@ -261,12 +263,12 @@ Supervisor·Review는 5~8초다. 당시 한도 `AGENT_LLM_TIMEOUT_SECONDS=150`·
 성공 호출 최대치(102초)와 150초가 너무 가까워서다. 코드 상한은 600초라 둘 다 유효하다.
 세 번 모두 503이면 여전히 `SAFE_FAILURE`로 끝나는데, 그건 제공자 장애라 맞는 동작이다.
 
-위 검증 당시에는 서버 연결과 절차 행 생성이 미완료였다. 현재 코드(`ceda32f`)에는
+위 검증 당시에는 서버 연결과 절차 행 생성이 미완료였다. BE는 PR #47에서
 `POST /cases` 뒤 백그라운드 최초 판단과 저장, `GET /cases`의 판단 결과 조회가 연결되어 있다.
 BE의 [`first_judgment.py`](../../backend/app/be/services/first_judgment.py)는
 `run_case_planning` 대신 `AgentRuntime.run_planning`을 직접 호출한다.
 [`case.py`](../../backend/app/be/services/case.py)는 임시 `TEMP_*` 절차 3개를 생성한다.
 다만 `TEMP_*`는 AI 절차 의미 코드와 연결되지 않고, BE는 절차 검수 목록에 빈 store를 넘긴다.
-현재 Agent는 이 경우 동봉 JSON을 검수 메타정보로 읽지만, 새 Case에 공식 근거를 저장하는
+#53의 Agent는 이 경우 동봉 JSON을 검수 메타정보로 읽지만, 새 Case에 공식 근거를 저장하는
 호출은 아직 없어 자동으로 공식 문서가 공급되지는 않는다.
 코드 확인 결과이며, 서버 전체 실행 검증은 아니다.
