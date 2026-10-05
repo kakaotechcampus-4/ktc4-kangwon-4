@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { RouterProvider, createMemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { isLoggedIn, saveTokens } from '../lib/auth'
+import { isLoggedIn, saveTokens, verifyOAuthState } from '../lib/auth'
 import { LoginPage } from './LoginPage'
 
 function renderAt(path: string) {
@@ -50,6 +50,24 @@ describe('LoginPage', () => {
     fireEvent.click(kakaoButton())
 
     expect(assign).toHaveBeenCalledWith(expect.stringContaining('/login/form'))
+  })
+
+  /**
+   * 이 값이 안 실려 나가면 돌아왔을 때 맞춰볼 것이 없다. 그래도 로그인은 멀쩡히
+   * 되기 때문에, 빠뜨려도 화면만 봐서는 알 수 없다.
+   */
+  it('카카오로 나가는 주소에 state 를 실어 보낸다', () => {
+    const assign = stubNavigation()
+    renderAt('/login')
+
+    fireEvent.click(kakaoButton())
+
+    const [url] = assign.mock.calls[0] as [string]
+    const sent = new URL(url, 'http://localhost').searchParams.get('state')
+
+    // 보낸 값이 저장돼 있어야 돌아왔을 때 통과한다
+    expect(sent).not.toBeNull()
+    expect(verifyOAuthState(sent)).toBe(true)
   })
 
   /**

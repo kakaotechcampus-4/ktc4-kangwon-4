@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ApiError, postLogin, request, UnauthorizedError } from './api'
-import { getAccessToken, saveTokens } from './auth'
+import { createOAuthState, getAccessToken, saveTokens } from './auth'
 
 function jsonResponse(body: unknown, init: ResponseInit = {}) {
   return new Response(JSON.stringify(body), { status: 200, ...init })
@@ -111,6 +111,7 @@ describe('request', () => {
 
 describe('postLogin', () => {
   it('토큰은 헤더에서, 닉네임은 본문에서 꺼낸다', async () => {
+    const state = createOAuthState()
     mockFetch(
       jsonResponse(
         { nickname: '김사장' },
@@ -118,7 +119,7 @@ describe('postLogin', () => {
       ),
     )
 
-    await expect(postLogin('code-1')).resolves.toEqual({
+    await expect(postLogin('code-1', state)).resolves.toEqual({
       accessToken: 'access-1',
       refreshToken: 'refresh-1',
       nickname: '김사장',
@@ -131,8 +132,21 @@ describe('postLogin', () => {
    * 다음 요청에서 401이 나서, 원인이 두 단계 떨어진 곳에 생긴다.
    */
   it('토큰 헤더가 없으면 성공으로 보지 않는다', async () => {
+    const state = createOAuthState()
     mockFetch(jsonResponse({ nickname: '김사장' }))
 
-    await expect(postLogin('code-1')).rejects.toBeInstanceOf(ApiError)
+    await expect(postLogin('code-1', state)).rejects.toBeInstanceOf(ApiError)
+  })
+
+  /**
+   * 우리가 시작하지 않은 로그인이다. 서버를 부르고 나서 막으면 늦다 — 그 사이에
+   * 공격자의 `code` 가 이미 토큰으로 바뀐다. 요청이 아예 나가지 않아야 한다.
+   */
+  it('state 가 어긋나면 서버를 부르지 않는다', async () => {
+    createOAuthState()
+    const fetchMock = mockFetch(jsonResponse({ nickname: '김사장' }))
+
+    await expect(postLogin('code-1', '꾸며낸-값')).rejects.toBeInstanceOf(ApiError)
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })
