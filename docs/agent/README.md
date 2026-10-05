@@ -67,6 +67,24 @@ outcome = await run_case_planning(
 [`decision_record.py`](../../backend/app/be/services/decision_record.py)가 검수된 판단을 저장한다.
 Blocker·Next Action·검수 기록을 저장하며, 판단 중 생성한 근거 본문·Case 변경 후보 저장은 아직 남아 있다.
 
+### 비슷한 필드의 역할과 현재 연결
+
+| 필드 | 실제 용도·현재 연결 |
+|---|---|
+| `snapshot_id` / `based_on_snapshot_id` | BE가 조회마다 발급한 Case 조회 상태 ID / 하위 결과가 참조하는 같은 ID. `DecisionRecord.snapshot_id`에 ID는 저장하지만 snapshot 본문은 저장하지 않는다. |
+| `run_id` / `call_id` / `review_call_id` | Graph 실행 / 개별 구성요소 호출 / PASS를 반환한 Review 호출의 ID. `DecisionRecord`에는 `run_id`가 저장되며 `review_call_id` 전용 컬럼은 없다. |
+| `trace_id` | 호출자가 선택적으로 주는 외부 추적 ID. `InvocationMeta`에는 전달하지만 현재 BE 첫 판단은 지정하지 않으며 `TraceEvent`에도 연결되지 않는다. 저장하려면 기존 `save_reviewed_plan(trace_id=...)`에 별도로 전달한다. |
+| `input_event_id` / `client_event_id` | 현재 BE는 저장된 이력에서 `case_history:{id}`를 만들어 전자에 넣고, 후자는 `None`으로 보낸다. `client_event_id`를 받는 것만으로 중복 요청 방지가 구현되지는 않는다. |
+| `CaseFact.updated_at` / `ProcedureProgress.updated_at` | 개별 사실의 변경 시각 / Case별 절차 진행 행의 변경 시각. 현재 BE는 사실의 시각을 `None`으로, 절차 시각은 `CaseProcedureStep.updated_at`으로 채운다. |
+| `submitted_at` / `captured_at` / `confirmed_at` | 입력 이력 시각 / snapshot 조립 시각 / 사용자 충돌 확인 시각. 서로 대신 채우는 값이 아니다. |
+
+Trigger와 그 안의 `RedactedInput`에는 같은 의미의 `submitted_at`이 있다. 현재 입력 조립 함수는
+같은 값을 넣지만 DTO는 두 입력 ID의 일치만 검사하며, 두 시각의 일치까지 검사하지는 않는다.
+검수 기록도 출력 전체가 아니다. `DecisionRecord`는 실행·snapshot·검수 대상 ID, digest·판정·검수 시각
+등을 선택해 저장하며 `ReviewSubject` 본문이나 하위 호출 결과 전체를 저장하지 않는다.
+현재 [`case_snapshot.py`](../../backend/app/be/services/case_snapshot.py)와
+[`decision_record.py`](../../backend/app/be/services/decision_record.py)의 연결 상태를 기준으로 한 설명이다.
+
 [`app.common.agent_data`](../../backend/app/common/agent_data.py)의 `build_known_procedure_steps`는
 BE가 조회한 `ProcedureStep`·`StepDependency`·`StepEligibility` 행을 변환한다.
 시간대 없는 DB 시각에는 호출자가 전달한 `db_timezone`을 적용한다. 공식 절차 자료와 지원 자료는
@@ -142,6 +160,13 @@ Agent에는 확정값과 다른 새 입력을 `CONFLICT`로 반환하고, 확인
 `case_snapshot.py`는 매번 새 UUID를 발급하며, 충돌 후보·snapshot의 보관 및 재사용 방식은
 BE·AI가 함께 확정해야 한다. 기존 Agent는 원래 후보의 snapshot ID와 대상 필드의 현재 상태·값을
 검사한다. 이 검사 조건을 설명한 것이며, BE 보관 정책이나 서비스 연결을 구현한 것은 아니다.
+
+DB에는 이미 `ConflictReference`의 참조·기존값·제안값·digest·만료/사용 시각과
+`CaseFieldHistory`의 필드별 변경 전후 값·생성 시각이 있다. 현재 판단 서비스는 이 모델들의
+저장·조회 경로를 연결하지 않았다. `conflict_ref`는 후보를 찾는 참조, `conflict_digest`는 내용
+변경을 확인하는 해시이며 서로 대체하지 않는다. 기존 모델만으로 Agent의 원래 충돌 후보 전체를
+복원하는 코드도 없으므로, 기존 구조를 활용할 보관·복원 방식을 먼저 합의해야 한다.
+`CaseFieldHistory.created_at`을 사실의 변경 시각으로 사용할 수 있는지도 이 연결에서 확인한다.
 
 ### DB 칸에 맞추기
 

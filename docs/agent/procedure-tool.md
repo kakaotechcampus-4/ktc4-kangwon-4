@@ -24,6 +24,16 @@ Tool 조회 중 인터넷·DB·파일을 읽지 않는다. 빈 승인 목록을 
   대응이 없는 코드는 제외하되 문서와 근거는 유지한다. 빈 대응표는 `step_codes=[]`가 된다.
   Tool을 직접 호출하며 대응표를 생략한 경우에만 기존 승인 목록의 코드를 그대로 사용한다.
 
+근거 키는 이름만 보고 바꾸지 않는다. Agent의 `evidence_refs`는 문자열인
+`Evidence.evidence_id`를 참조한다. 반면 DB 관계 모델 `EvidenceLineage.evidence_id`와
+`parent_evidence_id`는 숫자 PK인 `Evidence.id`를 참조한다. 이 모델과 생성 CRUD는 이미 있지만,
+현재 BE snapshot 변환은 `parent_evidence_refs=[]`로 고정하므로 파생 관계 조회는 아직 연결되지 않았다.
+
+#53 적재 코드의 `source_version`은 승인 JSON의 `snapshot_version`이며 공식기관 문서의 판본을
+뜻하지 않는다. `source_ref`는 공식 URL이고, `locator`에도 현재 같은 URL을 넣는다. 따라서
+`locator`가 발췌의 페이지·문단 위치를 제공한다고 볼 수 없으며 Tool의 승인 자료 대조에도 쓰지 않는다.
+`retrieved_at`은 자료 수집 시각으로, 사람의 `reviewed_at`이나 DB 행 생성 시각과 구분한다.
+
 | 승인 목록과 DB 상태 | 처리 |
 |---|---|
 | DB 자료와 대응하는 승인 목록에 검수 정보 없음 | `PROCEDURE_REVIEW_REQUIRED` 오류 |

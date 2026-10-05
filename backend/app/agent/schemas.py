@@ -1615,7 +1615,10 @@ class CaseCreatedTrigger(AgentSchema):
     trigger_type: Literal["CASE_CREATED"]
     input_event_id: NonEmptyStr
     client_event_id: NonEmptyStr | None = Field(
-        description="Client event ID; use null when absent."
+        description=(
+            "Client-provided event ID, distinct from input_event_id. Use null when "
+            "absent; this field does not implement duplicate-request prevention."
+        )
     )
     input: RedactedInput
     submitted_at: AwareDatetime
@@ -1631,7 +1634,10 @@ class ResultSubmittedTrigger(AgentSchema):
     trigger_type: Literal["RESULT_SUBMITTED"]
     input_event_id: NonEmptyStr
     client_event_id: NonEmptyStr | None = Field(
-        description="Client event ID; use null when absent."
+        description=(
+            "Client-provided event ID, distinct from input_event_id. Use null when "
+            "absent; this field does not implement duplicate-request prevention."
+        )
     )
     input: RedactedInput
     submitted_at: AwareDatetime
@@ -1659,7 +1665,10 @@ class ConflictConfirmedTrigger(AgentSchema):
     trigger_type: Literal["CONFLICT_CONFIRMED"]
     input_event_id: NonEmptyStr
     client_event_id: NonEmptyStr | None = Field(
-        description="Client event ID; use null when absent."
+        description=(
+            "Client-provided event ID, distinct from input_event_id. Use null when "
+            "absent; this field does not implement duplicate-request prevention."
+        )
     )
     confirmed_conflict: ConflictCandidate = Field(
         description="The original conflict candidate the user accepted."
@@ -1687,9 +1696,9 @@ class AgentGraphInput(AgentSchema):
     trace_id: Varchar100 | None = Field(
         default=None,
         description=(
-            "Optional caller-generated correlation ID propagated to invocation metadata. "
-            "BE must retain and pass it separately when saving DECISION_RECORD; "
-            "it is not a planning-decision input."
+            "Optional caller-generated correlation ID, distinct from run_id, "
+            "propagated to invocation metadata. To persist it, the caller passes it "
+            "separately to save_reviewed_plan; it is not a planning-decision input."
         ),
     )
 
