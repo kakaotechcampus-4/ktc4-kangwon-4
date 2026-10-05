@@ -123,15 +123,18 @@ describe('useCase', () => {
   })
 
   /**
-   * 서버가 Case 없음을 빈 봉투로 보낸 적이 있다. 그때 `case` 칸을 `null` 로만 보면
-   * 처음 온 사장님이 시작 화면 대신 "불러오지 못했어요" 를 본다 — 서버는 멀쩡히 답했는데.
+   * Case 가 없다는 뜻은 `case: null` 하나다.
+   *
+   * 칸이 통째로 빠진 응답을 "없음" 으로 읽으면, Case 를 가진 사장님이 갱신 한 번에
+   * 시작 화면으로 끌려가 **자기 정보가 사라진 줄 안다.** 서버가 잘못 답한 것이니
+   * 조회 실패로 두는 편이 정직하다.
    */
-  it('봉투에 case 칸이 아예 없어도 Case 가 없는 것으로 본다', async () => {
+  it('봉투에 case 칸이 없으면 Case 없음이 아니라 조회 실패로 둔다', async () => {
     saveTokens('access-1', 'refresh-1')
     mockFetch({})
     renderAt('/case')
 
-    expect(await screen.findByText('EMPTY')).toBeInTheDocument()
+    expect(await screen.findByText('LOAD_FAILED')).toBeInTheDocument()
   })
 
   /**
@@ -271,6 +274,30 @@ describe('useCase 폴링', () => {
 
     await advance(60_000)
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  /**
+   * 리뷰어가 `?mock=` 으로 다른 화면을 보다 쿼리를 지우고 돌아오는 경로다.
+   *
+   * 들고 있던 값은 Mock 을 보던 동안 낡는다. 그때 판단이 이미 끝나 있으면(`DONE`)
+   * 폴링도 예약되지 않아, 서버 상태가 달라져도 **옛 할 일을 계속 보여준다.**
+   */
+  it('Mock 을 보다 실제 조회로 돌아오면 다시 묻는다', async () => {
+    saveTokens('access-1', 'refresh-1')
+    const fetchMock = mockFetch(DONE)
+    vi.useFakeTimers()
+    const router = renderAt('/case')
+
+    await advance(0)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    await act(async () => void (await router.navigate('/case?mock=pending')))
+    await advance(0)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    await act(async () => void (await router.navigate('/case')))
+    await advance(0)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
   /** 숨어 있는 사이 판단이 끝났을 수 있다. 10초를 더 기다리게 하면 멈춘 것처럼 보인다 */

@@ -52,6 +52,14 @@ export interface CaseQueryResult {
 }
 
 /**
+ * 서버가 답은 했는데 모양이 계약과 다르다.
+ *
+ * 네트워크 실패와 같은 자리로 흘려보낸다 — 사장님이 할 수 있는 일이 "잠시 후 다시" 로
+ * 같고, 받아둔 가게 정보를 지키는 것도 같다.
+ */
+class MalformedResponseError extends Error {}
+
+/**
  * 판단이 끝날 때까지 다시 물어보는 간격.
  *
  * AI 판단은 실측 36~120초다(BE #47). 1초마다 묻는 것은 근거가 없고, 1분마다 묻는 것은
@@ -102,6 +110,9 @@ export function useCase(): CaseQueryResult {
   /** 탭을 떠나 있다 돌아왔는지. 그때는 다음 간격을 기다리지 않는다 */
   const resumed = useRef(false)
 
+  /** Mock 을 보고 있다 실제 조회로 돌아왔는지. 들고 있던 값이 그 사이 낡는다 */
+  const leftMock = useRef(false)
+
   const load = useCallback(async () => {
     if (inFlight.current) return
     inFlight.current = true
@@ -114,14 +125,15 @@ export function useCase(): CaseQueryResult {
       const body = (await response.json()) as CasesEnvelope
       if (mine !== generation.current) return
 
-      // `== null` 이다. 서버가 칸을 통째로 빠뜨린 적이 있어서, 그때 Case 가 없는 사람이
-      // 시작 화면 대신 조회 실패 화면을 보게 된다
-      const serverCase = body.case ?? null
+      // Case 가 없다는 뜻은 **`case: null`** 하나다. 칸이 통째로 빠진 응답을 "없음" 으로
+      // 읽으면, Case 를 가진 사장님이 갱신 한 번에 시작 화면으로 끌려가 **자기 정보가
+      // 사라진 줄 안다.** 그건 조회가 잘못된 것이니 받아둔 것을 지키고 실패로 둔다.
+      if (body.case === undefined) throw new MalformedResponseError()
 
       setFetched(
-        serverCase === null
+        body.case === null
           ? { status: 'EMPTY' }
-          : { status: 'READY', view: toCurrentCaseView(body, serverCase), stale: false },
+          : { status: 'READY', view: toCurrentCaseView(body, body.case), stale: false },
       )
     } catch (error: unknown) {
       if (mine !== generation.current) return
@@ -147,6 +159,9 @@ export function useCase(): CaseQueryResult {
     return () => {
       generation.current += 1
       inFlight.current = false
+      // 이 정리가 `usesMock` 이 참인 채로 돌았다면 Mock 을 벗어나는 참이다.
+      // 그동안 서버 쪽이 달라졌을 수 있어 돌아가면 다시 묻는다
+      if (usesMock) leftMock.current = true
     }
   }, [usesMock])
 
@@ -183,7 +198,7 @@ export function useCase(): CaseQueryResult {
 
     /** 다음 조회까지 기다릴 시간. `null` 이면 묻지 않는다 */
     function nextDelay(): number | null {
-      if (fetched.status === 'LOADING') return 0
+      if (fetched.status === 'LOADING' || leftMock.current) return 0
 
       // 탭에서 막 돌아왔다. 숨어 있는 사이 판단이 끝났을 수 있고, 갱신에 실패해
       // 멈춰 있던 화면도 여기서 회복할 기회를 얻는다
@@ -198,6 +213,7 @@ export function useCase(): CaseQueryResult {
 
     const delay = nextDelay()
     resumed.current = false
+    leftMock.current = false
     if (delay === null) return
 
     const timer = window.setTimeout(() => void load(), delay)
