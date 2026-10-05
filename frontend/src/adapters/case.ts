@@ -110,8 +110,10 @@ function toJudgmentView(envelope: CasesEnvelope): JudgmentView {
       return { status: 'FAILED' }
 
     case 'DONE':
-      // 둘 중 하나라도 비면 화면에 그릴 것이 없다
-      if (blocker === null || next_action === null) return { status: 'UNRECOGNIZED' }
+      // 둘 중 하나라도 비면 화면에 그릴 것이 없다. `null` 만 보지 않는 것은, 칸을 통째로
+      // 빠뜨린 응답과 빈 문자열이 같은 결과를 내기 때문이다 — 제목 없는 할 일 카드가 뜨고
+      // 그 밑의 "결과 알려주기" 는 멀쩡히 눌린다
+      if (!blocker || !next_action) return { status: 'UNRECOGNIZED' }
       return {
         status: 'DONE',
         blocker: { title: blocker },
@@ -119,8 +121,9 @@ function toJudgmentView(envelope: CasesEnvelope): JudgmentView {
       }
 
     case 'NEEDS_MORE_INFO':
-      // 물어볼 것이 없는데 "물어볼 게 있다" 고 할 수는 없다
-      if (questions_for_user === null || questions_for_user.length === 0) {
+      // 물어볼 것이 없는데 "물어볼 게 있다" 고 할 수는 없다. 칸이 아예 없으면
+      // `.length` 에서 터지고, 그 오류는 조회 실패로 읽혀 "불러오지 못했어요" 가 뜬다
+      if (!questions_for_user || questions_for_user.length === 0) {
         return { status: 'UNRECOGNIZED' }
       }
       return { status: 'NEEDS_MORE_INFO', questions: questions_for_user }

@@ -123,6 +123,18 @@ describe('useCase', () => {
   })
 
   /**
+   * 서버가 Case 없음을 빈 봉투로 보낸 적이 있다. 그때 `case` 칸을 `null` 로만 보면
+   * 처음 온 사장님이 시작 화면 대신 "불러오지 못했어요" 를 본다 — 서버는 멀쩡히 답했는데.
+   */
+  it('봉투에 case 칸이 아예 없어도 Case 가 없는 것으로 본다', async () => {
+    saveTokens('access-1', 'refresh-1')
+    mockFetch({})
+    renderAt('/case')
+
+    expect(await screen.findByText('EMPTY')).toBeInTheDocument()
+  })
+
+  /**
    * 못 쓰는 토큰을 들고 화면에 머물면 아무것도 되지 않는다. 화면은 멀쩡한데
    * 누르는 것마다 실패해서, 사용자는 무엇이 잘못됐는지 알 수 없다.
    */

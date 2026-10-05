@@ -128,6 +128,16 @@ function envelopeOf(judgment: Partial<CasesEnvelope>): CasesEnvelope {
   }
 }
 
+/**
+ * 서버가 칸을 통째로 빠뜨린 응답.
+ *
+ * 타입에는 `string | null` 로 적혀 있지만 실제로 오는 JSON 은 칸 자체가 없을 수 있다.
+ * 어댑터가 있는 이유가 그 어긋남이라, 여기서는 타입을 한 번 벗고 날것으로 넣는다.
+ */
+function rawEnvelope(body: Record<string, unknown>): CasesEnvelope {
+  return body as unknown as CasesEnvelope
+}
+
 describe('toCurrentCaseView', () => {
   it('가게 정보는 판단 상태와 무관하게 담는다', () => {
     const view = toCurrentCaseView(envelopeOf({ judgment_status: 'PENDING' }), SERVER_CASE)
@@ -196,6 +206,25 @@ describe('toCurrentCaseView', () => {
       ['판단 상태가 아예 없다', {}],
     ])('%s 면 알 수 없는 것으로 둔다', (_name, judgment) => {
       const view = toCurrentCaseView(envelopeOf(judgment), SERVER_CASE)
+
+      expect(view.judgment.status).toBe('UNRECOGNIZED')
+    })
+
+    /**
+     * `null` 만 보면 여기서 뚫린다.
+     *
+     * 할 일 칸이 없는 채로 `DONE` 이 통과하면 **제목 없는 검은 카드**가 뜨고, 그 밑의
+     * "결과 알려주기" 는 멀쩡히 눌린다 — 사장님이 빈 할 일의 결과를 보고하러 간다.
+     * 질문 칸이 없으면 `.length` 에서 터지는데, 그 오류는 조회 실패로 읽혀
+     * HTTP 는 200 인데 "불러오지 못했어요" 가 뜬다.
+     */
+    it.each([
+      ['할 일 칸이 아예 없다', { judgment_status: 'DONE', blocker: '막힘' }],
+      ['할 일이 빈 문자열이다', { judgment_status: 'DONE', blocker: '막힘', next_action: '' }],
+      ['막힌 것 칸이 아예 없다', { judgment_status: 'DONE', next_action: '할 일' }],
+      ['질문 칸이 아예 없다', { judgment_status: 'NEEDS_MORE_INFO' }],
+    ])('%s 면 알 수 없는 것으로 둔다', (_name, body) => {
+      const view = toCurrentCaseView(rawEnvelope({ ...body, case: SERVER_CASE }), SERVER_CASE)
 
       expect(view.judgment.status).toBe('UNRECOGNIZED')
     })

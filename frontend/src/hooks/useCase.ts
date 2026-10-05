@@ -114,10 +114,14 @@ export function useCase(): CaseQueryResult {
       const body = (await response.json()) as CasesEnvelope
       if (mine !== generation.current) return
 
+      // `== null` 이다. 서버가 칸을 통째로 빠뜨린 적이 있어서, 그때 Case 가 없는 사람이
+      // 시작 화면 대신 조회 실패 화면을 보게 된다
+      const serverCase = body.case ?? null
+
       setFetched(
-        body.case === null
+        serverCase === null
           ? { status: 'EMPTY' }
-          : { status: 'READY', view: toCurrentCaseView(body, body.case), stale: false },
+          : { status: 'READY', view: toCurrentCaseView(body, serverCase), stale: false },
       )
     } catch (error: unknown) {
       if (mine !== generation.current) return
@@ -131,10 +135,10 @@ export function useCase(): CaseQueryResult {
         current.status === 'READY' ? { ...current, stale: true } : { status: 'LOAD_FAILED' },
       )
     } finally {
-      if (mine === generation.current) {
-        inFlight.current = false
-        setRefreshing(false)
-      }
+      // `refreshing` 은 세대를 따지지 않고 내린다. 요청 중에 Mock 으로 바뀌면 이 조회는
+      // 버려지는데, 그때 켜둔 채로 두면 돌아왔을 때 모든 버튼이 잠긴 채로 남는다
+      if (mine === generation.current) inFlight.current = false
+      setRefreshing(false)
     }
   }, [navigate])
 
