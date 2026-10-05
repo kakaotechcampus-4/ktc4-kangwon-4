@@ -16,7 +16,7 @@ Agent는 폐업 Case의 확인된 사실과 근거로 **Blocker 1개·Next Actio
 [schema_table.md](../schema/schema_table.md)는 설계 배경으로 참고하며 코드와 다르면 실제 코드를 확인한다.
 MVP 단순화를 이유로 제약을 완화하지 않는다.
 낙관적 락은 쓰지 않는다 — Agent는 `CASE.case_version`과 이를 참조하는 버전 컬럼을 구현하지 않고,
-각 결과가 같은 Case 조회 상태를 기준으로 했는지는 `snapshot_id`로 확인한다.
+각 결과가 BE에서 받은 같은 입력 묶음을 사용했는지는 `snapshot_id`로 확인한다.
 충돌 확인에서는 대상 필드의 기존 상태·값도 대조한다.
 
 **규칙은 문서가 아니라 코드에 둔다.** 각 문서는 해당 구성요소의 사실만 담고 코드를 가리킨다.
@@ -69,9 +69,15 @@ Blocker·Next Action·검수 기록을 저장하며, 판단 중 생성한 근거
 
 ### 비슷한 필드의 역할과 현재 연결
 
+`CaseSnapshot`은 BE가 DB에서 읽은 Case 사실·절차 진행·근거를 Agent에 넘기는 입력 묶음이다.
+DB 전체 복사본이나 별도로 저장한 snapshot 행을 뜻하지 않는다. 기존 `snapshot_id`는 어떤 입력
+묶음인지, `run_id`는 어느 판단 실행인지를 식별한다. 같은 입력으로 다시 실행해도 `run_id`는
+달라지며, 기존 Review 검사는 다른 실행의 결과가 섞이는 것을 거부한다. 이번 PR에서 이 필드나
+검사를 새로 추가한 것은 아니다.
+
 | 필드 | 실제 용도·현재 연결 |
 |---|---|
-| `snapshot_id` / `based_on_snapshot_id` | BE가 조회마다 발급한 Case 조회 상태 ID / 하위 결과가 참조하는 같은 ID. `DecisionRecord.snapshot_id`에 ID는 저장하지만 snapshot 본문은 저장하지 않는다. |
+| `snapshot_id` / `based_on_snapshot_id` | BE가 조립한 입력 묶음의 ID / 하위 결과가 참조하는 같은 ID. `DecisionRecord.snapshot_id`에 ID는 저장하지만 snapshot 본문은 저장하지 않는다. |
 | `run_id` / `call_id` / `review_call_id` | Graph 실행 / 개별 구성요소 호출 / PASS를 반환한 Review 호출의 ID. `DecisionRecord`에는 `run_id`가 저장되며 `review_call_id` 전용 컬럼은 없다. |
 | `trace_id` | 호출자가 선택적으로 주는 외부 추적 ID. `InvocationMeta`에는 전달하지만 현재 BE 첫 판단은 지정하지 않으며 `TraceEvent`에도 연결되지 않는다. 저장하려면 기존 `save_reviewed_plan(trace_id=...)`에 별도로 전달한다. |
 | `input_event_id` / `client_event_id` | 현재 BE는 저장된 이력에서 `case_history:{id}`를 만들어 전자에 넣고, 후자는 `None`으로 보낸다. `client_event_id`를 받는 것만으로 중복 요청 방지가 구현되지는 않는다. |
@@ -144,6 +150,7 @@ Case 생성 트랜잭션 안에 적재 함수를 호출하고, 첫 snapshot 생�
 
 자료 공급에 남은 BE 요청은 실제 절차 ID·코드와 Case 연결 확정, 신규 Case 자동 자료 적재다.
 전달된 대응표를 적용하는 Agent 코드는 구현했으며, 실제 운영 대응값은 아직 미확정이다.
+요청 이유·기존 함수와 모델·확인 방법은 [BE요청사항](https://app.notion.com/p/3ef3c6661b7d80c9a697d4f39dce1841)에 정리한다.
 TODO: 확정된 실제 대응값을 전달하고,
 신규 Case 생성 → 실제 LLM 검수 → 판단 저장 → 새 세션 조회를 확인한다.
 
