@@ -138,8 +138,10 @@ PR 브랜치마다 Preview 주소가 달라 등록할 수 없어서, **리뷰어
 ```
 /?mock=logged-out           로그인 안 된 상태
 /?mock=no-case              Case가 없는 사용자 (시작 화면)
-/?mock=no-blocker           막고 있는 것 없음
-/?mock=insufficient         정보 부족
+/?mock=pending              판단 중 (Case를 막 만든 직후)
+/?mock=more-info            다음 할 일을 정하려면 더 물어봐야 하는 상태
+/?mock=judgment-failed      판단 실패
+/?mock=unrecognized         서버가 모르는 판단 상태를 보냈을 때
 /results?mock=conflict      제출하면 충돌 확인으로
 /results?mock=more-info     추가 질문
 /results?mock=invalid       정정 요청
@@ -147,11 +149,15 @@ PR 브랜치마다 Preview 주소가 달라 등록할 수 없어서, **리뷰어
 /replan?mock=no-change      바뀐 것 없음
 ```
 
+`?mock=` 없이 가짜 로그인만 하면 **판단이 끝난 화면**이 나옵니다.
+
 **먼저 한 번 로그인해야 합니다.** 위 링크는 로그인한 상태를 전제로 하고, 안 되어 있으면
 `/login`으로 갑니다. "가짜로 로그인"을 한 번 누르면 그 탭에서는 유지됩니다.
 
 `/` 에서 붙인 `?mock=` 은 "결과 알려주기"를 눌러도 이어집니다. `/?mock=conflict` 로 들어가면
-클릭만으로 충돌 흐름 끝까지 볼 수 있습니다.
+클릭만으로 충돌 흐름 끝까지 볼 수 있습니다. 다만 **다음 할 일이 없는 상태**(`pending` ·
+`more-info` · `judgment-failed` · `unrecognized`)에는 그 버튼이 없어서, 거기서는 흐름이
+이어지지 않고 그 화면만 보입니다.
 
 | 환경 | URL |
 |---|---|

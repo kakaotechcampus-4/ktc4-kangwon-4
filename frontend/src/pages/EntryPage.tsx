@@ -12,7 +12,7 @@ import { useCase } from '../hooks/useCase'
  * 남으면 `/case`에서 뒤로 눌렀을 때 다시 `/case`로 튕겨 나가 빠져나갈 수 없다.
  *
  * `search`를 그대로 넘기는 것은 `?mock=` 링크 하나로 흐름을 따라갈 수 있게 하려는 것이다.
- * `/?mock=insufficient` 가 `/case?mock=insufficient` 로 이어진다.
+ * `/?mock=more-info` 가 `/case?mock=more-info` 로 이어진다.
  */
 export function EntryPage() {
   const { search } = useLocation()
