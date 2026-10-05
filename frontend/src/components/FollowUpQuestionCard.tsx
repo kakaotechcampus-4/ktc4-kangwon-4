@@ -18,9 +18,7 @@ interface FollowUpQuestionCardProps {
  *
  * 여기 질문은 **서비스가 사장님에게** 묻는 것이다. 할 일 카드의 "이렇게 물어보세요"는
  * 사장님이 임대인에게 물을 말이라, 둘 다 "질문"이지만 방향이 반대다.
- *
- * ② `InsufficientInfoCard`와 다르다. 그쪽은 "알려주셔야 할 항목"을 이름으로 나열하고,
- * 여기는 서버가 문장으로 만들어 보낸 질문을 그대로 보여준다.
+
  */
 export function FollowUpQuestionCard({
   questions,
