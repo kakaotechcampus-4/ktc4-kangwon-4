@@ -5,6 +5,7 @@ from fastapi import HTTPException
 from sqlmodel import Session
 
 from app.be.crud import case as case_crud
+from app.be.crud import case_field_history as case_field_history_crud
 from app.be.crud import case_history as case_history_crud
 from app.be.crud import evidence as evidence_crud
 from app.be.crud import procedure_step as procedure_step_crud
@@ -13,7 +14,13 @@ from app.be.models.case_history import CaseHistory
 from app.be.models.evidence import Evidence
 from app.be.models.mixins import kst_now
 from app.be.models.procedure_step import CaseProcedureStep, ProcedureStep
-from app.be.schemas.case import CaseCreateRequest, CaseGetDetailResponse, CaseGetResponse, NextActionResponse
+from app.be.schemas.case import (
+    CaseCreateRequest,
+    CaseGetDetailResponse,
+    CaseGetResponse,
+    FieldChangeResponse,
+    NextActionResponse,
+)
 
 
 def create_case(session: Session, member_id: int, case_request: CaseCreateRequest) -> Case:
@@ -48,6 +55,7 @@ def get_case(session: Session, member_id: int) -> CaseGetResponse:
             recovery_action_code=None,
             requested_field_paths=None,
             retryable=None,
+            changes=None,
         )
 
     latest_history = case_crud.get_latest_user_driven_case_history(session, case.id)
@@ -79,6 +87,17 @@ def get_case(session: Session, member_id: int) -> CaseGetResponse:
         else None
     )
 
+    # TODO: case_history_id는 저장하는 쪽(decision_record.py의 _apply_fact_changes)이
+    # 아직 안 채워주고 있어서, DONE이어도 실제로는 변경이 있었는데 []로 나올 수 있다.
+    changes = (
+        [
+            FieldChangeResponse(field=h.canonical_field, stored_value=h.before_value, new_value=h.after_value)
+            for h in case_field_history_crud.get_case_field_histories_by_case_history_id(session, latest_history.id)
+        ]
+        if latest_history.judgment_status == "DONE"
+        else None
+    )
+
     return CaseGetResponse(
         case=CaseGetDetailResponse(**case.model_dump()),
         blocker=latest_history.priority_blocker.description if latest_history.priority_blocker else None,
@@ -90,6 +109,7 @@ def get_case(session: Session, member_id: int) -> CaseGetResponse:
         recovery_action_code=latest_history.recovery_action_code,
         requested_field_paths=latest_history.requested_field_paths,
         retryable=latest_history.retryable,
+        changes=changes,
     )
 
 

@@ -62,6 +62,12 @@ class NextActionResponse(BaseModel):
     questions_to_ask: list[str]
 
 
+class FieldChangeResponse(BaseModel):
+    field: str
+    stored_value: str | None
+    new_value: str | None
+
+
 class CaseGetResponse(BaseModel):
     case: CaseGetDetailResponse | None
     blocker: str | None
@@ -71,3 +77,4 @@ class CaseGetResponse(BaseModel):
     recovery_action_code: RecoveryActionCode | None
     requested_field_paths: list[str] | None
     retryable: bool | None
+    changes: list[FieldChangeResponse] | None

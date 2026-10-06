@@ -17,3 +17,11 @@ def get_case_field_histories_by_case_id(session: Session, case_id: int) -> list[
         .where(CaseFieldHistory.case_id == case_id)
         .order_by(CaseFieldHistory.created_at, CaseFieldHistory.id)
     ).all()
+
+
+def get_case_field_histories_by_case_history_id(session: Session, case_history_id: int) -> list[CaseFieldHistory]:
+    """특정 제출(CaseHistory) 한 건에서 실제로 바뀐 필드만 돌려준다."""
+
+    return session.exec(
+        select(CaseFieldHistory).where(CaseFieldHistory.case_history_id == case_history_id)
+    ).all()
