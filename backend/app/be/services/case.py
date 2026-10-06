@@ -40,7 +40,13 @@ def get_case(session: Session, member_id: int) -> CaseGetResponse:
     case = case_crud.get_case_by_member_id(session, member_id)
     if case is None:
         return CaseGetResponse(
-            case=None, blocker=None, next_action=None, judgment_status=None, questions_for_user=None
+            case=None,
+            blocker=None,
+            next_action=None,
+            judgment_status=None,
+            questions_for_user=None,
+            recovery_action_code=None,
+            requested_field_paths=None,
         )
 
     latest_history = case_crud.get_latest_user_driven_case_history(session, case.id)
