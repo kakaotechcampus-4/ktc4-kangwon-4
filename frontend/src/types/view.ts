@@ -182,12 +182,7 @@ export type SubmitOutcome =
   /** 화면에 머문다 */
   | { kind: 'STAY'; state: SubmitState }
 
-/**
- * 점포 형태. 서버 `lease_status`와 같은 값이다.
- *
- * TODO(계약): AI 쪽은 같은 이름으로 계약 단계(`ACTIVE` · `TERMINATION_NOTIFIED` …)를
- * 담고 있어 뜻이 다르다. 칸이 둘로 갈릴 수 있고 PM 판단을 기다리는 중이다.
- */
+/** 점포 형태. 서버 `lease_status`와 같은 값이다. AI 쪽도 같은 값을 쓴다 */
 export type LeaseStatus =
   /** 임차 — 임대료를 낸다 */
   | 'LEASED_PAID'
