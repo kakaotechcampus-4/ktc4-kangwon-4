@@ -32,7 +32,11 @@ function envelope(judgment: Partial<CasesEnvelope>) {
 const DONE = envelope({
   judgment_status: 'DONE',
   blocker: '원상복구 범위가 아직 확인되지 않았습니다.',
-  next_action: '임대인에게 원상복구 범위를 확인하세요.',
+  next_action: {
+    title: '임대인에게 원상복구 범위를 확인하세요.',
+    reason: '철거가 필요한지 판단하려면 원상복구 범위를 먼저 알아야 합니다.',
+    questions_to_ask: ['어디까지 원래대로 돌려놔야 하나요?', '철거까지 해야 하나요?'],
+  },
 })
 
 function response(body: unknown, status = 200) {
@@ -138,6 +142,22 @@ describe('CurrentCasePage', () => {
       expect(await screen.findByRole('heading', { name: '지금 할 일' })).toBeInTheDocument()
       expect(screen.getByText('임대인에게 원상복구 범위를 확인하세요.')).toBeInTheDocument()
       expect(screen.getByRole('heading', { name: '막혀 있는 것' })).toBeInTheDocument()
+    })
+
+    /**
+     * 사장님이 막히는 지점은 "임대인에게 연락해야지" 가 아니라 "뭐라고 말하지" 다.
+     * 제목만 뜨면 이 화면이 할 일 목록과 구분되지 않는다.
+     */
+    it('할 일과 함께 이유와 물어볼 말을 보여준다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      mockCase(DONE)
+      renderAt('/case')
+
+      expect(
+        await screen.findByText('철거가 필요한지 판단하려면 원상복구 범위를 먼저 알아야 합니다.'),
+      ).toBeInTheDocument()
+      expect(screen.getByText('어디까지 원래대로 돌려놔야 하나요?')).toBeInTheDocument()
+      expect(screen.getByText('철거까지 해야 하나요?')).toBeInTheDocument()
     })
 
     it('되물을 것이 있으면 질문을 보여준다', async () => {

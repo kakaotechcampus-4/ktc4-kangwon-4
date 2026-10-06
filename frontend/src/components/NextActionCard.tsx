@@ -37,8 +37,10 @@ export function NextActionCard({ nextAction, locked = false }: NextActionCardPro
           <h3 className="text-sm font-bold text-gray-400">이렇게 물어보시면 됩니다</h3>
           <ul className="mt-2 flex flex-col gap-2">
             {questions.map((question) => (
-              <li key={question} className="text-base leading-relaxed text-gray-200">
-                · {question}
+              <li key={question} className="flex gap-2 text-base leading-relaxed text-gray-200">
+                {/* 가운뎃점은 장식이라 낭독기가 읽을 필요가 없다. 질문만 한 덩어리로 둔다 */}
+                <span aria-hidden="true">·</span>
+                <span>{question}</span>
               </li>
             ))}
           </ul>
