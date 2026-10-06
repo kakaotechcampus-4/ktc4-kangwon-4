@@ -18,7 +18,11 @@ class CaseHistory(CreatedAtMixin, table=True):
     )
     judgment_status: str = Field(
         sa_column=Column(
-            Enum("PENDING", "DONE", "NEEDS_MORE_INFO", "FAILED", name="judgment_status_enum"), nullable=False
+            Enum(
+                "PENDING", "DONE", "NEEDS_MORE_INFO", "CONFLICT", "FAILED",
+                name="judgment_status_enum",
+            ),
+            nullable=False,
         ),
         description="판단 진행 상태. 입력을 받으면 PENDING으로 시작해 판단이 끝나면 갱신된다",
     )
@@ -43,6 +47,19 @@ class CaseHistory(CreatedAtMixin, table=True):
         default=None,
         sa_column=Column(JSON, nullable=True),
         description="행동을 정하기 전 서비스가 사용자에게 되묻는 질문 목록. 없으면 NULL",
+    )
+    recovery_action_code: str | None = Field(
+        default=None,
+        sa_column=Column(
+            Enum("RETRY", "RESUBMIT_INPUT", "CONTACT_SUPPORT", "NONE", name="recovery_action_code_enum"),
+            nullable=True,
+        ),
+        description="판단이 실패했을 때 화면이 안내할 다음 행동. 실패가 아니면 NULL",
+    )
+    requested_field_paths: list | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+        description="판단을 멈추게 한 Case 필드 목록. 실패가 아니면 NULL",
     )
     priority_blocker_id: int | None = Field(
         default=None, sa_column=Column(BigInteger, ForeignKey("blocker.id", use_alter=True, name="fk_case_history_priority_blocker"), nullable=True)

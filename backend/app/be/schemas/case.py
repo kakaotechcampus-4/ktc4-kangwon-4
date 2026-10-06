@@ -8,7 +8,8 @@ CaseStatus = Literal["IN_PROGRESS", "COMPLETED"]
 RestorationStatus = Literal["UNKNOWN", "NOT_STARTED", "IN_PROGRESS", "COMPLETED", "NOT_REQUIRED"]
 RestorationScope = Literal["UNKNOWN", "PARTIAL", "FULL", "NOT_REQUIRED"]
 DemolitionRequired = Literal["UNKNOWN", "REQUIRED", "NOT_REQUIRED"]
-JudgmentStatus = Literal["PENDING", "DONE", "NEEDS_MORE_INFO", "FAILED"]
+JudgmentStatus = Literal["PENDING", "DONE", "NEEDS_MORE_INFO", "CONFLICT", "FAILED"]
+RecoveryActionCode = Literal["RETRY", "RESUBMIT_INPUT", "CONTACT_SUPPORT", "NONE"]
 
 
 class CaseCreateRequest(BaseModel):
@@ -61,3 +62,5 @@ class CaseGetResponse(BaseModel):
     next_action: str | None
     judgment_status: JudgmentStatus | None
     questions_for_user: list[str] | None
+    recovery_action_code: RecoveryActionCode | None
+    requested_field_paths: list[str] | None

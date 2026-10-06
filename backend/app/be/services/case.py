@@ -55,12 +55,19 @@ def get_case(session: Session, member_id: int) -> CaseGetResponse:
     if latest_history.judgment_status == "NEEDS_MORE_INFO" and not latest_history.questions_for_user:
         raise HTTPException(status_code=500, detail="정보 부족(NEEDS_MORE_INFO) 상태인데 questions_for_user가 없습니다.")
 
+    if latest_history.judgment_status == "FAILED" and latest_history.recovery_action_code is None:
+        raise HTTPException(status_code=500, detail="판단 실패(FAILED) 상태인데 recovery_action_code가 없습니다.")
+
     return CaseGetResponse(
         case=CaseGetDetailResponse(**case.model_dump()),
         blocker=latest_history.priority_blocker.description if latest_history.priority_blocker else None,
         next_action=latest_history.next_action,
         judgment_status=latest_history.judgment_status,
         questions_for_user=latest_history.questions_for_user,
+        # 실패했을 때만 채워진다. 화면은 이 값으로 "다시 시도" / "다시 말씀해 주세요" /
+        # "문의" 중 무엇을 보여줄지 정한다.
+        recovery_action_code=latest_history.recovery_action_code,
+        requested_field_paths=latest_history.requested_field_paths,
     )
 
 
