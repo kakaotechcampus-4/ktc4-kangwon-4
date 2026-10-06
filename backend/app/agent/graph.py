@@ -461,6 +461,10 @@ class AgentGraph:
         )
         component_input = ProcedureLookupInput(
             lookup_goal="BUSINESS_CLOSURE",
+            evidence_records=[
+                item for item in request.case_snapshot.evidence_records
+                if item.source_type == "OFFICIAL_DOCUMENT"
+            ],
             search_queries=self._procedure_queries(request),
             as_of=self._as_of(request),
             locale="ko-KR",
@@ -696,7 +700,11 @@ class AgentGraph:
         trace_id: str | None,
         failure: dict[str, Any],
     ) -> SafeFailureOutcome:
-        requested = AgentGraph._requested_field_paths(failure)
+        requested = (
+            []
+            if failure.get("recovery_action_code") == "CONTACT_SUPPORT"
+            else AgentGraph._requested_field_paths(failure)
+        )
         retryable = failure.get("retryable", False)
         # Naming fields the caller can actually collect beats telling them
         # there is nothing to do.  Only when a retry is not the answer: a
@@ -855,6 +863,15 @@ class AgentGraph:
         component: Component | None,
     ) -> dict[str, Any]:
         name = exc.__class__.__name__
+        if name == "ProcedureBindingConfigurationError":
+            return {
+                "phase": "SAFE_FAILED",
+                "failure_code": "COMPONENT_UNAVAILABLE",
+                "failure_message_code": "AGENT_PROCEDURE_BINDINGS_MISSING",
+                "failed_component": component,
+                "retryable": False,
+                "recovery_action_code": "CONTACT_SUPPORT",
+            }
         if name == "StaleConfirmationError":
             return {
                 "phase": "SAFE_FAILED",

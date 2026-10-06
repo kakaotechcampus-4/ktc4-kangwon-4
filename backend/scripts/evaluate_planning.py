@@ -18,14 +18,15 @@ import hashlib
 import json
 from collections import Counter
 from dataclasses import asdict
-from enum import Enum
 from datetime import datetime, timezone
+from enum import Enum
 from pathlib import Path
 from time import perf_counter
 from unittest.mock import patch
 from uuid import UUID, uuid5
 
 import httpx
+
 import app.agent.runtime as runtime_module
 from app.agent.llm import LLMConfig, StructuredLLMClient
 from app.agent.procedure_tool.store import ReviewedProcedureSnapshot
@@ -327,9 +328,8 @@ def recording_from_env(calls: list[dict]):
 def decision_summary(outcome) -> dict:
     """The Blocker and Next Action a user would see, plus digests to compare.
 
-    evidence_refs are excluded from the digests: procedure evidence ids are
-    minted per run (procedure_tool/stored_tool.py), so they can never match
-    across repeats and comparing them would fail every time for no reason.
+    Compare the user-facing decision separately from its provenance. Official
+    evidence keeps its DB ID; other derived evidence may have per-run IDs.
     """
 
     if outcome.outcome_type != "REVIEWED_PLAN":

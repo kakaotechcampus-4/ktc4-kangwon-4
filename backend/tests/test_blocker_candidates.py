@@ -5,13 +5,13 @@ import json
 from uuid import UUID
 
 import pytest
-from pydantic import ValidationError
 from app.agent.blocker_candidates import build_blocker_candidates, missing_info_fields
 from app.agent.review_tool import ReviewTool
 from app.agent.schemas import (
     CaseFact,
     FactChangeCandidate,
     KnownProcedureStep,
+    MissingField,
     MutationSet,
     ProcedureDependency,
     ProcedureProgress,
@@ -22,6 +22,7 @@ from app.agent.schemas import (
     canonical_digest,
 )
 from app.agent.supervisor.agent import SupervisorAgent, SupervisorGuardrailError
+from pydantic import ValidationError
 from test_action_codes import (
     NOW,
     REF,
@@ -93,6 +94,29 @@ def mutations(**changes):
         }
         | changes
     )
+
+
+def missing_questions(request, *paths):
+    info = request.source_results[1].output
+    info.question_candidates = [
+        QuestionCandidate(
+            question_id=UUID(int=index),
+            text="합성 누락 질문",
+            resolves_field_paths=[path],
+            reason_summary="합성 미확인 항목",
+        )
+        for index, path in enumerate(paths, 81)
+    ]
+    info.missing_fields = [
+        MissingField(
+            field_path=question.resolves_field_paths[0],
+            reason_summary="현재 판단에 필요한 합성 항목",
+            blocks=["SUPERVISOR_DECISION"],
+            question_candidate_id=question.question_id,
+        )
+        for question in info.question_candidates
+    ]
+    request.source_results[1] = source(info)
 
 
 def candidates(request, changes=None):
@@ -558,27 +582,115 @@ def test_fallback_does_not_reask_unnecessary_restoration_details(resolution):
                 procedure_analysis_call_id=UUID(int=3),
             )
         )
-    request.source_results[1].output.question_candidates = [
-        QuestionCandidate(
-            question_id=UUID(int=index),
-            text="합성 누락 질문",
-            resolves_field_paths=[path],
-            reason_summary="합성 미확인 항목",
-        )
-        for index, path in enumerate(
-            ("restoration_scope_detail", "demolition_required", "employee_count"), 81
-        )
-    ]
+    missing_questions(
+        request, "restoration_scope_detail", "demolition_required", "employee_count"
+    )
     result = missing_info_fields(request.case_snapshot, request.source_results, changes)
     if resolution in {"scope_not_required", "status_not_required"}:
         # No inference from restoration to the independent demolition fact.
         assert result["questions_for_user"] == [
             "철거가 필요한지 확인한 내용이 있으면 알려주세요.",
-            "직원이 몇 명인가요?",
         ]
     else:
         assert result["questions_for_user"] == ["직원이 몇 명인가요?"]
     assert result["next_action"] is None
+
+
+def test_missing_fallback_asks_one_condition_with_sources_already_available():
+    request = request_with_state()
+    missing_questions(request, "employee_count", "restoration_scope")
+    assert request.source_results[0].output.completion_status == "COMPLETE"
+
+    result = missing_info_fields(request.case_snapshot, request.source_results, mutations())
+
+    assert result["questions_for_user"] == ["직원이 몇 명인가요?"]
+    assert result["blocker"]["description"] == "직원 수 확인이 필요합니다."
+    assert result["selection_summary"] == result["blocker"]["description"]
+    assert "안내" not in result["blocker"]["description"]
+
+
+def test_missing_fallback_uses_blocking_fields_in_existing_question_order():
+    request = request_with_state()
+    missing_questions(
+        request, "planned_closure_date", "employee_count", "restoration_scope",
+        "demolition_required",
+    )
+    info = request.source_results[1].output
+    info.missing_fields[1].blocks = ["SUPPORT_ANALYSIS"]
+    info.missing_fields.reverse()  # Metadata order must not reorder the questions.
+
+    result = missing_info_fields(request.case_snapshot, request.source_results, mutations())
+
+    assert result["questions_for_user"] == ["확인한 원상복구 범위가 있으면 알려주세요."]
+    assert result["blocker"]["description"] == "원상복구 범위 확인이 필요합니다."
+
+
+@pytest.mark.parametrize("reason", ["no_questions", "optional_date", "not_blocking", "confirmed"])
+def test_no_actual_missing_condition_does_not_request_generic_guidance(reason):
+    request = request_with_state(restoration_scope="PARTIAL")
+    if reason == "optional_date":
+        missing_questions(request, "planned_closure_date")
+    elif reason == "not_blocking":
+        missing_questions(request, "employee_count")
+        request.source_results[1].output.missing_fields[0].blocks = ["SUPPORT_ANALYSIS"]
+    elif reason == "confirmed":
+        missing_questions(request, "restoration_scope")
+
+    assert missing_info_fields(
+        request.case_snapshot, request.source_results, mutations()
+    ) is None
+
+
+def test_fallback_uses_confirmed_mutations_before_asking():
+    request = request_with_state()
+    missing_questions(request, "restoration_scope", "employee_count")
+    change = FactChangeCandidate(
+        candidate_id=UUID(int=51),
+        operation="SET",
+        source_fact_candidate_id=UUID(int=52),
+        source_type="INFO_ANALYSIS",
+        field_path="restoration_scope",
+        value_type="ENUM",
+        before_status="UNKNOWN",
+        before_value=None,
+        proposed_status="CONFIRMED",
+        proposed_value="FULL",
+        candidate_status="READY_FOR_REVIEW",
+        reason_summary="합성 확인 결과",
+        source_evidence_refs=[REF],
+        source_call_id=UUID(int=3),
+        confirmed_conflict_ref=None,
+    )
+
+    result = missing_info_fields(
+        request.case_snapshot, request.source_results, mutations(fact_changes=[change])
+    )
+
+    assert result["questions_for_user"] == ["직원이 몇 명인가요?"]
+    assert result["blocker"]["description"] == "직원 수 확인이 필요합니다."
+
+
+def test_single_missing_condition_passes_review_without_weakening_shared_guard():
+    async def run():
+        request = request_with_state()
+        for finding in request.source_results[1].output.procedure_findings:
+            finding.relevance = "UNDETERMINED"
+        missing_questions(request, "employee_count", "restoration_scope")
+        draft = await SupervisorAgent(ChoiceModel(), max_local_attempts=1).draft(request)
+        assert draft.decision.decision_type == "NEEDS_MORE_INFO"
+        assert draft.decision.next_action is None
+        assert draft.decision.questions_for_user == ["직원이 몇 명인가요?"]
+        review = ReviewTool(ChoiceModel(), max_output_attempts=1, provider_max_retries=0)
+        assert (await review.review(subject(request, draft))).verdict == "PASS"
+
+        draft.decision.blocker.description = "폐업 예정일 확인이 필요합니다."
+        result = await review.review(subject(request, draft))
+        assert result.verdict == "REVISE"
+        assert any(
+            issue.target_path.endswith("/decision/blocker") for issue in result.issues
+        )
+
+    asyncio.run(run())
 
 
 @pytest.mark.parametrize("freshness", ["CURRENT", "STALE"])

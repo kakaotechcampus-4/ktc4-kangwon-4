@@ -37,11 +37,20 @@ _QUESTIONS = {
     "franchise_status": "프랜차이즈 가게인가요?",
     "lease_status": "가게 자리를 월세, 무상 임차, 자가 중 어떤 방식으로 사용하시나요?",
     "employee_count": "직원이 몇 명인가요?",
-    "planned_closure_date": "정리할 예정일을 정하셨다면 알려주세요.",
     "restoration_scope": "확인한 원상복구 범위가 있으면 알려주세요.",
     "restoration_scope_detail": "확인한 원상복구 범위의 구체적인 내용을 알려주세요.",
     "demolition_required": "철거가 필요한지 확인한 내용이 있으면 알려주세요.",
     "restoration_status": "원상복구 작업이 어디까지 진행됐는지 알려주세요.",
+}
+_FIELD_LABELS = {
+    "business_type": "가게 업종",
+    "franchise_status": "프랜차이즈 여부",
+    "lease_status": "가게 자리의 임차 형태",
+    "employee_count": "직원 수",
+    "restoration_scope": "원상복구 범위",
+    "restoration_scope_detail": "원상복구 범위의 구체적인 내용",
+    "demolition_required": "철거 필요 여부",
+    "restoration_status": "원상복구 진행 상태",
 }
 
 
@@ -279,7 +288,7 @@ def missing_info_fields(
     mutations: MutationSet,
     procedure_bindings: ProcedureBindings | None = None,
 ) -> dict[str, Any] | None:
-    """A bounded question fallback without re-asking confirmed Case fields."""
+    """Ask about one unresolved decision blocker in the existing question order."""
     values = _values(snapshot, mutations)
     progress = {
         (
@@ -343,14 +352,21 @@ def missing_info_fields(
         description = "현재 판단에 사용할 지원 안내가 부족해 추가 확인이 필요합니다."
         questions = ["지원 안내문이나 담당 기관에서 확인한 내용이 있으면 알려주세요."]
     else:
-        missing = list(
-            dict.fromkeys(
+        missing = next(
+            (
                 path.value
                 for source in sources
                 if isinstance(source.output, InfoAnalysisResult)
                 for question in source.output.question_candidates
                 for path in question.resolves_field_paths
-                if path.value not in values
+                if path.value in _QUESTIONS
+                and path.value not in values
+                and any(
+                    item.field_path == path
+                    and "SUPERVISOR_DECISION" in item.blocks
+                    and item.question_candidate_id in {None, question.question_id}
+                    for item in source.output.missing_fields
+                )
                 and not (
                     restoration_questions_resolved
                     and path.value.startswith(("restoration_", "demolition_"))
@@ -359,16 +375,13 @@ def missing_info_fields(
                     restoration_detail_unnecessary
                     and path.value == "restoration_scope_detail"
                 )
-            )
+            ),
+            None,
         )
-        questions = [_QUESTIONS[key] for key in missing if key in _QUESTIONS][:3]
-        if not questions:
-            questions = [
-                "다음 절차를 확인할 수 있는 안내문이나 담당 기관의 안내 내용이 있으면 알려주세요."
-            ]
-        description = (
-            "다음 행동의 판단에 필요한 정보나 절차 안내가 아직 확인되지 않았습니다."
-        )
+        if missing is None:
+            return None
+        questions = [_QUESTIONS[missing]]
+        description = f"{_FIELD_LABELS[missing]} 확인이 필요합니다."
     return {
         "decision_type": "NEEDS_MORE_INFO",
         "selection_summary": description,

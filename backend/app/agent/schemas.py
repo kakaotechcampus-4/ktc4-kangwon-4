@@ -1179,6 +1179,9 @@ class ProcedureLookupInput(AgentSchema):
     lookup_goal: Literal[ProcedureLookupGoal.BUSINESS_CLOSURE] = Field(
         description="Fixed lookup goal for business-closure procedures."
     )
+    evidence_records: list[EvidenceRecord] = Field(
+        description="Official sources read by BE for this Case snapshot."
+    )
     search_queries: Annotated[
         list[NonEmptyStr],
         Field(
