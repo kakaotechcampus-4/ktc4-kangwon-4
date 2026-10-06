@@ -7,13 +7,14 @@ import logging
 
 from sqlmodel import Session
 
-from app.agent.schemas import AgentGraphOutput
 from app.be.crud import case_history as case_history_crud
 from app.be.db import _engine
 from app.be.models.evidence import DecisionRecord
 from app.be.services import agent_runtime as agent_runtime_service
 from app.be.services import case_snapshot as case_snapshot_service
 from app.be.services import decision_record as decision_record_service
+from app.common.agent_dto import AgentGraphOutput
+from app.common.agent_service import build_planning_input, run_case_planning
 
 logger = logging.getLogger(__name__)
 
@@ -48,18 +49,26 @@ async def run_first_judgment(
     if history is None:
         raise ValueError(f"case {case_id} has no CASE_CREATED history")
 
-    graph_input = case_snapshot_service.build_case_created_input(session, case_id)
+    graph_input = build_planning_input(
+        trigger_type="CASE_CREATED",
+        case_snapshot=case_snapshot_service.build_case_snapshot(session, case_id),
+        user_input=case_snapshot_service.build_user_input(history),
+        # TODO: 프론트가 자기 쪽 이벤트 식별자를 보내주기로 하면 그 값을 넣는다. 아직 미협의.
+        client_event_id=None,
+    )
 
-    # 호출할 때마다 런타임을 새로 만든다 = LLM 연결도 매번 새로 열고 닫는다. AgentRuntime은
-    # 원래 "여러 판단 요청에 답할 수 있게 한 번 만들어 두는" 물건(app/agent/runtime.py:118)이라
-    # 서버 시작 시 한 번 만들어 재사용하는 게 맞다. 다만 그러면 AI가 아는 절차 목록이 서버
-    # 시작 시점에 고정되므로(DB에서 절차가 바뀌어도 재시작 전엔 반영 안 됨) 그 결정을 함께
-    # 해야 해서, 지금은 단순하게 매번 만든다.
-    runtime = await agent_runtime_service.build_agent_runtime(session)
-    try:
-        outcome = await runtime.run_planning(graph_input)
-    finally:
-        await runtime.aclose()
+    # AI 호출은 AI팀이 공개한 입구 하나로만 한다(app/common/agent_service.py). 런타임을 우리가
+    # 직접 조립하면 AI 내부가 바뀔 때 BE만 깨지고, 추가 입력·충돌 확인 트리거를 만들 수도 없다.
+    outcome = await run_case_planning(
+        graph_input,
+        known_procedure_steps=agent_runtime_service.build_known_procedure_steps(session),
+        # TODO: AI가 아는 절차(원상복구 범위 확인/세무서 폐업 신고/영업신고증 폐업 신고/4대보험
+        # 상실 신고)와 우리 DB의 절차를 짝지어야 한다. 지금은 임시 더미 절차뿐이라 비워 둔다
+        # — 비면 AI가 절차와 연결된 다음 행동을 내놓지 못한다.
+        procedure_bindings={},
+        procedure_store=agent_runtime_service.EmptyProcedureStore(),
+        support_catalog=agent_runtime_service.empty_support_catalog(),
+    )
 
     if outcome.outcome_type != "REVIEWED_PLAN":
         # CONFLICT는 사용자에게 되물어 확인받는 흐름이 필요하고, SAFE_FAILURE는 실패 이유를
