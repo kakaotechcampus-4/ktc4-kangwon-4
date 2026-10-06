@@ -22,6 +22,7 @@ from app.agent.schemas import (
     RedactedInput,
 )
 from app.be.crud import case as case_crud
+from app.be.crud import case_field_history as case_field_history_crud
 from app.be.crud import case_history as case_history_crud
 from app.be.crud import evidence as evidence_crud
 from app.be.crud import procedure_step as procedure_step_crud
@@ -85,24 +86,31 @@ def build_case_snapshot(session: Session, case_id: int) -> CaseSnapshot:
         snapshot_id=uuid4(),
         case_id=case.id,
         case_status=CaseStatus(case.case_status),
-        facts=_build_facts(case, evidences),
+        facts=_build_facts(session, case, evidences),
         procedure_progress=[_build_procedure_progress(step) for step in case_procedure_steps],
         evidence_records=[_build_evidence_record(e) for e in evidences],
         captured_at=datetime.now(KST),
     )
 
 
-def _build_facts(case: Case, evidences: list[Evidence]) -> list[CaseFact]:
+def _build_facts(session: Session, case: Case, evidences: list[Evidence]) -> list[CaseFact]:
     # 지금은 case 생성 시 만든 근거 evidence 하나만 있다는 전제(app/be/services/case.py의
     # _create_case_creation_evidence). 나중에 다른 트리거(RESULT_SUBMITTED 등)로 evidence가 더
     # 생기면 필드별로 어떤 evidence를 참조할지 다시 설계해야 한다.
     creation_evidence_id = evidence_crud.creation_form_evidence_id(case.id)
     known_evidence_ids = {e.evidence_id for e in evidences}
     evidence_id = creation_evidence_id if creation_evidence_id in known_evidence_ids else None
-    return [_build_fact(case, field_key, evidence_id) for field_key in CaseFieldKey]
+    # 필드가 마지막으로 바뀐 시각 = 그 값이 확인된 시각. 오래된 것부터 읽어 덮어쓴다.
+    confirmed_at = {
+        row.canonical_field: row.created_at.replace(tzinfo=KST)
+        for row in case_field_history_crud.get_case_field_histories_by_case_id(session, case.id)
+    }
+    return [_build_fact(case, field_key, evidence_id, confirmed_at) for field_key in CaseFieldKey]
 
 
-def _build_fact(case: Case, field_key: CaseFieldKey, evidence_id: str | None) -> CaseFact:
+def _build_fact(
+    case: Case, field_key: CaseFieldKey, evidence_id: str | None, confirmed_at: dict[str, datetime]
+) -> CaseFact:
     value_type, _ = CASE_FIELD_SPECS[field_key]
     raw_value = getattr(case, field_key.value)
     is_unset = raw_value is None or (field_key in UNKNOWN_SENTINEL_FIELDS and raw_value == "UNKNOWN")
@@ -120,9 +128,9 @@ def _build_fact(case: Case, field_key: CaseFieldKey, evidence_id: str | None) ->
         value=raw_value,
         status=FactStatus.CONFIRMED,
         evidence_refs=[evidence_id],
-        # TODO: 개별 fact 확인 시각(updated_at)은 AI팀 확인_필요 항목("Case 행 updated_at과 구분;
-        # 미확인 시각 추정 금지") — 값을 추정하지 않고 비워둔다. updated_at은 옵셔널 필드라 None 허용.
-        updated_at=None,
+        # 변경 이력이 없는 값(폼으로 들어온 뒤 한 번도 안 바뀐 값)은 확인 시각을 모른다.
+        # Case 행의 updated_at은 행 전체가 마지막으로 바뀐 시각이라 필드별 시각이 아니다.
+        updated_at=confirmed_at.get(field_key.value),
     )
 
 
