@@ -136,8 +136,8 @@ runtime은 검증한 대응표를 절차조회 Tool에도 전달한다. Tool은 
 
 [`build_runtime`](../../backend/app/agent/runtime.py)은 호출자가 준비한 실제 절차 목록
 (`known_procedure_steps`), 검수 지원 자료(`support_catalog`), 절차 검수 목록
-(`procedure_store`)을 받는다. 절차 검수 목록이 비어 있으면 동봉 JSON을 검수·검색 메타정보로
-읽는다. 절차 원문과 근거 ID는 BE가 조회한 `CaseSnapshot.evidence_records`에서 가져오며,
+(`procedure_store`)을 받는다. 절차 검수 목록이 비어 있으면 빈 채로 두며 동봉 JSON으로
+채우지 않는다. 절차 원문과 근거 ID는 BE가 조회한 `CaseSnapshot.evidence_records`에서 가져오며,
 DB 근거가 없으면 JSON 본문으로 대신하지 않고 빈 결과를 반환한다.
 환경변수는 [`.env.example`](../../.env.example)를 따르고, 공용 runtime은 요청마다
 `run_planning(AgentGraphInput)`으로 실행한 뒤 애플리케이션 종료 시 `aclose()`로 정리한다.
