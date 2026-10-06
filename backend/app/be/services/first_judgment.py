@@ -13,6 +13,7 @@ from app.be.models.evidence import DecisionRecord
 from app.be.services import agent_runtime as agent_runtime_service
 from app.be.services import case_snapshot as case_snapshot_service
 from app.be.services import decision_record as decision_record_service
+from app.be.services import reviewed_procedure as reviewed_procedure_service
 from app.common.agent_dto import AgentGraphOutput
 from app.common.agent_service import build_planning_input, run_case_planning
 
@@ -66,7 +67,7 @@ async def run_first_judgment(
         # 상실 신고)와 우리 DB의 절차를 짝지어야 한다. 지금은 임시 더미 절차뿐이라 비워 둔다
         # — 비면 AI가 절차와 연결된 다음 행동을 내놓지 못한다.
         procedure_bindings={},
-        procedure_store=agent_runtime_service.EmptyProcedureStore(),
+        procedure_store=reviewed_procedure_service.load_reviewed_procedures(),
         support_catalog=agent_runtime_service.empty_support_catalog(),
     )
 

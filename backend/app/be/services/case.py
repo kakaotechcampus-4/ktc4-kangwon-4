@@ -14,6 +14,7 @@ from app.be.models.evidence import Evidence
 from app.be.models.mixins import kst_now
 from app.be.models.procedure_step import CaseProcedureStep, ProcedureStep
 from app.be.schemas.case import CaseCreateRequest, CaseGetDetailResponse, CaseGetResponse
+from app.be.services import reviewed_procedure as reviewed_procedure_service
 
 
 def create_case(session: Session, member_id: int, case_request: CaseCreateRequest) -> Case:
@@ -31,6 +32,14 @@ def create_case(session: Session, member_id: int, case_request: CaseCreateReques
     case = case_crud.create_case(session, case)
     _fill_temp_case_procedure_steps(session, case.id)
     _create_case_creation_evidence(session, case, case_request)
+    # 검수된 절차 문서는 AI가 직접 읽지 않고, BE가 이 Case의 근거로 저장해 둔 것만 쓴다.
+    # 적재해 두지 않으면 절차조회가 짝을 못 찾아 그 문서를 아예 안 쓴다.
+    reviewed_procedure_service.import_reviewed_procedures(
+        session,
+        case.id,
+        reviewed_procedure_service.load_reviewed_procedures(),
+        as_of=kst_now().date(),
+    )
     session.commit()
     session.refresh(case)
     return case
