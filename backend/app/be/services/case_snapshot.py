@@ -5,8 +5,6 @@ from sqlmodel import Session
 
 from app.agent.schemas import (
     CASE_FIELD_SPECS,
-    AgentGraphInput,
-    CaseCreatedTrigger,
     CaseFact,
     CaseFieldKey,
     CaseSnapshot,
@@ -27,6 +25,7 @@ from app.be.crud import case_history as case_history_crud
 from app.be.crud import evidence as evidence_crud
 from app.be.crud import procedure_step as procedure_step_crud
 from app.be.models.case import Case
+from app.be.models.case_history import CaseHistory
 from app.be.models.evidence import Evidence
 from app.be.models.mixins import KST
 from app.be.models.procedure_step import CaseProcedureStep
@@ -40,35 +39,22 @@ UNKNOWN_SENTINEL_FIELDS = {
 }
 
 
-def build_case_created_input(session: Session, case_id: int) -> AgentGraphInput:
-    """case 생성 직후 첫 판단을 요청할 때 AI에 넘기는 입력 한 벌(트리거 + 스냅샷)."""
+def build_user_input(history: CaseHistory) -> RedactedInput:
+    """사용자가 넣은 입력 한 건을 AI가 받는 모양으로 바꾼다.
 
-    history = case_history_crud.get_case_created_history(session, case_id)
-    if history is None:
-        raise ValueError(f"case {case_id} has no CASE_CREATED history")
+    트리거(= 왜 판단을 부르는가)로 감싸는 일은 AI팀 입구(app/common/agent_service.py)가 한다.
+    """
 
-    # DB에는 한국 시각을 저장하고(mixins.kst_now) AI 쪽은 timezone이 붙은 시각만 받으므로 tzinfo만 붙인다.
-    submitted_at = history.created_at.replace(tzinfo=KST)
-    input_event_id = f"case_history:{history.id}"
-
-    return AgentGraphInput(
-        trigger=CaseCreatedTrigger(
-            trigger_type="CASE_CREATED",
-            input_event_id=input_event_id,
-            # TODO: 프론트가 자기 쪽 이벤트 식별자를 보내주기로 하면 그 값을 넣는다. 아직 미협의.
-            client_event_id=None,
-            input=RedactedInput(
-                input_event_id=input_event_id,
-                source_type=InputSourceType.USER_INPUT,
-                redacted_text=history.raw_input,
-                # case 생성 폼은 업종/임차형태 같은 정해진 값만 받아서 지울 개인정보가 없다.
-                # 자유 입력을 받는 화면이 생기면 그때 민감정보 제거 목록을 채워야 한다.
-                redactions=[],
-                submitted_at=submitted_at,
-            ),
-            submitted_at=submitted_at,
-        ),
-        case_snapshot=build_case_snapshot(session, case_id),
+    return RedactedInput(
+        input_event_id=f"case_history:{history.id}",
+        source_type=InputSourceType.USER_INPUT,
+        redacted_text=history.raw_input,
+        # case 생성 폼은 업종/임차형태 같은 정해진 값만 받아서 지울 개인정보가 없다.
+        # 자유 입력을 받는 화면이 생기면 그때 민감정보 제거 목록을 채워야 한다.
+        redactions=[],
+        # DB에는 한국 시각을 저장하고(mixins.kst_now) AI 쪽은 timezone이 붙은 시각만 받으므로
+        # tzinfo만 붙인다.
+        submitted_at=history.created_at.replace(tzinfo=KST),
     )
 
 
@@ -97,19 +83,28 @@ def _build_facts(session: Session, case: Case, evidences: list[Evidence]) -> lis
     # 지금은 case 생성 시 만든 근거 evidence 하나만 있다는 전제(app/be/services/case.py의
     # _create_case_creation_evidence). 나중에 다른 트리거(RESULT_SUBMITTED 등)로 evidence가 더
     # 생기면 필드별로 어떤 evidence를 참조할지 다시 설계해야 한다.
-    creation_evidence_id = evidence_crud.creation_form_evidence_id(case.id)
+    creation_history = case_history_crud.get_case_created_history(session, case.id)
+    creation_evidence_id = (
+        evidence_crud.case_history_evidence_id(case.id, creation_history.id) if creation_history else None
+    )
     known_evidence_ids = {e.evidence_id for e in evidences}
     evidence_id = creation_evidence_id if creation_evidence_id in known_evidence_ids else None
-    # 필드가 마지막으로 바뀐 시각 = 그 값이 확인된 시각. 오래된 것부터 읽어 덮어쓴다.
-    confirmed_at = {
+    # 값이 언제 확인됐는지는 필드가 마지막으로 바뀐 시각을 쓴다. 오래된 것부터 읽어 덮어쓴다.
+    changed_at = {
         row.canonical_field: row.created_at.replace(tzinfo=KST)
         for row in case_field_history_crud.get_case_field_histories_by_case_id(session, case.id)
     }
-    return [_build_fact(case, field_key, evidence_id, confirmed_at) for field_key in CaseFieldKey]
+    # 폼으로 들어온 뒤 한 번도 안 바뀐 값은 이력이 없다. 그때는 폼을 낸 시각이 곧 확인 시각이다
+    # — 추정이 아니라 실제 입력 시각이고, 같은 시각을 그 근거의 retrieved_at에도 적어뒀다.
+    submitted_at = creation_history.created_at.replace(tzinfo=KST) if creation_history else None
+    return [
+        _build_fact(case, field_key, evidence_id, changed_at.get(field_key.value) or submitted_at)
+        for field_key in CaseFieldKey
+    ]
 
 
 def _build_fact(
-    case: Case, field_key: CaseFieldKey, evidence_id: str | None, confirmed_at: dict[str, datetime]
+    case: Case, field_key: CaseFieldKey, evidence_id: str | None, confirmed_at: datetime | None
 ) -> CaseFact:
     value_type, _ = CASE_FIELD_SPECS[field_key]
     raw_value = getattr(case, field_key.value)
@@ -128,9 +123,8 @@ def _build_fact(
         value=raw_value,
         status=FactStatus.CONFIRMED,
         evidence_refs=[evidence_id],
-        # 변경 이력이 없는 값(폼으로 들어온 뒤 한 번도 안 바뀐 값)은 확인 시각을 모른다.
-        # Case 행의 updated_at은 행 전체가 마지막으로 바뀐 시각이라 필드별 시각이 아니다.
-        updated_at=confirmed_at.get(field_key.value),
+        # Case 행의 updated_at은 행 전체가 마지막으로 바뀐 시각이라 필드별 확인 시각이 아니다.
+        updated_at=confirmed_at,
     )
 
 

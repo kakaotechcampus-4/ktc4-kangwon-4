@@ -3,10 +3,15 @@ from sqlmodel import Session, select
 from app.be.models.evidence import DecisionRecord, Evidence, EvidenceLineage
 
 
-def creation_form_evidence_id(case_id: int) -> str:
-    """case 생성 폼 입력값 근거의 evidence_id. 만들 때와 조회할 때 둘 다 이 함수를 써서 어긋나지 않게 한다."""
+def case_history_evidence_id(case_id: int, case_history_id: int) -> str:
+    """사용자 입력 한 건을 근거로 남길 때 쓰는 evidence_id.
 
-    return f"case_{case_id}_creation_form"
+    만들 때와 조회할 때 둘 다 이 함수를 써서 어긋나지 않게 한다. evidence_id는 UNIQUE라
+    케이스 번호만 쓰면 한 케이스에 근거를 하나밖에 못 남긴다 — 사용자가 추가로 입력할
+    때마다 근거가 늘어나므로 입력 이력 번호까지 넣는다.
+    """
+
+    return f"case_{case_id}_history_{case_history_id}"
 
 
 def create_evidence(session: Session, evidence: Evidence) -> Evidence:

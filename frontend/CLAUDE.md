@@ -23,7 +23,9 @@ Case 생성 → Blocker 1개 판정 → Next Action 1개 제시
   3버전 방식(`tailwind.config.js`, `@tailwind base;`)을 쓰지 않는다
 - 통신 **Fetch API** — axios 등 HTTP 클라이언트를 추가하지 않는다
 - 상태관리는 **React 내장**(`useState` / `useContext`). 외부 상태 라이브러리를 도입하지 않는다
-- **Mobile-first** 반응형. 기준 폭 375px
+- **Mobile-first** 반응형. 좁은 쪽 기준은 375px, 기본 컨테이너는 `max-w-md`(약 448px)다.
+  넓은 화면에서 2단으로 나눌 내용이 있는 화면만 `AppShell` 의 `width="wide"` 를 쓴다
+  (지금은 `/case`). 폼처럼 한 줄로 읽는 화면은 넓혀도 읽기 어려워지기만 한다
 
 현재 설치된 패키지와 버전, 실행 방법은 `README.md`를 본다.
 

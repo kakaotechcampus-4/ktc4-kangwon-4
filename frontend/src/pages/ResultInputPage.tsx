@@ -89,7 +89,12 @@ export function ResultInputPage() {
   }
 
   return (
-    <AppShell title="결과 알려주기" subtitle={`${nextAction.seq}번째 할 일의 결과`}>
+    // 순번은 `/case` 에서 넘어올 때 없다 — 서버가 보내지 않는 값이다.
+    // 그대로 끼우면 "undefined번째 할 일의 결과" 가 뜬다
+    <AppShell
+      title="결과 알려주기"
+      subtitle={nextAction.seq === undefined ? undefined : `${nextAction.seq}번째 할 일의 결과`}
+    >
       {/* 며칠 뒤에 들어올 수도 있다. 무엇에 대한 결과인지 먼저 상기시킨다 */}
       <section className="rounded-2xl border border-gray-200 bg-white p-5">
         <h2 className="text-sm font-bold tracking-wide text-gray-500">하시기로 한 일</h2>

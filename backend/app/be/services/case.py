@@ -78,7 +78,7 @@ def _create_case_creation_evidence(session: Session, case: Case, case_request: C
     evidence_crud.create_evidence(
         session,
         Evidence(
-            evidence_id=evidence_crud.creation_form_evidence_id(case.id),
+            evidence_id=evidence_crud.case_history_evidence_id(case.id, history.id),
             case_id=case.id,
             source_type="USER_INPUT",
             source_ref=f"case_history:{history.id}",
