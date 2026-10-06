@@ -82,26 +82,38 @@ export interface CaseCreateResponse extends CaseFields {
 }
 
 /**
+ * Agent 가 이 Case 를 어디까지 판단했는지.
+ *
+ *   PENDING          판단 중 — 잠시 후 다시 물어봐야 한다
+ *   DONE             판단 완료
+ *   NEEDS_MORE_INFO  물어볼 질문이 따로 온다
+ *   FAILED           판단 실패 — 다시 시도 안내
+ *
+ * BE 가 `CONFLICT` 추가를 건의했지만 아직 확정되지 않아 넣지 않는다. 모르는 값이 오면
+ * 어댑터가 가려내고 화면은 "판단 내용을 불러오지 못했어요" 로 간다 (`CLAUDE.md` 규칙 9).
+ */
+export type JudgmentStatus = 'PENDING' | 'DONE' | 'NEEDS_MORE_INFO' | 'FAILED'
+
+/**
  * `GET /cases` 응답.
  *
  * Case 가 없으면 `case` 가 `null` 이다. 빈 객체 대신 이 모양을 쓰기로 한 것은,
  * TypeScript 에서 빈 객체가 거의 모든 값과 맞는다고 판단돼 가려낼 수 없기 때문이다.
  *
- * TODO(API): 같은 응답에 `blocker` 와 `next_action` 이 실릴 예정이다(BE #39).
- * 모양이 확정되면 여기 추가한다 — 지금 미리 열어두면 비어 있어도 그냥 넘어간다.
+ * **Case 와 판단은 서로 다른 시점의 정보다.** `POST /cases` 가 저장만 하고 바로 응답한 뒤
+ * 판단은 뒤에서 돌기 때문에, Case 는 있는데 판단은 아직 `PENDING` 인 구간이 반드시 생긴다.
+ *
+ * `blocker` 와 `next_action` 은 문자열 하나씩이다. 서버가 제목만 꺼내 보내고 있어서
+ * "왜 이걸 먼저 해야 하는지"와 "상대에게 물어볼 말"은 아직 오지 않는다 — DB 에는 들어
+ * 있고 BE 가 내려주기로 했다(#44). 그때까지 화면은 제목만으로 성립해야 한다.
  */
 export interface CasesEnvelope {
   case: CaseResponse | null
+  /** 지금 진행을 막고 있는 것. 제목 한 줄 */
+  blocker: string | null
+  /** 다음 할 일의 제목. 이유와 질문 목록은 아직 없다 */
+  next_action: string | null
+  judgment_status: JudgmentStatus | null
+  /** 서비스가 사장님에게 되묻는 질문. `next_action` 의 "물어볼 말"과 다른 것이다 */
+  questions_for_user: string[] | null
 }
-
-/**
- * Agent 가 이 Case 를 어디까지 판단했는지.
- *
- * TODO(API): 아직 읽지 않는다. 서버가 판단을 실제로 채우기 시작하면(BE #47)
- * `CasesEnvelope` 에 넣고 대기·재시도 화면을 여기에 맞춘다.
- *   PENDING          판단 중 — 잠시 후 다시 물어봐야 한다
- *   DONE             판단 완료
- *   NEEDS_MORE_INFO  물어볼 질문이 따로 온다
- *   FAILED           판단 실패 — 다시 시도 안내
- */
-export type JudgmentStatus = 'PENDING' | 'DONE' | 'NEEDS_MORE_INFO' | 'FAILED'

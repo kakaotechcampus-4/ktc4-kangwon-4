@@ -22,7 +22,7 @@ import { useCase } from '../hooks/useCase'
 export function StartPage() {
   // ?mock= 을 이어준다. 예외 화면을 링크만으로 따라갈 수 있어야 리뷰가 된다
   const { search } = useLocation()
-  const query = useCase()
+  const { query } = useCase()
 
   /**
    * 답을 기다리는 동안에도 화면을 그린다. 내용이 고정이라 기다릴 이유가 없고,
