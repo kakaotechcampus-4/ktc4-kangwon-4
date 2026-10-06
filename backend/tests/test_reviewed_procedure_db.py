@@ -6,11 +6,17 @@ engine or starts the API; all rows live in a disposable mysql:8.0 container.
 
 import asyncio
 import hashlib
+import json
 from datetime import date, datetime, timezone
+from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import MetaData, Table, select, text
+from sqlmodel import Session, SQLModel, create_engine
+from testcontainers.community.mysql import MySqlContainer
+
 from app.agent import runtime as runtime_module
 from app.agent.procedure_tool.store import ProcedureStoreError
 from app.agent.procedure_tool.stored_tool import StoredProcedureLookupTool
@@ -18,17 +24,18 @@ from app.agent.schemas import ProcedureLookupInput, ProcedureStepRef
 from app.be.crud import evidence as evidence_crud
 from app.be.crud.case_history import get_case_created_history
 from app.be.crud.member import create_member
+from app.be.crud.procedure_step import get_all_procedure_steps
 from app.be.models.mixins import KST
 from app.be.schemas.case import CaseCreateRequest
 from app.be.services.agent_runtime import build_agent_runtime
 from app.be.services.case import create_case
 from app.be.services.case_snapshot import build_case_created_input, build_case_snapshot
 from app.common.agent_data import (
+    build_known_procedure_steps,
+    build_reviewed_procedure_store,
     import_reviewed_procedures,
     load_reviewed_procedure_store,
 )
-from sqlmodel import Session, SQLModel, create_engine
-from testcontainers.community.mysql import MySqlContainer
 
 AS_OF = date(2026, 10, 4)
 RETRIEVED = datetime(2026, 10, 4, 1, 2, 3, 456789, tzinfo=timezone.utc)
@@ -245,12 +252,12 @@ def test_invalid_import_writes_nothing(mysql_engine, approved_store, problem):
         assert official_rows(session, case_id) == []
 
 
-def test_existing_be_runtime_uses_db_rows_with_empty_store(
+def test_existing_be_runtime_keeps_empty_store_without_reading_procedure_file(
     mysql_engine, approved_store, monkeypatch,
 ):
     case_id = create_test_case(mysql_engine)
-    metadata_loader = Mock(return_value=approved_store)
-    monkeypatch.setattr(runtime_module, "load_reviewed_procedures", metadata_loader)
+    file_reader = Mock(side_effect=AssertionError("Runtime must not read procedure files"))
+    monkeypatch.setattr(Path, "read_text", file_reader)
     monkeypatch.setattr(runtime_module, "resolve_max_calls_per_run", lambda: 5)
     monkeypatch.setattr(runtime_module, "resolve_run_deadline_seconds", lambda: 60)
     monkeypatch.setattr(runtime_module.LangfuseTraceSink, "from_env", lambda: None)
@@ -283,11 +290,62 @@ def test_existing_be_runtime_uses_db_rows_with_empty_store(
         import_reviewed_procedures(session, case_id, approved_store, as_of=AS_OF)
         session.commit()
     with Session(mysql_engine) as session:
-        found = asyncio.run(lookup_from_be(session))
-        assert found.completion_status == "COMPLETE"
-        assert len(found.documents) == 2
-        assert all(document.step_codes == [] for document in found.documents)
-        assert {item.evidence_id for item in found.evidence_records} == {
-            row.evidence_id for row in official_rows(session, case_id)
+        assert len(official_rows(session, case_id)) == 2
+        missing_metadata = asyncio.run(lookup_from_be(session))
+        assert missing_metadata.completion_status == "NO_RESULTS"
+        assert missing_metadata.documents == []
+        assert missing_metadata.evidence_records == []
+    file_reader.assert_not_called()
+
+
+def test_proposed_db_column_supplies_approved_documents_without_files(mysql_engine, monkeypatch):
+    """BE column is simulated only in disposable MySQL, never in app models."""
+    source_path = Path(__file__).parents[1] / "app/common/reviewed-procedures.ko-KR.json"
+    source = json.loads(source_path.read_text(encoding="utf-8"))
+    with mysql_engine.begin() as connection:
+        connection.execute(text(
+            "ALTER TABLE procedure_step ADD COLUMN reviewed_source_snapshot JSON NULL"
+        ))
+    table = Table("procedure_step", MetaData(), autoload_with=mysql_engine)
+    with mysql_engine.begin() as connection:
+        for index, record in enumerate(source["records"], start=1):
+            connection.execute(table.insert().values(
+                step_code=record["step_codes"][0], step_name=f"합성 절차 {index}",
+                registry_version="synthetic/db-storage", requires_professional=False,
+                applicable_business_type="CAFE", created_at=RETRIEVED, updated_at=RETRIEVED,
+                reviewed_source_snapshot=source | {"records": [record]},
+            ))
+    case_id = create_test_case(mysql_engine)
+    file_reader = Mock(side_effect=AssertionError("DB path must not read files"))
+    monkeypatch.setattr(Path, "read_text", file_reader)
+    monkeypatch.setattr(Path, "open", file_reader)
+    with Session(mysql_engine) as session:
+        rows = get_all_procedure_steps(session)
+        known = build_known_procedure_steps(rows, [], [], db_timezone=KST)
+        snapshots = dict(session.execute(select(
+            table.c.step_code, table.c.reviewed_source_snapshot,
+        ).where(table.c.reviewed_source_snapshot.is_not(None))).all())
+        restored = build_reviewed_procedure_store(snapshots, known_procedure_steps=known)
+        assert restored.snapshot_version == source["snapshot_version"]
+        assert {item.record_id: item.model_dump(mode="json") for item in restored.records()} == {
+            item.record_id: item.model_dump(mode="json")
+            for item in load_reviewed_procedure_store(source).records()
         }
-    assert metadata_loader.call_count == 2
+        assert sum(len(item.excerpt) for item in restored.records()) == 5706
+        evidence_ids = {row.evidence_id for row in import_reviewed_procedures(
+            session, case_id, restored, as_of=AS_OF,
+        )}
+        session.commit()
+    with Session(mysql_engine) as session:
+        snapshot = build_case_snapshot(session, case_id)
+        request = lookup_request(snapshot)
+        request.search_queries = [
+            " ".join([*item.required_terms, *item.any_terms[:1]])
+            for item in restored.records()
+        ]
+        result = asyncio.run(StoredProcedureLookupTool(restored).lookup(request))
+        assert result.completion_status == "COMPLETE"
+        assert len(result.documents) == 4
+        assert {item.evidence_id for item in result.evidence_records} == evidence_ids
+        assert sum(len(item.excerpt) for item in result.documents) == 5706
+    file_reader.assert_not_called()

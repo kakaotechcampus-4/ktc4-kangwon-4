@@ -41,7 +41,6 @@ from app.agent.tracing import (
     UsageAccumulator,
     usage_scope,
 )
-from app.common.agent_data import load_reviewed_procedures
 from app.common.agent_dto import AgentGraphInput, AgentGraphOutput
 
 __all__ = ["AgentRuntime", "RuntimeLimits", "build_runtime"]
@@ -229,13 +228,11 @@ async def build_runtime(
 ) -> AgentRuntime:
     """Assemble the Agent with reviewed data supplied by the caller.
 
-    An empty store uses the bundled review metadata. Source text and evidence
-    IDs must still come from the BE Case snapshot; missing DB sources stay
-    unavailable. No SQL runs here. Wiki misses also remain unavailable.
+    An empty store stays empty. Source text and evidence IDs must come from
+    the BE Case snapshot; missing DB sources stay unavailable. No SQL or
+    procedure file loading runs here. Wiki misses also remain unavailable.
     """
 
-    if not procedure_store.records():
-        procedure_store = load_reviewed_procedures()
     bindings = resolve_procedure_bindings(known_procedure_steps, procedure_bindings)
     resolved = limits or RuntimeLimits(
         max_llm_calls_per_run=resolve_max_calls_per_run(),

@@ -6,6 +6,7 @@ database, no provider: BE rows are built in memory and the runtime is replaced.
 """
 
 import asyncio
+import sys
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 from uuid import UUID
@@ -16,6 +17,7 @@ from pydantic import ValidationError
 
 from app.agent.action_catalog import resolve_procedure_bindings
 from app.agent.guardrails import GuardrailViolation
+from app.agent.procedure_tool.store import ProcedureStoreError
 from app.agent.schemas import ProcedureStepRef
 from app.agent.support_agent import ReviewedSupportCatalog
 from app.be.models.procedure_step import ProcedureStep, StepDependency
@@ -25,6 +27,7 @@ from app.common.agent_data import (
 )
 from app.common.agent_dto import CaseSnapshot, RedactedInput
 from app.common.agent_service import build_planning_input, run_case_planning
+from scripts import import_reviewed_procedures as import_cli
 
 SEOUL = ZoneInfo("Asia/Seoul")
 NOW = datetime(2026, 9, 29, tzinfo=timezone.utc)
@@ -274,3 +277,33 @@ def test_the_runtime_is_closed_and_flushed_when_planning_raises():
         plan_with(runtime)
 
     assert runtime.closed and runtime.flushed
+
+
+def test_db_import_cli_requires_be_column_before_importing_database(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["import_reviewed_procedures", "--case-id", "1"])
+    monkeypatch.delitem(ProcedureStep.model_fields, "reviewed_source_snapshot", raising=False)
+    # Any attempt to import the application's engine must fail before connecting.
+    monkeypatch.setitem(sys.modules, "app.be.db", None)
+    with pytest.raises(ProcedureStoreError, match="컬럼 반영"):
+        import_cli.main()
+
+
+def test_db_import_cli_resolves_explicit_codes_and_keeps_unspecified_bindings_none():
+    ref = ProcedureStepRef(procedure_step_id=11, step_code="BE_TAX_CLOSURE")
+    refs = {ref.step_code: ref}
+    assert import_cli.parse_bindings([], refs) is None
+    assert import_cli.parse_bindings(
+        ["FILE_TAX_BUSINESS_CLOSURE=BE_TAX_CLOSURE"], refs,
+    ) == {"FILE_TAX_BUSINESS_CLOSURE": ref}
+
+
+@pytest.mark.parametrize("values", [
+    ["FILE_TAX_BUSINESS_CLOSURE=MISSING_STEP"],
+    ["FILE_TAX_BUSINESS_CLOSURE=BE_TAX_CLOSURE"] * 2,
+    ["FILE_TAX_BUSINESS_CLOSURE"],
+    ["=BE_TAX_CLOSURE"],
+])
+def test_db_import_cli_rejects_unregistered_duplicate_or_malformed_bindings(values):
+    ref = ProcedureStepRef(procedure_step_id=11, step_code="BE_TAX_CLOSURE")
+    with pytest.raises(ProcedureStoreError, match="--binding"):
+        import_cli.parse_bindings(values, {ref.step_code: ref})

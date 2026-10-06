@@ -18,6 +18,7 @@ from uuid import UUID
 
 from sqlmodel import Session
 
+from app.agent.action_catalog import ProcedureBindings, resolve_procedure_bindings
 from app.agent.procedure_tool.store import (
     ProcedureStoreError,
     ReviewedProcedureRecord,
@@ -46,6 +47,7 @@ from app.be.models.support_item import SupportItem
 __all__ = [
     "InMemoryReviewedProcedureStore",
     "build_known_procedure_steps",
+    "build_reviewed_procedure_store",
     "build_reviewed_support_catalog",
     "import_reviewed_procedures",
     "load_reviewed_procedure_store",
@@ -225,6 +227,48 @@ def load_reviewed_procedures() -> InMemoryReviewedProcedureStore:
         return load_reviewed_procedure_store(json.loads(path.read_text(encoding="utf-8")))
     except (OSError, ValueError) as exc:
         raise ProcedureStoreError("검수 절차 파일을 읽거나 검증하지 못했습니다.") from exc
+
+
+def build_reviewed_procedure_store(
+    snapshots_by_step: Mapping[str, Mapping[str, object]],
+    *,
+    known_procedure_steps: Sequence[KnownProcedureStep],
+    procedure_bindings: ProcedureBindings | None = None,
+) -> InMemoryReviewedProcedureStore:
+    """Join DB JSON values keyed by actual step_code; never query SQL or files.
+
+    BE extracts non-null reviewed_source_snapshot values from ProcedureStep.
+    The proposed column stays BE-owned. Logical document codes are retained;
+    lookup translates them using the same validated bindings as the runtime.
+    """
+    validate_procedure_registry(known_procedure_steps)
+    bindings = resolve_procedure_bindings(known_procedure_steps, procedure_bindings)
+    if not snapshots_by_step:
+        raise ProcedureStoreError("DB에 검수 절차 자료가 없습니다.")
+    metadata: dict[str, object] | None = None
+    records: list[ReviewedProcedureRecord] = []
+    try:
+        for step_code, payload in snapshots_by_step.items():
+            snapshot = ReviewedProcedureSnapshot.model_validate(payload)
+            current = snapshot.model_dump(mode="python", exclude={"records"})
+            if metadata is not None and metadata != current:
+                raise ProcedureStoreError("DB 절차 자료의 버전·생성 시각·언어가 다릅니다.")
+            metadata = current
+            if not snapshot.records:
+                raise ProcedureStoreError("DB 절차 자료의 문서 목록이 비어 있습니다.")
+            for record in snapshot.records:
+                if record.reviewed_by is None or record.reviewed_at is None:
+                    raise ProcedureStoreError("개발자가 검수·승인한 자료만 사용할 수 있습니다.")
+                if any(code not in bindings for code in record.step_codes):
+                    raise ProcedureStoreError("DB 자료의 논리 절차 코드에 대응값이 없습니다.")
+                related = {bindings[code].step_code for code in record.step_codes}
+                if step_code not in related:
+                    raise ProcedureStoreError("DB 절차 행과 문서의 절차 대응이 다릅니다.")
+            records.extend(snapshot.records)
+        # Keep the collected-body hash as supplied; an excerpt is not that body.
+        return load_reviewed_procedure_store({**metadata, "records": records})
+    except ValueError as exc:
+        raise ProcedureStoreError("DB 검수 절차 자료를 검증하지 못했습니다.") from exc
 
 
 def import_reviewed_procedures(

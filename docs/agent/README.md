@@ -97,6 +97,33 @@ BE가 조회한 `ProcedureStep`·`StepDependency`·`StepEligibility` 행을 변�
 각각 `load_reviewed_procedure_store`·`load_reviewed_support_catalog`로 검증한다.
 BE 모델에 없는 검수·조건·근거 필드를 만들어 채우지는 않는다.
 
+### DB 검수 자료 공급
+
+`build_reviewed_procedure_store(snapshots_by_step, known_procedure_steps=registry,
+procedure_bindings=bindings)`는 DB에서 조회한 JSON 값을 기존 자료 객체로 변환한다.
+`snapshots_by_step`은 **실제 DB 절차 코드 → 해당 절차의 검수 자료 묶음**이다.
+자료 묶음은 기존 `ReviewedProcedureSnapshot`의 버전·생성 시각·언어와 문서 목록을 유지한다.
+변환 함수는 파일·SQL을 읽지 않으며, 빈 자료·미검수·버전 혼합·중복 문서·잘못된 절차 대응을 거절한다.
+만료된 검수 시각은 그대로 유지하며, 기존 Tool이 조회 기준일에 유효성을 검사한다.
+`content_hash`는 수집한 원문 본문의 해시이므로 발췌문 해시로 다시 만들지 않는다.
+
+BE 연결 순서는 **DB 자료 조회 → store 변환 → 같은 store로 Case Evidence 적재·commit
+→ CaseSnapshot 생성 → 같은 store로 Agent 호출**이다. 기존
+`import_reviewed_procedures()`와 BE의 Evidence CRUD·snapshot·판단 저장을 재사용한다.
+Agent runtime은 빈 store를 JSON 파일로 채우지 않는다. 실제 자료 공급에는 BE 연결이 필요하다.
+
+BE 요청: `procedure_step.reviewed_source_snapshot` JSON 컬럼(제안명) 추가와 승인 자료 이관,
+실제 절차·Case 연결 및 위 호출 순서 반영. 기존 두 규칙 테이블은 스키마를 유지하며
+선후 관계·적용 조건 데이터는 따로 검수해야 한다. 현재 BE 모델에는 이 컬럼이 없다.
+운영 절차의 ID·코드·표시 이름을 테스트용 값으로 대신하지 않는다.
+
+`python -m scripts.import_reviewed_procedures --case-id <ID>`는 BE 컬럼 반영 후
+DB 원본을 해당 Case의 Evidence로 적재한다. 코드가 다르면
+`--binding LOGICAL_CODE=DB_STEP_CODE`를 반복해 확정한 대응을 전달한다.
+기존 `--source` 파일 옵션은 제거했다. 이 명령은 공통 절차 행을 생성하지 않으며,
+최초 승인 JSON의 절차 표 이관은 BE 작업이다. 상세 요청은
+[BE 요청사항](https://app.notion.com/p/3ef3c6661b7d80c9a697d4f39dce1841)의 JSON을 따른다.
+
 `procedure_bindings`의 키는 AI의 기존 절차 의미 코드, 값은 BE의 실제 `ProcedureStepRef`다.
 예를 들어 `"FILE_FOOD_SERVICE_CLOSURE"`에 BE에서 조회한 식품영업 폐업 절차의 ID·코드를 연결한다.
 행동 대상·진행 상태·근거 조회에는 BE 코드가 그대로 남는다. `TEMP_*` 이름이나 절차명으로
