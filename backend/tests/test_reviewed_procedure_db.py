@@ -20,22 +20,23 @@ from testcontainers.community.mysql import MySqlContainer
 from app.agent import runtime as runtime_module
 from app.agent.procedure_tool.store import ProcedureStoreError
 from app.agent.procedure_tool.stored_tool import StoredProcedureLookupTool
-from app.agent.schemas import ProcedureLookupInput, ProcedureStepRef
+from app.agent.schemas import ProcedureLookupInput, ProcedureStepRef, RedactedInput
 from app.be.crud import evidence as evidence_crud
 from app.be.crud.case_history import get_case_created_history
 from app.be.crud.member import create_member
 from app.be.crud.procedure_step import get_all_procedure_steps
 from app.be.models.mixins import KST
 from app.be.schemas.case import CaseCreateRequest
-from app.be.services.agent_runtime import build_agent_runtime
+from app.be.services.agent_runtime import EmptyProcedureStore, empty_support_catalog
 from app.be.services.case import create_case
-from app.be.services.case_snapshot import build_case_created_input, build_case_snapshot
+from app.be.services.case_snapshot import build_case_snapshot
 from app.common.agent_data import (
     build_known_procedure_steps,
     build_reviewed_procedure_store,
     import_reviewed_procedures,
     load_reviewed_procedure_store,
 )
+from app.common.agent_service import build_planning_input
 
 AS_OF = date(2026, 10, 4)
 RETRIEVED = datetime(2026, 10, 4, 1, 2, 3, 456789, tzinfo=timezone.utc)
@@ -252,7 +253,7 @@ def test_invalid_import_writes_nothing(mysql_engine, approved_store, problem):
         assert official_rows(session, case_id) == []
 
 
-def test_existing_be_runtime_keeps_empty_store_without_reading_procedure_file(
+def test_runtime_keeps_empty_store_without_reading_procedure_file(
     mysql_engine, approved_store, monkeypatch,
 ):
     case_id = create_test_case(mysql_engine)
@@ -267,9 +268,24 @@ def test_existing_be_runtime_keeps_empty_store_without_reading_procedure_file(
     )
 
     async def lookup_from_be(session):
-        runtime = await build_agent_runtime(session)
+        runtime = await runtime_module.build_runtime(
+            known_procedure_steps=build_known_procedure_steps(
+                get_all_procedure_steps(session), [], [], db_timezone=KST,
+            ),
+            support_catalog=empty_support_catalog(),
+            procedure_store=EmptyProcedureStore(),
+        )
         try:
-            request = build_case_created_input(session, case_id)
+            history = get_case_created_history(session, case_id)
+            request = build_planning_input(
+                trigger_type="CASE_CREATED",
+                case_snapshot=build_case_snapshot(session, case_id),
+                user_input=RedactedInput(
+                    input_event_id=f"case_history:{history.id}",
+                    source_type="USER_INPUT", redacted_text=history.raw_input,
+                    redactions=[], submitted_at=history.created_at.replace(tzinfo=KST),
+                ),
+            )
             monkeypatch.setattr(runtime._graph, "_procedure_queries", lambda _: ["합성 절차"])
             result = await runtime._graph._procedure_node({
                 "request": request, "run_id": uuid4(),
