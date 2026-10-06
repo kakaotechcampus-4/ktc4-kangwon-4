@@ -108,10 +108,14 @@ CASE에 대한 발화·이벤트 원본 이력.
 | case_id | BIGINT | FK | NOT NULL | 1 | |
 | raw_input | TEXT | | NOT NULL | `"임대인이랑 얘기 끝났어요, 다음 달까지 나가기로 했어요"` | 입력 원문 (사용자 발화, Case 생성 요청, 또는 배치가 에이전트에 전달한 지시문) |
 | source | ENUM | | NOT NULL | `USER_INPUT` | `USER_INPUT` / `SYSTEM_BATCH` / `CASE_CREATED` — `CASE_CREATED`는 Case 생성 직후 첫 Blocker/Next Action 판단 |
+| judgment_status | ENUM | | NOT NULL | `PENDING` | 판단 진행 상태. 입력을 받으면 `PENDING`으로 시작해 판단이 끝나면 갱신된다 — `PENDING` / `DONE` / `NEEDS_MORE_INFO` / `CONFLICT` / `FAILED` |
 | next_action | TEXT | | NULLABLE | `"부가가치세 확정신고를 진행하세요"` | 다음 액션 제안, 판단이 발생한 경우에만 채워짐 (AI 문장은 길이 제한이 없어 TEXT) |
 | next_action_reason | TEXT | | NULLABLE | `"신고 기한이 폐업일로부터 25일이기 때문입니다"` | 다음 행동을 해야 하는 이유 |
 | next_action_questions_to_ask | JSON | | NULLABLE | `["원상복구 범위가 어디까지인지 확인해 주세요"]` | 사용자가 임대인·기관에 물어볼 질문 목록. 다음 행동이 없으면 NULL |
 | next_action_evidence_refs | JSON | | NULLABLE | `["procedure:reviewed:NTS_CLOSURE"]` | 다음 행동의 근거 evidence_id 목록. 다음 행동이 없으면 NULL |
+| questions_for_user | JSON | | NULLABLE | `["확인한 원상복구 범위가 있으면 알려주세요."]` | 행동을 정하기 전 서비스가 사용자에게 되묻는 질문 목록. 없으면 NULL. `next_action_questions_to_ask`(사용자가 임대인·기관에 물어볼 말)와 다른 값이다 |
+| recovery_action_code | ENUM | | NULLABLE | `RETRY` | 판단이 실패했을 때 화면이 안내할 다음 행동 — `RETRY` / `RESUBMIT_INPUT` / `CONTACT_SUPPORT` / `NONE`. 실패가 아니면 NULL |
+| requested_field_paths | JSON | | NULLABLE | `["restoration_scope"]` | 판단을 멈추게 한 CASE 필드 목록. 실패가 아니면 NULL |
 | priority_blocker_id | BIGINT | FK | NULLABLE | `NULL` | 이 시점에 최우선인 블로커 참조 |
 | created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-09-10 09:10:00` | |
 
@@ -219,6 +223,7 @@ CASE_PROCEDURE_STEP ──1:N──► CASE_PROCEDURE_STEP_HISTORY   (상태 변
 | case_id | BIGINT | FK | NOT NULL | 1 | 대상 케이스 |
 | procedure_step_id | BIGINT | FK | NOT NULL | 1 | 적용된 절차 |
 | status | ENUM | | NOT NULL, DEFAULT `NOT_STARTED` | `IN_PROGRESS` | `NOT_STARTED` / `IN_PROGRESS` / `COMPLETED` |
+| evidence_refs | JSON | | NULLABLE | `["input:case_history:7:0:12:a3f2d8"]` | 이 진행 상태의 근거 evidence_id 목록. `COMPLETED`인 절차는 근거가 있어야 Agent 스냅샷에 담을 수 있다 |
 | created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-09-01 10:30:00` | |
 | updated_at | DATETIME | | NOT NULL, ON UPDATE CURRENT_TIMESTAMP | `2026-09-10 09:11:00` | |
 
@@ -387,7 +392,6 @@ Agent의 판단·리뷰 결과 기록.
 | verdict | **VARCHAR** | | NOT NULL | `"PASS"` | 판정 결과 — **ENUM 아니라 VARCHAR (ERD 확정)**, 문서상 `PASS`만 규정됨 |
 | decision_type | **VARCHAR** | | NOT NULL | `"ACTION"` | **ENUM 아니라 VARCHAR (ERD 확정)** — `ACTION`(블로커+다음액션 제시) / `NEEDS_MORE_INFO`(추가 질문만 제시) |
 | summary | TEXT | | NULLABLE ⚠️ 추정 | `"원상복구 범위 미확정, 사용자 확인 필요"` | 판단 요약 |
-| questions_for_user | JSON | | NULLABLE | `["확인한 원상복구 범위가 있으면 알려주세요."]` | 행동을 정하기 전 사용자에게 되묻는 질문 목록. 없으면 NULL |
 | human_confirmation_required | BOOLEAN | | NOT NULL, DEFAULT false ⚠️ 추정 | `false` | 사람 확인 필요 여부 |
 | reviewed_at | DATETIME | | NOT NULL ⚠️ 추정 | `2026-09-10 10:05:00` | 리뷰 완료 시각 |
 | created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP ⚠️ 추정 | `2026-09-10 10:00:00` | (updated_at 없음 — ERD 확정) |
