@@ -32,7 +32,7 @@ from app.be.models.procedure_step import CaseProcedureStep
 
 # restoration_status/restoration_scope/demolition_required는 DB에서 "UNKNOWN"이라는 enum 값 자체가
 # "아직 확인 안 됨"을 뜻한다(NULL이 아님). 나머지 필드는 컬럼 값이 NULL이면 미확인이다.
-_UNKNOWN_SENTINEL_FIELDS = {
+UNKNOWN_SENTINEL_FIELDS = {
     CaseFieldKey.RESTORATION_STATUS,
     CaseFieldKey.RESTORATION_SCOPE,
     CaseFieldKey.DEMOLITION_REQUIRED,
@@ -105,7 +105,7 @@ def _build_facts(case: Case, evidences: list[Evidence]) -> list[CaseFact]:
 def _build_fact(case: Case, field_key: CaseFieldKey, evidence_id: str | None) -> CaseFact:
     value_type, _ = CASE_FIELD_SPECS[field_key]
     raw_value = getattr(case, field_key.value)
-    is_unset = raw_value is None or (field_key in _UNKNOWN_SENTINEL_FIELDS and raw_value == "UNKNOWN")
+    is_unset = raw_value is None or (field_key in UNKNOWN_SENTINEL_FIELDS and raw_value == "UNKNOWN")
     if is_unset:
         return CaseFact(
             field_path=field_key, value_type=value_type, value=None, status=FactStatus.UNKNOWN, evidence_refs=[], updated_at=None

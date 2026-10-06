@@ -7,14 +7,28 @@ CONFLICT와 SAFE_FAILURE는 저장하지 않는다(AI팀 스펙: "CONFLICT·SAFE
 
 from sqlmodel import Session
 
-from app.agent.schemas import ReviewedPlanOutcome
+from app.agent.schemas import (
+    FactChangeCandidate,
+    FactOperation,
+    ProcedureProgressChangeCandidate,
+    ReviewedPlanOutcome,
+    SupportMatchUpdateCandidate,
+)
 from app.be.crud import blocker as blocker_crud
+from app.be.crud import case as case_crud
+from app.be.crud import case_field_history as case_field_history_crud
 from app.be.crud import case_history as case_history_crud
 from app.be.crud import evidence as evidence_crud
+from app.be.crud import procedure_step as procedure_step_crud
+from app.be.crud import support_item as support_item_crud
 from app.be.models.blocker import Blocker
+from app.be.models.case_field_history import CaseFieldHistory
 from app.be.models.case_history import CaseHistory
 from app.be.models.evidence import DecisionRecord
 from app.be.models.mixins import KST
+from app.be.models.procedure_step import CaseProcedureStepHistory
+from app.be.models.support_item import SupportMatch
+from app.be.services.case_snapshot import UNKNOWN_SENTINEL_FIELDS
 
 
 def save_reviewed_plan(
@@ -58,6 +72,13 @@ def save_reviewed_plan(
         "NEEDS_MORE_INFO" if decision.decision_type.value == "NEEDS_MORE_INFO" else "DONE"
     )
 
+    # 검수를 통과한 변경 제안을 실제 테이블에 반영한다. AI는 이것들을 "제안"으로만 돌려주기
+    # 때문에, 저장하지 않으면 다음 판단의 스냅샷이 그대로여서 같은 판단이 반복된다.
+    mutations = outcome.review_subject.supervisor_draft.mutations
+    _apply_fact_changes(session, history, mutations.fact_changes)
+    _apply_procedure_progress_changes(session, history, mutations.procedure_progress_changes)
+    _apply_support_match_updates(session, history, mutations.support_match_updates)
+
     record = evidence_crud.create_decision_record(
         session,
         DecisionRecord(
@@ -79,11 +100,8 @@ def save_reviewed_plan(
     )
 
     # TODO: 아직 저장하지 못하는 것들 — AI팀 스펙의 "확인_필요"가 풀려야 한다.
-    #  - evidence_refs가 가리키는 evidence 본문. AI가 실행 중 만든 근거(procedure:reviewed:...)는
-    #    메모리에만 있어서, 지금 저장한 refs로 조회하면 evidence 테이블에 행이 없다.
-    #  - mutations.fact_changes -> case / case_field_history
-    #  - mutations.procedure_progress_changes -> case_procedure_step(_history)
-    #  - mutations.support_match_updates -> support_match
+    #  - evidence_refs가 가리키는 evidence 본문. 절차 문서는 PR #53 이후 BE가 먼저 저장하지만,
+    #    정보분석이 사용자 글에서 떼어내 만든 근거(input:...)는 아직 우리 테이블에 없다.
     #  - 판단에 쓰인 evidence / evidence_lineage
     session.commit()
     session.refresh(record)
@@ -102,3 +120,116 @@ def mark_judgment_failed(session: Session, case_id: int) -> None:
         return
     history.judgment_status = "FAILED"
     session.commit()
+
+
+def _apply_fact_changes(
+    session: Session, history: CaseHistory, fact_changes: list[FactChangeCandidate]
+) -> None:
+    """검수를 통과한 Case 값 변경을 실제로 반영하고, 바뀐 내역을 한 줄씩 남긴다.
+
+    AI는 변경을 "제안"으로만 돌려준다(MutationSet). 저장하지 않으면 사용자가 답을 해도
+    Case 값이 그대로여서, 다음 판단의 스냅샷에도 같은 값이 들어가 AI가 같은 질문을 반복한다.
+    """
+
+    if not fact_changes:
+        return
+
+    case = case_crud.get_case_by_id(session, history.case_id)
+    if case is None:
+        raise ValueError(f"case {history.case_id} not found")
+
+    for change in fact_changes:
+        before = getattr(case, change.field_path.value)
+        setattr(case, change.field_path.value, _column_value(change))
+        case_field_history_crud.create_case_field_history(
+            session,
+            CaseFieldHistory(
+                case_id=case.id,
+                canonical_field=change.field_path.value,
+                before_value=_history_value(before),
+                after_value=_history_value(change.proposed_value),
+                # AI가 보내는 값(INFO_ANALYSIS / CONFIRMED_CONFLICT)을 그대로 쓴다. 우리 식으로
+                # 다시 이름 붙이면 AI가 값을 늘릴 때마다 변환을 따라 고쳐야 한다.
+                source=change.source_type.value,
+                reason=change.reason_summary,
+            ),
+        )
+
+
+def _column_value(change: FactChangeCandidate) -> object | None:
+    """Case 컬럼에 넣을 값. CLEAR(=모름으로 되돌리기)는 필드마다 표현이 다르다."""
+
+    if change.operation != FactOperation.CLEAR:
+        return change.proposed_value
+    # restoration_status/restoration_scope/demolition_required는 "UNKNOWN"이라는 enum 값 자체가
+    # 미확인을 뜻한다(case_snapshot.UNKNOWN_SENTINEL_FIELDS). 나머지는 컬럼을 NULL로 비운다.
+    return "UNKNOWN" if change.field_path in UNKNOWN_SENTINEL_FIELDS else None
+
+
+def _history_value(value: object | None) -> str:
+    """변경 이력에 적을 값. after_value가 NOT NULL이라 둘 다 같은 규칙으로 적는다.
+
+    값이 없을 때 한쪽은 NULL, 한쪽은 "UNKNOWN"으로 적으면 같은 상태가 두 모양으로 남는다.
+    """
+
+    return "UNKNOWN" if value is None else str(value)
+
+
+def _apply_procedure_progress_changes(
+    session: Session, history: CaseHistory, changes: list[ProcedureProgressChangeCandidate]
+) -> None:
+    """절차 진행 상태를 옮기고, 어느 입력 때문에 옮겼는지 함께 남긴다.
+
+    AI는 앞으로 가는 변경만 보낸다(ProcedureProgressChangeCandidate.validate_forward_transition).
+    되돌리는 경로는 여기 없고, 필요해지면 따로 만들어야 한다.
+    """
+
+    for change in changes:
+        step = procedure_step_crud.get_case_procedure_step(
+            session, history.case_id, change.procedure_step.procedure_step_id
+        )
+        if step is None:
+            raise ValueError(
+                f"case {history.case_id} has no procedure step {change.procedure_step.step_code}"
+            )
+        previous = step.status
+        step.status = change.proposed_status.value
+        procedure_step_crud.create_case_procedure_step_history(
+            session,
+            CaseProcedureStepHistory(
+                case_procedure_step_id=step.id,
+                case_history_id=history.id,
+                previous_status=previous,
+                new_status=step.status,
+            ),
+        )
+
+
+def _apply_support_match_updates(
+    session: Session, history: CaseHistory, updates: list[SupportMatchUpdateCandidate]
+) -> None:
+    """지원사업별 자격 판정 결과를 한 줄씩 남긴다.
+
+    같은 Case·지원사업 조합은 한 줄만 두고 판정만 갱신한다. 자격조건·필요서류 같은 서술형
+    정보는 검수 Wiki가 갖는다는 설계라(schema_table.md) 여기 저장하지 않는다.
+    """
+
+    for update in updates:
+        check = update.support_check
+        match = support_item_crud.get_support_match(
+            session, history.case_id, check.support_program.support_program_id
+        )
+        if match is None:
+            match = support_item_crud.create_support_match(
+                session,
+                SupportMatch(
+                    case_id=history.case_id,
+                    support_item_id=check.support_program.support_program_id,
+                    match_status=check.match_status.value,
+                    # TODO: 매칭 시점의 카탈로그 버전. 판단 결과에는 안 실려 와서 비워 둔다
+                    # — 검수된 지원사업 자료가 생기면 그 버전을 넣을 경로를 정해야 한다.
+                    catalog_version=None,
+                ),
+            )
+            continue
+        match.match_status = check.match_status.value
