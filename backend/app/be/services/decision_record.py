@@ -199,6 +199,9 @@ def _apply_procedure_progress_changes(
             )
         previous = step.status
         step.status = change.proposed_status.value
+        # 완료된 절차는 근거 없이 스냅샷에 담을 수 없다(ProcedureProgress.completed_requires_evidence).
+        # 다음 판단에 그대로 넘겨야 해서 어느 근거로 옮겼는지 함께 남긴다.
+        step.evidence_refs = list(change.execution_evidence_refs)
         procedure_step_crud.create_case_procedure_step_history(
             session,
             CaseProcedureStepHistory(

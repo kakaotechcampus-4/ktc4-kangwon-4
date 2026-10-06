@@ -25,6 +25,16 @@ def get_evidence_lineages_by_evidence_ids(session: Session, evidence_ids: list[i
     return session.exec(select(EvidenceLineage).where(EvidenceLineage.evidence_id.in_(evidence_ids))).all()
 
 
+def get_evidence_lineages_by_case_id(session: Session, case_id: int) -> list[EvidenceLineage]:
+    """이 Case의 근거들 사이 파생 관계. evidence.id가 아니라 case_id로 한 번에 읽는다."""
+
+    return session.exec(
+        select(EvidenceLineage)
+        .join(Evidence, Evidence.id == EvidenceLineage.evidence_id)
+        .where(Evidence.case_id == case_id)
+    ).all()
+
+
 def create_evidence_lineage(session: Session, evidence_lineage: EvidenceLineage) -> EvidenceLineage:
     session.add(evidence_lineage)
     session.flush()

@@ -53,6 +53,11 @@ class CaseProcedureStep(TimestampMixin, table=True):
             nullable=False,
         ),
     )
+    evidence_refs: list | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+        description="이 진행 상태의 근거 evidence_id 목록. 완료된 절차는 근거가 있어야 한다",
+    )
 
     case: "Case" = Relationship(back_populates="case_procedure_steps")
     procedure_step: "ProcedureStep" = Relationship(back_populates="case_procedure_steps")

@@ -88,7 +88,7 @@ def build_case_snapshot(session: Session, case_id: int) -> CaseSnapshot:
         case_status=CaseStatus(case.case_status),
         facts=_build_facts(session, case, evidences),
         procedure_progress=[_build_procedure_progress(step) for step in case_procedure_steps],
-        evidence_records=[_build_evidence_record(e) for e in evidences],
+        evidence_records=_build_evidence_records(session, case.id, evidences),
         captured_at=datetime.now(KST),
     )
 
@@ -138,12 +138,26 @@ def _build_procedure_progress(step: CaseProcedureStep) -> ProcedureProgress:
     return ProcedureProgress(
         procedure_step=ProcedureStepRef(procedure_step_id=step.procedure_step_id, step_code=step.procedure_step.step_code),
         status=ProcedureProgressStatus(step.status),
-        evidence_refs=[],
+        evidence_refs=list(step.evidence_refs or []),
         updated_at=step.updated_at.replace(tzinfo=KST),
     )
 
 
-def _build_evidence_record(evidence: Evidence) -> EvidenceRecord:
+def _build_evidence_records(
+    session: Session, case_id: int, evidences: list[Evidence]
+) -> list[EvidenceRecord]:
+    """근거마다 "어느 근거에서 나왔는지"를 채워서 넘긴다(evidence_lineage에 저장해 둔 관계)."""
+
+    evidence_id_by_row_id = {e.id: e.evidence_id for e in evidences}
+    parents: dict[int, list[str]] = {}
+    for link in evidence_crud.get_evidence_lineages_by_case_id(session, case_id):
+        parent = evidence_id_by_row_id.get(link.parent_evidence_id)
+        if parent is not None:
+            parents.setdefault(link.evidence_id, []).append(parent)
+    return [_build_evidence_record(e, parents.get(e.id, [])) for e in evidences]
+
+
+def _build_evidence_record(evidence: Evidence, parent_evidence_refs: list[str]) -> EvidenceRecord:
     return EvidenceRecord(
         evidence_id=evidence.evidence_id,
         source_type=EvidenceSourceType(evidence.source_type),
@@ -151,7 +165,7 @@ def _build_evidence_record(evidence: Evidence) -> EvidenceRecord:
         source_version=evidence.source_version,
         locator=evidence.locator,
         excerpt=evidence.excerpt,
-        parent_evidence_refs=[],
+        parent_evidence_refs=parent_evidence_refs,
         published_at=evidence.published_at.replace(tzinfo=KST) if evidence.published_at else None,
         retrieved_at=evidence.retrieved_at.replace(tzinfo=KST),
         freshness_status=FreshnessStatus(evidence.freshness_status),
