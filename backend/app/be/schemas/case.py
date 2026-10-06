@@ -70,3 +70,4 @@ class CaseGetResponse(BaseModel):
     questions_for_user: list[str] | None
     recovery_action_code: RecoveryActionCode | None
     requested_field_paths: list[str] | None
+    retryable: bool | None

@@ -47,6 +47,7 @@ def get_case(session: Session, member_id: int) -> CaseGetResponse:
             questions_for_user=None,
             recovery_action_code=None,
             requested_field_paths=None,
+            retryable=None,
         )
 
     latest_history = case_crud.get_latest_user_driven_case_history(session, case.id)
@@ -63,6 +64,10 @@ def get_case(session: Session, member_id: int) -> CaseGetResponse:
 
     if latest_history.judgment_status == "FAILED" and latest_history.recovery_action_code is None:
         raise HTTPException(status_code=500, detail="판단 실패(FAILED) 상태인데 recovery_action_code가 없습니다.")
+
+    # TODO: retryable은 저장하는 쪽(decision_record.py의 save_safe_failure 등)이 아직 안 채워주고
+    # 있어서 지금은 가드를 안 건다. 채워주기 시작하면 위 recovery_action_code처럼
+    # "FAILED인데 retryable이 없으면 500" 가드를 추가해야 한다.
 
     next_action = (
         NextActionResponse(
@@ -84,6 +89,7 @@ def get_case(session: Session, member_id: int) -> CaseGetResponse:
         # "문의" 중 무엇을 보여줄지 정한다.
         recovery_action_code=latest_history.recovery_action_code,
         requested_field_paths=latest_history.requested_field_paths,
+        retryable=latest_history.retryable,
     )
 
 
