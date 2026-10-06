@@ -27,8 +27,8 @@ Tool 조회 중 인터넷·DB·파일을 읽지 않는다. 빈 승인 목록을 
 
 근거 키는 이름만 보고 바꾸지 않는다. Agent의 `evidence_refs`는 문자열인
 `Evidence.evidence_id`를 참조한다. 반면 DB 관계 모델 `EvidenceLineage.evidence_id`와
-`parent_evidence_id`는 숫자 PK인 `Evidence.id`를 참조한다. 이 모델과 생성 CRUD는 이미 있지만,
-현재 BE snapshot 변환은 `parent_evidence_refs=[]`로 고정하므로 파생 관계 조회는 아직 연결되지 않았다.
+`parent_evidence_id`는 숫자 PK인 `Evidence.id`를 참조한다. 저장·조회 시 이 구분을 유지해야 하며,
+파생 관계 연결 작업은 [#57](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/issues/57)에서 추적한다.
 
 #53 적재 코드의 `source_version`은 승인 JSON의 `snapshot_version`이며 공식기관 문서의 판본을
 뜻하지 않는다. `source_ref`는 공식 URL이고, `locator`에도 현재 같은 URL을 넣는다. 따라서

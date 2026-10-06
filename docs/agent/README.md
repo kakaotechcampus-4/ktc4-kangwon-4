@@ -65,37 +65,37 @@ outcome = await run_case_planning(
 반환된 `AgentGraphOutput`은 아직 저장되지 않은 결과다. BE의
 [`case_snapshot.py`](../../backend/app/be/services/case_snapshot.py)가 저장된 Case로 snapshot을 만들고,
 [`decision_record.py`](../../backend/app/be/services/decision_record.py)가 검수된 판단을 저장한다.
-Blocker·Next Action·검수 기록을 저장하며, 판단 중 생성한 근거 본문·Case 변경 후보 저장은 아직 남아 있다.
+Blocker·Next Action·검수 기록을 저장한다. BE 연결 작업과 후속 저장 범위는
+[#56](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/issues/56)·
+[#57](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/issues/57)에서 추적한다.
 
-### 비슷한 필드의 역할과 현재 연결
+### 비슷한 필드의 역할
 
 `CaseSnapshot`은 BE가 DB에서 읽은 Case 사실·절차 진행·근거를 Agent에 넘기는 입력 묶음이다.
 DB 전체 복사본이나 별도로 저장한 snapshot 행을 뜻하지 않는다. 기존 `snapshot_id`는 어떤 입력
 묶음인지, `run_id`는 어느 판단 실행인지를 식별한다. 같은 입력으로 다시 실행해도 `run_id`는
-달라지며, 기존 Review 검사는 다른 실행의 결과가 섞이는 것을 거부한다. 이번 PR에서 이 필드나
-검사를 새로 추가한 것은 아니다.
+달라지며, Review 검사는 다른 실행의 결과가 섞이는 것을 거부한다.
 
-| 필드 | 실제 용도·현재 연결 |
+| 필드 | 용도 |
 |---|---|
-| `snapshot_id` / `based_on_snapshot_id` | BE가 조립한 입력 묶음의 ID / 하위 결과가 참조하는 같은 ID. `DecisionRecord.snapshot_id`에 ID는 저장하지만 snapshot 본문은 저장하지 않는다. |
-| `run_id` / `call_id` / `review_call_id` | Graph 실행 / 개별 구성요소 호출 / PASS를 반환한 Review 호출의 ID. `DecisionRecord`에는 `run_id`가 저장되며 `review_call_id` 전용 컬럼은 없다. |
-| `trace_id` | 호출자가 선택적으로 주는 외부 추적 ID. `InvocationMeta`에는 전달하지만 현재 BE 첫 판단은 지정하지 않으며 `TraceEvent`에도 연결되지 않는다. 저장하려면 기존 `save_reviewed_plan(trace_id=...)`에 별도로 전달한다. |
-| `input_event_id` / `client_event_id` | 현재 BE는 저장된 이력에서 `case_history:{id}`를 만들어 전자에 넣고, 후자는 `None`으로 보낸다. `client_event_id`를 받는 것만으로 중복 요청 방지가 구현되지는 않는다. |
-| `CaseFact.updated_at` / `ProcedureProgress.updated_at` | 개별 사실의 변경 시각 / Case별 절차 진행 행의 변경 시각. 현재 BE는 사실의 시각을 `None`으로, 절차 시각은 `CaseProcedureStep.updated_at`으로 채운다. |
+| `snapshot_id` / `based_on_snapshot_id` | BE가 조립한 입력 묶음의 ID / 하위 결과가 참조하는 같은 ID. |
+| `run_id` / `call_id` / `review_call_id` | Graph 실행 / 개별 구성요소 호출 / PASS를 반환한 Review 호출의 ID. |
+| `trace_id` | 호출자가 선택적으로 주는 외부 추적 ID. `InvocationMeta`로 전달하며, 판단 저장 시에는 `save_reviewed_plan(trace_id=...)`에도 별도로 전달한다. |
+| `input_event_id` / `client_event_id` | 서버에 저장된 입력 이벤트의 ID / 클라이언트가 부여한 이벤트 ID. `client_event_id` 전달만으로 중복 요청 방지가 보장되지는 않는다. |
+| `CaseFact.updated_at` / `ProcedureProgress.updated_at` | 개별 사실의 변경 시각 / Case별 절차 진행 행의 변경 시각. 사실의 시각을 모르면 `None`을 유지하며 Case 행의 변경 시각으로 대신하지 않는다. |
 | `submitted_at` / `captured_at` / `confirmed_at` | 입력 이력 시각 / snapshot 조립 시각 / 사용자 충돌 확인 시각. 서로 대신 채우는 값이 아니다. |
 
-Trigger와 그 안의 `RedactedInput`에는 같은 의미의 `submitted_at`이 있다. 현재 입력 조립 함수는
-같은 값을 넣지만 DTO는 두 입력 ID의 일치만 검사하며, 두 시각의 일치까지 검사하지는 않는다.
-검수 기록도 출력 전체가 아니다. `DecisionRecord`는 실행·snapshot·검수 대상 ID, digest·판정·검수 시각
-등을 선택해 저장하며 `ReviewSubject` 본문이나 하위 호출 결과 전체를 저장하지 않는다.
-현재 [`case_snapshot.py`](../../backend/app/be/services/case_snapshot.py)와
-[`decision_record.py`](../../backend/app/be/services/decision_record.py)의 연결 상태를 기준으로 한 설명이다.
+Trigger와 그 안의 `RedactedInput`에는 같은 의미의 `submitted_at`이 있으며,
+`build_planning_input`은 저장된 입력 시각을 두 곳에 함께 넣는다.
+입력 검증 조건은 [`schemas.py`](../../backend/app/agent/schemas.py), DB 값의 변환과 저장 범위는
+[`case_snapshot.py`](../../backend/app/be/services/case_snapshot.py)·
+[`decision_record.py`](../../backend/app/be/services/decision_record.py)를 따른다.
 
 [`app.common.agent_data`](../../backend/app/common/agent_data.py)의 `build_known_procedure_steps`는
 BE가 조회한 `ProcedureStep`·`StepDependency`·`StepEligibility` 행을 변환한다.
 시간대 없는 DB 시각에는 호출자가 전달한 `db_timezone`을 적용한다. 공식 절차 자료와 지원 자료는
 각각 `load_reviewed_procedure_store`·`load_reviewed_support_catalog`로 검증한다.
-현재 BE 모델에 없는 검수·조건·근거 필드를 만들어 채우지는 않는다.
+BE 모델에 없는 검수·조건·근거 필드를 만들어 채우지는 않는다.
 
 `procedure_bindings`의 키는 AI의 기존 절차 의미 코드, 값은 BE의 실제 `ProcedureStepRef`다.
 예를 들어 `"FILE_FOOD_SERVICE_CLOSURE"`에 BE에서 조회한 식품영업 폐업 절차의 ID·코드를 연결한다.
@@ -120,11 +120,9 @@ DB 근거가 없으면 JSON 본문으로 대신하지 않고 빈 결과를 반�
 공식 안내문을 수집·발췌한 뒤 개발자가 내용을 검수·승인한 자료를 사용한다.
 승인된 자료는 JSON으로 관리하며, 적재 함수를 통해 DB에 저장한다.
 
-아래 적재·조회 동작에는 [코드 PR #53](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/53)과
-[검수 데이터 PR #54](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/54)의
-`app/common/reviewed-procedures.ko-KR.json`이 함께 필요하다.
+적재·조회에 사용하는 승인 자료는
+[`reviewed-procedures.ko-KR.json`](../../backend/app/common/reviewed-procedures.ko-KR.json)에 있다.
 빈 절차 검수 목록으로 runtime을 만들 때 JSON이 없거나 잘못됐으면 생성 단계에서 실패한다.
-따라서 #54를 먼저 반영하거나 #53과 같은 배포에 포함한다.
 기존 Case에 자료를 넣을 때는 backend 디렉토리에서 다음 명령을 실행한다.
 `123`은 실제 존재하는 Case ID로 바꾼다.
 
@@ -142,41 +140,33 @@ BE의 기존 `get_evidence_by_case_id()` → `build_case_snapshot()` 조회 결�
 전달한다. Tool은 승인 목록과 출처·버전·해시·발췌가 일치하는 DB 근거만 사용하며,
 DB의 `evidence_id`를 그대로 반환한다. Agent는 전달받은 자료를 다시 DB에서 조회하지 않는다.
 
-현재 새 Case 생성 경로는 이 적재 함수를 호출하지 않는다. 자동 공급에는 BE에서
-Case 생성 트랜잭션 안에 적재 함수를 호출하고, 첫 snapshot 생성 전에 저장을 마쳐야 한다.
-`TEMP_*` 절차와 AI 의미 코드의 대응도 아직 필요하므로 수동 적재 성공을 서비스 전체 연결로 보지 않는다.
+판단에 공식 근거를 공급하려면 BE가 자료 적재를 마친 뒤 snapshot을 조립하고,
+실제 절차의 대응표와 함께 Agent에 전달해야 한다. 적재 함수의 commit·rollback은 호출자가 맡는다.
 
 자료가 있지만 절차 대응이 0개이고 실행 가능한 행동 후보도 없으면 Supervisor는
 `AGENT_PROCEDURE_BINDINGS_MISSING`으로 종료한다. 복구 안내는 `CONTACT_SUPPORT`이며,
 사용자에게 입력 필드를 요구하거나 Supervisor·Review LLM 호출을 반복하지 않는다.
 실제 사용자 정보 부족은 Info가 판단을 막는다고 표시한 미확인 조건 하나를 질문한다.
 
-자료 공급에 남은 BE 요청은 실제 절차 ID·코드와 Case 연결 확정, 신규 Case 자동 자료 적재다.
-전달된 대응표를 적용하는 Agent 코드는 구현했으며, 실제 운영 대응값은 아직 미확정이다.
-요청 이유·기존 함수와 모델·확인 방법은 [BE요청사항](https://app.notion.com/p/3ef3c6661b7d80c9a697d4f39dce1841)에 정리한다.
-TODO: 확정된 실제 대응값을 전달하고,
-신규 Case 생성 → 실제 LLM 검수 → 판단 저장 → 새 세션 조회를 확인한다.
+실제 절차·Case 연결, 자료 자동 적재의 진행 상황과 BE 요청·검증 기준은
+[#56](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/issues/56)에서 관리한다.
 
 권한을 확인한 Case snapshot 제공, 검수된 변경 후보의 저장·재조회는 호출자의 책임이다.
 `CONFLICT_CONFIRMED`에는 서버가 보관한 원래 충돌 후보를 전달하며, 클라이언트가 보내온
 임의 후보를 그대로 신뢰하지 않는다. Agent의 `REVIEWED_PLAN`은 DB 저장 완료를 뜻하지 않는다.
 
-### 충돌 확인의 구현 상태
+### 충돌 확인
 
 [PM의 PR #48 결정](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/48#issuecomment-5945630407)은
 `CONFLICT`일 때 확인 화면을 두고, `UPDATED`는 다시 묻지 않는 것이다.
-Agent에는 확정값과 다른 새 입력을 `CONFLICT`로 반환하고, 확인 입력 뒤 재계획하는 경로가 있다.
-현재 BE의 `first_judgment.py`는 `CONFLICT`도 `FAILED`로 처리하므로 사용자 확인 연결은 남아 있다.
-`case_snapshot.py`는 매번 새 UUID를 발급하며, 충돌 후보·snapshot의 보관 및 재사용 방식은
-BE·AI가 함께 확정해야 한다. 기존 Agent는 원래 후보의 snapshot ID와 대상 필드의 현재 상태·값을
-검사한다. 이 검사 조건을 설명한 것이며, BE 보관 정책이나 서비스 연결을 구현한 것은 아니다.
+Agent는 확정값과 다른 새 입력을 `CONFLICT`로 반환하고, 확인 입력 뒤 재계획한다.
+확인 시 원래 후보의 snapshot ID와 대상 필드의 현재 상태·값을 검사하며,
+사용자가 선택하기 전에는 충돌하는 값을 Case에 반영하지 않는다.
 
-DB에는 이미 `ConflictReference`의 참조·기존값·제안값·digest·만료/사용 시각과
-`CaseFieldHistory`의 필드별 변경 전후 값·생성 시각이 있다. 현재 판단 서비스는 이 모델들의
-저장·조회 경로를 연결하지 않았다. `conflict_ref`는 후보를 찾는 참조, `conflict_digest`는 내용
-변경을 확인하는 해시이며 서로 대체하지 않는다. 기존 모델만으로 Agent의 원래 충돌 후보 전체를
-복원하는 코드도 없으므로, 기존 구조를 활용할 보관·복원 방식을 먼저 합의해야 한다.
-`CaseFieldHistory.created_at`을 사실의 변경 시각으로 사용할 수 있는지도 이 연결에서 확인한다.
+`conflict_ref`는 후보를 찾는 참조, `conflict_digest`는 내용 변경을 확인하는 해시이며
+서로 대체하지 않는다. 호출자는 소유권·만료·중복 사용을 검증한 뒤 서버에서 복원한 원래 후보를
+`build_conflict_input()`에 전달해야 한다. 후보 보관·복원과 사용자 확인 연결, 실패 상태 구분의 진행 상황은
+[#57](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/issues/57)에서 관리한다.
 
 ### DB 칸에 맞추기
 
@@ -282,7 +272,7 @@ AI 코드 `a7c78d8`, BE 브랜치 `d5e050a` 기준. 카카오 로그인·지원�
 
 위 2026-09-29 기록의 기준 `a7c78d8`은 **이 브랜치 이력에 없다.** 브랜치를 둘로 나눠 다시 쓰는
 과정에서 빠졌고 이후 `app/agent`·`app/common`에서 9파일이 바뀌었다. 그래서 위 표는 이 브랜치
-코드의 증거가 아니며, 아래가 현재 코드 기준 측정이다.
+코드의 증거가 아니며, 아래는 `392294c` 기준 측정이다.
 
 합성 Case snapshot과 검수된 절차·지원 스냅샷을 `run_case_planning`에 전달해 실제 LLM 호출.
 세 역할 모두 `gpt-5.6-sol`, 판단 재사용 꺼짐. 11회 실행, 제공자 호출 35회.
@@ -312,12 +302,7 @@ Supervisor·Review는 5~8초다. 당시 한도 `AGENT_LLM_TIMEOUT_SECONDS=150`·
 성공 호출 최대치(102초)와 150초가 너무 가까워서다. 코드 상한은 600초라 둘 다 유효하다.
 세 번 모두 503이면 여전히 `SAFE_FAILURE`로 끝나는데, 그건 제공자 장애라 맞는 동작이다.
 
-위 검증 당시에는 서버 연결과 절차 행 생성이 미완료였다. BE는 PR #47에서
-`POST /cases` 뒤 백그라운드 최초 판단과 저장, `GET /cases`의 판단 결과 조회가 연결되어 있다.
-BE의 [`first_judgment.py`](../../backend/app/be/services/first_judgment.py)는
-`run_case_planning` 대신 `AgentRuntime.run_planning`을 직접 호출한다.
-[`case.py`](../../backend/app/be/services/case.py)는 임시 `TEMP_*` 절차 3개를 생성한다.
-다만 `TEMP_*`는 AI 절차 의미 코드와 연결되지 않고, BE는 절차 검수 목록에 빈 store를 넘긴다.
-#53의 Agent는 이 경우 동봉 JSON을 검수 메타정보로 읽지만, 새 Case에 공식 근거를 저장하는
-호출은 아직 없어 자동으로 공식 문서가 공급되지는 않는다.
-코드 확인 결과이며, 서버 전체 실행 검증은 아니다.
+위 검증은 당시 Agent 직접 호출의 결과이며, 서버 전체 연결의 통과 증거는 아니다.
+이후 BE 연결 작업과 서비스 전체 검증 결과는
+[#56](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/issues/56)·
+[#57](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/issues/57)에서 추적한다.
