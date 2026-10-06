@@ -7,7 +7,10 @@ CONFLICT와 SAFE_FAILURE는 저장하지 않는다(AI팀 스펙: "CONFLICT·SAFE
 
 from sqlmodel import Session
 
+from datetime import datetime
+
 from app.agent.schemas import (
+    EvidenceRecord,
     FactChangeCandidate,
     FactOperation,
     ProcedureProgressChangeCandidate,
@@ -24,7 +27,7 @@ from app.be.crud import support_item as support_item_crud
 from app.be.models.blocker import Blocker
 from app.be.models.case_field_history import CaseFieldHistory
 from app.be.models.case_history import CaseHistory
-from app.be.models.evidence import DecisionRecord
+from app.be.models.evidence import DecisionRecord, Evidence, EvidenceLineage
 from app.be.models.mixins import KST
 from app.be.models.procedure_step import CaseProcedureStepHistory
 from app.be.models.support_item import SupportMatch
@@ -74,6 +77,10 @@ def save_reviewed_plan(
 
     # 검수를 통과한 변경 제안을 실제 테이블에 반영한다. AI는 이것들을 "제안"으로만 돌려주기
     # 때문에, 저장하지 않으면 다음 판단의 스냅샷이 그대로여서 같은 판단이 반복된다.
+    # 판단에 인용된 근거를 먼저 저장한다. AI가 돌려주는 evidence_refs는 번호뿐이라,
+    # 본문을 남기지 않으면 나중에 그 번호로 조회해도 우리 테이블에 행이 없다.
+    _save_evidence_records(session, history, outcome.review_subject.source_results)
+
     mutations = outcome.review_subject.supervisor_draft.mutations
     _apply_fact_changes(session, history, mutations.fact_changes)
     _apply_procedure_progress_changes(session, history, mutations.procedure_progress_changes)
@@ -99,10 +106,8 @@ def save_reviewed_plan(
         ),
     )
 
-    # TODO: 아직 저장하지 못하는 것들 — AI팀 스펙의 "확인_필요"가 풀려야 한다.
-    #  - evidence_refs가 가리키는 evidence 본문. 절차 문서는 PR #53 이후 BE가 먼저 저장하지만,
-    #    정보분석이 사용자 글에서 떼어내 만든 근거(input:...)는 아직 우리 테이블에 없다.
-    #  - 판단에 쓰인 evidence / evidence_lineage
+    # TODO: grounded_claims(확인이 필요한 문장 표시)와 snapshot/known_procedure_steps(판단 당시
+    # 입력)는 아직 담을 화면·테이블이 없어 저장하지 않는다.
     session.commit()
     session.refresh(record)
     return record
@@ -233,3 +238,66 @@ def _apply_support_match_updates(
             )
             continue
         match.match_status = check.match_status.value
+
+
+def _save_evidence_records(session: Session, history: CaseHistory, source_results: list) -> None:
+    """판단에 쓰인 근거 본문을 Case의 evidence로 남긴다.
+
+    절차 문서처럼 BE가 미리 넣어둔 근거는 그대로 다시 오므로 건너뛰고, 정보분석이 사용자
+    글에서 떼어내 만든 근거(input:...)처럼 새로 생긴 것만 저장한다.
+    """
+
+    records: dict[str, EvidenceRecord] = {}
+    for source in source_results:
+        for record in getattr(source.output, "evidence_records", []):
+            records.setdefault(record.evidence_id, record)
+    if not records:
+        return
+
+    rows_by_evidence_id = {
+        row.evidence_id: row for row in evidence_crud.get_evidence_by_case_id(session, history.case_id)
+    }
+    for evidence_id, record in records.items():
+        if evidence_id in rows_by_evidence_id:
+            continue
+        rows_by_evidence_id[evidence_id] = evidence_crud.create_evidence(
+            session,
+            Evidence(
+                evidence_id=record.evidence_id,
+                case_id=history.case_id,
+                source_type=record.source_type.value,
+                source_ref=record.source_ref,
+                source_version=record.source_version,
+                locator=record.locator,
+                excerpt=record.excerpt,
+                published_at=_db_time(record.published_at),
+                retrieved_at=_db_time(record.retrieved_at),
+                freshness_status=record.freshness_status.value,
+                content_hash=record.content_hash,
+            ),
+        )
+
+    # 어느 근거에서 파생됐는지는 별도 접합 테이블에 남긴다. 같은 짝이 두 번 들어가면 UNIQUE에
+    # 걸리므로, 이미 저장된 관계를 먼저 읽어 두고 없는 것만 만든다(재판단 때 같은 근거가 다시 온다).
+    linked = {
+        (row.evidence_id, row.parent_evidence_id)
+        for row in evidence_crud.get_evidence_lineages_by_evidence_ids(
+            session, [row.id for row in rows_by_evidence_id.values()]
+        )
+    }
+    for evidence_id, record in records.items():
+        child = rows_by_evidence_id[evidence_id]
+        for parent_ref in record.parent_evidence_refs:
+            parent = rows_by_evidence_id.get(parent_ref)
+            if parent is None or (child.id, parent.id) in linked:
+                continue
+            linked.add((child.id, parent.id))
+            evidence_crud.create_evidence_lineage(
+                session, EvidenceLineage(evidence_id=child.id, parent_evidence_id=parent.id)
+            )
+
+
+def _db_time(value: datetime | None) -> datetime | None:
+    """DB는 timezone 없는 한국 시각을 쓰고, MySQL DATETIME은 초까지만 담는다."""
+
+    return None if value is None else value.astimezone(KST).replace(tzinfo=None, microsecond=0)
