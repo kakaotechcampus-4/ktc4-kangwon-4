@@ -1380,7 +1380,7 @@ class ProcedureFinding(AgentSchema):
 
 
 class Blocker(AgentSchema):
-    description: Varchar500  # BLOCKER.description
+    description: NonEmptyStr  # BLOCKER.description is TEXT.
     evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
 
 
@@ -1418,7 +1418,7 @@ ActionCode: TypeAlias = Literal[
 class NextAction(AgentSchema):
     action_code: ActionCode
     sequence: PositiveStrictInt
-    title: Varchar500  # CASE_HISTORY.next_action
+    title: NonEmptyStr  # CASE_HISTORY.next_action is TEXT.
     reason: NonEmptyStr
     questions_to_ask: list[NonEmptyStr]
     target: NextActionTarget

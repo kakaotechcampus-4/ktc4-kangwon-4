@@ -31,7 +31,7 @@ ResponseModelT = TypeVar("ResponseModelT", bound=BaseModel)
 SleepCallable = Callable[[float], Awaitable[None]]
 UsageSink = Callable[["LLMUsage"], None]
 
-_DEFAULT_TIMEOUT_SECONDS = 45.0
+_DEFAULT_TIMEOUT_SECONDS = 180.0
 _DEFAULT_MAX_RETRIES = 2
 _DEFAULT_RETRY_BACKOFF_SECONDS = 0.25
 _DEFAULT_MAX_RESPONSE_BYTES = 1_000_000

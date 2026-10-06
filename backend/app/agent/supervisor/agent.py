@@ -307,11 +307,6 @@ class SupervisorAgent:
             "contract": {
                 "action_count": 1,
                 "blocker_count": {"ACTION": [1], "NEEDS_MORE_INFO": [1]},
-                # Both land in VARCHAR(500) columns (BLOCKER.description,
-                # CASE_HISTORY.next_action). Over-length fails validation and
-                # burns a retry, so the limit is stated up front.
-                "blocker_description_max_characters": 500,
-                "next_action_title_max_characters": 500,
                 "action_questions_for_user": [],
                 "needs_more_info_requires_human": True,
                 "eligibility_assertion_level": "NEEDS_CONFIRMATION",
