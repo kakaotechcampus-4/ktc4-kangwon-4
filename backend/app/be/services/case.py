@@ -103,11 +103,20 @@ def _create_case_creation_evidence(session: Session, case: Case, case_request: C
 
 def _fill_temp_case_procedure_steps(session: Session, case_id: int) -> None:
     # TODO: 실제 폐업절차 마스터 데이터/조건(step_eligibility)로 교체 필요. 폐업절차 DB 구조가 아직
-    # 확정되지 않아, 지금은 case_procedure_step 채우는 흐름 검증용 임시 더미 절차 3개만 사용한다.
+    # 확정되지 않아, 지금은 case_procedure_step 채우는 흐름 검증용 임시 더미 절차 4개만 사용한다.
+    #
+    # step_code를 AI가 아는 논리 코드와 똑같이 둔다. 이름이 정확히 같을 때만 절차 대응표
+    # (procedure_bindings)가 자동으로 맺어지고(app/agent/action_catalog.py의
+    # resolve_procedure_bindings), 대응표가 비면 공식 문서를 찾아도 Supervisor가
+    # AGENT_PROCEDURE_BINDINGS_MISSING으로 판단을 멈춘다.
+    #
+    # TODO: 실제 폐업절차는 이보다 많고 이름도 다를 것이다. 그때는 이 4개를 어느 실제 절차에
+    # 맺을지 정해 procedure_bindings를 직접 넘겨야 한다(first_judgment.py).
     temp_procedure_steps = [
-        ("TEMP_BUSINESS_CLOSURE_REPORT", "사업자 폐업 신고"),
-        ("TEMP_TAX_CLOSURE_REPORT", "세무서 폐업 신고"),
-        ("TEMP_FOUR_INSURANCE_CANCEL", "4대보험 상실 신고"),
+        ("CONFIRM_RESTORATION_SCOPE", "원상복구 범위 확인"),
+        ("FILE_TAX_BUSINESS_CLOSURE", "세무서 폐업 신고"),
+        ("FILE_FOOD_SERVICE_CLOSURE", "영업신고증 폐업 신고"),
+        ("REPORT_WORKPLACE_INSURANCE_CLOSURE", "4대보험 상실 신고"),
     ]
     for step_code, step_name in temp_procedure_steps:
         step = procedure_step_crud.get_procedure_step_by_code(session, step_code)

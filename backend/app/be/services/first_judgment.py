@@ -63,10 +63,12 @@ async def run_first_judgment(
     outcome = await run_case_planning(
         graph_input,
         known_procedure_steps=agent_runtime_service.build_known_procedure_steps(session),
-        # TODO: AI가 아는 절차(원상복구 범위 확인/세무서 폐업 신고/영업신고증 폐업 신고/4대보험
-        # 상실 신고)와 우리 DB의 절차를 짝지어야 한다. 지금은 임시 더미 절차뿐이라 비워 둔다
-        # — 비면 AI가 절차와 연결된 다음 행동을 내놓지 못한다.
-        procedure_bindings={},
+        # None은 "절차 목록의 step_code가 AI 논리 코드와 같으면 알아서 맺어라"는 뜻이고,
+        # 빈 표({})는 "맺을 게 없다"는 뜻이라 서로 다르다(action_catalog.resolve_procedure_bindings).
+        # 지금은 임시 절차의 이름을 논리 코드와 같게 둬서 자동으로 맺는다(case.py).
+        # TODO: 실제 폐업절차 데이터가 들어오면 이름이 달라진다. 그때는 어느 절차에 맺을지
+        # 정해 여기에 직접 넘겨야 한다.
+        procedure_bindings=None,
         procedure_store=reviewed_procedure_service.load_reviewed_procedures(),
         support_catalog=agent_runtime_service.empty_support_catalog(),
     )
