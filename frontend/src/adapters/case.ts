@@ -148,6 +148,13 @@ function toJudgmentView(envelope: CasesEnvelope): JudgmentView {
     case 'FAILED':
       return { status: 'FAILED' }
 
+    // 검증할 것이 없다. 어긋난 항목은 응답에 안 실려 온다(#66).
+    //
+    // `blocker` 가 딸려 와도 보지 않는다 — 그건 충돌이 나기 전의 판단이라, 지금 할 일로
+    // 그리면 사장님이 이미 어긋난 전제 위에서 움직이게 된다. `PENDING`·`FAILED` 와 같은 규칙이다
+    case 'CONFLICT':
+      return { status: 'CONFLICT' }
+
     case 'DONE': {
       // 막힌 것과 할 일 중 하나라도 받을 수 없으면 그릴 것이 없다. 칸을 빠뜨린 응답·
       // 빈 문자열·모양이 다른 응답이 모두 여기 걸린다 — 통과시키면 제목 없는 할 일 카드가

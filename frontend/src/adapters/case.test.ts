@@ -246,6 +246,30 @@ describe('toCurrentCaseView', () => {
     })
   })
 
+  it('기록과 어긋났으면 확인이 필요한 것으로 둔다', () => {
+    const view = toCurrentCaseView(envelopeOf({ judgment_status: 'CONFLICT' }), SERVER_CASE)
+
+    expect(view.judgment).toEqual({ status: 'CONFLICT' })
+  })
+
+  /**
+   * 그 할 일은 **어긋나기 전의 판단**이다. 지금 할 일로 그리면 사장님이 이미 틀어진
+   * 전제 위에서 움직이고, 그 결과를 또 보고한다. `PENDING`·`FAILED` 에서 이전 판단을
+   * 안 그리는 것과 같은 이유다.
+   */
+  it('확인이 필요한데 할 일이 딸려 와도 그것을 그리지 않는다', () => {
+    const view = toCurrentCaseView(
+      envelopeOf({
+        judgment_status: 'CONFLICT',
+        blocker: '원상복구 범위가 아직 확인되지 않았습니다.',
+        next_action: NEXT_ACTION,
+      }),
+      SERVER_CASE,
+    )
+
+    expect(view.judgment).toEqual({ status: 'CONFLICT' })
+  })
+
   /**
    * 상태와 내용이 어긋난 응답을 **다른 상태로 바꿔 보여주지 않는다.**
    *
@@ -335,10 +359,14 @@ describe('toCurrentCaseView', () => {
       expect(view.judgment.status).toBe('UNRECOGNIZED')
     })
 
-    /** BE 가 `CONFLICT` 추가를 건의해 둔 상태다. 그쪽이 먼저 배포되면 바로 겪는다 */
+    /**
+     * `CONFLICT` 가 늘어난 것처럼(#66) 또 늘어날 수 있다. AI 는 이미 `SAFE_FAILURE` 를
+     * 따로 내고 있고 BE 가 그것을 `FAILED` 로 접어 보내는 중이라, 접는 것을 그만두면
+     * 이 값이 그대로 온다.
+     */
     it('우리가 모르는 판단 상태도 알 수 없는 것으로 둔다', () => {
       const view = toCurrentCaseView(
-        envelopeOf({ judgment_status: 'CONFLICT' as never }),
+        envelopeOf({ judgment_status: 'SAFE_FAILURE' as never }),
         SERVER_CASE,
       )
 

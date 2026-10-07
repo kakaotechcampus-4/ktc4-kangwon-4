@@ -180,12 +180,38 @@ describe('CurrentCasePage', () => {
     })
 
     /**
-     * 서버가 상태를 늘리면 바로 겪는다 — BE 가 `CONFLICT` 추가를 건의해 둔 상태다.
+     * 사장님이 답해야 끝나는 상태다. 전에는 모르는 값이라 "불러오지 못했어요" 가 떠서,
+     * 할 일이 있는 사람이 기다리라는 말을 듣고 있었다(#66).
+     */
+    it('확인이 필요하면 무엇을 해야 하는지 알린다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      mockCase(envelope({ judgment_status: 'CONFLICT' }))
+      renderAt('/case')
+
+      expect(await screen.findByText('확인이 필요한 내용이 있어요.')).toBeInTheDocument()
+    })
+
+    /**
+     * 어긋난 목록을 받아올 API 가 아직 없다. 보내봐야 `/confirm` 이 빈손으로 열려
+     * `/` 로 튕긴다 — 눌리는데 아무 데도 못 가는 버튼이 없는 버튼보다 나쁘다.
+     */
+    it('확인하러 가는 길은 아직 내보내지 않는다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      mockCase(envelope({ judgment_status: 'CONFLICT' }))
+      renderAt('/case')
+
+      await screen.findByText('확인이 필요한 내용이 있어요.')
+      expect(screen.queryByRole('link', { name: /확인/ })).not.toBeInTheDocument()
+    })
+
+    /**
+     * 서버가 상태를 늘리면 바로 겪는다 — `CONFLICT` 가 그렇게 늘었고, AI 가 따로 내는
+     * `SAFE_FAILURE` 도 BE 가 접기를 그만두면 그대로 온다.
      * 모르는 값을 "정보 부족"으로 바꿔 보여주면, 서버가 틀린 것을 사장님 탓으로 읽는다.
      */
     it('모르는 판단 상태는 정보 부족으로 바꿔 말하지 않는다', async () => {
       saveTokens('access-1', 'refresh-1')
-      mockCase(envelope({ judgment_status: 'CONFLICT' as never }))
+      mockCase(envelope({ judgment_status: 'SAFE_FAILURE' as never }))
       renderAt('/case')
 
       expect(await screen.findByText('판단 내용을 불러오지 못했어요.')).toBeInTheDocument()
@@ -195,7 +221,8 @@ describe('CurrentCasePage', () => {
     it.each([
       ['PENDING', envelope({ judgment_status: 'PENDING' })],
       ['FAILED', envelope({ judgment_status: 'FAILED' })],
-      ['모르는 상태', envelope({ judgment_status: 'CONFLICT' as never })],
+      ['CONFLICT', envelope({ judgment_status: 'CONFLICT' })],
+      ['모르는 상태', envelope({ judgment_status: 'SAFE_FAILURE' as never })],
       [
         'NEEDS_MORE_INFO',
         envelope({ judgment_status: 'NEEDS_MORE_INFO', questions_for_user: ['철거까지 하시나요?'] }),
@@ -251,6 +278,13 @@ describe('CurrentCasePage', () => {
       renderAt('/case?mock=pending')
 
       expect(await screen.findByText('다음 할 일을 정하고 있어요.')).toBeInTheDocument()
+    })
+
+    it('judgment-conflict 면 확인이 필요한 화면을 보여준다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      renderAt('/case?mock=judgment-conflict')
+
+      expect(await screen.findByText('확인이 필요한 내용이 있어요.')).toBeInTheDocument()
     })
 
     it('more-info 면 질문 화면을 보여준다', async () => {

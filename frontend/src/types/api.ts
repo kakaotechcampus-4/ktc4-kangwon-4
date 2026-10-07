@@ -86,13 +86,17 @@ export interface CaseCreateResponse extends CaseFields {
  *
  *   PENDING          판단 중 — 잠시 후 다시 물어봐야 한다
  *   DONE             판단 완료
- *   NEEDS_MORE_INFO  물어볼 질문이 따로 온다
+ *   NEEDS_MORE_INFO  서비스가 사장님에게 되물을 질문이 따로 온다
+ *   CONFLICT         말한 내용이 기록과 어긋나 어느 쪽이 맞는지 여쭤봐야 한다
  *   FAILED           판단 실패 — 다시 시도 안내
  *
- * BE 가 `CONFLICT` 추가를 건의했지만 아직 확정되지 않아 넣지 않는다. 모르는 값이 오면
- * 어댑터가 가려내고 화면은 "판단 내용을 불러오지 못했어요" 로 간다 (`CLAUDE.md` 규칙 9).
+ * `CONFLICT` 는 사장님이 답해야 끝난다. 나머지 넷과 달리 **기다린다고 저절로 바뀌지
+ * 않아서**, 화면이 다시 물어볼 이유도 없다(#66).
+ *
+ * 다섯이 다가 아닐 수 있다. 모르는 값이 오면 어댑터가 가려내고 화면은 "판단 내용을
+ * 불러오지 못했어요" 로 간다 — 다른 상태로 바꿔 보여주지 않는다 (`CLAUDE.md` 규칙 9).
  */
-export type JudgmentStatus = 'PENDING' | 'DONE' | 'NEEDS_MORE_INFO' | 'FAILED'
+export type JudgmentStatus = 'PENDING' | 'DONE' | 'NEEDS_MORE_INFO' | 'CONFLICT' | 'FAILED'
 
 /**
  * 다음 할 일.
