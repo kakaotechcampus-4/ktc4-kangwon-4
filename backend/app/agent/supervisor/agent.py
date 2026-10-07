@@ -73,7 +73,6 @@ from app.agent.schemas import (
     SupportAnalysisResult,
     SupportCheck,
     SupportMatchStatus,
-    SupportMatchUpdateCandidate,
 )
 
 
@@ -336,7 +335,7 @@ class SupervisorAgent:
                 ],
                 "claim_text_and_path_are_runtime_injected": True,
                 "support_eligibility_is_final": False,
-                "action_target_kinds": ["PROCEDURE", "SUPPORT_PROGRAM"],
+                "action_target_kinds": ["PROCEDURE"],
                 "action_requires_exactly_one_target": True,
                 "allowed_actions": action_candidates,
                 "blocker_candidates": blocker_candidates,
@@ -406,8 +405,7 @@ class SupervisorAgent:
                             "no next_action, requires_human=true, and at least one question. "
                             "Every ACTION must select exactly one canonical target. Use "
                             "target_kind=PROCEDURE with a procedure_step from an Info finding, "
-                            "or target_kind=SUPPORT_PROGRAM with a support_program from a "
-                            "Support check. Never mix both kinds in one action. "
+                            "and select the first ranked blocker candidate and its first action. "
                             "Every ELIGIBILITY claim must use NEEDS_CONFIRMATION. Select only "
                             "short evidence_ref handles listed in contract.allowed_evidence_refs; never "
                             "use a call, candidate, finding, document, or question UUID as evidence. "
@@ -441,10 +439,12 @@ class SupervisorAgent:
                 # the provider is not allowed to name anything outside it.
                 enum_constraints={
                     "evidence_refs": sorted(evidence_by_alias),
-                    "action_code": [item["action_code"] for item in action_candidates],
+                    "action_code": [
+                        blocker_candidates[0]["actions"][0]["action_code"]
+                    ] if blocker_candidates else [],
                     "blocker_candidate_id": [
-                        item["candidate_id"] for item in blocker_candidates
-                    ],
+                        blocker_candidates[0]["candidate_id"]
+                    ] if blocker_candidates else [],
                 },
             )
             try:
@@ -516,12 +516,17 @@ class SupervisorAgent:
             raise SupervisorGuardrailError(
                 "Supervisor must select an available blocker candidate"
             )
-        fields = candidate_decision_fields(
+        # Reject invented references before normalizing a valid model choice.
+        candidate_decision_fields(
             candidate,
             output.next_action.action_code,
             output.next_action.target.model_dump(mode="json"),
         )
-        action = fields["next_action"]
+        candidate = candidates[0]
+        action = candidate["actions"][0]
+        fields = candidate_decision_fields(
+            candidate, action["action_code"], action["target"]
+        )
         base = "/supervisor_draft/decision"
         texts = {
             f"{base}/selection_summary": fields["selection_summary"],
@@ -969,7 +974,6 @@ class SupervisorAgent:
         }
         fact_changes: list[FactChangeCandidate] = list(fact_overlays or [])
         progress_changes: list[ProcedureProgressChangeCandidate] = []
-        support_updates: list[SupportMatchUpdateCandidate] = []
         for source in sources:
             output = source.output
             if isinstance(output, InfoAnalysisResult):
@@ -1018,20 +1022,11 @@ class SupervisorAgent:
                             procedure_analysis_call_id=source.meta.call_id,
                         )
                     )
-            elif isinstance(output, SupportAnalysisResult):
-                support_updates.extend(
-                    SupportMatchUpdateCandidate(
-                        candidate_id=self._uuid(),
-                        support_check=check,
-                        source_call_id=source.meta.call_id,
-                    )
-                    for check in output.support_checks
-                )
 
         return MutationSet(
             fact_changes=fact_changes,
             procedure_progress_changes=progress_changes,
-            support_match_updates=support_updates,
+            support_match_updates=[],
         )
 
     @staticmethod

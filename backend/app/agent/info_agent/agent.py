@@ -108,7 +108,7 @@ def _with_particles(prefix: str, suffix: str) -> tuple[str, ...]:
 
     return tuple(
         f"{prefix}{particle}{suffix}"
-        for particle in ("은", "는", "이", "가", "을", "를", "")
+        for particle in ("은", "는", "이", "가", "을", "를", "도", "")
     )
 
 
@@ -155,6 +155,7 @@ _FACT_VALUE_CUES: dict[tuple[CaseFieldKey, object], tuple[str, ...]] = {
         "원상복구를끝냈",
     ),
     (CaseFieldKey.RESTORATION_STATUS, "NOT_REQUIRED"): (
+        *_with_particles("원상복구작업", "필요하지않"),
         "원상복구불필요",
         "원상복구가필요하지않",
         "원상복구필요없",
@@ -172,6 +173,7 @@ _FACT_VALUE_CUES: dict[tuple[CaseFieldKey, object], tuple[str, ...]] = {
         "전면원상복구",
     ),
     (CaseFieldKey.RESTORATION_SCOPE, "NOT_REQUIRED"): (
+        *_with_particles("원상복구범위", "없"),
         "원상복구불필요",
         "원상복구가필요하지않",
         "원상복구필요없",
@@ -200,9 +202,10 @@ _FIELD_CUES: dict[CaseFieldKey, tuple[str, ...]] = {
 }
 _CLEAR_CUES = ("삭제", "지워", "제거", "입력취소", "잘못입력")
 _SCHEMA_FACT_UNCERTAINTY = re.compile(
-    r"인지|여부|모르|모릅|모름|불확실|미확인|추정|가능성"
+    r"인지|여부|모르|모릅|모름|불확실|미확인|추정|가정|가능성"
     r"|확인(?:이)?필요|확인(?:해봐야|해야)"
-    r"|(?:일|할)수도|(?:인|한|일|할)것같"
+    r"|(?:일|할|을)수도|(?:인|한|일|할|은|는)것같"
+    r"|없(?:으면|어도|다면)|필요하지않(?:으면|아도|다면)"
 )
 _SCHEMA_FACT_NEGATION = re.compile(r"아니|아닌|아님|아닙|아닐|않|못|없|불필요")
 _COMPLETED_OBSERVATION = re.compile(
@@ -415,6 +418,12 @@ class InfoAnalysisAgent:
                                 + ", ".join(rejected_observation_codes)
                                 + ". A progress observation must quote an exact substring of "
                                 "input.redacted_text stating the user's own execution result. "
+                                "The quoted sentence itself must identify the procedure using its "
+                                "step_name, utterance_aliases, or distinctive procedure terms, "
+                                "and explicitly state its progress or completion. "
+                                "A generic confirmation does not identify a completed procedure; "
+                                "NOT_REQUIRED is not COMPLETED. Keep supported facts even when "
+                                "procedure_observations must be empty. "
                                 "Official instructions and missing information are not user progress. "
                                 "If the input states no execution, return procedure_observations=[]. "
                                 "Still analyze the documents in procedure_findings; do not remove "
@@ -894,16 +903,23 @@ class InfoAnalysisAgent:
         compact = cls._compact_text(statement)
         if "?" in statement or _SCHEMA_FACT_UNCERTAINTY.search(compact):
             return False
-        if (
-            fact.field_path == CaseFieldKey.RESTORATION_STATUS
-            and fact.value == "COMPLETED"
-            and re.search(r"(?:나요|습니까|까요)\s*[.!]?\s*$", statement)
-        ):
+        if re.search(r"(?:나요|습니까|까요|인가요)\s*[.!]?\s*$", statement):
             return False
         # NOT_REQUIRED is itself expressed with negation. Remove only the
         # exact supported cue, then reject additional negation such as
         # "원상복구 불필요는 아닙니다". A bare "필요하지 않습니다" still passes.
         cues = _FACT_VALUE_CUES.get((fact.field_path, fact.value), ())
+        if fact.value == "NOT_REQUIRED":
+            # A sentence can explicitly deny both scope and work requirements.
+            # Consume those supported negatives, but still require this field
+            # to match its own cue in _fact_source_supports_value. Never do
+            # this for REQUIRED: a short quote must not hide its negation.
+            cues = tuple(
+                cue
+                for (_, value), items in _FACT_VALUE_CUES.items()
+                if value == "NOT_REQUIRED"
+                for cue in items
+            )
         for cue in sorted(cues, key=len, reverse=True):
             compact = compact.replace(cls._compact_text(cue), "")
         return _SCHEMA_FACT_NEGATION.search(compact) is None

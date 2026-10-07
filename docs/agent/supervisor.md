@@ -1,6 +1,6 @@
 # Supervisor Agent
 
-최종 판단 지점. 하위 결과(Info·Procedure·Support)를 종합해 **Blocker 1개·Next Action 1개** 결정.
+최종 판단 지점. 하위 결과(Info·Procedure)를 종합해 **Blocker 1개·Next Action 1개** 결정.
 Case 직접 접근 없이 검증된 `SupervisorAgentInput` 사용.
 
 ## 입력 → 출력
@@ -24,19 +24,23 @@ Agent 출력은 판단 근거를 연결하는 `evidence_refs`도 함께 반환�
 `title`·`blocker_code`는 없다 — 물리 컬럼에 없어서 뺐다.
 Blocker 해소(`RESOLVED`) 판정은 Supervisor가 하지 않는다. BE가 다음 판단에서 처리한다.
 
-현재 MVP의 정상 판단에는 Blocker가 항상 정확히 1개 있다. 원상복구 미확인·지원조건 확인과
+현재 MVP의 정상 판단에는 Blocker가 항상 정확히 1개 있다. 원상복구 미확인과
 공식 절차의 진행 상태·준비사항 확인을 근거 있는 후보로 반환한다. 확인된 사실을 다시
 미확인으로 바꾸거나, 후보에 없는 차단 조건을 만들지 않는다. 전체 Case 완료 판정은
 범위에서 제외하며 모든 판단·행동의 근거와 필수 Review를 유지한다.
 
 [`blocker_candidates.py`](../../backend/app/agent/blocker_candidates.py)가 확인된 Case 값과
-현재 절차·지원 분석에서 최대 3개 후보를 만든다. 기존 업무 순서와 절차 제약을 적용하고,
-각 후보에 허용된 행동 코드·대상을 연결한다. Supervisor는 후보와 행동을 선택하며,
-선택한 후보의 상태 설명·확인 질문을 코드에서 채운다. 따라서 미확인을 실제 미결정으로
-바꾸거나 이미 확인한 항목을 다시 묻는 표현을 모델이 추가하지 않는다.
-Review도 필수 Blocker와 후보의 상태 문장을 재검증한다. 후보가 없으면 Info의 판단 차단 항목 중
-실제 미확인 조건 하나의 Blocker·질문을 반환한다. 선택 날짜·확정된 사실을 다시 묻거나
-질문 근거 없이 안내문 제출을 요구하지 않는다. 기존 지원 우선 분기는 지원 안내 확인 질문을 유지한다.
+현재 절차 분석에서 기존 근거·적용 조건·선후 관계·완료 여부 검사를 통과한 전체 후보를 만든다.
+후보를 임의로 3개에서 자르지 않는다. 각 후보에 허용된 행동 코드·대상을 연결하고 아래 순서로 정렬한다.
+Supervisor 모델에는 첫 후보·첫 행동만 선택값으로 제공하며, 다른 유효한 선택이 오더라도
+코드가 첫 후보·첫 행동으로 정규화한다. 목록에 없는 코드·대상은 거절한다.
+상태 설명·확인 질문도 후보에서 채우며 Review가 같은 우선순위와 문장을 재검증한다.
+
+같은 검증된 Case·자료·Info 분석 결과에서 정상 출력되는 Blocker·행동은 동일하다.
+Info 재분석 결과나 Review 통과 여부, 실행 ID·시각까지 같다는 보장은 아니다.
+후보가 없으면 Info의 판단 차단 항목 중 실제 미확인 조건 하나를 고정된 필드 순서로 묻는다.
+선택 날짜·확정된 사실을 다시 묻거나 근거 없이 안내문 제출을 요구하지 않는다.
+지원사업 행동·지원 안내 요청·지원 변경 후보는 MVP 실행에서 생성하지 않는다.
 공식 문서는 있지만 절차 대응이 0개이고 행동 후보도 없으면 구성 오류로 종료하며,
 사용자 추가 입력으로 해결할 수 있다고 안내하지 않는다.
 
@@ -47,21 +51,25 @@ Review도 필수 Blocker와 후보의 상태 문장을 재검증한다. 후보�
 
 ## ACTION의 next_action 규칙
 
-- target은 정확히 하나: `target_kind=PROCEDURE`(Info finding 기반) 또는 `target_kind=SUPPORT_PROGRAM`(Support check 기반). 섞지 않는다
+- MVP target은 `target_kind=PROCEDURE`(Info finding 기반) 하나다. 지원 target DTO는 기존 계약에 남지만 현재 실행에서는 선택하지 않는다
 - `questions_for_user`는 비워야 한다 — 확인 질문은 `next_action.questions_to_ask`에 넣는다
 - `procedure_plan_constraints`(→ [procedure-tool.md](./procedure-tool.md))를 통과 못 하면 `SupervisorGuardrailError`로 초안 자체를 거부한다
-- `action_code`는 [행동 목록](../../backend/app/agent/action_catalog.py)에 정의한 값만 선택한다. 현재 Info·Support 결과에서 가능한 코드와 target 조합을 Supervisor에 제공하고, 서버와 Review가 다시 검증한다
+- `action_code`는 [행동 목록](../../backend/app/agent/action_catalog.py)에 정의한 값만 선택한다. 현재 Info 결과에서 가능한 코드와 target 조합을 Supervisor에 제공하고, 서버와 Review가 다시 검증한다
 - 코드는 행동 종류이며 대상 ID나 실행 이력 ID가 아니다. 같은 절차에서도 요건 확인과 신고 진행은 다른 코드다. 제목·이유·질문이 선택한 코드의 의미와 맞는지도 Review가 검사한다
-- 원상복구 범위 확인, 세무·식품영업 폐업 및 사업장 보험 탈퇴의 요건 확인/신고, 지원사업 조건 확인을 정의한다. 새 절차는 행동 목록에 명시적으로 등록하며 임의 코드로 대체하지 않는다
-- 코드가 고정돼도 판단 내용의 일관성이 보장되는 것은 아니다. 반복 평가에서는 코드·target과 실제 확인 항목을 함께 비교한다
+- 원상복구 범위 확인, 세무·식품영업 폐업 및 사업장 보험 탈퇴의 요건 확인/신고, 지원사업 조건 확인을 정의한다. 지원사업 코드는 MVP 실행에서 제외한다. 새 절차는 행동 목록에 명시적으로 등록하며 임의 코드로 대체하지 않는다
+- 현재 `ProcedureFinding.requires_confirmation`은 `Literal[True]`다. 같은 절차의 행동 중 담당자 확인을 먼저 선택한다
 
-## 업무 순서 (prompts.py의 지시)
+## 업무 순서 (코드와 Review에서 적용)
 
-1. `demolition_required=REQUIRED` 확정 + `restoration_status≠COMPLETED` → 철거 지원조건 확인 우선
-2. 그 외 `restoration_scope`·철거 필요 여부가 미확정 → 임대인 확인을 Info finding 기반으로 우선
-3. 근거 있는 행동이 없고 확인할 조건이 있으면 `NEEDS_MORE_INFO`
+1. 원상복구가 완료되지 않은 임차 점포에서 범위·철거 필요 여부가 미확인 → 임대인 확인
+2. 현재 Case에 관련되고 적용 조건을 충족하는 다른 미완료 절차의 `SEQUENTIAL` 선행 절차
+3. 진행 중인 절차(`IN_PROGRESS`)
+4. 나머지 실행 가능한 폐업 절차
 
-이미 확정된 사실은 다시 묻지 않고, `restoration_status=COMPLETED` 뒤 철거 전 행동을 반복하지 않는다.
+동률은 DB ID나 조회 순서가 아닌 고정된 논리 절차 코드 순으로 정한다.
+이는 선택의 일관성을 위한 동률 처리이며 법적 선후 관계를 새로 만드는 규칙이 아니다.
+임대인 확인도 근거·절차 제약 검사를 통과해야 하며, 이미 확인된 항목은 다시 묻지 않는다.
+근거 있는 행동이 없고 실제 확인할 조건이 있을 때만 `NEEDS_MORE_INFO`를 반환한다.
 
 ## 미검수 자료의 처리
 

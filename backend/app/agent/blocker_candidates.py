@@ -1,7 +1,7 @@
 """Bound the existing MVP priorities using verified Case state and source results.
 
-The Supervisor still chooses a candidate and an action. State descriptions and
-confirmation questions come from code, so UNKNOWN never becomes 'undecided'.
+Closure candidates are ordered by confirmed Case state and stored dependencies.
+State descriptions and confirmation questions never turn UNKNOWN into a fact.
 """
 
 from collections.abc import Mapping, Sequence
@@ -14,7 +14,10 @@ from app.agent.action_catalog import (
     resolve_procedure_bindings,
 )
 from app.agent.claim_safety import expand_evidence
-from app.agent.procedure_tool.rules import procedure_plan_constraints
+from app.agent.procedure_tool.rules import (
+    procedure_constraints,
+    procedure_plan_constraints,
+)
 from app.agent.schemas import (
     ActionDecisionDraft,
     CaseSnapshot,
@@ -24,7 +27,6 @@ from app.agent.schemas import (
     KnownProcedureStep,
     MutationSet,
     ReviewSourceResult,
-    SupportAnalysisResult,
 )
 
 _PROCEDURE_LABELS = {
@@ -105,7 +107,7 @@ def build_blocker_candidates(
     evidence_by_id: Mapping[str, EvidenceRecord],
     procedure_bindings: ProcedureBindings | None = None,
 ) -> list[dict[str, Any]]:
-    """Apply the priority already specified in supervisor_messages, then cap at 3."""
+    """Rank all executable closure candidates; support is outside the MVP."""
     resolved_bindings = resolve_procedure_bindings(steps, procedure_bindings)
     values = _values(snapshot, mutations)
     state_refs = list(
@@ -118,7 +120,6 @@ def build_blocker_candidates(
         if ref not in state_refs
     )
     completed = values.get("restoration_status") == "COMPLETED"
-    support_first = values.get("demolition_required") == "REQUIRED" and not completed
     missing = [
         label
         for key, label in (
@@ -128,8 +129,7 @@ def build_blocker_candidates(
         if key not in values
     ]
     restoration_first = (
-        not support_first
-        and not completed
+        not completed
         and bool(missing)
         and values.get("lease_status") in {"LEASED_PAID", "LEASED_FREE"}
     )
@@ -142,114 +142,90 @@ def build_blocker_candidates(
         if isinstance(source.output, InfoAnalysisResult)
         for finding in source.output.procedure_findings
     }
-    checks = {
-        check.support_program.support_program_id: check
-        for source in sources
-        if isinstance(source.output, SupportAnalysisResult)
-        for check in source.output.support_checks
-    }
     groups: dict[str, dict[str, Any]] = {}
     for row in build_action_candidates(sources, evidence_by_id, resolved_bindings):
         target = row["target"]
-        is_support = target["target_kind"] == "SUPPORT_PROGRAM"
-        if support_first and not is_support:
+        if target["target_kind"] != "PROCEDURE":
             continue
-        if is_support:
-            if restoration_first:
+        reference = target["procedure_step"]
+        step_code = reference["step_code"]
+        finding = findings[(reference["procedure_step_id"], step_code)]
+        definition = ACTION_DEFINITIONS[row["action_code"]]
+        logical_code = definition.procedure_logical_code
+        # A current source can support asking whether a procedure applies.
+        # Submission still requires established relevance and master rules.
+        if finding.relevance != "RELEVANT":
+            if not (
+                definition.confirmation_only
+                and finding.relevance == "POSSIBLY_RELEVANT"
+                and finding.requires_confirmation
+            ):
                 continue
-            check = checks[target["support_program"]["support_program_id"]]
-            key = f"support:{check.support_program.support_program_id}"
-            description = "지원조건과 신청 전 증빙의 확인이 필요합니다."
-            title = f"{check.program_name}의 현재 조건과 신청 전 증빙을 확인하세요."
-            reason = "제공된 지원 안내의 현재 조건을 담당 기관에 확인해야 합니다."
-            # 확인 문구를 넣어야 최신이 아닌 지원 자료에서도 이 질문이 살아남는다.
-            # 절차 쪽 확인 질문과 같은 형태다.
-            questions = ["현재 조건과 신청 전에 준비할 증빙을 확인해 주시겠습니까?"]
-            refs = list(check.evidence_refs)
+            evidence = expand_evidence(
+                [evidence_by_id[ref] for ref in finding.evidence_refs],
+                evidence_by_id,
+            )
+            if any(item.freshness_status != "CURRENT" for item in evidence):
+                continue
+        key = f"procedure:{reference['procedure_step_id']}"
+        refs = list(finding.evidence_refs)
+        if logical_code == "CONFIRM_RESTORATION_SCOPE":
+            if not restoration_first:
+                continue
+            subject = "와 ".join(missing)
+            description = f"{subject}가 아직 확인되지 않았습니다."
+            title = f"임대인에게 {subject}를 확인하세요."
+            reason = (
+                f"현재 {subject}가 확인되지 않아 임대인에게 확인할 필요가 있습니다."
+            )
+            questions = [
+                "원상복구해야 할 범위는 어디까지인가요?"
+                if label == "원상복구 범위"
+                else "철거가 필요한가요?"
+                for label in missing
+            ]
         else:
-            reference = target["procedure_step"]
-            step_code = reference["step_code"]
-            finding = findings[(reference["procedure_step_id"], step_code)]
-            definition = ACTION_DEFINITIONS[row["action_code"]]
-            logical_code = definition.procedure_logical_code
-            # A current source can support asking whether a procedure applies.
-            # Submission still requires established relevance and master rules.
-            if finding.relevance != "RELEVANT":
-                if not (
-                    definition.confirmation_only
-                    and finding.relevance == "POSSIBLY_RELEVANT"
-                    and finding.requires_confirmation
-                ):
-                    continue
-                evidence = expand_evidence(
-                    [evidence_by_id[ref] for ref in finding.evidence_refs],
-                    evidence_by_id,
-                )
-                if any(item.freshness_status != "CURRENT" for item in evidence):
-                    continue
-            key = f"procedure:{reference['procedure_step_id']}"
-            refs = list(finding.evidence_refs)
-            if logical_code == "CONFIRM_RESTORATION_SCOPE":
-                if not restoration_first:
-                    continue
-                subject = "와 ".join(missing)
-                description = f"{subject}가 아직 확인되지 않았습니다."
-                title = f"임대인에게 {subject}를 확인하세요."
-                reason = (
-                    f"현재 {subject}가 확인되지 않아 임대인에게 확인할 필요가 있습니다."
-                )
-                questions = [
-                    "원상복구해야 할 범위는 어디까지인가요?"
-                    if label == "원상복구 범위"
-                    else "철거가 필요한가요?"
-                    for label in missing
+            assert logical_code is not None
+            label = _PROCEDURE_LABELS[logical_code]
+            evidence = expand_evidence(
+                [evidence_by_id[ref] for ref in finding.evidence_refs],
+                evidence_by_id,
+            )
+            confirmation = definition.confirmation_only
+            applicability_unknown = finding.relevance == "POSSIBLY_RELEVANT"
+            description = (
+                f"{label} 안내의 현재 적용 여부를 확인할 필요가 있습니다."
+                if any(item.freshness_status != "CURRENT" for item in evidence)
+                else f"{label} 대상 여부와 준비사항을 확인할 필요가 있습니다."
+                if applicability_unknown
+                else f"{label}의 진행 상태와 준비사항을 확인할 필요가 있습니다."
+            )
+            title = (
+                f"담당 기관에 {label} 대상 여부와 준비사항을 확인하세요."
+                if applicability_unknown
+                else f"담당 기관에 {label} 준비사항을 확인하세요."
+                if confirmation
+                else f"{label}를 제출하세요."
+            )
+            reason = (
+                "제공된 공식 안내가 가게에 적용되는지 담당 기관에 확인할 필요가 있습니다."
+                if applicability_unknown
+                else f"제공된 공식 안내를 바탕으로 {label}에 필요한 준비를 확인하세요."
+                if confirmation
+                else finding.required_actions[0].text
+            )
+            questions = (
+                [
+                    (
+                        f"제 가게가 {label} 대상인지, 해당하면 필요한 서류와 제출 방법은 "
+                        "무엇인지 확인해 주시겠습니까?"
+                    )
                 ]
-            else:
-                if restoration_first:
-                    continue
-                assert logical_code is not None
-                label = _PROCEDURE_LABELS[logical_code]
-                evidence = expand_evidence(
-                    [evidence_by_id[ref] for ref in finding.evidence_refs],
-                    evidence_by_id,
-                )
-                confirmation = definition.confirmation_only
-                applicability_unknown = finding.relevance == "POSSIBLY_RELEVANT"
-                description = (
-                    f"{label} 안내의 현재 적용 여부를 확인할 필요가 있습니다."
-                    if any(item.freshness_status != "CURRENT" for item in evidence)
-                    else f"{label} 대상 여부와 준비사항을 확인할 필요가 있습니다."
-                    if applicability_unknown
-                    else f"{label}의 진행 상태와 준비사항을 확인할 필요가 있습니다."
-                )
-                title = (
-                    f"담당 기관에 {label} 대상 여부와 준비사항을 확인하세요."
-                    if applicability_unknown
-                    else f"담당 기관에 {label} 준비사항을 확인하세요."
-                    if confirmation
-                    else f"{label}를 제출하세요."
-                )
-                reason = (
-                    "제공된 공식 안내가 가게에 적용되는지 담당 기관에 확인할 필요가 있습니다."
-                    if applicability_unknown
-                    else f"제공된 공식 안내를 바탕으로 {label}에 필요한 준비를 확인하세요."
-                    if confirmation
-                    else finding.required_actions[0].text
-                )
-                questions = (
-                    [
-                        (
-                            f"제 가게가 {label} 대상인지, 해당하면 필요한 서류와 제출 방법은 "
-                            "무엇인지 확인해 주시겠습니까?"
-                        )
-                    ]
-                    if applicability_unknown
-                    else [f"{label}에 필요한 서류와 제출 방법을 확인해 주시겠습니까?"]
-                    if confirmation
-                    else [
-                        "제출한 신고서와 첨부서류가 접수되었는지 확인해 주시겠습니까?"
-                    ]
-                )
+                if applicability_unknown
+                else [f"{label}에 필요한 서류와 제출 방법을 확인해 주시겠습니까?"]
+                if confirmation
+                else ["제출한 신고서와 첨부서류가 접수되었는지 확인해 주시겠습니까?"]
+            )
         action = {key: row[key] for key in ("action_code", "target")}
         action.update(
             title=title, reason=reason, questions_to_ask=questions, evidence_refs=refs
@@ -279,7 +255,53 @@ def build_blocker_candidates(
             groups[key]["actions"].append(action)
         else:
             groups[key] = candidate
-    return [groups[key] for key in sorted(groups)][:3]
+    progress = {
+        item.procedure_step.procedure_step_id: item.status
+        for item in snapshot.procedure_progress
+    }
+    progress.update(
+        (change.procedure_step.procedure_step_id, change.proposed_status)
+        for change in mutations.procedure_progress_changes
+    )
+    prerequisites = {
+        dependency.prerequisite_procedure_step_id
+        for step in steps
+        if progress.get(step.procedure_step.procedure_step_id) != "COMPLETED"
+        and any(
+            finding.procedure_step == step.procedure_step
+            and finding.relevance in {"RELEVANT", "POSSIBLY_RELEVANT"}
+            for finding in findings.values()
+        )
+        and not procedure_constraints(
+            step.model_copy(update={"dependencies": []}),
+            snapshot,
+            mutations.fact_changes,
+            mutations.procedure_progress_changes,
+        )
+        for dependency in step.dependencies
+        if dependency.dependency_type == "SEQUENTIAL"
+    }
+
+    def priority(candidate: dict[str, Any]) -> tuple[bool, bool, bool, str]:
+        action = candidate["actions"][0]
+        logical = ACTION_DEFINITIONS[action["action_code"]].procedure_logical_code
+        step_id = action["target"]["procedure_step"]["procedure_step_id"]
+        return (
+            logical != "CONFIRM_RESTORATION_SCOPE",
+            step_id not in prerequisites,
+            progress.get(step_id) != "IN_PROGRESS",
+            logical or "",
+        )
+
+    for candidate in groups.values():
+        # The current ProcedureFinding contract always requires confirmation.
+        candidate["actions"].sort(
+            key=lambda action: (
+                not ACTION_DEFINITIONS[action["action_code"]].confirmation_only,
+                action["action_code"],
+            )
+        )
+    return sorted(groups.values(), key=priority)
 
 
 def missing_info_fields(
@@ -322,20 +344,13 @@ def missing_info_fields(
                     restoration_ref.step_code,
                 )
             )
-            or (
-                procedure_bindings is None
-                and code == "CONFIRM_RESTORATION_SCOPE"
-            )
+            or (procedure_bindings is None and code == "CONFIRM_RESTORATION_SCOPE")
         )
         for (step_id, code), status in progress.items()
     )
     restoration_detail_unnecessary = (
         values.get("restoration_status") == "NOT_REQUIRED"
         or values.get("restoration_scope") == "NOT_REQUIRED"
-    )
-    support_first = (
-        values.get("demolition_required") == "REQUIRED"
-        and values.get("restoration_status") != "COMPLETED"
     )
     refs = list(
         dict.fromkeys(ref for fact in snapshot.facts for ref in fact.evidence_refs)
@@ -348,40 +363,33 @@ def missing_info_fields(
     )
     if not refs:
         return None
-    if support_first:
-        description = "현재 판단에 사용할 지원 안내가 부족해 추가 확인이 필요합니다."
-        questions = ["지원 안내문이나 담당 기관에서 확인한 내용이 있으면 알려주세요."]
-    else:
-        missing = next(
-            (
-                path.value
-                for source in sources
-                if isinstance(source.output, InfoAnalysisResult)
-                for question in source.output.question_candidates
-                for path in question.resolves_field_paths
-                if path.value in _QUESTIONS
-                and path.value not in values
-                and any(
-                    item.field_path == path
-                    and "SUPERVISOR_DECISION" in item.blocks
-                    and item.question_candidate_id in {None, question.question_id}
-                    for item in source.output.missing_fields
-                )
-                and not (
-                    restoration_questions_resolved
-                    and path.value.startswith(("restoration_", "demolition_"))
-                )
-                and not (
-                    restoration_detail_unnecessary
-                    and path.value == "restoration_scope_detail"
-                )
-            ),
-            None,
+    missing_paths = {
+        path.value
+        for source in sources
+        if isinstance(source.output, InfoAnalysisResult)
+        for question in source.output.question_candidates
+        for path in question.resolves_field_paths
+        if path.value in _QUESTIONS
+        and path.value not in values
+        and any(
+            item.field_path == path
+            and "SUPERVISOR_DECISION" in item.blocks
+            and item.question_candidate_id in {None, question.question_id}
+            for item in source.output.missing_fields
         )
-        if missing is None:
-            return None
-        questions = [_QUESTIONS[missing]]
-        description = f"{_FIELD_LABELS[missing]} 확인이 필요합니다."
+        and not (
+            restoration_questions_resolved
+            and path.value.startswith(("restoration_", "demolition_"))
+        )
+        and not (
+            restoration_detail_unnecessary and path.value == "restoration_scope_detail"
+        )
+    }
+    missing = next((path for path in _QUESTIONS if path in missing_paths), None)
+    if missing is None:
+        return None
+    questions = [_QUESTIONS[missing]]
+    description = f"{_FIELD_LABELS[missing]} 확인이 필요합니다."
     return {
         "decision_type": "NEEDS_MORE_INFO",
         "selection_summary": description,
@@ -401,16 +409,10 @@ def candidate_decision_violations(
     """Shared by Supervisor and independent Review, including a forced-model PASS."""
     expected = fallback
     if decision.next_action is not None:
-        expected = next(
-            (
-                _decision_fields(candidate, action)
-                for candidate in candidates
-                for action in candidate["actions"]
-                if action["action_code"] == decision.next_action.action_code
-                and action["target"]
-                == decision.next_action.target.model_dump(mode="json")
-            ),
-            None,
+        expected = (
+            _decision_fields(candidates[0], candidates[0]["actions"][0])
+            if candidates
+            else None
         )
     elif candidates:
         expected = None
