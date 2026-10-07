@@ -138,6 +138,13 @@ function rawEnvelope(body: Record<string, unknown>): CasesEnvelope {
   return body as unknown as CasesEnvelope
 }
 
+/** 서버가 보내는 다음 할 일 한 건 */
+const NEXT_ACTION = {
+  title: '임대인에게 원상복구 범위를 확인하세요.',
+  reason: '철거가 필요한지 판단하려면 원상복구 범위를 먼저 알아야 합니다.',
+  questions_to_ask: ['어디까지 원래대로 돌려놔야 하나요?', '철거까지 해야 하나요?'],
+}
+
 describe('toCurrentCaseView', () => {
   it('가게 정보는 판단 상태와 무관하게 담는다', () => {
     const view = toCurrentCaseView(envelopeOf({ judgment_status: 'PENDING' }), SERVER_CASE)
@@ -151,29 +158,80 @@ describe('toCurrentCaseView', () => {
       envelopeOf({
         judgment_status: 'DONE',
         blocker: '원상복구 범위가 아직 확인되지 않았습니다.',
-        next_action: '임대인에게 원상복구 범위를 확인하세요.',
+        next_action: NEXT_ACTION,
       }),
       SERVER_CASE,
     )
 
     if (view.judgment.status !== 'DONE') throw new Error('DONE 이어야 한다')
     expect(view.judgment.blocker.title).toBe('원상복구 범위가 아직 확인되지 않았습니다.')
-    expect(view.judgment.nextAction.title).toBe('임대인에게 원상복구 범위를 확인하세요.')
+    expect(view.judgment.nextAction).toEqual({
+      title: NEXT_ACTION.title,
+      reason: NEXT_ACTION.reason,
+      questions: NEXT_ACTION.questions_to_ask,
+    })
   })
 
   /**
-   * 서버가 제목만 보낸다. 이유와 순번을 지어내면 사장님이 서버가 판단한 것으로 읽는다 —
-   * 특히 순번은 "지금 1번째구나" 하고 전체 진행도를 짐작하게 만든다.
+   * 순번은 응답에 없다. 1 로 지어내면 사장님이 "지금 1번째구나" 하고 전체 진행도를
+   * 짐작하게 된다 — 서버가 세어준 적이 없는 숫자다.
    */
-  it('서버에 없는 이유와 순번을 지어내지 않는다', () => {
+  it('서버에 없는 순번을 지어내지 않는다', () => {
     const view = toCurrentCaseView(
-      envelopeOf({ judgment_status: 'DONE', blocker: '막힘', next_action: '할 일' }),
+      envelopeOf({ judgment_status: 'DONE', blocker: '막힘', next_action: NEXT_ACTION }),
       SERVER_CASE,
     )
 
     if (view.judgment.status !== 'DONE') throw new Error('DONE 이어야 한다')
-    expect(view.judgment.nextAction.reason).toBe('')
     expect(view.judgment.nextAction.seq).toBeUndefined()
+  })
+
+  /**
+   * 이유와 물어볼 말은 없어도 카드가 성립한다. 카드가 그 자리를 아예 안 그리므로
+   * 빈 문단이나 빈 목록이 남지 않는다.
+   */
+  it.each([
+    // 서버가 실제로 보내는 모양이다 — 이유가 없으면 `null`, 물어볼 말이 없으면 빈 목록(#68)
+    [
+      '이유가 null 이면',
+      { title: '할 일', reason: null, questions_to_ask: [] },
+      { reason: '', questions: [] },
+    ],
+    ['이유 칸이 아예 없으면', { title: '할 일', questions_to_ask: [] }, { reason: '', questions: [] }],
+    [
+      '이유가 글자가 아니면',
+      { title: '할 일', reason: 123, questions_to_ask: [] },
+      { reason: '', questions: [] },
+    ],
+    ['물어볼 말 칸이 없으면', { title: '할 일', reason: '왜' }, { reason: '왜', questions: undefined }],
+  ])('%s 빈 채로 둔다', (_name, nextAction, expected) => {
+    const view = toCurrentCaseView(
+      rawEnvelope({ judgment_status: 'DONE', blocker: '막힘', next_action: nextAction, case: SERVER_CASE }),
+      SERVER_CASE,
+    )
+
+    if (view.judgment.status !== 'DONE') throw new Error('DONE 이어야 한다')
+    expect(view.judgment.nextAction.reason).toBe(expected.reason)
+    expect(view.judgment.nextAction.questions).toEqual(expected.questions)
+  })
+
+  /**
+   * 성한 것만 골라 그리면 사장님이 그게 물어볼 말의 전부인 줄 알고, 빠뜨린 채로
+   * 임대인을 만난다. 반쯤 보여주는 것이 안 보여주는 것보다 나쁜 경우다.
+   */
+  it('물어볼 말에 글자가 아닌 것이 섞이면 통째로 버린다', () => {
+    const view = toCurrentCaseView(
+      rawEnvelope({
+        judgment_status: 'DONE',
+        blocker: '막힘',
+        next_action: { title: '할 일', reason: '왜', questions_to_ask: ['물어볼 말', { q: '객체' }] },
+        case: SERVER_CASE,
+      }),
+      SERVER_CASE,
+    )
+
+    if (view.judgment.status !== 'DONE') throw new Error('DONE 이어야 한다')
+    expect(view.judgment.nextAction.questions).toBeUndefined()
   })
 
   it('되물을 것이 있으면 질문을 그대로 담는다', () => {
@@ -188,6 +246,30 @@ describe('toCurrentCaseView', () => {
     })
   })
 
+  it('기록과 어긋났으면 확인이 필요한 것으로 둔다', () => {
+    const view = toCurrentCaseView(envelopeOf({ judgment_status: 'CONFLICT' }), SERVER_CASE)
+
+    expect(view.judgment).toEqual({ status: 'CONFLICT' })
+  })
+
+  /**
+   * 그 할 일은 **어긋나기 전의 판단**이다. 지금 할 일로 그리면 사장님이 이미 틀어진
+   * 전제 위에서 움직이고, 그 결과를 또 보고한다. `PENDING`·`FAILED` 에서 이전 판단을
+   * 안 그리는 것과 같은 이유다.
+   */
+  it('확인이 필요한데 할 일이 딸려 와도 그것을 그리지 않는다', () => {
+    const view = toCurrentCaseView(
+      envelopeOf({
+        judgment_status: 'CONFLICT',
+        blocker: '원상복구 범위가 아직 확인되지 않았습니다.',
+        next_action: NEXT_ACTION,
+      }),
+      SERVER_CASE,
+    )
+
+    expect(view.judgment).toEqual({ status: 'CONFLICT' })
+  })
+
   /**
    * 상태와 내용이 어긋난 응답을 **다른 상태로 바꿔 보여주지 않는다.**
    *
@@ -197,7 +279,10 @@ describe('toCurrentCaseView', () => {
   describe('계약이 어긋난 응답', () => {
     it.each([
       ['DONE 인데 할 일이 없다', { judgment_status: 'DONE' as const, blocker: '막힘' }],
-      ['DONE 인데 막힌 것이 없다', { judgment_status: 'DONE' as const, next_action: '할 일' }],
+      [
+        'DONE 인데 막힌 것이 없다',
+        { judgment_status: 'DONE' as const, next_action: NEXT_ACTION },
+      ],
       ['되묻는다면서 질문이 없다', { judgment_status: 'NEEDS_MORE_INFO' as const }],
       [
         '되묻는다면서 질문이 빈 목록이다',
@@ -237,8 +322,10 @@ describe('toCurrentCaseView', () => {
      * 죽는다 — 사장님은 흰 화면을 본다. 못 그리는 것과 죽는 것은 다르다.
      */
     it.each([
-      ['할 일이 묶음으로 바뀌어 온다', { next_action: { title: '할 일', reason: '왜' }, blocker: '막힘' }],
-      ['막힌 것이 묶음으로 바뀌어 온다', { next_action: '할 일', blocker: { description: '막힘' } }],
+      ['할 일이 아직 글자로 온다', { next_action: '임대인에게 확인하세요.', blocker: '막힘' }],
+      ['할 일에 제목이 없다', { next_action: { reason: '왜' }, blocker: '막힘' }],
+      ['할 일의 제목이 글자가 아니다', { next_action: { title: 1 }, blocker: '막힘' }],
+      ['막힌 것이 묶음으로 바뀌어 온다', { next_action: NEXT_ACTION, blocker: { description: '막힘' } }],
       ['할 일이 숫자다', { next_action: 1, blocker: '막힘' }],
     ])('%s 면 알 수 없는 것으로 둔다', (_name, body) => {
       const view = toCurrentCaseView(
@@ -272,10 +359,14 @@ describe('toCurrentCaseView', () => {
       expect(view.judgment.status).toBe('UNRECOGNIZED')
     })
 
-    /** BE 가 `CONFLICT` 추가를 건의해 둔 상태다. 그쪽이 먼저 배포되면 바로 겪는다 */
+    /**
+     * `CONFLICT` 가 늘어난 것처럼(#66) 또 늘어날 수 있다. AI 는 이미 `SAFE_FAILURE` 를
+     * 따로 내고 있고 BE 가 그것을 `FAILED` 로 접어 보내는 중이라, 접는 것을 그만두면
+     * 이 값이 그대로 온다.
+     */
     it('우리가 모르는 판단 상태도 알 수 없는 것으로 둔다', () => {
       const view = toCurrentCaseView(
-        envelopeOf({ judgment_status: 'CONFLICT' as never }),
+        envelopeOf({ judgment_status: 'SAFE_FAILURE' as never }),
         SERVER_CASE,
       )
 
