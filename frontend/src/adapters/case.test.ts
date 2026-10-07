@@ -229,6 +229,49 @@ describe('toCurrentCaseView', () => {
       expect(view.judgment.status).toBe('UNRECOGNIZED')
     })
 
+    /**
+     * **지금 실제로 벌어지는 중인 일이다.**
+     *
+     * `next_action` 이 글자에서 묶음으로 바뀌고 있다(#58). BE 가 먼저 배포되면 묶음이
+     * 그대로 들어오는데, 막지 않으면 React 가 객체를 글자 자리에 받아 `/case` 가 통째로
+     * 죽는다 — 사장님은 흰 화면을 본다. 못 그리는 것과 죽는 것은 다르다.
+     */
+    it.each([
+      ['할 일이 묶음으로 바뀌어 온다', { next_action: { title: '할 일', reason: '왜' }, blocker: '막힘' }],
+      ['막힌 것이 묶음으로 바뀌어 온다', { next_action: '할 일', blocker: { description: '막힘' } }],
+      ['할 일이 숫자다', { next_action: 1, blocker: '막힘' }],
+    ])('%s 면 알 수 없는 것으로 둔다', (_name, body) => {
+      const view = toCurrentCaseView(
+        rawEnvelope({ judgment_status: 'DONE', ...body, case: SERVER_CASE }),
+        SERVER_CASE,
+      )
+
+      expect(view.judgment.status).toBe('UNRECOGNIZED')
+    })
+
+    /**
+     * 질문은 목록이라 두 겹으로 틀어질 수 있다 — 목록이 아니거나, 목록인데 안에 든 것이
+     * 글자가 아니거나. 둘 다 카드가 목록을 펼치는 자리에서 앱을 내린다.
+     *
+     * 문자열은 `.length` 도 있고 비어 있지도 않아서 **예전 검사를 그냥 통과했다.**
+     */
+    it.each([
+      ['목록이 아니라 글자 하나다', '철거까지 하시나요?'],
+      ['목록 안에 객체가 들어 있다', [{ question: '철거까지 하시나요?' }]],
+      ['목록 안에 빈 글자가 섞여 있다', ['철거까지 하시나요?', '']],
+    ])('질문이 %s 면 알 수 없는 것으로 둔다', (_name, questions) => {
+      const view = toCurrentCaseView(
+        rawEnvelope({
+          judgment_status: 'NEEDS_MORE_INFO',
+          questions_for_user: questions,
+          case: SERVER_CASE,
+        }),
+        SERVER_CASE,
+      )
+
+      expect(view.judgment.status).toBe('UNRECOGNIZED')
+    })
+
     /** BE 가 `CONFLICT` 추가를 건의해 둔 상태다. 그쪽이 먼저 배포되면 바로 겪는다 */
     it('우리가 모르는 판단 상태도 알 수 없는 것으로 둔다', () => {
       const view = toCurrentCaseView(
