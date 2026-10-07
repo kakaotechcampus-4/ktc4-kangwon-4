@@ -101,7 +101,7 @@ async def run_case_planning(
     request: AgentGraphInput,
     *,
     known_procedure_steps: Sequence[KnownProcedureStep],
-    procedure_bindings: ProcedureBindings,
+    procedure_bindings: ProcedureBindings | None,
     procedure_store: ReviewedProcedureStore,
     support_catalog: ReviewedSupportCatalog,
     limits: RuntimeLimits | None = None,
@@ -109,8 +109,9 @@ async def run_case_planning(
     """Build, invoke and close the real Agent using BE-supplied data.
 
     Explicit bindings map the AI's existing logical procedure codes to BE's
-    actual id+step_code pairs. An empty mapping means no bound procedure;
-    no label or TEMP_* name is interpreted as a mapping.
+    actual id+step_code pairs. None enables exact step-code matching, while
+    an empty mapping means no bound procedure. No label or TEMP_* name is
+    interpreted as a mapping.
 
     REVIEWED_PLAN carries a PASS proof and uncommitted mutations. CONFLICT
     carries candidates for BE to retain. SAFE_FAILURE carries recovery fields.

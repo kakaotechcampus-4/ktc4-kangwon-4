@@ -98,7 +98,7 @@ BE가 조회한 `ProcedureStep`·`StepDependency`·`StepEligibility` 행을 변�
 각각 `load_reviewed_procedure_store`·`load_reviewed_support_catalog`로 검증한다.
 BE 모델에 없는 검수·조건·근거 필드를 만들어 채우지는 않는다.
 
-### DB 검수 자료 공급
+### DB 원본 공급용 변환 함수
 
 `build_reviewed_procedure_store(snapshots_by_step, known_procedure_steps=registry,
 procedure_bindings=bindings)`는 DB에서 조회한 JSON 값을 기존 자료 객체로 변환한다.
@@ -110,27 +110,24 @@ procedure_bindings=bindings)`는 DB에서 조회한 JSON 값을 기존 자료 �
 
 BE 연결 순서는 **DB 자료 조회 → store 변환 → 같은 store로 Case Evidence 적재·commit
 → CaseSnapshot 생성 → 같은 store로 Agent 호출**이다. 기존
-`import_reviewed_procedures()`와 BE의 Evidence CRUD·snapshot·판단 저장을 재사용한다.
-Agent runtime은 빈 store를 JSON 파일로 채우지 않는다. 실제 자료 공급에는 BE 연결이 필요하다.
+`app.be.services.reviewed_procedure.import_reviewed_procedures()`와 기존 Evidence
+CRUD·snapshot·판단 저장을 재사용하는 연결안이다. Agent runtime은 빈 store를 JSON 파일로 채우지 않는다.
 
 BE 요청: `procedure_step.reviewed_source_snapshot` JSON 컬럼(제안명) 추가와 승인 자료 이관,
 실제 절차·Case 연결 및 위 호출 순서 반영. 기존 두 규칙 테이블은 스키마를 유지하며
 선후 관계·적용 조건 데이터는 따로 검수해야 한다. 현재 BE 모델에는 이 컬럼이 없다.
 운영 절차의 ID·코드·표시 이름을 테스트용 값으로 대신하지 않는다.
 
-`python -m scripts.import_reviewed_procedures --case-id <ID>`는 BE 컬럼 반영 후
-DB 원본을 해당 Case의 Evidence로 적재한다. 코드가 다르면
-`--binding LOGICAL_CODE=DB_STEP_CODE`를 반복해 확정한 대응을 전달한다.
-기존 `--source` 파일 옵션은 제거했다. 이 명령은 공통 절차 행을 생성하지 않으며,
-최초 승인 JSON의 절차 표 이관은 BE 작업이다. 상세 요청은
-[BE 요청사항](https://app.notion.com/p/3ef3c6661b7d80c9a697d4f39dce1841)의 JSON을 따른다.
+이 변환 함수는 향후 DB 원본 공급용이며, 현재 #65의 Case 생성·재적재 경로는 아래의
+승인 JSON → BE Evidence 저장 방식이다. 원본 저장 구조 변경은
+[BE 요청사항](https://app.notion.com/p/3ef3c6661b7d80c9a697d4f39dce1841)에서 별도로 다룬다.
 
 `procedure_bindings`의 키는 AI의 기존 절차 의미 코드, 값은 BE의 실제 `ProcedureStepRef`다.
 예를 들어 `"FILE_FOOD_SERVICE_CLOSURE"`에 BE에서 조회한 식품영업 폐업 절차의 ID·코드를 연결한다.
 행동 대상·진행 상태·근거 조회에는 BE 코드가 그대로 남는다. `TEMP_*` 이름이나 절차명으로
 의미를 추정하지 않으며, 다른 절차에 같은 ID·코드를 중복 연결하거나 미등록 대상을 연결하면 거부한다.
-새 호출 함수에는 명시적 매핑이 필수이고 `{}`는 매핑 없음이다. 기존 `build_runtime` 호출에서만
-매핑 생략 시 이미 등록된 코드가 AI 의미 코드와 정확히 같은 항목을 사용한다.
+`run_case_planning`의 대응표 인자는 필수다. 값으로 `None`을 넘기면 등록된 DB 코드가 AI 의미
+코드와 정확히 같은 항목을 연결하고, `{}`를 넘기면 아무 절차도 연결하지 않는다.
 runtime은 검증한 대응표를 절차조회 Tool에도 전달한다. Tool은 반환 문서의 `step_codes`만
 실제 DB 코드로 바꾸며, 대응이 없는 코드로는 행동 대상을 연결하지 않는다.
 승인 JSON과 DB Evidence의 원문·해시·근거 ID는 바꾸지 않는다.
@@ -146,24 +143,27 @@ DB 근거가 없으면 JSON 본문으로 대신하지 않고 빈 결과를 반�
 ### 검수 절차 자료 저장·조회
 
 공식 안내문을 수집·발췌한 뒤 개발자가 내용을 검수·승인한 자료를 사용한다.
-승인된 JSON은 최초 이관 원본이다. 운영에서는 BE가 절차 테이블의 검수 snapshot을 조회하고,
-해당 자료를 Case별 Evidence로 적재한 뒤 Agent에 전달한다.
+현재 #65의 BE는 승인 JSON을 읽어 Case 생성 시 공식 문서 4건을 Case별 Evidence로 적재한다.
+이후 DB에서 조립한 Case snapshot과 승인 목록을 Agent에 전달한다.
 
-최초 이관할 승인 자료는
+승인 자료는
 [`reviewed-procedures.ko-KR.json`](../../backend/app/common/reviewed-procedures.ko-KR.json)에 있다.
-runtime은 이 파일을 자동으로 읽지 않는다. BE 모델·DB 컬럼과 자료 이관을 반영한 뒤
-기존 Case에 자료를 넣을 때는 backend 디렉토리에서 다음 명령을 실행한다.
+runtime은 이 파일을 자동으로 읽지 않는다. 자료 버전 변경 후 기존 Case에 재적재할 때는
+backend 디렉토리에서 다음 명령을 실행한다. 제안 DB 컬럼 추가 없이 현재 BE 구조에서 실행된다.
 `123`은 실제 존재하는 Case ID로 바꾼다.
 
 ```bash
 .venv/bin/python -m scripts.import_reviewed_procedures --case-id 123
 ```
 
-[`import_reviewed_procedures`](../../backend/app/common/agent_data.py)는 기존 BE의
+별도 승인 JSON을 사용할 때는 `--source <파일 경로>`를 지정한다. 재적재는 문서 근거를 저장하는
+작업이므로 절차 대응표를 받지 않으며 공통 절차 행도 생성하지 않는다.
+
+[`import_reviewed_procedures`](../../backend/app/be/services/reviewed_procedure.py)는 기존 BE의
 `create_evidence()`로 Case별 발췌·출처·버전·해시·시각·상태를 저장한다. CLI가 전체 자료를
 한 번에 commit하며 실패하면 rollback한다. 같은 ID와 내용의 재실행은 건너뛰고,
 같은 ID에 다른 내용이 있으면 덮어쓰지 않는다. 새 버전은 새 근거로 남는다.
-검수 시각·유효기간·검색어·절차 연결 등 검수 메타데이터는 BE가 조회한 절차 snapshot에
+검수 시각·유효기간·검색어·절차 연결 등 검수 메타데이터는 BE가 읽어 전달한 승인 목록에
 유지한다. Case Evidence는 발췌와 출처를 판단의 근거로 보관한다.
 
 BE의 기존 `get_evidence_by_case_id()` → `build_case_snapshot()` 조회 결과를 Graph가 Tool에
@@ -374,13 +374,18 @@ Agent `75af1c5`와 당시 `develop` `73b9f5d`를 기준으로 별도 임시 작�
 #63(`8ea1414`)·#67을 함께 병합한 상태에서 백엔드 테스트 330개가 통과했다.
 FE 화면 동작과 운영 DB 저장·재조회까지 검증한 결과는 아니다.
 
-#65(`07aaf75`)를 추가하면 `app/agent/runtime.py`와 `app/common/agent_data.py`에서 충돌한다.
+#65(`07aaf75`)를 처음 추가했을 때 `app/agent/runtime.py`와 `app/common/agent_data.py`에서 충돌했다.
 DB 자료 변환 함수는 유지하고 저장 함수의 BE 이관을 반영해 충돌을 풀어도,
 `test_agent_service.py`·`test_reviewed_procedure_db.py`·`test_reviewed_procedure_import.py`가
 이동·삭제된 이름을 import해 테스트 수집 오류 3건이 발생했다.
 
-TODO: #65가 반영된 develop을 받은 뒤 `scripts/import_reviewed_procedures.py`와 적재 테스트의
-저장 함수 참조를 `app.be.services.reviewed_procedure`로 바꾼다. 삭제된 `EmptyProcedureStore`
-참조는 기존 빈 `InMemoryReviewedProcedureStore`로 대체하고, Case 생성 시 공식 근거 자동 적재에
-맞게 합성 테스트 준비와 검증을 조정한다. 합본 테스트를 다시 통과하기 전에는 #65와의 호환 완료로
-보지 않는다. 새 BE 서비스가 없는 현재 develop에 미래 import 경로만 먼저 적용하지 않는다.
+이후 [#65의 AI 후속 수정 약속](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/65#issuecomment-6030409316)에
+맞춰 #65 원본 커밋을 현재 feature 브랜치에 통합했다. BE 파일은 #65의 내용 그대로 유지하고,
+저장 함수 참조를 `app.be.services.reviewed_procedure`로 바꿨다. 삭제된 `EmptyProcedureStore`는
+기존 빈 `InMemoryReviewedProcedureStore`로 대체했다. Case 생성 시 자동 적재되는 4건을 포함해
+검증하도록 테스트를 수정했으며 전체 331개가 통과했다.
+
+CLI는 현재 BE 방식인 `--case-id`·선택적 `--source`를 사용한다. 제안 DB 컬럼이나 절차 대응표를
+요구하지 않는다. 격리 MySQL에서 기본 재적재, 새 버전 추가, 재실행 중복 방지와 이전 근거 보존을
+검증했다. `procedure_bindings=None`도 BE가 사용하는 정확한 코드 자동 대응 값으로 타입과
+설명에 명시했다. 빈 대응표 `{}`와 구분하며 runtime의 파일 자동 보충은 복원하지 않았다.

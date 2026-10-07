@@ -9,12 +9,13 @@ from sqlmodel import Session
 
 from app.agent.procedure_tool.store import ProcedureStoreError, ReviewedProcedureRecord
 from app.agent.schemas import KnownProcedureStep, ProcedureStepRef
+from app.be.crud import case as case_crud
+from app.be.crud import evidence as evidence_crud
 from app.be.models.evidence import Evidence
-from app.common import agent_data
+from app.be.services.reviewed_procedure import import_reviewed_procedures
 from app.common.agent_data import (
     InMemoryReviewedProcedureStore,
     build_reviewed_procedure_store,
-    import_reviewed_procedures,
 )
 
 AS_OF = date(2026, 10, 4)
@@ -49,13 +50,13 @@ def store(*records, version="synthetic/1"):
 @pytest.fixture
 def writes(monkeypatch):
     rows = []
-    monkeypatch.setattr(agent_data.case_crud, "get_case_by_id", lambda *_: object())
+    monkeypatch.setattr(case_crud, "get_case_by_id", lambda *_: object())
     monkeypatch.setattr(
-        agent_data.evidence_crud, "get_evidence_by_case_id",
+        evidence_crud, "get_evidence_by_case_id",
         lambda _, case_id: [row for row in rows if row.case_id == case_id],
     )
     writer = MagicMock(side_effect=lambda _, row: rows.append(row) or row)
-    monkeypatch.setattr(agent_data.evidence_crud, "create_evidence", writer)
+    monkeypatch.setattr(evidence_crud, "create_evidence", writer)
     return rows, writer
 
 
@@ -124,7 +125,7 @@ def test_existing_id_conflict_is_checked_before_any_new_write(writes):
 
 
 def test_missing_case_is_rejected(writes, monkeypatch):
-    monkeypatch.setattr(agent_data.case_crud, "get_case_by_id", lambda *_: None)
+    monkeypatch.setattr(case_crud, "get_case_by_id", lambda *_: None)
     with pytest.raises(ProcedureStoreError, match="Case"):
         import_reviewed_procedures(MagicMock(spec=Session), 1, store(), as_of=AS_OF)
     writes[1].assert_not_called()

@@ -228,9 +228,10 @@ async def build_runtime(
 ) -> AgentRuntime:
     """Assemble the Agent with reviewed data supplied by the caller.
 
-    An empty store stays empty. Source text and evidence IDs must come from
-    the BE Case snapshot; missing DB sources stay unavailable. No SQL or
-    procedure file loading runs here. Wiki misses also remain unavailable.
+    An empty store stays empty: the caller states what it has, and that
+    statement is not overridden here. Source text and evidence IDs come from
+    the BE Case snapshot; missing DB sources stay unavailable. No SQL runs
+    here. Wiki misses also remain unavailable.
     """
 
     bindings = resolve_procedure_bindings(known_procedure_steps, procedure_bindings)
