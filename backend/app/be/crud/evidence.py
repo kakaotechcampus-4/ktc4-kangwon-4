@@ -1,6 +1,6 @@
 from sqlmodel import Session, select
 
-from app.be.models.evidence import DecisionRecord, Evidence, EvidenceLineage
+from app.be.models.evidence import ConflictReference, DecisionRecord, Evidence, EvidenceLineage
 
 
 def case_history_evidence_id(case_id: int, case_history_id: int) -> str:
@@ -50,3 +50,15 @@ def create_decision_record(session: Session, decision_record: DecisionRecord) ->
     session.add(decision_record)
     session.flush()
     return decision_record
+
+
+def get_conflict_reference(session: Session, conflict_ref: str) -> ConflictReference | None:
+    return session.exec(
+        select(ConflictReference).where(ConflictReference.conflict_ref == conflict_ref)
+    ).one_or_none()
+
+
+def create_conflict_reference(session: Session, conflict_reference: ConflictReference) -> ConflictReference:
+    session.add(conflict_reference)
+    session.flush()
+    return conflict_reference

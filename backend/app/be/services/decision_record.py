@@ -1,7 +1,8 @@
-"""검수를 통과한 AI 판단을 DB에 저장한다.
+"""AI 판단 결과를 DB에 저장한다.
 
-CONFLICT와 SAFE_FAILURE는 저장하지 않는다(AI팀 스펙: "CONFLICT·SAFE_FAILURE의 정상
-결과 저장 제외"). 사용자 확인 전 충돌값을 Case에 반영하면 안 되기 때문이다.
+결과는 세 가지다. 검수를 통과한 판단(REVIEWED_PLAN)만 Case 값을 바꾸고, 충돌(CONFLICT)과
+실패(SAFE_FAILURE)는 화면이 다음 행동을 안내할 수 있을 만큼만 남긴다. 사용자 확인 전에
+충돌값을 Case에 반영하면 안 되기 때문이다(AI팀 스펙).
 """
 
 
@@ -10,11 +11,13 @@ from sqlmodel import Session
 from datetime import datetime
 
 from app.agent.schemas import (
+    ConflictOutcome,
     EvidenceRecord,
     FactChangeCandidate,
     FactOperation,
     ProcedureProgressChangeCandidate,
     ReviewedPlanOutcome,
+    SafeFailureOutcome,
     SupportMatchUpdateCandidate,
 )
 from app.be.crud import blocker as blocker_crud
@@ -27,11 +30,14 @@ from app.be.crud import support_item as support_item_crud
 from app.be.models.blocker import Blocker
 from app.be.models.case_field_history import CaseFieldHistory
 from app.be.models.case_history import CaseHistory
-from app.be.models.evidence import DecisionRecord, Evidence, EvidenceLineage
+from app.be.models.evidence import ConflictReference, DecisionRecord, Evidence, EvidenceLineage
 from app.be.models.mixins import KST
 from app.be.models.procedure_step import CaseProcedureStepHistory
 from app.be.models.support_item import SupportMatch
 from app.be.services.case_snapshot import UNKNOWN_SENTINEL_FIELDS
+
+# 충돌 확인 기한을 아직 정하지 않아, 만료로 막히지 않도록 멀리 둔다.
+_NO_EXPIRY = datetime(9999, 12, 31)
 
 
 def save_reviewed_plan(
@@ -113,17 +119,61 @@ def save_reviewed_plan(
     return record
 
 
-def mark_judgment_failed(session: Session, case_id: int) -> None:
-    """판단이 정상 결과로 끝나지 않았음을 화면이 알 수 있게 상태만 남긴다.
+def save_conflict(session: Session, history: CaseHistory, outcome: ConflictOutcome) -> None:
+    """사용자에게 되물을 충돌을 보관한다. Case 값은 건드리지 않는다.
 
-    판단 내용은 저장하지 않는다(AI팀 스펙: CONFLICT·SAFE_FAILURE는 정상 결과로 저장하지
-    않음). 다만 상태를 PENDING으로 두면 화면이 영영 "분석 중"에 머물게 된다.
+    AI는 확인받기 전에는 아무것도 바꾸지 말라고 충돌만 돌려준다. 그래서 여기서는 어떤 필드가
+    무엇에서 무엇으로 어긋났는지만 남기고, 반영은 사용자가 고른 뒤에 한다.
+    """
+
+    for conflict in outcome.conflicts:
+        if evidence_crud.get_conflict_reference(session, conflict.conflict_ref) is not None:
+            continue
+        evidence_crud.create_conflict_reference(
+            session,
+            ConflictReference(
+                conflict_ref=conflict.conflict_ref,
+                case_id=history.case_id,
+                canonical_field=conflict.field_path.value,
+                committed_value=_history_value(conflict.committed_value),
+                proposed_value=_history_value(conflict.proposed_value),
+                conflict_digest=conflict.conflict_digest,
+                # TODO: 충돌 확인에 기한을 둘지 정하지 않았다. AI가 주는 값이 아니라 BE가 정해야
+                # 하는데, 기준이 없어 당장은 만료되지 않게 둔다. 충돌 확인 API를 만들 때 정한다.
+                expires_at=_NO_EXPIRY,
+            ),
+        )
+    history.judgment_status = "CONFLICT"
+    session.commit()
+
+
+def save_safe_failure(session: Session, history: CaseHistory, outcome: SafeFailureOutcome) -> None:
+    """실패를 화면이 안내할 수 있는 만큼 남긴다.
+
+    검수를 통과하지 않은 판단은 저장하지 않는다(AI팀 스펙). 다만 상태만 남기면 화면이 모든
+    실패를 "다시 시도"로만 보여주게 되므로, 다음 행동과 멈추게 한 필드는 함께 적는다.
+    """
+
+    history.judgment_status = "FAILED"
+    history.recovery_action_code = outcome.recovery_action_code
+    history.requested_field_paths = [field.value for field in outcome.requested_field_paths]
+    session.commit()
+
+
+def mark_judgment_failed(session: Session, case_id: int) -> None:
+    """판단이 결과를 내놓기도 전에 끊겼을 때 상태를 남긴다.
+
+    AI가 돌려준 실패(SAFE_FAILURE)가 아니라, 그 전에 예외로 끊긴 경우다. 상태를 PENDING으로
+    두면 화면이 영영 "분석 중"에 머물게 된다. 우리 쪽 문제라 같은 입력으로 다시 해볼 만하므로
+    다음 행동은 RETRY로 둔다.
     """
 
     history = case_history_crud.get_case_created_history(session, case_id)
     if history is None:
         return
     history.judgment_status = "FAILED"
+    history.recovery_action_code = "RETRY"
+    history.requested_field_paths = []
     session.commit()
 
 

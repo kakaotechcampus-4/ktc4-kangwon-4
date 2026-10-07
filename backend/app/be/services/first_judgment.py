@@ -73,12 +73,14 @@ async def run_first_judgment(
         support_catalog=agent_runtime_service.empty_support_catalog(),
     )
 
-    if outcome.outcome_type != "REVIEWED_PLAN":
-        # CONFLICT는 사용자에게 되물어 확인받는 흐름이 필요하고, SAFE_FAILURE는 실패 이유를
-        # 보여줘야 한다. 둘 다 정상 결과로는 저장하지 않지만, 화면이 계속 "분석 중"에
-        # 머물지 않도록 상태만은 FAILED로 남긴다.
-        # TODO: CONFLICT를 FAILED로 뭉뚱그리지 않고 재확인 흐름으로 잇는다.
-        decision_record_service.mark_judgment_failed(session, case_id)
+    # 결과는 세 가지이고 화면이 할 일이 각각 다르다. 검수를 통과한 판단만 Case 값을 바꾸고,
+    # 충돌은 되물을 거리를, 실패는 다음 행동을 남긴다.
+    if outcome.outcome_type == "CONFLICT":
+        decision_record_service.save_conflict(session, history, outcome)
+        return outcome, None
+
+    if outcome.outcome_type == "SAFE_FAILURE":
+        decision_record_service.save_safe_failure(session, history, outcome)
         return outcome, None
 
     return outcome, decision_record_service.save_reviewed_plan(session, history, outcome)
