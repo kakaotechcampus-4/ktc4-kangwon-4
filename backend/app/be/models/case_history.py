@@ -1,6 +1,6 @@
 from typing import Optional
 
-from sqlalchemy import JSON, BigInteger, Column, Enum, ForeignKey, Text
+from sqlalchemy import JSON, BigInteger, Boolean, Column, Enum, ForeignKey, Text
 from sqlmodel import Field, Relationship
 
 from app.be.models.mixins import CreatedAtMixin
@@ -60,6 +60,11 @@ class CaseHistory(CreatedAtMixin, table=True):
         default=None,
         sa_column=Column(JSON, nullable=True),
         description="판단을 멈추게 한 Case 필드 목록. 실패가 아니면 NULL",
+    )
+    retryable: bool | None = Field(
+        default=None,
+        sa_column=Column(Boolean, nullable=True),
+        description="재시도하면 성공할 가능성이 있는지. 실패가 아니면 NULL",
     )
     priority_blocker_id: int | None = Field(
         default=None, sa_column=Column(BigInteger, ForeignKey("blocker.id", use_alter=True, name="fk_case_history_priority_blocker"), nullable=True)

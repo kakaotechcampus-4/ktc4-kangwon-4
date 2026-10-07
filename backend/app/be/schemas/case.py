@@ -56,11 +56,25 @@ class CaseGetDetailResponse(BaseModel):
     planned_closure_date: date | None
 
 
+class NextActionResponse(BaseModel):
+    title: str
+    reason: str | None
+    questions_to_ask: list[str]
+
+
+class FieldChangeResponse(BaseModel):
+    field: str
+    stored_value: str | None
+    new_value: str | None
+
+
 class CaseGetResponse(BaseModel):
     case: CaseGetDetailResponse | None
     blocker: str | None
-    next_action: str | None
+    next_action: NextActionResponse | None
     judgment_status: JudgmentStatus | None
     questions_for_user: list[str] | None
     recovery_action_code: RecoveryActionCode | None
     requested_field_paths: list[str] | None
+    retryable: bool | None
+    changes: list[FieldChangeResponse] | None
