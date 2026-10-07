@@ -106,9 +106,13 @@ export type JudgmentStatus = 'PENDING' | 'DONE' | 'NEEDS_MORE_INFO' | 'FAILED'
  */
 export interface NextActionResponse {
   title: string
-  /** 왜 이걸 먼저 해야 하는지 */
-  reason: string
-  /** 사장님이 **상대에게** 물을 말. 서비스가 사장님에게 되묻는 `questions_for_user` 와 다르다 */
+  /** 왜 이걸 먼저 해야 하는지. 없으면 `null` 이다 */
+  reason: string | null
+  /**
+   * 사장님이 **상대에게** 물을 말. 서비스가 사장님에게 되묻는 `questions_for_user` 와 다르다.
+   *
+   * 없어도 `null` 이 아니라 빈 목록으로 온다(#68).
+   */
   questions_to_ask: string[]
 }
 

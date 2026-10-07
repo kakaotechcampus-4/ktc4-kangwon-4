@@ -191,7 +191,13 @@ describe('toCurrentCaseView', () => {
    * 빈 문단이나 빈 목록이 남지 않는다.
    */
   it.each([
-    ['이유가 없으면', { title: '할 일', questions_to_ask: [] }, { reason: '', questions: [] }],
+    // 서버가 실제로 보내는 모양이다 — 이유가 없으면 `null`, 물어볼 말이 없으면 빈 목록(#68)
+    [
+      '이유가 null 이면',
+      { title: '할 일', reason: null, questions_to_ask: [] },
+      { reason: '', questions: [] },
+    ],
+    ['이유 칸이 아예 없으면', { title: '할 일', questions_to_ask: [] }, { reason: '', questions: [] }],
     [
       '이유가 글자가 아니면',
       { title: '할 일', reason: 123, questions_to_ask: [] },
