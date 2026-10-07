@@ -389,3 +389,12 @@ CLI는 현재 BE 방식인 `--case-id`·선택적 `--source`를 사용한다. �
 요구하지 않는다. 격리 MySQL에서 기본 재적재, 새 버전 추가, 재실행 중복 방지와 이전 근거 보존을
 검증했다. `procedure_bindings=None`도 BE가 사용하는 정확한 코드 자동 대응 값으로 타입과
 설명에 명시했다. 빈 대응표 `{}`와 구분하며 runtime의 파일 자동 보충은 복원하지 않았다.
+
+수정본 `25a5cd0`을 `develop` → #63 → #65 → #67 순서로 준비한 임시 통합본에 병합해
+충돌이 없음을 확인했고, 합본에서도 백엔드 테스트 331개가 통과했다. #65를 먼저 develop에
+병합하면 이번 PR의 비교에서 #65 원본 BE 변경은 빠지고 AI 후속 변경만 남는다.
+
+현재 BE의 Case 생성 → DB 근거 재조회 → `run_case_planning(procedure_bindings=None)`도
+실제 LLM으로 확인했다. 제안 DB 컬럼 추가 없이 151초에 `REVIEWED_PLAN`·Review PASS를
+반환했으며 임대인 원상복구 범위·철거 필요 여부 확인 행동을 선택했다.
+`gpt-5.6-sol`·`xhigh`, 판단 캐시 비활성화, Info·Supervisor·Review 각 1회와 HTTP 200을 확인했다.
