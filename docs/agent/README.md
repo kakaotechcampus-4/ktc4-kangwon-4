@@ -367,3 +367,20 @@ BE 미구현 컬럼 `reviewed_source_snapshot`은 테스트 DB에만 추가했�
 결과 입력 2회의 행동 코드·대상·사실 변경 후보는 같았지만, Info의 `RELEVANT` /
 `POSSIBLY_RELEVANT` 분류가 달라 Blocker 설명과 확인 질문은 달랐다. 같은 검증 상태·후보의
 우선순위를 고정한 것이며 자유 입력부터 최종 문구까지 완전히 동일함을 보장하지 않는다.
+
+### 2026-10-07 열린 PR 통합 검증
+
+Agent `75af1c5`와 당시 `develop` `73b9f5d`를 기준으로 별도 임시 작업 트리에서 확인했다.
+#63(`8ea1414`)·#67을 함께 병합한 상태에서 백엔드 테스트 330개가 통과했다.
+FE 화면 동작과 운영 DB 저장·재조회까지 검증한 결과는 아니다.
+
+#65(`07aaf75`)를 추가하면 `app/agent/runtime.py`와 `app/common/agent_data.py`에서 충돌한다.
+DB 자료 변환 함수는 유지하고 저장 함수의 BE 이관을 반영해 충돌을 풀어도,
+`test_agent_service.py`·`test_reviewed_procedure_db.py`·`test_reviewed_procedure_import.py`가
+이동·삭제된 이름을 import해 테스트 수집 오류 3건이 발생했다.
+
+TODO: #65가 반영된 develop을 받은 뒤 `scripts/import_reviewed_procedures.py`와 적재 테스트의
+저장 함수 참조를 `app.be.services.reviewed_procedure`로 바꾼다. 삭제된 `EmptyProcedureStore`
+참조는 기존 빈 `InMemoryReviewedProcedureStore`로 대체하고, Case 생성 시 공식 근거 자동 적재에
+맞게 합성 테스트 준비와 검증을 조정한다. 합본 테스트를 다시 통과하기 전에는 #65와의 호환 완료로
+보지 않는다. 새 BE 서비스가 없는 현재 develop에 미래 import 경로만 먼저 적용하지 않는다.
