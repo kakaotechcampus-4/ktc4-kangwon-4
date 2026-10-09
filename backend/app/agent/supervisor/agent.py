@@ -37,7 +37,7 @@ from app.agent.guardrails import (
     ensure_known_refs,
     ensure_no_sensitive_text,
 )
-from app.agent.llm import LLMRequestError
+from app.agent.llm import LLMClientError
 from app.agent.procedure_tool.rules import (
     procedure_constraints,
     procedure_plan_constraints,
@@ -463,10 +463,12 @@ class SupervisorAgent:
                     draft_version=draft_version,
                     mutations=mutations,
                 )
-            except LLMRequestError:
-                # 공급자 장애는 다시 물어도 같은 답이 온다. 호출 한 번이 최대
-                # 180초라 더 기다리면 판단 전체 제한시간만 까먹는다. 아래에서
-                # 코드가 이미 정해 둔 1순위로 내보낸다.
+            except LLMClientError:
+                # 모델에게서 쓸 답을 받지 못한 경우다. 통신 장애(LLMRequestError)든
+                # 형식 불일치(LLMResponseError)든, llm.py가 이미 내부에서 재시도를
+                # 끝낸 뒤 던지므로 여기서 다시 부르면 이미 재시도한 호출을 통째로
+                # 반복하게 된다. 한 번이 최대 180초라 판단 전체 제한시간만 까먹는다.
+                # 아래에서 코드가 이미 정해 둔 1순위로 내보낸다.
                 llm_unavailable = True
                 break
             except (GuardrailViolation, ValueError):
