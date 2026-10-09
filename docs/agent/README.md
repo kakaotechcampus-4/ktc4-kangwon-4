@@ -424,3 +424,37 @@ Info·Review도 같은 구조이지만 고치지 않았다. 두 곳은 코드가
 **DB 원본 공급용 변환 함수 제거** — 앱에서 부르는 곳이 없고 BE 모델에 없는
 `reviewed_source_snapshot` 컬럼을 전제했다. 컬럼이 확정될 때 함께 넣는다.
 `app/common/`은 BE 소유이므로 이 PR에서 해당 디렉터리 변경은 모두 되돌렸다.
+
+### 2026-10-09 되묻기 연결과 실제 LLM 확인
+
+확인이 필요한 사실은 Case에 저장되지 않는데, 모델은 답을 냈다고 보고 그 필드를
+`missing_fields`에 넣지 않는다. 그래서 **사실은 보류됐는데 아무도 묻지 않는** 상태가
+되어 Supervisor가 쓸 후보도 질문도 없이 끝났다. `missing_info_fields`가 보류된 사실의
+필드를 되물을 대상에 넣고, 그 근거도 함께 모으도록 보완했다.
+
+`gpt-5.6-sol`·`xhigh`, 판단 캐시 비활성화. 아래는 `scripts/evaluate_planning.py`에
+추가한 두 시나리오로 확인한 결과다.
+
+| 입력 | 결과 |
+|---|---|
+| `scope_reversed` (뒤 절이 앞 절을 뒤집음) | 모델이 사실을 제안하지 않는 경우가 많았다. 제안하지 않으면 Info가 질문을 만들어 `NEEDS_MORE_INFO`로 끝난다(3회 중 2회) |
+| `scope_benign_connective` (접속 표현은 있지만 뒤집지 않음) | 모델이 사실을 제안한다. 보류는 의도대로 동작했으나(`확인필요=1`) 판단은 `SAFE_FAILURE`로 끝났다(3회 중 3회) |
+
+두 번째 결과를 같은 입력·변경 전 코드로 다시 확인했다. 변경 전도 `SAFE_FAILURE`였고,
+실패 지점만 Supervisor에서 Review로 뒤로 밀렸다. 이번 변경이 만든 회귀가 아니다.
+
+| | 변경 전 | 변경 후 |
+|---|---|---|
+| Info | 2회(1차 거부 → 2차 통과, 확인필요=0) | 2회(1차 거부 → 2차 통과, 확인필요=1) |
+| 실패 지점 | Supervisor, `STRUCTURED_OUTPUT_FAILED` | Review, `REVIEW_RETRY_EXHAUSTED` |
+
+**확인하지 못한 것**: 보류된 사실이 실제 화면까지 되묻기로 도달하는 전체 경로.
+모델이 사실을 제안하는 입력은 Supervisor·Review의 기존 불안정성에 먼저 걸리고,
+제안하지 않는 입력은 이 변경을 거치지 않는다. 10회 넘게 실행했지만 그 조합이 나오지
+않았다. 되묻기 생성 자체는 LLM 없이 결정적으로 확인했다
+(`test_held_fact_still_produces_a_question_for_the_owner`).
+
+1차 거부는 이번 변경과 무관한 기존 검사다. 모델이 한 문장을 근거로 서로 다른 사실을
+여러 개 제안해 `fact value is not explicit in its source text`로 거부됐다.
+애매한 입력에서 Supervisor나 Review가 반복 거부해 `SAFE_FAILURE`로 끝나는 경로는
+통신 장애보다 넓게 존재한다.
