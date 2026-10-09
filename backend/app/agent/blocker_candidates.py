@@ -361,6 +361,21 @@ def missing_info_fields(
         for ref in change.source_evidence_refs
         if ref not in refs
     )
+    # 확인이 필요한 사실은 Case에 반영되지 않으므로 mutations에 안 들어온다.
+    # 그 사실의 근거(사장님이 쓴 문장)는 되물을 때 인용할 거라 여기서 모은다.
+    held = [
+        candidate
+        for source in sources
+        if isinstance(source.output, InfoAnalysisResult)
+        for candidate in source.output.fact_candidates
+        if candidate.requires_confirmation
+    ]
+    refs.extend(
+        ref
+        for candidate in held
+        for ref in candidate.source_evidence_refs
+        if ref not in refs
+    )
     if not refs:
         return None
     missing_paths = {
@@ -383,6 +398,23 @@ def missing_info_fields(
         )
         and not (
             restoration_detail_unnecessary and path.value == "restoration_scope_detail"
+        )
+    }
+    # 모델이 답을 냈다고 보면 그 필드를 missing_fields에 안 넣는다. 그런데 그 답이
+    # 확인이 필요한 상태로 보류됐다면 아직 모르는 값이므로, 되물을 대상에 넣는다.
+    # 이것이 없으면 "사실은 보류됐는데 아무도 묻지 않는" 상태가 된다.
+    missing_paths |= {
+        candidate.field_path.value
+        for candidate in held
+        if candidate.field_path.value in _QUESTIONS
+        and candidate.field_path.value not in values
+        and not (
+            restoration_questions_resolved
+            and candidate.field_path.value.startswith(("restoration_", "demolition_"))
+        )
+        and not (
+            restoration_detail_unnecessary
+            and candidate.field_path.value == "restoration_scope_detail"
         )
     }
     missing = next((path for path in _QUESTIONS if path in missing_paths), None)

@@ -645,3 +645,46 @@ def test_plain_result_sentence_still_confirms_without_asking_back():
     ], text)
     assert len(result.fact_candidates) == 3
     assert not any(item.requires_confirmation for item in result.fact_candidates)
+
+
+# 확인이 필요한 사실은 Case에 저장되지 않는다. 그런데 모델은 답을 냈다고 보고 그 필드를
+# missing_fields에 넣지 않으므로, 되물을 대상에 따로 넣어주지 않으면 "사실은 보류됐는데
+# 아무도 묻지 않는" 상태가 되어 판단이 통째로 실패한다. 실제 실행에서 그렇게 끝났다.
+def test_held_fact_still_produces_a_question_for_the_owner():
+    from uuid import uuid4
+
+    from app.agent.blocker_candidates import missing_info_fields
+    from app.agent.enrichment import build_fact_overlays
+    from app.agent.schemas import CaseSnapshot, MutationSet
+
+    text = "임대인에게 물어봤어요. 원상복구 범위는 없다고 들었는데 임대인은 전부 하라고 했어요."
+    result = analyze_facts([("restoration_scope", "NOT_REQUIRED", text)], text)
+    candidate, = result.fact_candidates
+    assert candidate.requires_confirmation
+
+    base = supervisor_request()
+    snapshot = base.case_snapshot.model_dump(mode="json")
+    for item in snapshot["facts"]:
+        if item["field_path"] in {"restoration_scope", "restoration_status"}:
+            item.update(status="UNKNOWN", value=None, evidence_refs=[], updated_at=None)
+    snapshot["procedure_progress"] = []
+    snapshot = CaseSnapshot.model_validate(snapshot)
+    source = next(
+        item for item in base.source_results
+        if type(item.output).__name__ == "InfoAnalysisResult"
+    ).model_copy(update={"output": result})
+
+    # 보류된 값은 Case에 반영되지 않는다
+    assert build_fact_overlays(snapshot, result, uuid4(), uuid_factory=uuid4) == []
+    # 그래도 사장님께는 물어본다
+    fields = missing_info_fields(
+        snapshot,
+        [source],
+        MutationSet(
+            fact_changes=[], procedure_progress_changes=[], support_match_updates=[]
+        ),
+        None,
+    )
+    assert fields is not None
+    assert fields["decision_type"] == "NEEDS_MORE_INFO"
+    assert fields["questions_for_user"] == ["확인한 원상복구 범위가 있으면 알려주세요."]
