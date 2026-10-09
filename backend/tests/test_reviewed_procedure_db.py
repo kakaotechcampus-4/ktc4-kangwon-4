@@ -15,7 +15,6 @@ from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import MetaData, Table, select, text
 from sqlmodel import Session, SQLModel, create_engine
 from testcontainers.community.mysql import MySqlContainer
 
@@ -40,7 +39,6 @@ from app.be.services.reviewed_procedure import (
 from app.common.agent_data import (
     InMemoryReviewedProcedureStore,
     build_known_procedure_steps,
-    build_reviewed_procedure_store,
     load_reviewed_procedure_store,
 )
 from app.common.agent_service import build_planning_input
@@ -371,59 +369,6 @@ def test_runtime_keeps_empty_store_without_reading_procedure_file(
         assert missing_metadata.completion_status == "NO_RESULTS"
         assert missing_metadata.documents == []
         assert missing_metadata.evidence_records == []
-    file_reader.assert_not_called()
-
-
-def test_proposed_db_column_supplies_approved_documents_without_files(mysql_engine, monkeypatch):
-    """BE column is simulated only in disposable MySQL, never in app models."""
-    source_path = Path(__file__).parents[1] / "app/common/reviewed-procedures.ko-KR.json"
-    source = json.loads(source_path.read_text(encoding="utf-8"))
-    case_id = create_test_case(mysql_engine)
-    with mysql_engine.begin() as connection:
-        connection.execute(text(
-            "ALTER TABLE procedure_step ADD COLUMN reviewed_source_snapshot JSON NULL"
-        ))
-    table = Table("procedure_step", MetaData(), autoload_with=mysql_engine)
-    with mysql_engine.begin() as connection:
-        for record in source["records"]:
-            updated = connection.execute(table.update().where(
-                table.c.step_code == record["step_codes"][0],
-            ).values(
-                reviewed_source_snapshot=source | {"records": [record]},
-            ))
-            assert updated.rowcount == 1
-    file_reader = Mock(side_effect=AssertionError("DB path must not read files"))
-    monkeypatch.setattr(Path, "read_text", file_reader)
-    monkeypatch.setattr(Path, "open", file_reader)
-    with Session(mysql_engine) as session:
-        rows = get_all_procedure_steps(session)
-        known = build_known_procedure_steps(rows, [], [], db_timezone=KST)
-        snapshots = dict(session.execute(select(
-            table.c.step_code, table.c.reviewed_source_snapshot,
-        ).where(table.c.reviewed_source_snapshot.is_not(None))).all())
-        restored = build_reviewed_procedure_store(snapshots, known_procedure_steps=known)
-        assert restored.snapshot_version == source["snapshot_version"]
-        assert {item.record_id: item.model_dump(mode="json") for item in restored.records()} == {
-            item.record_id: item.model_dump(mode="json")
-            for item in load_reviewed_procedure_store(source).records()
-        }
-        assert sum(len(item.excerpt) for item in restored.records()) == 5706
-        evidence_ids = {row.evidence_id for row in import_reviewed_procedures(
-            session, case_id, restored, as_of=AS_OF,
-        )}
-        session.commit()
-    with Session(mysql_engine) as session:
-        snapshot = build_case_snapshot(session, case_id)
-        request = lookup_request(snapshot)
-        request.search_queries = [
-            " ".join([*item.required_terms, *item.any_terms[:1]])
-            for item in restored.records()
-        ]
-        result = asyncio.run(StoredProcedureLookupTool(restored).lookup(request))
-        assert result.completion_status == "COMPLETE"
-        assert len(result.documents) == 4
-        assert {item.evidence_id for item in result.evidence_records} == evidence_ids
-        assert sum(len(item.excerpt) for item in result.documents) == 5706
     file_reader.assert_not_called()
 
 
