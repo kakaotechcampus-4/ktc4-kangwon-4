@@ -42,7 +42,7 @@ export interface NextAction {
   /**
    * 왜 이걸 먼저 해야 하는지.
    *
-   * 서버가 제목만 보내는 동안에는 비어 있다. 비면 문단 자체를 그리지 않는다.
+   * 서버가 안 보내면 빈 글자다. 비면 문단 자체를 그리지 않으므로 빈 자리가 남지 않는다.
    */
   reason: string
   /**
@@ -69,6 +69,13 @@ export type JudgmentView =
   | { status: 'DONE'; blocker: Blocker; nextAction: NextAction }
   /** 다음 할 일을 정하려면 사용자에게 먼저 물어볼 것이 있다 */
   | { status: 'NEEDS_MORE_INFO'; questions: string[] }
+  /**
+   * 사용자가 한 말이 기록과 어긋나 어느 쪽이 맞는지 확인해야 한다.
+   *
+   * 담는 값이 없다. 서버가 `judgment_status` 만 보내고 **어긋난 항목은 싣지 않기로**
+   * 했다 — 그 목록은 충돌 확인 API 를 만들 때 함께 내려준다(#66).
+   */
+  | { status: 'CONFLICT' }
   /** 판단을 마치지 못했다. 사용자 탓이 아니다 */
   | { status: 'FAILED' }
   /** 서버가 모르는 값을 보냈거나, 상태와 내용의 조합이 계약과 어긋난다 */

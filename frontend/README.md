@@ -142,6 +142,7 @@ PR 브랜치마다 Preview 주소가 달라 등록할 수 없어서, **리뷰어
 /?mock=pending-long         판단 중인데 오래 걸려 자동 조회를 멈춘 상태
 /?mock=more-info            다음 할 일을 정하려면 더 물어봐야 하는 상태
 /?mock=judgment-failed      판단 실패
+/?mock=judgment-conflict    말한 내용이 기록과 달라 확인이 필요한 상태
 /?mock=unrecognized         서버가 모르는 판단 상태를 보냈을 때
 /results?mock=conflict      제출하면 충돌 확인으로
 /results?mock=more-info     추가 질문

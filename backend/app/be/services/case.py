@@ -5,6 +5,7 @@ from fastapi import HTTPException
 from sqlmodel import Session
 
 from app.be.crud import case as case_crud
+from app.be.crud import case_field_history as case_field_history_crud
 from app.be.crud import case_history as case_history_crud
 from app.be.crud import evidence as evidence_crud
 from app.be.crud import procedure_step as procedure_step_crud
@@ -13,7 +14,13 @@ from app.be.models.case_history import CaseHistory
 from app.be.models.evidence import Evidence
 from app.be.models.mixins import kst_now
 from app.be.models.procedure_step import CaseProcedureStep, ProcedureStep
-from app.be.schemas.case import CaseCreateRequest, CaseGetDetailResponse, CaseGetResponse
+from app.be.schemas.case import (
+    CaseCreateRequest,
+    CaseGetDetailResponse,
+    CaseGetResponse,
+    FieldChangeResponse,
+    NextActionResponse,
+)
 from app.be.services import reviewed_procedure as reviewed_procedure_service
 
 
@@ -49,7 +56,15 @@ def get_case(session: Session, member_id: int) -> CaseGetResponse:
     case = case_crud.get_case_by_member_id(session, member_id)
     if case is None:
         return CaseGetResponse(
-            case=None, blocker=None, next_action=None, judgment_status=None, questions_for_user=None
+            case=None,
+            blocker=None,
+            next_action=None,
+            judgment_status=None,
+            questions_for_user=None,
+            recovery_action_code=None,
+            requested_field_paths=None,
+            retryable=None,
+            changes=None,
         )
 
     latest_history = case_crud.get_latest_user_driven_case_history(session, case.id)
@@ -64,12 +79,46 @@ def get_case(session: Session, member_id: int) -> CaseGetResponse:
     if latest_history.judgment_status == "NEEDS_MORE_INFO" and not latest_history.questions_for_user:
         raise HTTPException(status_code=500, detail="정보 부족(NEEDS_MORE_INFO) 상태인데 questions_for_user가 없습니다.")
 
+    if latest_history.judgment_status == "FAILED" and latest_history.recovery_action_code is None:
+        raise HTTPException(status_code=500, detail="판단 실패(FAILED) 상태인데 recovery_action_code가 없습니다.")
+
+    # TODO: retryable은 저장하는 쪽(decision_record.py의 save_safe_failure 등)이 아직 안 채워주고
+    # 있어서 지금은 가드를 안 건다. 채워주기 시작하면 위 recovery_action_code처럼
+    # "FAILED인데 retryable이 없으면 500" 가드를 추가해야 한다.
+
+    next_action = (
+        NextActionResponse(
+            title=latest_history.next_action,
+            reason=latest_history.next_action_reason,
+            questions_to_ask=latest_history.next_action_questions_to_ask or [],
+        )
+        if latest_history.next_action is not None
+        else None
+    )
+
+    # TODO: case_history_id는 저장하는 쪽(decision_record.py의 _apply_fact_changes)이
+    # 아직 안 채워주고 있어서, DONE이어도 실제로는 변경이 있었는데 []로 나올 수 있다.
+    changes = (
+        [
+            FieldChangeResponse(field=h.canonical_field, stored_value=h.before_value, new_value=h.after_value)
+            for h in case_field_history_crud.get_case_field_histories_by_case_history_id(session, latest_history.id)
+        ]
+        if latest_history.judgment_status == "DONE"
+        else None
+    )
+
     return CaseGetResponse(
         case=CaseGetDetailResponse(**case.model_dump()),
         blocker=latest_history.priority_blocker.description if latest_history.priority_blocker else None,
-        next_action=latest_history.next_action,
+        next_action=next_action,
         judgment_status=latest_history.judgment_status,
         questions_for_user=latest_history.questions_for_user,
+        # 실패했을 때만 채워진다. 화면은 이 값으로 "다시 시도" / "다시 말씀해 주세요" /
+        # "문의" 중 무엇을 보여줄지 정한다.
+        recovery_action_code=latest_history.recovery_action_code,
+        requested_field_paths=latest_history.requested_field_paths,
+        retryable=latest_history.retryable,
+        changes=changes,
     )
 
 

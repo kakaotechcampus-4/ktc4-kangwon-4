@@ -7,6 +7,7 @@ import { usesMockData } from '../lib/auth'
 import { readMockKey } from '../lib/mockSwitch'
 import {
   doneCase,
+  judgmentConflictCase,
   judgmentFailedCase,
   moreInfoCase,
   pendingCase,
@@ -89,6 +90,9 @@ const MOCKS: Record<string, CurrentCaseView> = {
   'pending-long': pendingCase,
   'more-info': moreInfoCase,
   'judgment-failed': judgmentFailedCase,
+  // `conflict` 는 못 쓴다. `/results?mock=conflict` 가 결과 제출 쪽 충돌 흐름을 쓰고 있어서,
+  // 같은 키를 여기 붙이면 `/case` 에서 할 일 카드가 안 떠 그 흐름이 첫 걸음에서 끊긴다
+  'judgment-conflict': judgmentConflictCase,
   unrecognized: unrecognizedCase,
 }
 
