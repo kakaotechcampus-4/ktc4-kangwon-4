@@ -6,32 +6,51 @@ engine or starts the API; all rows live in a disposable mysql:8.0 container.
 
 import asyncio
 import hashlib
+import json
+import sys
 from datetime import date, datetime, timezone
+from pathlib import Path
+from types import ModuleType
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
-from app.agent import runtime as runtime_module
-from app.agent.procedure_tool.store import ProcedureStoreError
-from app.agent.procedure_tool.stored_tool import StoredProcedureLookupTool
-from app.agent.schemas import ProcedureLookupInput, ProcedureStepRef
-from app.be.crud import evidence as evidence_crud
-from app.be.crud.case_history import get_case_created_history
-from app.be.crud.member import create_member
-from app.be.models.mixins import KST
-from app.be.schemas.case import CaseCreateRequest
-from app.be.services.agent_runtime import build_agent_runtime
-from app.be.services.case import create_case
-from app.be.services.case_snapshot import build_case_created_input, build_case_snapshot
-from app.common.agent_data import (
-    import_reviewed_procedures,
-    load_reviewed_procedure_store,
-)
 from sqlmodel import Session, SQLModel, create_engine
 from testcontainers.community.mysql import MySqlContainer
 
+from app.agent import runtime as runtime_module
+from app.agent.procedure_tool.store import ProcedureStoreError
+from app.agent.procedure_tool.stored_tool import StoredProcedureLookupTool
+from app.agent.schemas import ProcedureLookupInput, ProcedureStepRef, RedactedInput
+from app.be.crud import evidence as evidence_crud
+from app.be.crud.case_history import get_case_created_history
+from app.be.crud.member import create_member
+from app.be.crud.procedure_step import get_all_procedure_steps
+from app.be.models.mixins import KST
+from app.be.schemas.case import CaseCreateRequest
+from app.be.services import case as case_service
+from app.be.services.agent_runtime import empty_support_catalog
+from app.be.services.case import create_case
+from app.be.services.case_snapshot import build_case_snapshot
+from app.be.services.reviewed_procedure import (
+    import_reviewed_procedures,
+    load_reviewed_procedures,
+)
+from app.common.agent_data import (
+    InMemoryReviewedProcedureStore,
+    build_known_procedure_steps,
+    load_reviewed_procedure_store,
+)
+from app.common.agent_service import build_planning_input
+
 AS_OF = date(2026, 10, 4)
 RETRIEVED = datetime(2026, 10, 4, 1, 2, 3, 456789, tzinfo=timezone.utc)
+
+
+@pytest.fixture(autouse=True)
+def case_creation_clock(monkeypatch):
+    # Keep automatic approval freshness stable without replacing create_case.
+    monkeypatch.setattr(case_service, "kst_now", lambda: RETRIEVED.astimezone(KST))
 
 
 @pytest.fixture(scope="module")
@@ -91,11 +110,16 @@ def create_test_case(engine):
         return case.id
 
 
-def official_rows(session, case_id):
+def official_rows(session, case_id, *, version=None):
     return [
         row for row in evidence_crud.get_evidence_by_case_id(session, case_id)
         if row.source_type == "OFFICIAL_DOCUMENT"
+        and (version is None or row.source_version == version)
     ]
+
+
+def official_payloads(session, case_id):
+    return {row.evidence_id: row.model_dump() for row in official_rows(session, case_id)}
 
 
 def lookup_request(snapshot):
@@ -105,6 +129,35 @@ def lookup_request(snapshot):
         max_results_per_query=4, based_on_snapshot_id=snapshot.snapshot_id,
         evidence_records=snapshot.evidence_records, review_feedback=[],
     )
+
+
+def test_case_creation_imports_four_approved_documents_and_reuses_their_ids(mysql_engine):
+    store = load_reviewed_procedures()
+    case_id = create_test_case(mysql_engine)
+    with Session(mysql_engine) as session:
+        baseline = official_payloads(session, case_id)
+        assert len(baseline) == len(store.records()) == 4
+        assert {row["source_version"] for row in baseline.values()} == {store.snapshot_version}
+        assert {row["excerpt"] for row in baseline.values()} == {
+            record.excerpt for record in store.records()
+        }
+        repeated = import_reviewed_procedures(session, case_id, store, as_of=AS_OF)
+        assert {row.evidence_id for row in repeated} == set(baseline)
+        session.commit()
+    with Session(mysql_engine) as session:
+        assert official_payloads(session, case_id) == baseline
+        snapshot = build_case_snapshot(session, case_id)
+        request = lookup_request(snapshot)
+        request.search_queries = [
+            " ".join([*item.required_terms, *item.any_terms[:1]]) for item in store.records()
+        ]
+        result = asyncio.run(StoredProcedureLookupTool(store).lookup(request))
+        assert result.completion_status == "COMPLETE"
+        assert len(result.documents) == 4
+        assert {item.evidence_id for item in result.evidence_records} == set(baseline)
+        assert {item.procedure_step.step_code for item in snapshot.procedure_progress} == {
+            code for record in store.records() for code in record.step_codes
+        }
 
 
 def test_committed_rows_reach_tool_without_new_evidence_ids(mysql_engine, approved_store):
@@ -126,7 +179,7 @@ def test_committed_rows_reach_tool_without_new_evidence_ids(mysql_engine, approv
 
         # A fresh session proves these are persisted rows, not ORM identity-map data.
         with Session(mysql_engine) as session:
-            rows = official_rows(session, case_id)
+            rows = official_rows(session, case_id, version=approved_store.snapshot_version)
             records = {record.canonical_url: record for record in approved_store.records()}
             assert len(rows) == 2
             for row in rows:
@@ -157,13 +210,16 @@ def test_committed_rows_reach_tool_without_new_evidence_ids(mysql_engine, approv
             )
             assert {row.evidence_id for row in repeated} == ids_by_case[-1]
             session.commit()
-            assert len(official_rows(session, case_id)) == 2
+            assert len(official_rows(
+                session, case_id, version=approved_store.snapshot_version,
+            )) == 2
     assert ids_by_case[0].isdisjoint(ids_by_case[1])
 
 
 def test_new_version_preserves_old_evidence(mysql_engine, approved_store):
     case_id = create_test_case(mysql_engine)
     with Session(mysql_engine) as session:
+        baseline = official_payloads(session, case_id)
         old_ids = {row.evidence_id for row in import_reviewed_procedures(
             session, case_id, approved_store, as_of=AS_OF
         )}
@@ -178,7 +234,9 @@ def test_new_version_preserves_old_evidence(mysql_engine, approved_store):
         session.commit()
     with Session(mysql_engine) as session:
         assert old_ids.isdisjoint(new_ids)
-        assert {row.evidence_id for row in official_rows(session, case_id)} == old_ids | new_ids
+        actual = official_payloads(session, case_id)
+        assert set(actual) == set(baseline) | old_ids | new_ids
+        assert {key: actual[key] for key in baseline} == baseline
 
 
 def test_same_id_changed_payload_is_rejected(mysql_engine, approved_store):
@@ -196,13 +254,17 @@ def test_same_id_changed_payload_is_rejected(mysql_engine, approved_store):
             import_reviewed_procedures(session, case_id, changed, as_of=AS_OF)
         session.rollback()
     with Session(mysql_engine) as session:
-        assert {row.excerpt for row in official_rows(session, case_id)} == {
+        assert {row.excerpt for row in official_rows(
+            session, case_id, version=approved_store.snapshot_version,
+        )} == {
             record.excerpt for record in approved_store.records()
         }
 
 
 def test_caller_rolls_back_partial_import(mysql_engine, approved_store, monkeypatch):
     case_id = create_test_case(mysql_engine)
+    with Session(mysql_engine) as session:
+        baseline = official_payloads(session, case_id)
     create = evidence_crud.create_evidence
     calls = 0
 
@@ -219,12 +281,14 @@ def test_caller_rolls_back_partial_import(mysql_engine, approved_store, monkeypa
             import_reviewed_procedures(session, case_id, approved_store, as_of=AS_OF)
         session.rollback()
     with Session(mysql_engine) as session:
-        assert official_rows(session, case_id) == []
+        assert official_payloads(session, case_id) == baseline
 
 
 @pytest.mark.parametrize("problem", ["missing_case", "unreviewed", "long_url"])
 def test_invalid_import_writes_nothing(mysql_engine, approved_store, problem):
     case_id = create_test_case(mysql_engine)
+    with Session(mysql_engine) as session:
+        baseline = official_payloads(session, case_id)
     records = [item.model_dump() for item in approved_store.records()]
     if problem == "unreviewed":
         records[-1].update(reviewed_by=None, reviewed_at=None)
@@ -239,18 +303,18 @@ def test_invalid_import_writes_nothing(mysql_engine, approved_store, problem):
         with pytest.raises(ProcedureStoreError):
             import_reviewed_procedures(session, target_id, store, as_of=AS_OF)
         # No rollback yet: even the valid first record must not have been inserted.
-        assert official_rows(session, case_id) == []
+        assert official_payloads(session, case_id) == baseline
         session.commit()
     with Session(mysql_engine) as session:
-        assert official_rows(session, case_id) == []
+        assert official_payloads(session, case_id) == baseline
 
 
-def test_existing_be_runtime_uses_db_rows_with_empty_store(
+def test_runtime_keeps_empty_store_without_reading_procedure_file(
     mysql_engine, approved_store, monkeypatch,
 ):
     case_id = create_test_case(mysql_engine)
-    metadata_loader = Mock(return_value=approved_store)
-    monkeypatch.setattr(runtime_module, "load_reviewed_procedures", metadata_loader)
+    file_reader = Mock(side_effect=AssertionError("Runtime must not read procedure files"))
+    monkeypatch.setattr(Path, "read_text", file_reader)
     monkeypatch.setattr(runtime_module, "resolve_max_calls_per_run", lambda: 5)
     monkeypatch.setattr(runtime_module, "resolve_run_deadline_seconds", lambda: 60)
     monkeypatch.setattr(runtime_module.LangfuseTraceSink, "from_env", lambda: None)
@@ -260,9 +324,24 @@ def test_existing_be_runtime_uses_db_rows_with_empty_store(
     )
 
     async def lookup_from_be(session):
-        runtime = await build_agent_runtime(session)
+        runtime = await runtime_module.build_runtime(
+            known_procedure_steps=build_known_procedure_steps(
+                get_all_procedure_steps(session), [], [], db_timezone=KST,
+            ),
+            support_catalog=empty_support_catalog(),
+            procedure_store=InMemoryReviewedProcedureStore("synthetic/empty", ()),
+        )
         try:
-            request = build_case_created_input(session, case_id)
+            history = get_case_created_history(session, case_id)
+            request = build_planning_input(
+                trigger_type="CASE_CREATED",
+                case_snapshot=build_case_snapshot(session, case_id),
+                user_input=RedactedInput(
+                    input_event_id=f"case_history:{history.id}",
+                    source_type="USER_INPUT", redacted_text=history.raw_input,
+                    redactions=[], submitted_at=history.created_at.replace(tzinfo=KST),
+                ),
+            )
             monkeypatch.setattr(runtime._graph, "_procedure_queries", lambda _: ["합성 절차"])
             result = await runtime._graph._procedure_node({
                 "request": request, "run_id": uuid4(),
@@ -283,11 +362,61 @@ def test_existing_be_runtime_uses_db_rows_with_empty_store(
         import_reviewed_procedures(session, case_id, approved_store, as_of=AS_OF)
         session.commit()
     with Session(mysql_engine) as session:
-        found = asyncio.run(lookup_from_be(session))
-        assert found.completion_status == "COMPLETE"
-        assert len(found.documents) == 2
-        assert all(document.step_codes == [] for document in found.documents)
-        assert {item.evidence_id for item in found.evidence_records} == {
-            row.evidence_id for row in official_rows(session, case_id)
-        }
-    assert metadata_loader.call_count == 2
+        assert len(official_rows(
+            session, case_id, version=approved_store.snapshot_version,
+        )) == 2
+        missing_metadata = asyncio.run(lookup_from_be(session))
+        assert missing_metadata.completion_status == "NO_RESULTS"
+        assert missing_metadata.documents == []
+        assert missing_metadata.evidence_records == []
+    file_reader.assert_not_called()
+
+
+def test_cli_reimport_and_new_source_version_preserve_existing_evidence(
+    mysql_engine, monkeypatch, tmp_path,
+):
+    from scripts import import_reviewed_procedures as import_cli
+
+    case_id = create_test_case(mysql_engine)
+    with Session(mysql_engine) as session:
+        baseline = official_payloads(session, case_id)
+    # The CLI's database import resolves only to this disposable test engine.
+    database = ModuleType("app.be.db")
+    database._engine = mysql_engine
+    monkeypatch.setitem(sys.modules, "app.be.db", database)
+    monkeypatch.setattr(import_cli, "datetime", Mock(now=lambda tz: RETRIEVED.astimezone(tz)))
+    command = ["import_reviewed_procedures", "--case-id", str(case_id)]
+    monkeypatch.setattr(sys, "argv", command)
+    import_cli.main()
+    with Session(mysql_engine) as session:
+        assert official_payloads(session, case_id) == baseline
+
+    source = {
+        "snapshot_version": "synthetic/cli-next",
+        "generated_at": RETRIEVED.isoformat(),
+        "locale": "ko-KR",
+        "records": [record.model_dump(mode="json") for record in load_reviewed_procedures().records()],
+    }
+    source_path = tmp_path / "new-version.json"
+    source_path.write_text(json.dumps(source, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", [*command, "--source", str(source_path)])
+    import_cli.main()
+    with Session(mysql_engine) as session:
+        updated = official_payloads(session, case_id)
+        assert len(updated) == 8
+        assert {key: updated[key] for key in baseline} == baseline
+        new_ids = set(updated) - set(baseline)
+        assert {updated[key]["source_version"] for key in new_ids} == {source["snapshot_version"]}
+    import_cli.main()
+    with Session(mysql_engine) as session:
+        assert official_payloads(session, case_id) == updated
+        snapshot = build_case_snapshot(session, case_id)
+        request = lookup_request(snapshot)
+        store = load_reviewed_procedure_store(source)
+        request.search_queries = [
+            " ".join([*item.required_terms, *item.any_terms[:1]]) for item in store.records()
+        ]
+        result = asyncio.run(StoredProcedureLookupTool(store).lookup(request))
+        assert result.completion_status == "COMPLETE"
+        assert len(result.documents) == 4
+        assert {item.evidence_id for item in result.evidence_records} == new_ids

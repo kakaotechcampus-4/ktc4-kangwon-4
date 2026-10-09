@@ -73,6 +73,15 @@ RESULT_INPUTS = {
     "scope_and_demolition": (
         "임대인에게 확인했더니 원상복구 범위는 전체이고 철거가 필요하다고 했어요."
     ),
+    # 앞 절을 뒤 절이 뒤집는 입력. 확정하지 않고 되물어야 한다.
+    "scope_reversed": (
+        "임대인에게 물어봤어요. 원상복구 범위는 없다고 들었는데 임대인은 전부 하라고 했어요."
+    ),
+    # 접속 표현은 있지만 뒤 절이 앞 절을 뒤집지 않는 입력. 되묻기가 넓어져
+    # 정상 입력까지 다시 묻게 되는지 보는 반대쪽 시나리오다.
+    "scope_benign_connective": (
+        "임대인에게 확인했습니다. 원상복구 범위는 없다고 했는데 그대로 두면 된대요."
+    ),
 }
 
 # build_runtime creates one client per env prefix; giving each its own transport

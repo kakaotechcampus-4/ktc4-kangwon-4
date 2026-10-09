@@ -10,7 +10,8 @@ Agent는 폐업 Case의 확인된 사실과 근거로 **Blocker 1개·Next Actio
 일반 절차는 공식 안내에 따른 진행 상태와 준비사항 확인을 Blocker로 제시하며,
 확인된 사실과 후보에 없는 차단 조건을 만들어내지 않는다.
 
-지원사업은 MVP 구현·정상 동작 검증 범위에서 제외. 기존 지원사업 코드와 자료는 유지.
+지원사업은 MVP 실행에서 제외한다. 지원 Agent를 호출하지 않고 지원 행동·추가 질문·변경 후보를 생성하지 않는다.
+기존 지원사업 코드·자료·입력 DTO는 유지한다. 폐업 절차의 선택 순서는 [Supervisor 우선순위](./supervisor.md#업무-순서-코드와-review에서-적용)를 따른다.
 
 필드·타입·enum·NULL·기본값·관계·상태 전이는 실제 DTO·BE 모델·검증 코드가 기준이다.
 [schema_table.md](../schema/schema_table.md)는 설계 배경으로 참고하며 코드와 다르면 실제 코드를 확인한다.
@@ -97,20 +98,34 @@ BE가 조회한 `ProcedureStep`·`StepDependency`·`StepEligibility` 행을 변�
 각각 `load_reviewed_procedure_store`·`load_reviewed_support_catalog`로 검증한다.
 BE 모델에 없는 검수·조건·근거 필드를 만들어 채우지는 않는다.
 
+### DB 원본 공급 (아직 연결 전)
+
+현재 Case 생성·재적재 경로는 **승인 JSON → BE Evidence 저장 → DB snapshot 조회 →
+Agent 전달**이다(#65). 절차 원본 자체를 DB에서 공급하는 경로는 아직 없다.
+
+그 경로를 만들려면 BE에 `procedure_step.reviewed_source_snapshot` JSON 컬럼(제안명)이
+먼저 필요하다. **현재 BE 모델에는 이 컬럼이 없다.** 컬럼이 확정되면 DB JSON 값을
+자료 객체로 바꾸는 변환 함수를 그때 같이 넣는다. 지금 미리 넣으면 앱에서 부르는 곳이
+없고 없는 컬럼을 전제하게 되어, 테스트는 통과하지만 실제로는 쓸 수 없는 코드가 된다.
+
+기존 두 규칙 테이블은 스키마를 유지하며 선후 관계·적용 조건 데이터는 따로 검수해야 한다.
+운영 절차의 ID·코드·표시 이름을 테스트용 값으로 대신하지 않는다. 원본 저장 구조 변경은
+[BE 요청사항](https://app.notion.com/p/3ef3c6661b7d80c9a697d4f39dce1841)에서 별도로 다룬다.
+
 `procedure_bindings`의 키는 AI의 기존 절차 의미 코드, 값은 BE의 실제 `ProcedureStepRef`다.
 예를 들어 `"FILE_FOOD_SERVICE_CLOSURE"`에 BE에서 조회한 식품영업 폐업 절차의 ID·코드를 연결한다.
 행동 대상·진행 상태·근거 조회에는 BE 코드가 그대로 남는다. `TEMP_*` 이름이나 절차명으로
 의미를 추정하지 않으며, 다른 절차에 같은 ID·코드를 중복 연결하거나 미등록 대상을 연결하면 거부한다.
-새 호출 함수에는 명시적 매핑이 필수이고 `{}`는 매핑 없음이다. 기존 `build_runtime` 호출에서만
-매핑 생략 시 이미 등록된 코드가 AI 의미 코드와 정확히 같은 항목을 사용한다.
+`run_case_planning`의 대응표 인자는 필수다. 값으로 `None`을 넘기면 등록된 DB 코드가 AI 의미
+코드와 정확히 같은 항목을 연결하고, `{}`를 넘기면 아무 절차도 연결하지 않는다.
 runtime은 검증한 대응표를 절차조회 Tool에도 전달한다. Tool은 반환 문서의 `step_codes`만
 실제 DB 코드로 바꾸며, 대응이 없는 코드로는 행동 대상을 연결하지 않는다.
 승인 JSON과 DB Evidence의 원문·해시·근거 ID는 바꾸지 않는다.
 
 [`build_runtime`](../../backend/app/agent/runtime.py)은 호출자가 준비한 실제 절차 목록
 (`known_procedure_steps`), 검수 지원 자료(`support_catalog`), 절차 검수 목록
-(`procedure_store`)을 받는다. 절차 검수 목록이 비어 있으면 동봉 JSON을 검수·검색 메타정보로
-읽는다. 절차 원문과 근거 ID는 BE가 조회한 `CaseSnapshot.evidence_records`에서 가져오며,
+(`procedure_store`)을 받는다. 절차 검수 목록이 비어 있으면 빈 채로 두며 동봉 JSON으로
+채우지 않는다. 절차 원문과 근거 ID는 BE가 조회한 `CaseSnapshot.evidence_records`에서 가져오며,
 DB 근거가 없으면 JSON 본문으로 대신하지 않고 빈 결과를 반환한다.
 환경변수는 [`.env.example`](../../.env.example)를 따르고, 공용 runtime은 요청마다
 `run_planning(AgentGraphInput)`으로 실행한 뒤 애플리케이션 종료 시 `aclose()`로 정리한다.
@@ -118,23 +133,28 @@ DB 근거가 없으면 JSON 본문으로 대신하지 않고 빈 결과를 반�
 ### 검수 절차 자료 저장·조회
 
 공식 안내문을 수집·발췌한 뒤 개발자가 내용을 검수·승인한 자료를 사용한다.
-승인된 자료는 JSON으로 관리하며, 적재 함수를 통해 DB에 저장한다.
+현재 #65의 BE는 승인 JSON을 읽어 Case 생성 시 공식 문서 4건을 Case별 Evidence로 적재한다.
+이후 DB에서 조립한 Case snapshot과 승인 목록을 Agent에 전달한다.
 
-적재·조회에 사용하는 승인 자료는
+승인 자료는
 [`reviewed-procedures.ko-KR.json`](../../backend/app/common/reviewed-procedures.ko-KR.json)에 있다.
-빈 절차 검수 목록으로 runtime을 만들 때 JSON이 없거나 잘못됐으면 생성 단계에서 실패한다.
-기존 Case에 자료를 넣을 때는 backend 디렉토리에서 다음 명령을 실행한다.
+runtime은 이 파일을 자동으로 읽지 않는다. 자료 버전 변경 후 기존 Case에 재적재할 때는
+backend 디렉토리에서 다음 명령을 실행한다. 제안 DB 컬럼 추가 없이 현재 BE 구조에서 실행된다.
 `123`은 실제 존재하는 Case ID로 바꾼다.
 
 ```bash
 .venv/bin/python -m scripts.import_reviewed_procedures --case-id 123
 ```
 
-[`import_reviewed_procedures`](../../backend/app/common/agent_data.py)는 기존 BE의
+별도 승인 JSON을 사용할 때는 `--source <파일 경로>`를 지정한다. 재적재는 문서 근거를 저장하는
+작업이므로 절차 대응표를 받지 않으며 공통 절차 행도 생성하지 않는다.
+
+[`import_reviewed_procedures`](../../backend/app/be/services/reviewed_procedure.py)는 기존 BE의
 `create_evidence()`로 Case별 발췌·출처·버전·해시·시각·상태를 저장한다. CLI가 전체 자료를
 한 번에 commit하며 실패하면 rollback한다. 같은 ID와 내용의 재실행은 건너뛰고,
 같은 ID에 다른 내용이 있으면 덮어쓰지 않는다. 새 버전은 새 근거로 남는다.
-검수자·검수 시각·유효기간·검색어·절차 연결은 승인 JSON에 유지한다.
+검수 시각·유효기간·검색어·절차 연결 등 검수 메타데이터는 BE가 읽어 전달한 승인 목록에
+유지한다. Case Evidence는 발췌와 출처를 판단의 근거로 보관한다.
 
 BE의 기존 `get_evidence_by_case_id()` → `build_case_snapshot()` 조회 결과를 Graph가 Tool에
 전달한다. Tool은 승인 목록과 출처·버전·해시·발췌가 일치하는 DB 근거만 사용하며,
@@ -306,3 +326,135 @@ Supervisor·Review는 5~8초다. 당시 한도 `AGENT_LLM_TIMEOUT_SECONDS=150`·
 이후 BE 연결 작업과 서비스 전체 검증 결과는
 [#56](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/issues/56)·
 [#57](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/issues/57)에서 추적한다.
+
+### 2026-10-07 폐업 우선순위 검증
+
+`feature/agent-procedure-db-source`에서 임대인 확인 우선, 선행·진행 중 절차 정렬,
+지원 분석 호출 제외와 결과 입력의 사실 근거 검증을 보완했다.
+전체 테스트 330개(격리 MySQL 포함)와 변경 파일 Ruff가 통과했다.
+
+실제 호출은 격리 MySQL에 검수 자료 4건과 Case 근거를 저장·재조회한 뒤 실행했다.
+BE 미구현 컬럼 `reviewed_source_snapshot`은 테스트 DB에만 추가했다. 운영 DB 반영이나
+결과 mutations 저장·재조회까지 완료했다는 증거는 아니다.
+모델은 `gpt-5.6-sol`·`xhigh`, 판단 캐시는 비활성화했고 지원 분석 호출은 없었다.
+
+| 입력 | 실제 결과 |
+|---|---|
+| 동일한 최초 판단 2회 | 137초·106초, 모두 Review PASS. Blocker·Next Action이 같고 임대인 확인을 선택 |
+| 원상복구 범위 전체·철거 필요 확인 결과 | 263초, Review PASS. 두 사실의 변경 후보와 식품영업 폐업신고 준비사항 확인 행동 반환. Info HTTP 503 한 번 후 재시도 성공 |
+| 원상복구 작업·철거 불필요를 다른 표현으로 입력 — 수정 전 | 329초, Info 3회 후 `STRUCTURED_OUTPUT_FAILED`. Supervisor·Review에 도달하지 않음 |
+| 같은 결과 입력 — 사실 근거 검증 보완 후 2회 | 185초·353초, 모두 Review PASS. 원상복구 범위·작업·철거의 `NOT_REQUIRED` 후보 3건과 식품영업 폐업신고 준비사항 확인 행동 반환. 근거가 불충분한 절차 완료 후보는 각각 1회·2회 거절한 뒤 재시도 성공 |
+| 같은 결과 입력 — 절차 진행 안내까지 보완한 최종 코드 | 157초, Review PASS. 같은 사실 후보 3건과 식품영업 폐업신고 준비사항 확인 행동 반환. Info·Supervisor·Review 각 1회, 모두 HTTP 200이며 재시도 없음 |
+
+위 실패를 재현한 뒤 기존 `info_agent/agent.py`의 근거 표현 목록을 보완했다.
+`원상복구 범위는 없고`, `원상복구 작업은 필요하지 않습니다`, `철거도 필요하지 않습니다`를
+각 필드의 `NOT_REQUIRED` 근거로 인정한다. 한 필드의 표현으로 다른 필드나 작업 완료를 추정하지
+않으며, 조건문·질문·가정·이중 부정과 짧게 인용해 부정을 숨기는 입력은 회귀 테스트로 차단했다.
+절차 진행 후보의 인용문에는 절차를 식별하는 말과 실행 상태가 함께 있어야 한다는 기존 검증
+조건도 최초 지시와 재시도 안내에 명시했다. 거절된 진행 후보 때문에 유효한 사실 후보나 절차
+분석까지 삭제하지 않도록 안내한다.
+
+결과 입력 2회의 행동 코드·대상·사실 변경 후보는 같았지만, Info의 `RELEVANT` /
+`POSSIBLY_RELEVANT` 분류가 달라 Blocker 설명과 확인 질문은 달랐다. 같은 검증 상태·후보의
+우선순위를 고정한 것이며 자유 입력부터 최종 문구까지 완전히 동일함을 보장하지 않는다.
+
+### 2026-10-07 열린 PR 통합 검증
+
+Agent `75af1c5`와 당시 `develop` `73b9f5d`를 기준으로 별도 임시 작업 트리에서 확인했다.
+#63(`8ea1414`)·#67을 함께 병합한 상태에서 백엔드 테스트 330개가 통과했다.
+FE 화면 동작과 운영 DB 저장·재조회까지 검증한 결과는 아니다.
+
+#65(`07aaf75`)를 처음 추가했을 때 `app/agent/runtime.py`와 `app/common/agent_data.py`에서 충돌했다.
+DB 자료 변환 함수는 유지하고 저장 함수의 BE 이관을 반영해 충돌을 풀어도,
+`test_agent_service.py`·`test_reviewed_procedure_db.py`·`test_reviewed_procedure_import.py`가
+이동·삭제된 이름을 import해 테스트 수집 오류 3건이 발생했다.
+
+이후 [#65의 AI 후속 수정 약속](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/65#issuecomment-6030409316)에
+맞춰 #65 원본 커밋을 현재 feature 브랜치에 통합했다. BE 파일은 #65의 내용 그대로 유지하고,
+저장 함수 참조를 `app.be.services.reviewed_procedure`로 바꿨다. 삭제된 `EmptyProcedureStore`는
+기존 빈 `InMemoryReviewedProcedureStore`로 대체했다. Case 생성 시 자동 적재되는 4건을 포함해
+검증하도록 테스트를 수정했으며 전체 331개가 통과했다.
+
+CLI는 현재 BE 방식인 `--case-id`·선택적 `--source`를 사용한다. 제안 DB 컬럼이나 절차 대응표를
+요구하지 않는다. 격리 MySQL에서 기본 재적재, 새 버전 추가, 재실행 중복 방지와 이전 근거 보존을
+검증했다. `procedure_bindings=None`도 BE가 사용하는 정확한 코드 자동 대응 값으로 타입과
+설명에 명시했다. 빈 대응표 `{}`와 구분하며 runtime의 파일 자동 보충은 복원하지 않았다.
+
+수정본 `25a5cd0`을 `develop` → #63 → #65 → #67 순서로 준비한 임시 통합본에 병합해
+충돌이 없음을 확인했고, 합본에서도 백엔드 테스트 331개가 통과했다. #65를 먼저 develop에
+병합하면 이번 PR의 비교에서 #65 원본 BE 변경은 빠지고 AI 후속 변경만 남는다.
+
+현재 BE의 Case 생성 → DB 근거 재조회 → `run_case_planning(procedure_bindings=None)`도
+실제 LLM으로 확인했다. 제안 DB 컬럼 추가 없이 151초에 `REVIEWED_PLAN`·Review PASS를
+반환했으며 임대인 원상복구 범위·철거 필요 여부 확인 행동을 선택했다.
+`gpt-5.6-sol`·`xhigh`, 판단 캐시 비활성화, Info·Supervisor·Review 각 1회와 HTTP 200을 확인했다.
+
+### 2026-10-09 리뷰 반영 (#69 1차 리뷰)
+
+`develop` `f352c01`을 병합한 뒤 리뷰 지적 중 AI 담당 두 건을 고쳤다.
+전체 테스트 328개(격리 MySQL 11개 포함)와 변경 파일 Ruff가 통과했다.
+실제 LLM 호출로 다시 확인한 결과는 아니며, 아래는 코드와 테스트 기준이다.
+
+**결과 입력의 반대 뜻 문장** — 리뷰어가 올린 9문장을 재현했고 전부 같은 결과가 나왔다.
+구멍은 `_schema_enum_is_asserted`가 인정한 단서를 지운 뒤 남은 글자에 부정어가 있는지만
+보기 때문이다. 반박하는 절에는 부정어가 없어 통과한다. 확인하면서 세 가지를 더 찾았다.
+
+- 이 구멍은 `develop`에도 있다. `원상복구 불필요하다고 했는데 결국 하래요.`가 그대로 통과한다
+- `필요 없음` 값만의 문제가 아니다. `원상복구 범위는 전체라고 했다가 일부래요.`도 통과한다
+- 부정어 목록에 `안`이 없어 `철거해야 한다고 했는데 안 해도 된대요.`가 통과한다
+
+반박하는 말(`있대요`·`하라고 했어요`)을 목록으로 모으면 말투만큼 늘어나 끝나지 않으므로,
+앞뒤를 뒤집는 접속 표현(`지만`·`는데`·`인데`·`다가`·`그런데`·`결국`)만 본다.
+걸리면 막지 않고 `requires_confirmation`을 켜 되묻는다. 막으면 재시도를 거쳐 분석 전체가
+실패해 사용자가 아무 답도 받지 못하기 때문이다. 확인이 필요한 사실은 덮개를 만들지 않고
+(`enrichment.py`) Case에도 저장되지 않는다(`review_tool/tool.py`).
+
+남은 한계: 반박이 **다음 문장**에 있으면 못 잡는다. 문장을 가져오는 범위가 마침표 하나
+안쪽이라 구조상 보이지 않는다. 이번 변경으로 좁아지거나 넓어지지 않은 기존 한계다.
+
+**모델에게서 쓸 답을 못 받았을 때** — 통신 장애든 응답 형식 불일치든 1순위 후보로
+ACTION 초안을 만든다. 이전에는 `generate()` 호출이 재시도 `try` 바깥이라 선언한 3회가
+이 오류들에 전혀 동작하지 않았고, 후보가 있어도 판단 전체가 실패했다. 모델이 답은
+했는데 틀린 경우는 그대로 실패로 남긴다. 자세한 내용은 [supervisor.md](./supervisor.md).
+
+Info·Review도 같은 구조이지만 고치지 않았다. 두 곳은 코드가 답을 대신 알 수 없고,
+`llm.py`가 이미 내부 재시도를 끝낸 뒤 오류를 던지므로 여기서 다시 부르면 이미
+재시도한 호출을 반복하게 된다. 위 2026-09-29 기록의 "503 한 번에 120초"가 그 경우다.
+
+**DB 원본 공급용 변환 함수 제거** — 앱에서 부르는 곳이 없고 BE 모델에 없는
+`reviewed_source_snapshot` 컬럼을 전제했다. 컬럼이 확정될 때 함께 넣는다.
+`app/common/`은 BE 소유이므로 이 PR에서 해당 디렉터리 변경은 모두 되돌렸다.
+
+### 2026-10-09 되묻기 연결과 실제 LLM 확인
+
+확인이 필요한 사실은 Case에 저장되지 않는데, 모델은 답을 냈다고 보고 그 필드를
+`missing_fields`에 넣지 않는다. 그래서 **사실은 보류됐는데 아무도 묻지 않는** 상태가
+되어 Supervisor가 쓸 후보도 질문도 없이 끝났다. `missing_info_fields`가 보류된 사실의
+필드를 되물을 대상에 넣고, 그 근거도 함께 모으도록 보완했다.
+
+`gpt-5.6-sol`·`xhigh`, 판단 캐시 비활성화. 아래는 `scripts/evaluate_planning.py`에
+추가한 두 시나리오로 확인한 결과다.
+
+| 입력 | 결과 |
+|---|---|
+| `scope_reversed` (뒤 절이 앞 절을 뒤집음) | 모델이 사실을 제안하지 않는 경우가 많았다. 제안하지 않으면 Info가 질문을 만들어 `NEEDS_MORE_INFO`로 끝난다(3회 중 2회) |
+| `scope_benign_connective` (접속 표현은 있지만 뒤집지 않음) | 모델이 사실을 제안한다. 보류는 의도대로 동작했으나(`확인필요=1`) 판단은 `SAFE_FAILURE`로 끝났다(3회 중 3회) |
+
+두 번째 결과를 같은 입력·변경 전 코드로 다시 확인했다. 변경 전도 `SAFE_FAILURE`였고,
+실패 지점만 Supervisor에서 Review로 뒤로 밀렸다. 이번 변경이 만든 회귀가 아니다.
+
+| | 변경 전 | 변경 후 |
+|---|---|---|
+| Info | 2회(1차 거부 → 2차 통과, 확인필요=0) | 2회(1차 거부 → 2차 통과, 확인필요=1) |
+| 실패 지점 | Supervisor, `STRUCTURED_OUTPUT_FAILED` | Review, `REVIEW_RETRY_EXHAUSTED` |
+
+**확인하지 못한 것**: 보류된 사실이 실제 화면까지 되묻기로 도달하는 전체 경로.
+모델이 사실을 제안하는 입력은 Supervisor·Review의 기존 불안정성에 먼저 걸리고,
+제안하지 않는 입력은 이 변경을 거치지 않는다. 10회 넘게 실행했지만 그 조합이 나오지
+않았다. 되묻기 생성 자체는 LLM 없이 결정적으로 확인했다
+(`test_held_fact_still_produces_a_question_for_the_owner`).
+
+1차 거부는 이번 변경과 무관한 기존 검사다. 모델이 한 문장을 근거로 서로 다른 사실을
+여러 개 제안해 `fact value is not explicit in its source text`로 거부됐다.
+애매한 입력에서 Supervisor나 Review가 반복 거부해 `SAFE_FAILURE`로 끝나는 경로는
+통신 장애보다 넓게 존재한다.

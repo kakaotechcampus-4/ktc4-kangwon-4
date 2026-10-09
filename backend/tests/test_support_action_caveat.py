@@ -1,19 +1,14 @@
-"""검수 전·오래된 지원 자료로도 확인 행동이 나와야 한다.
-
-`_validate_pre_review_claim_safety`는 최신이 아닌 근거로 만든 문장마다 확인 문구를
-요구한다. 지원사업 행동의 질문만 그 문구가 없어서, 검수 전 자료에서는 Supervisor가
-세 번 다 초안을 버리고 `STRUCTURED_OUTPUT_FAILED`로 끝났다. 절차 쪽 질문은 모두
-"확인해 주시겠습니까?"로 끝나므로 같은 상황에서 막히지 않는다.
-"""
+"""지원 근거의 최신성과 무관하게 MVP는 폐업 확인 행동만 선택한다."""
 
 import asyncio
 
 import pytest
+from test_action_codes import source, support_sources
+from test_blocker_candidates import ChoiceModel, candidates, request_with_state
+
 from app.agent.claim_safety import has_confirmation_caveat
 from app.agent.schemas import FreshnessStatus, SupportMatchStatus
 from app.agent.supervisor import SupervisorAgent
-from test_action_codes import source, support_sources
-from test_blocker_candidates import ChoiceModel, candidates, request_with_state
 
 _MATCH_STATUS = {
     "CURRENT": "NEEDS_CONFIRMATION",
@@ -25,7 +20,7 @@ _MATCH_STATUS = {
 def request_with_support(freshness: str):
     """확정된 철거 필요 + 해당 최신성의 지원 자료 하나."""
 
-    request = request_with_state(demolition_required="REQUIRED")
+    request = request_with_state(lease_status="OWNED", demolition_required="REQUIRED")
     output = support_sources()[0].output
     check = output.support_checks[0].model_copy(
         update={
@@ -58,16 +53,17 @@ def request_with_support(freshness: str):
 
 
 @pytest.mark.parametrize("freshness", ["CURRENT", "UNKNOWN", "STALE"])
-def test_support_action_survives_non_current_evidence(freshness):
+def test_support_is_excluded_without_weakening_closure_evidence_caveats(freshness):
     async def run():
         request = request_with_support(freshness)
         rows = candidates(request)
-        assert [row["candidate_id"] for row in rows] == ["support:1"]
+        assert [row["candidate_id"] for row in rows] == ["procedure:1"]
 
         draft = await SupervisorAgent(ChoiceModel(), max_local_attempts=1).draft(request)
         assert draft.decision.decision_type == "ACTION"
         action = draft.decision.next_action
-        assert action.action_code == "CONFIRM_SUPPORT_PROGRAM_REQUIREMENTS"
+        assert action.action_code == "CONFIRM_TAX_CLOSURE_REQUIREMENTS"
+        assert draft.mutations.support_match_updates == []
         # 최신이 아닌 근거를 쓰는 모든 문장에는 확인 문구가 있어야 한다.
         for text in (
             draft.decision.blocker.description,
