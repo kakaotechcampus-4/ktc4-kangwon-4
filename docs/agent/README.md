@@ -98,28 +98,18 @@ BE가 조회한 `ProcedureStep`·`StepDependency`·`StepEligibility` 행을 변�
 각각 `load_reviewed_procedure_store`·`load_reviewed_support_catalog`로 검증한다.
 BE 모델에 없는 검수·조건·근거 필드를 만들어 채우지는 않는다.
 
-### DB 원본 공급용 변환 함수
+### DB 원본 공급 (아직 연결 전)
 
-`build_reviewed_procedure_store(snapshots_by_step, known_procedure_steps=registry,
-procedure_bindings=bindings)`는 DB에서 조회한 JSON 값을 기존 자료 객체로 변환한다.
-`snapshots_by_step`은 **실제 DB 절차 코드 → 해당 절차의 검수 자료 묶음**이다.
-자료 묶음은 기존 `ReviewedProcedureSnapshot`의 버전·생성 시각·언어와 문서 목록을 유지한다.
-변환 함수는 파일·SQL을 읽지 않으며, 빈 자료·미검수·버전 혼합·중복 문서·잘못된 절차 대응을 거절한다.
-만료된 검수 시각은 그대로 유지하며, 기존 Tool이 조회 기준일에 유효성을 검사한다.
-`content_hash`는 수집한 원문 본문의 해시이므로 발췌문 해시로 다시 만들지 않는다.
+현재 Case 생성·재적재 경로는 **승인 JSON → BE Evidence 저장 → DB snapshot 조회 →
+Agent 전달**이다(#65). 절차 원본 자체를 DB에서 공급하는 경로는 아직 없다.
 
-BE 연결 순서는 **DB 자료 조회 → store 변환 → 같은 store로 Case Evidence 적재·commit
-→ CaseSnapshot 생성 → 같은 store로 Agent 호출**이다. 기존
-`app.be.services.reviewed_procedure.import_reviewed_procedures()`와 기존 Evidence
-CRUD·snapshot·판단 저장을 재사용하는 연결안이다. Agent runtime은 빈 store를 JSON 파일로 채우지 않는다.
+그 경로를 만들려면 BE에 `procedure_step.reviewed_source_snapshot` JSON 컬럼(제안명)이
+먼저 필요하다. **현재 BE 모델에는 이 컬럼이 없다.** 컬럼이 확정되면 DB JSON 값을
+자료 객체로 바꾸는 변환 함수를 그때 같이 넣는다. 지금 미리 넣으면 앱에서 부르는 곳이
+없고 없는 컬럼을 전제하게 되어, 테스트는 통과하지만 실제로는 쓸 수 없는 코드가 된다.
 
-BE 요청: `procedure_step.reviewed_source_snapshot` JSON 컬럼(제안명) 추가와 승인 자료 이관,
-실제 절차·Case 연결 및 위 호출 순서 반영. 기존 두 규칙 테이블은 스키마를 유지하며
-선후 관계·적용 조건 데이터는 따로 검수해야 한다. 현재 BE 모델에는 이 컬럼이 없다.
-운영 절차의 ID·코드·표시 이름을 테스트용 값으로 대신하지 않는다.
-
-이 변환 함수는 향후 DB 원본 공급용이며, 현재 #65의 Case 생성·재적재 경로는 아래의
-승인 JSON → BE Evidence 저장 방식이다. 원본 저장 구조 변경은
+기존 두 규칙 테이블은 스키마를 유지하며 선후 관계·적용 조건 데이터는 따로 검수해야 한다.
+운영 절차의 ID·코드·표시 이름을 테스트용 값으로 대신하지 않는다. 원본 저장 구조 변경은
 [BE 요청사항](https://app.notion.com/p/3ef3c6661b7d80c9a697d4f39dce1841)에서 별도로 다룬다.
 
 `procedure_bindings`의 키는 AI의 기존 절차 의미 코드, 값은 BE의 실제 `ProcedureStepRef`다.
@@ -398,3 +388,35 @@ CLI는 현재 BE 방식인 `--case-id`·선택적 `--source`를 사용한다. �
 실제 LLM으로 확인했다. 제안 DB 컬럼 추가 없이 151초에 `REVIEWED_PLAN`·Review PASS를
 반환했으며 임대인 원상복구 범위·철거 필요 여부 확인 행동을 선택했다.
 `gpt-5.6-sol`·`xhigh`, 판단 캐시 비활성화, Info·Supervisor·Review 각 1회와 HTTP 200을 확인했다.
+
+### 2026-10-09 리뷰 반영 (#69 1차 리뷰)
+
+`develop` `f352c01`을 병합한 뒤 리뷰 지적 중 AI 담당 두 건을 고쳤다.
+전체 테스트 328개(격리 MySQL 11개 포함)와 변경 파일 Ruff가 통과했다.
+실제 LLM 호출로 다시 확인한 결과는 아니며, 아래는 코드와 테스트 기준이다.
+
+**결과 입력의 반대 뜻 문장** — 리뷰어가 올린 9문장을 재현했고 전부 같은 결과가 나왔다.
+구멍은 `_schema_enum_is_asserted`가 인정한 단서를 지운 뒤 남은 글자에 부정어가 있는지만
+보기 때문이다. 반박하는 절에는 부정어가 없어 통과한다. 확인하면서 세 가지를 더 찾았다.
+
+- 이 구멍은 `develop`에도 있다. `원상복구 불필요하다고 했는데 결국 하래요.`가 그대로 통과한다
+- `필요 없음` 값만의 문제가 아니다. `원상복구 범위는 전체라고 했다가 일부래요.`도 통과한다
+- 부정어 목록에 `안`이 없어 `철거해야 한다고 했는데 안 해도 된대요.`가 통과한다
+
+반박하는 말(`있대요`·`하라고 했어요`)을 목록으로 모으면 말투만큼 늘어나 끝나지 않으므로,
+앞뒤를 뒤집는 접속 표현(`지만`·`는데`·`인데`·`다가`·`그런데`·`결국`)만 본다.
+걸리면 막지 않고 `requires_confirmation`을 켜 되묻는다. 막으면 재시도를 거쳐 분석 전체가
+실패해 사용자가 아무 답도 받지 못하기 때문이다. 확인이 필요한 사실은 덮개를 만들지 않고
+(`enrichment.py`) Case에도 저장되지 않는다(`review_tool/tool.py`).
+
+남은 한계: 반박이 **다음 문장**에 있으면 못 잡는다. 문장을 가져오는 범위가 마침표 하나
+안쪽이라 구조상 보이지 않는다. 이번 변경으로 좁아지거나 넓어지지 않은 기존 한계다.
+
+**모델에 닿지 못했을 때** — 공급자 장애면 1순위 후보로 ACTION 초안을 만든다.
+이전에는 `generate()` 호출이 재시도 `try` 바깥이라 선언한 3회가 통신 오류에 전혀
+동작하지 않았고, 후보가 있어도 판단 전체가 실패했다. 모델이 답은 했는데 틀린 경우는
+그대로 실패로 남긴다. 자세한 내용은 [supervisor.md](./supervisor.md).
+
+**DB 원본 공급용 변환 함수 제거** — 앱에서 부르는 곳이 없고 BE 모델에 없는
+`reviewed_source_snapshot` 컬럼을 전제했다. 컬럼이 확정될 때 함께 넣는다.
+`app/common/`은 BE 소유이므로 이 PR에서 해당 디렉터리 변경은 모두 되돌렸다.
