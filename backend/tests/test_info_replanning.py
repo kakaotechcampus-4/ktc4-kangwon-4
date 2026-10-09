@@ -588,3 +588,60 @@ def test_result_sentence_produces_only_the_three_stated_fact_changes(unsupported
     }
     assert result.conflicts == []
     assert result.procedure_progress_observations == []
+
+
+def analyze_facts(facts, text):
+    """Run the whole analyzer on one input sentence and return its result."""
+    request = request_for_replanning()
+    snapshot = request.case_snapshot.model_dump(mode="json")
+    for item in snapshot["facts"]:
+        if item["field_path"] in {"restoration_scope", "restoration_status"}:
+            item.update(status="UNKNOWN", value=None, evidence_refs=[], updated_at=None)
+    snapshot["procedure_progress"] = []
+    request = InfoAnalysisInput.model_validate(request.model_dump() | {
+        "case_snapshot": snapshot,
+        "input": request.input.model_dump() | {"redacted_text": text},
+    })
+    response = output(
+        [finding(TAX, "doc1"), finding(FOOD, "doc2"), finding(RESTORATION, "doc3")]
+    )
+    response["facts"] = [
+        {"operation": "SET", "field_path": field, "value_type": "ENUM", "value": value,
+         "source_text": quote, "confidence_bps": 9500, "requires_confirmation": False,
+         "reason_summary": "합성 임대인 확인 결과"}
+        for field, value, quote in facts
+    ]
+    return asyncio.run(InfoAnalysisAgent(Responses(response)).analyze(request))
+
+
+# 앞 절을 뒤 절이 뒤집는 문장은 확정하지 않고 사장님께 되묻는다. 뒤집는 말 자체를
+# 목록으로 모으지 않기 때문에 "있대요"·"하라고 했어요"·"비용을 내래요"처럼
+# 처음 보는 말투도 같이 걸린다. 확인이 필요한 사실은 Case에 저장되지 않는다.
+@pytest.mark.parametrize("field,value,text", [
+    ("restoration_scope", "NOT_REQUIRED", "원상복구 범위가 없는 줄 알았는데 있대요."),
+    ("restoration_scope", "NOT_REQUIRED", "원상복구 범위는 없다고 들었는데 임대인은 전부 하라고 했어요."),
+    ("restoration_scope", "NOT_REQUIRED", "원상복구 범위는 없다고 했지만 계약서에는 있어요."),
+    ("restoration_scope", "NOT_REQUIRED", "원상복구 범위는 없다고 했는데 원상복구를 하래요."),
+    ("restoration_status", "NOT_REQUIRED", "원상복구 작업은 필요하지 않다고 했다가 다시 필요하다고 했어요."),
+    ("demolition_required", "NOT_REQUIRED", "철거도 필요하지 않다고 했는데 결국 철거하래요."),
+    ("demolition_required", "NOT_REQUIRED", "임대인이 철거는 필요 없다고 했다가 다시 해야 한대요."),
+    ("demolition_required", "NOT_REQUIRED", "철거는 필요 없다고 했는데 철거 비용을 내래요."),
+    ("demolition_required", "REQUIRED", "철거해야 한다고 했는데 안 해도 된대요."),
+])
+def test_self_reversing_sentence_is_asked_back_instead_of_confirmed(field, value, text):
+    candidate, = analyze_facts([(field, value, text)], text).fact_candidates
+    assert candidate.field_path == field
+    assert candidate.requires_confirmation
+
+
+# 뒤집는 말이 없는 문장은 그대로 확정된다. 되묻기가 넓어져 정상 입력까지 다시 묻게
+# 되면 사장님이 같은 답을 두 번 하게 되므로 반대쪽도 같이 지킨다.
+def test_plain_result_sentence_still_confirms_without_asking_back():
+    text = RESTORATION_RESULT + " 철거도 필요하지 않습니다."
+    result = analyze_facts([
+        ("restoration_scope", "NOT_REQUIRED", RESTORATION_RESULT),
+        ("restoration_status", "NOT_REQUIRED", RESTORATION_RESULT),
+        ("demolition_required", "NOT_REQUIRED", "철거도 필요하지 않습니다."),
+    ], text)
+    assert len(result.fact_candidates) == 3
+    assert not any(item.requires_confirmation for item in result.fact_candidates)

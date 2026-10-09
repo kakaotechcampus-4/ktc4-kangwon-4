@@ -208,6 +208,11 @@ _SCHEMA_FACT_UNCERTAINTY = re.compile(
     r"|없(?:으면|어도|다면)|필요하지않(?:으면|아도|다면)"
 )
 _SCHEMA_FACT_NEGATION = re.compile(r"아니|아닌|아님|아닙|아닐|않|못|없|불필요")
+# 한 문장 안에서 앞 절을 뒤 절이 뒤집는 접속 표현.
+# "없다고 했는데 있대요"처럼 말하면 어느 쪽이 지금 사실인지 글만으로는 정할 수 없다.
+# 뒤집는 말 자체("있대요", "하라고 했어요")를 모으면 목록이 끝나지 않으므로,
+# 끝이 있는 접속 표현만 본다. 걸리면 버리지 않고 사장님께 되묻는다.
+_SCHEMA_FACT_REVERSAL = re.compile(r"지만|는데|인데|다가|그런데|결국")
 _COMPLETED_OBSERVATION = re.compile(
     r"(?:완료|끝냈|마쳤|처리했|신고했|제출했|반납했|해지했|탈퇴했|확인했|종료했)"
 )
@@ -816,18 +821,7 @@ class InfoAnalysisAgent:
             and fact.value in {"NOT_REQUIRED", "COMPLETED"}
         ):
             # Schema-aligned values describe asserted lease terms and scope.
-            # Read the containing sentence too: quoting only "유상으로 임차"
-            # cannot erase the user's following "한 것은 아닙니다".
-            statement = fact.source_text
-            if input_text is not None:
-                start, end = exact_span(input_text, fact.source_text)
-                left = max(input_text.rfind(mark, 0, start) for mark in ".!?\n")
-                if input_text[end - 1] in ".!?\n":
-                    right = end
-                else:
-                    boundary = re.search(r"[.!?\n]", input_text[end:])
-                    right = end + boundary.end() if boundary else len(input_text)
-                statement = input_text[left + 1 : right]
+            statement = cls._containing_statement(input_text, fact.source_text)
             if not cls._schema_enum_is_asserted(fact, statement):
                 return False
 
@@ -895,6 +889,25 @@ class InfoAnalysisAgent:
         # Every current BOOLEAN and ENUM value has an explicit cue registry.
         # Missing registry coverage is intentionally fail-closed.
         return False
+
+    @staticmethod
+    def _containing_statement(input_text: str | None, source_text: str) -> str:
+        """Return the whole sentence holding the quoted span.
+
+        A short quote must not erase the rest of its sentence: quoting only
+        "유상으로 임차" cannot hide the user's following "한 것은 아닙니다".
+        """
+
+        if input_text is None:
+            return source_text
+        start, end = exact_span(input_text, source_text)
+        left = max(input_text.rfind(mark, 0, start) for mark in ".!?\n")
+        if input_text[end - 1] in ".!?\n":
+            right = end
+        else:
+            boundary = re.search(r"[.!?\n]", input_text[end:])
+            right = end + boundary.end() if boundary else len(input_text)
+        return input_text[left + 1 : right]
 
     @classmethod
     def _schema_enum_is_asserted(cls, fact: ExtractedFactDraft, statement: str) -> bool:
@@ -1017,16 +1030,24 @@ class InfoAnalysisAgent:
                 # Re-stating an already unknown fact is not a mutation and must not
                 # require the model to fabricate a user-text source span.
                 continue
-            if not self._fact_source_supports_value(
-                semantic,
-                input_text=(
-                    request.input.redacted_text if request.input is not None else ""
-                ),
-            ):
+            input_text = (
+                request.input.redacted_text if request.input is not None else ""
+            )
+            if not self._fact_source_supports_value(semantic, input_text=input_text):
                 raise InfoAnalysisGuardrailError(
                     "fact value is not explicit in its source text",
                     rejected_fields=(semantic.field_path,),
                 )
+            # 한 문장이 스스로를 뒤집으면("없다고 했는데 있대요") 어느 쪽이 지금 사실인지
+            # 글만으로는 정할 수 없다. 버리면 분석 전체가 실패하므로, 확정하지 않고
+            # 확인이 필요한 사실로 넘겨 사장님께 되묻는다.
+            statement_reverses = bool(
+                _SCHEMA_FACT_REVERSAL.search(
+                    self._compact_text(
+                        self._containing_statement(input_text, semantic.source_text)
+                    )
+                )
+            )
             span, evidence = self._ground_text(request, semantic.source_text)
             evidence_by_span[(span.start_offset, span.end_offset)] = evidence
             if current is not None and current.status == FactStatus.CONFIRMED:
@@ -1049,7 +1070,9 @@ class InfoAnalysisAgent:
                 source_span=span,
                 source_evidence_refs=[evidence.evidence_id],
                 confidence_bps=semantic.confidence_bps,
-                requires_confirmation=semantic.requires_confirmation,
+                requires_confirmation=(
+                    semantic.requires_confirmation or statement_reverses
+                ),
                 reason_summary=semantic.reason_summary,
             )
             fact_candidates.append(candidate)
