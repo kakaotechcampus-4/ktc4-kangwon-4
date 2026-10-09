@@ -17,6 +17,7 @@ from test_action_codes import (
 )
 
 from app.agent.blocker_candidates import build_blocker_candidates, missing_info_fields
+from app.agent.llm import LLMRequestError
 from app.agent.review_tool import ReviewTool
 from app.agent.schemas import (
     CaseFact,
@@ -880,5 +881,43 @@ def test_review_rejects_lower_priority_action_despite_model_pass():
             and issue.target_path == "/supervisor_draft/decision/next_action"
             for issue in review.issues
         )
+
+    asyncio.run(run())
+
+
+class UnreachableModel(StubModel):
+    """Supervisor 호출만 공급자 장애로 실패시키고 독립 Review는 정상 응답한다."""
+
+    async def generate(self, model, messages, **kwargs):
+        if kwargs["schema_name"] == "reborn_review_output":
+            return await super().generate(model, messages, **kwargs)
+        self.calls += 1
+        raise LLMRequestError(
+            "LLM provider returned HTTP 503 after 3 attempt(s)",
+            code="UPSTREAM_HTTP_ERROR",
+            retryable=True,
+            attempts=3,
+        )
+
+
+# 할 일 순서는 코드가 정하고 모델은 그 1순위밖에 고를 수 없다. 그래서 모델에 닿지
+# 못해도 답은 이미 손에 있다. 판단 전체를 실패로 끝내면 사장님은 빈손이 된다.
+def test_unreachable_model_answers_the_same_as_a_working_one():
+    async def run():
+        request = request_with_all_closure_steps(demolition_required="REQUIRED")
+        working = await SupervisorAgent(ChoiceModel(), max_local_attempts=3).draft(
+            request
+        )
+        model = UnreachableModel()
+        offline = await SupervisorAgent(model, max_local_attempts=3).draft(request)
+        assert offline.decision.decision_type == "ACTION"
+        assert offline.decision.blocker == working.decision.blocker
+        assert offline.decision.next_action == working.decision.next_action
+        # 한 번이 최대 180초인 호출을 더 기다리지 않는다
+        assert model.calls == 1
+        review = await ReviewTool(ChoiceModel(), max_output_attempts=1).review(
+            subject(request, offline)
+        )
+        assert review.verdict == "PASS"
 
     asyncio.run(run())
