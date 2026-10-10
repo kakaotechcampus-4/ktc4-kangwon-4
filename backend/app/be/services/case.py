@@ -79,12 +79,13 @@ def get_case(session: Session, member_id: int) -> CaseGetResponse:
     if latest_history.judgment_status == "NEEDS_MORE_INFO" and not latest_history.questions_for_user:
         raise HTTPException(status_code=500, detail="정보 부족(NEEDS_MORE_INFO) 상태인데 questions_for_user가 없습니다.")
 
-    if latest_history.judgment_status == "FAILED" and latest_history.recovery_action_code is None:
-        raise HTTPException(status_code=500, detail="판단 실패(FAILED) 상태인데 recovery_action_code가 없습니다.")
-
-    # TODO: retryable은 저장하는 쪽(decision_record.py의 save_safe_failure 등)이 아직 안 채워주고
-    # 있어서 지금은 가드를 안 건다. 채워주기 시작하면 위 recovery_action_code처럼
-    # "FAILED인데 retryable이 없으면 500" 가드를 추가해야 한다.
+    if latest_history.judgment_status == "FAILED" and (
+        latest_history.recovery_action_code is None or latest_history.retryable is None
+    ):
+        raise HTTPException(
+            status_code=500,
+            detail="판단 실패(FAILED) 상태인데 recovery_action_code·retryable이 없습니다.",
+        )
 
     next_action = (
         NextActionResponse(
