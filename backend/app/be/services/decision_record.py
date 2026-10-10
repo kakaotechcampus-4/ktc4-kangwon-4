@@ -134,6 +134,7 @@ def save_conflict(session: Session, history: CaseHistory, outcome: ConflictOutco
             ConflictReference(
                 conflict_ref=conflict.conflict_ref,
                 case_id=history.case_id,
+                case_history_id=history.id,
                 canonical_field=conflict.field_path.value,
                 committed_value=_history_value(conflict.committed_value),
                 proposed_value=_history_value(conflict.proposed_value),
