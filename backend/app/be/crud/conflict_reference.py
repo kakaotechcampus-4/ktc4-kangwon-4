@@ -15,4 +15,5 @@ def get_pending_conflicts_by_case_id(session: Session, case_id: int) -> list[Con
         .options(joinedload(ConflictReference.case_history))
         .where(ConflictReference.case_id == case_id)
         .where(ConflictReference.used_at.is_(None))
+        .order_by(ConflictReference.id)
     ).all()
