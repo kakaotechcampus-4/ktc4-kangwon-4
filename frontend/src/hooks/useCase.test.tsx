@@ -1,7 +1,8 @@
-import { act, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { RouterProvider, createMemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { REQUEST_TIMEOUT_MS } from '../lib/api'
 import { logInWithMock, saveTokens } from '../lib/auth'
 import type { CaseResponse } from '../types/api'
 import { useCase } from './useCase'
@@ -30,6 +31,39 @@ function response(body: unknown, status = 200) {
 
 function mockFetch(body: unknown, status = 200) {
   const fetchMock = vi.fn().mockResolvedValue(response(body, status))
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
+}
+
+/**
+ * 답을 주지 않는 서버. 요청이 취소되면 그 이유로 거부한다 — 실제 `fetch` 와 같다.
+ *
+ * `mockFetch` 는 `signal` 을 보지 않아서, 취소해도 그 Promise 가 끝나지 않는다.
+ */
+function hangingFetch() {
+  const fetchMock = vi.fn(
+    (_url: string, init: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => reject(init.signal?.reason))
+      }),
+  )
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
+}
+
+/** 처음엔 받아오고, 그 뒤로는 답을 주지 않는다. 갱신만 멈춘 상태를 만든다 */
+function mockThenHang(body: unknown) {
+  let called = false
+  const fetchMock = vi.fn((_url: string, init: RequestInit) => {
+    if (!called) {
+      called = true
+      return Promise.resolve(response(body))
+    }
+
+    return new Promise((_resolve, reject) => {
+      init.signal?.addEventListener('abort', () => reject(init.signal?.reason))
+    })
+  })
   vi.stubGlobal('fetch', fetchMock)
   return fetchMock
 }
@@ -84,6 +118,7 @@ function Probe() {
       ) : (
         <p>{query.status}</p>
       )}
+      {query.status === 'READY' && query.stale && <p>최신인지 모름</p>}
       {waitedTooLong && <p>오래 기다림</p>}
       <button type="button" onClick={refresh}>
         다시 묻기
@@ -362,6 +397,61 @@ describe('useCase 폴링', () => {
     await act(async () => void (await router.navigate('/case')))
     await advance(0)
     expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  /**
+   * 서버가 답을 아예 주지 않는 경우다. 제한 시간이 없으면 그 요청이 영영 끝나지 않고,
+   * 끝나야 풀리는 중복 방지 플래그도 그대로 남는다 — **다음 조회가 아예 나가지 못해서
+   * 자동이든 수동이든 화면이 굳는다.** 멘토 리뷰(#70)에서 짚인 자리다.
+   */
+  describe('답이 오지 않을 때', () => {
+    it('한 번도 못 받았으면 조회 실패로 둔다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      hangingFetch()
+      vi.useFakeTimers()
+      renderAt('/case')
+
+      await advance(0)
+      expect(screen.getByText('LOADING')).toBeInTheDocument()
+
+      await advance(REQUEST_TIMEOUT_MS)
+      expect(screen.getByText('LOAD_FAILED')).toBeInTheDocument()
+    })
+
+    /** 가게 정보까지 사라지면 사장님은 적어낸 내용이 날아간 줄 안다 */
+    it('받아둔 것이 있으면 남기고 최신이 아니라고 둔다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      mockThenHang(PENDING)
+      vi.useFakeTimers()
+      renderAt('/case')
+
+      await advance(0)
+      await advance(10_000)
+      await advance(REQUEST_TIMEOUT_MS)
+
+      expect(screen.getByText('READY PENDING 카페')).toBeInTheDocument()
+      expect(screen.getByText('최신인지 모름')).toBeInTheDocument()
+    })
+
+    /**
+     * **이 PR 이 막는 바로 그 자리다.** 플래그가 안 풀리면 두 번째 요청이 나가지 않아
+     * 버튼을 눌러도 아무 일이 없다.
+     */
+    it('끊긴 뒤에도 다시 물을 수 있다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      const fetchMock = hangingFetch()
+      vi.useFakeTimers()
+      renderAt('/case')
+
+      await advance(0)
+      await advance(REQUEST_TIMEOUT_MS)
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+
+      fireEvent.click(screen.getByRole('button', { name: '다시 묻기' }))
+      await advance(0)
+
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+    })
   })
 
   /** 숨어 있는 사이 판단이 끝났을 수 있다. 10초를 더 기다리게 하면 멈춘 것처럼 보인다 */
