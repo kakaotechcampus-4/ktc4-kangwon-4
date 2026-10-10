@@ -80,9 +80,6 @@ class CaseGetResponse(BaseModel):
     changes: list[FieldChangeResponse] | None
 
 
-NextScreen = Literal["CONFLICT_CONFIRM", "RESULT_INPUT_PENDING", "RESULT_INPUT"]
-
-
 class ConflictItemResponse(BaseModel):
     id: int
     field: str
@@ -91,7 +88,11 @@ class ConflictItemResponse(BaseModel):
 
 
 class CaseResultsEntryResponse(BaseModel):
-    next_screen: NextScreen
+    judgment_status: JudgmentStatus
     raw_input: str | None = None
     conflicts: list[ConflictItemResponse] | None = None
     next_action: NextActionResponse | None = None
+    questions_for_user: list[str] | None = None
+    recovery_action_code: RecoveryActionCode | None = None
+    requested_field_paths: list[str] | None = None
+    retryable: bool | None = None

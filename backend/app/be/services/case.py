@@ -130,7 +130,7 @@ def get_case(session: Session, member_id: int) -> CaseGetResponse:
 
 
 def get_case_results_entry(session: Session, member_id: int) -> CaseResultsEntryResponse:
-    """`/case`의 "결과 알려주기" 버튼(API 1). 다음에 어느 화면으로 갈지만 판단한다."""
+    """`/case`의 "결과 알려주기" 버튼(API 1). `judgment_status`를 그대로 응답에 싣는다."""
 
     case = case_crud.get_case_by_member_id(session, member_id)
     if case is None:
@@ -142,7 +142,7 @@ def get_case_results_entry(session: Session, member_id: int) -> CaseResultsEntry
         # 것이므로, raw_input은 아무 row에서나 꺼내도 같다.
         raw_input = pending_conflicts[0].case_history.raw_input
         return CaseResultsEntryResponse(
-            next_screen="CONFLICT_CONFIRM",
+            judgment_status="CONFLICT",
             raw_input=raw_input,
             conflicts=[
                 ConflictItemResponse(
@@ -160,19 +160,38 @@ def get_case_results_entry(session: Session, member_id: int) -> CaseResultsEntry
         raise HTTPException(status_code=500, detail="Case에 대한 최초 판단 기록이 없습니다.")
 
     if latest_history.judgment_status == "PENDING":
-        return CaseResultsEntryResponse(next_screen="RESULT_INPUT_PENDING")
+        return CaseResultsEntryResponse(judgment_status="PENDING")
+
+    if latest_history.judgment_status == "DONE":
+        return CaseResultsEntryResponse(
+            judgment_status="DONE",
+            next_action=(
+                NextActionResponse(
+                    title=latest_history.next_action,
+                    reason=latest_history.next_action_reason,
+                    questions_to_ask=latest_history.next_action_questions_to_ask or [],
+                )
+                if latest_history.next_action is not None
+                else None
+            ),
+        )
+
+    if latest_history.judgment_status == "NEEDS_MORE_INFO":
+        if not latest_history.questions_for_user:
+            raise HTTPException(status_code=500, detail="정보 부족(NEEDS_MORE_INFO) 상태인데 questions_for_user가 없습니다.")
+        return CaseResultsEntryResponse(
+            judgment_status="NEEDS_MORE_INFO",
+            questions_for_user=latest_history.questions_for_user,
+        )
+
+    if latest_history.recovery_action_code is None:
+        raise HTTPException(status_code=500, detail="판단 실패(FAILED) 상태인데 recovery_action_code가 없습니다.")
 
     return CaseResultsEntryResponse(
-        next_screen="RESULT_INPUT",
-        next_action=(
-            NextActionResponse(
-                title=latest_history.next_action,
-                reason=latest_history.next_action_reason,
-                questions_to_ask=latest_history.next_action_questions_to_ask or [],
-            )
-            if latest_history.next_action is not None
-            else None
-        ),
+        judgment_status="FAILED",
+        recovery_action_code=latest_history.recovery_action_code,
+        requested_field_paths=latest_history.requested_field_paths,
+        retryable=latest_history.retryable,
     )
 
 
