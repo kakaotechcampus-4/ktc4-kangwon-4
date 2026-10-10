@@ -31,46 +31,70 @@ export interface Blocker {
 
 /** 지금 먼저 할 일 — 화면에서 유일하게 강하게 강조하는 요소 */
 export interface NextAction {
-  /** 몇 번째 할 일인지. 서버가 센다 */
-  seq: number
+  /**
+   * 몇 번째 할 일인지.
+   *
+   * `GET /cases` 응답에 없어서 선택이다. 없으면 "N번째" 표기를 아예 그리지 않는다 —
+   * 1로 지어내면 사장님이 실제 순서를 아는 것처럼 읽는다.
+   */
+  seq?: number
   title: string
-  /** 왜 이걸 먼저 해야 하는지 */
+  /**
+   * 왜 이걸 먼저 해야 하는지.
+   *
+   * 서버가 안 보내면 빈 글자다. 비면 문단 자체를 그리지 않으므로 빈 자리가 남지 않는다.
+   */
   reason: string
-  /** "이렇게 물어보시면 됩니다" — 사용자가 상대에게 물을 질문 */
+  /**
+   * "이렇게 물어보시면 됩니다" — 사용자가 **상대에게** 물을 질문.
+   *
+   * 서비스가 사용자에게 되묻는 `questions_for_user` 와 다른 것이다. 둘 다 "질문"이라
+   * 섞이기 쉬워, 이쪽은 Next Action 안에만 둔다.
+   */
   questions?: string[]
 }
 
 /**
+ * Agent 가 이 Case 를 어디까지 판단했는지, 그리고 그 결과.
+ *
+ * 상태와 결과를 한 덩어리로 묶는다. `DONE` 안에 `blocker` 와 `nextAction` 을 필수로 두면
+ * **"판단은 끝났다는데 내용이 없는" 상태를 타입으로 표현할 수 없다.** 서버가 그런 조합을
+ * 보내면 어댑터가 `UNRECOGNIZED` 로 떨어뜨릴 수밖에 없고, 화면에 빈 칸이 생기지 않는다.
+ *
+ * 조회 상태(`CaseQuery`)와는 다른 축이다 — 서버를 잘 불렀어도 판단은 아직 안 끝날 수 있다.
+ */
+export type JudgmentView =
+  /** 판단 중. 잠시 뒤 다시 물어봐야 한다 */
+  | { status: 'PENDING' }
+  | { status: 'DONE'; blocker: Blocker; nextAction: NextAction }
+  /** 다음 할 일을 정하려면 사용자에게 먼저 물어볼 것이 있다 */
+  | { status: 'NEEDS_MORE_INFO'; questions: string[] }
+  /**
+   * 사용자가 한 말이 기록과 어긋나 어느 쪽이 맞는지 확인해야 한다.
+   *
+   * 담는 값이 없다. 서버가 `judgment_status` 만 보내고 **어긋난 항목은 싣지 않기로**
+   * 했다 — 그 목록은 충돌 확인 API 를 만들 때 함께 내려준다(#66).
+   */
+  | { status: 'CONFLICT' }
+  /** 판단을 마치지 못했다. 사용자 탓이 아니다 */
+  | { status: 'FAILED' }
+  /** 서버가 모르는 값을 보냈거나, 상태와 내용의 조합이 계약과 어긋난다 */
+  | { status: 'UNRECOGNIZED' }
+
+/**
  * ② 현재 Case 화면이 필요한 전체 데이터.
  *
- * 예외 상태를 `null` 조합으로 표현한다. 프론트가 조건을 판단하지 않고
- * 서버가 준 형태에 따라 화면을 고른다.
+ * **가게 정보와 판단을 나눠 둔다.** 전에는 `nextAction` 하나가 `null` 인지로 화면을
+ * 골랐는데, 그러면 "판단 중"·"물어볼 게 있음"·"판단 실패"가 전부 "정보가 부족합니다"
+ * 하나로 뭉개진다. 사장님 입장에서는 기다려야 하는 상황과 답해야 하는 상황이 다르다.
  *
- * | blocker | nextAction | 화면 |
- * | --- | --- | --- |
- * | O | O | Next Action + Blocker |
- * | null | O | Next Action + 막힌 것 없음 |
- * | O | null | 정보 부족 + Blocker |
- * | null | null | 정보 부족만 |
- *
- * "막힌 것 없음"은 다음 할 일이 있을 때만 의미 있는 정보다. 할 일을 정하지 못한 상태에서
- * 막힌 게 없다고 하면 긍정 신호로 오해된다.
- *
- * TODO(BE 확인): `nextAction: null`이 실제로 어떤 서버 상태인지 확정되지 않았다.
- * `GET /cases/{caseId}`의 `latestDecision`이 `null`로 올 수 있는지, 있다면 어떤 상황인지.
- *
- * `POST /cases`와 `GET /cases/{caseId}`는 판단을 함께 반환하고, `/results`의
- * `NEEDS_MORE_INFO`는 Case를 바꾸지 않아 이전 판단이 그대로 유효하다. 그러면 남는 건
- * `REPLAN_FAILED`(오류) 쪽인데, 그건 정보 부족이 아니라 재시도 안내가 맞다.
- *
- * 지금 화면은 "정보 부족"으로 안내한다. 오류 상태에 이 문구를 쓰면 서버 실패를
- * 사용자 탓으로 돌리게 되므로, 계약이 확정되면 화면 소속과 문구를 다시 정한다.
+ * 가게 정보는 판단 상태와 무관하게 늘 보여준다. 판단이 안 끝났어도 사장님이 적어낸
+ * 내용은 그대로 남아 있다는 것을 알 수 있어야 한다.
  */
 export interface CurrentCaseView {
   /** 확인된 것과 미확인을 모두 담는다. 서버가 정한 순서를 그대로 쓴다 */
   facts: Fact[]
-  blocker: Blocker | null
-  nextAction: NextAction | null
+  judgment: JudgmentView
 }
 
 /**
@@ -165,12 +189,7 @@ export type SubmitOutcome =
   /** 화면에 머문다 */
   | { kind: 'STAY'; state: SubmitState }
 
-/**
- * 점포 형태. 서버 `lease_status`와 같은 값이다.
- *
- * TODO(계약): AI 쪽은 같은 이름으로 계약 단계(`ACTIVE` · `TERMINATION_NOTIFIED` …)를
- * 담고 있어 뜻이 다르다. 칸이 둘로 갈릴 수 있고 PM 판단을 기다리는 중이다.
- */
+/** 점포 형태. 서버 `lease_status`와 같은 값이다. AI 쪽도 같은 값을 쓴다 */
 export type LeaseStatus =
   /** 임차 — 임대료를 낸다 */
   | 'LEASED_PAID'

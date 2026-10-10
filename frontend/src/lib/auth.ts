@@ -27,6 +27,18 @@ const refreshToken = createSessionValue('reborn:refresh-token')
 const MOCK_TOKEN = 'mock-session'
 
 /**
+ * 카카오로 나갈 때 들려 보내고, 돌아올 때 맞춰보는 값.
+ *
+ * 이게 없으면 공격자가 자기 계정의 `code`가 담긴 `/login/callback?code=...` 링크를
+ * 사장님에게 열게 해서, 사장님 브라우저를 공격자 계정으로 로그인시킬 수 있다.
+ * 그 뒤 입력하는 폐업 정보가 전부 공격자 쪽에 쌓인다.
+ *
+ * 서버는 이 값을 저장하지도 검증하지도 않고 카카오에 그대로 실어 보내기만 한다.
+ * 만들고 맞춰보는 것은 전부 여기 책임이다.
+ */
+const oauthState = createSessionValue('reborn:oauth-state')
+
+/**
  * `search`를 반드시 받는다. `?mock=logged-out` 처리를 호출부가 빼먹으면 화면마다
  * 다른 답이 나오는데, 인자로 요구하면 빼먹을 수가 없다.
  */
@@ -86,4 +98,36 @@ export function isMockSession(): boolean {
  */
 export function usesMockData(search: string): boolean {
   return readMockKey(search) !== '' || isMockSession()
+}
+
+/**
+ * 로그인 한 번에 값 하나. 시작할 때마다 새로 만들어 덮어쓴다.
+ *
+ * `crypto.randomUUID()`는 HTTPS 와 localhost 에서만 쓸 수 있는데, 우리 화면이 사는 곳이
+ * 그 둘뿐이라 따로 대비하지 않는다.
+ */
+export function createOAuthState(): string {
+  const value = crypto.randomUUID()
+  oauthState.write(value)
+  return value
+}
+
+/**
+ * 카카오가 돌려준 값이 우리가 보낸 것과 같은지.
+ *
+ * **맞든 안 맞든 저장분을 지운다.** state 하나는 로그인 시도 하나다. 남겨두면 같은
+ * 콜백 주소를 다시 열었을 때 또 통과한다.
+ *
+ * 세 갈래를 따로 본다. `returned !== saved` 하나만 쓰면 둘 다 `null` 일 때
+ * `null !== null` 이 `false` 라서 통과한다 — state 를 아예 안 보내는, 제일 쉬운
+ * 공격이 그대로 뚫린다.
+ *
+ * 저장소를 못 쓰는 브라우저에서는 저장분이 비어 있어 로그인이 막힌다. 검증을 건너뛰면
+ * 막으려던 구멍이 그대로 남으므로 막히는 쪽을 고른다.
+ */
+export function verifyOAuthState(returned: string | null): boolean {
+  const saved = oauthState.read()
+  oauthState.write(null)
+
+  return returned !== null && saved !== null && returned === saved
 }

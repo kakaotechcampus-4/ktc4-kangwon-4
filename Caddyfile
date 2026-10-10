@@ -1,0 +1,8 @@
+# EC2 프로덕션 서버용 Caddy 설정. 실제 적용 위치는 서버의 /etc/caddy/Caddyfile이며,
+# 이 파일은 git 기록·재현용 사본이다 — 서버에서 직접 수정했다면 이 파일도 같이 갱신한다.
+#
+# Caddy가 80(인증서 발급·http->https 리다이렉트)·443(HTTPS)을 전담하고,
+# FastAPI(uvicorn)는 127.0.0.1:8000에서만 듣는다(docker-compose.prod.yml 참고).
+reborn-ktc.duckdns.org {
+    reverse_proxy localhost:8000
+}

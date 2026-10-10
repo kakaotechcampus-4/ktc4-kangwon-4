@@ -5,6 +5,8 @@ import json
 
 import httpx
 import pytest
+from pydantic import BaseModel
+
 from app.agent.llm import (
     LLMConfig,
     LLMConfigurationError,
@@ -12,7 +14,7 @@ from app.agent.llm import (
     LLMResponseError,
     StructuredLLMClient,
 )
-from pydantic import BaseModel
+from app.agent.runtime import resolve_run_deadline_seconds
 
 
 class Answer(BaseModel):
@@ -27,6 +29,20 @@ def config(**changes):
         retry_backoff_seconds=0,
         **changes,
     )
+
+
+@pytest.mark.parametrize("seconds", [None, "30"])
+def test_time_limits(tmp_path, seconds):
+    env = {
+        "CHAT_PROXY_URL": "https://example.org",
+        "PROXY_TOKEN": "test",
+        "OPENAI_MODEL": "test",
+    }
+    if seconds:
+        env.update(AGENT_LLM_TIMEOUT_SECONDS=seconds, AGENT_RUN_DEADLINE_SECONDS=seconds)
+    options = {"env_file": tmp_path / "absent.env", "environ": env}
+    assert LLMConfig.from_env(**options).timeout_seconds == (30 if seconds else 180)
+    assert resolve_run_deadline_seconds(**options) == (30 if seconds else 420)
 
 
 def generate(settings, handler):

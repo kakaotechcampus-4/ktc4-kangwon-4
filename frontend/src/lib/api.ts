@@ -1,4 +1,4 @@
-import { getAccessToken, logOut } from './auth'
+import { getAccessToken, logOut, verifyOAuthState } from './auth'
 
 /**
  * 서버를 부르는 유일한 자리.
@@ -78,9 +78,15 @@ export async function request(path: string, { method = 'GET', body }: RequestOpt
  *
  * `fetch`로 부를 수 없다. 서버가 303으로 카카오에 넘기는데, 그 리다이렉트를 따라가는 것은
  * 브라우저가 할 일이다. 주소를 만드는 규칙은 여기 두고 화면은 이동만 시킨다.
+ *
+ * `state`를 인자로 **반드시** 받는다. 빼먹어도 로그인은 멀쩡히 되는데 돌아왔을 때
+ * 맞춰볼 것이 없어져, 실수가 화면에 드러나지 않는다. 인자로 요구하면 컴파일에서 막힌다.
+ *
+ * UUID에는 특수문자가 없지만 그래도 감싼다. 규칙이 값의 생김새에 기대면,
+ * 나중에 값을 바꾼 사람이 여기까지 보지 않는다.
  */
-export function loginFormUrl(): string {
-  return `${API_BASE}/login/form`
+export function loginFormUrl(state: string): string {
+  return `${API_BASE}/login/form?state=${encodeURIComponent(state)}`
 }
 
 export interface LoginResult {
@@ -92,12 +98,22 @@ export interface LoginResult {
 /**
  * 카카오가 준 `code`를 토큰으로 바꾼다. `code`는 한 번만 쓸 수 있다.
  *
+ * `state` 검사를 화면이 아니라 여기 둔다. 이 함수가 하는 일은 "돌아온 콜백을 세션으로
+ * 바꾸는 것"이고, **그 콜백을 믿어도 되는가**는 그 일의 일부다. 떼어놓으면 검사를
+ * 건너뛰고 이 함수를 부르는 길이 생긴다.
+ *
  * 토큰은 본문이 아니라 응답 헤더로 온다. 그래서 서버에 `Access-Control-Expose-Headers`
  * 설정이 없거나 중간 프록시가 헤더를 지우면, **응답은 200인데 토큰만 비어 온다.**
  * 그 상태를 성공으로 넘기면 로그인한 것처럼 보이다가 다음 요청에서 401이 나므로
  * 여기서 실패로 끊는다.
  */
-export async function postLogin(code: string): Promise<LoginResult> {
+export async function postLogin(code: string, state: string | null): Promise<LoginResult> {
+  // 돌아온 콜백이 우리가 시작한 로그인인지 먼저 본다. 서버를 부르기 전에 막아야
+  // 공격자의 code 가 토큰으로 바뀌지 않는다.
+  if (!verifyOAuthState(state)) {
+    throw new ApiError(400, '로그인 요청이 올바르지 않습니다.')
+  }
+
   const response = await request('/login', { method: 'POST', body: { code } })
 
   const accessToken = response.headers.get('Access-Token')

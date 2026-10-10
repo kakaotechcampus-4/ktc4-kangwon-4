@@ -31,8 +31,7 @@ __all__ = [
 class ProcedureStoreError(RuntimeError):
     """Raised when a snapshot cannot be loaded or fails its own contract.
 
-    Only the local, gitignored JSON-file loader raises this -- the tracked
-    request-path runtime never reads a snapshot from disk.
+    File loaders report failures here; procedure lookups use preloaded records.
     """
 
 
@@ -166,8 +165,8 @@ class ReviewedProcedureRecord(AgentSchema):
 class ReviewedProcedureSnapshot(AgentSchema):
     """A whole snapshot file: a version, when it was built, and its records.
 
-    Only the local, gitignored JSON-file loader constructs this -- the
-    tracked request-path runtime is handed records directly.
+    Callers validate a payload or a bundled JSON file before loading records
+    into the in-memory store used by procedure lookups.
     """
 
     snapshot_version: NonEmptyStr = Field(

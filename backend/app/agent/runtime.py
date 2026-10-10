@@ -45,7 +45,7 @@ from app.common.agent_dto import AgentGraphInput, AgentGraphOutput
 
 __all__ = ["AgentRuntime", "RuntimeLimits", "build_runtime"]
 
-_DEFAULT_RUN_DEADLINE_SECONDS = 60.0
+_DEFAULT_RUN_DEADLINE_SECONDS = 420.0
 _MAX_RUN_DEADLINE_SECONDS = 600.0
 
 
@@ -81,7 +81,7 @@ def resolve_run_deadline_seconds(
     env_file: str | Path | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> float:
-    """Read ``AGENT_RUN_DEADLINE_SECONDS``, falling back to one minute."""
+    """Read ``AGENT_RUN_DEADLINE_SECONDS``, falling back to seven minutes."""
 
     environment = os.environ if environ is None else environ
     dotenv_path = Path(env_file) if env_file is not None else _repo_root() / ".env"
@@ -228,9 +228,10 @@ async def build_runtime(
 ) -> AgentRuntime:
     """Assemble the Agent with reviewed data supplied by the caller.
 
-    Preload ``procedure_store`` through agreed BE functions; its reads must
-    stay in memory. No local JSON fallback or SQL runs here. An optional Wiki
-    source must resolve existing support IDs; misses remain unavailable.
+    An empty store stays empty: the caller states what it has, and that
+    statement is not overridden here. Source text and evidence IDs come from
+    the BE Case snapshot; missing DB sources stay unavailable. No SQL runs
+    here. Wiki misses also remain unavailable.
     """
 
     bindings = resolve_procedure_bindings(known_procedure_steps, procedure_bindings)
@@ -259,7 +260,9 @@ async def build_runtime(
             usage_sink=scoped_usage.record,
         )
         clients.append(info_client)
-        procedure_tool = StoredProcedureLookupTool(procedure_store)
+        procedure_tool = StoredProcedureLookupTool(
+            procedure_store, procedure_bindings=bindings
+        )
         trace_sink = LangfuseTraceSink.from_env()
         graph = AgentGraph(
             info_agent=InfoAnalysisAgent(info_client, procedure_bindings=bindings),

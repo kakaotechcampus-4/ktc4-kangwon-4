@@ -11,7 +11,7 @@ import { defineConfig } from 'vitest/config'
  *
  * 로컬 BE 에 붙일 때는 `.env.local` 의 `VITE_API_BASE_URL` 로 이 프록시를 건너뛴다.
  */
-const API_SERVER = 'http://52.79.222.103'
+const API_SERVER = 'https://reborn-ktc.duckdns.org'
 
 /** 개발 서버(`dev`)와 빌드 확인용 서버(`preview`)가 같은 규칙을 써야 한다 */
 const API_PROXY = {

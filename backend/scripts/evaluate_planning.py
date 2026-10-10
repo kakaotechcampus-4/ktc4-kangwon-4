@@ -18,14 +18,15 @@ import hashlib
 import json
 from collections import Counter
 from dataclasses import asdict
-from enum import Enum
 from datetime import datetime, timezone
+from enum import Enum
 from pathlib import Path
 from time import perf_counter
 from unittest.mock import patch
 from uuid import UUID, uuid5
 
 import httpx
+
 import app.agent.runtime as runtime_module
 from app.agent.llm import LLMConfig, StructuredLLMClient
 from app.agent.procedure_tool.store import ReviewedProcedureSnapshot
@@ -71,6 +72,15 @@ RESULT_INPUTS = {
     "demolition_only": "임대인이 철거해야 한다고 했어요.",
     "scope_and_demolition": (
         "임대인에게 확인했더니 원상복구 범위는 전체이고 철거가 필요하다고 했어요."
+    ),
+    # 앞 절을 뒤 절이 뒤집는 입력. 확정하지 않고 되물어야 한다.
+    "scope_reversed": (
+        "임대인에게 물어봤어요. 원상복구 범위는 없다고 들었는데 임대인은 전부 하라고 했어요."
+    ),
+    # 접속 표현은 있지만 뒤 절이 앞 절을 뒤집지 않는 입력. 되묻기가 넓어져
+    # 정상 입력까지 다시 묻게 되는지 보는 반대쪽 시나리오다.
+    "scope_benign_connective": (
+        "임대인에게 확인했습니다. 원상복구 범위는 없다고 했는데 그대로 두면 된대요."
     ),
 }
 
@@ -327,9 +337,8 @@ def recording_from_env(calls: list[dict]):
 def decision_summary(outcome) -> dict:
     """The Blocker and Next Action a user would see, plus digests to compare.
 
-    evidence_refs are excluded from the digests: procedure evidence ids are
-    minted per run (procedure_tool/stored_tool.py), so they can never match
-    across repeats and comparing them would fail every time for no reason.
+    Compare the user-facing decision separately from its provenance. Official
+    evidence keeps its DB ID; other derived evidence may have per-run IDs.
     """
 
     if outcome.outcome_type != "REVIEWED_PLAN":

@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
+
 from app.agent import decision_cache as cache_module
 from app.agent import runtime as runtime_module
 from app.agent.decision_cache import DecisionCache

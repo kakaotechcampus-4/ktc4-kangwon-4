@@ -82,26 +82,62 @@ export interface CaseCreateResponse extends CaseFields {
 }
 
 /**
+ * Agent 가 이 Case 를 어디까지 판단했는지.
+ *
+ *   PENDING          판단 중 — 잠시 후 다시 물어봐야 한다
+ *   DONE             판단 완료
+ *   NEEDS_MORE_INFO  서비스가 사장님에게 되물을 질문이 따로 온다
+ *   CONFLICT         말한 내용이 기록과 어긋나 어느 쪽이 맞는지 여쭤봐야 한다
+ *   FAILED           판단 실패 — 다시 시도 안내
+ *
+ * `CONFLICT` 는 사장님이 답해야 끝난다. 나머지 넷과 달리 **기다린다고 저절로 바뀌지
+ * 않아서**, 화면이 다시 물어볼 이유도 없다(#66).
+ *
+ * 다섯이 다가 아닐 수 있다. 모르는 값이 오면 어댑터가 가려내고 화면은 "판단 내용을
+ * 불러오지 못했어요" 로 간다 — 다른 상태로 바꿔 보여주지 않는다 (`CLAUDE.md` 규칙 9).
+ */
+export type JudgmentStatus = 'PENDING' | 'DONE' | 'NEEDS_MORE_INFO' | 'CONFLICT' | 'FAILED'
+
+/**
+ * 다음 할 일.
+ *
+ * 전에는 제목 한 줄이었다. 제목만으로는 "임대인에게 확인하세요" 가 끝이라, 사장님이
+ * 정작 **무슨 말을 꺼내야 할지** 모른다. 그래서 이유와 상대에게 물어볼 말까지 묶어
+ * 보내기로 했다(#58).
+ *
+ * `sequence` 와 `evidence_refs` 는 빼기로 했다. 화면에 쓰는 자리가 없다 — 순번은
+ * 할 일을 하나만 보여줘서 늘 1 이고, 근거를 펼쳐 보는 화면은 아직 없다.
+ */
+export interface NextActionResponse {
+  title: string
+  /** 왜 이걸 먼저 해야 하는지. 없으면 `null` 이다 */
+  reason: string | null
+  /**
+   * 사장님이 **상대에게** 물을 말. 서비스가 사장님에게 되묻는 `questions_for_user` 와 다르다.
+   *
+   * 없어도 `null` 이 아니라 빈 목록으로 온다(#68).
+   */
+  questions_to_ask: string[]
+}
+
+/**
  * `GET /cases` 응답.
  *
  * Case 가 없으면 `case` 가 `null` 이다. 빈 객체 대신 이 모양을 쓰기로 한 것은,
  * TypeScript 에서 빈 객체가 거의 모든 값과 맞는다고 판단돼 가려낼 수 없기 때문이다.
  *
- * TODO(API): 같은 응답에 `blocker` 와 `next_action` 이 실릴 예정이다(BE #39).
- * 모양이 확정되면 여기 추가한다 — 지금 미리 열어두면 비어 있어도 그냥 넘어간다.
+ * **Case 와 판단은 서로 다른 시점의 정보다.** `POST /cases` 가 저장만 하고 바로 응답한 뒤
+ * 판단은 뒤에서 돌기 때문에, Case 는 있는데 판단은 아직 `PENDING` 인 구간이 반드시 생긴다.
+ *
+ * `blocker` 는 문자열 하나로 둔다. AI 가 주는 설명이 이미 완성된 문장이라, 제목을 따로
+ * 만들면 같은 말을 두 번 쓰게 된다(#58).
  */
 export interface CasesEnvelope {
   case: CaseResponse | null
+  /** 지금 진행을 막고 있는 것. 제목 한 줄 */
+  blocker: string | null
+  next_action: NextActionResponse | null
+  judgment_status: JudgmentStatus | null
+  /** 서비스가 사장님에게 되묻는 질문. `next_action` 의 "물어볼 말"과 다른 것이다 */
+  questions_for_user: string[] | null
 }
-
-/**
- * Agent 가 이 Case 를 어디까지 판단했는지.
- *
- * TODO(API): 아직 읽지 않는다. 서버가 판단을 실제로 채우기 시작하면(BE #47)
- * `CasesEnvelope` 에 넣고 대기·재시도 화면을 여기에 맞춘다.
- *   PENDING          판단 중 — 잠시 후 다시 물어봐야 한다
- *   DONE             판단 완료
- *   NEEDS_MORE_INFO  물어볼 질문이 따로 온다
- *   FAILED           판단 실패 — 다시 시도 안내
- */
-export type JudgmentStatus = 'PENDING' | 'DONE' | 'NEEDS_MORE_INFO' | 'FAILED'

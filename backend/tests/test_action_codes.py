@@ -6,7 +6,9 @@ from unittest.mock import AsyncMock
 from uuid import UUID
 
 import pytest
-from app.agent.action_catalog import build_action_candidates
+from pydantic import TypeAdapter, ValidationError
+
+from app.agent.action_catalog import build_action_candidates, resolve_procedure_bindings
 from app.agent.graph import AgentGraph
 from app.agent.review_tool import ReviewTool
 from app.agent.schemas import (
@@ -31,7 +33,6 @@ from app.agent.supervisor.agent import (
     SupervisorGuardrailError,
     SupervisorModelOutput,
 )
-from pydantic import TypeAdapter, ValidationError
 
 NOW = datetime(2026, 9, 25, tzinfo=timezone.utc)
 REF = "synthetic-document"
@@ -391,10 +392,16 @@ class StubModel:
             )
         action = action_payload(self.action_code, title="담당기관에 확인해 주세요")
         action["evidence_refs"] = ["e1"]
+        support_action = self.action_code == "CONFIRM_SUPPORT_PROGRAM_REQUIREMENTS"
+        if support_action:
+            action["target"] = {
+                "target_kind": "SUPPORT_PROGRAM",
+                "support_program": {"support_program_id": 1, "wiki_uuid": UUID(int=6)},
+            }
         return model.model_validate(
             {
                 "decision_type": "ACTION",
-                "blocker_candidate_id": "procedure:1",
+                "blocker_candidate_id": "support:1" if support_action else "procedure:1",
                 "selection_summary": "확인이 필요합니다.",
                 "requires_human": True,
                 "evidence_refs": ["e1"],
@@ -463,7 +470,7 @@ def test_review_checks_required_blocker_against_verified_candidate(
         ).draft(request)
         assert draft.decision.blocker is not None
         assert draft.decision.blocker.evidence_refs == [REF]
-        assert draft.decision.next_action.action_code == action_code
+        assert draft.decision.next_action.action_code == CONFIRM_TAX
         assert draft.decision.questions_for_user == []
         assert any(
             "/blocker/" in claim.target_path for claim in draft.grounded_claims
@@ -505,9 +512,24 @@ def test_review_checks_required_blocker_against_verified_candidate(
 
 
 @pytest.mark.parametrize("trigger_type", ["CASE_CREATED", "RESULT_SUBMITTED"])
-def test_graph_releases_a_reviewed_action_with_one_blocker(trigger_type):
+@pytest.mark.parametrize("scenario", ["procedure_action", "missing_bindings", "support_action"])
+def test_graph_distinguishes_missing_bindings_from_actionable_candidates(trigger_type, scenario):
     async def run():
         template = supervisor_request()
+        if scenario != "procedure_action":
+            step = template.known_procedure_steps[0]
+            template.known_procedure_steps = [
+                type(step).model_validate(step.model_dump() | {
+                    "procedure_step": {"procedure_step_id": index, "step_code": code},
+                    "step_name": name, "registry_version": "temp",
+                })
+                for index, (code, name) in enumerate([
+                    ("TEMP_BUSINESS_CLOSURE_REPORT", "사업자 폐업 신고"),
+                    ("TEMP_TAX_CLOSURE_REPORT", "세무서 폐업 신고"),
+                    ("TEMP_FOUR_INSURANCE_CANCEL", "4대보험 상실 신고"),
+                ], start=1)
+            ]
+            assert resolve_procedure_bindings(template.known_procedure_steps) == {}
         request = AgentGraphInput(
             trigger=template.trigger.model_dump() | {"trigger_type": trigger_type},
             case_snapshot=template.case_snapshot,
@@ -516,8 +538,23 @@ def test_graph_releases_a_reviewed_action_with_one_blocker(trigger_type):
         lookup = template.source_results[0].output
 
         async def analyze_info(component_input):
+            payload = template.source_results[1].output.model_dump()
+            if scenario != "procedure_action":
+                payload.update(
+                    procedure_findings=[],
+                    missing_fields=[{
+                        "field_path": "employee_count", "reason_summary": "합성 누락",
+                        "blocks": ["SUPERVISOR_DECISION"],
+                        "question_candidate_id": UUID(int=20),
+                    }],
+                    question_candidates=[{
+                        "question_id": UUID(int=20), "text": "직원이 몇 명인가요?",
+                        "resolves_field_paths": ["employee_count"],
+                        "reason_summary": "합성 누락",
+                    }],
+                )
             return InfoAnalysisResult.model_validate(
-                template.source_results[1].output.model_dump()
+                payload
                 | {
                     "based_on_procedure_lookup_call_id": component_input.procedure_lookup_call_id,
                     "based_on_procedure_lookup_digest": canonical_digest(
@@ -526,14 +563,14 @@ def test_graph_releases_a_reviewed_action_with_one_blocker(trigger_type):
                 }
             )
 
-        support = SupportAnalysisResult.model_validate(
-            support_sources()[0].output.model_dump()
-            | {
+        support_payload = support_sources()[0].output.model_dump()
+        if scenario != "support_action":
+            support_payload.update({
                 "completion_status": "NO_CANDIDATE",
                 "support_checks": [],
                 "no_candidate_reason_code": "NO_REVIEWED_CANDIDATE",
-            }
-        )
+            })
+        support = SupportAnalysisResult.model_validate(support_payload)
         procedure_runner = AsyncMock()
         procedure_runner.lookup.return_value = lookup
         info_runner = AsyncMock()
@@ -541,34 +578,51 @@ def test_graph_releases_a_reviewed_action_with_one_blocker(trigger_type):
         support_runner = AsyncMock()
         support_runner.analyze.return_value = support
         review_client = StubModel()
+        action_code = (
+            "CONFIRM_SUPPORT_PROGRAM_REQUIREMENTS"
+            if scenario == "support_action" else CONFIRM_TAX
+        )
+        supervisor_client = StubModel(action_code)
         graph = AgentGraph(
             procedure_tool=procedure_runner,
             info_agent=info_runner,
             support_agent=support_runner,
-            supervisor=SupervisorAgent(StubModel(), clock=lambda: NOW),
+            supervisor=SupervisorAgent(
+                supervisor_client, clock=lambda: NOW, max_local_attempts=1,
+            ),
             review_tool=ReviewTool(review_client),
             known_procedure_steps=template.known_procedure_steps,
             clock=lambda: NOW,
             max_review_revisions=0,
         )
         outcome = await graph.run(request)
-        assert outcome.outcome_type == "REVIEWED_PLAN", outcome
         restored = TypeAdapter(AgentGraphOutput).validate_json(outcome.model_dump_json())
-        restored.assert_integrity()
-        decision = restored.review_subject.supervisor_draft.decision
-        assert decision.decision_type == "ACTION"
-        assert decision.blocker is not None
-        assert decision.blocker.evidence_refs == [REF]
-        assert decision.next_action.action_code == CONFIRM_TAX
-        assert decision.evidence_refs and decision.next_action.evidence_refs
-        assert restored.review_proof.snapshot_id == request.case_snapshot.snapshot_id
-        assert review_client.calls == 1
+        if scenario in {"missing_bindings", "support_action"}:
+            assert restored.outcome_type == "SAFE_FAILURE", restored
+            assert restored.failure_code == "COMPONENT_UNAVAILABLE"
+            assert restored.message_code == "AGENT_PROCEDURE_BINDINGS_MISSING"
+            assert restored.recovery_action_code == "CONTACT_SUPPORT"
+            assert restored.requested_field_paths == []
+            assert restored.retryable is False
+            assert restored.failed_component == "SUPERVISOR"
+            assert supervisor_client.calls == review_client.calls == 0
+        else:
+            assert restored.outcome_type == "REVIEWED_PLAN", restored
+            restored.assert_integrity()
+            decision = restored.review_subject.supervisor_draft.decision
+            assert decision.decision_type == "ACTION"
+            assert decision.blocker is not None
+            assert decision.blocker.evidence_refs == [REF]
+            assert decision.next_action.action_code == action_code
+            assert decision.evidence_refs and decision.next_action.evidence_refs
+            assert restored.review_proof.snapshot_id == request.case_snapshot.snapshot_id
+            assert supervisor_client.calls == review_client.calls == 1
         for runner, method in (
             (procedure_runner, "lookup"),
             (info_runner, "analyze"),
-            (support_runner, "analyze"),
         ):
             getattr(runner, method).assert_awaited_once()
+        support_runner.analyze.assert_not_awaited()
         assert request.model_dump_json() == original
 
     asyncio.run(run())

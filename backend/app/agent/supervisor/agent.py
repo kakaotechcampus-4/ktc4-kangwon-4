@@ -37,6 +37,7 @@ from app.agent.guardrails import (
     ensure_known_refs,
     ensure_no_sensitive_text,
 )
+from app.agent.llm import LLMClientError
 from app.agent.procedure_tool.rules import (
     procedure_constraints,
     procedure_plan_constraints,
@@ -73,7 +74,6 @@ from app.agent.schemas import (
     SupportAnalysisResult,
     SupportCheck,
     SupportMatchStatus,
-    SupportMatchUpdateCandidate,
 )
 
 
@@ -88,6 +88,10 @@ class StructuredGenerator(Protocol):
 
 class SupervisorGuardrailError(GuardrailViolation):
     """Raised when a Supervisor draft references data it did not receive."""
+
+
+class ProcedureBindingConfigurationError(RuntimeError):
+    """Official documents are available but no procedure mapping is configured."""
 
 
 class NextActionSemantic(AgentSchema):
@@ -248,14 +252,26 @@ class SupervisorAgent:
             request, list(source_results), fact_overlays=fact_overlays
         )
         evidence_registry = self._evidence(source_results, request)
+        bindings = self._bindings(request)
         blocker_candidates = build_blocker_candidates(
             request.case_snapshot,
             request.known_procedure_steps,
             source_results,
             mutations,
             evidence_registry,
-            self._bindings(request),
+            bindings,
         )
+        if (
+            not blocker_candidates
+            and not bindings
+            and any(
+                isinstance(source.output, ProcedureLookupResult) and source.output.documents
+                for source in source_results
+            )
+        ):
+            raise ProcedureBindingConfigurationError(
+                "Reviewed documents require a configured procedure mapping"
+            )
         action_candidates = [
             action
             for candidate in blocker_candidates
@@ -307,11 +323,6 @@ class SupervisorAgent:
             "contract": {
                 "action_count": 1,
                 "blocker_count": {"ACTION": [1], "NEEDS_MORE_INFO": [1]},
-                # Both land in VARCHAR(500) columns (BLOCKER.description,
-                # CASE_HISTORY.next_action). Over-length fails validation and
-                # burns a retry, so the limit is stated up front.
-                "blocker_description_max_characters": 500,
-                "next_action_title_max_characters": 500,
                 "action_questions_for_user": [],
                 "needs_more_info_requires_human": True,
                 "eligibility_assertion_level": "NEEDS_CONFIRMATION",
@@ -325,7 +336,7 @@ class SupervisorAgent:
                 ],
                 "claim_text_and_path_are_runtime_injected": True,
                 "support_eligibility_is_final": False,
-                "action_target_kinds": ["PROCEDURE", "SUPPORT_PROGRAM"],
+                "action_target_kinds": ["PROCEDURE"],
                 "action_requires_exactly_one_target": True,
                 "allowed_actions": action_candidates,
                 "blocker_candidates": blocker_candidates,
@@ -366,6 +377,7 @@ class SupervisorAgent:
         }
         ensure_projection_has_no_obvious_sensitive_text(prompt_input)
 
+        llm_unavailable = False
         for attempt in range(1, self._max_local_attempts + 1):
             messages = supervisor_messages(prompt_input)
             if previous_draft is not None:
@@ -395,8 +407,7 @@ class SupervisorAgent:
                             "no next_action, requires_human=true, and at least one question. "
                             "Every ACTION must select exactly one canonical target. Use "
                             "target_kind=PROCEDURE with a procedure_step from an Info finding, "
-                            "or target_kind=SUPPORT_PROGRAM with a support_program from a "
-                            "Support check. Never mix both kinds in one action. "
+                            "and select the first ranked blocker candidate and its first action. "
                             "Every ELIGIBILITY claim must use NEEDS_CONFIRMATION. Select only "
                             "short evidence_ref handles listed in contract.allowed_evidence_refs; never "
                             "use a call, candidate, finding, document, or question UUID as evidence. "
@@ -413,30 +424,32 @@ class SupervisorAgent:
                         ),
                     }
                 )
-            model_output = await self._llm.generate(
-                SupervisorModelOutput,
-                messages,
-                schema_name="reborn_supervisor_draft",
-                # ponytail: no temperature=0 here -- the configured Supervisor
-                # model (see SUPERVISOR_MODEL) rejects any non-default value
-                # with HTTP 400 ("Only the default (1) value is supported"),
-                # confirmed against the real provider 2026-09-23. `seed` was
-                # tried too and does not help either -- confirmed against the
-                # real provider 2026-09-23 with an identical prompt + seed
-                # producing a different decision_type on replay. Supervisor
-                # has no sampling-level determinism guarantee. Runtime reuse
-                # separately checks the full request, evidence and configuration.
-                # Same reason as the Info Agent: the evidence list is closed, so
-                # the provider is not allowed to name anything outside it.
-                enum_constraints={
-                    "evidence_refs": sorted(evidence_by_alias),
-                    "action_code": [item["action_code"] for item in action_candidates],
-                    "blocker_candidate_id": [
-                        item["candidate_id"] for item in blocker_candidates
-                    ],
-                },
-            )
             try:
+                model_output = await self._llm.generate(
+                    SupervisorModelOutput,
+                    messages,
+                    schema_name="reborn_supervisor_draft",
+                    # ponytail: no temperature=0 here -- the configured Supervisor
+                    # model (see SUPERVISOR_MODEL) rejects any non-default value
+                    # with HTTP 400 ("Only the default (1) value is supported"),
+                    # confirmed against the real provider 2026-09-23. `seed` was
+                    # tried too and does not help either -- confirmed against the
+                    # real provider 2026-09-23 with an identical prompt + seed
+                    # producing a different decision_type on replay. Supervisor
+                    # has no sampling-level determinism guarantee. Runtime reuse
+                    # separately checks the full request, evidence and configuration.
+                    # Same reason as the Info Agent: the evidence list is closed, so
+                    # the provider is not allowed to name anything outside it.
+                    enum_constraints={
+                        "evidence_refs": sorted(evidence_by_alias),
+                        "action_code": [
+                            blocker_candidates[0]["actions"][0]["action_code"]
+                        ] if blocker_candidates else [],
+                        "blocker_candidate_id": [
+                            blocker_candidates[0]["candidate_id"]
+                        ] if blocker_candidates else [],
+                    },
+                )
                 semantic = self._candidate_semantic(
                     model_output,
                     blocker_candidates,
@@ -450,13 +463,29 @@ class SupervisorAgent:
                     draft_version=draft_version,
                     mutations=mutations,
                 )
+            except LLMClientError:
+                # 모델에게서 쓸 답을 받지 못한 경우다. 통신 장애(LLMRequestError)든
+                # 형식 불일치(LLMResponseError)든, llm.py가 이미 내부에서 재시도를
+                # 끝낸 뒤 던지므로 여기서 다시 부르면 이미 재시도한 호출을 통째로
+                # 반복하게 된다. 한 번이 최대 180초라 판단 전체 제한시간만 까먹는다.
+                # 아래에서 코드가 이미 정해 둔 1순위로 내보낸다.
+                llm_unavailable = True
+                break
             except (GuardrailViolation, ValueError):
                 continue
-        fallback = (
-            self._missing_info_fallback(request, mutations)
-            if not blocker_candidates
-            else None
-        )
+        if llm_unavailable and blocker_candidates:
+            # 모델에 닿지 못했을 때만 쓴다. 순서는 코드가 이미 정해 뒀으므로 1순위를
+            # 그대로 내보내 사장님이 빈손으로 끝나지 않게 한다. 독립 Review는 그대로
+            # 거친다. 모델이 "답은 했는데 틀린" 경우는 여기로 오지 않는다 — 그건
+            # 덮어서 넘기지 않고 실패로 남긴다(test_invented_candidate_is_rejected...).
+            return self._materialize(
+                request,
+                list(source_results),
+                self._first_candidate_semantic(request, blocker_candidates),
+                draft_version=draft_version,
+                mutations=mutations,
+            )
+        fallback = self._missing_info_fallback(request, mutations)
         if fallback is not None:
             return self._materialize(
                 request,
@@ -505,12 +534,31 @@ class SupervisorAgent:
             raise SupervisorGuardrailError(
                 "Supervisor must select an available blocker candidate"
             )
-        fields = candidate_decision_fields(
+        # Reject invented references before normalizing a valid model choice.
+        candidate_decision_fields(
             candidate,
             output.next_action.action_code,
             output.next_action.target.model_dump(mode="json"),
         )
-        action = fields["next_action"]
+        return self._first_candidate_semantic(request, candidates)
+
+    def _first_candidate_semantic(
+        self,
+        request: SupervisorAgentInput,
+        candidates: list[dict[str, Any]],
+    ) -> SupervisorSemanticDraft:
+        """Build the ACTION draft from the top-priority candidate alone.
+
+        Order and wording come from `blocker_candidates`, never from the
+        model, so this is exactly what the model path returns once its
+        choice has been normalized. Keeping it separate lets a bounded
+        model failure still answer instead of ending the whole run.
+        """
+        candidate = candidates[0]
+        action = candidate["actions"][0]
+        fields = candidate_decision_fields(
+            candidate, action["action_code"], action["target"]
+        )
         base = "/supervisor_draft/decision"
         texts = {
             f"{base}/selection_summary": fields["selection_summary"],
@@ -958,7 +1006,6 @@ class SupervisorAgent:
         }
         fact_changes: list[FactChangeCandidate] = list(fact_overlays or [])
         progress_changes: list[ProcedureProgressChangeCandidate] = []
-        support_updates: list[SupportMatchUpdateCandidate] = []
         for source in sources:
             output = source.output
             if isinstance(output, InfoAnalysisResult):
@@ -1007,20 +1054,11 @@ class SupervisorAgent:
                             procedure_analysis_call_id=source.meta.call_id,
                         )
                     )
-            elif isinstance(output, SupportAnalysisResult):
-                support_updates.extend(
-                    SupportMatchUpdateCandidate(
-                        candidate_id=self._uuid(),
-                        support_check=check,
-                        source_call_id=source.meta.call_id,
-                    )
-                    for check in output.support_checks
-                )
 
         return MutationSet(
             fact_changes=fact_changes,
             procedure_progress_changes=progress_changes,
-            support_match_updates=support_updates,
+            support_match_updates=[],
         )
 
     @staticmethod

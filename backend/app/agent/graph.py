@@ -233,7 +233,6 @@ class AgentGraph:
         builder.add_node("conflict", self._conflict_node)
         builder.add_node("confirmed_conflict", self._confirmed_conflict_node)
         builder.add_node("procedure_lookup", self._procedure_node)
-        builder.add_node("support_analysis", self._support_node)
         builder.add_node("supervisor", self._supervisor_node)
         builder.add_node("review", self._review_node)
         builder.add_node("finalize", self._finalize_node)
@@ -244,7 +243,6 @@ class AgentGraph:
             self._route_start,
             {
                 "procedure": "procedure_lookup",
-                "support": "support_analysis",
                 "confirmed_conflict": "confirmed_conflict",
             },
         )
@@ -262,17 +260,12 @@ class AgentGraph:
             "info_analysis",
             self._route_after_info,
             {
-                "continue": "support_analysis",
+                "continue": "supervisor",
                 "conflict": "conflict",
                 "failure": "safe_failure",
             },
         )
         builder.add_edge("conflict", END)
-        builder.add_conditional_edges(
-            "support_analysis",
-            self._route_after_component,
-            {"continue": "supervisor", "failure": "safe_failure"},
-        )
         builder.add_conditional_edges(
             "supervisor",
             self._route_after_component,
@@ -285,7 +278,6 @@ class AgentGraph:
                 "pass": "finalize",
                 "info": "info_analysis",
                 "procedure": "procedure_lookup",
-                "support": "support_analysis",
                 "supervisor": "supervisor",
                 "failure": "safe_failure",
             },
@@ -461,6 +453,10 @@ class AgentGraph:
         )
         component_input = ProcedureLookupInput(
             lookup_goal="BUSINESS_CLOSURE",
+            evidence_records=[
+                item for item in request.case_snapshot.evidence_records
+                if item.source_type == "OFFICIAL_DOCUMENT"
+            ],
             search_queries=self._procedure_queries(request),
             as_of=self._as_of(request),
             locale="ko-KR",
@@ -582,6 +578,13 @@ class AgentGraph:
             if "meta" in locals():
                 self._emit(meta, started, "ERROR", exc)
             return self._failure(exc, Component.REVIEW_TOOL)
+        if Component.SUPPORT_AGENT in result.recommended_rework_targets:
+            exc = ValueError("Support analysis is outside the closure MVP")
+            self._emit(meta, started, "ERROR", exc)
+            return {
+                **self._failure(exc, Component.REVIEW_TOOL),
+                "recovery_action_code": "CONTACT_SUPPORT",
+            }
         self._emit(
             meta,
             started,
@@ -662,13 +665,12 @@ class AgentGraph:
         The Review result cannot answer this.  Its paths point inside the draft
         (``/decision/next_action/...``) while this field takes Case field keys,
         and no mapping between the two exists; inventing one would be a guess.
-        The source results do carry real field keys, so ask them instead, most
-        specific first: what blocks the decision, then what the support
-        comparison could not resolve, then what asking the user would settle.
+        Info results carry real field keys: first what blocks the closure
+        decision, then what asking the user would settle. Support programs are
+        outside the MVP and must not create additional input requirements.
         """
 
         blocks_decision: set[CaseFieldKey] = set()
-        unresolved_support: set[CaseFieldKey] = set()
         answerable: set[CaseFieldKey] = set()
         for source in failure.get("source_results", []):
             output = source.output
@@ -678,12 +680,14 @@ class AgentGraph:
                     for item in output.missing_fields
                     if MissingFieldBlock.SUPERVISOR_DECISION in item.blocks
                 )
+                support_only = {
+                    item.field_path
+                    for item in output.missing_fields
+                    if set(item.blocks) == {MissingFieldBlock.SUPPORT_ANALYSIS}
+                }
                 for question in output.question_candidates:
-                    answerable.update(question.resolves_field_paths)
-            elif isinstance(output, SupportAnalysisResult):
-                for check in output.support_checks:
-                    unresolved_support.update(check.unknown_field_paths)
-        found = blocks_decision or unresolved_support or answerable
+                    answerable.update(set(question.resolves_field_paths) - support_only)
+        found = blocks_decision or answerable
         # Canonical order, so two runs that found the same fields in a
         # different sequence still produce the same outcome digest.
         return [key for key in CASE_FIELD_SPECS if key in found]
@@ -696,7 +700,11 @@ class AgentGraph:
         trace_id: str | None,
         failure: dict[str, Any],
     ) -> SafeFailureOutcome:
-        requested = AgentGraph._requested_field_paths(failure)
+        requested = (
+            []
+            if failure.get("recovery_action_code") == "CONTACT_SUPPORT"
+            else AgentGraph._requested_field_paths(failure)
+        )
         retryable = failure.get("retryable", False)
         # Naming fields the caller can actually collect beats telling them
         # there is nothing to do.  Only when a retry is not the answer: a
@@ -735,7 +743,7 @@ class AgentGraph:
     @staticmethod
     def _route_start(
         state: AgentGraphState,
-    ) -> Literal["procedure", "support", "confirmed_conflict"]:
+    ) -> Literal["procedure", "confirmed_conflict"]:
         trigger = state["request"].trigger
         if isinstance(trigger, ConflictConfirmedTrigger):
             return "confirmed_conflict"
@@ -750,7 +758,7 @@ class AgentGraph:
     @staticmethod
     def _route_after_review(
         state: AgentGraphState,
-    ) -> Literal["pass", "info", "procedure", "support", "supervisor", "failure"]:
+    ) -> Literal["pass", "info", "procedure", "supervisor", "failure"]:
         if state.get("failure_code"):
             return "failure"
         result = state.get("review_result")
@@ -761,8 +769,6 @@ class AgentGraph:
             return "procedure"
         if Component.INFO_AGENT in targets:
             return "info"
-        if Component.SUPPORT_AGENT in targets:
-            return "support"
         return "supervisor"
 
     @staticmethod
@@ -770,7 +776,6 @@ class AgentGraph:
         for component in (
             Component.PROCEDURE_TOOL,
             Component.INFO_AGENT,
-            Component.SUPPORT_AGENT,
             Component.SUPERVISOR,
         ):
             if component in targets:
@@ -789,13 +794,6 @@ class AgentGraph:
                 item
                 for item in sources
                 if item.meta.component == Component.PROCEDURE_TOOL
-            ]
-        if earliest == Component.SUPPORT_AGENT:
-            return [
-                item
-                for item in sources
-                if item.meta.component
-                in {Component.PROCEDURE_TOOL, Component.INFO_AGENT}
             ]
         return list(sources)
 
@@ -855,6 +853,15 @@ class AgentGraph:
         component: Component | None,
     ) -> dict[str, Any]:
         name = exc.__class__.__name__
+        if name == "ProcedureBindingConfigurationError":
+            return {
+                "phase": "SAFE_FAILED",
+                "failure_code": "COMPONENT_UNAVAILABLE",
+                "failure_message_code": "AGENT_PROCEDURE_BINDINGS_MISSING",
+                "failed_component": component,
+                "retryable": False,
+                "recovery_action_code": "CONTACT_SUPPORT",
+            }
         if name == "StaleConfirmationError":
             return {
                 "phase": "SAFE_FAILED",

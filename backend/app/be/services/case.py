@@ -5,6 +5,7 @@ from fastapi import HTTPException
 from sqlmodel import Session
 
 from app.be.crud import case as case_crud
+from app.be.crud import case_field_history as case_field_history_crud
 from app.be.crud import case_history as case_history_crud
 from app.be.crud import evidence as evidence_crud
 from app.be.crud import procedure_step as procedure_step_crud
@@ -13,7 +14,14 @@ from app.be.models.case_history import CaseHistory
 from app.be.models.evidence import Evidence
 from app.be.models.mixins import kst_now
 from app.be.models.procedure_step import CaseProcedureStep, ProcedureStep
-from app.be.schemas.case import CaseCreateRequest, CaseGetDetailResponse, CaseGetResponse
+from app.be.schemas.case import (
+    CaseCreateRequest,
+    CaseGetDetailResponse,
+    CaseGetResponse,
+    FieldChangeResponse,
+    NextActionResponse,
+)
+from app.be.services import reviewed_procedure as reviewed_procedure_service
 
 
 def create_case(session: Session, member_id: int, case_request: CaseCreateRequest) -> Case:
@@ -31,6 +39,14 @@ def create_case(session: Session, member_id: int, case_request: CaseCreateReques
     case = case_crud.create_case(session, case)
     _fill_temp_case_procedure_steps(session, case.id)
     _create_case_creation_evidence(session, case, case_request)
+    # 검수된 절차 문서는 AI가 직접 읽지 않고, BE가 이 Case의 근거로 저장해 둔 것만 쓴다.
+    # 적재해 두지 않으면 절차조회가 짝을 못 찾아 그 문서를 아예 안 쓴다.
+    reviewed_procedure_service.import_reviewed_procedures(
+        session,
+        case.id,
+        reviewed_procedure_service.load_reviewed_procedures(),
+        as_of=kst_now().date(),
+    )
     session.commit()
     session.refresh(case)
     return case
@@ -40,7 +56,15 @@ def get_case(session: Session, member_id: int) -> CaseGetResponse:
     case = case_crud.get_case_by_member_id(session, member_id)
     if case is None:
         return CaseGetResponse(
-            case=None, blocker=None, next_action=None, judgment_status=None, questions_for_user=None
+            case=None,
+            blocker=None,
+            next_action=None,
+            judgment_status=None,
+            questions_for_user=None,
+            recovery_action_code=None,
+            requested_field_paths=None,
+            retryable=None,
+            changes=None,
         )
 
     latest_history = case_crud.get_latest_user_driven_case_history(session, case.id)
@@ -55,12 +79,46 @@ def get_case(session: Session, member_id: int) -> CaseGetResponse:
     if latest_history.judgment_status == "NEEDS_MORE_INFO" and not latest_history.questions_for_user:
         raise HTTPException(status_code=500, detail="정보 부족(NEEDS_MORE_INFO) 상태인데 questions_for_user가 없습니다.")
 
+    if latest_history.judgment_status == "FAILED" and latest_history.recovery_action_code is None:
+        raise HTTPException(status_code=500, detail="판단 실패(FAILED) 상태인데 recovery_action_code가 없습니다.")
+
+    # TODO: retryable은 저장하는 쪽(decision_record.py의 save_safe_failure 등)이 아직 안 채워주고
+    # 있어서 지금은 가드를 안 건다. 채워주기 시작하면 위 recovery_action_code처럼
+    # "FAILED인데 retryable이 없으면 500" 가드를 추가해야 한다.
+
+    next_action = (
+        NextActionResponse(
+            title=latest_history.next_action,
+            reason=latest_history.next_action_reason,
+            questions_to_ask=latest_history.next_action_questions_to_ask or [],
+        )
+        if latest_history.next_action is not None
+        else None
+    )
+
+    # TODO: case_history_id는 저장하는 쪽(decision_record.py의 _apply_fact_changes)이
+    # 아직 안 채워주고 있어서, DONE이어도 실제로는 변경이 있었는데 []로 나올 수 있다.
+    changes = (
+        [
+            FieldChangeResponse(field=h.canonical_field, stored_value=h.before_value, new_value=h.after_value)
+            for h in case_field_history_crud.get_case_field_histories_by_case_history_id(session, latest_history.id)
+        ]
+        if latest_history.judgment_status == "DONE"
+        else None
+    )
+
     return CaseGetResponse(
         case=CaseGetDetailResponse(**case.model_dump()),
         blocker=latest_history.priority_blocker.description if latest_history.priority_blocker else None,
-        next_action=latest_history.next_action,
+        next_action=next_action,
         judgment_status=latest_history.judgment_status,
         questions_for_user=latest_history.questions_for_user,
+        # 실패했을 때만 채워진다. 화면은 이 값으로 "다시 시도" / "다시 말씀해 주세요" /
+        # "문의" 중 무엇을 보여줄지 정한다.
+        recovery_action_code=latest_history.recovery_action_code,
+        requested_field_paths=latest_history.requested_field_paths,
+        retryable=latest_history.retryable,
+        changes=changes,
     )
 
 
@@ -78,7 +136,7 @@ def _create_case_creation_evidence(session: Session, case: Case, case_request: C
     evidence_crud.create_evidence(
         session,
         Evidence(
-            evidence_id=evidence_crud.creation_form_evidence_id(case.id),
+            evidence_id=evidence_crud.case_history_evidence_id(case.id, history.id),
             case_id=case.id,
             source_type="USER_INPUT",
             source_ref=f"case_history:{history.id}",
@@ -94,11 +152,20 @@ def _create_case_creation_evidence(session: Session, case: Case, case_request: C
 
 def _fill_temp_case_procedure_steps(session: Session, case_id: int) -> None:
     # TODO: 실제 폐업절차 마스터 데이터/조건(step_eligibility)로 교체 필요. 폐업절차 DB 구조가 아직
-    # 확정되지 않아, 지금은 case_procedure_step 채우는 흐름 검증용 임시 더미 절차 3개만 사용한다.
+    # 확정되지 않아, 지금은 case_procedure_step 채우는 흐름 검증용 임시 더미 절차 4개만 사용한다.
+    #
+    # step_code를 AI가 아는 논리 코드와 똑같이 둔다. 이름이 정확히 같을 때만 절차 대응표
+    # (procedure_bindings)가 자동으로 맺어지고(app/agent/action_catalog.py의
+    # resolve_procedure_bindings), 대응표가 비면 공식 문서를 찾아도 Supervisor가
+    # AGENT_PROCEDURE_BINDINGS_MISSING으로 판단을 멈춘다.
+    #
+    # TODO: 실제 폐업절차는 이보다 많고 이름도 다를 것이다. 그때는 이 4개를 어느 실제 절차에
+    # 맺을지 정해 procedure_bindings를 직접 넘겨야 한다(first_judgment.py).
     temp_procedure_steps = [
-        ("TEMP_BUSINESS_CLOSURE_REPORT", "사업자 폐업 신고"),
-        ("TEMP_TAX_CLOSURE_REPORT", "세무서 폐업 신고"),
-        ("TEMP_FOUR_INSURANCE_CANCEL", "4대보험 상실 신고"),
+        ("CONFIRM_RESTORATION_SCOPE", "원상복구 범위 확인"),
+        ("FILE_TAX_BUSINESS_CLOSURE", "세무서 폐업 신고"),
+        ("FILE_FOOD_SERVICE_CLOSURE", "영업신고증 폐업 신고"),
+        ("REPORT_WORKPLACE_INSURANCE_CLOSURE", "4대보험 상실 신고"),
     ]
     for step_code, step_name in temp_procedure_steps:
         step = procedure_step_crud.get_procedure_step_by_code(session, step_code)

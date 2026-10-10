@@ -7,13 +7,15 @@ import logging
 
 from sqlmodel import Session
 
-from app.agent.schemas import AgentGraphOutput
 from app.be.crud import case_history as case_history_crud
 from app.be.db import _engine
 from app.be.models.evidence import DecisionRecord
 from app.be.services import agent_runtime as agent_runtime_service
 from app.be.services import case_snapshot as case_snapshot_service
 from app.be.services import decision_record as decision_record_service
+from app.be.services import reviewed_procedure as reviewed_procedure_service
+from app.common.agent_dto import AgentGraphOutput
+from app.common.agent_service import build_planning_input, run_case_planning
 
 logger = logging.getLogger(__name__)
 
@@ -48,25 +50,37 @@ async def run_first_judgment(
     if history is None:
         raise ValueError(f"case {case_id} has no CASE_CREATED history")
 
-    graph_input = case_snapshot_service.build_case_created_input(session, case_id)
+    graph_input = build_planning_input(
+        trigger_type="CASE_CREATED",
+        case_snapshot=case_snapshot_service.build_case_snapshot(session, case_id),
+        user_input=case_snapshot_service.build_user_input(history),
+        # TODO: 프론트가 자기 쪽 이벤트 식별자를 보내주기로 하면 그 값을 넣는다. 아직 미협의.
+        client_event_id=None,
+    )
 
-    # 호출할 때마다 런타임을 새로 만든다 = LLM 연결도 매번 새로 열고 닫는다. AgentRuntime은
-    # 원래 "여러 판단 요청에 답할 수 있게 한 번 만들어 두는" 물건(app/agent/runtime.py:118)이라
-    # 서버 시작 시 한 번 만들어 재사용하는 게 맞다. 다만 그러면 AI가 아는 절차 목록이 서버
-    # 시작 시점에 고정되므로(DB에서 절차가 바뀌어도 재시작 전엔 반영 안 됨) 그 결정을 함께
-    # 해야 해서, 지금은 단순하게 매번 만든다.
-    runtime = await agent_runtime_service.build_agent_runtime(session)
-    try:
-        outcome = await runtime.run_planning(graph_input)
-    finally:
-        await runtime.aclose()
+    # AI 호출은 AI팀이 공개한 입구 하나로만 한다(app/common/agent_service.py). 런타임을 우리가
+    # 직접 조립하면 AI 내부가 바뀔 때 BE만 깨지고, 추가 입력·충돌 확인 트리거를 만들 수도 없다.
+    outcome = await run_case_planning(
+        graph_input,
+        known_procedure_steps=agent_runtime_service.build_known_procedure_steps(session),
+        # None은 "절차 목록의 step_code가 AI 논리 코드와 같으면 알아서 맺어라"는 뜻이고,
+        # 빈 표({})는 "맺을 게 없다"는 뜻이라 서로 다르다(action_catalog.resolve_procedure_bindings).
+        # 지금은 임시 절차의 이름을 논리 코드와 같게 둬서 자동으로 맺는다(case.py).
+        # TODO: 실제 폐업절차 데이터가 들어오면 이름이 달라진다. 그때는 어느 절차에 맺을지
+        # 정해 여기에 직접 넘겨야 한다.
+        procedure_bindings=None,
+        procedure_store=reviewed_procedure_service.load_reviewed_procedures(),
+        support_catalog=agent_runtime_service.empty_support_catalog(),
+    )
 
-    if outcome.outcome_type != "REVIEWED_PLAN":
-        # CONFLICT는 사용자에게 되물어 확인받는 흐름이 필요하고, SAFE_FAILURE는 실패 이유를
-        # 보여줘야 한다. 둘 다 정상 결과로는 저장하지 않지만, 화면이 계속 "분석 중"에
-        # 머물지 않도록 상태만은 FAILED로 남긴다.
-        # TODO: CONFLICT를 FAILED로 뭉뚱그리지 않고 재확인 흐름으로 잇는다.
-        decision_record_service.mark_judgment_failed(session, case_id)
+    # 결과는 세 가지이고 화면이 할 일이 각각 다르다. 검수를 통과한 판단만 Case 값을 바꾸고,
+    # 충돌은 되물을 거리를, 실패는 다음 행동을 남긴다.
+    if outcome.outcome_type == "CONFLICT":
+        decision_record_service.save_conflict(session, history, outcome)
+        return outcome, None
+
+    if outcome.outcome_type == "SAFE_FAILURE":
+        decision_record_service.save_safe_failure(session, history, outcome)
         return outcome, None
 
     return outcome, decision_record_service.save_reviewed_plan(session, history, outcome)
