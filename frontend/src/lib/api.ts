@@ -14,6 +14,20 @@ import { getAccessToken, logOut, verifyOAuthState } from './auth'
 // 화면 경로에 부딪힌다 — 오류 없이 아무 일도 일어나지 않는 것처럼 보인다
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
 
+/**
+ * 요청을 보내고 **본문까지 다 받기를** 기다리는 시간.
+ *
+ * 성능 예산이 아니라 "서버가 답을 안 준다"를 가려내는 값이다. 제한이 없으면 그 요청이
+ * 영영 끝나지 않고, 끝나기를 기다리는 쪽(`useCase`)의 뒷정리도 같이 멈춘다 —
+ * 자동 조회도 다시 확인 버튼도 막혀서 사장님이 화면에 갇힌다.
+ *
+ * 폴링 간격(10초)보다 길어 한 주기를 건너뛰지만, 조회 쪽이 중복 요청을 막고 있다.
+ *
+ * 아직 실서버 응답 시간을 재보지 못해 잡아둔 초기값이다. 배포 뒤 실제 조회 응답 시간을
+ * 보고 다시 정한다.
+ */
+export const REQUEST_TIMEOUT_MS = 15_000
+
 /** 서버가 2xx가 아닌 것을 돌려줬을 때 */
 export class ApiError extends Error {
   // 생성자 인자에 `readonly`를 붙이는 축약형은 이 프로젝트의 `erasableSyntaxOnly`
@@ -40,6 +54,19 @@ export class UnauthorizedError extends ApiError {
   }
 }
 
+/**
+ * 제한 시간 안에 응답 수신을 마치지 못했다.
+ *
+ * 이유 없이 취소하면 `DOMException: AbortError`가 올라와 **네트워크 실패와 구분되지 않는다.**
+ * 취소한 이유를 직접 넘겨서 "우리가 끊었다"가 남게 한다.
+ */
+export class TimeoutError extends Error {
+  constructor(message = '제한 시간 안에 응답을 다 받지 못했습니다.') {
+    super(message)
+    this.name = 'TimeoutError'
+  }
+}
+
 interface RequestOptions {
   method?: 'GET' | 'POST'
   body?: unknown
@@ -48,12 +75,21 @@ interface RequestOptions {
 /**
  * 네트워크 자체가 실패하면 `fetch`가 던지는 오류가 그대로 올라간다.
  * 서버가 준 답이 없다는 뜻이라 상태 코드로 감쌀 것이 없다.
+ *
+ * 제한 시간을 넘기면 요청을 취소한다. **취소를 예약한 타이머는 지우지 않는다** —
+ * 이 함수는 `Response`만 돌려주고 본문은 호출부가 나중에 읽는데, 응답을 받자마자 지우면
+ * **헤더만 오고 본문이 멈추는 경우**를 못 막는다. 이미 끝난 요청을 취소하는 것은 아무 일도
+ * 하지 않으므로, 정상 응답 뒤 하는 일 없는 타이머가 잠시 남는 대신 본문까지 보호한다.
  */
 export async function request(path: string, { method = 'GET', body }: RequestOptions = {}) {
   const token = getAccessToken()
 
+  const controller = new AbortController()
+  setTimeout(() => controller.abort(new TimeoutError()), REQUEST_TIMEOUT_MS)
+
   const response = await fetch(`${API_BASE}${path}`, {
     method,
+    signal: controller.signal,
     headers: {
       ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
       // BE가 표준 Authorization 대신 커스텀 헤더를 쓴다
