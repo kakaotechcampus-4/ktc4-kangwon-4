@@ -156,6 +156,7 @@ def save_safe_failure(session: Session, history: CaseHistory, outcome: SafeFailu
 
     history.judgment_status = "FAILED"
     history.recovery_action_code = outcome.recovery_action_code
+    history.retryable = outcome.retryable
     history.requested_field_paths = [field.value for field in outcome.requested_field_paths]
     session.commit()
 
@@ -173,6 +174,7 @@ def mark_judgment_failed(session: Session, case_id: int) -> None:
         return
     history.judgment_status = "FAILED"
     history.recovery_action_code = "RETRY"
+    history.retryable = True
     history.requested_field_paths = []
     session.commit()
 
@@ -200,6 +202,9 @@ def _apply_fact_changes(
             session,
             CaseFieldHistory(
                 case_id=case.id,
+                # 어느 제출에서 나온 변경인지. 이 값이 있어야 "이번 판단에서 뭐가 바뀌었나"를
+                # 골라낼 수 있다(GET /cases의 changes).
+                case_history_id=history.id,
                 canonical_field=change.field_path.value,
                 before_value=_history_value(before),
                 after_value=_history_value(change.proposed_value),

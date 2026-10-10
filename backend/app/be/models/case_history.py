@@ -56,6 +56,11 @@ class CaseHistory(CreatedAtMixin, table=True):
         ),
         description="판단이 실패했을 때 화면이 안내할 다음 행동. 실패가 아니면 NULL",
     )
+    retryable: bool | None = Field(
+        default=None,
+        sa_column=Column(Boolean, nullable=True),
+        description="같은 입력으로 다시 해볼 만한 실패인지. 실패가 아니면 NULL",
+    )
     requested_field_paths: list | None = Field(
         default=None,
         sa_column=Column(JSON, nullable=True),
