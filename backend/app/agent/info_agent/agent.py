@@ -208,10 +208,7 @@ _SCHEMA_FACT_UNCERTAINTY = re.compile(
     r"|없(?:으면|어도|다면)|필요하지않(?:으면|아도|다면)"
 )
 _SCHEMA_FACT_NEGATION = re.compile(r"아니|아닌|아님|아닙|아닐|않|못|없|불필요")
-# 한 문장 안에서 앞 절을 뒤 절이 뒤집는 접속 표현.
-# "없다고 했는데 있대요"처럼 말하면 어느 쪽이 지금 사실인지 글만으로는 정할 수 없다.
-# 뒤집는 말 자체("있대요", "하라고 했어요")를 모으면 목록이 끝나지 않으므로,
-# 끝이 있는 접속 표현만 본다. 걸리면 버리지 않고 사장님께 되묻는다.
+# 접속사 앞에 해당 필드의 값 표현이 있을 때만 후속 절의 반전을 검사한다.
 _SCHEMA_FACT_REVERSAL = re.compile(r"지만|는데|인데|다가|그런데|결국")
 _COMPLETED_OBSERVATION = re.compile(
     r"(?:완료|끝냈|마쳤|처리했|신고했|제출했|반납했|해지했|탈퇴했|확인했|종료했)"
@@ -910,6 +907,36 @@ class InfoAnalysisAgent:
         return input_text[left + 1 : right]
 
     @classmethod
+    def _statement_reverses(cls, fact: ExtractedFactDraft, statement: str) -> bool:
+        compact = cls._compact_text(statement)
+        own_cues = tuple(
+            cls._compact_text(cue)
+            for cue in _FACT_VALUE_CUES.get((fact.field_path, fact.value), ())
+        )
+        for match in _SCHEMA_FACT_REVERSAL.finditer(compact):
+            before, after = compact[:match.start()], compact[match.end():]
+            if not any(cue in before for cue in own_cues):
+                continue  # 확인 행위 뒤 처음 보고하는 사실은 반전이 아니다.
+            if any(cue in after for cue in own_cues):
+                continue  # 같은 값을 명시적으로 다시 보고했다.
+            other_field_report = any(
+                cls._compact_text(cue) in after
+                for (field, _), cues in _FACT_VALUE_CUES.items()
+                if field != fact.field_path
+                for cue in cues
+            )
+            own_field_report = any(
+                cls._compact_text(cue) in after
+                for (field, _), cues in _FACT_VALUE_CUES.items()
+                if field == fact.field_path
+                for cue in cues
+            )
+            if other_field_report and not own_field_report:
+                continue
+            return True
+        return False
+
+    @classmethod
     def _schema_enum_is_asserted(cls, fact: ExtractedFactDraft, statement: str) -> bool:
         """Reject negation/uncertainty for the schema-aligned enum cues only."""
 
@@ -1041,12 +1068,8 @@ class InfoAnalysisAgent:
             # 한 문장이 스스로를 뒤집으면("없다고 했는데 있대요") 어느 쪽이 지금 사실인지
             # 글만으로는 정할 수 없다. 버리면 분석 전체가 실패하므로, 확정하지 않고
             # 확인이 필요한 사실로 넘겨 사장님께 되묻는다.
-            statement_reverses = bool(
-                _SCHEMA_FACT_REVERSAL.search(
-                    self._compact_text(
-                        self._containing_statement(input_text, semantic.source_text)
-                    )
-                )
+            statement_reverses = self._statement_reverses(
+                semantic, self._containing_statement(input_text, semantic.source_text)
             )
             span, evidence = self._ground_text(request, semantic.source_text)
             evidence_by_span[(span.start_offset, span.end_offset)] = evidence
