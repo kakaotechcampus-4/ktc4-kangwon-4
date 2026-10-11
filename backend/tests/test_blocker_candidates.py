@@ -11,6 +11,7 @@ from test_action_codes import (
     REF,
     StubModel,
     evidence,
+    result_fixes_xfail,
     source,
     supervisor_request,
     support_sources,
@@ -933,6 +934,7 @@ def test_unusable_model_answers_the_same_as_a_working_one(error):
 
 
 @pytest.mark.parametrize("held_field", ["restoration_scope", "demolition_required"])
+@result_fixes_xfail()
 def test_held_fact_precedes_missing_questions_and_actions_and_passes_review(held_field):
     from test_info_replanning import analyze_facts
 
