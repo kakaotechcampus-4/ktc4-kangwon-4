@@ -17,6 +17,7 @@ from app.agent.info_agent.agent import (
 )
 from app.agent.review_tool import ReviewTool
 from app.agent.schemas import (
+    CASE_FIELD_SPECS,
     AgentGraphInput,
     CaseFieldKey,
     CaseSnapshot,
@@ -617,7 +618,7 @@ def analyze_facts(facts, text):
         [finding(TAX, "doc1"), finding(FOOD, "doc2"), finding(RESTORATION, "doc3")]
     )
     response["facts"] = [
-        {"operation": "SET", "field_path": field, "value_type": "ENUM", "value": value,
+        {"operation": "SET", "field_path": field, "value_type": CASE_FIELD_SPECS[field][0], "value": value,
          "source_text": quote, "confidence_bps": 9500, "requires_confirmation": False,
          "reason_summary": "합성 임대인 확인 결과"}
         for field, value, quote in facts
@@ -705,6 +706,7 @@ def test_held_fact_still_produces_a_question_for_the_owner():
     ("restoration_scope", "임대인한테 물어봤는데 원상복구 범위는 없대요."),
     ("demolition_required", "계약서 확인해봤는데 철거도 필요하지 않습니다."),
     ("restoration_scope", "원상복구 범위는 없다고 들었는데 계약서에도 원상복구 범위는 없대요."),
+    ("restoration_scope", "원상복구 범위는 없다고 했는데 지금도 원상복구 범위는 없다고 합니다."),
     ("restoration_scope", "원상복구 범위는 없다고 했는데 철거도 필요하지 않습니다."),
     ("demolition_required", "철거도 필요하지 않다고 했는데 원상복구 범위도 없대요."),
     ("restoration_scope", "원상복구 범위는 없다고 했는데 원상복구 작업도 필요하지 않습니다."),
@@ -718,6 +720,96 @@ def test_connective_without_field_reversal_confirms_report(field, text):
     result = analyze_facts(facts, text)
     assert not any(candidate.requires_confirmation for candidate in result.fact_candidates)
     assert result.procedure_progress_observations == []
+
+
+@pytest.mark.parametrize("field,value,text", [
+    ("restoration_scope", "NOT_REQUIRED", "원상복구 범위는 없다고 했는데 임대인은 전부 하라고 하고 철거도 필요하대요."),
+    ("restoration_scope", "NOT_REQUIRED", "원상복구 범위는 없다고 했는데 철거도 필요하대요, 임대인은 전부 하라고 했어요."),
+    ("restoration_scope", "NOT_REQUIRED", "원상복구 범위는 없다고 했는데 계약서에도 원상복구 범위는 없대요, 임대인은 전부 하라고 했어요."),
+    ("employee_count", 3, "직원은 3명인데 지금은 0명으로 바뀌었어요."),
+    ("employee_count", 3, "직원은 3명인데 지금은 13명으로 바뀌었어요."),
+    ("employee_count", 3, "직원은 3명인데 지금은 30명으로 바뀌었어요."),
+    ("employee_count", 3, "직원은 3명인데 지금 3명은 아니래요."),
+    ("restoration_scope_detail", "벽면", "원상복구 범위는 벽면이라고 했는데 지금은 바닥으로 바뀌었어요."),
+    ("planned_closure_date", "2026-11-01", "폐업 예정일은 2026-11-01이었는데 지금은 2026-12-01로 바뀌었어요."),
+])
+def test_reversed_report_is_held_even_with_another_fact_or_value_type(field, value, text):
+    from app.agent.enrichment import build_fact_overlays
+
+    result = analyze_facts([(field, value, text)], text)
+    candidate, = result.fact_candidates
+    assert candidate.field_path == field
+    assert candidate.requires_confirmation
+    assert result.conflicts == []
+    assert build_fact_overlays(
+        supervisor_request().case_snapshot, result, uuid4(), uuid_factory=uuid4,
+    ) == []
+
+
+def test_short_quote_keeps_the_mixed_reversal_in_the_whole_sentence():
+    from app.agent.enrichment import build_fact_overlays
+
+    quote = "원상복구 범위는 없다고 했"
+    text = quote + "는데 임대인은 전부 하라고 하고 철거도 필요하대요."
+    result = analyze_facts([("restoration_scope", "NOT_REQUIRED", quote)], text)
+    candidate, = result.fact_candidates
+    assert candidate.source_span.text == quote
+    assert candidate.requires_confirmation
+    assert build_fact_overlays(
+        supervisor_request().case_snapshot, result, uuid4(), uuid_factory=uuid4,
+    ) == []
+
+
+@pytest.mark.parametrize("field,value,text", [
+    ("employee_count", 3, "직원은 3명입니다."),
+    ("employee_count", 0, "직원을 정리해서 지금은 0명으로 바뀌었어요."),
+    pytest.param("employee_count", 3, "직원은 3명인데 지금도 3명입니다.", marks=result_fixes_xfail()),
+    pytest.param("employee_count", 3, "직원은 3명이라고 했는데 지금도 3명이라고 합니다.", marks=result_fixes_xfail()),
+    pytest.param("restoration_scope_detail", "벽면", "원상복구 범위는 벽면이라고 했는데 지금도 벽면이라고 합니다.", marks=result_fixes_xfail()),
+    pytest.param("planned_closure_date", "2026-11-01", "폐업 예정일은 2026-11-01이라고 했는데 지금도 2026-11-01이라고 합니다.", marks=result_fixes_xfail()),
+])
+def test_plain_or_repeated_report_produces_a_reviewable_change(field, value, text):
+    from app.agent.enrichment import build_fact_overlays
+
+    result = analyze_facts([(field, value, text)], text)
+    candidate, = result.fact_candidates
+    assert not candidate.requires_confirmation
+    change, = build_fact_overlays(
+        supervisor_request().case_snapshot, result, uuid4(), uuid_factory=uuid4,
+    )
+    assert change.field_path == field
+    assert change.model_dump(mode="json")["proposed_value"] == value
+
+
+def test_clearing_confirmed_closure_date_keeps_the_conflict_candidate():
+    request = request_for_replanning()
+    text = "폐업 예정일을 삭제했는데 새 일정은 다시 알려드릴게요."
+    snapshot = request.case_snapshot.model_dump(mode="json")
+    snapshot["facts"].append({
+        "field_path": "planned_closure_date", "value_type": "DATE", "value": "2026-11-01",
+        "status": "CONFIRMED", "evidence_refs": ["synthetic-document"],
+        "updated_at": snapshot["captured_at"],
+    })
+    request = InfoAnalysisInput.model_validate(request.model_dump() | {
+        "case_snapshot": snapshot,
+        "input": request.input.model_dump() | {"redacted_text": text},
+    })
+    response = output(
+        [finding(TAX, "doc1"), finding(FOOD, "doc2"), finding(RESTORATION, "doc3")]
+    )
+    response["facts"] = [{
+        "operation": "CLEAR", "field_path": "planned_closure_date", "value_type": "DATE",
+        "value": None, "source_text": text, "confidence_bps": 9500,
+        "requires_confirmation": False, "reason_summary": "합성 예정일 삭제 요청",
+    }]
+    result = asyncio.run(InfoAnalysisAgent(Responses(response), max_local_attempts=1).analyze(request))
+    conflict, = result.conflicts
+    assert conflict.field_path == "planned_closure_date"
+    assert conflict.model_dump(mode="json")["committed_value"] == "2026-11-01"
+    assert conflict.proposed_operation == "CLEAR"
+    assert conflict.proposed_value is None
+    assert conflict.proposed_status == "UNKNOWN"
+    assert result.fact_candidates == []
 
 
 @pytest.mark.parametrize("invalid", [
