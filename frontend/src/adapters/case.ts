@@ -1,4 +1,4 @@
-import { factLabelOf, FRANCHISE_OPTIONS, LEASE_OPTIONS } from '../lib/caseOptions'
+import { factLabelOf, FIELD_LABEL, FRANCHISE_OPTIONS, LEASE_OPTIONS } from '../lib/caseOptions'
 import type {
   CaseCreateRequest,
   CaseResponse,
@@ -65,26 +65,46 @@ function toFact(key: string, label: string, value: string | null | undefined): F
  *
  * 사용자가 답할 수 있는 것만 담는다. `restoration_status`처럼 진행 단계를 나타내는 값은
  * 목록에 넣지 않는다 — "아직 확인 안 된 것"이 사용자에게 할 일로 읽히기 때문이다.
+ *
+ * 문구는 `FIELD_LABEL`에서 가져온다. 서버는 여러 자리에서 같은 칸을 이름으로 지목하는데
+ * (실패했을 때 다시 봐야 할 칸, 변경 내역, 충돌 항목), 문구를 여기 적어두면 그 자리마다
+ * 같은 칸이 다른 이름으로 불릴 수 있다.
+ *
+ * **`key`는 사전의 열쇠와 다를 수 있다.** `franchise`가 그렇다 — 서버 칸 이름은
+ * `franchise_status`지만 화면에서 쓰던 열쇠를 바꾸면 이 목록을 참조하는 쪽이 같이 깨진다.
+ * 바꾸는 것은 문구뿐이다.
  */
 export function toFacts(serverCase: CaseResponse): Fact[] {
   return [
-    toFact('business_type', '업종', serverCase.business_type),
-    toFact('franchise', '프랜차이즈', factLabelOf(FRANCHISE_OPTIONS, serverCase.franchise_status)),
+    toFact('business_type', FIELD_LABEL.business_type, serverCase.business_type),
+    toFact(
+      'franchise',
+      FIELD_LABEL.franchise_status,
+      factLabelOf(FRANCHISE_OPTIONS, serverCase.franchise_status),
+    ),
     toFact(
       'employee_count',
-      '직원 수',
+      FIELD_LABEL.employee_count,
       serverCase.employee_count === null ? null : `${serverCase.employee_count}명`,
     ),
-    toFact('lease_status', '점포 형태', factLabelOf(LEASE_OPTIONS, serverCase.lease_status)),
-    toFact('planned_closure_date', '폐업 예정일', toDateLabel(serverCase.planned_closure_date)),
+    toFact(
+      'lease_status',
+      FIELD_LABEL.lease_status,
+      factLabelOf(LEASE_OPTIONS, serverCase.lease_status),
+    ),
+    toFact(
+      'planned_closure_date',
+      FIELD_LABEL.planned_closure_date,
+      toDateLabel(serverCase.planned_closure_date),
+    ),
     toFact(
       'restoration_scope',
-      '원상복구 범위',
+      FIELD_LABEL.restoration_scope,
       RESTORATION_SCOPE_LABEL[serverCase.restoration_scope],
     ),
     toFact(
       'demolition_required',
-      '철거 필요 여부',
+      FIELD_LABEL.demolition_required,
       DEMOLITION_LABEL[serverCase.demolition_required],
     ),
   ]
