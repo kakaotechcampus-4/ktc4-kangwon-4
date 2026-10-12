@@ -864,19 +864,9 @@ class InfoAnalysisAgent:
             return explicit_number is not None and has_employee_context
 
         if fact.value_type == FactValueType.DATE:
-            parsed = (
-                fact.value
-                if type(fact.value) is date
-                else date.fromisoformat(str(fact.value))
+            return cls._date_is_explicit(fact.value, fact.source_text) and any(
+                cue in compact_source for cue in field_cues
             )
-            year, month, day = parsed.year, parsed.month, parsed.day
-            date_forms = (
-                rf"{year}\s*[-./]\s*0?{month}\s*[-./]\s*0?{day}",
-                rf"{year}\s*년\s*0?{month}\s*월\s*0?{day}\s*일",
-            )
-            return any(
-                re.search(pattern, fact.source_text) for pattern in date_forms
-            ) and any(cue in compact_source for cue in field_cues)
 
         if fact.value_type == FactValueType.STRING:
             assert type(fact.value) is str
@@ -886,6 +876,18 @@ class InfoAnalysisAgent:
         # Every current BOOLEAN and ENUM value has an explicit cue registry.
         # Missing registry coverage is intentionally fail-closed.
         return False
+
+    @staticmethod
+    def _date_is_explicit(value: StrictScalar, text: str) -> bool:
+        parsed = value if type(value) is date else date.fromisoformat(str(value))
+        year, month, day = parsed.year, parsed.month, parsed.day
+        return any(
+            re.search(pattern, text)
+            for pattern in (
+                rf"{year}\s*[-./]\s*0?{month}\s*[-./]\s*0?{day}",
+                rf"{year}\s*년\s*0?{month}\s*월\s*0?{day}\s*일",
+            )
+        )
 
     @staticmethod
     def _containing_statement(input_text: str | None, source_text: str) -> str:
@@ -908,19 +910,47 @@ class InfoAnalysisAgent:
 
     @classmethod
     def _statement_reverses(cls, fact: ExtractedFactDraft, statement: str) -> bool:
-        compact = cls._compact_text(statement)
         own_cues = tuple(
             cls._compact_text(cue)
             for cue in _FACT_VALUE_CUES.get((fact.field_path, fact.value), ())
         )
-        for match in _SCHEMA_FACT_REVERSAL.finditer(compact):
-            before, after = compact[:match.start()], compact[match.end():]
-            if not any(cue in before for cue in own_cues):
+        for match in _SCHEMA_FACT_REVERSAL.finditer(statement):
+            before_text, after_text = statement[:match.start()], statement[match.end():]
+            before, after = cls._compact_text(before_text), cls._compact_text(after_text)
+            if own_cues:
+                asserted_before = any(cue in before for cue in own_cues)
+                repeated_after = any(cue in after for cue in own_cues)
+            else:
+                # 숫자·날짜·문자열도 기존 원문 검사를 재사용한다. 공백과 날짜
+                # 구분자를 보존해 3명과 13명, 날짜의 표기를 구분한다.
+                asserted_before = cls._fact_source_supports_value(
+                    fact.model_copy(update={"source_text": before_text}),
+                    input_text=before_text,
+                )
+                # 앞 절에서 폐업 예정일임을 확인했다면 뒤 절은 날짜만
+                # 반복해도 된다. 다른 표기의 날짜는 기존 원문 식으로 검사한다.
+                repeated_after = (
+                    cls._date_is_explicit(fact.value, after_text)
+                    if fact.operation == FactOperation.SET
+                    and fact.value_type == FactValueType.DATE
+                    else cls._fact_source_supports_value(
+                        fact.model_copy(update={"source_text": after_text}),
+                        input_text=after_text,
+                    )
+                ) and not (
+                    _SCHEMA_FACT_NEGATION.search(after)
+                    or _SCHEMA_FACT_UNCERTAINTY.search(after)
+                )
+            if not asserted_before:
                 continue  # 확인 행위 뒤 처음 보고하는 사실은 반전이 아니다.
-            if any(cue in after for cue in own_cues):
+            # 뒤 절에 보고가 더 이어지면 같은 값이나 다른 필드가 있다는
+            # 이유만으로 앞의 반박을 지우지 않는다.
+            # 인용 어미인 '이라고/다고'의 '고'는 추가 보고의 연결어가 아니다.
+            single_report = re.search(r"[,;]|(?<![라다])고|며", after_text) is None
+            if repeated_after and single_report:
                 continue  # 같은 값을 명시적으로 다시 보고했다.
             other_field_report = any(
-                cls._compact_text(cue) in after
+                after.startswith(cls._compact_text(cue))
                 for (field, _), cues in _FACT_VALUE_CUES.items()
                 if field != fact.field_path
                 for cue in cues
@@ -931,7 +961,7 @@ class InfoAnalysisAgent:
                 if field == fact.field_path
                 for cue in cues
             )
-            if other_field_report and not own_field_report:
+            if single_report and other_field_report and not own_field_report:
                 continue
             return True
         return False

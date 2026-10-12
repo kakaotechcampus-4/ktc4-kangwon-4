@@ -384,6 +384,11 @@ def missing_info_fields(
         if isinstance(source.output, InfoAnalysisResult)
         for candidate in source.output.fact_candidates
         if candidate.requires_confirmation
+        and not any(
+            item.field_path == candidate.field_path
+            and set(item.blocks) == {"SUPPORT_ANALYSIS"}
+            for item in source.output.missing_fields
+        )
     ]
     refs.extend(
         ref
