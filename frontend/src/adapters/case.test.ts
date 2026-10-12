@@ -345,6 +345,18 @@ describe('toCurrentCaseView', () => {
       })
     })
 
+    /**
+     * 모양이 깨진 항목 하나 때문에 멀쩡한 항목까지 버리지 않는다. 아는 것은 그대로 알리고,
+     * 못 읽은 것이 있었다는 사실만 함께 남긴다.
+     */
+    it('글자가 아닌 것이 섞여도 아는 칸은 그대로 담는다', () => {
+      expect(detailOf(['restoration_scope', 1])).toEqual({
+        kind: 'NEEDS_DETAIL',
+        fields: ['원상복구 범위'],
+        partial: true,
+      })
+    })
+
     it('같은 칸이 두 번 와도 한 번만 담는다', () => {
       expect(detailOf(['restoration_scope', 'restoration_scope']).fields).toEqual(['원상복구 범위'])
     })

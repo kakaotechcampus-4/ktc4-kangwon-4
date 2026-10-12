@@ -162,16 +162,6 @@ function toNextAction(value: unknown): NextAction | null {
 }
 
 /**
- * 판단 상태와 그 내용을 화면 모양으로.
- *
- * 상태마다 같이 와야 하는 값이 정해져 있다. 그 약속이 깨진 응답은 **다른 상태로 바꿔
- * 보여주지 않고** `UNRECOGNIZED` 로 둔다 — 예를 들어 `DONE` 인데 할 일이 비어 있는 것을
- * "정보 부족"으로 그리면, 서버가 틀린 것을 사장님이 덜 적어낸 탓으로 읽는다.
- *
- * 서버가 이 조합들을 500 으로 막고 있지만 여기서도 본다. 막는 쪽이 바뀌어도 화면은
- * 빈 칸을 그리지 않아야 한다.
- */
-/**
  * 다시 봐야 할 칸들을 화면 문구로. 아는 것만 담고, 나머지가 있었는지도 함께 돌려준다.
  *
  * 서버가 보내는 목록은 **믿고 그릴 수 없다.** AI 쪽은 아홉 칸짜리 닫힌 목록으로 보내지만
@@ -207,6 +197,9 @@ function toRequestedFields(paths: unknown): { fields: string[]; partial: boolean
  * **코드 하나만 보고 정한다.** 같이 오는 `retryable` 은 읽지 않는다 — 코드와 짝이 맞는지
  * 검사하는 쪽이 AI 에만 있고 BE 는 그대로 통과시켜서, 둘이 어긋난 값이 와도 막히지 않는다.
  * 둘을 함께 보면 어느 쪽을 믿을지 화면이 정해야 하는데, 그건 화면이 할 판단이 아니다.
+ *
+ * 같은 이유로 **다시 봐야 할 칸은 `RESUBMIT_INPUT` 에서만 읽는다.** 다른 코드에 칸이
+ * 딸려 오면 그건 보내는 쪽이 어긋난 것이고, 짝을 맞추는 일은 거기서 한다(#74).
  */
 function toFailureNotice(envelope: CasesEnvelope): FailureNotice {
   switch (envelope.recovery_action_code) {
@@ -229,6 +222,16 @@ function toFailureNotice(envelope: CasesEnvelope): FailureNotice {
   }
 }
 
+/**
+ * 판단 상태와 그 내용을 화면 모양으로.
+ *
+ * 상태마다 같이 와야 하는 값이 정해져 있다. 그 약속이 깨진 응답은 **다른 상태로 바꿔
+ * 보여주지 않고** `UNRECOGNIZED` 로 둔다 — 예를 들어 `DONE` 인데 할 일이 비어 있는 것을
+ * "정보 부족"으로 그리면, 서버가 틀린 것을 사장님이 덜 적어낸 탓으로 읽는다.
+ *
+ * 서버가 이 조합들을 500 으로 막고 있지만 여기서도 본다. 막는 쪽이 바뀌어도 화면은
+ * 빈 칸을 그리지 않아야 한다.
+ */
 function toJudgmentView(envelope: CasesEnvelope): JudgmentView {
   const { judgment_status, blocker, next_action, questions_for_user } = envelope
 

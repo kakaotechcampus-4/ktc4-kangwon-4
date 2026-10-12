@@ -228,7 +228,7 @@ describe('CurrentCasePage', () => {
       renderAt('/case')
 
       await screen.findByText('다음 할 일을 정하지 못했어요.')
-      expect(screen.queryByText(/이어서 하실 수 있는 일은 없어요/)).not.toBeInTheDocument()
+      expect(screen.queryByText(/더 해 보실 수 있는 것이 없어요/)).not.toBeInTheDocument()
     })
 
     /**

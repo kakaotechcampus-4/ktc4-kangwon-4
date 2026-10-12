@@ -168,11 +168,16 @@ function failureCard(notice: FailureNotice): {
         description: '가게 정보는 그대로 있어요. 이 건은 저희 쪽에서 봐야 하는 문제예요.',
       }
 
+    /*
+      **"이번 판단" 으로 범위를 좁혀 쓴다.** 그냥 "하실 수 있는 일이 없다" 고 하면 폐업
+      절차 전체에 할 일이 없다는 말로 읽힌다. 서버가 말한 것은 이 실패를 되돌릴 방법이
+      없다는 것뿐이고, 가게의 다음 할 일은 판단이 다시 돌면 그때 나온다.
+    */
     case 'NO_RECOVERY':
       return {
         tone: 'NEUTRAL',
         title: '다음 할 일을 정하지 못했어요.',
-        description: '가게 정보는 그대로 있어요. 지금 이어서 하실 수 있는 일은 없어요.',
+        description: '가게 정보는 그대로 있어요. 이번 판단에 대해서는 더 해 보실 수 있는 것이 없어요.',
       }
 
     /*
@@ -308,7 +313,6 @@ function JudgmentSection({
     */
     case 'FAILED':
       return <NoticeCard {...failureCard(judgment.notice)} action={recheck} />
-
 
     /*
       서버가 우리가 모르는 상태를 보냈거나 내용이 비어서 온 경우다. "정보가 부족합니다"로
