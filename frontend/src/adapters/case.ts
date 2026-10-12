@@ -1,4 +1,10 @@
-import { factLabelOf, FIELD_LABEL, FRANCHISE_OPTIONS, LEASE_OPTIONS } from '../lib/caseOptions'
+import {
+  factLabelOf,
+  FIELD_LABEL,
+  fieldLabelOf,
+  FRANCHISE_OPTIONS,
+  LEASE_OPTIONS,
+} from '../lib/caseOptions'
 import type {
   CaseCreateRequest,
   CaseResponse,
@@ -7,7 +13,14 @@ import type {
   NextActionResponse,
   RestorationScope,
 } from '../types/api'
-import type { CaseDraft, CurrentCaseView, Fact, JudgmentView, NextAction } from '../types/view'
+import type {
+  CaseDraft,
+  CurrentCaseView,
+  Fact,
+  FailureNotice,
+  JudgmentView,
+  NextAction,
+} from '../types/view'
 
 /**
  * 서버 모양과 화면 모양 사이를 잇는다.
@@ -158,6 +171,64 @@ function toNextAction(value: unknown): NextAction | null {
  * 서버가 이 조합들을 500 으로 막고 있지만 여기서도 본다. 막는 쪽이 바뀌어도 화면은
  * 빈 칸을 그리지 않아야 한다.
  */
+/**
+ * 다시 봐야 할 칸들을 화면 문구로. 아는 것만 담고, 나머지가 있었는지도 함께 돌려준다.
+ *
+ * 서버가 보내는 목록은 **믿고 그릴 수 없다.** AI 쪽은 아홉 칸짜리 닫힌 목록으로 보내지만
+ * BE 가 검사 없이 JSON 칸에 담아 돌려주기 때문에, 중간에 모양이 깨져도 아무도 못 막는다.
+ *
+ * 모르는 이름은 **버리되 버렸다는 사실을 남긴다.** 영어 칸 이름을 그대로 띄우면 사장님이
+ * 읽을 수 없는 글자가 뜨고, 조용히 빼기만 하면 남은 것이 전부인 줄 알게 된다.
+ *
+ * 같은 칸이 두 번 와도 한 번만 적는다. 목록에 같은 말이 두 번 보이면 화면이 고장 난 것처럼
+ * 읽힌다.
+ */
+function toRequestedFields(paths: unknown): { fields: string[]; partial: boolean } {
+  if (!Array.isArray(paths)) return { fields: [], partial: false }
+
+  const fields: string[] = []
+  let dropped = false
+
+  for (const path of paths) {
+    const label = isReadableText(path) ? fieldLabelOf(path) : null
+
+    if (label === null) dropped = true
+    else if (!fields.includes(label)) fields.push(label)
+  }
+
+  // 하나도 못 알아봤으면 "일부" 가 아니라 아예 말할 수 없는 것이다. 빈 목록이 그 뜻을
+  // 이미 담고 있어서, 여기서 `partial` 을 켜면 화면이 없는 목록을 가리키게 된다
+  return { fields, partial: fields.length > 0 && dropped }
+}
+
+/**
+ * 실패 정보를 화면이 설명할 모양으로.
+ *
+ * **코드 하나만 보고 정한다.** 같이 오는 `retryable` 은 읽지 않는다 — 코드와 짝이 맞는지
+ * 검사하는 쪽이 AI 에만 있고 BE 는 그대로 통과시켜서, 둘이 어긋난 값이 와도 막히지 않는다.
+ * 둘을 함께 보면 어느 쪽을 믿을지 화면이 정해야 하는데, 그건 화면이 할 판단이 아니다.
+ */
+function toFailureNotice(envelope: CasesEnvelope): FailureNotice {
+  switch (envelope.recovery_action_code) {
+    case 'RETRY':
+      return { kind: 'RETRY_AVAILABLE' }
+
+    case 'RESUBMIT_INPUT':
+      return { kind: 'NEEDS_DETAIL', ...toRequestedFields(envelope.requested_field_paths) }
+
+    case 'CONTACT_SUPPORT':
+      return { kind: 'SERVICE_SIDE' }
+
+    case 'NONE':
+      return { kind: 'NO_RECOVERY' }
+
+    default:
+      // 코드가 안 왔거나 우리가 모르는 값이다. `NONE` 으로 떨어뜨리지 않는다 —
+      // 그건 서버가 "할 수 있는 것이 없다" 고 **말한** 경우고, 여기는 말을 못 알아들은 경우다
+      return { kind: 'UNKNOWN_CAUSE' }
+  }
+}
+
 function toJudgmentView(envelope: CasesEnvelope): JudgmentView {
   const { judgment_status, blocker, next_action, questions_for_user } = envelope
 
@@ -166,7 +237,7 @@ function toJudgmentView(envelope: CasesEnvelope): JudgmentView {
       return { status: 'PENDING' }
 
     case 'FAILED':
-      return { status: 'FAILED' }
+      return { status: 'FAILED', notice: toFailureNotice(envelope) }
 
     // 검증할 것이 없다. 어긋난 항목은 응답에 안 실려 온다(#66).
     //
