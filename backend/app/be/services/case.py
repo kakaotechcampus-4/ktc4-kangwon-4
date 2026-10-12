@@ -20,6 +20,7 @@ from app.be.schemas.case import (
     CaseGetDetailResponse,
     CaseGetResponse,
     CaseResultsEntryResponse,
+    CaseResultsSubmitRequest,
     ConflictItemResponse,
     FieldChangeResponse,
     NextActionResponse,
@@ -193,6 +194,43 @@ def get_case_results_entry(session: Session, member_id: int) -> CaseResultsEntry
         requested_field_paths=latest_history.requested_field_paths,
         retryable=latest_history.retryable,
     )
+
+
+def submit_case_results(
+    session: Session, member_id: int, submit_request: CaseResultsSubmitRequest
+) -> CaseHistory:
+    """`/results`의 "이 내용으로 알려주기" 버튼. 접수만 하고 끝난다.
+
+    Agent 판단은 최소 30초~2분 걸려서 이 요청·응답 안에서 끝낼 수 없다. 그래서 여기서는
+    접수 가능한 상태인지만 확인하고 PENDING 이력을 남긴 뒤 끝난다 — 판단 결과는 이 응답이
+    아니라 처리 상태를 조회하는 별도 조회 API가 준다.
+    """
+
+    case = case_crud.get_case_by_member_id(session, member_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case를 찾을 수 없습니다.")
+
+    if conflict_reference_crud.get_pending_conflicts_by_case_id(session, case.id):
+        raise HTTPException(status_code=409, detail="확인 대기 중인 충돌이 있습니다.")
+
+    latest_history = case_history_crud.get_latest_user_driven_case_history(session, case.id)
+    if latest_history is not None and latest_history.judgment_status == "PENDING":
+        raise HTTPException(status_code=409, detail="직전 제출을 아직 처리 중입니다.")
+
+    history = case_history_crud.create_case_history(
+        session,
+        CaseHistory(
+            case_id=case.id,
+            raw_input=submit_request.raw_input,
+            source="USER_INPUT",
+            judgment_status="PENDING",
+        ),
+    )
+    session.commit()
+
+    # TODO(AI팀 연동): 여기서 만든 history를 입력으로, Agent 판단을 백그라운드에서 실행하고 그
+    # 결과를 저장하는 과정이 이어져야 한다. Case 생성 때와 같은 패턴.
+    return history
 
 
 def _create_case_creation_evidence(session: Session, case: Case, case_request: CaseCreateRequest) -> None:

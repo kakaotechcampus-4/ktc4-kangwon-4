@@ -96,3 +96,7 @@ class CaseResultsEntryResponse(BaseModel):
     recovery_action_code: RecoveryActionCode | None = None
     requested_field_paths: list[str] | None = None
     retryable: bool | None = None
+
+
+class CaseResultsSubmitRequest(BaseModel):
+    raw_input: str
