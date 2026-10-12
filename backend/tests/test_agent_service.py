@@ -2,13 +2,14 @@
 
 These are the functions BE calls; nothing else in the suite covers them, so a
 signature change here would otherwise only surface once BE is wired up. No
-database, no provider: BE rows are built in memory and the runtime is replaced.
+database, no provider: BE rows are built in memory and external clients are replaced.
 """
 
 import asyncio
 import json
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 from uuid import UUID
@@ -17,6 +18,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from pydantic import ValidationError
 
+from app.agent import runtime as runtime_module
 from app.agent.action_catalog import resolve_procedure_bindings
 from app.agent.guardrails import GuardrailViolation
 from app.agent.procedure_tool.store import ProcedureStoreError
@@ -282,6 +284,51 @@ def test_the_runtime_is_closed_and_flushed_when_planning_raises():
         plan_with(runtime, {})
 
     assert runtime.closed and runtime.flushed
+
+
+@pytest.mark.parametrize("has_official_evidence", [False, True])
+def test_runtime_keeps_empty_store_without_reading_procedure_file(monkeypatch, has_official_evidence):
+    snapshot = case_snapshot()
+    if not has_official_evidence:
+        data = snapshot.model_dump()
+        data["evidence_records"][0]["source_type"] = "USER_INPUT"
+        snapshot = CaseSnapshot.model_validate(data)
+    request = build_planning_input(
+        trigger_type="CASE_CREATED", case_snapshot=snapshot, user_input=redacted_input(),
+    )
+    clients = [SimpleNamespace(
+        generate=AsyncMock(side_effect=AssertionError("Procedure lookup must not call an LLM")),
+        aclose=AsyncMock(),
+    ) for _ in range(3)]
+    file_reader = MagicMock(side_effect=AssertionError("Runtime must not read procedure files"))
+    monkeypatch.setattr(Path, "read_text", file_reader)
+    monkeypatch.setattr(runtime_module.StructuredLLMClient, "from_env", MagicMock(side_effect=clients))
+    monkeypatch.setattr(runtime_module.LangfuseTraceSink, "from_env", lambda: None)
+
+    async def run():
+        runtime = await runtime_module.build_runtime(
+            known_procedure_steps=known(row(11, "FILE_TAX_BUSINESS_CLOSURE")),
+            support_catalog=ReviewedSupportCatalog(
+                programs=[], evidence_records=[], catalog_version="synthetic/empty",
+            ),
+            procedure_store=InMemoryReviewedProcedureStore("synthetic/empty", ()),
+            limits=runtime_module.RuntimeLimits(5, 60), use_decision_cache=False,
+        )
+        try:
+            result = await runtime._graph._procedure_node({"request": request, "run_id": UUID(int=2)})
+            assert result["phase"] == "PROCEDURE_LOOKUP"
+            output = result["source_results"][0].output
+            assert output.completion_status == "NO_RESULTS"
+            assert output.documents == []
+            assert output.evidence_records == []
+        finally:
+            await runtime.aclose()
+
+    asyncio.run(run())
+    file_reader.assert_not_called()
+    for client in clients:
+        client.generate.assert_not_awaited()
+        client.aclose.assert_awaited_once_with()
 
 
 @pytest.fixture
