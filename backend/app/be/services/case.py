@@ -227,9 +227,6 @@ def submit_case_results(
         ),
     )
     session.commit()
-
-    # TODO(AI팀 연동): 여기서 만든 history를 입력으로, Agent 판단을 백그라운드에서 실행하고 그
-    # 결과를 저장하는 과정이 이어져야 한다. Case 생성 때와 같은 패턴.
     return history
 
 
