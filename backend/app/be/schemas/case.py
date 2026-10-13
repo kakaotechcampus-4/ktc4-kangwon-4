@@ -74,6 +74,7 @@ class CaseGetResponse(BaseModel):
     blocker: str | None
     next_action: NextActionResponse | None
     judgment_status: JudgmentStatus | None
+    case_history_id: int | None
     questions_for_user: list[str] | None
     recovery_action_code: RecoveryActionCode | None
     requested_field_paths: list[str] | None
