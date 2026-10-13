@@ -126,9 +126,12 @@ def save_conflict(session: Session, history: CaseHistory, outcome: ConflictOutco
     무엇에서 무엇으로 어긋났는지만 남기고, 반영은 사용자가 고른 뒤에 한다.
     """
 
+    # 같은 충돌이 두 번 쌓이는 것을 conflict_ref로는 막을 수 없다. AI가 판단할 때마다 새
+    # UUID로 만들어서(info_agent/agent.py의 _conflict) 내용이 같아도 값이 달라, 전에 두었던
+    # "이미 있으면 건너뛰기"는 한 번도 걸리지 않았다.
+    # TODO: 같은 Case를 두 번 판단하면 같은 필드 충돌이 행 두 개로 쌓인다. 충돌 확인 API를
+    # 만들 때 무엇을 같은 충돌로 볼지(conflict_digest 등) 정해서 여기서 막아야 한다.
     for conflict in outcome.conflicts:
-        if evidence_crud.get_conflict_reference(session, conflict.conflict_ref) is not None:
-            continue
         evidence_crud.create_conflict_reference(
             session,
             ConflictReference(
@@ -162,15 +165,18 @@ def save_safe_failure(session: Session, history: CaseHistory, outcome: SafeFailu
     session.commit()
 
 
-def mark_judgment_failed(session: Session, case_id: int) -> None:
+def mark_judgment_failed(session: Session, case_history_id: int) -> None:
     """판단이 결과를 내놓기도 전에 끊겼을 때 상태를 남긴다.
 
     AI가 돌려준 실패(SAFE_FAILURE)가 아니라, 그 전에 예외로 끊긴 경우다. 상태를 PENDING으로
     두면 화면이 영영 "분석 중"에 머물게 된다. 우리 쪽 문제라 같은 입력으로 다시 해볼 만하므로
     다음 행동은 RETRY로 둔다.
+
+    끊긴 그 판단의 이력을 받는다. 여기서 CASE_CREATED 이력을 직접 찾으면, 결과 제출 판단이
+    터졌을 때 멀쩡한 가입 판단 결과를 FAILED로 덮고 정작 방금 들어온 입력은 PENDING에 남는다.
     """
 
-    history = case_history_crud.get_case_created_history(session, case_id)
+    history = case_history_crud.get_case_history_by_id(session, case_history_id)
     if history is None:
         return
     history.judgment_status = "FAILED"

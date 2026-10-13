@@ -27,7 +27,9 @@ from app.be.schemas.case import (
 from app.be.services import reviewed_procedure as reviewed_procedure_service
 
 
-def create_case(session: Session, member_id: int, case_request: CaseCreateRequest) -> Case:
+def create_case(session: Session, member_id: int, case_request: CaseCreateRequest) -> tuple[Case, int]:
+    """만들어진 Case와, 첫 판단이 대상으로 삼을 입력 이력의 id를 함께 돌려준다."""
+
     if case_crud.get_case_by_member_id(session, member_id) is not None:
         raise HTTPException(status_code=409, detail="이미 등록된 Case가 있습니다.")
 
@@ -41,7 +43,7 @@ def create_case(session: Session, member_id: int, case_request: CaseCreateReques
     )
     case = case_crud.create_case(session, case)
     _fill_temp_case_procedure_steps(session, case.id)
-    _create_case_creation_evidence(session, case, case_request)
+    history = _create_case_creation_evidence(session, case, case_request)
     # 검수된 절차 문서는 AI가 직접 읽지 않고, BE가 이 Case의 근거로 저장해 둔 것만 쓴다.
     # 적재해 두지 않으면 절차조회가 짝을 못 찾아 그 문서를 아예 안 쓴다.
     reviewed_procedure_service.import_reviewed_procedures(
@@ -52,7 +54,7 @@ def create_case(session: Session, member_id: int, case_request: CaseCreateReques
     )
     session.commit()
     session.refresh(case)
-    return case
+    return case, history.id
 
 
 def get_case(session: Session, member_id: int) -> CaseGetResponse:
@@ -100,8 +102,6 @@ def get_case(session: Session, member_id: int) -> CaseGetResponse:
         else None
     )
 
-    # TODO: case_history_id는 저장하는 쪽(decision_record.py의 _apply_fact_changes)이
-    # 아직 안 채워주고 있어서, DONE이어도 실제로는 변경이 있었는데 []로 나올 수 있다.
     changes = (
         [
             FieldChangeResponse(field=h.canonical_field, stored_value=h.before_value, new_value=h.after_value)
@@ -199,7 +199,9 @@ def get_case_results_entry(session: Session, member_id: int) -> CaseResultsEntry
     )
 
 
-def _create_case_creation_evidence(session: Session, case: Case, case_request: CaseCreateRequest) -> None:
+def _create_case_creation_evidence(
+    session: Session, case: Case, case_request: CaseCreateRequest
+) -> CaseHistory:
     # case 생성 폼 입력값(business_type/franchise_status/lease_status)을 AI 쪽에서 CONFIRMED로
     # 인정하려면 evidence_refs가 있어야 한다(CaseFact.validate_fact_state). 세 필드가 이 evidence
     # 하나를 같이 참조해도 된다고 AI팀 확인함.
@@ -225,6 +227,7 @@ def _create_case_creation_evidence(session: Session, case: Case, case_request: C
             freshness_status="CURRENT",
         ),
     )
+    return history
 
 
 def _fill_temp_case_procedure_steps(session: Session, case_id: int) -> None:
