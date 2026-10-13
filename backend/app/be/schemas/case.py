@@ -102,6 +102,7 @@ class CaseResultsEntryResponse(BaseModel):
 
 class CaseResultsSubmitRequest(BaseModel):
     raw_input: str
+    case_history_id: int
 
 
 class CaseResultsSubmitResponse(BaseModel):

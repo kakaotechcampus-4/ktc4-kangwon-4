@@ -217,8 +217,14 @@ def submit_case_results(
         raise HTTPException(status_code=409, detail="확인 대기 중인 충돌이 있습니다.")
 
     latest_history = case_history_crud.get_latest_user_driven_case_history(session, case.id)
-    if latest_history is not None and latest_history.judgment_status == "PENDING":
+    if latest_history is None:
+        raise HTTPException(status_code=500, detail="Case에 대한 최초 판단 기록이 없습니다.")
+
+    if latest_history.judgment_status == "PENDING":
         raise HTTPException(status_code=409, detail="직전 제출을 아직 처리 중입니다.")
+
+    if submit_request.case_history_id != latest_history.id:
+        raise HTTPException(status_code=409, detail="최신 판단에 대해 요청을 주지 않았습니다.")
 
     history = case_history_crud.create_case_history(
         session,
