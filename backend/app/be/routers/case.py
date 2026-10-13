@@ -68,7 +68,8 @@ def submit_case_results(
 
 @router.get("/cases/results/status", response_model=CaseResultsSubmitResponse)
 def get_case_results_submit_status(
+    case_history_id: int,
     member_id: int = Depends(get_current_member_id),
     session: Session = Depends(get_db),
 ):
-    return case_service.get_case_results_submit_status(session, member_id)
+    return case_service.get_case_results_submit_status(session, member_id, case_history_id)

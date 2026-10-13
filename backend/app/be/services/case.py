@@ -240,11 +240,17 @@ def submit_case_results(
     return CaseResultsSubmitAcceptedResponse(case_history_id=history.id)
 
 
-def get_case_results_submit_status(session: Session, member_id: int) -> CaseResultsSubmitResponse:
+def get_case_results_submit_status(
+    session: Session, member_id: int, case_history_id: int
+) -> CaseResultsSubmitResponse:
     """제출(`/results`) 이후 FE가 몇 초 간격으로 묻는 처리 상태 조회.
 
     `/replan` 화면은 `changes`·`blocker`·`next_action`까지 필요해서, `/case` 진입 판단용인
     `get_case_results_entry()`와 응답 모양이 다르다. 그래서 별도 스키마(`result` 기반)를 쓴다.
+
+    `case_history_id`는 "지금 조회하려는 게 어느 제출이냐"를 밝히는 값이다. Case 생성 판단은
+    이 조회 대상이 아니므로, 최신 판단을 찾을 때 USER_INPUT만 본다(get_latest_user_driven_
+    case_history와 다른 점).
     """
 
     case = case_crud.get_case_by_member_id(session, member_id)
@@ -268,9 +274,12 @@ def get_case_results_submit_status(session: Session, member_id: int) -> CaseResu
             ],
         )
 
-    latest_history = case_history_crud.get_latest_user_driven_case_history(session, case.id)
+    latest_history = case_history_crud.get_latest_case_history_by_source(session, case.id, "USER_INPUT")
     if latest_history is None:
-        raise HTTPException(status_code=500, detail="Case에 대한 최초 판단 기록이 없습니다.")
+        raise HTTPException(status_code=500, detail="Case에 대한 결과 제출 기록이 없습니다.")
+
+    if case_history_id != latest_history.id:
+        raise HTTPException(status_code=409, detail="최신 판단에 대해 요청을 주지 않았습니다.")
 
     if latest_history.judgment_status == "PENDING":
         return CaseResultsSubmitResponse(result="PENDING")
