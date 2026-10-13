@@ -276,7 +276,7 @@ def get_case_results_submit_status(
 
     latest_history = case_history_crud.get_latest_case_history_by_source(session, case.id, "USER_INPUT")
     if latest_history is None:
-        raise HTTPException(status_code=500, detail="Case에 대한 결과 제출 기록이 없습니다.")
+        raise HTTPException(status_code=404, detail="조회할 제출 기록을 찾을 수 없습니다.")
 
     if case_history_id != latest_history.id:
         raise HTTPException(status_code=409, detail="최신 판단에 대해 요청을 주지 않았습니다.")
