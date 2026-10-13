@@ -126,11 +126,11 @@ def save_conflict(session: Session, history: CaseHistory, outcome: ConflictOutco
     무엇에서 무엇으로 어긋났는지만 남기고, 반영은 사용자가 고른 뒤에 한다.
     """
 
-    # 같은 충돌이 두 번 쌓이는 것을 conflict_ref로는 막을 수 없다. AI가 판단할 때마다 새
-    # UUID로 만들어서(info_agent/agent.py의 _conflict) 내용이 같아도 값이 달라, 전에 두었던
-    # "이미 있으면 건너뛰기"는 한 번도 걸리지 않았다.
-    # TODO: 같은 Case를 두 번 판단하면 같은 필드 충돌이 행 두 개로 쌓인다. 충돌 확인 API를
-    # 만들 때 무엇을 같은 충돌로 볼지(conflict_digest 등) 정해서 여기서 막아야 한다.
+    # 같은 충돌이 두 번 저장되는 것을 따로 막지 않는다. 전에 두었던 "이미 있으면 건너뛰기"는
+    # conflict_ref로 비교했는데, AI가 판단할 때마다 새 UUID로 만들어서(info_agent/agent.py의
+    # _conflict) 내용이 같아도 값이 달라 한 번도 걸리지 않았다.
+    # 막을 상황도 없다. 아직 안 고른 충돌이 있는 동안은 새 제출이 거부돼 두 번째 판단이 돌지
+    # 않고, 이미 고른 충돌은 그 사이 사정이 달라졌을 수 있어 다시 물어보는 쪽이 맞다.
     for conflict in outcome.conflicts:
         evidence_crud.create_conflict_reference(
             session,
