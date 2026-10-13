@@ -105,6 +105,10 @@ class CaseResultsSubmitRequest(BaseModel):
     case_history_id: int
 
 
+class CaseResultsSubmitAcceptedResponse(BaseModel):
+    case_history_id: int
+
+
 class CaseResultsSubmitResponse(BaseModel):
     result: ResultsSubmitResult
     changes: list[FieldChangeResponse] | None = None

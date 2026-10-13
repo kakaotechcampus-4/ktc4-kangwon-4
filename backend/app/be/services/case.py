@@ -20,6 +20,7 @@ from app.be.schemas.case import (
     CaseGetDetailResponse,
     CaseGetResponse,
     CaseResultsEntryResponse,
+    CaseResultsSubmitAcceptedResponse,
     CaseResultsSubmitRequest,
     CaseResultsSubmitResponse,
     ConflictItemResponse,
@@ -201,7 +202,7 @@ def get_case_results_entry(session: Session, member_id: int) -> CaseResultsEntry
 
 def submit_case_results(
     session: Session, member_id: int, submit_request: CaseResultsSubmitRequest
-) -> CaseHistory:
+) -> CaseResultsSubmitAcceptedResponse:
     """`/results`의 "이 내용으로 알려주기" 버튼. 접수만 하고 끝난다.
 
     Agent 판단은 최소 30초~2분 걸려서 이 요청·응답 안에서 끝낼 수 없다. 그래서 여기서는
@@ -236,7 +237,7 @@ def submit_case_results(
         ),
     )
     session.commit()
-    return history
+    return CaseResultsSubmitAcceptedResponse(case_history_id=history.id)
 
 
 def get_case_results_submit_status(session: Session, member_id: int) -> CaseResultsSubmitResponse:

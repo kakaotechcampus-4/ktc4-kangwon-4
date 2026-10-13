@@ -1,4 +1,4 @@
-from fastapi import APIRouter, BackgroundTasks, Depends, Response
+from fastapi import APIRouter, BackgroundTasks, Depends
 from sqlmodel import Session
 
 from app.be.db import get_db
@@ -8,6 +8,7 @@ from app.be.schemas.case import (
     CaseCreateResponse,
     CaseGetResponse,
     CaseResultsEntryResponse,
+    CaseResultsSubmitAcceptedResponse,
     CaseResultsSubmitRequest,
     CaseResultsSubmitResponse,
 )
@@ -51,16 +52,18 @@ def get_case_results(
     return case_service.get_case_results_entry(session, member_id)
 
 
-@router.post("/cases/results", response_class=Response)
+@router.post("/cases/results", response_model=CaseResultsSubmitAcceptedResponse)
 def submit_case_results(
     submit_request: CaseResultsSubmitRequest,
     member_id: int = Depends(get_current_member_id),
     session: Session = Depends(get_db),
 ):
-    case_service.submit_case_results(session, member_id, submit_request)
+    response = case_service.submit_case_results(session, member_id, submit_request)
 
     # TODO(AI팀 연동): 여기서 Agent 판단을 백그라운드로 실행하는 부분이 이어져야 한다.
     # Case 생성 때와 같은 패턴.
+
+    return response
 
 
 @router.get("/cases/results/status", response_model=CaseResultsSubmitResponse)
