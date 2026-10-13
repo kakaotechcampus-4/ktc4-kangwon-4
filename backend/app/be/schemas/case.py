@@ -78,3 +78,22 @@ class CaseGetResponse(BaseModel):
     requested_field_paths: list[str] | None
     retryable: bool | None
     changes: list[FieldChangeResponse] | None
+
+
+class ConflictItemResponse(BaseModel):
+    id: int
+    field: str
+    stored_value: str | None
+    proposed_value: str
+
+
+class CaseResultsEntryResponse(BaseModel):
+    judgment_status: JudgmentStatus
+    case_history_id: int | None = None
+    raw_input: str | None = None
+    conflicts: list[ConflictItemResponse] | None = None
+    next_action: NextActionResponse | None = None
+    questions_for_user: list[str] | None = None
+    recovery_action_code: RecoveryActionCode | None = None
+    requested_field_paths: list[str] | None = None
+    retryable: bool | None = None
