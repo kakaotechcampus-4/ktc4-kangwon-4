@@ -160,11 +160,12 @@ def get_case_results_entry(session: Session, member_id: int) -> CaseResultsEntry
         raise HTTPException(status_code=500, detail="Case에 대한 최초 판단 기록이 없습니다.")
 
     if latest_history.judgment_status == "PENDING":
-        return CaseResultsEntryResponse(judgment_status="PENDING")
+        return CaseResultsEntryResponse(judgment_status="PENDING", case_history_id=latest_history.id)
 
     if latest_history.judgment_status == "DONE":
         return CaseResultsEntryResponse(
             judgment_status="DONE",
+            case_history_id=latest_history.id,
             next_action=(
                 NextActionResponse(
                     title=latest_history.next_action,
@@ -181,6 +182,7 @@ def get_case_results_entry(session: Session, member_id: int) -> CaseResultsEntry
             raise HTTPException(status_code=500, detail="정보 부족(NEEDS_MORE_INFO) 상태인데 questions_for_user가 없습니다.")
         return CaseResultsEntryResponse(
             judgment_status="NEEDS_MORE_INFO",
+            case_history_id=latest_history.id,
             questions_for_user=latest_history.questions_for_user,
         )
 
@@ -189,6 +191,7 @@ def get_case_results_entry(session: Session, member_id: int) -> CaseResultsEntry
 
     return CaseResultsEntryResponse(
         judgment_status="FAILED",
+        case_history_id=latest_history.id,
         recovery_action_code=latest_history.recovery_action_code,
         requested_field_paths=latest_history.requested_field_paths,
         retryable=latest_history.retryable,

@@ -89,6 +89,7 @@ class ConflictItemResponse(BaseModel):
 
 class CaseResultsEntryResponse(BaseModel):
     judgment_status: JudgmentStatus
+    case_history_id: int | None = None
     raw_input: str | None = None
     conflicts: list[ConflictItemResponse] | None = None
     next_action: NextActionResponse | None = None
