@@ -73,9 +73,11 @@ CASE의 필드 단위 변경 이력 (감사 추적용). `CASE_HISTORY`(발화·�
 |---|---|---|---|---|---|
 | id | BIGINT | PK | NOT NULL, AUTO_INCREMENT | 1 | |
 | case_id | BIGINT | FK | NOT NULL | 1 | |
+| case_history_id | BIGINT | FK | NULLABLE | 7 | 이 변경이 나온 제출(CASE_HISTORY). 이 값이 있어야 "이번 판단에서 뭐가 바뀌었나"를 골라낼 수 있다 |
 | canonical_field | VARCHAR | | NOT NULL | `"restoration_scope"` | 변경된 필드명 |
+| source_evidence_refs | JSON | | NULLABLE | `["input:9f3e7d"]` | 이 변경의 근거 evidence_id 목록. 다음 판단 스냅샷에서 이 필드의 근거로 되돌려 준다 |
 | before_value | VARCHAR | | NULLABLE | `"UNKNOWN"` | 변경 전 값 |
-| after_value | VARCHAR | | NOT NULL | `"FULL"` | 변경 후 값 |
+| after_value | VARCHAR | | NULLABLE | `"FULL"` | 변경 후 값. 비움으로 정정한 경우 NULL |
 | source | VARCHAR | | NOT NULL ⚠️ 값 목록 P0 미정 | `"USER_INPUT"` | 변경 출처 |
 | reason | VARCHAR | | NULLABLE | `"사용자가 원상복구 범위 확정함"` | 변경 사유 |
 | created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP ⚠️ 추정 | `2026-09-10 09:11:00` | |
@@ -114,8 +116,10 @@ CASE에 대한 발화·이벤트 원본 이력.
 | next_action_questions_to_ask | JSON | | NULLABLE | `["원상복구 범위가 어디까지인지 확인해 주세요"]` | 사용자가 임대인·기관에 물어볼 질문 목록. 다음 행동이 없으면 NULL |
 | next_action_evidence_refs | JSON | | NULLABLE | `["procedure:reviewed:NTS_CLOSURE"]` | 다음 행동의 근거 evidence_id 목록. 다음 행동이 없으면 NULL |
 | questions_for_user | JSON | | NULLABLE | `["확인한 원상복구 범위가 있으면 알려주세요."]` | 행동을 정하기 전 서비스가 사용자에게 되묻는 질문 목록. 없으면 NULL. `next_action_questions_to_ask`(사용자가 임대인·기관에 물어볼 말)와 다른 값이다 |
+| failure_code | VARCHAR | | NULLABLE | `"LOOP_LIMIT_REACHED"` | Agent가 돌려준 실패 종류. Agent가 값을 늘려도 따라 고치지 않도록 ENUM이 아닌 VARCHAR. 실패가 아니거나 Agent가 결과를 내기 전에 끊겼으면 NULL |
 | recovery_action_code | ENUM | | NULLABLE | `RETRY` | 판단이 실패했을 때 화면이 안내할 다음 행동 — `RETRY` / `RESUBMIT_INPUT` / `CONTACT_SUPPORT` / `NONE`. 실패가 아니면 NULL |
 | requested_field_paths | JSON | | NULLABLE | `["restoration_scope"]` | 판단을 멈추게 한 CASE 필드 목록. 실패가 아니면 NULL |
+| retryable | BOOLEAN | | NULLABLE | `true` | 재시도하면 성공할 가능성이 있는지. 실패가 아니면 NULL |
 | priority_blocker_id | BIGINT | FK | NULLABLE | `NULL` | 이 시점에 최우선인 블로커 참조 |
 | created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-09-10 09:10:00` | |
 
@@ -366,10 +370,12 @@ CASE 필드 값 충돌을 확인하기 위한 1회성 참조.
 | id | BIGINT | PK | NOT NULL, AUTO_INCREMENT | 1 | 내부 식별자 |
 | conflict_ref | VARCHAR | UK | NOT NULL, UNIQUE ⚠️ 추정 | `"cf_7d8e9f"` | opaque 참조값 — `id`와 별개의 비즈니스 키 |
 | case_id | BIGINT | FK | NOT NULL | 1 | 대상 케이스 |
+| case_history_id | BIGINT | FK | NOT NULL | 7 | 이 충돌을 일으킨 제출(CASE_HISTORY) — `/confirm`이 "이번에 하신 말씀"을 보여줄 때 쓴다 |
 | canonical_field | VARCHAR | | NOT NULL | `"restoration_scope"` | 충돌이 발생한 필드 |
 | committed_value | VARCHAR | | NULLABLE ⚠️ 추정 | `"UNKNOWN"` | 기존 값 |
 | proposed_value | VARCHAR | | NOT NULL ⚠️ 추정 | `"FULL"` | 새로 제안된 값 |
 | conflict_digest | VARCHAR | | NULLABLE ⚠️ 추정 | `"d4e5f6..."` | 충돌 내용 다이제스트 |
+| candidate_payload | JSON | | NULLABLE | `{"field_path": "employee_count", "committed_value": 2, ...}` | Agent가 보낸 충돌 후보 원본 전체. 위 칸들은 화면용이라 글자로 바꿔 숫자·참거짓·빈 값을 되돌릴 수 없는데, 확인할 때 Agent가 내용 다이제스트를 대조해 다르면 거절한다 |
 | expires_at | DATETIME | | NOT NULL | `2026-09-11 10:00:00` | 만료 시각 |
 | used_at | DATETIME | | NULLABLE | `NULL` | 사용(1회) 시각 (nullable) — 1회 사용 검증용 |
 | created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP ⚠️ 추정 | `2026-09-10 10:00:00` | |
