@@ -2,17 +2,29 @@
 
 import asyncio
 from copy import deepcopy
-from uuid import UUID
+from unittest.mock import AsyncMock
+from uuid import UUID, uuid4
 
 import pytest
-from test_action_codes import supervisor_request
+from test_action_codes import NOW, result_fixes_xfail, supervisor_request
+from test_blocker_candidates import ChoiceModel, request_with_state
 
+from app.agent.graph import AgentGraph
 from app.agent.info_agent.agent import (
     ExtractedFactDraft,
     InfoAnalysisAgent,
     InfoAnalysisGuardrailError,
 )
-from app.agent.schemas import CaseFieldKey, InfoAnalysisInput, ProcedureLookupResult
+from app.agent.review_tool import ReviewTool
+from app.agent.schemas import (
+    CASE_FIELD_SPECS,
+    AgentGraphInput,
+    CaseFieldKey,
+    CaseSnapshot,
+    InfoAnalysisInput,
+    ProcedureLookupResult,
+)
+from app.agent.supervisor.agent import SupervisorAgent
 
 TAX = "FILE_TAX_BUSINESS_CLOSURE"
 FOOD = "FILE_FOOD_SERVICE_CLOSURE"
@@ -606,7 +618,7 @@ def analyze_facts(facts, text):
         [finding(TAX, "doc1"), finding(FOOD, "doc2"), finding(RESTORATION, "doc3")]
     )
     response["facts"] = [
-        {"operation": "SET", "field_path": field, "value_type": "ENUM", "value": value,
+        {"operation": "SET", "field_path": field, "value_type": CASE_FIELD_SPECS[field][0], "value": value,
          "source_text": quote, "confidence_bps": 9500, "requires_confirmation": False,
          "reason_summary": "합성 임대인 확인 결과"}
         for field, value, quote in facts
@@ -688,3 +700,287 @@ def test_held_fact_still_produces_a_question_for_the_owner():
     assert fields is not None
     assert fields["decision_type"] == "NEEDS_MORE_INFO"
     assert fields["questions_for_user"] == ["확인한 원상복구 범위가 있으면 알려주세요."]
+
+
+@pytest.mark.parametrize("field,text", [
+    ("restoration_scope", "임대인한테 물어봤는데 원상복구 범위는 없대요."),
+    ("demolition_required", "계약서 확인해봤는데 철거도 필요하지 않습니다."),
+    ("restoration_scope", "원상복구 범위는 없다고 들었는데 계약서에도 원상복구 범위는 없대요."),
+    ("restoration_scope", "원상복구 범위는 없다고 했는데 지금도 원상복구 범위는 없다고 합니다."),
+    ("restoration_scope", "원상복구 범위는 없다고 했는데 철거도 필요하지 않습니다."),
+    ("demolition_required", "철거도 필요하지 않다고 했는데 원상복구 범위도 없대요."),
+    ("restoration_scope", "원상복구 범위는 없다고 했는데 원상복구 작업도 필요하지 않습니다."),
+    ("restoration_status", "원상복구 작업은 필요하지 않다고 했는데 원상복구 범위도 없대요."),
+])
+@result_fixes_xfail()
+def test_connective_without_field_reversal_confirms_report(field, text):
+    facts = [(field, "NOT_REQUIRED", text)]
+    if field == "restoration_status":
+        facts.append(("restoration_scope", "NOT_REQUIRED", text))
+    result = analyze_facts(facts, text)
+    assert not any(candidate.requires_confirmation for candidate in result.fact_candidates)
+    assert result.procedure_progress_observations == []
+
+
+@pytest.mark.parametrize("field,value,text", [
+    ("restoration_scope", "NOT_REQUIRED", "원상복구 범위는 없다고 했는데 임대인은 전부 하라고 하고 철거도 필요하대요."),
+    ("restoration_scope", "NOT_REQUIRED", "원상복구 범위는 없다고 했는데 철거도 필요하대요, 임대인은 전부 하라고 했어요."),
+    ("restoration_scope", "NOT_REQUIRED", "원상복구 범위는 없다고 했는데 계약서에도 원상복구 범위는 없대요, 임대인은 전부 하라고 했어요."),
+    ("employee_count", 3, "직원은 3명인데 지금은 0명으로 바뀌었어요."),
+    ("employee_count", 3, "직원은 3명인데 지금은 13명으로 바뀌었어요."),
+    ("employee_count", 3, "직원은 3명인데 지금은 30명으로 바뀌었어요."),
+    ("employee_count", 3, "직원은 3명인데 지금 3명은 아니래요."),
+    ("restoration_scope_detail", "벽면", "원상복구 범위는 벽면이라고 했는데 지금은 바닥으로 바뀌었어요."),
+    ("planned_closure_date", "2026-11-01", "폐업 예정일은 2026-11-01이었는데 지금은 2026-12-01로 바뀌었어요."),
+])
+def test_reversed_report_is_held_even_with_another_fact_or_value_type(field, value, text):
+    from app.agent.enrichment import build_fact_overlays
+
+    result = analyze_facts([(field, value, text)], text)
+    candidate, = result.fact_candidates
+    assert candidate.field_path == field
+    assert candidate.requires_confirmation
+    assert result.conflicts == []
+    assert build_fact_overlays(
+        supervisor_request().case_snapshot, result, uuid4(), uuid_factory=uuid4,
+    ) == []
+
+
+@pytest.mark.parametrize("suffix", [
+    "는데 임대인은 전부 하라고 하고 철거도 필요하대요.",
+    "는데 철거가 필요하대서 전부 원상복구해야 한대요.",
+    "는데 철거가 필요하다면서 전부 하래요.",
+    "는데 철거해야 하니까 원상복구도 전부 하래요.",
+])
+def test_short_quote_keeps_the_mixed_reversal_in_the_whole_sentence(suffix):
+    from app.agent.enrichment import build_fact_overlays
+
+    quote = "원상복구 범위는 없다고 했"
+    text = quote + suffix
+    result = analyze_facts([("restoration_scope", "NOT_REQUIRED", quote)], text)
+    candidate, = result.fact_candidates
+    assert candidate.source_span.text == quote
+    assert candidate.requires_confirmation
+    assert build_fact_overlays(
+        supervisor_request().case_snapshot, result, uuid4(), uuid_factory=uuid4,
+    ) == []
+
+
+@pytest.mark.parametrize("field,value,text", [
+    ("employee_count", 3, "직원은 3명입니다."),
+    ("employee_count", 0, "직원을 정리해서 지금은 0명으로 바뀌었어요."),
+    pytest.param("employee_count", 3, "직원은 3명인데 지금도 3명입니다.", marks=result_fixes_xfail()),
+    pytest.param("employee_count", 3, "직원은 3명이라고 했는데 지금도 3명이라고 합니다.", marks=result_fixes_xfail()),
+    pytest.param("restoration_scope_detail", "벽면", "원상복구 범위는 벽면이라고 했는데 지금도 벽면이라고 합니다.", marks=result_fixes_xfail()),
+    pytest.param("planned_closure_date", "2026-11-01", "폐업 예정일은 2026-11-01이라고 했는데 지금도 2026-11-01이라고 합니다.", marks=result_fixes_xfail()),
+])
+def test_plain_or_repeated_report_produces_a_reviewable_change(field, value, text):
+    from app.agent.enrichment import build_fact_overlays
+
+    result = analyze_facts([(field, value, text)], text)
+    candidate, = result.fact_candidates
+    assert not candidate.requires_confirmation
+    change, = build_fact_overlays(
+        supervisor_request().case_snapshot, result, uuid4(), uuid_factory=uuid4,
+    )
+    assert change.field_path == field
+    assert change.model_dump(mode="json")["proposed_value"] == value
+
+
+def test_clearing_confirmed_closure_date_keeps_the_conflict_candidate():
+    request = request_for_replanning()
+    text = "폐업 예정일을 삭제했는데 새 일정은 다시 알려드릴게요."
+    snapshot = request.case_snapshot.model_dump(mode="json")
+    snapshot["facts"].append({
+        "field_path": "planned_closure_date", "value_type": "DATE", "value": "2026-11-01",
+        "status": "CONFIRMED", "evidence_refs": ["synthetic-document"],
+        "updated_at": snapshot["captured_at"],
+    })
+    request = InfoAnalysisInput.model_validate(request.model_dump() | {
+        "case_snapshot": snapshot,
+        "input": request.input.model_dump() | {"redacted_text": text},
+    })
+    response = output(
+        [finding(TAX, "doc1"), finding(FOOD, "doc2"), finding(RESTORATION, "doc3")]
+    )
+    response["facts"] = [{
+        "operation": "CLEAR", "field_path": "planned_closure_date", "value_type": "DATE",
+        "value": None, "source_text": text, "confidence_bps": 9500,
+        "requires_confirmation": False, "reason_summary": "합성 예정일 삭제 요청",
+    }]
+    result = asyncio.run(InfoAnalysisAgent(Responses(response), max_local_attempts=1).analyze(request))
+    conflict, = result.conflicts
+    assert conflict.field_path == "planned_closure_date"
+    assert conflict.model_dump(mode="json")["committed_value"] == "2026-11-01"
+    assert conflict.proposed_operation == "CLEAR"
+    assert conflict.proposed_value is None
+    assert conflict.proposed_status == "UNKNOWN"
+    assert result.fact_candidates == []
+
+
+@pytest.mark.parametrize("invalid", [
+    None,
+    pytest.param("digest", marks=result_fixes_xfail(raises=pytest.fail.Exception)),
+    pytest.param("evidence", marks=result_fixes_xfail(raises=pytest.fail.Exception)),
+])
+def test_confirmed_conflict_overlay_checks_original_before_planning(invalid):
+    from app.agent.enrichment import build_confirmed_conflict_overlay
+    from app.agent.schemas import ConflictCandidate
+
+    snapshot = supervisor_request().case_snapshot
+    original = snapshot.model_dump_json()
+    conflict = ConflictCandidate.create(
+        conflict_ref="synthetic-conflict", candidate_id=UUID(int=70),
+        snapshot_id=snapshot.snapshot_id, field_path="lease_status",
+        committed_status="CONFIRMED", committed_value="OWNED",
+        proposed_operation="SET", proposed_status="CONFIRMED",
+        proposed_value="LEASED_PAID", source_call_id=UUID(int=3),
+        source_evidence_refs=["missing-input" if invalid == "evidence" else "synthetic-document"],
+    )
+    if invalid == "digest":
+        conflict = conflict.model_copy(update={"proposed_value": "LEASED_FREE"})
+    if invalid is None:
+        overlay = build_confirmed_conflict_overlay(snapshot, conflict)
+        assert overlay.proposed_value == "LEASED_PAID"
+        assert overlay.confirmed_conflict_ref == conflict.conflict_ref
+        assert overlay.source_evidence_refs == conflict.source_evidence_refs
+    else:
+        with pytest.raises(ValueError):
+            build_confirmed_conflict_overlay(snapshot, conflict)
+    assert snapshot.model_dump_json() == original
+
+
+def snapshot_from_reviewed_facts(outcome):
+    """Explicit memory fixture for the next read; this does not exercise BE storage."""
+    subject = outcome.review_subject
+    records = {
+        item.evidence_id: item for item in subject.snapshot.evidence_records
+    }
+    for result in subject.source_results:
+        records.update({item.evidence_id: item for item in result.output.evidence_records})
+    facts = {item.field_path: item.model_dump() for item in subject.snapshot.facts}
+    for change in subject.supervisor_draft.mutations.fact_changes:
+        facts[change.field_path] = {
+            "field_path": change.field_path,
+            "value_type": change.value_type,
+            "value": change.proposed_value,
+            "status": change.proposed_status,
+            "evidence_refs": change.source_evidence_refs,
+            "updated_at": NOW,
+        }
+    return CaseSnapshot.model_validate(subject.snapshot.model_dump() | {
+        "snapshot_id": uuid4(),
+        "facts": list(facts.values()),
+        "evidence_records": list(records.values()),
+    })
+
+
+@pytest.mark.parametrize("held_demolition", [False, True])
+@result_fixes_xfail()
+def test_result_replanning_uses_reviewed_facts_without_repeating_scope_question(
+    held_demolition,
+):
+    async def run():
+        template = request_with_state()
+        scope_text = "임대인한테 물어봤는데 원상복구 범위는 없대요."
+        demolition_text = (
+            "철거도 필요하지 않다고 했는데 결국 철거하래요."
+            if held_demolition else "철거도 필요하지 않습니다."
+        )
+        status_text = "원상복구 작업은 필요하지 않습니다."
+
+        def analysis_response(facts):
+            response = output([finding(TAX, "doc1"), finding(RESTORATION, "doc1")])
+            response["facts"] = [
+                {"operation": "SET", "field_path": field, "value_type": "ENUM",
+                 "value": "NOT_REQUIRED", "source_text": quote,
+                 "confidence_bps": 9500, "requires_confirmation": False,
+                 "reason_summary": "합성 임대인 확인 결과"}
+                for field, quote in facts
+            ]
+            return response
+
+        info_client = Responses(
+            analysis_response([("restoration_scope", scope_text)]),
+            analysis_response([
+                ("demolition_required", demolition_text),
+                ("restoration_status", status_text),
+            ]),
+        )
+        lookup = template.source_results[0].output
+
+        async def lookup_for_snapshot(request):
+            return lookup.model_copy(update={
+                "based_on_snapshot_id": request.based_on_snapshot_id,
+                "as_of": request.as_of,
+            })
+
+        procedure = AsyncMock()
+        procedure.lookup.side_effect = lookup_for_snapshot
+        support = AsyncMock()
+        graph = AgentGraph(
+            info_agent=InfoAnalysisAgent(info_client, max_local_attempts=1),
+            procedure_tool=procedure,
+            support_agent=support,
+            supervisor=SupervisorAgent(ChoiceModel(), max_local_attempts=1),
+            review_tool=ReviewTool(ChoiceModel(), max_output_attempts=1),
+            known_procedure_steps=template.known_procedure_steps,
+            clock=lambda: NOW,
+            max_review_revisions=0,
+        )
+
+        def result_request(snapshot, event, text):
+            trigger = template.trigger.model_dump()
+            trigger.update(trigger_type="RESULT_SUBMITTED", input_event_id=event)
+            trigger["input"].update(input_event_id=event, redacted_text=text)
+            return AgentGraphInput(trigger=trigger, case_snapshot=snapshot)
+
+        first_request = result_request(template.case_snapshot, "scope-result", scope_text)
+        original = first_request.model_dump_json()
+        first = await graph.run(first_request)
+        assert first.outcome_type == "REVIEWED_PLAN", first
+        first.assert_integrity()
+        draft = first.review_subject.supervisor_draft
+        assert draft.decision.next_action.questions_to_ask == ["철거가 필요한가요?"]
+        assert [change.field_path for change in draft.mutations.fact_changes] == [
+            "restoration_scope"
+        ]
+        assert draft.mutations.procedure_progress_changes == []
+        assert first_request.model_dump_json() == original
+
+        next_snapshot = snapshot_from_reviewed_facts(first)
+        scope = next(fact for fact in next_snapshot.facts if fact.field_path == "restoration_scope")
+        assert scope.value == "NOT_REQUIRED"
+        actual_source = next(
+            record for record in next_snapshot.evidence_records
+            if record.evidence_id == scope.evidence_refs[0]
+        )
+        assert actual_source.source_type == "USER_INPUT"
+        assert actual_source.source_ref == "scope-result"
+        assert actual_source.excerpt == scope_text
+
+        second = await graph.run(result_request(
+            next_snapshot, "demolition-result", demolition_text + " " + status_text,
+        ))
+        assert second.outcome_type == "REVIEWED_PLAN", second
+        second.assert_integrity()
+        draft = second.review_subject.supervisor_draft
+        assert draft.mutations.procedure_progress_changes == []
+        assert {change.field_path for change in draft.mutations.fact_changes} == (
+            {"restoration_status"} if held_demolition
+            else {"restoration_status", "demolition_required"}
+        )
+        if held_demolition:
+            assert draft.decision.decision_type == "NEEDS_MORE_INFO"
+            assert draft.decision.next_action is None
+            assert draft.decision.questions_for_user == [
+                "철거가 필요한지 확인한 내용이 있으면 알려주세요."
+            ]
+        else:
+            assert draft.decision.decision_type == "ACTION"
+            assert draft.decision.next_action.action_code == "CONFIRM_TAX_CLOSURE_REQUIREMENTS"
+        assert len(info_client.messages) == 2
+        assert procedure.lookup.await_count == 2
+        support.analyze.assert_not_awaited()
+
+    asyncio.run(run())

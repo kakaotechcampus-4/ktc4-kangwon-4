@@ -10,6 +10,7 @@ RestorationScope = Literal["UNKNOWN", "PARTIAL", "FULL", "NOT_REQUIRED"]
 DemolitionRequired = Literal["UNKNOWN", "REQUIRED", "NOT_REQUIRED"]
 JudgmentStatus = Literal["PENDING", "DONE", "NEEDS_MORE_INFO", "CONFLICT", "FAILED"]
 RecoveryActionCode = Literal["RETRY", "RESUBMIT_INPUT", "CONTACT_SUPPORT", "NONE"]
+ResultsSubmitResult = Literal["PENDING", "UPDATED", "NO_CHANGE", "NEEDS_MORE_INFO", "CONFLICT", "FAILED"]
 
 
 class CaseCreateRequest(BaseModel):
@@ -73,6 +74,7 @@ class CaseGetResponse(BaseModel):
     blocker: str | None
     next_action: NextActionResponse | None
     judgment_status: JudgmentStatus | None
+    case_history_id: int | None
     questions_for_user: list[str] | None
     recovery_action_code: RecoveryActionCode | None
     requested_field_paths: list[str] | None
@@ -97,3 +99,25 @@ class CaseResultsEntryResponse(BaseModel):
     recovery_action_code: RecoveryActionCode | None = None
     requested_field_paths: list[str] | None = None
     retryable: bool | None = None
+
+
+class CaseResultsSubmitRequest(BaseModel):
+    raw_input: str
+    case_history_id: int
+
+
+class CaseResultsSubmitAcceptedResponse(BaseModel):
+    case_history_id: int
+
+
+class CaseResultsSubmitResponse(BaseModel):
+    result: ResultsSubmitResult
+    changes: list[FieldChangeResponse] | None = None
+    blocker: str | None = None
+    next_action: NextActionResponse | None = None
+    questions_for_user: list[str] | None = None
+    raw_input: str | None = None
+    conflicts: list[ConflictItemResponse] | None = None
+    recovery_action_code: RecoveryActionCode | None = None
+    retryable: bool | None = None
+    requested_field_paths: list[str] | None = None

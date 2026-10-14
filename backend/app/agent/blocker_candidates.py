@@ -20,6 +20,7 @@ from app.agent.procedure_tool.rules import (
 )
 from app.agent.schemas import (
     ActionDecisionDraft,
+    CaseFieldKey,
     CaseSnapshot,
     DecisionDraft,
     EvidenceRecord,
@@ -54,6 +55,13 @@ _FIELD_LABELS = {
     "demolition_required": "철거 필요 여부",
     "restoration_status": "원상복구 진행 상태",
 }
+
+
+def field_confirmation_question(field_path: CaseFieldKey) -> str:
+    """Reuse the Case confirmation question when Info has no specific question."""
+    if field_path == CaseFieldKey.PLANNED_CLOSURE_DATE:
+        return "예정한 폐업일이 언제인지 알려주세요."
+    return _QUESTIONS[field_path.value]
 
 
 def _values(snapshot: CaseSnapshot, mutations: MutationSet) -> dict[str, Any]:
@@ -109,6 +117,11 @@ def build_blocker_candidates(
 ) -> list[dict[str, Any]]:
     """Rank all executable closure candidates; support is outside the MVP."""
     resolved_bindings = resolve_procedure_bindings(steps, procedure_bindings)
+    if missing_info_fields(
+        snapshot, sources, mutations, resolved_bindings, held_only=True
+    ) is not None:
+        return []
+
     values = _values(snapshot, mutations)
     state_refs = list(
         dict.fromkeys(ref for fact in snapshot.facts for ref in fact.evidence_refs)
@@ -309,6 +322,8 @@ def missing_info_fields(
     sources: Sequence[ReviewSourceResult],
     mutations: MutationSet,
     procedure_bindings: ProcedureBindings | None = None,
+    *,
+    held_only: bool = False,
 ) -> dict[str, Any] | None:
     """Ask about one unresolved decision blocker in the existing question order."""
     values = _values(snapshot, mutations)
@@ -369,6 +384,11 @@ def missing_info_fields(
         if isinstance(source.output, InfoAnalysisResult)
         for candidate in source.output.fact_candidates
         if candidate.requires_confirmation
+        and not any(
+            item.field_path == candidate.field_path
+            and set(item.blocks) == {"SUPPORT_ANALYSIS"}
+            for item in source.output.missing_fields
+        )
     ]
     refs.extend(
         ref
@@ -403,7 +423,7 @@ def missing_info_fields(
     # 모델이 답을 냈다고 보면 그 필드를 missing_fields에 안 넣는다. 그런데 그 답이
     # 확인이 필요한 상태로 보류됐다면 아직 모르는 값이므로, 되물을 대상에 넣는다.
     # 이것이 없으면 "사실은 보류됐는데 아무도 묻지 않는" 상태가 된다.
-    missing_paths |= {
+    held_paths = {
         candidate.field_path.value
         for candidate in held
         if candidate.field_path.value in _QUESTIONS
@@ -417,7 +437,8 @@ def missing_info_fields(
             and candidate.field_path.value == "restoration_scope_detail"
         )
     }
-    missing = next((path for path in _QUESTIONS if path in missing_paths), None)
+    paths = held_paths if held_only or held_paths else missing_paths
+    missing = next((path for path in _QUESTIONS if path in paths), None)
     if missing is None:
         return None
     questions = [_QUESTIONS[missing]]

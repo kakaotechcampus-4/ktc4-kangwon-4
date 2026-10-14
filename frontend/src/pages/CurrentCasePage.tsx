@@ -7,7 +7,7 @@ import { FollowUpQuestionCard } from '../components/FollowUpQuestionCard'
 import { NextActionCard } from '../components/NextActionCard'
 import { NoticeCard } from '../components/NoticeCard'
 import { useCase } from '../hooks/useCase'
-import type { JudgmentView } from '../types/view'
+import type { FailureNotice, JudgmentView } from '../types/view'
 
 /**
  * 현재 Case. 사용자가 돌아올 곳이고, 이 제품에서 유일하게 "지금 상황"을 보여주는 화면이다.
@@ -103,6 +103,94 @@ export function CurrentCasePage() {
       </div>
     </AppShell>
   )
+}
+
+/**
+ * 다시 알아야 할 항목을 한 문장으로.
+ *
+ * 목록을 줄 나눠 보여주지 않는다. `NoticeCard` 의 설명은 문단 하나라, 목록을 그리려면
+ * 그 컴포넌트를 먼저 고쳐야 한다 — 지금 필요한 모양이 아니다.
+ *
+ * **조사를 붙이지 않는다.** "업종을" 과 "범위를" 은 받침에 따라 갈리는데, 그걸 맞추는
+ * 규칙을 넣기에는 이 문구 자체가 임시다. 항목을 문장 끝에 떼어 두면 조사가 필요 없다.
+ */
+function requestedText({ fields, partial }: { fields: string[]; partial: boolean }): string {
+  if (fields.length === 0) return '어떤 내용이 더 필요한지는 아직 확인되지 않았어요.'
+
+  return `이 내용을 더 알아야 해요 — ${fields.join(', ')}${partial ? ' 등' : ''}.`
+}
+
+/**
+ * 실패 이유에 맞는 안내 한 장.
+ *
+ * TODO(#55): 네 가지 문구는 PM 이 정한다. 지금은 **상황을 사실대로 적기만 한** 초안이다.
+ * 다듬어 두면 어차피 바뀔 문구를 두고 리뷰가 돈다.
+ *
+ * 아직 지켜야 할 것 둘:
+ *   - **못 하는 일을 약속하지 않는다.** 실패한 Case 를 다시 판단시키는 수단이 없고(#57)
+ *     결과를 다시 알려주는 입력 경로도 아직 없다. "다시 보내주세요" 라고 쓰면 사장님이
+ *     없는 자리를 찾아다니게 된다
+ *   - **"상태 다시 확인" 을 재판단으로 읽히게 쓰지 않는다.** 그 버튼은 저장된 상태를 다시
+ *     읽을 뿐이다. 다른 기기나 운영 쪽에서 상황이 바뀌었는지 보라고 남겨 둔 것이다
+ */
+function failureCard(notice: FailureNotice): {
+  tone: 'WARNING' | 'NEUTRAL'
+  title: string
+  description: string
+} {
+  switch (notice.kind) {
+    /*
+      서버가 다시 해볼 수 있다고 분류했을 뿐, 원인이 일시적이라는 뜻은 아니다.
+      그래서 "잠시 후 다시" 도 "곧 됩니다" 도 쓰지 않는다.
+    */
+    case 'RETRY_AVAILABLE':
+      return {
+        tone: 'NEUTRAL',
+        title: '다음 할 일을 정하지 못했어요.',
+        description: '가게 정보는 그대로 있어요. 다시 판단해 드리는 기능을 준비하고 있습니다.',
+      }
+
+    /*
+      여기만 `WARNING` 이다. **사장님이 잘못 적었다는 뜻이 아니라** 아직 모르는 것이
+      있다는 뜻이라, 문구가 탓하는 말로 읽히지 않게 쓴다.
+    */
+    case 'NEEDS_DETAIL':
+      return {
+        tone: 'WARNING',
+        title: '추가 확인이 필요해요.',
+        description: `${requestedText(notice)} 알려주시는 자리는 준비하고 있습니다.`,
+      }
+
+    case 'SERVICE_SIDE':
+      return {
+        tone: 'NEUTRAL',
+        title: '서비스에서 확인이 필요한 문제가 생겼어요.',
+        description: '가게 정보는 그대로 있어요. 이 건은 저희 쪽에서 봐야 하는 문제예요.',
+      }
+
+    /*
+      **"이번 판단" 으로 범위를 좁혀 쓴다.** 그냥 "하실 수 있는 일이 없다" 고 하면 폐업
+      절차 전체에 할 일이 없다는 말로 읽힌다. 서버가 말한 것은 이 실패를 되돌릴 방법이
+      없다는 것뿐이고, 가게의 다음 할 일은 판단이 다시 돌면 그때 나온다.
+    */
+    case 'NO_RECOVERY':
+      return {
+        tone: 'NEUTRAL',
+        title: '다음 할 일을 정하지 못했어요.',
+        description: '가게 정보는 그대로 있어요. 이번 판단에 대해서는 더 해 보실 수 있는 것이 없어요.',
+      }
+
+    /*
+      이유를 못 알아들었다. `NO_RECOVERY` 와 같은 문구를 쓰지 않는다 — 저쪽은 서버가
+      "할 것이 없다" 고 말한 것이고, 여기는 우리가 못 읽은 것이다.
+    */
+    case 'UNKNOWN_CAUSE':
+      return {
+        tone: 'NEUTRAL',
+        title: '다음 할 일을 정하지 못했어요.',
+        description: '가게 정보는 그대로 있어요. 자세한 이유는 확인되지 않았어요.',
+      }
+  }
 }
 
 interface JudgmentSectionProps {
@@ -220,18 +308,11 @@ function JudgmentSection({
       (#57) 몇 번을 눌러도 같은 실패가 돌아온다. 기다리면 된다고 하면 사장님은 언제
       되는지 모른 채 계속 들어와 보게 된다.
 
-      TODO(기획): 실패 원인별 문구와 버튼은 #55 에서 정한다. 그때까지는 상태를 있는
-      그대로 알리고, 되지 않는 일을 약속하지 않는다.
+      이유마다 문구만 갈리고 **누를 것은 다섯 갈래 모두 재조회 하나다.** 이번 작업은
+      할 수 있는 일을 늘리는 것이 아니라 상황을 정확히 말하는 것이다.
     */
     case 'FAILED':
-      return (
-        <NoticeCard
-          tone="NEUTRAL"
-          title="다음 할 일을 정하지 못했어요."
-          description="가게 정보는 그대로 있어요. 다시 판단해 드리는 기능을 준비하고 있습니다."
-          action={recheck}
-        />
-      )
+      return <NoticeCard {...failureCard(judgment.notice)} action={recheck} />
 
     /*
       서버가 우리가 모르는 상태를 보냈거나 내용이 비어서 온 경우다. "정보가 부족합니다"로

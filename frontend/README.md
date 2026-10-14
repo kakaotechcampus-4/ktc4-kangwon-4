@@ -141,7 +141,10 @@ PR 브랜치마다 Preview 주소가 달라 등록할 수 없어서, **리뷰어
 /?mock=pending              판단 중 (Case를 막 만든 직후)
 /?mock=pending-long         판단 중인데 오래 걸려 자동 조회를 멈춘 상태
 /?mock=more-info            다음 할 일을 정하려면 더 물어봐야 하는 상태
-/?mock=judgment-failed      판단 실패
+/?mock=judgment-failed          판단 실패 — 서버가 다시 해볼 수 있다고 본 경우
+/?mock=judgment-failed-detail   판단 실패 — 다시 알아야 할 항목을 짚어준 경우
+/?mock=judgment-failed-service  판단 실패 — 서비스가 들여다봐야 하는 경우
+/?mock=judgment-failed-none     판단 실패 — 지금 이어서 할 수 있는 것이 없는 경우
 /?mock=judgment-conflict    말한 내용이 기록과 달라 확인이 필요한 상태
 /?mock=unrecognized         서버가 모르는 판단 상태를 보냈을 때
 /results?mock=conflict      제출하면 충돌 확인으로
@@ -158,7 +161,7 @@ PR 브랜치마다 Preview 주소가 달라 등록할 수 없어서, **리뷰어
 
 `/` 에서 붙인 `?mock=` 은 "결과 알려주기"를 눌러도 이어집니다. `/?mock=conflict` 로 들어가면
 클릭만으로 충돌 흐름 끝까지 볼 수 있습니다. 다만 **다음 할 일이 없는 상태**(`pending` ·
-`more-info` · `judgment-failed` · `unrecognized`)에는 그 버튼이 없어서, 거기서는 흐름이
+`more-info` · `judgment-failed*` · `unrecognized`)에는 그 버튼이 없어서, 거기서는 흐름이
 이어지지 않고 그 화면만 보입니다.
 
 | 환경 | URL |

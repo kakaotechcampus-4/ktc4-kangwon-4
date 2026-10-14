@@ -47,3 +47,22 @@ def get_latest_user_driven_case_history(session: Session, case_id: int) -> CaseH
         .order_by(CaseHistory.created_at.desc(), CaseHistory.id.desc())
         .limit(1)
     ).first()
+
+
+def get_latest_case_history_by_source(session: Session, case_id: int, source: str) -> CaseHistory | None:
+    """`source`가 주어진 값과 같은 것 중 가장 최근 판단 이력. 없으면 None.
+
+    예를 들어 `"USER_INPUT"`을 넘기면 Case 생성 판단(CASE_CREATED)은 제외하고
+    `/results` 제출에서 나온 판단만 본다.
+    """
+
+    return session.exec(
+        select(CaseHistory)
+        .options(joinedload(CaseHistory.priority_blocker))
+        .where(CaseHistory.case_id == case_id)
+        .where(CaseHistory.source == source)
+        # created_at은 MySQL DATETIME이라 초 단위까지만 저장돼 같은 초에 두 이력이 생기면
+        # 동률이 난다. id(auto-increment)는 항상 생성 순서를 정확히 반영하므로 2차 기준으로 쓴다.
+        .order_by(CaseHistory.created_at.desc(), CaseHistory.id.desc())
+        .limit(1)
+    ).first()
