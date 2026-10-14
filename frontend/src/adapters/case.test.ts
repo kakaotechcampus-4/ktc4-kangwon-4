@@ -124,6 +124,8 @@ function envelopeOf(judgment: Partial<CasesEnvelope>): CasesEnvelope {
     next_action: null,
     judgment_status: null,
     questions_for_user: null,
+    recovery_action_code: null,
+    requested_field_paths: null,
     ...judgment,
   }
 }
@@ -276,6 +278,105 @@ describe('toCurrentCaseView', () => {
    * `DONE` 인데 할 일이 비어 있는 것을 "정보 부족"으로 그리면, 서버가 틀린 것을 사장님이
    * 덜 적어낸 탓으로 읽는다. 서버가 지금은 이 조합들을 500 으로 막지만 그쪽이 바뀔 수 있다.
    */
+  /**
+   * 실패는 하나가 아니다. "다시 해볼 수 있다" 와 "정보가 더 있어야 한다" 를 한 화면으로
+   * 뭉개면, 사장님이 알려줘야 끝나는 상황에서도 기다리면 되는 줄 알고 가만히 있게 된다.
+   */
+  describe('판단 실패', () => {
+    /** 실패 안내만 꺼낸다. 다른 상태로 나오면 테스트가 잘못 짜인 것이다 */
+    function noticeOf(judgment: Partial<CasesEnvelope>) {
+      const view = toCurrentCaseView(
+        envelopeOf({ judgment_status: 'FAILED', ...judgment }),
+        SERVER_CASE,
+      )
+      if (view.judgment.status !== 'FAILED') throw new Error('FAILED 여야 한다')
+
+      return view.judgment.notice
+    }
+
+    /** 다시 알아야 할 칸까지 들어 있는 안내를 꺼낸다 */
+    function detailOf(requested_field_paths: unknown) {
+      const notice = noticeOf({
+        recovery_action_code: 'RESUBMIT_INPUT',
+        requested_field_paths: requested_field_paths as string[],
+      })
+      if (notice.kind !== 'NEEDS_DETAIL') throw new Error('NEEDS_DETAIL 이어야 한다')
+
+      return notice
+    }
+
+    it.each([
+      ['RETRY', 'RETRY_AVAILABLE'],
+      ['RESUBMIT_INPUT', 'NEEDS_DETAIL'],
+      ['CONTACT_SUPPORT', 'SERVICE_SIDE'],
+      ['NONE', 'NO_RECOVERY'],
+    ])('%s 는 %s 안내로 간다', (code, kind) => {
+      expect(noticeOf({ recovery_action_code: code as never }).kind).toBe(kind)
+    })
+
+    /**
+     * `NONE` 으로 떨어뜨리지 않는다. 그건 서버가 "할 수 있는 것이 없다" 고 **말한** 경우고,
+     * 여기는 우리가 그 말을 못 알아들은 경우다. 뭉개면 계약이 어긋난 사실이 화면 뒤로 숨는다.
+     */
+    it.each([
+      ['코드가 비어 있으면', null],
+      ['우리가 모르는 코드가 오면', 'RETRY_WITH_MORE_INFO'],
+    ])('%s 이유를 모르는 것으로 둔다', (_name, code) => {
+      expect(noticeOf({ recovery_action_code: code as never }).kind).toBe('UNKNOWN_CAUSE')
+    })
+
+    it('다시 알아야 할 칸을 화면 문구로 바꾼다', () => {
+      expect(detailOf(['restoration_scope', 'demolition_required'])).toEqual({
+        kind: 'NEEDS_DETAIL',
+        fields: ['원상복구 범위', '철거 필요 여부'],
+        partial: false,
+      })
+    })
+
+    /**
+     * 모르는 이름을 조용히 빼기만 하면 남은 것이 전부인 줄 알게 되고, 영어 칸 이름을 그대로
+     * 띄우면 사장님이 읽을 수 없는 글자를 보게 된다. 빼되 **뺐다는 사실을 남긴다.**
+     */
+    it('모르는 이름이 섞이면 아는 것만 담고 더 있었다고 알린다', () => {
+      expect(detailOf(['restoration_scope', 'closure_subsidy'])).toEqual({
+        kind: 'NEEDS_DETAIL',
+        fields: ['원상복구 범위'],
+        partial: true,
+      })
+    })
+
+    /**
+     * 모양이 깨진 항목 하나 때문에 멀쩡한 항목까지 버리지 않는다. 아는 것은 그대로 알리고,
+     * 못 읽은 것이 있었다는 사실만 함께 남긴다.
+     */
+    it('글자가 아닌 것이 섞여도 아는 칸은 그대로 담는다', () => {
+      expect(detailOf(['restoration_scope', 1])).toEqual({
+        kind: 'NEEDS_DETAIL',
+        fields: ['원상복구 범위'],
+        partial: true,
+      })
+    })
+
+    it('같은 칸이 두 번 와도 한 번만 담는다', () => {
+      expect(detailOf(['restoration_scope', 'restoration_scope']).fields).toEqual(['원상복구 범위'])
+    })
+
+    /**
+     * 하나도 못 알아봤으면 "일부" 가 아니라 아예 말할 수 없는 것이다. `partial` 을 켜면
+     * 화면이 **없는 목록을 가리키며** "등" 이라고 말하게 된다.
+     */
+    it.each([
+      ['아는 이름이 하나도 없으면', ['closure_subsidy']],
+      ['물려받은 이름이 와도', ['toString']],
+      ['목록이 비어 있으면', []],
+      ['칸이 비어 있으면', null],
+      ['목록이 아니면', '원상복구 범위'],
+      ['글자가 아닌 것이 들어 있으면', [1, { field: 'restoration_scope' }]],
+    ])('%s 항목을 특정하지 않는다', (_name, paths) => {
+      expect(detailOf(paths)).toEqual({ kind: 'NEEDS_DETAIL', fields: [], partial: false })
+    })
+  })
+
   describe('계약이 어긋난 응답', () => {
     it.each([
       ['DONE 인데 할 일이 없다', { judgment_status: 'DONE' as const, blocker: '막힘' }],
