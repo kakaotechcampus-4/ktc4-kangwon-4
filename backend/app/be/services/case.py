@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 
 from fastapi import HTTPException
 from sqlmodel import Session
@@ -27,7 +28,10 @@ from app.be.schemas.case import (
     FieldChangeResponse,
     NextActionResponse,
 )
+from app.agent.procedure_tool.store import ReviewedProcedureStore
 from app.be.services import reviewed_procedure as reviewed_procedure_service
+
+logger = logging.getLogger(__name__)
 
 
 def create_case(session: Session, member_id: int, case_request: CaseCreateRequest) -> tuple[Case, int]:
@@ -35,6 +39,12 @@ def create_case(session: Session, member_id: int, case_request: CaseCreateReques
 
     if case_crud.get_case_by_member_id(session, member_id) is not None:
         raise HTTPException(status_code=409, detail="이미 등록된 Case가 있습니다.")
+
+    # 검수 문서를 Case보다 먼저 읽는다. 파일이 깨져 있으면 판단도 같은 파일을 읽어서
+    # (first_judgment.py) AI를 부르기 전에 터진다. 그 상태로 Case만 만들어 두면 가입 직후
+    # FAILED인데 재판단 API가 없고 다시 가입하면 409라 빠져나올 길이 없다. 여기서 터지면
+    # 가입 자체가 실패하므로, 파일을 고친 뒤 다시 시도하면 된다.
+    procedure_store = reviewed_procedure_service.load_reviewed_procedures()
 
     case = Case(
         member_id=member_id,
@@ -47,17 +57,50 @@ def create_case(session: Session, member_id: int, case_request: CaseCreateReques
     case = case_crud.create_case(session, case)
     _fill_temp_case_procedure_steps(session, case.id)
     history = _create_case_creation_evidence(session, case, case_request)
-    # 검수된 절차 문서는 AI가 직접 읽지 않고, BE가 이 Case의 근거로 저장해 둔 것만 쓴다.
-    # 적재해 두지 않으면 절차조회가 짝을 못 찾아 그 문서를 아예 안 쓴다.
-    reviewed_procedure_service.import_reviewed_procedures(
-        session,
-        case.id,
-        reviewed_procedure_service.load_reviewed_procedures(),
-        as_of=kst_now().date(),
-    )
+    # 문서 적재보다 먼저 확정한다. 적재가 터져도 가입은 남아야 하기 때문이다.
     session.commit()
+
+    _import_reviewed_procedures(session, case.id, procedure_store)
+
     session.refresh(case)
     return case, history.id
+
+
+def _import_reviewed_procedures(session: Session, case_id: int, store: ReviewedProcedureStore) -> None:
+    """검수된 절차 문서를 이 Case의 근거로 저장한다. 실패해도 Case는 그대로 둔다.
+
+    AI는 이 문서를 직접 읽지 않고 BE가 Case의 근거로 저장해 둔 것만 쓴다. 적재해 두지
+    않으면 절차조회가 짝을 못 찾아 그 문서를 아예 안 쓴다.
+
+    여기서 터지는 건 사장님 입력이 아니라 우리 쪽 문서 문제다 — 버전을 올리지 않고 본문만
+    고쳤거나, 본문이 DB 칸 길이를 넘은 경우다. 그걸로 가입을 막으면 우리가 문서를 잘못 건드린
+    동안 들어온 사장님이 전부 500을 받는다.
+
+    그래서 Case를 먼저 확정한 뒤 여기서 따로 커밋한다. 터지면 되돌려서 문서가 일부만
+    저장된 상태를 남기지 않고, 예외는 밖으로 던지지 않는다. 이미 Case가 저장된 뒤라
+    여기서 던져 봐야 화면에는 "가입 실패"로 보이고 다시 하면 "이미 있다"가 된다.
+
+    파일을 못 읽는 경우는 여기까지 오지 않는다. 호출부가 Case를 만들기 전에 읽어서 넘긴다.
+    판단도 같은 파일을 읽기 때문에, 파일이 깨진 채로 Case만 남으면 빠져나올 길이 없다.
+
+    DB 쪽 이유로만 실패하면 판단은 그대로 돈다. 다만 절차조회가 0건이라 절차 안내가 안 나온다.
+    TODO: 적재는 멱등이므로 판단 전에 한 번 더 부르면 다음 판단에서 저절로 채워진다
+    (승준님 #65 리뷰 2번과 같은 작업이라 거기서 함께 한다).
+    """
+
+    try:
+        reviewed_procedure_service.import_reviewed_procedures(
+            session,
+            case_id,
+            store,
+            as_of=kst_now().date(),
+        )
+        session.commit()
+    except Exception:
+        session.rollback()
+        # 판단 백그라운드 실행과 같은 방식이다. 되돌릴 수 없는 일이 이미 끝났으므로
+        # 예외를 삼키되, 원인을 알 수 있게 traceback까지 남긴다.
+        logger.exception("case %s 검수 절차 문서 적재 실패 — 문서 없이 판단한다", case_id)
 
 
 def get_case(session: Session, member_id: int) -> CaseGetResponse:
@@ -80,21 +123,7 @@ def get_case(session: Session, member_id: int) -> CaseGetResponse:
     if latest_history is None:
         raise HTTPException(status_code=500, detail="Case에 대한 최초 판단 기록이 없습니다.")
 
-    if latest_history.judgment_status == "DONE" and (
-        latest_history.next_action is None or latest_history.priority_blocker is None
-    ):
-        raise HTTPException(status_code=500, detail="판단 완료(DONE) 상태인데 Blocker·Next Action이 없습니다.")
-
-    if latest_history.judgment_status == "NEEDS_MORE_INFO" and not latest_history.questions_for_user:
-        raise HTTPException(status_code=500, detail="정보 부족(NEEDS_MORE_INFO) 상태인데 questions_for_user가 없습니다.")
-
-    if latest_history.judgment_status == "FAILED" and (
-        latest_history.recovery_action_code is None or latest_history.retryable is None
-    ):
-        raise HTTPException(
-            status_code=500,
-            detail="판단 실패(FAILED) 상태인데 recovery_action_code·retryable이 없습니다.",
-        )
+    _assert_judgment_is_showable(latest_history)
 
     next_action = (
         NextActionResponse(
@@ -111,7 +140,9 @@ def get_case(session: Session, member_id: int) -> CaseGetResponse:
             FieldChangeResponse(field=h.canonical_field, stored_value=h.before_value, new_value=h.after_value)
             for h in case_field_history_crud.get_case_field_histories_by_case_history_id(session, latest_history.id)
         ]
-        if latest_history.judgment_status == "DONE"
+        # 충돌을 확인한 뒤 되묻는 경우(NEEDS_MORE_INFO)에도 검수를 통과한 변경은 저장된다.
+        # DONE만 보면 그 변경이 화면에 안 보인다.
+        if latest_history.judgment_status in ("DONE", "NEEDS_MORE_INFO")
         else None
     )
 
@@ -165,6 +196,8 @@ def get_case_results_entry(session: Session, member_id: int) -> CaseResultsEntry
     if latest_history is None:
         raise HTTPException(status_code=500, detail="Case에 대한 최초 판단 기록이 없습니다.")
 
+    _assert_judgment_is_showable(latest_history)
+
     if latest_history.judgment_status == "PENDING":
         return CaseResultsEntryResponse(judgment_status="PENDING", case_history_id=latest_history.id)
 
@@ -184,16 +217,11 @@ def get_case_results_entry(session: Session, member_id: int) -> CaseResultsEntry
         )
 
     if latest_history.judgment_status == "NEEDS_MORE_INFO":
-        if not latest_history.questions_for_user:
-            raise HTTPException(status_code=500, detail="정보 부족(NEEDS_MORE_INFO) 상태인데 questions_for_user가 없습니다.")
         return CaseResultsEntryResponse(
             judgment_status="NEEDS_MORE_INFO",
             case_history_id=latest_history.id,
             questions_for_user=latest_history.questions_for_user,
         )
-
-    if latest_history.recovery_action_code is None:
-        raise HTTPException(status_code=500, detail="판단 실패(FAILED) 상태인데 recovery_action_code가 없습니다.")
 
     return CaseResultsEntryResponse(
         judgment_status="FAILED",
@@ -202,6 +230,47 @@ def get_case_results_entry(session: Session, member_id: int) -> CaseResultsEntry
         requested_field_paths=latest_history.requested_field_paths,
         retryable=latest_history.retryable,
     )
+
+
+def _assert_judgment_is_showable(history: CaseHistory) -> None:
+    """상태별로 화면이 읽을 값이 다 있는지 본다. 없으면 빈칸을 내보내지 말고 여기서 막는다.
+
+    AI 계약상 next_action이 있으면 reason도 반드시 있고(NextAction.reason은 빈 문자열도
+    거부한다), 검수를 통과한 판단은 항상 blocker를 남긴다. 그래서 평소에는 걸리지 않는다.
+    걸린다면 AI가 아니라 우리 저장 코드가 깨진 것이고, 그때 조용히 빈 화면을 보여주는 것보다
+    멈추고 알아차리는 쪽이 낫다.
+
+    같은 검사를 /cases와 /cases/results가 함께 쓴다. 흩어 두면 화면이 늘 때마다 한쪽만
+    고치게 된다.
+    """
+
+    if history.judgment_status == "DONE":
+        if history.next_action is None or history.next_action_reason is None:
+            raise HTTPException(
+                status_code=500, detail="판단 완료(DONE) 상태인데 다음 행동이나 그 이유가 없습니다."
+            )
+        if history.priority_blocker is None:
+            raise HTTPException(status_code=500, detail="판단 완료(DONE) 상태인데 Blocker가 없습니다.")
+        return
+
+    if history.judgment_status == "NEEDS_MORE_INFO":
+        if not history.questions_for_user:
+            raise HTTPException(
+                status_code=500, detail="정보 부족(NEEDS_MORE_INFO) 상태인데 되물을 질문이 없습니다."
+            )
+        if history.priority_blocker is None:
+            raise HTTPException(
+                status_code=500, detail="정보 부족(NEEDS_MORE_INFO) 상태인데 Blocker가 없습니다."
+            )
+        return
+
+    if history.judgment_status == "FAILED" and (
+        history.recovery_action_code is None or history.retryable is None
+    ):
+        raise HTTPException(
+            status_code=500,
+            detail="판단 실패(FAILED) 상태인데 recovery_action_code·retryable이 없습니다.",
+        )
 
 
 def submit_case_results(
@@ -285,20 +354,18 @@ def get_case_results_submit_status(
     if case_history_id != latest_history.id:
         raise HTTPException(status_code=409, detail="최신 판단에 대해 요청을 주지 않았습니다.")
 
+    _assert_judgment_is_showable(latest_history)
+
     if latest_history.judgment_status == "PENDING":
         return CaseResultsSubmitResponse(result="PENDING")
 
     if latest_history.judgment_status == "NEEDS_MORE_INFO":
-        if not latest_history.questions_for_user:
-            raise HTTPException(status_code=500, detail="정보 부족(NEEDS_MORE_INFO) 상태인데 questions_for_user가 없습니다.")
         return CaseResultsSubmitResponse(
             result="NEEDS_MORE_INFO",
             questions_for_user=latest_history.questions_for_user,
         )
 
     if latest_history.judgment_status == "FAILED":
-        if latest_history.recovery_action_code is None:
-            raise HTTPException(status_code=500, detail="판단 실패(FAILED) 상태인데 recovery_action_code가 없습니다.")
         return CaseResultsSubmitResponse(
             result="FAILED",
             recovery_action_code=latest_history.recovery_action_code,
@@ -306,8 +373,13 @@ def get_case_results_submit_status(
             retryable=latest_history.retryable,
         )
 
-    if latest_history.next_action is None or latest_history.priority_blocker is None:
-        raise HTTPException(status_code=500, detail="판단 완료(DONE) 상태인데 Blocker·Next Action이 없습니다.")
+    # 남는 건 DONE뿐이다. 위에서 상태 이름으로 거르지 않고 내려오면, CONFLICT처럼 blocker가
+    # 없는 상태가 아래 blocker.description에 닿아 엉뚱한 곳에서 터진다.
+    if latest_history.judgment_status != "DONE":
+        raise HTTPException(
+            status_code=500,
+            detail=f"처리 상태 조회가 다루지 않는 판단 상태입니다: {latest_history.judgment_status}",
+        )
 
     changes = [
         FieldChangeResponse(field=h.canonical_field, stored_value=h.before_value, new_value=h.after_value)

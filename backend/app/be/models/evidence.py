@@ -92,6 +92,15 @@ class ConflictReference(CreatedAtMixin, table=True):
     )
     proposed_value: str = Field(max_length=1000, description="새로 제안된 값")
     conflict_digest: str | None = Field(default=None, max_length=255, description="충돌 내용 다이제스트")
+    candidate_payload: dict | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+        description=(
+            "AI가 보낸 충돌 후보 원본(ConflictCandidate) 전체. 사용자가 고른 뒤 그대로 돌려줘야 "
+            "AI가 내용 다이제스트를 대조해 받아준다. 위 칸들은 화면에 보여주려고 글자로 바꾼 "
+            "값이라 숫자·참거짓·빈 값을 되돌릴 수 없다"
+        ),
+    )
     expires_at: datetime = Field(sa_column=Column(DateTime, nullable=False), description="만료 시각")
     used_at: datetime | None = Field(
         default=None, sa_column=Column(DateTime, nullable=True), description="사용(1회) 시각"

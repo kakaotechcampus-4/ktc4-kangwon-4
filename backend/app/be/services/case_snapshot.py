@@ -91,23 +91,26 @@ def _build_facts(session: Session, case: Case, evidences: list[Evidence]) -> lis
         evidence_crud.case_history_evidence_id(case.id, creation_history.id) if creation_history else None
     )
     known_evidence_ids = {e.evidence_id for e in evidences}
-    evidence_id = creation_evidence_id if creation_evidence_id in known_evidence_ids else None
-    # 값이 언제 확인됐는지는 필드가 마지막으로 바뀐 시각을 쓴다. 오래된 것부터 읽어 덮어쓴다.
-    changed_at = {
-        row.canonical_field: row.created_at.replace(tzinfo=KST)
-        for row in case_field_history_crud.get_case_field_histories_by_case_id(session, case.id)
-    }
+    creation_refs = [creation_evidence_id] if creation_evidence_id in known_evidence_ids else []
+    # 필드가 마지막으로 바뀐 판단이 무엇을 근거로 댔는지. 오래된 것부터 읽어 덮어쓰므로
+    # 마지막에 남는 것이 최신이다. 이 Case에 없는 근거(지난 버전 등)는 빼고 넘긴다 —
+    # AI는 스냅샷에 담기지 않은 근거 번호를 받으면 입력 검증에서 거부한다.
+    last_change: dict[str, tuple[list[str], datetime]] = {}
+    for row in case_field_history_crud.get_case_field_histories_by_case_id(session, case.id):
+        refs = [ref for ref in (row.source_evidence_refs or []) if ref in known_evidence_ids]
+        last_change[row.canonical_field] = (refs, row.created_at.replace(tzinfo=KST))
     # 폼으로 들어온 뒤 한 번도 안 바뀐 값은 이력이 없다. 그때는 폼을 낸 시각이 곧 확인 시각이다
     # — 추정이 아니라 실제 입력 시각이고, 같은 시각을 그 근거의 retrieved_at에도 적어뒀다.
     submitted_at = creation_history.created_at.replace(tzinfo=KST) if creation_history else None
-    return [
-        _build_fact(case, field_key, evidence_id, changed_at.get(field_key.value) or submitted_at)
-        for field_key in CaseFieldKey
-    ]
+    facts = []
+    for field_key in CaseFieldKey:
+        refs, changed_at = last_change.get(field_key.value, ([], None))
+        facts.append(_build_fact(case, field_key, refs or creation_refs, changed_at or submitted_at))
+    return facts
 
 
 def _build_fact(
-    case: Case, field_key: CaseFieldKey, evidence_id: str | None, confirmed_at: datetime | None
+    case: Case, field_key: CaseFieldKey, evidence_refs: list[str], confirmed_at: datetime | None
 ) -> CaseFact:
     value_type, _ = CASE_FIELD_SPECS[field_key]
     raw_value = getattr(case, field_key.value)
@@ -117,15 +120,15 @@ def _build_fact(
             field_path=field_key, value_type=value_type, value=None, status=FactStatus.UNKNOWN, evidence_refs=[], updated_at=None
         )
 
-    if evidence_id is None:
-        raise ValueError(f"case {case.id} has confirmed field {field_key.value} but no creation-form evidence")
+    if not evidence_refs:
+        raise ValueError(f"case {case.id} has confirmed field {field_key.value} but no evidence")
 
     return CaseFact(
         field_path=field_key,
         value_type=value_type,
         value=raw_value,
         status=FactStatus.CONFIRMED,
-        evidence_refs=[evidence_id],
+        evidence_refs=list(evidence_refs),
         # Case 행의 updated_at은 행 전체가 마지막으로 바뀐 시각이라 필드별 확인 시각이 아니다.
         updated_at=confirmed_at,
     )
