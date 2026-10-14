@@ -169,8 +169,11 @@ _FACT_VALUE_CUES: dict[tuple[CaseFieldKey, object], tuple[str, ...]] = {
     (CaseFieldKey.RESTORATION_SCOPE, "FULL"): (
         *_with_particles("원상복구범위", "전체"),
         *_with_particles("원상복구", "전체"),
+        *_with_particles("원상복구범위", "전부"),
+        *_with_particles("원상복구", "전부"),
         "전체원상복구",
         "전면원상복구",
+        "전부원상복구",
     ),
     (CaseFieldKey.RESTORATION_SCOPE, "NOT_REQUIRED"): (
         *_with_particles("원상복구범위", "없"),
@@ -945,6 +948,24 @@ class InfoAnalysisAgent:
                 continue  # 확인 행위 뒤 처음 보고하는 사실은 반전이 아니다.
             # 뒤 절에 보고가 더 이어지면 같은 값이나 다른 필드가 있다는
             # 이유만으로 앞의 반박을 지우지 않는다.
+            # "철거가 필요하다면서 전부 하래요"처럼 범위의 이름을
+            # 생략한 복구 요구도 앞서 보고한 범위 없음과 함께 확정하지 않는다.
+            if (
+                fact.field_path == CaseFieldKey.RESTORATION_SCOPE
+                and (
+                    any(
+                        cls._compact_text(cue) in after
+                        for (field, value), cues in _FACT_VALUE_CUES.items()
+                        if field == fact.field_path and value != fact.value
+                        for cue in cues
+                    )
+                    or (
+                        fact.value != "FULL"
+                        and re.search(r"(?:전부|전체|전면)(?:원상복구)?(?:해야|하라|하래)", after)
+                    )
+                )
+            ):
+                return True
             # 인용 어미인 '이라고/다고'의 '고'는 추가 보고의 연결어가 아니다.
             single_report = re.search(r"[,;]|(?<![라다])고|며", after_text) is None
             if repeated_after and single_report:
@@ -960,6 +981,20 @@ class InfoAnalysisAgent:
                 for (field, _), cues in _FACT_VALUE_CUES.items()
                 if field == fact.field_path
                 for cue in cues
+            )
+            # 다른 항목의 명확한 값 표현을 제외한 뒤 필드 이름도 검사한다.
+            # 범위 보고 뒤 "원상복구 작업도 필요하지 않다"는 별도 상태 보고다.
+            other_cues = (
+                cls._compact_text(cue)
+                for (field, _), cues in _FACT_VALUE_CUES.items()
+                if field != fact.field_path
+                for cue in cues
+            )
+            remaining = after
+            for cue in sorted(other_cues, key=len, reverse=True):
+                remaining = remaining.replace(cue, "")
+            own_field_report = own_field_report or any(
+                cls._compact_text(cue) in remaining for cue in _FIELD_CUES[fact.field_path]
             )
             if single_report and other_field_report and not own_field_report:
                 continue
