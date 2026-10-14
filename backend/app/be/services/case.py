@@ -20,6 +20,9 @@ from app.be.schemas.case import (
     CaseGetDetailResponse,
     CaseGetResponse,
     CaseResultsEntryResponse,
+    CaseResultsSubmitAcceptedResponse,
+    CaseResultsSubmitRequest,
+    CaseResultsSubmitResponse,
     ConflictItemResponse,
     FieldChangeResponse,
     NextActionResponse,
@@ -63,6 +66,7 @@ def get_case(session: Session, member_id: int) -> CaseGetResponse:
             blocker=None,
             next_action=None,
             judgment_status=None,
+            case_history_id=None,
             questions_for_user=None,
             recovery_action_code=None,
             requested_field_paths=None,
@@ -120,6 +124,7 @@ def get_case(session: Session, member_id: int) -> CaseGetResponse:
         ),
         next_action=next_action,
         judgment_status=latest_history.judgment_status,
+        case_history_id=latest_history.id if latest_history.judgment_status != "CONFLICT" else None,
         questions_for_user=latest_history.questions_for_user,
         # 실패했을 때만 채워진다. 화면은 이 값으로 "다시 시도" / "다시 말씀해 주세요" /
         # "문의" 중 무엇을 보여줄지 정한다.
@@ -196,6 +201,127 @@ def get_case_results_entry(session: Session, member_id: int) -> CaseResultsEntry
         recovery_action_code=latest_history.recovery_action_code,
         requested_field_paths=latest_history.requested_field_paths,
         retryable=latest_history.retryable,
+    )
+
+
+def submit_case_results(
+    session: Session, member_id: int, submit_request: CaseResultsSubmitRequest
+) -> CaseResultsSubmitAcceptedResponse:
+    """`/results`의 "이 내용으로 알려주기" 버튼. 접수만 하고 끝난다.
+
+    Agent 판단은 최소 30초~2분 걸려서 이 요청·응답 안에서 끝낼 수 없다. 그래서 여기서는
+    접수 가능한 상태인지만 확인하고 PENDING 이력을 남긴 뒤 끝난다 — 판단 결과는 이 응답이
+    아니라 처리 상태를 조회하는 별도 조회 API가 준다.
+    """
+
+    case = case_crud.get_case_by_member_id(session, member_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case를 찾을 수 없습니다.")
+
+    if conflict_reference_crud.get_pending_conflicts_by_case_id(session, case.id):
+        raise HTTPException(status_code=409, detail="확인 대기 중인 충돌이 있습니다.")
+
+    latest_history = case_history_crud.get_latest_user_driven_case_history(session, case.id)
+    if latest_history is None:
+        raise HTTPException(status_code=500, detail="Case에 대한 최초 판단 기록이 없습니다.")
+
+    if latest_history.judgment_status == "PENDING":
+        raise HTTPException(status_code=409, detail="직전 제출을 아직 처리 중입니다.")
+
+    if submit_request.case_history_id != latest_history.id:
+        raise HTTPException(status_code=409, detail="최신 판단에 대해 요청을 주지 않았습니다.")
+
+    history = case_history_crud.create_case_history(
+        session,
+        CaseHistory(
+            case_id=case.id,
+            raw_input=submit_request.raw_input,
+            source="USER_INPUT",
+            judgment_status="PENDING",
+        ),
+    )
+    session.commit()
+    return CaseResultsSubmitAcceptedResponse(case_history_id=history.id)
+
+
+def get_case_results_submit_status(
+    session: Session, member_id: int, case_history_id: int
+) -> CaseResultsSubmitResponse:
+    """제출(`/results`) 이후 FE가 몇 초 간격으로 묻는 처리 상태 조회.
+
+    `/replan` 화면은 `changes`·`blocker`·`next_action`까지 필요해서, `/case` 진입 판단용인
+    `get_case_results_entry()`와 응답 모양이 다르다. 그래서 별도 스키마(`result` 기반)를 쓴다.
+
+    `case_history_id`는 "지금 조회하려는 게 어느 제출이냐"를 밝히는 값이다. Case 생성 판단은
+    이 조회 대상이 아니므로, 최신 판단을 찾을 때 USER_INPUT만 본다(get_latest_user_driven_
+    case_history와 다른 점).
+    """
+
+    case = case_crud.get_case_by_member_id(session, member_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case를 찾을 수 없습니다.")
+
+    pending_conflicts = conflict_reference_crud.get_pending_conflicts_by_case_id(session, case.id)
+    if pending_conflicts:
+        raw_input = pending_conflicts[0].case_history.raw_input
+        return CaseResultsSubmitResponse(
+            result="CONFLICT",
+            raw_input=raw_input,
+            conflicts=[
+                ConflictItemResponse(
+                    id=conflict.id,
+                    field=conflict.canonical_field,
+                    stored_value=conflict.committed_value,
+                    proposed_value=conflict.proposed_value,
+                )
+                for conflict in pending_conflicts
+            ],
+        )
+
+    latest_history = case_history_crud.get_latest_case_history_by_source(session, case.id, "USER_INPUT")
+    if latest_history is None:
+        raise HTTPException(status_code=404, detail="조회할 제출 기록을 찾을 수 없습니다.")
+
+    if case_history_id != latest_history.id:
+        raise HTTPException(status_code=409, detail="최신 판단에 대해 요청을 주지 않았습니다.")
+
+    if latest_history.judgment_status == "PENDING":
+        return CaseResultsSubmitResponse(result="PENDING")
+
+    if latest_history.judgment_status == "NEEDS_MORE_INFO":
+        if not latest_history.questions_for_user:
+            raise HTTPException(status_code=500, detail="정보 부족(NEEDS_MORE_INFO) 상태인데 questions_for_user가 없습니다.")
+        return CaseResultsSubmitResponse(
+            result="NEEDS_MORE_INFO",
+            questions_for_user=latest_history.questions_for_user,
+        )
+
+    if latest_history.judgment_status == "FAILED":
+        if latest_history.recovery_action_code is None:
+            raise HTTPException(status_code=500, detail="판단 실패(FAILED) 상태인데 recovery_action_code가 없습니다.")
+        return CaseResultsSubmitResponse(
+            result="FAILED",
+            recovery_action_code=latest_history.recovery_action_code,
+            requested_field_paths=latest_history.requested_field_paths,
+            retryable=latest_history.retryable,
+        )
+
+    if latest_history.next_action is None or latest_history.priority_blocker is None:
+        raise HTTPException(status_code=500, detail="판단 완료(DONE) 상태인데 Blocker·Next Action이 없습니다.")
+
+    changes = [
+        FieldChangeResponse(field=h.canonical_field, stored_value=h.before_value, new_value=h.after_value)
+        for h in case_field_history_crud.get_case_field_histories_by_case_history_id(session, latest_history.id)
+    ]
+    return CaseResultsSubmitResponse(
+        result="UPDATED" if changes else "NO_CHANGE",
+        changes=changes,
+        blocker=latest_history.priority_blocker.description,
+        next_action=NextActionResponse(
+            title=latest_history.next_action,
+            reason=latest_history.next_action_reason,
+            questions_to_ask=latest_history.next_action_questions_to_ask or [],
+        ),
     )
 
 

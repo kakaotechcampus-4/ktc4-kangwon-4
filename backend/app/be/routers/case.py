@@ -3,7 +3,15 @@ from sqlmodel import Session
 
 from app.be.db import get_db
 from app.be.dependencies.auth import get_current_member_id
-from app.be.schemas.case import CaseCreateRequest, CaseCreateResponse, CaseGetResponse, CaseResultsEntryResponse
+from app.be.schemas.case import (
+    CaseCreateRequest,
+    CaseCreateResponse,
+    CaseGetResponse,
+    CaseResultsEntryResponse,
+    CaseResultsSubmitAcceptedResponse,
+    CaseResultsSubmitRequest,
+    CaseResultsSubmitResponse,
+)
 from app.be.services import case as case_service
 from app.be.services import first_judgment as first_judgment_service
 
@@ -42,3 +50,26 @@ def get_case_results(
     session: Session = Depends(get_db),
 ):
     return case_service.get_case_results_entry(session, member_id)
+
+
+@router.post("/cases/results", response_model=CaseResultsSubmitAcceptedResponse)
+def submit_case_results(
+    submit_request: CaseResultsSubmitRequest,
+    member_id: int = Depends(get_current_member_id),
+    session: Session = Depends(get_db),
+):
+    response = case_service.submit_case_results(session, member_id, submit_request)
+
+    # TODO(AI팀 연동): 여기서 Agent 판단을 백그라운드로 실행하는 부분이 이어져야 한다.
+    # Case 생성 때와 같은 패턴.
+
+    return response
+
+
+@router.get("/cases/results/status", response_model=CaseResultsSubmitResponse)
+def get_case_results_submit_status(
+    case_history_id: int,
+    member_id: int = Depends(get_current_member_id),
+    session: Session = Depends(get_db),
+):
+    return case_service.get_case_results_submit_status(session, member_id, case_history_id)
