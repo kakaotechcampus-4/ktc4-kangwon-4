@@ -17,6 +17,7 @@ from uuid import UUID, uuid4
 
 from langgraph.graph import END, START, StateGraph
 
+from app.agent.blocker_candidates import field_confirmation_question
 from app.agent.enrichment import build_confirmed_conflict_overlay, build_fact_overlays
 from app.agent.llm import current_call_budget
 from app.agent.procedure_tool.rules import business_type_code
@@ -665,11 +666,13 @@ class AgentGraph:
         The Review result cannot answer this.  Its paths point inside the draft
         (``/decision/next_action/...``) while this field takes Case field keys,
         and no mapping between the two exists; inventing one would be a guess.
-        Info results carry real field keys: first what blocks the closure
-        decision, then what asking the user would settle. Support programs are
-        outside the MVP and must not create additional input requirements.
+        Info results carry real field keys: first facts held for confirmation,
+        then what blocks the closure decision or asking the user would settle.
+        Support programs are outside the MVP and must not create additional
+        input requirements.
         """
 
+        held_fields: set[CaseFieldKey] = set()
         blocks_decision: set[CaseFieldKey] = set()
         answerable: set[CaseFieldKey] = set()
         for source in failure.get("source_results", []):
@@ -685,12 +688,61 @@ class AgentGraph:
                     for item in output.missing_fields
                     if set(item.blocks) == {MissingFieldBlock.SUPPORT_ANALYSIS}
                 }
+                held_fields.update(
+                    candidate.field_path
+                    for candidate in output.fact_candidates
+                    if candidate.requires_confirmation
+                    and candidate.field_path not in support_only
+                )
                 for question in output.question_candidates:
                     answerable.update(set(question.resolves_field_paths) - support_only)
-        found = blocks_decision or answerable
+        found = held_fields or blocks_decision or answerable
         # Canonical order, so two runs that found the same fields in a
         # different sequence still produce the same outcome digest.
         return [key for key in CASE_FIELD_SPECS if key in found]
+
+    @staticmethod
+    def _requested_field_guidance(
+        failure: dict[str, Any], requested_field_paths: Sequence[CaseFieldKey]
+    ) -> dict[CaseFieldKey, str]:
+        """Use existing questions for the filtered fields requested by this failure."""
+        requested = set(requested_field_paths)
+        linked: dict[CaseFieldKey, str] = {}
+        resolving: dict[CaseFieldKey, str] = {}
+        for source in failure.get("source_results", []):
+            output = source.output
+            if not isinstance(output, InfoAnalysisResult):
+                continue
+            support_only = {
+                item.field_path
+                for item in output.missing_fields
+                if set(item.blocks) == {MissingFieldBlock.SUPPORT_ANALYSIS}
+            }
+            questions = {
+                item.question_id: item
+                for item in output.question_candidates
+                if not set(item.resolves_field_paths) & support_only
+            }
+            eligible = requested - support_only
+            for missing in output.missing_fields:
+                question = questions.get(missing.question_candidate_id)
+                if (
+                    missing.field_path in eligible
+                    and question is not None
+                    and missing.field_path in question.resolves_field_paths
+                ):
+                    linked.setdefault(missing.field_path, question.text)
+            for question in questions.values():
+                for field_path in question.resolves_field_paths:
+                    if field_path in eligible:
+                        resolving.setdefault(field_path, question.text)
+        return {
+            field_path: linked.get(
+                field_path,
+                resolving.get(field_path, field_confirmation_question(field_path)),
+            )
+            for field_path in requested_field_paths
+        }
 
     @staticmethod
     def _build_safe_failure(
@@ -700,18 +752,13 @@ class AgentGraph:
         trace_id: str | None,
         failure: dict[str, Any],
     ) -> SafeFailureOutcome:
-        requested = (
-            []
-            if failure.get("recovery_action_code") == "CONTACT_SUPPORT"
-            else AgentGraph._requested_field_paths(failure)
-        )
+        available_fields = AgentGraph._requested_field_paths(failure)
         retryable = failure.get("retryable", False)
-        # Naming fields the caller can actually collect beats telling them
-        # there is nothing to do.  Only when a retry is not the answer: a
-        # timeout is a latency problem, not a missing-input one.
-        fallback_recovery = "RETRY" if retryable else "NONE"
-        if requested and not retryable:
-            fallback_recovery = "RESUBMIT_INPUT"
+        fallback_recovery = (
+            "RETRY" if retryable else "RESUBMIT_INPUT" if available_fields else "NONE"
+        )
+        recovery = failure.get("recovery_action_code", fallback_recovery)
+        requested = available_fields if recovery == "RESUBMIT_INPUT" else []
         return SafeFailureOutcome(
             outcome_type="SAFE_FAILURE",
             run_id=run_id,
@@ -722,7 +769,7 @@ class AgentGraph:
             message_code=failure.get(
                 "failure_message_code", "AGENT_COMPONENT_UNAVAILABLE"
             ),
-            recovery_action_code=failure.get("recovery_action_code", fallback_recovery),
+            recovery_action_code=recovery,
             requested_field_paths=requested,
             retryable=retryable,
             failed_component=failure.get("failed_component"),

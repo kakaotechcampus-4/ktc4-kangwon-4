@@ -2195,6 +2195,23 @@ class SafeFailureOutcome(AgentSchema):
         description="Optional caller trace identifier copied from AgentGraphInput."
     )
 
+    @model_validator(mode="after")
+    def validate_recovery(self) -> SafeFailureOutcome:
+        _ensure_unique(
+            self.requested_field_paths, lambda field: field, "requested_field_paths"
+        )
+        if self.retryable != (self.recovery_action_code == "RETRY"):
+            raise ValueError("retryable must match recovery_action_code")
+        if self.recovery_action_code == "RESUBMIT_INPUT":
+            if (
+                not self.requested_field_paths
+                and self.failure_code != "STALE_CONFLICT_CONFIRMATION"
+            ):
+                raise ValueError("RESUBMIT_INPUT requires requested fields")
+        elif self.requested_field_paths:
+            raise ValueError("only RESUBMIT_INPUT may request fields")
+        return self
+
 
 AgentRunOutcome: TypeAlias = Annotated[
     ReviewedPlanOutcome | ConflictOutcome | SafeFailureOutcome,

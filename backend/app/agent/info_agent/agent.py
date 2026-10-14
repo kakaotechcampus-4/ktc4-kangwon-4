@@ -169,8 +169,11 @@ _FACT_VALUE_CUES: dict[tuple[CaseFieldKey, object], tuple[str, ...]] = {
     (CaseFieldKey.RESTORATION_SCOPE, "FULL"): (
         *_with_particles("원상복구범위", "전체"),
         *_with_particles("원상복구", "전체"),
+        *_with_particles("원상복구범위", "전부"),
+        *_with_particles("원상복구", "전부"),
         "전체원상복구",
         "전면원상복구",
+        "전부원상복구",
     ),
     (CaseFieldKey.RESTORATION_SCOPE, "NOT_REQUIRED"): (
         *_with_particles("원상복구범위", "없"),
@@ -208,10 +211,7 @@ _SCHEMA_FACT_UNCERTAINTY = re.compile(
     r"|없(?:으면|어도|다면)|필요하지않(?:으면|아도|다면)"
 )
 _SCHEMA_FACT_NEGATION = re.compile(r"아니|아닌|아님|아닙|아닐|않|못|없|불필요")
-# 한 문장 안에서 앞 절을 뒤 절이 뒤집는 접속 표현.
-# "없다고 했는데 있대요"처럼 말하면 어느 쪽이 지금 사실인지 글만으로는 정할 수 없다.
-# 뒤집는 말 자체("있대요", "하라고 했어요")를 모으면 목록이 끝나지 않으므로,
-# 끝이 있는 접속 표현만 본다. 걸리면 버리지 않고 사장님께 되묻는다.
+# 접속사 앞에 해당 필드의 값 표현이 있을 때만 후속 절의 반전을 검사한다.
 _SCHEMA_FACT_REVERSAL = re.compile(r"지만|는데|인데|다가|그런데|결국")
 _COMPLETED_OBSERVATION = re.compile(
     r"(?:완료|끝냈|마쳤|처리했|신고했|제출했|반납했|해지했|탈퇴했|확인했|종료했)"
@@ -867,19 +867,9 @@ class InfoAnalysisAgent:
             return explicit_number is not None and has_employee_context
 
         if fact.value_type == FactValueType.DATE:
-            parsed = (
-                fact.value
-                if type(fact.value) is date
-                else date.fromisoformat(str(fact.value))
+            return cls._date_is_explicit(fact.value, fact.source_text) and any(
+                cue in compact_source for cue in field_cues
             )
-            year, month, day = parsed.year, parsed.month, parsed.day
-            date_forms = (
-                rf"{year}\s*[-./]\s*0?{month}\s*[-./]\s*0?{day}",
-                rf"{year}\s*년\s*0?{month}\s*월\s*0?{day}\s*일",
-            )
-            return any(
-                re.search(pattern, fact.source_text) for pattern in date_forms
-            ) and any(cue in compact_source for cue in field_cues)
 
         if fact.value_type == FactValueType.STRING:
             assert type(fact.value) is str
@@ -889,6 +879,18 @@ class InfoAnalysisAgent:
         # Every current BOOLEAN and ENUM value has an explicit cue registry.
         # Missing registry coverage is intentionally fail-closed.
         return False
+
+    @staticmethod
+    def _date_is_explicit(value: StrictScalar, text: str) -> bool:
+        parsed = value if type(value) is date else date.fromisoformat(str(value))
+        year, month, day = parsed.year, parsed.month, parsed.day
+        return any(
+            re.search(pattern, text)
+            for pattern in (
+                rf"{year}\s*[-./]\s*0?{month}\s*[-./]\s*0?{day}",
+                rf"{year}\s*년\s*0?{month}\s*월\s*0?{day}\s*일",
+            )
+        )
 
     @staticmethod
     def _containing_statement(input_text: str | None, source_text: str) -> str:
@@ -908,6 +910,96 @@ class InfoAnalysisAgent:
             boundary = re.search(r"[.!?\n]", input_text[end:])
             right = end + boundary.end() if boundary else len(input_text)
         return input_text[left + 1 : right]
+
+    @classmethod
+    def _statement_reverses(cls, fact: ExtractedFactDraft, statement: str) -> bool:
+        own_cues = tuple(
+            cls._compact_text(cue)
+            for cue in _FACT_VALUE_CUES.get((fact.field_path, fact.value), ())
+        )
+        for match in _SCHEMA_FACT_REVERSAL.finditer(statement):
+            before_text, after_text = statement[:match.start()], statement[match.end():]
+            before, after = cls._compact_text(before_text), cls._compact_text(after_text)
+            if own_cues:
+                asserted_before = any(cue in before for cue in own_cues)
+                repeated_after = any(cue in after for cue in own_cues)
+            else:
+                # 숫자·날짜·문자열도 기존 원문 검사를 재사용한다. 공백과 날짜
+                # 구분자를 보존해 3명과 13명, 날짜의 표기를 구분한다.
+                asserted_before = cls._fact_source_supports_value(
+                    fact.model_copy(update={"source_text": before_text}),
+                    input_text=before_text,
+                )
+                # 앞 절에서 폐업 예정일임을 확인했다면 뒤 절은 날짜만
+                # 반복해도 된다. 다른 표기의 날짜는 기존 원문 식으로 검사한다.
+                repeated_after = (
+                    cls._date_is_explicit(fact.value, after_text)
+                    if fact.operation == FactOperation.SET
+                    and fact.value_type == FactValueType.DATE
+                    else cls._fact_source_supports_value(
+                        fact.model_copy(update={"source_text": after_text}),
+                        input_text=after_text,
+                    )
+                ) and not (
+                    _SCHEMA_FACT_NEGATION.search(after)
+                    or _SCHEMA_FACT_UNCERTAINTY.search(after)
+                )
+            if not asserted_before:
+                continue  # 확인 행위 뒤 처음 보고하는 사실은 반전이 아니다.
+            # 뒤 절에 보고가 더 이어지면 같은 값이나 다른 필드가 있다는
+            # 이유만으로 앞의 반박을 지우지 않는다.
+            # "철거가 필요하다면서 전부 하래요"처럼 범위의 이름을
+            # 생략한 복구 요구도 앞서 보고한 범위 없음과 함께 확정하지 않는다.
+            if (
+                fact.field_path == CaseFieldKey.RESTORATION_SCOPE
+                and (
+                    any(
+                        cls._compact_text(cue) in after
+                        for (field, value), cues in _FACT_VALUE_CUES.items()
+                        if field == fact.field_path and value != fact.value
+                        for cue in cues
+                    )
+                    or (
+                        fact.value != "FULL"
+                        and re.search(r"(?:전부|전체|전면)(?:원상복구)?(?:해야|하라|하래)", after)
+                    )
+                )
+            ):
+                return True
+            # 인용 어미인 '이라고/다고'의 '고'는 추가 보고의 연결어가 아니다.
+            single_report = re.search(r"[,;]|(?<![라다])고|며", after_text) is None
+            if repeated_after and single_report:
+                continue  # 같은 값을 명시적으로 다시 보고했다.
+            other_field_report = any(
+                after.startswith(cls._compact_text(cue))
+                for (field, _), cues in _FACT_VALUE_CUES.items()
+                if field != fact.field_path
+                for cue in cues
+            )
+            own_field_report = any(
+                cls._compact_text(cue) in after
+                for (field, _), cues in _FACT_VALUE_CUES.items()
+                if field == fact.field_path
+                for cue in cues
+            )
+            # 다른 항목의 명확한 값 표현을 제외한 뒤 필드 이름도 검사한다.
+            # 범위 보고 뒤 "원상복구 작업도 필요하지 않다"는 별도 상태 보고다.
+            other_cues = (
+                cls._compact_text(cue)
+                for (field, _), cues in _FACT_VALUE_CUES.items()
+                if field != fact.field_path
+                for cue in cues
+            )
+            remaining = after
+            for cue in sorted(other_cues, key=len, reverse=True):
+                remaining = remaining.replace(cue, "")
+            own_field_report = own_field_report or any(
+                cls._compact_text(cue) in remaining for cue in _FIELD_CUES[fact.field_path]
+            )
+            if single_report and other_field_report and not own_field_report:
+                continue
+            return True
+        return False
 
     @classmethod
     def _schema_enum_is_asserted(cls, fact: ExtractedFactDraft, statement: str) -> bool:
@@ -1041,12 +1133,8 @@ class InfoAnalysisAgent:
             # 한 문장이 스스로를 뒤집으면("없다고 했는데 있대요") 어느 쪽이 지금 사실인지
             # 글만으로는 정할 수 없다. 버리면 분석 전체가 실패하므로, 확정하지 않고
             # 확인이 필요한 사실로 넘겨 사장님께 되묻는다.
-            statement_reverses = bool(
-                _SCHEMA_FACT_REVERSAL.search(
-                    self._compact_text(
-                        self._containing_statement(input_text, semantic.source_text)
-                    )
-                )
+            statement_reverses = self._statement_reverses(
+                semantic, self._containing_statement(input_text, semantic.source_text)
             )
             span, evidence = self._ground_text(request, semantic.source_text)
             evidence_by_span[(span.start_offset, span.end_offset)] = evidence
