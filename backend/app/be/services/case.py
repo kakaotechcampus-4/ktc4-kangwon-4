@@ -354,20 +354,18 @@ def get_case_results_submit_status(
     if case_history_id != latest_history.id:
         raise HTTPException(status_code=409, detail="최신 판단에 대해 요청을 주지 않았습니다.")
 
+    _assert_judgment_is_showable(latest_history)
+
     if latest_history.judgment_status == "PENDING":
         return CaseResultsSubmitResponse(result="PENDING")
 
     if latest_history.judgment_status == "NEEDS_MORE_INFO":
-        if not latest_history.questions_for_user:
-            raise HTTPException(status_code=500, detail="정보 부족(NEEDS_MORE_INFO) 상태인데 questions_for_user가 없습니다.")
         return CaseResultsSubmitResponse(
             result="NEEDS_MORE_INFO",
             questions_for_user=latest_history.questions_for_user,
         )
 
     if latest_history.judgment_status == "FAILED":
-        if latest_history.recovery_action_code is None:
-            raise HTTPException(status_code=500, detail="판단 실패(FAILED) 상태인데 recovery_action_code가 없습니다.")
         return CaseResultsSubmitResponse(
             result="FAILED",
             recovery_action_code=latest_history.recovery_action_code,
@@ -375,8 +373,13 @@ def get_case_results_submit_status(
             retryable=latest_history.retryable,
         )
 
-    if latest_history.next_action is None or latest_history.priority_blocker is None:
-        raise HTTPException(status_code=500, detail="판단 완료(DONE) 상태인데 Blocker·Next Action이 없습니다.")
+    # 남는 건 DONE뿐이다. 위에서 상태 이름으로 거르지 않고 내려오면, CONFLICT처럼 blocker가
+    # 없는 상태가 아래 blocker.description에 닿아 엉뚱한 곳에서 터진다.
+    if latest_history.judgment_status != "DONE":
+        raise HTTPException(
+            status_code=500,
+            detail=f"처리 상태 조회가 다루지 않는 판단 상태입니다: {latest_history.judgment_status}",
+        )
 
     changes = [
         FieldChangeResponse(field=h.canonical_field, stored_value=h.before_value, new_value=h.after_value)
