@@ -746,11 +746,17 @@ def test_reversed_report_is_held_even_with_another_fact_or_value_type(field, val
     ) == []
 
 
-def test_short_quote_keeps_the_mixed_reversal_in_the_whole_sentence():
+@pytest.mark.parametrize("suffix", [
+    "는데 임대인은 전부 하라고 하고 철거도 필요하대요.",
+    "는데 철거가 필요하대서 전부 원상복구해야 한대요.",
+    "는데 철거가 필요하다면서 전부 하래요.",
+    "는데 철거해야 하니까 원상복구도 전부 하래요.",
+])
+def test_short_quote_keeps_the_mixed_reversal_in_the_whole_sentence(suffix):
     from app.agent.enrichment import build_fact_overlays
 
     quote = "원상복구 범위는 없다고 했"
-    text = quote + "는데 임대인은 전부 하라고 하고 철거도 필요하대요."
+    text = quote + suffix
     result = analyze_facts([("restoration_scope", "NOT_REQUIRED", quote)], text)
     candidate, = result.fact_candidates
     assert candidate.source_span.text == quote
