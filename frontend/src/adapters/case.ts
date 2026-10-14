@@ -1,4 +1,10 @@
-import { factLabelOf, FRANCHISE_OPTIONS, LEASE_OPTIONS } from '../lib/caseOptions'
+import {
+  factLabelOf,
+  FIELD_LABEL,
+  fieldLabelOf,
+  FRANCHISE_OPTIONS,
+  LEASE_OPTIONS,
+} from '../lib/caseOptions'
 import type {
   CaseCreateRequest,
   CaseResponse,
@@ -7,7 +13,14 @@ import type {
   NextActionResponse,
   RestorationScope,
 } from '../types/api'
-import type { CaseDraft, CurrentCaseView, Fact, JudgmentView, NextAction } from '../types/view'
+import type {
+  CaseDraft,
+  CurrentCaseView,
+  Fact,
+  FailureNotice,
+  JudgmentView,
+  NextAction,
+} from '../types/view'
 
 /**
  * 서버 모양과 화면 모양 사이를 잇는다.
@@ -65,26 +78,46 @@ function toFact(key: string, label: string, value: string | null | undefined): F
  *
  * 사용자가 답할 수 있는 것만 담는다. `restoration_status`처럼 진행 단계를 나타내는 값은
  * 목록에 넣지 않는다 — "아직 확인 안 된 것"이 사용자에게 할 일로 읽히기 때문이다.
+ *
+ * 문구는 `FIELD_LABEL`에서 가져온다. 서버는 여러 자리에서 같은 칸을 이름으로 지목하는데
+ * (실패했을 때 다시 봐야 할 칸, 변경 내역, 충돌 항목), 문구를 여기 적어두면 그 자리마다
+ * 같은 칸이 다른 이름으로 불릴 수 있다.
+ *
+ * **`key`는 사전의 열쇠와 다를 수 있다.** `franchise`가 그렇다 — 서버 칸 이름은
+ * `franchise_status`지만 화면에서 쓰던 열쇠를 바꾸면 이 목록을 참조하는 쪽이 같이 깨진다.
+ * 바꾸는 것은 문구뿐이다.
  */
 export function toFacts(serverCase: CaseResponse): Fact[] {
   return [
-    toFact('business_type', '업종', serverCase.business_type),
-    toFact('franchise', '프랜차이즈', factLabelOf(FRANCHISE_OPTIONS, serverCase.franchise_status)),
+    toFact('business_type', FIELD_LABEL.business_type, serverCase.business_type),
+    toFact(
+      'franchise',
+      FIELD_LABEL.franchise_status,
+      factLabelOf(FRANCHISE_OPTIONS, serverCase.franchise_status),
+    ),
     toFact(
       'employee_count',
-      '직원 수',
+      FIELD_LABEL.employee_count,
       serverCase.employee_count === null ? null : `${serverCase.employee_count}명`,
     ),
-    toFact('lease_status', '점포 형태', factLabelOf(LEASE_OPTIONS, serverCase.lease_status)),
-    toFact('planned_closure_date', '폐업 예정일', toDateLabel(serverCase.planned_closure_date)),
+    toFact(
+      'lease_status',
+      FIELD_LABEL.lease_status,
+      factLabelOf(LEASE_OPTIONS, serverCase.lease_status),
+    ),
+    toFact(
+      'planned_closure_date',
+      FIELD_LABEL.planned_closure_date,
+      toDateLabel(serverCase.planned_closure_date),
+    ),
     toFact(
       'restoration_scope',
-      '원상복구 범위',
+      FIELD_LABEL.restoration_scope,
       RESTORATION_SCOPE_LABEL[serverCase.restoration_scope],
     ),
     toFact(
       'demolition_required',
-      '철거 필요 여부',
+      FIELD_LABEL.demolition_required,
       DEMOLITION_LABEL[serverCase.demolition_required],
     ),
   ]
@@ -129,6 +162,67 @@ function toNextAction(value: unknown): NextAction | null {
 }
 
 /**
+ * 다시 봐야 할 칸들을 화면 문구로. 아는 것만 담고, 나머지가 있었는지도 함께 돌려준다.
+ *
+ * 서버가 보내는 목록은 **믿고 그릴 수 없다.** AI 쪽은 아홉 칸짜리 닫힌 목록으로 보내지만
+ * BE 가 검사 없이 JSON 칸에 담아 돌려주기 때문에, 중간에 모양이 깨져도 아무도 못 막는다.
+ *
+ * 모르는 이름은 **버리되 버렸다는 사실을 남긴다.** 영어 칸 이름을 그대로 띄우면 사장님이
+ * 읽을 수 없는 글자가 뜨고, 조용히 빼기만 하면 남은 것이 전부인 줄 알게 된다.
+ *
+ * 같은 칸이 두 번 와도 한 번만 적는다. 목록에 같은 말이 두 번 보이면 화면이 고장 난 것처럼
+ * 읽힌다.
+ */
+function toRequestedFields(paths: unknown): { fields: string[]; partial: boolean } {
+  if (!Array.isArray(paths)) return { fields: [], partial: false }
+
+  const fields: string[] = []
+  let dropped = false
+
+  for (const path of paths) {
+    const label = isReadableText(path) ? fieldLabelOf(path) : null
+
+    if (label === null) dropped = true
+    else if (!fields.includes(label)) fields.push(label)
+  }
+
+  // 하나도 못 알아봤으면 "일부" 가 아니라 아예 말할 수 없는 것이다. 빈 목록이 그 뜻을
+  // 이미 담고 있어서, 여기서 `partial` 을 켜면 화면이 없는 목록을 가리키게 된다
+  return { fields, partial: fields.length > 0 && dropped }
+}
+
+/**
+ * 실패 정보를 화면이 설명할 모양으로.
+ *
+ * **코드 하나만 보고 정한다.** 같이 오는 `retryable` 은 읽지 않는다 — 코드와 짝이 맞는지
+ * 검사하는 쪽이 AI 에만 있고 BE 는 그대로 통과시켜서, 둘이 어긋난 값이 와도 막히지 않는다.
+ * 둘을 함께 보면 어느 쪽을 믿을지 화면이 정해야 하는데, 그건 화면이 할 판단이 아니다.
+ *
+ * 같은 이유로 **다시 봐야 할 칸은 `RESUBMIT_INPUT` 에서만 읽는다.** 다른 코드에 칸이
+ * 딸려 오면 그건 보내는 쪽이 어긋난 것이고, 짝을 맞추는 일은 거기서 한다(#74).
+ */
+function toFailureNotice(envelope: CasesEnvelope): FailureNotice {
+  switch (envelope.recovery_action_code) {
+    case 'RETRY':
+      return { kind: 'RETRY_AVAILABLE' }
+
+    case 'RESUBMIT_INPUT':
+      return { kind: 'NEEDS_DETAIL', ...toRequestedFields(envelope.requested_field_paths) }
+
+    case 'CONTACT_SUPPORT':
+      return { kind: 'SERVICE_SIDE' }
+
+    case 'NONE':
+      return { kind: 'NO_RECOVERY' }
+
+    default:
+      // 코드가 안 왔거나 우리가 모르는 값이다. `NONE` 으로 떨어뜨리지 않는다 —
+      // 그건 서버가 "할 수 있는 것이 없다" 고 **말한** 경우고, 여기는 말을 못 알아들은 경우다
+      return { kind: 'UNKNOWN_CAUSE' }
+  }
+}
+
+/**
  * 판단 상태와 그 내용을 화면 모양으로.
  *
  * 상태마다 같이 와야 하는 값이 정해져 있다. 그 약속이 깨진 응답은 **다른 상태로 바꿔
@@ -146,7 +240,7 @@ function toJudgmentView(envelope: CasesEnvelope): JudgmentView {
       return { status: 'PENDING' }
 
     case 'FAILED':
-      return { status: 'FAILED' }
+      return { status: 'FAILED', notice: toFailureNotice(envelope) }
 
     // 검증할 것이 없다. 어긋난 항목은 응답에 안 실려 온다(#66).
     //

@@ -25,6 +25,8 @@ function envelope(judgment: Partial<CasesEnvelope>) {
     next_action: null,
     judgment_status: null,
     questions_for_user: null,
+    recovery_action_code: null,
+    requested_field_paths: null,
     ...judgment,
   }
 }
@@ -172,11 +174,61 @@ describe('CurrentCasePage', () => {
 
     it('판단에 실패하면 가게 정보는 남기고 안내만 바꾼다', async () => {
       saveTokens('access-1', 'refresh-1')
-      mockCase(envelope({ judgment_status: 'FAILED' }))
+      mockCase(envelope({ judgment_status: 'FAILED', recovery_action_code: 'RETRY' }))
       renderAt('/case')
 
       expect(await screen.findByText('다음 할 일을 정하지 못했어요.')).toBeInTheDocument()
       expect(screen.getByText('분식집')).toBeInTheDocument()
+    })
+
+    /**
+     * 사장님이 알려줘야 끝나는 실패다. 이유를 안 밝히면 "저희가 다시 해보겠습니다" 로 읽혀
+     * 기다리면 되는 줄 알고 가만히 있게 된다. 어느 칸인지까지 말해야 움직일 수 있다.
+     *
+     * 라벨("확인이 필요해요")은 안내 카드가 톤에 따라 붙이는 제목이다. 다섯 갈래 중
+     * 여기만 다른 톤을 쓴다는 것을 이 줄이 고정한다.
+     */
+    it('다시 알아야 할 것이 있으면 어느 칸인지까지 알린다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      mockCase(
+        envelope({
+          judgment_status: 'FAILED',
+          recovery_action_code: 'RESUBMIT_INPUT',
+          requested_field_paths: ['restoration_scope', 'demolition_required'],
+        }),
+      )
+      renderAt('/case')
+
+      expect(await screen.findByRole('heading', { name: '확인이 필요해요' })).toBeInTheDocument()
+      expect(screen.getByText(/원상복구 범위, 철거 필요 여부/)).toBeInTheDocument()
+    })
+
+    /** 아는 것만 적고 그것이 전부인 척하면 사장님이 나머지를 영영 모른 채로 남는다 */
+    it('일부만 알아봤으면 그것이 전부인 것처럼 말하지 않는다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      mockCase(
+        envelope({
+          judgment_status: 'FAILED',
+          recovery_action_code: 'RESUBMIT_INPUT',
+          requested_field_paths: ['restoration_scope', 'closure_subsidy'],
+        }),
+      )
+      renderAt('/case')
+
+      expect(await screen.findByText(/원상복구 범위 등/)).toBeInTheDocument()
+    })
+
+    /**
+     * 서버가 "할 수 있는 것이 없다" 고 **말한** 경우와 우리가 그 말을 **못 알아들은** 경우는
+     * 다르다. 같은 문구로 덮으면 계약이 어긋난 사실이 화면 뒤로 숨는다.
+     */
+    it('이유를 모를 때 할 수 있는 것이 없다고 단정하지 않는다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      mockCase(envelope({ judgment_status: 'FAILED' }))
+      renderAt('/case')
+
+      await screen.findByText('다음 할 일을 정하지 못했어요.')
+      expect(screen.queryByText(/더 해 보실 수 있는 것이 없어요/)).not.toBeInTheDocument()
     })
 
     /**
@@ -217,10 +269,30 @@ describe('CurrentCasePage', () => {
       expect(await screen.findByText('판단 내용을 불러오지 못했어요.')).toBeInTheDocument()
     })
 
-    /** 할 일이 없다고 버튼까지 사라지면 사장님은 화면만 보다 나가게 된다 */
+    /**
+     * 할 일이 없다고 버튼까지 사라지면 사장님은 화면만 보다 나가게 된다.
+     *
+     * 실패 네 갈래를 전부 적는다. **이유마다 다른 버튼을 만들지 않는다는 것**이 여기서
+     * 고정된다 — 지금은 재판단도 재입력도 보낼 곳이 없어서, 늘릴 수 있는 것은 "저장된
+     * 상태를 다시 읽기" 하나뿐이다.
+     */
     it.each([
       ['PENDING', envelope({ judgment_status: 'PENDING' })],
-      ['FAILED', envelope({ judgment_status: 'FAILED' })],
+      ['실패 · 다시 해볼 수 있음', envelope({ judgment_status: 'FAILED', recovery_action_code: 'RETRY' })],
+      [
+        '실패 · 더 알아야 함',
+        envelope({
+          judgment_status: 'FAILED',
+          recovery_action_code: 'RESUBMIT_INPUT',
+          requested_field_paths: ['restoration_scope'],
+        }),
+      ],
+      [
+        '실패 · 서비스가 볼 것',
+        envelope({ judgment_status: 'FAILED', recovery_action_code: 'CONTACT_SUPPORT' }),
+      ],
+      ['실패 · 할 수 있는 것 없음', envelope({ judgment_status: 'FAILED', recovery_action_code: 'NONE' })],
+      ['실패 · 이유를 모름', envelope({ judgment_status: 'FAILED' })],
       ['CONFLICT', envelope({ judgment_status: 'CONFLICT' })],
       ['모르는 상태', envelope({ judgment_status: 'SAFE_FAILURE' as never })],
       [

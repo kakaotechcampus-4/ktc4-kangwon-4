@@ -9,6 +9,9 @@ import {
   doneCase,
   judgmentConflictCase,
   judgmentFailedCase,
+  judgmentNeedsDetailCase,
+  judgmentNoRecoveryCase,
+  judgmentServiceSideCase,
   moreInfoCase,
   pendingCase,
   unrecognizedCase,
@@ -89,7 +92,12 @@ const MOCKS: Record<string, CurrentCaseView> = {
   pending: pendingCase,
   'pending-long': pendingCase,
   'more-info': moreInfoCase,
+  // 실패는 이유마다 문구가 갈려서 키도 갈린다. `judgment-failed` 는 서버가 "다시 해볼 수
+  // 있다" 고 분류한 경우다 — 이름이 그 뜻까지 담지는 못해 여기 적어 둔다
   'judgment-failed': judgmentFailedCase,
+  'judgment-failed-detail': judgmentNeedsDetailCase,
+  'judgment-failed-service': judgmentServiceSideCase,
+  'judgment-failed-none': judgmentNoRecoveryCase,
   // `conflict` 는 못 쓴다. `/results?mock=conflict` 가 결과 제출 쪽 충돌 흐름을 쓰고 있어서,
   // 같은 키를 여기 붙이면 `/case` 에서 할 일 카드가 안 떠 그 흐름이 첫 걸음에서 끊긴다
   'judgment-conflict': judgmentConflictCase,

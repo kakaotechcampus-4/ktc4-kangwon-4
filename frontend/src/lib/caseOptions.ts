@@ -50,3 +50,38 @@ export const FRANCHISE_OPTIONS: Option<boolean>[] = [
 export function factLabelOf<T>(options: Option<T>[], value: T): string | null {
   return options.find((option) => option.value === value)?.factLabel ?? null
 }
+
+/**
+ * 서버가 Case의 칸 하나를 **이름으로 가리킬 때** 쓰는 말을 화면 말로 바꾼다.
+ *
+ * 값이 아니라 칸 이름을 옮기는 것이라 위 선택지 목록과 쓰임이 다르다. 서버는 여러
+ * 자리에서 칸을 이름으로 지목하는데(판단 실패의 `requested_field_paths`, 변경 내역의
+ * `field`, 충돌 항목의 `field`) 전부 같은 어휘를 쓴다. 그래서 사전은 하나면 된다.
+ *
+ * 순서는 서버 쪽 `CaseFieldKey`를 그대로 따른다. 나란히 놓고 보면 빠진 칸이 눈에 띈다.
+ */
+export const FIELD_LABEL = {
+  business_type: '업종',
+  franchise_status: '프랜차이즈',
+  employee_count: '직원 수',
+  lease_status: '점포 형태',
+  restoration_status: '원상복구 진행 상황',
+  restoration_scope: '원상복구 범위',
+  restoration_scope_detail: '원상복구 범위 설명',
+  demolition_required: '철거 필요 여부',
+  planned_closure_date: '폐업 예정일',
+} as const
+
+/**
+ * 칸 이름을 화면 문구로. 모르는 이름이면 `null`.
+ *
+ * **서버가 준 이름을 그대로 화면에 내보내지 않는다.** `restoration_scope_detail` 같은
+ * 영어 칸 이름이 사장님에게 뜨면 읽을 수 없는 글자가 되고, 우리가 모르는 이름이라는
+ * 사실도 묻힌다.
+ *
+ * `in`이 아니라 `Object.hasOwn`이다. `'toString'`처럼 모든 객체가 물려받는 이름이
+ * 들어와도 아는 칸으로 통과하지 않는다 — 들어오는 값이 서버 JSON이라 걸러야 한다.
+ */
+export function fieldLabelOf(field: string): string | null {
+  return Object.hasOwn(FIELD_LABEL, field) ? FIELD_LABEL[field as keyof typeof FIELD_LABEL] : null
+}

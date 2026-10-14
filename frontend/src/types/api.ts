@@ -99,6 +99,19 @@ export interface CaseCreateResponse extends CaseFields {
 export type JudgmentStatus = 'PENDING' | 'DONE' | 'NEEDS_MORE_INFO' | 'CONFLICT' | 'FAILED'
 
 /**
+ * 판단이 실패했을 때 서버가 분류한 **다음에 해볼 만한 것**.
+ *
+ * 네 값을 `#58` 에서 합의했고 BE·AI 양쪽 스키마가 같은 목록을 쓴다.
+ *
+ * **`RETRY` 를 "일시적인 문제" 로 읽으면 안 된다.** 판단이 결과를 내놓기도 전에 예외로
+ * 끊기면 원인을 가리지 않고 전부 `RETRY` 로 저장된다(`decision_record.py` 의
+ * `mark_judgment_failed`). 서버가 "다시 해볼 수는 있다" 고 분류했다는 뜻까지다.
+ *
+ * `JudgmentStatus` 와 마찬가지로 넷이 다가 아닐 수 있다. 모르는 값은 어댑터가 가려낸다.
+ */
+export type RecoveryActionCode = 'RETRY' | 'RESUBMIT_INPUT' | 'CONTACT_SUPPORT' | 'NONE'
+
+/**
  * 다음 할 일.
  *
  * 전에는 제목 한 줄이었다. 제목만으로는 "임대인에게 확인하세요" 가 끝이라, 사장님이
@@ -140,4 +153,14 @@ export interface CasesEnvelope {
   judgment_status: JudgmentStatus | null
   /** 서비스가 사장님에게 되묻는 질문. `next_action` 의 "물어볼 말"과 다른 것이다 */
   questions_for_user: string[] | null
+  /** 판단이 실패했을 때만 채워진다. 실패가 아니면 `null` 이다 */
+  recovery_action_code: RecoveryActionCode | null
+  /**
+   * 판단을 멈추게 한 Case 의 칸 이름들. 실패가 아니면 `null` 이다.
+   *
+   * **`string[]` 으로 둔다.** AI 쪽은 아홉 칸짜리 닫힌 목록(`CaseFieldKey`)으로 보내지만,
+   * BE 가 그 값을 검사 없이 JSON 칸에 담아 `list[str]` 로 돌려준다. 좁은 타입으로 적으면
+   * 지켜지지 않는 약속을 타입이 지켜 주는 것처럼 보인다 — 거르는 일은 어댑터가 한다.
+   */
+  requested_field_paths: string[] | null
 }

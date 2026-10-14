@@ -25,7 +25,6 @@ from app.be.crud import case_history as case_history_crud
 from app.be.crud import evidence as evidence_crud
 from app.be.crud import procedure_step as procedure_step_crud
 from app.be.models.case import Case
-from app.be.models.case_history import CaseHistory
 from app.be.models.evidence import Evidence
 from app.be.models.mixins import KST
 from app.be.models.procedure_step import CaseProcedureStep
@@ -39,22 +38,26 @@ UNKNOWN_SENTINEL_FIELDS = {
 }
 
 
-def build_user_input(history: CaseHistory) -> RedactedInput:
+def build_user_input(case_history_id: int, raw_input: str, submitted_at: datetime) -> RedactedInput:
     """사용자가 넣은 입력 한 건을 AI가 받는 모양으로 바꾼다.
+
+    CaseHistory 행 전체가 아니라 실제로 쓰는 값 세 개만 받는다. 모델을 통째로 받으면 이
+    함수가 어느 칼럼까지 보는지 호출부에서 알 수 없고, 입력이 꼭 CaseHistory에서만 와야
+    하는 것처럼 묶인다.
 
     트리거(= 왜 판단을 부르는가)로 감싸는 일은 AI팀 입구(app/common/agent_service.py)가 한다.
     """
 
     return RedactedInput(
-        input_event_id=f"case_history:{history.id}",
+        input_event_id=f"case_history:{case_history_id}",
         source_type=InputSourceType.USER_INPUT,
-        redacted_text=history.raw_input,
+        redacted_text=raw_input,
         # case 생성 폼은 업종/임차형태 같은 정해진 값만 받아서 지울 개인정보가 없다.
         # 자유 입력을 받는 화면이 생기면 그때 민감정보 제거 목록을 채워야 한다.
         redactions=[],
-        # DB에는 한국 시각을 저장하고(mixins.kst_now) AI 쪽은 timezone이 붙은 시각만 받으므로
-        # tzinfo만 붙인다.
-        submitted_at=history.created_at.replace(tzinfo=KST),
+        # DB에는 timezone 없는 한국 시각을 저장하고(mixins.kst_now) AI 쪽은 timezone이 붙은
+        # 시각만 받으므로, 저장된 값을 그대로 받아 여기서 tzinfo만 붙인다.
+        submitted_at=submitted_at.replace(tzinfo=KST),
     )
 
 
