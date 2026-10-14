@@ -82,10 +82,21 @@ export const judgmentFailedCase: CurrentCaseView = {
 }
 
 /**
+ * 사장님이 알려준 내용이 저장된 기록과 어긋나 확인이 필요한 상태.
+ *
+ * 담는 값이 없다. 어긋난 항목은 응답에 안 실려 와서, 화면도 "확인이 필요하다" 까지만
+ * 말한다(#66).
+ */
+export const judgmentConflictCase: CurrentCaseView = {
+  facts,
+  judgment: { status: 'CONFLICT' },
+}
+
+/**
  * 서버가 우리가 모르는 상태를 보냈거나, 상태와 내용의 조합이 계약과 어긋난 경우.
  *
- * 실제로 일어날 수 있다 — BE 가 `judgment_status` 에 `CONFLICT` 추가를 건의한 상태라,
- * 그쪽이 먼저 배포되면 이 화면이 뜬다.
+ * `CONFLICT` 가 아는 값이 된 뒤에도 남겨둔다. 상태는 또 늘어날 수 있고, 그때 화면이
+ * 무엇을 보여줄지가 여기서 확인된다.
  */
 export const unrecognizedCase: CurrentCaseView = {
   facts,

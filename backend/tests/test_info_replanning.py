@@ -5,9 +5,14 @@ from copy import deepcopy
 from uuid import UUID
 
 import pytest
-from app.agent.info_agent.agent import InfoAnalysisAgent, InfoAnalysisGuardrailError
-from app.agent.schemas import CaseFieldKey, InfoAnalysisInput, ProcedureLookupResult
 from test_action_codes import supervisor_request
+
+from app.agent.info_agent.agent import (
+    ExtractedFactDraft,
+    InfoAnalysisAgent,
+    InfoAnalysisGuardrailError,
+)
+from app.agent.schemas import CaseFieldKey, InfoAnalysisInput, ProcedureLookupResult
 
 TAX = "FILE_TAX_BUSINESS_CLOSURE"
 FOOD = "FILE_FOOD_SERVICE_CLOSURE"
@@ -474,3 +479,212 @@ def test_explicit_user_progress_is_still_extracted():
     observation = result.procedure_progress_observations[0]
     assert observation.observed_status == "IN_PROGRESS"
     assert observation.source_span.text == request.input.redacted_text
+
+
+RESTORATION_RESULT = "원상복구 범위는 없고 원상복구 작업은 필요하지 않습니다."
+
+
+def supports_restoration(field, value, quote, *, full_input=None):
+    fact = ExtractedFactDraft(
+        operation="SET", field_path=field, value_type="ENUM", value=value,
+        source_text=quote, confidence_bps=9000, requires_confirmation=False,
+        reason_summary="합성 임대인 확인 결과",
+    )
+    return InfoAnalysisAgent._fact_source_supports_value(
+        fact, input_text=full_input or quote,
+    )
+
+
+@pytest.mark.parametrize("field,quote", [
+    ("restoration_scope", "원상복구 범위는 없습니다."),
+    ("restoration_status", "원상복구 작업은 필요하지 않습니다."),
+    ("restoration_scope", RESTORATION_RESULT),
+    ("restoration_status", RESTORATION_RESULT),
+])
+def test_explicit_restoration_result_is_accepted(field, quote):
+    assert supports_restoration(field, "NOT_REQUIRED", quote)
+
+
+@pytest.mark.parametrize("field,value,quote", [
+    ("restoration_status", "NOT_REQUIRED", "원상복구 범위는 없습니다."),
+    ("restoration_status", "COMPLETED", "원상복구 범위는 없습니다."),
+    ("demolition_required", "NOT_REQUIRED", "원상복구 범위는 없습니다."),
+    ("restoration_scope", "NOT_REQUIRED", "원상복구 작업은 필요하지 않습니다."),
+    ("restoration_status", "COMPLETED", RESTORATION_RESULT),
+])
+def test_absence_of_scope_does_not_infer_another_fact(field, value, quote):
+    assert not supports_restoration(field, value, quote)
+
+
+@pytest.mark.parametrize("field,quote", [
+    ("restoration_scope", "원상복구 범위는 없지는 않습니다."),
+    ("restoration_scope", "원상복구 범위는 없을 수도 있습니다."),
+    ("restoration_scope", "원상복구 범위는 없는 것 같습니다."),
+    ("restoration_scope", "원상복구 범위는 없나요."),
+    ("restoration_scope", "원상복구 범위는 없으면 좋겠습니다."),
+    ("restoration_scope", "원상복구 범위는 없다면 작업을 생략합니다."),
+    ("restoration_scope", "원상복구 범위는 없다는 뜻인가요."),
+    ("restoration_scope", "원상복구 범위는 없다고 가정합니다."),
+    ("restoration_scope", "원상복구 범위는 없어도 확인해야 합니다."),
+    ("restoration_status", "원상복구 작업은 필요하지 않은 것은 아닙니다."),
+    ("restoration_status", "원상복구 작업은 필요하지 않을 수도 있습니다."),
+    ("restoration_status", "원상복구 작업은 필요하지 않은 것 같습니다."),
+    ("restoration_status", "원상복구 작업은 필요하지 않나요."),
+    ("restoration_status", "원상복구 작업은 필요하지 않으면 생략합니다."),
+    ("restoration_status", "원상복구 작업은 필요하지 않다면 생략합니다."),
+])
+def test_unconfirmed_restoration_is_not_asserted(field, quote):
+    assert not supports_restoration(field, "NOT_REQUIRED", quote)
+
+
+@pytest.mark.parametrize("suffix", ["는 것은 아닙니다.", "을 수도 있습니다."])
+def test_short_scope_quote_keeps_the_containing_sentence_guard(suffix):
+    quote = "원상복구 범위는 없"
+    assert not supports_restoration(
+        "restoration_scope", "NOT_REQUIRED", quote, full_input=quote + suffix,
+    )
+
+
+@pytest.mark.parametrize("unsupported_completion", [False, True])
+def test_result_sentence_produces_only_the_three_stated_fact_changes(unsupported_completion):
+    request = request_for_replanning()
+    snapshot = request.case_snapshot.model_dump(mode="json")
+    for item in snapshot["facts"]:
+        if item["field_path"] in {"restoration_scope", "restoration_status"}:
+            item.update(status="UNKNOWN", value=None, evidence_refs=[], updated_at=None)
+    snapshot["procedure_progress"] = []
+    text = "임대인에게 확인했습니다. " + RESTORATION_RESULT + " 철거도 필요하지 않습니다."
+    request = InfoAnalysisInput.model_validate(request.model_dump() | {
+        "case_snapshot": snapshot,
+        "input": request.input.model_dump() | {"redacted_text": text},
+    })
+    response = output([finding(TAX, "doc1"), finding(FOOD, "doc2"), finding(RESTORATION, "doc3")])
+    response["facts"] = [
+        {"operation": "SET", "field_path": field, "value_type": "ENUM", "value": "NOT_REQUIRED",
+         "source_text": quote, "confidence_bps": 9500, "requires_confirmation": False,
+         "reason_summary": "합성 임대인 확인 결과"}
+        for field, quote in (
+            ("restoration_scope", RESTORATION_RESULT),
+            ("restoration_status", RESTORATION_RESULT),
+            ("demolition_required", "철거도 필요하지 않습니다."),
+        )
+    ]
+    rejected = deepcopy(response)
+    rejected["procedure_observations"] = [{
+        "step_code": RESTORATION, "observed_status": "COMPLETED",
+        "source_text": "임대인에게 확인했습니다.", "requires_confirmation": False,
+        "reason_summary": "절차를 식별하지 않는 확인 문장",
+    }]
+    client = Responses(*([rejected] if unsupported_completion else []), response)
+    result = asyncio.run(InfoAnalysisAgent(client).analyze(request))
+    assert len(client.messages) == (2 if unsupported_completion else 1)
+    if unsupported_completion:
+        feedback = " ".join(item["content"] for item in client.messages[1])
+        assert "The quoted sentence itself must identify the procedure" in feedback
+    assert {(fact.field_path, fact.value) for fact in result.fact_candidates} == {
+        ("restoration_scope", "NOT_REQUIRED"),
+        ("restoration_status", "NOT_REQUIRED"),
+        ("demolition_required", "NOT_REQUIRED"),
+    }
+    assert result.conflicts == []
+    assert result.procedure_progress_observations == []
+
+
+def analyze_facts(facts, text):
+    """Run the whole analyzer on one input sentence and return its result."""
+    request = request_for_replanning()
+    snapshot = request.case_snapshot.model_dump(mode="json")
+    for item in snapshot["facts"]:
+        if item["field_path"] in {"restoration_scope", "restoration_status"}:
+            item.update(status="UNKNOWN", value=None, evidence_refs=[], updated_at=None)
+    snapshot["procedure_progress"] = []
+    request = InfoAnalysisInput.model_validate(request.model_dump() | {
+        "case_snapshot": snapshot,
+        "input": request.input.model_dump() | {"redacted_text": text},
+    })
+    response = output(
+        [finding(TAX, "doc1"), finding(FOOD, "doc2"), finding(RESTORATION, "doc3")]
+    )
+    response["facts"] = [
+        {"operation": "SET", "field_path": field, "value_type": "ENUM", "value": value,
+         "source_text": quote, "confidence_bps": 9500, "requires_confirmation": False,
+         "reason_summary": "합성 임대인 확인 결과"}
+        for field, value, quote in facts
+    ]
+    return asyncio.run(InfoAnalysisAgent(Responses(response)).analyze(request))
+
+
+# 앞 절을 뒤 절이 뒤집는 문장은 확정하지 않고 사장님께 되묻는다. 뒤집는 말 자체를
+# 목록으로 모으지 않기 때문에 "있대요"·"하라고 했어요"·"비용을 내래요"처럼
+# 처음 보는 말투도 같이 걸린다. 확인이 필요한 사실은 Case에 저장되지 않는다.
+@pytest.mark.parametrize("field,value,text", [
+    ("restoration_scope", "NOT_REQUIRED", "원상복구 범위가 없는 줄 알았는데 있대요."),
+    ("restoration_scope", "NOT_REQUIRED", "원상복구 범위는 없다고 들었는데 임대인은 전부 하라고 했어요."),
+    ("restoration_scope", "NOT_REQUIRED", "원상복구 범위는 없다고 했지만 계약서에는 있어요."),
+    ("restoration_scope", "NOT_REQUIRED", "원상복구 범위는 없다고 했는데 원상복구를 하래요."),
+    ("restoration_status", "NOT_REQUIRED", "원상복구 작업은 필요하지 않다고 했다가 다시 필요하다고 했어요."),
+    ("demolition_required", "NOT_REQUIRED", "철거도 필요하지 않다고 했는데 결국 철거하래요."),
+    ("demolition_required", "NOT_REQUIRED", "임대인이 철거는 필요 없다고 했다가 다시 해야 한대요."),
+    ("demolition_required", "NOT_REQUIRED", "철거는 필요 없다고 했는데 철거 비용을 내래요."),
+    ("demolition_required", "REQUIRED", "철거해야 한다고 했는데 안 해도 된대요."),
+])
+def test_self_reversing_sentence_is_asked_back_instead_of_confirmed(field, value, text):
+    candidate, = analyze_facts([(field, value, text)], text).fact_candidates
+    assert candidate.field_path == field
+    assert candidate.requires_confirmation
+
+
+# 뒤집는 말이 없는 문장은 그대로 확정된다. 되묻기가 넓어져 정상 입력까지 다시 묻게
+# 되면 사장님이 같은 답을 두 번 하게 되므로 반대쪽도 같이 지킨다.
+def test_plain_result_sentence_still_confirms_without_asking_back():
+    text = RESTORATION_RESULT + " 철거도 필요하지 않습니다."
+    result = analyze_facts([
+        ("restoration_scope", "NOT_REQUIRED", RESTORATION_RESULT),
+        ("restoration_status", "NOT_REQUIRED", RESTORATION_RESULT),
+        ("demolition_required", "NOT_REQUIRED", "철거도 필요하지 않습니다."),
+    ], text)
+    assert len(result.fact_candidates) == 3
+    assert not any(item.requires_confirmation for item in result.fact_candidates)
+
+
+# 확인이 필요한 사실은 Case에 저장되지 않는다. 그런데 모델은 답을 냈다고 보고 그 필드를
+# missing_fields에 넣지 않으므로, 되물을 대상에 따로 넣어주지 않으면 "사실은 보류됐는데
+# 아무도 묻지 않는" 상태가 되어 판단이 통째로 실패한다. 실제 실행에서 그렇게 끝났다.
+def test_held_fact_still_produces_a_question_for_the_owner():
+    from uuid import uuid4
+
+    from app.agent.blocker_candidates import missing_info_fields
+    from app.agent.enrichment import build_fact_overlays
+    from app.agent.schemas import CaseSnapshot, MutationSet
+
+    text = "임대인에게 물어봤어요. 원상복구 범위는 없다고 들었는데 임대인은 전부 하라고 했어요."
+    result = analyze_facts([("restoration_scope", "NOT_REQUIRED", text)], text)
+    candidate, = result.fact_candidates
+    assert candidate.requires_confirmation
+
+    base = supervisor_request()
+    snapshot = base.case_snapshot.model_dump(mode="json")
+    for item in snapshot["facts"]:
+        if item["field_path"] in {"restoration_scope", "restoration_status"}:
+            item.update(status="UNKNOWN", value=None, evidence_refs=[], updated_at=None)
+    snapshot["procedure_progress"] = []
+    snapshot = CaseSnapshot.model_validate(snapshot)
+    source = next(
+        item for item in base.source_results
+        if type(item.output).__name__ == "InfoAnalysisResult"
+    ).model_copy(update={"output": result})
+
+    # 보류된 값은 Case에 반영되지 않는다
+    assert build_fact_overlays(snapshot, result, uuid4(), uuid_factory=uuid4) == []
+    # 그래도 사장님께는 물어본다
+    fields = missing_info_fields(
+        snapshot,
+        [source],
+        MutationSet(
+            fact_changes=[], procedure_progress_changes=[], support_match_updates=[]
+        ),
+        None,
+    )
+    assert fields is not None
+    assert fields["decision_type"] == "NEEDS_MORE_INFO"
+    assert fields["questions_for_user"] == ["확인한 원상복구 범위가 있으면 알려주세요."]

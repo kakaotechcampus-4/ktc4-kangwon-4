@@ -118,7 +118,7 @@ interface JudgmentSectionProps {
 /**
  * 판단 상태에 맞는 안내와 행동.
  *
- * 다섯 갈래를 전부 적는다. `switch`가 아니라 `if`로 흘려두면 새 상태가 늘었을 때
+ * 여섯 갈래를 전부 적는다. `switch`가 아니라 `if`로 흘려두면 새 상태가 늘었을 때
  * 아무 화면도 안 나오고 조용히 빈 자리가 생긴다.
  */
 function JudgmentSection({
@@ -194,6 +194,25 @@ function JudgmentSection({
             action={recheck}
           />
         </>
+      )
+
+    /*
+      어긋난 항목이 응답에 없어서(#66) 무엇과 무엇이 다른지는 아직 못 보여준다.
+      그래도 "불러오지 못했어요" 로 두는 것보다 낫다 — 사장님이 해야 할 일이 기다리는
+      것인지 답하는 것인지가 달라진다.
+
+      `/confirm` 으로 보내는 버튼은 달지 않는다. 어긋난 목록을 받아올 API 가 없어서
+      그 화면이 빈손으로 열리고 `/` 로 튕긴다. `NEEDS_MORE_INFO` 에서 입력칸을 안 두는
+      것과 같다 — 되지 않는 일을 버튼으로 약속하지 않는다.
+    */
+    case 'CONFLICT':
+      return (
+        <NoticeCard
+          tone="NEUTRAL"
+          title="확인이 필요한 내용이 있어요."
+          description="알려주신 내용이 저장된 기록과 달라서, 어느 쪽이 맞는지 여쭤봐야 해요. 확인하시는 화면을 준비하고 있습니다."
+          action={recheck}
+        />
       )
 
     /*

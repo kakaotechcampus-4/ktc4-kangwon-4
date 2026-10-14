@@ -8,7 +8,8 @@ CaseStatus = Literal["IN_PROGRESS", "COMPLETED"]
 RestorationStatus = Literal["UNKNOWN", "NOT_STARTED", "IN_PROGRESS", "COMPLETED", "NOT_REQUIRED"]
 RestorationScope = Literal["UNKNOWN", "PARTIAL", "FULL", "NOT_REQUIRED"]
 DemolitionRequired = Literal["UNKNOWN", "REQUIRED", "NOT_REQUIRED"]
-JudgmentStatus = Literal["PENDING", "DONE", "NEEDS_MORE_INFO", "FAILED"]
+JudgmentStatus = Literal["PENDING", "DONE", "NEEDS_MORE_INFO", "CONFLICT", "FAILED"]
+RecoveryActionCode = Literal["RETRY", "RESUBMIT_INPUT", "CONTACT_SUPPORT", "NONE"]
 
 
 class CaseCreateRequest(BaseModel):
@@ -55,9 +56,44 @@ class CaseGetDetailResponse(BaseModel):
     planned_closure_date: date | None
 
 
+class NextActionResponse(BaseModel):
+    title: str
+    reason: str | None
+    questions_to_ask: list[str]
+
+
+class FieldChangeResponse(BaseModel):
+    field: str
+    stored_value: str | None
+    new_value: str | None
+
+
 class CaseGetResponse(BaseModel):
     case: CaseGetDetailResponse | None
     blocker: str | None
-    next_action: str | None
+    next_action: NextActionResponse | None
     judgment_status: JudgmentStatus | None
     questions_for_user: list[str] | None
+    recovery_action_code: RecoveryActionCode | None
+    requested_field_paths: list[str] | None
+    retryable: bool | None
+    changes: list[FieldChangeResponse] | None
+
+
+class ConflictItemResponse(BaseModel):
+    id: int
+    field: str
+    stored_value: str | None
+    proposed_value: str
+
+
+class CaseResultsEntryResponse(BaseModel):
+    judgment_status: JudgmentStatus
+    case_history_id: int | None = None
+    raw_input: str | None = None
+    conflicts: list[ConflictItemResponse] | None = None
+    next_action: NextActionResponse | None = None
+    questions_for_user: list[str] | None = None
+    recovery_action_code: RecoveryActionCode | None = None
+    requested_field_paths: list[str] | None = None
+    retryable: bool | None = None

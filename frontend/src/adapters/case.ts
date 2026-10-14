@@ -4,9 +4,10 @@ import type {
   CaseResponse,
   CasesEnvelope,
   DemolitionRequired,
+  NextActionResponse,
   RestorationScope,
 } from '../types/api'
-import type { CaseDraft, CurrentCaseView, Fact, JudgmentView } from '../types/view'
+import type { CaseDraft, CurrentCaseView, Fact, JudgmentView, NextAction } from '../types/view'
 
 /**
  * 서버 모양과 화면 모양 사이를 잇는다.
@@ -90,6 +91,44 @@ export function toFacts(serverCase: CaseResponse): Fact[] {
 }
 
 /**
+ * 화면에 그대로 띄울 수 있는 글자인지.
+ *
+ * 타입에 `string` 으로 적혀 있어도 실제로 오는 JSON 은 그 약속을 지키지 않을 수 있다.
+ * 글자가 아닌 것이 글자 자리에 들어가면 React 가 객체를 받아 화면이 통째로 죽는다.
+ *
+ * 비어 있는 것과 모양이 다른 것을 같이 본다 — 둘 다 "그릴 것이 없다" 는 뜻이고,
+ * 화면이 할 수 있는 일도 같다.
+ */
+function isReadableText(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0
+}
+
+/**
+ * 다음 할 일을 화면 모양으로. 받을 수 없는 모양이면 `null`.
+ *
+ * **제목만 필수다.** 이유와 물어볼 말은 없어도 카드가 성립하고, 없으면 그 자리를 아예
+ * 그리지 않는다. 반면 제목이 없으면 띄울 것이 없다.
+ *
+ * 물어볼 말은 하나라도 글자가 아니면 **통째로 버린다.** 성한 것만 골라 그리면 사장님이
+ * 그게 물어볼 말의 전부인 줄 알고, 빠뜨린 채로 임대인을 만난다.
+ */
+function toNextAction(value: unknown): NextAction | null {
+  if (value === null || typeof value !== 'object') return null
+
+  const { title, reason, questions_to_ask } = value as Partial<NextActionResponse>
+  if (!isReadableText(title)) return null
+
+  return {
+    title,
+    reason: isReadableText(reason) ? reason : '',
+    questions:
+      Array.isArray(questions_to_ask) && questions_to_ask.every(isReadableText)
+        ? questions_to_ask
+        : undefined,
+  }
+}
+
+/**
  * 판단 상태와 그 내용을 화면 모양으로.
  *
  * 상태마다 같이 와야 하는 값이 정해져 있다. 그 약속이 깨진 응답은 **다른 상태로 바꿔
@@ -109,21 +148,34 @@ function toJudgmentView(envelope: CasesEnvelope): JudgmentView {
     case 'FAILED':
       return { status: 'FAILED' }
 
-    case 'DONE':
-      // 둘 중 하나라도 비면 화면에 그릴 것이 없다. `null` 만 보지 않는 것은, 칸을 통째로
-      // 빠뜨린 응답과 빈 문자열이 같은 결과를 내기 때문이다 — 제목 없는 할 일 카드가 뜨고
-      // 그 밑의 "결과 알려주기" 는 멀쩡히 눌린다
-      if (!blocker || !next_action) return { status: 'UNRECOGNIZED' }
-      return {
-        status: 'DONE',
-        blocker: { title: blocker },
-        nextAction: toNextAction(next_action),
-      }
+    // 검증할 것이 없다. 어긋난 항목은 응답에 안 실려 온다(#66).
+    //
+    // `blocker` 가 딸려 와도 보지 않는다 — 그건 충돌이 나기 전의 판단이라, 지금 할 일로
+    // 그리면 사장님이 이미 어긋난 전제 위에서 움직이게 된다. `PENDING`·`FAILED` 와 같은 규칙이다
+    case 'CONFLICT':
+      return { status: 'CONFLICT' }
+
+    case 'DONE': {
+      // 막힌 것과 할 일 중 하나라도 받을 수 없으면 그릴 것이 없다. 칸을 빠뜨린 응답·
+      // 빈 문자열·모양이 다른 응답이 모두 여기 걸린다 — 통과시키면 제목 없는 할 일 카드가
+      // 뜨고 그 밑의 "결과 알려주기" 는 멀쩡히 눌린다
+      const nextAction = toNextAction(next_action)
+      if (!isReadableText(blocker) || nextAction === null) return { status: 'UNRECOGNIZED' }
+
+      return { status: 'DONE', blocker: { title: blocker }, nextAction }
+    }
 
     case 'NEEDS_MORE_INFO':
-      // 물어볼 것이 없는데 "물어볼 게 있다" 고 할 수는 없다. 칸이 아예 없으면
-      // `.length` 에서 터지고, 그 오류는 조회 실패로 읽혀 "불러오지 못했어요" 가 뜬다
-      if (!questions_for_user || questions_for_user.length === 0) {
+      // 물어볼 것이 없는데 "물어볼 게 있다" 고 할 수는 없다.
+      //
+      // 목록인지만 보면 모자라다. 글자가 아닌 것이 담겨 있어도 화면이 그릴 수 없어서,
+      // 카드가 목록을 펼치다 React 에 객체를 넘기고 거기서 앱이 내려간다. 바깥 그릇만
+      // 보고 안에 든 것을 안 보면 `next_action` 에서 막은 것과 같은 구멍이 남는다
+      if (
+        !Array.isArray(questions_for_user) ||
+        questions_for_user.length === 0 ||
+        !questions_for_user.every(isReadableText)
+      ) {
         return { status: 'UNRECOGNIZED' }
       }
       return { status: 'NEEDS_MORE_INFO', questions: questions_for_user }
@@ -132,19 +184,6 @@ function toJudgmentView(envelope: CasesEnvelope): JudgmentView {
       // `null` 이거나 우리가 모르는 값. 서버가 상태를 늘렸다는 뜻이다
       return { status: 'UNRECOGNIZED' }
   }
-}
-
-/**
- * 서버는 다음 할 일의 **제목만** 보낸다.
- *
- * 이유(`reason`)와 상대에게 물어볼 말(`questions_to_ask`)은 DB 에 들어 있는데 응답에
- * 실리지 않는다(BE #44 에서 내려주기로 함). 그때까지 제목만으로 화면이 성립해야 해서
- * 나머지는 비워 둔다 — 카드가 빈 문단을 그리지 않는 것은 `NextActionCard` 가 맡는다.
- *
- * 순번(`seq`)도 응답에 없다. 1 로 채우지 않는다. 지어낸 순서는 사장님이 실제 순서로 읽는다.
- */
-function toNextAction(title: string) {
-  return { title, reason: '' }
 }
 
 /** 현재 Case 화면이 필요한 전체 데이터 */

@@ -13,6 +13,7 @@ from app.be.models.evidence import DecisionRecord
 from app.be.services import agent_runtime as agent_runtime_service
 from app.be.services import case_snapshot as case_snapshot_service
 from app.be.services import decision_record as decision_record_service
+from app.be.services import reviewed_procedure as reviewed_procedure_service
 from app.common.agent_dto import AgentGraphOutput
 from app.common.agent_service import build_planning_input, run_case_planning
 
@@ -62,20 +63,24 @@ async def run_first_judgment(
     outcome = await run_case_planning(
         graph_input,
         known_procedure_steps=agent_runtime_service.build_known_procedure_steps(session),
-        # TODO: AI가 아는 절차(원상복구 범위 확인/세무서 폐업 신고/영업신고증 폐업 신고/4대보험
-        # 상실 신고)와 우리 DB의 절차를 짝지어야 한다. 지금은 임시 더미 절차뿐이라 비워 둔다
-        # — 비면 AI가 절차와 연결된 다음 행동을 내놓지 못한다.
-        procedure_bindings={},
-        procedure_store=agent_runtime_service.EmptyProcedureStore(),
+        # None은 "절차 목록의 step_code가 AI 논리 코드와 같으면 알아서 맺어라"는 뜻이고,
+        # 빈 표({})는 "맺을 게 없다"는 뜻이라 서로 다르다(action_catalog.resolve_procedure_bindings).
+        # 지금은 임시 절차의 이름을 논리 코드와 같게 둬서 자동으로 맺는다(case.py).
+        # TODO: 실제 폐업절차 데이터가 들어오면 이름이 달라진다. 그때는 어느 절차에 맺을지
+        # 정해 여기에 직접 넘겨야 한다.
+        procedure_bindings=None,
+        procedure_store=reviewed_procedure_service.load_reviewed_procedures(),
         support_catalog=agent_runtime_service.empty_support_catalog(),
     )
 
-    if outcome.outcome_type != "REVIEWED_PLAN":
-        # CONFLICT는 사용자에게 되물어 확인받는 흐름이 필요하고, SAFE_FAILURE는 실패 이유를
-        # 보여줘야 한다. 둘 다 정상 결과로는 저장하지 않지만, 화면이 계속 "분석 중"에
-        # 머물지 않도록 상태만은 FAILED로 남긴다.
-        # TODO: CONFLICT를 FAILED로 뭉뚱그리지 않고 재확인 흐름으로 잇는다.
-        decision_record_service.mark_judgment_failed(session, case_id)
+    # 결과는 세 가지이고 화면이 할 일이 각각 다르다. 검수를 통과한 판단만 Case 값을 바꾸고,
+    # 충돌은 되물을 거리를, 실패는 다음 행동을 남긴다.
+    if outcome.outcome_type == "CONFLICT":
+        decision_record_service.save_conflict(session, history, outcome)
+        return outcome, None
+
+    if outcome.outcome_type == "SAFE_FAILURE":
+        decision_record_service.save_safe_failure(session, history, outcome)
         return outcome, None
 
     return outcome, decision_record_service.save_reviewed_plan(session, history, outcome)

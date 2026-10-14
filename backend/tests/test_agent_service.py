@@ -6,8 +6,11 @@ database, no provider: BE rows are built in memory and the runtime is replaced.
 """
 
 import asyncio
+import json
+import sys
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, patch
+from types import SimpleNamespace
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
@@ -16,6 +19,7 @@ from pydantic import ValidationError
 
 from app.agent.action_catalog import resolve_procedure_bindings
 from app.agent.guardrails import GuardrailViolation
+from app.agent.procedure_tool.store import ProcedureStoreError
 from app.agent.schemas import ProcedureStepRef
 from app.agent.support_agent import ReviewedSupportCatalog
 from app.be.models.procedure_step import ProcedureStep, StepDependency
@@ -25,6 +29,7 @@ from app.common.agent_data import (
 )
 from app.common.agent_dto import CaseSnapshot, RedactedInput
 from app.common.agent_service import build_planning_input, run_case_planning
+from scripts import import_reviewed_procedures as import_cli
 
 SEOUL = ZoneInfo("Asia/Seoul")
 NOW = datetime(2026, 9, 29, tzinfo=timezone.utc)
@@ -222,7 +227,7 @@ class FakeRuntime:
         self.flushed = True
 
 
-def plan_with(runtime):
+def plan_with(runtime, bindings):
     request = build_planning_input(
         trigger_type="CASE_CREATED",
         case_snapshot=case_snapshot(),
@@ -233,11 +238,11 @@ def plan_with(runtime):
         with patch(
             "app.common.agent_service.build_runtime",
             new=AsyncMock(return_value=runtime),
-        ):
-            return await run_case_planning(
+        ) as build:
+            outcome = await run_case_planning(
                 request,
                 known_procedure_steps=known(row(11, "FILE_TAX_BUSINESS_CLOSURE")),
-                procedure_bindings={},
+                procedure_bindings=bindings,
                 procedure_store=InMemoryReviewedProcedureStore("synthetic/1", ()),
                 support_catalog=ReviewedSupportCatalog.model_validate(
                     {
@@ -247,15 +252,18 @@ def plan_with(runtime):
                     }
                 ),
             )
+            assert build.await_args.kwargs["procedure_bindings"] is bindings
+            return outcome
 
     return asyncio.run(run())
 
 
-def test_a_reviewed_plan_is_integrity_checked_before_it_is_returned():
+@pytest.mark.parametrize("bindings", [{}, None])
+def test_a_reviewed_plan_is_integrity_checked_before_it_is_returned(bindings):
     outcome = FakeOutcome("REVIEWED_PLAN")
     runtime = FakeRuntime(outcome=outcome)
 
-    assert plan_with(runtime) is outcome
+    assert plan_with(runtime, bindings) is outcome
     assert outcome.integrity_checked
     assert runtime.closed and runtime.flushed
 
@@ -263,7 +271,7 @@ def test_a_reviewed_plan_is_integrity_checked_before_it_is_returned():
 def test_a_safe_failure_is_returned_without_the_reviewed_plan_check():
     outcome = FakeOutcome("SAFE_FAILURE")
 
-    assert plan_with(FakeRuntime(outcome=outcome)) is outcome
+    assert plan_with(FakeRuntime(outcome=outcome), {}) is outcome
     assert not outcome.integrity_checked
 
 
@@ -271,6 +279,66 @@ def test_the_runtime_is_closed_and_flushed_when_planning_raises():
     runtime = FakeRuntime(error=RuntimeError("provider down"))
 
     with pytest.raises(RuntimeError, match="provider down"):
-        plan_with(runtime)
+        plan_with(runtime, {})
 
     assert runtime.closed and runtime.flushed
+
+
+@pytest.fixture
+def import_cli_context(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["import_reviewed_procedures", "--case-id", "1"])
+    monkeypatch.setitem(sys.modules, "app.be.db", SimpleNamespace(_engine=object()))
+    session = MagicMock()
+    session.__enter__.return_value = session
+    monkeypatch.setattr(import_cli, "Session", MagicMock(return_value=session))
+    store = InMemoryReviewedProcedureStore("synthetic/1", ())
+    monkeypatch.setattr(import_cli, "load_reviewed_procedures", MagicMock(return_value=store))
+    writer = MagicMock(return_value=[])
+    monkeypatch.setattr(import_cli, "import_reviewed_procedures", writer)
+    return store, session, writer
+
+
+def test_import_cli_passes_bundled_store_to_be_and_commits_without_new_column(import_cli_context):
+    store, session, writer = import_cli_context
+    import_cli.main()
+    writer.assert_called_once_with(session, 1, store, as_of=ANY)
+    session.commit.assert_called_once_with()
+    session.rollback.assert_not_called()
+
+
+def test_import_cli_validates_explicit_source_and_preserves_its_version(
+    import_cli_context, monkeypatch, tmp_path,
+):
+    _, session, writer = import_cli_context
+    source = tmp_path / "reviewed.json"
+    source.write_text(json.dumps({
+        "snapshot_version": "synthetic/2", "generated_at": NOW.isoformat(),
+        "locale": "ko-KR", "records": [],
+    }), encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", [
+        "import_reviewed_procedures", "--case-id", "1", "--source", str(source),
+    ])
+    import_cli.main()
+    imported_store = writer.call_args.args[2]
+    assert imported_store.snapshot_version == "synthetic/2"
+    import_cli.load_reviewed_procedures.assert_not_called()
+    session.commit.assert_called_once_with()
+
+
+def test_import_cli_rolls_back_when_be_import_fails(import_cli_context):
+    _, session, writer = import_cli_context
+    writer.side_effect = ProcedureStoreError("synthetic import failure")
+    with pytest.raises(ProcedureStoreError, match="synthetic import failure"):
+        import_cli.main()
+    session.rollback.assert_called_once_with()
+    session.commit.assert_not_called()
+
+
+def test_import_cli_rejects_invalid_source_before_importing_database(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["import_reviewed_procedures", "--case-id", "1"])
+    monkeypatch.setitem(sys.modules, "app.be.db", None)
+    monkeypatch.setattr(import_cli, "load_reviewed_procedures", MagicMock(
+        side_effect=ProcedureStoreError("synthetic invalid source"),
+    ))
+    with pytest.raises(ProcedureStoreError, match="synthetic invalid source"):
+        import_cli.main()

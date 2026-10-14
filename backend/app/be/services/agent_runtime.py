@@ -1,18 +1,15 @@
 """AI에 넘길 참고 자료를 BE 쪽 데이터로 만든다.
 
 AI 호출은 AI팀 입구(app/common/agent_service.py)가 맡고, 여기서는 그 입구에 넘길
-절차 목록·절차 문서·지원사업 자료만 만든다.
+절차 목록과 지원사업 자료를 만든다. 검수된 절차 문서는 app/be/services/reviewed_procedure.py가
+맡는다.
 
-AI는 검수된 절차 문서·지원사업 자료를 호출자가 넣어주기를 기대한다.
-아직 그 자료가 없어서 절차 문서와 지원사업은 빈 채로 넘긴다 — 없는 걸 지어내면
-AI가 존재하지 않는 출처를 근거로 안내하게 되므로, 비어 있다는 사실을 그대로 전달한다.
+지원사업은 검수된 자료가 아직 없어서 빈 채로 넘긴다 — 없는 걸 지어내면 AI가 존재하지
+않는 출처를 근거로 안내하게 되므로, 비어 있다는 사실을 그대로 전달한다.
 """
-
-from collections.abc import Sequence
 
 from sqlmodel import Session
 
-from app.agent.procedure_tool.store import ReviewedProcedureRecord
 from app.agent.schemas import (
     KnownProcedureStep,
     ProcedureDependency,
@@ -22,17 +19,6 @@ from app.agent.schemas import (
 from app.agent.support_agent import ReviewedSupportCatalog
 from app.be.crud import procedure_step as procedure_step_crud
 from app.be.models.mixins import KST
-
-
-class EmptyProcedureStore:
-    """검수된 절차 문서가 아직 하나도 없는 상태를 나타내는 store."""
-
-    @property
-    def snapshot_version(self) -> str:
-        return "no-reviewed-procedure-documents"
-
-    def records(self) -> Sequence[ReviewedProcedureRecord]:
-        return ()
 
 
 def empty_support_catalog() -> ReviewedSupportCatalog:

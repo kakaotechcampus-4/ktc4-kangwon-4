@@ -1,4 +1,4 @@
-"""검수 원본을 기존 Case에 적재: cd backend && python -m scripts.import_reviewed_procedures --case-id 1."""
+"""BE 저장 함수로 검수 자료를 재적재: python -m scripts.import_reviewed_procedures --case-id 1."""
 
 from __future__ import annotations
 
@@ -10,11 +10,11 @@ from pathlib import Path
 from sqlmodel import Session
 
 from app.be.models.mixins import KST
-from app.common.agent_data import (
+from app.be.services.reviewed_procedure import (
     import_reviewed_procedures,
-    load_reviewed_procedure_store,
     load_reviewed_procedures,
 )
+from app.common.agent_data import load_reviewed_procedure_store
 
 
 def main() -> None:

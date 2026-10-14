@@ -353,7 +353,12 @@ class CaseFact(AgentSchema):
     value: StrictScalar
     status: FactStatus
     evidence_refs: list[NonEmptyStr]
-    updated_at: AwareDatetime | None
+    updated_at: AwareDatetime | None = Field(
+        description=(
+            "When this individual fact was updated, if known. Use null when unknown; "
+            "do not infer it from the Case row's updated_at."
+        )
+    )
 
     @model_validator(mode="after")
     def validate_fact_state(self) -> CaseFact:
@@ -390,7 +395,15 @@ class ProcedureProgress(AgentSchema):
 
 
 class CaseSnapshot(AgentSchema):
-    snapshot_id: RuntimeUUID
+    snapshot_id: RuntimeUUID = Field(
+        description=(
+            "Caller-issued identity of the Case read view used for this planning run "
+            "and its review proof. Conflict confirmation must match the original "
+            "candidate's snapshot ID and current field state/value; a mismatch causes "
+            "STALE_CONFLICT_CONFIRMATION. How the caller stores and reuses this ID "
+            "and the conflict candidate is a separate integration decision."
+        )
+    )
     case_id: PositiveStrictInt
     case_status: Literal[CaseStatus.IN_PROGRESS]
     facts: list[CaseFact]
@@ -1604,7 +1617,12 @@ class SupervisorDraft(AgentSchema):
 class CaseCreatedTrigger(AgentSchema):
     trigger_type: Literal["CASE_CREATED"]
     input_event_id: NonEmptyStr
-    client_event_id: NonEmptyStr | None
+    client_event_id: NonEmptyStr | None = Field(
+        description=(
+            "Client-provided event ID, distinct from input_event_id. Use null when "
+            "absent; this field does not implement duplicate-request prevention."
+        )
+    )
     input: RedactedInput
     submitted_at: AwareDatetime
 
@@ -1618,7 +1636,12 @@ class CaseCreatedTrigger(AgentSchema):
 class ResultSubmittedTrigger(AgentSchema):
     trigger_type: Literal["RESULT_SUBMITTED"]
     input_event_id: NonEmptyStr
-    client_event_id: NonEmptyStr | None
+    client_event_id: NonEmptyStr | None = Field(
+        description=(
+            "Client-provided event ID, distinct from input_event_id. Use null when "
+            "absent; this field does not implement duplicate-request prevention."
+        )
+    )
     input: RedactedInput
     submitted_at: AwareDatetime
 
@@ -1644,7 +1667,12 @@ class ConflictConfirmedTrigger(AgentSchema):
 
     trigger_type: Literal["CONFLICT_CONFIRMED"]
     input_event_id: NonEmptyStr
-    client_event_id: NonEmptyStr | None
+    client_event_id: NonEmptyStr | None = Field(
+        description=(
+            "Client-provided event ID, distinct from input_event_id. Use null when "
+            "absent; this field does not implement duplicate-request prevention."
+        )
+    )
     confirmed_conflict: ConflictCandidate = Field(
         description="The original conflict candidate the user accepted."
     )
@@ -1671,8 +1699,9 @@ class AgentGraphInput(AgentSchema):
     trace_id: Varchar100 | None = Field(
         default=None,
         description=(
-            "Optional caller correlation identifier propagated to invocation metadata; "
-            "it is not a planning-decision input."
+            "Optional caller-generated correlation ID, distinct from run_id, "
+            "propagated to invocation metadata. To persist it, the caller passes it "
+            "separately to save_reviewed_plan; it is not a planning-decision input."
         ),
     )
 

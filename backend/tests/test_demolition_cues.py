@@ -7,6 +7,7 @@ uncertain phrasing still fails.
 """
 
 import pytest
+
 from app.agent.info_agent.agent import ExtractedFactDraft, InfoAnalysisAgent
 
 
@@ -36,6 +37,7 @@ def supports(value, sentence):
         "임대인이 철거를 해야 한다고 했어요.",
         "임대인이 철거가 필요하다고 했어요.",
         "임대인이 철거는 필요하다고 했어요.",
+        "철거도 필요합니다.",
     ],
 )
 def test_particle_variants_assert_demolition_required(sentence):
@@ -50,6 +52,7 @@ def test_particle_variants_assert_demolition_required(sentence):
         "임대인이 철거는 필요없다고 했어요.",
         "임대인이 철거하지 않아도 된다고 했어요.",
         "임대인이 철거는 불필요하다고 했어요.",
+        "철거도 필요하지 않습니다.",
     ],
 )
 def test_negated_phrasings_never_assert_required(sentence):
@@ -70,3 +73,20 @@ def test_negated_phrasings_never_assert_required(sentence):
 def test_uncertain_phrasings_assert_nothing(sentence):
     assert not supports("REQUIRED", sentence)
     assert not supports("NOT_REQUIRED", sentence)
+
+
+@pytest.mark.parametrize("sentence", [
+    "철거도 필요하지 않은 것은 아닙니다.",
+    "철거도 필요하지 않을 수도 있습니다.",
+    "철거도 필요하지 않은 것 같습니다.",
+    "철거도 필요하지 않나요.",
+])
+def test_unconfirmed_demolition_with_additive_particle_is_not_asserted(sentence):
+    assert not supports("REQUIRED", sentence)
+    assert not supports("NOT_REQUIRED", sentence)
+
+
+def test_short_quote_cannot_hide_demolition_negation():
+    assert not InfoAnalysisAgent._fact_source_supports_value(
+        fact("REQUIRED", "철거도 필요"), input_text="철거도 필요하지 않습니다."
+    )

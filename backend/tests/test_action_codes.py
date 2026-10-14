@@ -6,6 +6,8 @@ from unittest.mock import AsyncMock
 from uuid import UUID
 
 import pytest
+from pydantic import TypeAdapter, ValidationError
+
 from app.agent.action_catalog import build_action_candidates, resolve_procedure_bindings
 from app.agent.graph import AgentGraph
 from app.agent.review_tool import ReviewTool
@@ -31,7 +33,6 @@ from app.agent.supervisor.agent import (
     SupervisorGuardrailError,
     SupervisorModelOutput,
 )
-from pydantic import TypeAdapter, ValidationError
 
 NOW = datetime(2026, 9, 25, tzinfo=timezone.utc)
 REF = "synthetic-document"
@@ -469,7 +470,7 @@ def test_review_checks_required_blocker_against_verified_candidate(
         ).draft(request)
         assert draft.decision.blocker is not None
         assert draft.decision.blocker.evidence_refs == [REF]
-        assert draft.decision.next_action.action_code == action_code
+        assert draft.decision.next_action.action_code == CONFIRM_TAX
         assert draft.decision.questions_for_user == []
         assert any(
             "/blocker/" in claim.target_path for claim in draft.grounded_claims
@@ -596,7 +597,7 @@ def test_graph_distinguishes_missing_bindings_from_actionable_candidates(trigger
         )
         outcome = await graph.run(request)
         restored = TypeAdapter(AgentGraphOutput).validate_json(outcome.model_dump_json())
-        if scenario == "missing_bindings":
+        if scenario in {"missing_bindings", "support_action"}:
             assert restored.outcome_type == "SAFE_FAILURE", restored
             assert restored.failure_code == "COMPONENT_UNAVAILABLE"
             assert restored.message_code == "AGENT_PROCEDURE_BINDINGS_MISSING"
@@ -619,9 +620,9 @@ def test_graph_distinguishes_missing_bindings_from_actionable_candidates(trigger
         for runner, method in (
             (procedure_runner, "lookup"),
             (info_runner, "analyze"),
-            (support_runner, "analyze"),
         ):
             getattr(runner, method).assert_awaited_once()
+        support_runner.analyze.assert_not_awaited()
         assert request.model_dump_json() == original
 
     asyncio.run(run())

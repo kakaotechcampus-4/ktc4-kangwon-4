@@ -9,9 +9,9 @@ Agent는 확인된 Case와 근거로 다음 행동을 판단한다. 실행 경�
 
 | 구성요소 | 책임 |
 |---|---|
-| Supervisor Agent | 절차·사실·지원조건을 종합해 Blocker 1개·Next Action 1개 또는 확인 질문과 변경 후보 생성 |
+| Supervisor Agent | 절차·사실을 종합해 Blocker 1개·Next Action 1개 또는 확인 질문과 변경 후보 생성 |
 | 정보분석 Agent | 비식별 입력에서 근거가 있는 사실·진행·충돌 후보를 추출하고 Case에 맞는 절차를 분석한다 |
-| 지원금 Agent | 검수된 지원조건을 Case와 비교하고 관련성·미확인 조건·공식 근거를 반환한다 |
+| 지원금 Agent | 기존 구현을 보존하되 MVP 실행 경로에서는 호출하지 않는다 |
 | 절차조회 Tool | 주입된 절차 자료에서 원문·출처·검수 상태를 조회한다. 우선순위나 Next Action을 결정하지 않는다 |
 | Review Tool | 초안·변경 후보·근거를 독립 검수해 `PASS` 또는 사유와 재작업 대상이 있는 `REVISE`를 반환한다 |
 
@@ -24,12 +24,12 @@ Review는 검색·초안 수정·저장을 수행하지 않는다.
 CASE_CREATED | RESULT_SUBMITTED
   → Procedure → Info
       ├─ 확정 사실과 충돌 → CONFLICT
-      └─ 충돌 없음 → Support → Supervisor → Review
+      └─ 충돌 없음 → Supervisor → Review
 
 CONFLICT_CONFIRMED
   → 선택 후보·현재값 검증 → 확인된 fact_overlays
   → Procedure → Info(절차 분석: input=None, fact_overlays)
-  → Support → Supervisor → Review
+  → Supervisor → Review
 
 Review
   ├─ PASS → 검수 대상과 일치하는 ReviewProof → REVIEWED_PLAN
@@ -38,13 +38,14 @@ Review
 ```
 
 MVP는 위 경로를 사용하며 일반화된 자율 Tool 선택 계획을 추가하지 않는다.
-충돌 확인 뒤에도 변경된 사실을 바탕으로 절차·지원조건을 다시 확인한다.
+충돌 확인 뒤에도 변경된 사실을 바탕으로 폐업 절차를 다시 확인한다.
 새 사용자 입력이 없는 실행을 위해 발화를 만들지 않는다. Info는 전달된 확인 후보로 절차만 분석한다.
 확인된 후보는 Procedure·Info부터 다시 실행하는 재작업에서도 유지하며 LLM이 교체하지 못한다.
 
 ## 실행 자료와 수명
 
-BE가 실제 절차 ID 목록·검수 지원 catalog·절차 store를 `build_runtime`에 주입한다.
+BE가 실제 절차 ID 목록·절차 store를 `build_runtime`에 주입한다.
+지원 catalog 인자는 기존 호출 계약에 남지만 MVP에서는 지원 분석을 실행하지 않는다.
 공용 runtime을 여러 요청에 사용하되 호출 예산·사용량·deadline은 실행마다 분리한다.
 환경변수는 [`.env.example`](../../.env.example), 한도·자원 정리는
 [`runtime.py`](../../backend/app/agent/runtime.py)를 따른다.
@@ -92,4 +93,4 @@ Case snapshot은 한 실행 동안 바꾸지 않는다. 추출·사용자 확인
 - 사용자 원문·근거 본문·비밀값을 trace에 기록하지 않는다.
 
 호출자가 맡는 저장과 충돌 확인 경계는 [실행 경계](./README.md#실행-경계)를 따른다.
-절차 실행 가능 판정은 `procedure_tool/rules.py`, 지원조건 비교는 `support_agent/agent.py`가 기준이다.
+절차 실행 가능 판정은 `procedure_tool/rules.py`, 후보 우선순위는 `blocker_candidates.py`가 기준이다.
