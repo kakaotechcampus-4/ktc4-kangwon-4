@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 
 from fastapi import HTTPException
 from sqlmodel import Session
@@ -26,6 +27,8 @@ from app.be.schemas.case import (
 )
 from app.be.services import reviewed_procedure as reviewed_procedure_service
 
+logger = logging.getLogger(__name__)
+
 
 def create_case(session: Session, member_id: int, case_request: CaseCreateRequest) -> Case:
     if case_crud.get_case_by_member_id(session, member_id) is not None:
@@ -42,17 +45,47 @@ def create_case(session: Session, member_id: int, case_request: CaseCreateReques
     case = case_crud.create_case(session, case)
     _fill_temp_case_procedure_steps(session, case.id)
     _create_case_creation_evidence(session, case, case_request)
-    # 검수된 절차 문서는 AI가 직접 읽지 않고, BE가 이 Case의 근거로 저장해 둔 것만 쓴다.
-    # 적재해 두지 않으면 절차조회가 짝을 못 찾아 그 문서를 아예 안 쓴다.
-    reviewed_procedure_service.import_reviewed_procedures(
-        session,
-        case.id,
-        reviewed_procedure_service.load_reviewed_procedures(),
-        as_of=kst_now().date(),
-    )
+    # 문서 적재보다 먼저 확정한다. 적재가 터져도 가입은 남아야 하기 때문이다.
     session.commit()
+
+    _import_reviewed_procedures(session, case.id)
+
     session.refresh(case)
     return case
+
+
+def _import_reviewed_procedures(session: Session, case_id: int) -> None:
+    """검수된 절차 문서를 이 Case의 근거로 저장한다. 실패해도 Case는 그대로 둔다.
+
+    AI는 이 문서를 직접 읽지 않고 BE가 Case의 근거로 저장해 둔 것만 쓴다. 적재해 두지
+    않으면 절차조회가 짝을 못 찾아 그 문서를 아예 안 쓴다.
+
+    여기서 터지는 건 사장님 입력이 아니라 우리 쪽 문서 문제다 — 파일이 깨졌거나, 버전을
+    올리지 않고 본문만 고쳤거나, 본문이 DB 칸 길이를 넘은 경우다. 그걸로 가입을 막으면
+    우리가 JSON 하나 잘못 건드린 동안 들어온 사장님이 전부 500을 받는다.
+
+    그래서 Case를 먼저 확정한 뒤 여기서 따로 커밋한다. 터지면 되돌려서 문서가 일부만
+    저장된 상태를 남기지 않고, 예외는 밖으로 던지지 않는다. 이미 Case가 저장된 뒤라
+    여기서 던져 봐야 화면에는 "가입 실패"로 보이고 다시 하면 "이미 있다"가 된다.
+
+    판단은 그대로 시작한다. 문서 없이 AI가 어떤 결과를 내는지는 확인하지 않았지만, 어떤
+    결과가 오든 저장되고 예외로 끊겨도 FAILED로 남으므로(first_judgment.py) 사장님이
+    "분석 중"에 갇히지는 않는다.
+    """
+
+    try:
+        reviewed_procedure_service.import_reviewed_procedures(
+            session,
+            case_id,
+            reviewed_procedure_service.load_reviewed_procedures(),
+            as_of=kst_now().date(),
+        )
+        session.commit()
+    except Exception:
+        session.rollback()
+        # 판단 백그라운드 실행과 같은 방식이다. 되돌릴 수 없는 일이 이미 끝났으므로
+        # 예외를 삼키되, 원인을 알 수 있게 traceback까지 남긴다.
+        logger.exception("case %s 검수 절차 문서 적재 실패 — 문서 없이 판단한다", case_id)
 
 
 def get_case(session: Session, member_id: int) -> CaseGetResponse:
