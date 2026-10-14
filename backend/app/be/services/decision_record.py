@@ -53,6 +53,12 @@ def save_reviewed_plan(
 
     # 저장 직전에 검수 증거를 다시 대조한다(AI팀 스펙의 처리 설명).
     outcome.assert_integrity()
+    # 대조 전에 읽기 트랜잭션을 끊는다. 이 세션은 판단 시작 때 스냅샷을 읽고 그대로 36~120초를
+    # 기다렸는데, MySQL 기본 격리 수준(REPEATABLE READ)에서는 같은 트랜잭션 안의 재조회가 처음
+    # 읽은 시점을 계속 본다. SQLAlchemy도 이미 읽어둔 객체를 그대로 돌려준다. 끊지 않으면 그
+    # 사이 바뀐 값을 못 보고 대조가 한 번도 걸리지 않는다.
+    # 여기까지 읽기만 했으므로 되돌릴 것이 없고, 대조와 쓰기는 그다음 트랜잭션에 함께 들어간다.
+    session.rollback()
     # 쓰기 전에 본다. 하나라도 어긋나면 아무것도 반영하지 않는다.
     _assert_changes_are_current(session, history, outcome.review_subject.supervisor_draft.mutations)
 
@@ -271,7 +277,9 @@ def _apply_fact_changes(
         raise ValueError(f"case {history.case_id} not found")
 
     for change in fact_changes:
-        before = getattr(case, change.field_path.value)
+        # 컬럼에 글자 "UNKNOWN"이 들어 있는 필드가 있다. 그대로 적으면 "모름"이 이력에
+        # 두 모양(NULL과 "UNKNOWN")으로 남는다. AI가 보는 표현으로 맞춰서 적는다.
+        before = _comparable_case_value(case, change.field_path)
         setattr(case, change.field_path.value, _column_value(change))
         case_field_history_crud.create_case_field_history(
             session,

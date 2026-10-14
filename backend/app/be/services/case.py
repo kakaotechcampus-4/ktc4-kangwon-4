@@ -25,6 +25,7 @@ from app.be.schemas.case import (
     FieldChangeResponse,
     NextActionResponse,
 )
+from app.agent.procedure_tool.store import ReviewedProcedureStore
 from app.be.services import reviewed_procedure as reviewed_procedure_service
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,12 @@ logger = logging.getLogger(__name__)
 def create_case(session: Session, member_id: int, case_request: CaseCreateRequest) -> Case:
     if case_crud.get_case_by_member_id(session, member_id) is not None:
         raise HTTPException(status_code=409, detail="이미 등록된 Case가 있습니다.")
+
+    # 검수 문서를 Case보다 먼저 읽는다. 파일이 깨져 있으면 판단도 같은 파일을 읽어서
+    # (first_judgment.py) AI를 부르기 전에 터진다. 그 상태로 Case만 만들어 두면 가입 직후
+    # FAILED인데 재판단 API가 없고 다시 가입하면 409라 빠져나올 길이 없다. 여기서 터지면
+    # 가입 자체가 실패하므로, 파일을 고친 뒤 다시 시도하면 된다.
+    procedure_store = reviewed_procedure_service.load_reviewed_procedures()
 
     case = Case(
         member_id=member_id,
@@ -48,36 +55,39 @@ def create_case(session: Session, member_id: int, case_request: CaseCreateReques
     # 문서 적재보다 먼저 확정한다. 적재가 터져도 가입은 남아야 하기 때문이다.
     session.commit()
 
-    _import_reviewed_procedures(session, case.id)
+    _import_reviewed_procedures(session, case.id, procedure_store)
 
     session.refresh(case)
     return case
 
 
-def _import_reviewed_procedures(session: Session, case_id: int) -> None:
+def _import_reviewed_procedures(session: Session, case_id: int, store: ReviewedProcedureStore) -> None:
     """검수된 절차 문서를 이 Case의 근거로 저장한다. 실패해도 Case는 그대로 둔다.
 
     AI는 이 문서를 직접 읽지 않고 BE가 Case의 근거로 저장해 둔 것만 쓴다. 적재해 두지
     않으면 절차조회가 짝을 못 찾아 그 문서를 아예 안 쓴다.
 
-    여기서 터지는 건 사장님 입력이 아니라 우리 쪽 문서 문제다 — 파일이 깨졌거나, 버전을
-    올리지 않고 본문만 고쳤거나, 본문이 DB 칸 길이를 넘은 경우다. 그걸로 가입을 막으면
-    우리가 JSON 하나 잘못 건드린 동안 들어온 사장님이 전부 500을 받는다.
+    여기서 터지는 건 사장님 입력이 아니라 우리 쪽 문서 문제다 — 버전을 올리지 않고 본문만
+    고쳤거나, 본문이 DB 칸 길이를 넘은 경우다. 그걸로 가입을 막으면 우리가 문서를 잘못 건드린
+    동안 들어온 사장님이 전부 500을 받는다.
 
     그래서 Case를 먼저 확정한 뒤 여기서 따로 커밋한다. 터지면 되돌려서 문서가 일부만
     저장된 상태를 남기지 않고, 예외는 밖으로 던지지 않는다. 이미 Case가 저장된 뒤라
     여기서 던져 봐야 화면에는 "가입 실패"로 보이고 다시 하면 "이미 있다"가 된다.
 
-    판단은 그대로 시작한다. 문서 없이 AI가 어떤 결과를 내는지는 확인하지 않았지만, 어떤
-    결과가 오든 저장되고 예외로 끊겨도 FAILED로 남으므로(first_judgment.py) 사장님이
-    "분석 중"에 갇히지는 않는다.
+    파일을 못 읽는 경우는 여기까지 오지 않는다. 호출부가 Case를 만들기 전에 읽어서 넘긴다.
+    판단도 같은 파일을 읽기 때문에, 파일이 깨진 채로 Case만 남으면 빠져나올 길이 없다.
+
+    DB 쪽 이유로만 실패하면 판단은 그대로 돈다. 다만 절차조회가 0건이라 절차 안내가 안 나온다.
+    TODO: 적재는 멱등이므로 판단 전에 한 번 더 부르면 다음 판단에서 저절로 채워진다
+    (승준님 #65 리뷰 2번과 같은 작업이라 거기서 함께 한다).
     """
 
     try:
         reviewed_procedure_service.import_reviewed_procedures(
             session,
             case_id,
-            reviewed_procedure_service.load_reviewed_procedures(),
+            store,
             as_of=kst_now().date(),
         )
         session.commit()
