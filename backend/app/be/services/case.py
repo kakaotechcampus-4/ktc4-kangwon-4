@@ -107,21 +107,7 @@ def get_case(session: Session, member_id: int) -> CaseGetResponse:
     if latest_history is None:
         raise HTTPException(status_code=500, detail="Case에 대한 최초 판단 기록이 없습니다.")
 
-    if latest_history.judgment_status == "DONE" and (
-        latest_history.next_action is None or latest_history.priority_blocker is None
-    ):
-        raise HTTPException(status_code=500, detail="판단 완료(DONE) 상태인데 Blocker·Next Action이 없습니다.")
-
-    if latest_history.judgment_status == "NEEDS_MORE_INFO" and not latest_history.questions_for_user:
-        raise HTTPException(status_code=500, detail="정보 부족(NEEDS_MORE_INFO) 상태인데 questions_for_user가 없습니다.")
-
-    if latest_history.judgment_status == "FAILED" and (
-        latest_history.recovery_action_code is None or latest_history.retryable is None
-    ):
-        raise HTTPException(
-            status_code=500,
-            detail="판단 실패(FAILED) 상태인데 recovery_action_code·retryable이 없습니다.",
-        )
+    _assert_judgment_is_showable(latest_history)
 
     next_action = (
         NextActionResponse(
@@ -140,7 +126,9 @@ def get_case(session: Session, member_id: int) -> CaseGetResponse:
             FieldChangeResponse(field=h.canonical_field, stored_value=h.before_value, new_value=h.after_value)
             for h in case_field_history_crud.get_case_field_histories_by_case_history_id(session, latest_history.id)
         ]
-        if latest_history.judgment_status == "DONE"
+        # 충돌을 확인한 뒤 되묻는 경우(NEEDS_MORE_INFO)에도 검수를 통과한 변경은 저장된다.
+        # DONE만 보면 그 변경이 화면에 안 보인다.
+        if latest_history.judgment_status in ("DONE", "NEEDS_MORE_INFO")
         else None
     )
 
@@ -193,6 +181,8 @@ def get_case_results_entry(session: Session, member_id: int) -> CaseResultsEntry
     if latest_history is None:
         raise HTTPException(status_code=500, detail="Case에 대한 최초 판단 기록이 없습니다.")
 
+    _assert_judgment_is_showable(latest_history)
+
     if latest_history.judgment_status == "PENDING":
         return CaseResultsEntryResponse(judgment_status="PENDING", case_history_id=latest_history.id)
 
@@ -212,16 +202,11 @@ def get_case_results_entry(session: Session, member_id: int) -> CaseResultsEntry
         )
 
     if latest_history.judgment_status == "NEEDS_MORE_INFO":
-        if not latest_history.questions_for_user:
-            raise HTTPException(status_code=500, detail="정보 부족(NEEDS_MORE_INFO) 상태인데 questions_for_user가 없습니다.")
         return CaseResultsEntryResponse(
             judgment_status="NEEDS_MORE_INFO",
             case_history_id=latest_history.id,
             questions_for_user=latest_history.questions_for_user,
         )
-
-    if latest_history.recovery_action_code is None:
-        raise HTTPException(status_code=500, detail="판단 실패(FAILED) 상태인데 recovery_action_code가 없습니다.")
 
     return CaseResultsEntryResponse(
         judgment_status="FAILED",
@@ -230,6 +215,47 @@ def get_case_results_entry(session: Session, member_id: int) -> CaseResultsEntry
         requested_field_paths=latest_history.requested_field_paths,
         retryable=latest_history.retryable,
     )
+
+
+def _assert_judgment_is_showable(history: CaseHistory) -> None:
+    """상태별로 화면이 읽을 값이 다 있는지 본다. 없으면 빈칸을 내보내지 말고 여기서 막는다.
+
+    AI 계약상 next_action이 있으면 reason도 반드시 있고(NextAction.reason은 빈 문자열도
+    거부한다), 검수를 통과한 판단은 항상 blocker를 남긴다. 그래서 평소에는 걸리지 않는다.
+    걸린다면 AI가 아니라 우리 저장 코드가 깨진 것이고, 그때 조용히 빈 화면을 보여주는 것보다
+    멈추고 알아차리는 쪽이 낫다.
+
+    같은 검사를 /cases와 /cases/results가 함께 쓴다. 흩어 두면 화면이 늘 때마다 한쪽만
+    고치게 된다.
+    """
+
+    if history.judgment_status == "DONE":
+        if history.next_action is None or history.next_action_reason is None:
+            raise HTTPException(
+                status_code=500, detail="판단 완료(DONE) 상태인데 다음 행동이나 그 이유가 없습니다."
+            )
+        if history.priority_blocker is None:
+            raise HTTPException(status_code=500, detail="판단 완료(DONE) 상태인데 Blocker가 없습니다.")
+        return
+
+    if history.judgment_status == "NEEDS_MORE_INFO":
+        if not history.questions_for_user:
+            raise HTTPException(
+                status_code=500, detail="정보 부족(NEEDS_MORE_INFO) 상태인데 되물을 질문이 없습니다."
+            )
+        if history.priority_blocker is None:
+            raise HTTPException(
+                status_code=500, detail="정보 부족(NEEDS_MORE_INFO) 상태인데 Blocker가 없습니다."
+            )
+        return
+
+    if history.judgment_status == "FAILED" and (
+        history.recovery_action_code is None or history.retryable is None
+    ):
+        raise HTTPException(
+            status_code=500,
+            detail="판단 실패(FAILED) 상태인데 recovery_action_code·retryable이 없습니다.",
+        )
 
 
 def _create_case_creation_evidence(session: Session, case: Case, case_request: CaseCreateRequest) -> None:
