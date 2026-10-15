@@ -1400,9 +1400,6 @@ class Blocker(AgentSchema):
     evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
 
 
-BlockerDraft = Blocker
-
-
 class ProcedureActionTarget(AgentSchema):
     target_kind: Literal["PROCEDURE"]
     procedure_step: ProcedureStepRef
@@ -1439,9 +1436,6 @@ class NextAction(AgentSchema):
     questions_to_ask: list[NonEmptyStr]
     target: NextActionTarget
     evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
-
-
-NextActionDraft = NextAction
 
 
 class DecisionType(StrEnum):
@@ -2303,7 +2297,6 @@ __all__ = [
     "AgentRunOutcome",
     "AgentSchema",
     "Blocker",
-    "BlockerDraft",
     "CaseCreatedTrigger",
     "CaseFact",
     "CaseFieldKey",
@@ -2344,7 +2337,6 @@ __all__ = [
     "MutationSet",
     "NeedsMoreInfoDecisionDraft",
     "NextAction",
-    "NextActionDraft",
     "NextActionTarget",
     "NonNullStrictScalar",
     "PlanningContext",
