@@ -215,7 +215,7 @@ class FakeRuntime:
         self.closed = False
         self.flushed = False
 
-    async def run_planning(self, request, use_cache=False):
+    async def run_planning(self, request):
         if self.error is not None:
             raise self.error
         return self.outcome
