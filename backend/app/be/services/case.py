@@ -330,12 +330,33 @@ def get_case_results_submit_status(
     if case is None:
         raise HTTPException(status_code=404, detail="Case를 찾을 수 없습니다.")
 
-    pending_conflicts = conflict_reference_crud.get_pending_conflicts_by_case_id(session, case.id)
-    if pending_conflicts:
-        raw_input = pending_conflicts[0].case_history.raw_input
+    latest_history = case_history_crud.get_latest_case_history_by_source(session, case.id, "USER_INPUT")
+    if latest_history is None:
+        raise HTTPException(status_code=404, detail="조회할 제출 기록을 찾을 수 없습니다.")
+
+    if case_history_id != latest_history.id:
+        raise HTTPException(status_code=409, detail="최신 판단에 대해 요청을 주지 않았습니다.")
+
+    _assert_judgment_is_showable(latest_history)
+
+    # 충돌도 다른 상태와 똑같이 judgment_status로 가른다. Case 전체가 아니라 이 제출
+    # (latest_history)에 달린 충돌만 본다 — used_at이 실제로 찍히기 시작하면(충돌 확인 API),
+    # Case 전체로 찾는 조회는 다른 제출의 충돌을 집어올 수 있다.
+    if latest_history.judgment_status == "CONFLICT":
+        pending_conflicts = conflict_reference_crud.get_pending_conflicts_by_case_history_id(
+            session, latest_history.id
+        )
+        if not pending_conflicts:
+            # 미결 충돌이 있는 동안은 새 제출이 거부되므로(submit_case_results), 이 제출이
+            # CONFLICT인데 남은 충돌이 없다면 저장이 어긋난 것이다. 빈 목록을 CONFLICT라고
+            # 내보내면 화면이 고를 것 없는 되묻기를 띄운다.
+            raise HTTPException(
+                status_code=500,
+                detail=f"case_history {latest_history.id}가 CONFLICT인데 확인 대기 중인 충돌이 없습니다.",
+            )
         return CaseResultsSubmitResponse(
             result="CONFLICT",
-            raw_input=raw_input,
+            raw_input=latest_history.raw_input,
             conflicts=[
                 ConflictItemResponse(
                     id=conflict.id,
@@ -346,15 +367,6 @@ def get_case_results_submit_status(
                 for conflict in pending_conflicts
             ],
         )
-
-    latest_history = case_history_crud.get_latest_case_history_by_source(session, case.id, "USER_INPUT")
-    if latest_history is None:
-        raise HTTPException(status_code=404, detail="조회할 제출 기록을 찾을 수 없습니다.")
-
-    if case_history_id != latest_history.id:
-        raise HTTPException(status_code=409, detail="최신 판단에 대해 요청을 주지 않았습니다.")
-
-    _assert_judgment_is_showable(latest_history)
 
     if latest_history.judgment_status == "PENDING":
         return CaseResultsSubmitResponse(result="PENDING")
