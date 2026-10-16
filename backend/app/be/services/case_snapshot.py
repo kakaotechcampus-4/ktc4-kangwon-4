@@ -38,6 +38,15 @@ UNKNOWN_SENTINEL_FIELDS = {
 }
 
 
+class StoredEvidenceMissingError(ValueError):
+    """저장된 Case 값에 달 근거가 DB에 없어, 스냅샷을 만들 수 없는 상태.
+
+    방금 들어온 입력이 아니라 전에 저장된 행이 원인이라, 같은 입력으로 다시 판단해도
+    같은 자리에서 또 터진다. 그래서 "다시 시도"가 아니라 "문의"로 안내해야 한다
+    (decision_record.mark_judgment_failed).
+    """
+
+
 def build_user_input(case_history_id: int, raw_input: str, submitted_at: datetime) -> RedactedInput:
     """사용자가 넣은 입력 한 건을 AI가 받는 모양으로 바꾼다.
 
@@ -104,14 +113,28 @@ def _build_facts(session: Session, case: Case, evidences: list[Evidence]) -> lis
     submitted_at = creation_history.created_at.replace(tzinfo=KST) if creation_history else None
     facts = []
     for field_key in CaseFieldKey:
-        refs, changed_at = last_change.get(field_key.value, ([], None))
-        facts.append(_build_fact(case, field_key, refs or creation_refs, changed_at or submitted_at))
+        change = last_change.get(field_key.value)
+        # 폼 근거는 "한 번도 안 바뀐 값"에만 쓴다. 바뀐 적이 있는데 그 판단의 근거가 비었다고
+        # 폼 근거로 되돌리면, 판단이 바꿔 넣은 값을 "가입할 때 받은 값"이라고 AI에게 틀리게
+        # 알려주게 된다. 근거가 빈 것은 적재 쪽 결함이므로 덮지 않고 드러낸다.
+        if change is None:
+            facts.append(_build_fact(case, field_key, creation_refs, submitted_at, source="가입 폼"))
+            continue
+        refs, changed_at = change
+        facts.append(_build_fact(case, field_key, refs, changed_at, source="변경 이력"))
     return facts
 
 
 def _build_fact(
-    case: Case, field_key: CaseFieldKey, evidence_refs: list[str], confirmed_at: datetime | None
+    case: Case,
+    field_key: CaseFieldKey,
+    evidence_refs: list[str],
+    confirmed_at: datetime | None,
+    *,
+    source: str,
 ) -> CaseFact:
+    """`source`는 근거가 비었을 때 어느 쪽이 빈 것인지 알려주기 위한 설명 문구다."""
+
     value_type, _ = CASE_FIELD_SPECS[field_key]
     raw_value = getattr(case, field_key.value)
     is_unset = raw_value is None or (field_key in UNKNOWN_SENTINEL_FIELDS and raw_value == "UNKNOWN")
@@ -121,7 +144,9 @@ def _build_fact(
         )
 
     if not evidence_refs:
-        raise ValueError(f"case {case.id} has confirmed field {field_key.value} but no evidence")
+        raise StoredEvidenceMissingError(
+            f"case {case.id}의 {field_key.value}는 확정값인데 {source}에 근거가 없다"
+        )
 
     return CaseFact(
         field_path=field_key,
