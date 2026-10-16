@@ -36,7 +36,7 @@ from app.be.models.evidence import ConflictReference, DecisionRecord, Evidence, 
 from app.be.models.mixins import KST
 from app.be.models.procedure_step import CaseProcedureStepHistory
 from app.be.models.support_item import SupportMatch
-from app.be.services.case_snapshot import UNKNOWN_SENTINEL_FIELDS
+from app.be.services.case_snapshot import UNKNOWN_SENTINEL_FIELDS, StoredEvidenceMissingError
 
 # 충돌 확인 기한을 아직 정하지 않아, 만료로 막히지 않도록 멀리 둔다.
 _NO_EXPIRY = datetime(9999, 12, 31)
@@ -186,15 +186,17 @@ def save_safe_failure(session: Session, history: CaseHistory, outcome: SafeFailu
     session.commit()
 
 
-def mark_judgment_failed(session: Session, case_history_id: int) -> None:
+def mark_judgment_failed(session: Session, case_history_id: int, error: Exception | None = None) -> None:
     """판단이 결과를 내놓기도 전에 끊겼을 때 상태를 남긴다.
 
     AI가 돌려준 실패(SAFE_FAILURE)가 아니라, 그 전에 예외로 끊긴 경우다. 상태를 PENDING으로
-    두면 화면이 영영 "분석 중"에 머물게 된다. 우리 쪽 문제라 같은 입력으로 다시 해볼 만하므로
-    다음 행동은 RETRY로 둔다.
+    두면 화면이 영영 "분석 중"에 머물게 된다. 대개 우리 쪽 일시적인 문제라 같은 입력으로
+    다시 해볼 만하므로 다음 행동은 RETRY로 둔다.
 
     끊긴 그 판단의 이력을 받는다. 여기서 CASE_CREATED 이력을 직접 찾으면, 결과 제출 판단이
     터졌을 때 멀쩡한 가입 판단 결과를 FAILED로 덮고 정작 방금 들어온 입력은 PENDING에 남는다.
+
+    `error`는 무엇 때문에 끊겼는지다. 다시 해도 안 풀리는 종류면 RETRY로 안내하지 않는다.
     """
 
     history = case_history_crud.get_case_history_by_id(session, case_history_id)
@@ -203,8 +205,11 @@ def mark_judgment_failed(session: Session, case_history_id: int) -> None:
     history.judgment_status = "FAILED"
     # AI가 결과를 내기 전에 끊겨서 실패 종류를 받지 못했다. 없는 값을 지어내지 않는다.
     history.failure_code = None
-    history.recovery_action_code = "RETRY"
-    history.retryable = True
+    # 전에 저장된 행이 원인이면 다시 판단해도 같은 자리에서 또 터진다. 그 Case는 사람이
+    # 데이터를 고치기 전까지 못 빠져나오므로, 눌러도 안 되는 "다시 시도" 대신 문의로 보낸다.
+    retryable = not isinstance(error, StoredEvidenceMissingError)
+    history.recovery_action_code = "RETRY" if retryable else "CONTACT_SUPPORT"
+    history.retryable = retryable
     history.requested_field_paths = []
     session.commit()
 

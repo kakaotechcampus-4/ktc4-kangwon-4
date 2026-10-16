@@ -38,6 +38,15 @@ UNKNOWN_SENTINEL_FIELDS = {
 }
 
 
+class StoredEvidenceMissingError(ValueError):
+    """저장된 Case 값에 달 근거가 DB에 없어, 스냅샷을 만들 수 없는 상태.
+
+    방금 들어온 입력이 아니라 전에 저장된 행이 원인이라, 같은 입력으로 다시 판단해도
+    같은 자리에서 또 터진다. 그래서 "다시 시도"가 아니라 "문의"로 안내해야 한다
+    (decision_record.mark_judgment_failed).
+    """
+
+
 def build_user_input(case_history_id: int, raw_input: str, submitted_at: datetime) -> RedactedInput:
     """사용자가 넣은 입력 한 건을 AI가 받는 모양으로 바꾼다.
 
@@ -135,7 +144,9 @@ def _build_fact(
         )
 
     if not evidence_refs:
-        raise ValueError(f"case {case.id}의 {field_key.value}는 확정값인데 {source}에 근거가 없다")
+        raise StoredEvidenceMissingError(
+            f"case {case.id}의 {field_key.value}는 확정값인데 {source}에 근거가 없다"
+        )
 
     return CaseFact(
         field_path=field_key,

@@ -17,7 +17,8 @@ from app.be.crud import case_history as case_history_crud
 from app.be.crud import evidence as evidence_crud
 from app.be.crud import procedure_step as procedure_step_crud
 from app.be.models.case import Case
-from app.be.services.case_snapshot import build_case_snapshot
+from app.be.services import decision_record
+from app.be.services.case_snapshot import StoredEvidenceMissingError, build_case_snapshot
 
 CASE_ID = 7
 CREATION_HISTORY_ID = 11
@@ -139,3 +140,35 @@ def test_unset_field_stays_unknown_and_does_not_demand_evidence(snapshot_of):
     fact = fact_of(snapshot, "restoration_scope_detail")
     assert fact.status is FactStatus.UNKNOWN
     assert fact.evidence_refs == []
+
+
+def test_missing_stored_evidence_tells_the_user_to_contact_support_not_to_retry(monkeypatch):
+    """다시 눌러도 같은 행을 또 읽어 같은 자리에서 터지므로, RETRY로 안내하면 안 된다."""
+
+    history = SimpleNamespace(
+        judgment_status="PENDING", failure_code="SOMETHING",
+        recovery_action_code=None, retryable=None, requested_field_paths=None,
+    )
+    monkeypatch.setattr(case_history_crud, "get_case_history_by_id", lambda *_: history)
+
+    decision_record.mark_judgment_failed(
+        MagicMock(spec=Session), 1, StoredEvidenceMissingError("합성 결함")
+    )
+
+    assert history.judgment_status == "FAILED"
+    assert history.recovery_action_code == "CONTACT_SUPPORT"
+    assert history.retryable is False
+
+
+def test_other_failures_still_tell_the_user_to_retry(monkeypatch):
+    # 일시적인 문제(연결 끊김 등)까지 문의로 보내면 안 된다.
+    history = SimpleNamespace(
+        judgment_status="PENDING", failure_code=None,
+        recovery_action_code=None, retryable=None, requested_field_paths=None,
+    )
+    monkeypatch.setattr(case_history_crud, "get_case_history_by_id", lambda *_: history)
+
+    decision_record.mark_judgment_failed(MagicMock(spec=Session), 1, TimeoutError("합성 지연"))
+
+    assert history.recovery_action_code == "RETRY"
+    assert history.retryable is True

@@ -30,11 +30,13 @@ async def run_first_judgment_in_background(case_history_id: int) -> None:
     try:
         with Session(_engine) as session:
             await run_first_judgment(session, case_history_id)
-    except Exception:
+    except Exception as error:
         logger.exception("case_history %s 첫 판단 실패", case_history_id)
         try:
             with Session(_engine) as session:
-                decision_record_service.mark_judgment_failed(session, case_history_id)
+                # 무엇 때문에 끊겼는지 함께 넘긴다. 다시 해도 안 풀리는 종류면 화면에
+                # "다시 시도"를 띄우면 안 된다.
+                decision_record_service.mark_judgment_failed(session, case_history_id, error)
         except Exception:
             logger.exception("case_history %s 판단 실패 상태 기록도 실패", case_history_id)
 
