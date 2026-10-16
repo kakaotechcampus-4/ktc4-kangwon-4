@@ -569,6 +569,53 @@ def analyze_facts(facts, text, *, requires_confirmation=False):
     return asyncio.run(InfoAnalysisAgent(Responses(response)).analyze(request))
 
 
+# 코드 검사에 걸린 이유를 재시도에 알려주지 않으면 모델은 같은 답을 반복하고
+# 분석 전체가 실패한다. 실제 모델(gpt-6.1-sol)에서 뒤집히는 보고 3번 중 2번이 그랬다.
+REVERSED = "원상복구 범위는 없다고 들었는데 임대인은 전부 하라고 했어요."
+
+
+def held(field, value):
+    return {"operation": "SET", "field_path": field, "value_type": "ENUM", "value": value,
+            "source_text": REVERSED, "confidence_bps": 8000, "requires_confirmation": True,
+            "reason_summary": "합성 임대인 확인 결과"}
+
+
+@pytest.mark.parametrize("rejected_facts,reason", [
+    ([held("restoration_scope", "NOT_REQUIRED"),
+      held("restoration_status", "NOT_REQUIRED") | {"requires_confirmation": False}],
+     "restoration_status can be confirmed only when restoration_scope"),
+    ([held("restoration_scope", "NOT_REQUIRED"), held("restoration_scope", "FULL")],
+     "Return at most one fact per field_path"),
+])
+def test_rejected_facts_tell_the_retry_why(rejected_facts, reason):
+    request = request_for_replanning()
+    snapshot = request.case_snapshot.model_dump(mode="json")
+    for item in snapshot["facts"]:
+        if item["field_path"] in {"restoration_scope", "restoration_status"}:
+            item.update(status="UNKNOWN", value=None, evidence_refs=[], updated_at=None)
+    snapshot["procedure_progress"] = []
+    request = InfoAnalysisInput.model_validate(request.model_dump() | {
+        "case_snapshot": snapshot,
+        "input": request.input.model_dump() | {"redacted_text": REVERSED},
+    })
+    findings = [finding(TAX, "doc1"), finding(FOOD, "doc2"), finding(RESTORATION, "doc3")]
+    rejected, corrected = output(findings), output(findings)
+    rejected["facts"] = rejected_facts
+    corrected["facts"] = [held("restoration_scope", "NOT_REQUIRED")]
+    client = Responses(rejected, corrected)
+
+    result = asyncio.run(InfoAnalysisAgent(client).analyze(request))
+
+    feedback, = [
+        item["content"] for item in client.messages[1]
+        if item["content"].startswith("The previous facts were rejected.")
+    ]
+    assert reason in feedback
+    assert "원상복구 범위는 없다" not in feedback  # 사장님 말은 안내에 섞지 않는다
+    candidate, = result.fact_candidates
+    assert candidate.requires_confirmation
+
+
 # 뒤집는 말이 없는 문장은 그대로 확정된다. 되묻기가 넓어져 정상 입력까지 다시 묻게
 # 되면 사장님이 같은 답을 두 번 하게 되므로 반대쪽도 같이 지킨다.
 def test_plain_result_sentence_still_confirms_without_asking_back():

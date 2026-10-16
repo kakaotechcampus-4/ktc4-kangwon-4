@@ -82,8 +82,11 @@ class InfoAnalysisGuardrailError(GuardrailViolation):
         omitted_procedure_codes: Sequence[str] = (),
         procedure_source_errors: Sequence[str] = (),
         rejected_observation_codes: Sequence[str] = (),
+        fact_errors: Sequence[str] = (),
     ) -> None:
         super().__init__(message)
+        # 재시도 때 모델에 그대로 보내므로 코드에 고정된 문장만 넣는다(사용자 원문 금지).
+        self.fact_errors = tuple(fact_errors)
         self.omitted_procedure_codes = tuple(omitted_procedure_codes)
         self.procedure_source_errors = tuple(procedure_source_errors)
         self.rejected_observation_codes = tuple(rejected_observation_codes)
@@ -286,9 +289,18 @@ class InfoAnalysisAgent:
         omitted_procedure_codes: tuple[str, ...] = ()
         procedure_source_errors: tuple[str, ...] = ()
         rejected_observation_codes: tuple[str, ...] = ()
+        fact_errors: tuple[str, ...] = ()
         for attempt in range(1, self._max_local_attempts + 1):
             messages = info_messages(prompt_input)
             if attempt > 1:
+                if fact_errors:
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": "The previous facts were rejected. "
+                            + " ".join(fact_errors),
+                        }
+                    )
                 if rejected_observation_codes:
                     messages.append(
                         {
@@ -390,6 +402,7 @@ class InfoAnalysisAgent:
                 )
                 return self._materialize(request, draft, procedure_bindings)
             except (GuardrailViolation, ValueError) as exc:
+                fact_errors = getattr(exc, "fact_errors", ())
                 omitted_procedure_codes = getattr(exc, "omitted_procedure_codes", ())
                 procedure_source_errors = getattr(exc, "procedure_source_errors", ())
                 rejected_observation_codes = getattr(
@@ -707,7 +720,13 @@ class InfoAnalysisAgent:
 
         proposed_fields = [item.field_path for item in draft.facts]
         if len(set(proposed_fields)) != len(proposed_fields):
-            raise InfoAnalysisGuardrailError("model returned duplicate fact fields")
+            raise InfoAnalysisGuardrailError(
+                "model returned duplicate fact fields",
+                fact_errors=(
+                    "Return at most one fact per field_path. If the user stated "
+                    "conflicting values, return one fact with requires_confirmation=true.",
+                ),
+            )
 
         for semantic in draft.facts:
             if semantic.field_path not in allowed:
@@ -755,26 +774,36 @@ class InfoAnalysisAgent:
             )
             fact_candidates.append(candidate)
 
-        validate_restoration_state(
-            {
-                **{
-                    item.field_path: item.status for item in request.case_snapshot.facts
-                },
-                **{
-                    item.field_path: item.proposed_status
-                    for item in request.fact_overlays
-                },
-                **{
-                    item.field_path: (
-                        FactStatus.UNKNOWN
-                        if item.operation == FactOperation.CLEAR
-                        else FactStatus.CONFIRMED
-                    )
-                    for item in fact_candidates
-                    if not item.requires_confirmation
-                },
-            }
-        )
+        try:
+            validate_restoration_state(
+                {
+                    **{
+                        item.field_path: item.status for item in request.case_snapshot.facts
+                    },
+                    **{
+                        item.field_path: item.proposed_status
+                        for item in request.fact_overlays
+                    },
+                    **{
+                        item.field_path: (
+                            FactStatus.UNKNOWN
+                            if item.operation == FactOperation.CLEAR
+                            else FactStatus.CONFIRMED
+                        )
+                        for item in fact_candidates
+                        if not item.requires_confirmation
+                    },
+                }
+            )
+        except ValueError:
+            raise InfoAnalysisGuardrailError(
+                "restoration facts are inconsistent",
+                fact_errors=(
+                    "restoration_status can be confirmed only when restoration_scope "
+                    "is also confirmed. If the scope needs confirmation, set "
+                    "requires_confirmation=true on restoration_status too, or omit it.",
+                ),
+            ) from None
 
         observations: list[ProcedureProgressObservation] = []
         for semantic in draft.procedure_observations:
