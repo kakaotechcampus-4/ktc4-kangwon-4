@@ -75,10 +75,39 @@ export const moreInfoCase: CurrentCaseView = {
   },
 }
 
-/** 판단을 마치지 못한 상태. 가게 정보는 저장돼 있고 사장님 탓이 아니다 */
+/**
+ * 판단을 마치지 못한 상태. 가게 정보는 저장돼 있고 사장님 탓이 아니다.
+ *
+ * 실패는 **이유마다 할 말이 달라서** 하나로 두지 않는다. 서버가 "다시 해볼 수 있다" 고
+ * 분류한 것과 "정보가 더 있어야 한다" 고 한 것은 사장님이 알아야 할 내용이 전혀 다르다.
+ *
+ * `UNKNOWN_CAUSE` 는 Mock 을 두지 않았다. 서버가 계약에 없는 값을 보낸 경우라 **눈으로 볼
+ * 화면을 미리 만들어 둘 성질의 것이 아니고**, 어댑터 테스트가 본다.
+ */
 export const judgmentFailedCase: CurrentCaseView = {
   facts,
-  judgment: { status: 'FAILED' },
+  judgment: { status: 'FAILED', notice: { kind: 'RETRY_AVAILABLE' } },
+}
+
+/** 다시 알아야 할 칸을 서버가 짚어준 실패. 이 화면만 `WARNING` 톤이다 */
+export const judgmentNeedsDetailCase: CurrentCaseView = {
+  facts,
+  judgment: {
+    status: 'FAILED',
+    notice: { kind: 'NEEDS_DETAIL', fields: ['원상복구 범위', '철거 필요 여부'], partial: false },
+  },
+}
+
+/** 사장님이 하실 수 있는 것이 없고 서비스가 들여다봐야 하는 실패 */
+export const judgmentServiceSideCase: CurrentCaseView = {
+  facts,
+  judgment: { status: 'FAILED', notice: { kind: 'SERVICE_SIDE' } },
+}
+
+/** 서버가 **할 수 있는 복구 행동이 없다고 말한** 실패 */
+export const judgmentNoRecoveryCase: CurrentCaseView = {
+  facts,
+  judgment: { status: 'FAILED', notice: { kind: 'NO_RECOVERY' } },
 }
 
 /**

@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 
 from fastapi import HTTPException
 from sqlmodel import Session
@@ -7,6 +8,7 @@ from sqlmodel import Session
 from app.be.crud import case as case_crud
 from app.be.crud import case_field_history as case_field_history_crud
 from app.be.crud import case_history as case_history_crud
+from app.be.crud import conflict_reference as conflict_reference_crud
 from app.be.crud import evidence as evidence_crud
 from app.be.crud import procedure_step as procedure_step_crud
 from app.be.models.case import Case
@@ -18,15 +20,31 @@ from app.be.schemas.case import (
     CaseCreateRequest,
     CaseGetDetailResponse,
     CaseGetResponse,
+    CaseResultsEntryResponse,
+    CaseResultsSubmitAcceptedResponse,
+    CaseResultsSubmitRequest,
+    CaseResultsSubmitResponse,
+    ConflictItemResponse,
     FieldChangeResponse,
     NextActionResponse,
 )
+from app.agent.procedure_tool.store import ReviewedProcedureStore
 from app.be.services import reviewed_procedure as reviewed_procedure_service
 
+logger = logging.getLogger(__name__)
 
-def create_case(session: Session, member_id: int, case_request: CaseCreateRequest) -> Case:
+
+def create_case(session: Session, member_id: int, case_request: CaseCreateRequest) -> tuple[Case, int]:
+    """만들어진 Case와, 첫 판단이 대상으로 삼을 입력 이력의 id를 함께 돌려준다."""
+
     if case_crud.get_case_by_member_id(session, member_id) is not None:
         raise HTTPException(status_code=409, detail="이미 등록된 Case가 있습니다.")
+
+    # 검수 문서를 Case보다 먼저 읽는다. 파일이 깨져 있으면 판단도 같은 파일을 읽어서
+    # (first_judgment.py) AI를 부르기 전에 터진다. 그 상태로 Case만 만들어 두면 가입 직후
+    # FAILED인데 재판단 API가 없고 다시 가입하면 409라 빠져나올 길이 없다. 여기서 터지면
+    # 가입 자체가 실패하므로, 파일을 고친 뒤 다시 시도하면 된다.
+    procedure_store = reviewed_procedure_service.load_reviewed_procedures()
 
     case = Case(
         member_id=member_id,
@@ -38,18 +56,51 @@ def create_case(session: Session, member_id: int, case_request: CaseCreateReques
     )
     case = case_crud.create_case(session, case)
     _fill_temp_case_procedure_steps(session, case.id)
-    _create_case_creation_evidence(session, case, case_request)
-    # 검수된 절차 문서는 AI가 직접 읽지 않고, BE가 이 Case의 근거로 저장해 둔 것만 쓴다.
-    # 적재해 두지 않으면 절차조회가 짝을 못 찾아 그 문서를 아예 안 쓴다.
-    reviewed_procedure_service.import_reviewed_procedures(
-        session,
-        case.id,
-        reviewed_procedure_service.load_reviewed_procedures(),
-        as_of=kst_now().date(),
-    )
+    history = _create_case_creation_evidence(session, case, case_request)
+    # 문서 적재보다 먼저 확정한다. 적재가 터져도 가입은 남아야 하기 때문이다.
     session.commit()
+
+    _import_reviewed_procedures(session, case.id, procedure_store)
+
     session.refresh(case)
-    return case
+    return case, history.id
+
+
+def _import_reviewed_procedures(session: Session, case_id: int, store: ReviewedProcedureStore) -> None:
+    """검수된 절차 문서를 이 Case의 근거로 저장한다. 실패해도 Case는 그대로 둔다.
+
+    AI는 이 문서를 직접 읽지 않고 BE가 Case의 근거로 저장해 둔 것만 쓴다. 적재해 두지
+    않으면 절차조회가 짝을 못 찾아 그 문서를 아예 안 쓴다.
+
+    여기서 터지는 건 사장님 입력이 아니라 우리 쪽 문서 문제다 — 버전을 올리지 않고 본문만
+    고쳤거나, 본문이 DB 칸 길이를 넘은 경우다. 그걸로 가입을 막으면 우리가 문서를 잘못 건드린
+    동안 들어온 사장님이 전부 500을 받는다.
+
+    그래서 Case를 먼저 확정한 뒤 여기서 따로 커밋한다. 터지면 되돌려서 문서가 일부만
+    저장된 상태를 남기지 않고, 예외는 밖으로 던지지 않는다. 이미 Case가 저장된 뒤라
+    여기서 던져 봐야 화면에는 "가입 실패"로 보이고 다시 하면 "이미 있다"가 된다.
+
+    파일을 못 읽는 경우는 여기까지 오지 않는다. 호출부가 Case를 만들기 전에 읽어서 넘긴다.
+    판단도 같은 파일을 읽기 때문에, 파일이 깨진 채로 Case만 남으면 빠져나올 길이 없다.
+
+    DB 쪽 이유로만 실패하면 판단은 그대로 돈다. 다만 절차조회가 0건이라 절차 안내가 안 나온다.
+    TODO: 적재는 멱등이므로 판단 전에 한 번 더 부르면 다음 판단에서 저절로 채워진다
+    (승준님 #65 리뷰 2번과 같은 작업이라 거기서 함께 한다).
+    """
+
+    try:
+        reviewed_procedure_service.import_reviewed_procedures(
+            session,
+            case_id,
+            store,
+            as_of=kst_now().date(),
+        )
+        session.commit()
+    except Exception:
+        session.rollback()
+        # 판단 백그라운드 실행과 같은 방식이다. 되돌릴 수 없는 일이 이미 끝났으므로
+        # 예외를 삼키되, 원인을 알 수 있게 traceback까지 남긴다.
+        logger.exception("case %s 검수 절차 문서 적재 실패 — 문서 없이 판단한다", case_id)
 
 
 def get_case(session: Session, member_id: int) -> CaseGetResponse:
@@ -60,6 +111,7 @@ def get_case(session: Session, member_id: int) -> CaseGetResponse:
             blocker=None,
             next_action=None,
             judgment_status=None,
+            case_history_id=None,
             questions_for_user=None,
             recovery_action_code=None,
             requested_field_paths=None,
@@ -67,24 +119,11 @@ def get_case(session: Session, member_id: int) -> CaseGetResponse:
             changes=None,
         )
 
-    latest_history = case_crud.get_latest_user_driven_case_history(session, case.id)
+    latest_history = case_history_crud.get_latest_user_driven_case_history(session, case.id)
     if latest_history is None:
         raise HTTPException(status_code=500, detail="Case에 대한 최초 판단 기록이 없습니다.")
 
-    if latest_history.judgment_status == "DONE" and (
-        latest_history.next_action is None or latest_history.priority_blocker is None
-    ):
-        raise HTTPException(status_code=500, detail="판단 완료(DONE) 상태인데 Blocker·Next Action이 없습니다.")
-
-    if latest_history.judgment_status == "NEEDS_MORE_INFO" and not latest_history.questions_for_user:
-        raise HTTPException(status_code=500, detail="정보 부족(NEEDS_MORE_INFO) 상태인데 questions_for_user가 없습니다.")
-
-    if latest_history.judgment_status == "FAILED" and latest_history.recovery_action_code is None:
-        raise HTTPException(status_code=500, detail="판단 실패(FAILED) 상태인데 recovery_action_code가 없습니다.")
-
-    # TODO: retryable은 저장하는 쪽(decision_record.py의 save_safe_failure 등)이 아직 안 채워주고
-    # 있어서 지금은 가드를 안 건다. 채워주기 시작하면 위 recovery_action_code처럼
-    # "FAILED인데 retryable이 없으면 500" 가드를 추가해야 한다.
+    _assert_judgment_is_showable(latest_history)
 
     next_action = (
         NextActionResponse(
@@ -96,22 +135,27 @@ def get_case(session: Session, member_id: int) -> CaseGetResponse:
         else None
     )
 
-    # TODO: case_history_id는 저장하는 쪽(decision_record.py의 _apply_fact_changes)이
-    # 아직 안 채워주고 있어서, DONE이어도 실제로는 변경이 있었는데 []로 나올 수 있다.
     changes = (
         [
             FieldChangeResponse(field=h.canonical_field, stored_value=h.before_value, new_value=h.after_value)
             for h in case_field_history_crud.get_case_field_histories_by_case_history_id(session, latest_history.id)
         ]
-        if latest_history.judgment_status == "DONE"
+        # 충돌을 확인한 뒤 되묻는 경우(NEEDS_MORE_INFO)에도 검수를 통과한 변경은 저장된다.
+        # DONE만 보면 그 변경이 화면에 안 보인다.
+        if latest_history.judgment_status in ("DONE", "NEEDS_MORE_INFO")
         else None
     )
 
     return CaseGetResponse(
         case=CaseGetDetailResponse(**case.model_dump()),
-        blocker=latest_history.priority_blocker.description if latest_history.priority_blocker else None,
+        blocker=(
+            latest_history.priority_blocker.description
+            if latest_history.priority_blocker and latest_history.judgment_status != "NEEDS_MORE_INFO"
+            else None
+        ),
         next_action=next_action,
         judgment_status=latest_history.judgment_status,
+        case_history_id=latest_history.id if latest_history.judgment_status != "CONFLICT" else None,
         questions_for_user=latest_history.questions_for_user,
         # 실패했을 때만 채워진다. 화면은 이 값으로 "다시 시도" / "다시 말씀해 주세요" /
         # "문의" 중 무엇을 보여줄지 정한다.
@@ -122,7 +166,252 @@ def get_case(session: Session, member_id: int) -> CaseGetResponse:
     )
 
 
-def _create_case_creation_evidence(session: Session, case: Case, case_request: CaseCreateRequest) -> None:
+def get_case_results_entry(session: Session, member_id: int) -> CaseResultsEntryResponse:
+    """`/case`의 "결과 알려주기" 버튼(API 1). `judgment_status`를 그대로 응답에 싣는다."""
+
+    case = case_crud.get_case_by_member_id(session, member_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case를 찾을 수 없습니다.")
+
+    pending_conflicts = conflict_reference_crud.get_pending_conflicts_by_case_id(session, case.id)
+    if pending_conflicts:
+        # 사전 검사 전제(미결 충돌은 항상 최대 1개)상 전부 같은 case_history에서 나온
+        # 것이므로, raw_input은 아무 row에서나 꺼내도 같다.
+        raw_input = pending_conflicts[0].case_history.raw_input
+        return CaseResultsEntryResponse(
+            judgment_status="CONFLICT",
+            raw_input=raw_input,
+            conflicts=[
+                ConflictItemResponse(
+                    id=conflict.id,
+                    field=conflict.canonical_field,
+                    stored_value=conflict.committed_value,
+                    proposed_value=conflict.proposed_value,
+                )
+                for conflict in pending_conflicts
+            ],
+        )
+
+    latest_history = case_history_crud.get_latest_user_driven_case_history(session, case.id)
+    if latest_history is None:
+        raise HTTPException(status_code=500, detail="Case에 대한 최초 판단 기록이 없습니다.")
+
+    _assert_judgment_is_showable(latest_history)
+
+    if latest_history.judgment_status == "PENDING":
+        return CaseResultsEntryResponse(judgment_status="PENDING", case_history_id=latest_history.id)
+
+    if latest_history.judgment_status == "DONE":
+        return CaseResultsEntryResponse(
+            judgment_status="DONE",
+            case_history_id=latest_history.id,
+            next_action=(
+                NextActionResponse(
+                    title=latest_history.next_action,
+                    reason=latest_history.next_action_reason,
+                    questions_to_ask=latest_history.next_action_questions_to_ask or [],
+                )
+                if latest_history.next_action is not None
+                else None
+            ),
+        )
+
+    if latest_history.judgment_status == "NEEDS_MORE_INFO":
+        return CaseResultsEntryResponse(
+            judgment_status="NEEDS_MORE_INFO",
+            case_history_id=latest_history.id,
+            questions_for_user=latest_history.questions_for_user,
+        )
+
+    return CaseResultsEntryResponse(
+        judgment_status="FAILED",
+        case_history_id=latest_history.id,
+        recovery_action_code=latest_history.recovery_action_code,
+        requested_field_paths=latest_history.requested_field_paths,
+        retryable=latest_history.retryable,
+    )
+
+
+def _assert_judgment_is_showable(history: CaseHistory) -> None:
+    """상태별로 화면이 읽을 값이 다 있는지 본다. 없으면 빈칸을 내보내지 말고 여기서 막는다.
+
+    AI 계약상 next_action이 있으면 reason도 반드시 있고(NextAction.reason은 빈 문자열도
+    거부한다), 검수를 통과한 판단은 항상 blocker를 남긴다. 그래서 평소에는 걸리지 않는다.
+    걸린다면 AI가 아니라 우리 저장 코드가 깨진 것이고, 그때 조용히 빈 화면을 보여주는 것보다
+    멈추고 알아차리는 쪽이 낫다.
+
+    같은 검사를 /cases와 /cases/results가 함께 쓴다. 흩어 두면 화면이 늘 때마다 한쪽만
+    고치게 된다.
+    """
+
+    if history.judgment_status == "DONE":
+        if history.next_action is None or history.next_action_reason is None:
+            raise HTTPException(
+                status_code=500, detail="판단 완료(DONE) 상태인데 다음 행동이나 그 이유가 없습니다."
+            )
+        if history.priority_blocker is None:
+            raise HTTPException(status_code=500, detail="판단 완료(DONE) 상태인데 Blocker가 없습니다.")
+        return
+
+    if history.judgment_status == "NEEDS_MORE_INFO":
+        if not history.questions_for_user:
+            raise HTTPException(
+                status_code=500, detail="정보 부족(NEEDS_MORE_INFO) 상태인데 되물을 질문이 없습니다."
+            )
+        if history.priority_blocker is None:
+            raise HTTPException(
+                status_code=500, detail="정보 부족(NEEDS_MORE_INFO) 상태인데 Blocker가 없습니다."
+            )
+        return
+
+    if history.judgment_status == "FAILED" and (
+        history.recovery_action_code is None or history.retryable is None
+    ):
+        raise HTTPException(
+            status_code=500,
+            detail="판단 실패(FAILED) 상태인데 recovery_action_code·retryable이 없습니다.",
+        )
+
+
+def submit_case_results(
+    session: Session, member_id: int, submit_request: CaseResultsSubmitRequest
+) -> CaseResultsSubmitAcceptedResponse:
+    """`/results`의 "이 내용으로 알려주기" 버튼. 접수만 하고 끝난다.
+
+    Agent 판단은 최소 30초~2분 걸려서 이 요청·응답 안에서 끝낼 수 없다. 그래서 여기서는
+    접수 가능한 상태인지만 확인하고 PENDING 이력을 남긴 뒤 끝난다 — 판단 결과는 이 응답이
+    아니라 처리 상태를 조회하는 별도 조회 API가 준다.
+    """
+
+    case = case_crud.get_case_by_member_id(session, member_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case를 찾을 수 없습니다.")
+
+    if conflict_reference_crud.get_pending_conflicts_by_case_id(session, case.id):
+        raise HTTPException(status_code=409, detail="확인 대기 중인 충돌이 있습니다.")
+
+    latest_history = case_history_crud.get_latest_user_driven_case_history(session, case.id)
+    if latest_history is None:
+        raise HTTPException(status_code=500, detail="Case에 대한 최초 판단 기록이 없습니다.")
+
+    if latest_history.judgment_status == "PENDING":
+        raise HTTPException(status_code=409, detail="직전 제출을 아직 처리 중입니다.")
+
+    if submit_request.case_history_id != latest_history.id:
+        raise HTTPException(status_code=409, detail="최신 판단에 대해 요청을 주지 않았습니다.")
+
+    history = case_history_crud.create_case_history(
+        session,
+        CaseHistory(
+            case_id=case.id,
+            raw_input=submit_request.raw_input,
+            source="USER_INPUT",
+            judgment_status="PENDING",
+        ),
+    )
+    session.commit()
+    return CaseResultsSubmitAcceptedResponse(case_history_id=history.id)
+
+
+def get_case_results_submit_status(
+    session: Session, member_id: int, case_history_id: int
+) -> CaseResultsSubmitResponse:
+    """제출(`/results`) 이후 FE가 몇 초 간격으로 묻는 처리 상태 조회.
+
+    `/replan` 화면은 `changes`·`blocker`·`next_action`까지 필요해서, `/case` 진입 판단용인
+    `get_case_results_entry()`와 응답 모양이 다르다. 그래서 별도 스키마(`result` 기반)를 쓴다.
+
+    `case_history_id`는 "지금 조회하려는 게 어느 제출이냐"를 밝히는 값이다. Case 생성 판단은
+    이 조회 대상이 아니므로, 최신 판단을 찾을 때 USER_INPUT만 본다(get_latest_user_driven_
+    case_history와 다른 점).
+    """
+
+    case = case_crud.get_case_by_member_id(session, member_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case를 찾을 수 없습니다.")
+
+    latest_history = case_history_crud.get_latest_case_history_by_source(session, case.id, "USER_INPUT")
+    if latest_history is None:
+        raise HTTPException(status_code=404, detail="조회할 제출 기록을 찾을 수 없습니다.")
+
+    if case_history_id != latest_history.id:
+        raise HTTPException(status_code=409, detail="최신 판단에 대해 요청을 주지 않았습니다.")
+
+    _assert_judgment_is_showable(latest_history)
+
+    # 충돌도 다른 상태와 똑같이 judgment_status로 가른다. Case 전체가 아니라 이 제출
+    # (latest_history)에 달린 충돌만 본다 — used_at이 실제로 찍히기 시작하면(충돌 확인 API),
+    # Case 전체로 찾는 조회는 다른 제출의 충돌을 집어올 수 있다.
+    if latest_history.judgment_status == "CONFLICT":
+        pending_conflicts = conflict_reference_crud.get_pending_conflicts_by_case_history_id(
+            session, latest_history.id
+        )
+        if not pending_conflicts:
+            # 미결 충돌이 있는 동안은 새 제출이 거부되므로(submit_case_results), 이 제출이
+            # CONFLICT인데 남은 충돌이 없다면 저장이 어긋난 것이다. 빈 목록을 CONFLICT라고
+            # 내보내면 화면이 고를 것 없는 되묻기를 띄운다.
+            raise HTTPException(
+                status_code=500,
+                detail=f"case_history {latest_history.id}가 CONFLICT인데 확인 대기 중인 충돌이 없습니다.",
+            )
+        return CaseResultsSubmitResponse(
+            result="CONFLICT",
+            raw_input=latest_history.raw_input,
+            conflicts=[
+                ConflictItemResponse(
+                    id=conflict.id,
+                    field=conflict.canonical_field,
+                    stored_value=conflict.committed_value,
+                    proposed_value=conflict.proposed_value,
+                )
+                for conflict in pending_conflicts
+            ],
+        )
+
+    if latest_history.judgment_status == "PENDING":
+        return CaseResultsSubmitResponse(result="PENDING")
+
+    if latest_history.judgment_status == "NEEDS_MORE_INFO":
+        return CaseResultsSubmitResponse(
+            result="NEEDS_MORE_INFO",
+            questions_for_user=latest_history.questions_for_user,
+        )
+
+    if latest_history.judgment_status == "FAILED":
+        return CaseResultsSubmitResponse(
+            result="FAILED",
+            recovery_action_code=latest_history.recovery_action_code,
+            requested_field_paths=latest_history.requested_field_paths,
+            retryable=latest_history.retryable,
+        )
+
+    # 남는 건 DONE뿐이다. 위에서 상태 이름으로 거르지 않고 내려오면, CONFLICT처럼 blocker가
+    # 없는 상태가 아래 blocker.description에 닿아 엉뚱한 곳에서 터진다.
+    if latest_history.judgment_status != "DONE":
+        raise HTTPException(
+            status_code=500,
+            detail=f"처리 상태 조회가 다루지 않는 판단 상태입니다: {latest_history.judgment_status}",
+        )
+
+    changes = [
+        FieldChangeResponse(field=h.canonical_field, stored_value=h.before_value, new_value=h.after_value)
+        for h in case_field_history_crud.get_case_field_histories_by_case_history_id(session, latest_history.id)
+    ]
+    return CaseResultsSubmitResponse(
+        result="UPDATED" if changes else "NO_CHANGE",
+        changes=changes,
+        blocker=latest_history.priority_blocker.description,
+        next_action=NextActionResponse(
+            title=latest_history.next_action,
+            reason=latest_history.next_action_reason,
+            questions_to_ask=latest_history.next_action_questions_to_ask or [],
+        ),
+    )
+
+
+def _create_case_creation_evidence(
+    session: Session, case: Case, case_request: CaseCreateRequest
+) -> CaseHistory:
     # case 생성 폼 입력값(business_type/franchise_status/lease_status)을 AI 쪽에서 CONFIRMED로
     # 인정하려면 evidence_refs가 있어야 한다(CaseFact.validate_fact_state). 세 필드가 이 evidence
     # 하나를 같이 참조해도 된다고 AI팀 확인함.
@@ -148,6 +437,7 @@ def _create_case_creation_evidence(session: Session, case: Case, case_request: C
             freshness_status="CURRENT",
         ),
     )
+    return history
 
 
 def _fill_temp_case_procedure_steps(session: Session, case_id: int) -> None:

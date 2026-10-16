@@ -1,13 +1,16 @@
 """The closure MVP does not execute or request input for support programs."""
 
 import asyncio
+from itertools import product
 from unittest.mock import AsyncMock
 from uuid import UUID
 
 import pytest
+from pydantic import ValidationError
 from test_action_codes import (
     NOW,
     StubModel,
+    result_fixes_xfail,
     source,
     supervisor_request,
     support_sources,
@@ -17,9 +20,13 @@ from test_blocker_candidates import ChoiceModel
 from app.agent.graph import AgentGraph
 from app.agent.review_tool import ReviewTool
 from app.agent.schemas import (
+    CASE_FIELD_SPECS,
     AgentGraphInput,
+    CaseFieldKey,
+    ConflictCandidate,
     InfoAnalysisResult,
     ReviewResult,
+    SafeFailureOutcome,
     canonical_digest,
 )
 from app.agent.supervisor.agent import SupervisorAgent
@@ -159,6 +166,331 @@ def test_info_question_keeps_closure_fields_but_omits_support_only_fields():
         }],
     })
 
-    assert AgentGraph._requested_field_paths({
-        "source_results": [source(info)],
-    }) == ["restoration_scope"]
+    failure = {"source_results": [source(info)]}
+    requested = AgentGraph._requested_field_paths(failure)
+    assert requested == ["restoration_scope"]
+    if hasattr(AgentGraph, "_requested_field_guidance"):
+        assert AgentGraph._requested_field_guidance(failure, requested) == {
+            "restoration_scope": "확인한 원상복구 범위가 있으면 알려주세요.",
+        }
+
+
+@pytest.mark.parametrize("linked_id,expected", [
+    (95, "임대인이 확인해 준 원상복구 범위가 무엇인가요?"),
+    (96, "원상복구 범위를 확인하셨나요?"),
+    (93, "원상복구 범위를 확인하셨나요?"),
+])
+@result_fixes_xfail(raises=AttributeError)
+def test_requested_guidance_prefers_linked_question_then_resolving_question(linked_id, expected):
+    info = supervisor_request().source_results[1].output
+    info = InfoAnalysisResult.model_validate(info.model_dump() | {
+        "missing_fields": [{
+            "field_path": "restoration_scope", "blocks": ["SUPERVISOR_DECISION"],
+            "reason_summary": "합성 미확인 항목", "question_candidate_id": UUID(int=linked_id),
+        }],
+        "question_candidates": [
+            {
+                "question_id": UUID(int=question_id), "text": text,
+                "resolves_field_paths": [field], "reason_summary": "합성 확인 질문",
+            }
+            for question_id, field, text in [
+                (93, "employee_count", "직원이 몇 명인가요?"),
+                (94, "restoration_scope", "원상복구 범위를 확인하셨나요?"),
+                (95, "restoration_scope", "임대인이 확인해 준 원상복구 범위가 무엇인가요?"),
+            ]
+        ],
+    })
+    failure = {"source_results": [source(info)]}
+
+    assert AgentGraph._requested_field_guidance(failure, [CaseFieldKey.RESTORATION_SCOPE]) == {
+        "restoration_scope": expected,
+    }
+
+
+@result_fixes_xfail(raises=AttributeError)
+def test_requested_guidance_fallback_covers_every_case_field():
+    guidance = AgentGraph._requested_field_guidance({}, list(CASE_FIELD_SPECS))
+
+    assert list(guidance) == list(CASE_FIELD_SPECS)
+    assert all(text.strip() for text in guidance.values())
+    assert guidance[CaseFieldKey.PLANNED_CLOSURE_DATE] == "예정한 폐업일이 언제인지 알려주세요."
+
+
+@pytest.mark.parametrize("recovery,retryable", [
+    ("RETRY", True), ("CONTACT_SUPPORT", False), ("NONE", False),
+])
+@result_fixes_xfail(raises=AttributeError)
+def test_non_input_recovery_has_no_field_guidance(recovery, retryable):
+    _, request, _, _, _ = graph_run_inputs("RESULT_SUBMITTED")
+    info = supervisor_request().source_results[1].output
+    info = InfoAnalysisResult.model_validate(info.model_dump() | {
+        "question_candidates": [{
+            "question_id": UUID(int=97), "text": "원상복구 범위를 알려주세요.",
+            "resolves_field_paths": ["restoration_scope"], "reason_summary": "합성 확인 질문",
+        }],
+    })
+    failure = {
+        "source_results": [source(info)], "recovery_action_code": recovery, "retryable": retryable,
+    }
+    outcome = AgentGraph._build_safe_failure(request, run_id=UUID(int=2), trace_id=None, failure=failure)
+
+    assert AgentGraph._requested_field_paths(failure) == ["restoration_scope"]
+    assert AgentGraph._requested_field_guidance(failure, outcome.requested_field_paths) == {}
+
+
+@pytest.mark.parametrize("code,retryable,fields,stale", [
+    pytest.param(
+        code, retryable, fields, stale,
+        marks=result_fixes_xfail(raises=pytest.fail.Exception)
+        if retryable != (code == "RETRY") or (
+            not fields and not stale if code == "RESUBMIT_INPUT" else bool(fields)
+        ) else (),
+    )
+    for code, retryable, fields, stale in product(
+        ["RETRY", "RESUBMIT_INPUT", "CONTACT_SUPPORT", "NONE"],
+        [False, True], [[], ["restoration_scope"]], [False, True],
+    )
+])
+def test_safe_failure_recovery_combinations(code, retryable, fields, stale):
+    _, request, _, _, _ = graph_run_inputs("RESULT_SUBMITTED")
+    payload = {
+        "outcome_type": "SAFE_FAILURE", "run_id": UUID(int=2), "case_id": 1,
+        "trigger": request.trigger, "snapshot_id": request.case_snapshot.snapshot_id,
+        "failure_code": "STALE_CONFLICT_CONFIRMATION" if stale else "COMPONENT_UNAVAILABLE",
+        "message_code": "AGENT_COMPONENT_UNAVAILABLE", "recovery_action_code": code,
+        "requested_field_paths": fields, "retryable": retryable, "failed_component": None,
+        "trace_id": None,
+    }
+    valid = retryable == (code == "RETRY") and (
+        bool(fields) or stale if code == "RESUBMIT_INPUT" else not fields
+    )
+    if valid:
+        outcome = SafeFailureOutcome.model_validate(payload)
+        assert SafeFailureOutcome.model_validate_json(outcome.model_dump_json()) == outcome
+    else:
+        with pytest.raises(ValidationError):
+            SafeFailureOutcome.model_validate(payload)
+
+
+@result_fixes_xfail(raises=pytest.fail.Exception)
+def test_safe_failure_rejects_duplicate_requested_fields():
+    _, request, _, _, _ = graph_run_inputs("RESULT_SUBMITTED")
+    outcome = AgentGraph._build_safe_failure(request, run_id=UUID(int=2), trace_id=None, failure={})
+
+    with pytest.raises(ValidationError):
+        SafeFailureOutcome.model_validate(outcome.model_dump() | {
+            "recovery_action_code": "RESUBMIT_INPUT",
+            "requested_field_paths": ["restoration_scope", "restoration_scope"],
+        })
+
+
+@pytest.mark.parametrize("error,expected", [
+    pytest.param("timeout", "RUN_DEADLINE_EXCEEDED", marks=result_fixes_xfail()),
+    pytest.param("component", "COMPONENT_UNAVAILABLE", marks=result_fixes_xfail()),
+    ("invalid_output", "STRUCTURED_OUTPUT_FAILED"),
+])
+def test_graph_failure_with_missing_fields_keeps_recovery_combination(error, expected):
+    from app.agent.llm import LLMRequestError
+    from app.agent.run_scope import RunDeadlineExceededError
+
+    graph, request, _, info, _ = graph_run_inputs("RESULT_SUBMITTED")
+    original = info.analyze.side_effect
+
+    async def analyze(component_input):
+        result = await original(component_input)
+        return InfoAnalysisResult.model_validate(result.model_dump() | {
+            "question_candidates": [{
+                "question_id": UUID(int=91), "text": "원상복구 범위를 알려주세요.",
+                "resolves_field_paths": ["restoration_scope"],
+                "reason_summary": "합성 누락 질문",
+            }],
+        })
+
+    info.analyze.side_effect = analyze
+    graph._supervisor = AsyncMock()
+    graph._supervisor.draft.side_effect = (
+        RunDeadlineExceededError() if error == "timeout"
+        else LLMRequestError("synthetic unavailable", code="SYNTHETIC_COMPONENT_ERROR", retryable=True)
+        if error == "component" else ValueError("synthetic invalid output")
+    )
+    outcome = asyncio.run(graph.run(request))
+    assert outcome.outcome_type == "SAFE_FAILURE"
+    assert outcome.failure_code == expected
+    assert outcome.retryable is (error != "invalid_output")
+    assert outcome.recovery_action_code == (
+        "RESUBMIT_INPUT" if error == "invalid_output" else "RETRY"
+    )
+    assert outcome.requested_field_paths == (
+        ["restoration_scope"] if error == "invalid_output" else []
+    )
+    SafeFailureOutcome.model_validate_json(outcome.model_dump_json())
+
+
+@pytest.mark.parametrize("changed", ["snapshot", "value"])
+def test_graph_stale_confirmation_requires_new_choice_without_requested_fields(changed):
+    graph, request, procedure, info, _ = graph_run_inputs("RESULT_SUBMITTED")
+    conflict = ConflictCandidate.create(
+        conflict_ref="synthetic-conflict", candidate_id=UUID(int=60),
+        snapshot_id=UUID(int=61) if changed == "snapshot" else request.case_snapshot.snapshot_id,
+        field_path="lease_status", committed_status="CONFIRMED",
+        committed_value="LEASED_PAID" if changed == "value" else "OWNED",
+        proposed_operation="SET", proposed_status="CONFIRMED", proposed_value="LEASED_FREE",
+        source_evidence_refs=["synthetic-document"], source_call_id=UUID(int=3),
+    )
+    request = AgentGraphInput(
+        trigger={"trigger_type": "CONFLICT_CONFIRMED", "input_event_id": "synthetic-confirmation",
+                     "client_event_id": None, "confirmed_conflict": conflict, "confirmed_at": NOW},
+        case_snapshot=request.case_snapshot,
+    )
+    outcome = asyncio.run(graph.run(request))
+    assert outcome.outcome_type == "SAFE_FAILURE", outcome
+    assert outcome.failure_code == "STALE_CONFLICT_CONFIRMATION"
+    assert outcome.recovery_action_code == "RESUBMIT_INPUT"
+    assert outcome.retryable is False
+    assert outcome.requested_field_paths == []
+    procedure.lookup.assert_not_awaited()
+    info.analyze.assert_not_awaited()
+
+
+@result_fixes_xfail(raises=pytest.fail.Exception)
+def test_failure_builder_rejects_explicit_conflicting_recovery_and_retryable():
+    _, request, _, _, _ = graph_run_inputs("RESULT_SUBMITTED")
+    with pytest.raises(ValidationError):
+        AgentGraph._build_safe_failure(
+            request, run_id=UUID(int=2), trace_id=None,
+            failure={"recovery_action_code": "CONTACT_SUPPORT", "retryable": True},
+        )
+
+
+@pytest.mark.parametrize("blocks,expected", [
+    pytest.param(None, ["restoration_scope"], marks=result_fixes_xfail()),
+    pytest.param(
+        ["SUPPORT_ANALYSIS"], [], marks=result_fixes_xfail(raises=AttributeError),
+    ),
+    pytest.param(
+        ["SUPPORT_ANALYSIS", "SUPERVISOR_DECISION"], ["restoration_scope"],
+        marks=result_fixes_xfail(raises=AttributeError),
+    ),
+])
+def test_failure_requests_held_facts_without_missing_questions(blocks, expected):
+    from test_info_replanning import analyze_facts
+
+    text = "원상복구 범위는 없다고 했는데 임대인은 전부 하라고 했어요."
+    held = analyze_facts([("restoration_scope", "NOT_REQUIRED", text)], text, requires_confirmation=True)
+    assert held.fact_candidates[0].requires_confirmation
+    assert held.missing_fields == []
+    assert held.question_candidates == []
+    if blocks is not None:
+        held = InfoAnalysisResult.model_validate(held.model_dump() | {
+            "missing_fields": [{
+                "field_path": "restoration_scope", "blocks": blocks,
+                "reason_summary": "합성 확인 항목", "question_candidate_id": None,
+            }],
+        })
+
+    failure = {"source_results": [source(held)]}
+    requested = AgentGraph._requested_field_paths(failure)
+    assert requested == expected
+    assert AgentGraph._requested_field_guidance(failure, requested) == (
+        {"restoration_scope": "확인한 원상복구 범위가 있으면 알려주세요."}
+        if expected else {}
+    )
+
+
+@pytest.mark.parametrize("failure", [
+    pytest.param("supervisor", marks=result_fixes_xfail()),
+    "timeout",
+    pytest.param("review_exhausted", marks=result_fixes_xfail()),
+    "support_rework",
+])
+def test_graph_failure_keeps_held_fact_recovery(failure):
+    from test_info_replanning import analyze_facts
+
+    from app.agent.run_scope import RunDeadlineExceededError
+
+    async def review(subject):
+        return ReviewResult(
+            reviewed_subject_id=subject.review_subject_id,
+            reviewed_subject_digest=subject.subject_digest,
+            verdict="REVISE", issues=[],
+            missing_evidence=[{
+                "claim_path": "/supervisor_draft/decision/blocker",
+                "required_source_types": ["USER_INPUT"],
+                "reason_summary": "합성 보류 사실 확인 요청",
+            }],
+            recommended_rework_targets=[
+                "SUPPORT_AGENT" if failure == "support_rework" else "SUPERVISOR"
+            ],
+            resolution_reason="합성 재작업 요청",
+        )
+
+    reviewer = AsyncMock()
+    reviewer.review.side_effect = review
+    graph, request, _, info, support = graph_run_inputs("RESULT_SUBMITTED", reviewer)
+    text = "원상복구 범위는 없다고 했는데 임대인은 전부 하라고 했어요."
+    request.trigger.input.redacted_text = text
+    held = analyze_facts([("restoration_scope", "NOT_REQUIRED", text)], text, requires_confirmation=True)
+    original = info.analyze.side_effect
+
+    async def analyze(component_input):
+        result = await original(component_input)
+        return InfoAnalysisResult.model_validate(result.model_dump() | {
+            "fact_candidates": held.fact_candidates,
+            "evidence_records": [*result.evidence_records, *held.evidence_records],
+        })
+
+    info.analyze.side_effect = analyze
+    if failure in {"supervisor", "timeout"}:
+        graph._supervisor = AsyncMock()
+        graph._supervisor.draft.side_effect = (
+            RunDeadlineExceededError() if failure == "timeout"
+            else ValueError("synthetic invalid output")
+        )
+
+    outcome = asyncio.run(graph.run(request))
+
+    assert outcome.outcome_type == "SAFE_FAILURE", outcome
+    assert outcome.recovery_action_code == (
+        "RETRY" if failure == "timeout"
+        else "CONTACT_SUPPORT" if failure == "support_rework"
+        else "RESUBMIT_INPUT"
+    )
+    assert outcome.retryable is (failure == "timeout")
+    assert outcome.requested_field_paths == (
+        [] if failure in {"timeout", "support_rework"} else ["restoration_scope"]
+    )
+    if failure == "review_exhausted":
+        assert outcome.failure_code == "REVIEW_RETRY_EXHAUSTED"
+        assert reviewer.review.await_count == 3
+    support.analyze.assert_not_awaited()
+    SafeFailureOutcome.model_validate_json(outcome.model_dump_json())
+
+
+@result_fixes_xfail()
+def test_graph_delivers_held_fact_question_before_available_action():
+    from test_info_replanning import analyze_facts
+
+    text = "원상복구 범위는 없다고 했는데 임대인은 전부 하라고 했어요."
+    held = analyze_facts([("restoration_scope", "NOT_REQUIRED", text)], text, requires_confirmation=True)
+    graph, request, _, info, _ = graph_run_inputs("RESULT_SUBMITTED")
+    request.trigger.input.redacted_text = text
+    original = info.analyze.side_effect
+
+    async def analyze(component_input):
+        result = await original(component_input)
+        return InfoAnalysisResult.model_validate(result.model_dump() | {
+            "fact_candidates": held.fact_candidates,
+            "evidence_records": [*result.evidence_records, *held.evidence_records],
+        })
+
+    info.analyze.side_effect = analyze
+    outcome = asyncio.run(graph.run(request))
+    assert outcome.outcome_type == "REVIEWED_PLAN", outcome
+    outcome.assert_integrity()
+    draft = outcome.review_subject.supervisor_draft
+    assert draft.decision.decision_type == "NEEDS_MORE_INFO"
+    assert draft.decision.next_action is None
+    assert draft.decision.questions_for_user == ["확인한 원상복구 범위가 있으면 알려주세요."]
+    assert held.fact_candidates[0].source_evidence_refs[0] in draft.decision.blocker.evidence_refs
+    assert draft.mutations.fact_changes == []
+    assert draft.mutations.procedure_progress_changes == []

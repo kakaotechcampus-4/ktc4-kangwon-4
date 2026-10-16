@@ -374,6 +374,20 @@ def _validate_mutation_provenance(
     sources_by_call_id: dict[UUID, Any],
 ) -> None:
     mutations = subject.supervisor_draft.mutations
+    if isinstance(subject.trigger, ConflictConfirmedTrigger):
+        confirmed_changes = [
+            candidate
+            for candidate in mutations.fact_changes
+            if candidate.source_type == FactChangeSourceType.CONFIRMED_CONFLICT
+        ]
+        if len(confirmed_changes) != 1:
+            raise ReviewIntegrityError(
+                "conflict confirmation requires exactly one confirmed change"
+            )
+        if len(mutations.fact_changes) != 1 or mutations.procedure_progress_changes:
+            raise ReviewIntegrityError(
+                "conflict confirmation cannot create new facts or procedure progress"
+            )
     snapshot_facts = {fact.field_path: fact for fact in subject.snapshot.facts}
     for candidate in mutations.fact_changes:
         if candidate.source_type == FactChangeSourceType.CONFIRMED_CONFLICT:

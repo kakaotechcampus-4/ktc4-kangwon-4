@@ -1,6 +1,6 @@
 from typing import Optional
 
-from sqlalchemy import JSON, BigInteger, Boolean, Column, Enum, ForeignKey, Text
+from sqlalchemy import JSON, BigInteger, Boolean, Column, Enum, ForeignKey, String, Text
 from sqlmodel import Field, Relationship
 
 from app.be.models.mixins import CreatedAtMixin
@@ -47,6 +47,15 @@ class CaseHistory(CreatedAtMixin, table=True):
         default=None,
         sa_column=Column(JSON, nullable=True),
         description="행동을 정하기 전 서비스가 사용자에게 되묻는 질문 목록. 없으면 NULL",
+    )
+    failure_code: str | None = Field(
+        default=None,
+        sa_column=Column(String(100), nullable=True),
+        description=(
+            "AI가 돌려준 실패 종류(REVIEW_RETRY_EXHAUSTED, LOOP_LIMIT_REACHED 등). "
+            "AI가 값을 늘려도 따라 고치지 않도록 enum이 아닌 문자열로 둔다. "
+            "실패가 아니거나 AI가 결과를 내기 전에 끊겼으면 NULL"
+        ),
     )
     recovery_action_code: str | None = Field(
         default=None,

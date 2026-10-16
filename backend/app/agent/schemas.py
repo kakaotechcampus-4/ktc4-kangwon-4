@@ -1400,9 +1400,6 @@ class Blocker(AgentSchema):
     evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
 
 
-BlockerDraft = Blocker
-
-
 class ProcedureActionTarget(AgentSchema):
     target_kind: Literal["PROCEDURE"]
     procedure_step: ProcedureStepRef
@@ -1439,9 +1436,6 @@ class NextAction(AgentSchema):
     questions_to_ask: list[NonEmptyStr]
     target: NextActionTarget
     evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
-
-
-NextActionDraft = NextAction
 
 
 class DecisionType(StrEnum):
@@ -2195,6 +2189,23 @@ class SafeFailureOutcome(AgentSchema):
         description="Optional caller trace identifier copied from AgentGraphInput."
     )
 
+    @model_validator(mode="after")
+    def validate_recovery(self) -> SafeFailureOutcome:
+        _ensure_unique(
+            self.requested_field_paths, lambda field: field, "requested_field_paths"
+        )
+        if self.retryable != (self.recovery_action_code == "RETRY"):
+            raise ValueError("retryable must match recovery_action_code")
+        if self.recovery_action_code == "RESUBMIT_INPUT":
+            if (
+                not self.requested_field_paths
+                and self.failure_code != "STALE_CONFLICT_CONFIRMATION"
+            ):
+                raise ValueError("RESUBMIT_INPUT requires requested fields")
+        elif self.requested_field_paths:
+            raise ValueError("only RESUBMIT_INPUT may request fields")
+        return self
+
 
 AgentRunOutcome: TypeAlias = Annotated[
     ReviewedPlanOutcome | ConflictOutcome | SafeFailureOutcome,
@@ -2286,7 +2297,6 @@ __all__ = [
     "AgentRunOutcome",
     "AgentSchema",
     "Blocker",
-    "BlockerDraft",
     "CaseCreatedTrigger",
     "CaseFact",
     "CaseFieldKey",
@@ -2327,7 +2337,6 @@ __all__ = [
     "MutationSet",
     "NeedsMoreInfoDecisionDraft",
     "NextAction",
-    "NextActionDraft",
     "NextActionTarget",
     "NonNullStrictScalar",
     "PlanningContext",
