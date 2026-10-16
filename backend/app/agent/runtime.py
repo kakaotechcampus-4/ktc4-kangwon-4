@@ -4,16 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import os
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 from dotenv import dotenv_values
 
-from app.agent import prompts
 from app.agent.action_catalog import ProcedureBindings, resolve_procedure_bindings
-from app.agent.decision_cache import DecisionCache, fingerprint
 from app.agent.graph import AgentGraph
 from app.agent.info_agent import InfoAnalysisAgent
 from app.agent.llm import (
@@ -124,46 +121,22 @@ class AgentRuntime:
         clients: Sequence[StructuredLLMClient],
         procedure_tool: StoredProcedureLookupTool,
         trace_sink: TraceSink | None = None,
-        decision_cache: DecisionCache | None = None,
-        cache_context: Callable[[], Mapping[str, object] | None] | None = None,
     ) -> None:
         self._graph = graph
         self._limits = limits
         self._clients = tuple(clients)
         self._procedure_tool = procedure_tool
         self._trace_sink = trace_sink
-        self._decision_cache = decision_cache
-        self._cache_context = cache_context
 
     @property
     def limits(self) -> RuntimeLimits:
         return self._limits
-
-    @property
-    def decision_cache(self) -> DecisionCache | None:
-        """Inspect, clear, or invalidate a Case without exposing cached data."""
-
-        return self._decision_cache
-
-    def _cache_key(self, request: AgentGraphInput) -> str | None:
-        if self._decision_cache is None or self._cache_context is None:
-            return None
-        try:
-            context = self._cache_context()
-            return (
-                self._decision_cache.key(request, context)
-                if context is not None
-                else None
-            )
-        except Exception:  # noqa: BLE001 - cache failure must defer to the Graph
-            return None
 
     async def run_planning(
         self,
         request: AgentGraphInput,
         *,
         deadline_seconds: float | None = None,
-        use_cache: bool = True,
     ) -> AgentGraphOutput:
         """Run with an isolated budget and the caller's remaining time limit."""
 
@@ -185,21 +158,7 @@ class AgentRuntime:
             usage_scope(usage),
             run_deadline_scope(deadline),
         ):
-            cache = self._decision_cache if use_cache else None
-            key = self._cache_key(request) if cache is not None else None
-            if key is not None and not deadline.is_expired():
-                cached = cache.get(key)
-                if cached is not None and not deadline.is_expired():
-                    # Preserve the original run, subject and proof; this is reuse.
-                    return cached
-            outcome = await self._graph.run(request)
-            if (
-                key is not None
-                and not deadline.is_expired()
-                and self._cache_key(request) == key
-            ):
-                cache.put(key, request, outcome)
-            return outcome
+            return await self._graph.run(request)
 
     async def aclose(self) -> None:
         # Cleanup must attempt every transport and must not discard a reviewed
@@ -224,7 +183,6 @@ async def build_runtime(
     procedure_bindings: ProcedureBindings | None = None,
     support_wiki: SupportWikiStore | None = None,
     limits: RuntimeLimits | None = None,
-    use_decision_cache: bool = True,
 ) -> AgentRuntime:
     """Assemble the Agent with reviewed data supplied by the caller.
 
@@ -286,49 +244,10 @@ async def build_runtime(
         )
         raise
 
-    def cache_context() -> Mapping[str, object] | None:
-        # Wiki lookup has no revision/expiry contract. Re-fetch it through the
-        # graph instead of claiming that an earlier lookup remains valid.
-        if support_wiki is not None:
-            return None
-        records = list(procedure_store.records())
-        today = datetime.now(timezone.utc).date()
-        if any(record.freshness(today) != "CURRENT" for record in records):
-            return None
-        if any(
-            evidence.freshness_status != "CURRENT"
-            for evidence in support_catalog.evidence_records
-        ):
-            return None
-        return {
-            "models": [fingerprint(asdict(item.config)) for item in clients],
-            "registry": [
-                step.model_dump(mode="json") for step in known_procedure_steps
-            ],
-            "procedure_bindings": {
-                key: reference.model_dump(mode="json")
-                for key, reference in bindings.items()
-            },
-            "catalog": support_catalog.model_dump(mode="json"),
-            "store_version": procedure_store.snapshot_version,
-            "procedure_records": [record.model_dump(mode="json") for record in records],
-            "prompts": [
-                factory({})
-                for factory in (
-                    prompts.info_messages,
-                    prompts.support_messages,
-                    prompts.supervisor_messages,
-                    prompts.review_messages,
-                )
-            ],
-        }
-
     return AgentRuntime(
         graph=graph,
         limits=resolved,
         clients=clients,
         procedure_tool=procedure_tool,
         trace_sink=trace_sink,
-        decision_cache=DecisionCache() if use_decision_cache else None,
-        cache_context=cache_context if use_decision_cache else None,
     )

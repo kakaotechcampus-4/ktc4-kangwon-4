@@ -125,16 +125,16 @@ async def run_case_planning(
         for step in known_procedure_steps
     ]
     catalog = ReviewedSupportCatalog.model_validate(support_catalog.model_dump())
+    # A runtime is built per request, so no decision cache: it could never hit.
     runtime = await build_runtime(
         known_procedure_steps=registry,
         procedure_bindings=procedure_bindings,
         procedure_store=procedure_store,
         support_catalog=catalog,
         limits=limits,
-        use_decision_cache=False,
     )
     try:
-        outcome = await runtime.run_planning(owned_request, use_cache=False)
+        outcome = await runtime.run_planning(owned_request)
         if outcome.outcome_type == "REVIEWED_PLAN":
             outcome.assert_integrity()
         return outcome
