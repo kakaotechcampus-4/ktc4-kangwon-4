@@ -11,7 +11,6 @@ from test_blocker_candidates import ChoiceModel, request_with_state
 
 from app.agent.graph import AgentGraph
 from app.agent.info_agent.agent import (
-    ExtractedFactDraft,
     InfoAnalysisAgent,
     InfoAnalysisGuardrailError,
 )
@@ -496,67 +495,6 @@ def test_explicit_user_progress_is_still_extracted():
 RESTORATION_RESULT = "원상복구 범위는 없고 원상복구 작업은 필요하지 않습니다."
 
 
-def supports_restoration(field, value, quote, *, full_input=None):
-    fact = ExtractedFactDraft(
-        operation="SET", field_path=field, value_type="ENUM", value=value,
-        source_text=quote, confidence_bps=9000, requires_confirmation=False,
-        reason_summary="합성 임대인 확인 결과",
-    )
-    return InfoAnalysisAgent._fact_source_supports_value(
-        fact, input_text=full_input or quote,
-    )
-
-
-@pytest.mark.parametrize("field,quote", [
-    ("restoration_scope", "원상복구 범위는 없습니다."),
-    ("restoration_status", "원상복구 작업은 필요하지 않습니다."),
-    ("restoration_scope", RESTORATION_RESULT),
-    ("restoration_status", RESTORATION_RESULT),
-])
-def test_explicit_restoration_result_is_accepted(field, quote):
-    assert supports_restoration(field, "NOT_REQUIRED", quote)
-
-
-@pytest.mark.parametrize("field,value,quote", [
-    ("restoration_status", "NOT_REQUIRED", "원상복구 범위는 없습니다."),
-    ("restoration_status", "COMPLETED", "원상복구 범위는 없습니다."),
-    ("demolition_required", "NOT_REQUIRED", "원상복구 범위는 없습니다."),
-    ("restoration_scope", "NOT_REQUIRED", "원상복구 작업은 필요하지 않습니다."),
-    ("restoration_status", "COMPLETED", RESTORATION_RESULT),
-])
-def test_absence_of_scope_does_not_infer_another_fact(field, value, quote):
-    assert not supports_restoration(field, value, quote)
-
-
-@pytest.mark.parametrize("field,quote", [
-    ("restoration_scope", "원상복구 범위는 없지는 않습니다."),
-    ("restoration_scope", "원상복구 범위는 없을 수도 있습니다."),
-    ("restoration_scope", "원상복구 범위는 없는 것 같습니다."),
-    ("restoration_scope", "원상복구 범위는 없나요."),
-    ("restoration_scope", "원상복구 범위는 없으면 좋겠습니다."),
-    ("restoration_scope", "원상복구 범위는 없다면 작업을 생략합니다."),
-    ("restoration_scope", "원상복구 범위는 없다는 뜻인가요."),
-    ("restoration_scope", "원상복구 범위는 없다고 가정합니다."),
-    ("restoration_scope", "원상복구 범위는 없어도 확인해야 합니다."),
-    ("restoration_status", "원상복구 작업은 필요하지 않은 것은 아닙니다."),
-    ("restoration_status", "원상복구 작업은 필요하지 않을 수도 있습니다."),
-    ("restoration_status", "원상복구 작업은 필요하지 않은 것 같습니다."),
-    ("restoration_status", "원상복구 작업은 필요하지 않나요."),
-    ("restoration_status", "원상복구 작업은 필요하지 않으면 생략합니다."),
-    ("restoration_status", "원상복구 작업은 필요하지 않다면 생략합니다."),
-])
-def test_unconfirmed_restoration_is_not_asserted(field, quote):
-    assert not supports_restoration(field, "NOT_REQUIRED", quote)
-
-
-@pytest.mark.parametrize("suffix", ["는 것은 아닙니다.", "을 수도 있습니다."])
-def test_short_scope_quote_keeps_the_containing_sentence_guard(suffix):
-    quote = "원상복구 범위는 없"
-    assert not supports_restoration(
-        "restoration_scope", "NOT_REQUIRED", quote, full_input=quote + suffix,
-    )
-
-
 @pytest.mark.parametrize("unsupported_completion", [False, True])
 def test_result_sentence_produces_only_the_three_stated_fact_changes(unsupported_completion):
     request = request_for_replanning()
@@ -602,8 +540,12 @@ def test_result_sentence_produces_only_the_three_stated_fact_changes(unsupported
     assert result.procedure_progress_observations == []
 
 
-def analyze_facts(facts, text):
-    """Run the whole analyzer on one input sentence and return its result."""
+def analyze_facts(facts, text, *, requires_confirmation=False):
+    """Run the whole analyzer on one input sentence and return its result.
+
+    requires_confirmation=True stands in for the model marking the facts as
+    needing the owner's confirmation; the code now follows that mark as is.
+    """
     request = request_for_replanning()
     snapshot = request.case_snapshot.model_dump(mode="json")
     for item in snapshot["facts"]:
@@ -619,30 +561,58 @@ def analyze_facts(facts, text):
     )
     response["facts"] = [
         {"operation": "SET", "field_path": field, "value_type": CASE_FIELD_SPECS[field][0], "value": value,
-         "source_text": quote, "confidence_bps": 9500, "requires_confirmation": False,
+         "source_text": quote, "confidence_bps": 9500,
+         "requires_confirmation": requires_confirmation,
          "reason_summary": "합성 임대인 확인 결과"}
         for field, value, quote in facts
     ]
     return asyncio.run(InfoAnalysisAgent(Responses(response)).analyze(request))
 
 
-# 앞 절을 뒤 절이 뒤집는 문장은 확정하지 않고 사장님께 되묻는다. 뒤집는 말 자체를
-# 목록으로 모으지 않기 때문에 "있대요"·"하라고 했어요"·"비용을 내래요"처럼
-# 처음 보는 말투도 같이 걸린다. 확인이 필요한 사실은 Case에 저장되지 않는다.
-@pytest.mark.parametrize("field,value,text", [
-    ("restoration_scope", "NOT_REQUIRED", "원상복구 범위가 없는 줄 알았는데 있대요."),
-    ("restoration_scope", "NOT_REQUIRED", "원상복구 범위는 없다고 들었는데 임대인은 전부 하라고 했어요."),
-    ("restoration_scope", "NOT_REQUIRED", "원상복구 범위는 없다고 했지만 계약서에는 있어요."),
-    ("restoration_scope", "NOT_REQUIRED", "원상복구 범위는 없다고 했는데 원상복구를 하래요."),
-    ("restoration_status", "NOT_REQUIRED", "원상복구 작업은 필요하지 않다고 했다가 다시 필요하다고 했어요."),
-    ("demolition_required", "NOT_REQUIRED", "철거도 필요하지 않다고 했는데 결국 철거하래요."),
-    ("demolition_required", "NOT_REQUIRED", "임대인이 철거는 필요 없다고 했다가 다시 해야 한대요."),
-    ("demolition_required", "NOT_REQUIRED", "철거는 필요 없다고 했는데 철거 비용을 내래요."),
-    ("demolition_required", "REQUIRED", "철거해야 한다고 했는데 안 해도 된대요."),
+# 코드 검사에 걸린 이유를 재시도에 알려주지 않으면 모델은 같은 답을 반복하고
+# 분석 전체가 실패한다. 실제 모델(gpt-6.1-sol)에서 뒤집히는 보고 3번 중 2번이 그랬다.
+REVERSED = "원상복구 범위는 없다고 들었는데 임대인은 전부 하라고 했어요."
+
+
+def held(field, value):
+    return {"operation": "SET", "field_path": field, "value_type": "ENUM", "value": value,
+            "source_text": REVERSED, "confidence_bps": 8000, "requires_confirmation": True,
+            "reason_summary": "합성 임대인 확인 결과"}
+
+
+@pytest.mark.parametrize("rejected_facts,reason", [
+    ([held("restoration_scope", "NOT_REQUIRED"),
+      held("restoration_status", "NOT_REQUIRED") | {"requires_confirmation": False}],
+     "restoration_status can be confirmed only when restoration_scope"),
+    ([held("restoration_scope", "NOT_REQUIRED"), held("restoration_scope", "FULL")],
+     "Return at most one fact per field_path"),
 ])
-def test_self_reversing_sentence_is_asked_back_instead_of_confirmed(field, value, text):
-    candidate, = analyze_facts([(field, value, text)], text).fact_candidates
-    assert candidate.field_path == field
+def test_rejected_facts_tell_the_retry_why(rejected_facts, reason):
+    request = request_for_replanning()
+    snapshot = request.case_snapshot.model_dump(mode="json")
+    for item in snapshot["facts"]:
+        if item["field_path"] in {"restoration_scope", "restoration_status"}:
+            item.update(status="UNKNOWN", value=None, evidence_refs=[], updated_at=None)
+    snapshot["procedure_progress"] = []
+    request = InfoAnalysisInput.model_validate(request.model_dump() | {
+        "case_snapshot": snapshot,
+        "input": request.input.model_dump() | {"redacted_text": REVERSED},
+    })
+    findings = [finding(TAX, "doc1"), finding(FOOD, "doc2"), finding(RESTORATION, "doc3")]
+    rejected, corrected = output(findings), output(findings)
+    rejected["facts"] = rejected_facts
+    corrected["facts"] = [held("restoration_scope", "NOT_REQUIRED")]
+    client = Responses(rejected, corrected)
+
+    result = asyncio.run(InfoAnalysisAgent(client).analyze(request))
+
+    feedback, = [
+        item["content"] for item in client.messages[1]
+        if item["content"].startswith("The previous facts were rejected.")
+    ]
+    assert reason in feedback
+    assert "원상복구 범위는 없다" not in feedback  # 사장님 말은 안내에 섞지 않는다
+    candidate, = result.fact_candidates
     assert candidate.requires_confirmation
 
 
@@ -670,7 +640,7 @@ def test_held_fact_still_produces_a_question_for_the_owner():
     from app.agent.schemas import CaseSnapshot, MutationSet
 
     text = "임대인에게 물어봤어요. 원상복구 범위는 없다고 들었는데 임대인은 전부 하라고 했어요."
-    result = analyze_facts([("restoration_scope", "NOT_REQUIRED", text)], text)
+    result = analyze_facts([("restoration_scope", "NOT_REQUIRED", text)], text, requires_confirmation=True)
     candidate, = result.fact_candidates
     assert candidate.requires_confirmation
 
@@ -720,50 +690,6 @@ def test_connective_without_field_reversal_confirms_report(field, text):
     result = analyze_facts(facts, text)
     assert not any(candidate.requires_confirmation for candidate in result.fact_candidates)
     assert result.procedure_progress_observations == []
-
-
-@pytest.mark.parametrize("field,value,text", [
-    ("restoration_scope", "NOT_REQUIRED", "원상복구 범위는 없다고 했는데 임대인은 전부 하라고 하고 철거도 필요하대요."),
-    ("restoration_scope", "NOT_REQUIRED", "원상복구 범위는 없다고 했는데 철거도 필요하대요, 임대인은 전부 하라고 했어요."),
-    ("restoration_scope", "NOT_REQUIRED", "원상복구 범위는 없다고 했는데 계약서에도 원상복구 범위는 없대요, 임대인은 전부 하라고 했어요."),
-    ("employee_count", 3, "직원은 3명인데 지금은 0명으로 바뀌었어요."),
-    ("employee_count", 3, "직원은 3명인데 지금은 13명으로 바뀌었어요."),
-    ("employee_count", 3, "직원은 3명인데 지금은 30명으로 바뀌었어요."),
-    ("employee_count", 3, "직원은 3명인데 지금 3명은 아니래요."),
-    ("restoration_scope_detail", "벽면", "원상복구 범위는 벽면이라고 했는데 지금은 바닥으로 바뀌었어요."),
-    ("planned_closure_date", "2026-11-01", "폐업 예정일은 2026-11-01이었는데 지금은 2026-12-01로 바뀌었어요."),
-])
-def test_reversed_report_is_held_even_with_another_fact_or_value_type(field, value, text):
-    from app.agent.enrichment import build_fact_overlays
-
-    result = analyze_facts([(field, value, text)], text)
-    candidate, = result.fact_candidates
-    assert candidate.field_path == field
-    assert candidate.requires_confirmation
-    assert result.conflicts == []
-    assert build_fact_overlays(
-        supervisor_request().case_snapshot, result, uuid4(), uuid_factory=uuid4,
-    ) == []
-
-
-@pytest.mark.parametrize("suffix", [
-    "는데 임대인은 전부 하라고 하고 철거도 필요하대요.",
-    "는데 철거가 필요하대서 전부 원상복구해야 한대요.",
-    "는데 철거가 필요하다면서 전부 하래요.",
-    "는데 철거해야 하니까 원상복구도 전부 하래요.",
-])
-def test_short_quote_keeps_the_mixed_reversal_in_the_whole_sentence(suffix):
-    from app.agent.enrichment import build_fact_overlays
-
-    quote = "원상복구 범위는 없다고 했"
-    text = quote + suffix
-    result = analyze_facts([("restoration_scope", "NOT_REQUIRED", quote)], text)
-    candidate, = result.fact_candidates
-    assert candidate.source_span.text == quote
-    assert candidate.requires_confirmation
-    assert build_fact_overlays(
-        supervisor_request().case_snapshot, result, uuid4(), uuid_factory=uuid4,
-    ) == []
 
 
 @pytest.mark.parametrize("field,value,text", [
@@ -894,17 +820,17 @@ def test_result_replanning_uses_reviewed_facts_without_repeating_scope_question(
             response["facts"] = [
                 {"operation": "SET", "field_path": field, "value_type": "ENUM",
                  "value": "NOT_REQUIRED", "source_text": quote,
-                 "confidence_bps": 9500, "requires_confirmation": False,
+                 "confidence_bps": 9500, "requires_confirmation": held,
                  "reason_summary": "합성 임대인 확인 결과"}
-                for field, quote in facts
+                for field, quote, held in facts
             ]
             return response
 
         info_client = Responses(
-            analysis_response([("restoration_scope", scope_text)]),
+            analysis_response([("restoration_scope", scope_text, False)]),
             analysis_response([
-                ("demolition_required", demolition_text),
-                ("restoration_status", status_text),
+                ("demolition_required", demolition_text, held_demolition),
+                ("restoration_status", status_text, False),
             ]),
         )
         lookup = template.source_results[0].output
