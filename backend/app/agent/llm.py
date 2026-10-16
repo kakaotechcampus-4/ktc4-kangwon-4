@@ -656,9 +656,7 @@ class StructuredLLMClient:
             payload["max_completion_tokens"] = self.config.max_completion_tokens
         if self.config.stream:
             payload["stream"] = True
-        if self.config.reasoning_effort and _supports_reasoning_effort(
-            self.config.model
-        ):
+        if self.config.reasoning_effort:
             payload["reasoning_effort"] = self.config.reasoning_effort
         return payload
 
@@ -1031,11 +1029,6 @@ def _validate_response_model(response_model: type[BaseModel]) -> None:
         valid = False
     if not valid:
         raise TypeError("response_model must be a Pydantic BaseModel class")
-
-
-def _supports_reasoning_effort(model: str) -> bool:
-    model_name = model.rsplit("/", 1)[-1].lower()
-    return model_name.startswith(("gpt-5", "o1", "o3", "o4"))
 
 
 def _normalize_schema_name(name: str) -> str:

@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from dataclasses import replace
 
 import httpx
 import pytest
@@ -71,6 +72,22 @@ def test_completion_limit_is_sent_only_when_configured(limit):
         assert "max_completion_tokens" not in payloads[0]
     else:
         assert payloads[0]["max_completion_tokens"] == limit
+
+
+@pytest.mark.parametrize("model", ["gpt-6.1-sol", "gpt-4.1-mini"])
+@pytest.mark.parametrize("effort", ["xhigh", None])
+def test_reasoning_effort_is_sent_exactly_when_configured(model, effort):
+    payloads = []
+
+    def handler(request):
+        payloads.append(json.loads(request.content))
+        return httpx.Response(
+            200, json={"choices": [{"message": {"content": '{"ok":true}'}}]}
+        )
+
+    settings = replace(config(reasoning_effort=effort), model=model)
+    assert generate(settings, handler).ok is True
+    assert payloads[0].get("reasoning_effort") == effort
 
 
 @pytest.mark.parametrize("content", ["", '{"ok":true}'])
