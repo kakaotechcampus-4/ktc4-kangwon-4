@@ -330,6 +330,13 @@ def get_case_results_submit_status(
     if case is None:
         raise HTTPException(status_code=404, detail="Case를 찾을 수 없습니다.")
 
+    latest_history = case_history_crud.get_latest_case_history_by_source(session, case.id, "USER_INPUT")
+    if latest_history is None:
+        raise HTTPException(status_code=404, detail="조회할 제출 기록을 찾을 수 없습니다.")
+
+    if case_history_id != latest_history.id:
+        raise HTTPException(status_code=409, detail="최신 판단에 대해 요청을 주지 않았습니다.")
+
     pending_conflicts = conflict_reference_crud.get_pending_conflicts_by_case_id(session, case.id)
     if pending_conflicts:
         raw_input = pending_conflicts[0].case_history.raw_input
@@ -346,13 +353,6 @@ def get_case_results_submit_status(
                 for conflict in pending_conflicts
             ],
         )
-
-    latest_history = case_history_crud.get_latest_case_history_by_source(session, case.id, "USER_INPUT")
-    if latest_history is None:
-        raise HTTPException(status_code=404, detail="조회할 제출 기록을 찾을 수 없습니다.")
-
-    if case_history_id != latest_history.id:
-        raise HTTPException(status_code=409, detail="최신 판단에 대해 요청을 주지 않았습니다.")
 
     _assert_judgment_is_showable(latest_history)
 
