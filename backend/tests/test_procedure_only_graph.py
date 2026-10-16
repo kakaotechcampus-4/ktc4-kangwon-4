@@ -376,7 +376,7 @@ def test_failure_requests_held_facts_without_missing_questions(blocks, expected)
     from test_info_replanning import analyze_facts
 
     text = "원상복구 범위는 없다고 했는데 임대인은 전부 하라고 했어요."
-    held = analyze_facts([("restoration_scope", "NOT_REQUIRED", text)], text)
+    held = analyze_facts([("restoration_scope", "NOT_REQUIRED", text)], text, requires_confirmation=True)
     assert held.fact_candidates[0].requires_confirmation
     assert held.missing_fields == []
     assert held.question_candidates == []
@@ -429,7 +429,7 @@ def test_graph_failure_keeps_held_fact_recovery(failure):
     graph, request, _, info, support = graph_run_inputs("RESULT_SUBMITTED", reviewer)
     text = "원상복구 범위는 없다고 했는데 임대인은 전부 하라고 했어요."
     request.trigger.input.redacted_text = text
-    held = analyze_facts([("restoration_scope", "NOT_REQUIRED", text)], text)
+    held = analyze_facts([("restoration_scope", "NOT_REQUIRED", text)], text, requires_confirmation=True)
     original = info.analyze.side_effect
 
     async def analyze(component_input):
@@ -471,7 +471,7 @@ def test_graph_delivers_held_fact_question_before_available_action():
     from test_info_replanning import analyze_facts
 
     text = "원상복구 범위는 없다고 했는데 임대인은 전부 하라고 했어요."
-    held = analyze_facts([("restoration_scope", "NOT_REQUIRED", text)], text)
+    held = analyze_facts([("restoration_scope", "NOT_REQUIRED", text)], text, requires_confirmation=True)
     graph, request, _, info, _ = graph_run_inputs("RESULT_SUBMITTED")
     request.trigger.input.redacted_text = text
     original = info.analyze.side_effect

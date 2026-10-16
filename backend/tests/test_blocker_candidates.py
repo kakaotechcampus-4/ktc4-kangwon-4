@@ -943,7 +943,7 @@ def test_held_fact_precedes_missing_questions_and_actions_and_passes_review(held
         if held_field == "restoration_scope"
         else "철거도 필요하지 않다고 했는데 결국 철거하래요."
     )
-    result = analyze_facts([(held_field, "NOT_REQUIRED", text)], text)
+    result = analyze_facts([(held_field, "NOT_REQUIRED", text)], text, requires_confirmation=True)
 
     async def run():
         request = request_with_state()
@@ -983,7 +983,7 @@ def test_held_fact_only_blocks_closure_when_not_support_only(blocks):
     from test_info_replanning import analyze_facts
 
     text = "원상복구 범위는 없다고 했는데 임대인은 전부 하라고 했어요."
-    result = analyze_facts([("restoration_scope", "NOT_REQUIRED", text)], text)
+    result = analyze_facts([("restoration_scope", "NOT_REQUIRED", text)], text, requires_confirmation=True)
 
     async def run():
         request = request_with_state()
