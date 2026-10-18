@@ -16,6 +16,7 @@ import argparse
 import asyncio
 import hashlib
 import json
+import subprocess
 from collections import Counter
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -102,7 +103,14 @@ def digest(value) -> str:
     return "sha256:" + hashlib.sha256(canonical(value).encode()).hexdigest()
 
 
-def build_case_snapshot(payload: dict) -> tuple[CaseSnapshot, str]:
+PRIOR_FACT_FIELDS = (
+    "restoration_status", "restoration_scope", "restoration_scope_detail", "demolition_required",
+)
+
+
+def build_case_snapshot(
+    payload: dict, prior_facts: dict | None = None
+) -> tuple[CaseSnapshot, str]:
     """Map the five intake answers onto a Case read view, without a database.
 
     This is NOT the BE contract. BE builds a snapshot by reading a saved Case
@@ -110,11 +118,17 @@ def build_case_snapshot(payload: dict) -> tuple[CaseSnapshot, str]:
     derived from the payload so the same answers always produce the same input.
     No domain fact missing from the intake form is guessed: restoration and
     demolition stay UNKNOWN, which is exactly what the form does not ask.
+
+    ``prior_facts`` is a dataset row's state before its result input, for the
+    four restoration fields only (None = still unknown). Without it the output
+    is byte-identical to earlier runs, so their recorded digests stay comparable.
     """
 
     request = CaseCreateRequest.model_validate(payload)
     normalized = request.model_dump(mode="json")
     text = canonical(normalized)
+    prior = {name: (prior_facts or {}).get(name) for name in PRIOR_FACT_FIELDS}
+    known = {name: value for name, value in prior.items() if value is not None}
     evidence = EvidenceRecord(
         evidence_id="synthetic-fe-case-input",
         source_type="USER_INPUT",
@@ -128,20 +142,34 @@ def build_case_snapshot(payload: dict) -> tuple[CaseSnapshot, str]:
         freshness_status="CURRENT",
         content_hash=hashlib.sha256(text.encode()).hexdigest(),
     )
+    evidence_records = [evidence]
+    # A restoration fact confirmed by an earlier result input needs its own
+    # evidence; citing the intake form for it would claim the form asked it.
+    prior_evidence = None
+    if known:
+        prior_text = canonical(known)
+        prior_evidence = evidence.model_copy(update={
+            "evidence_id": "synthetic-prior-result-input",
+            "source_ref": "synthetic:dataset-current-facts",
+            "excerpt": prior_text,
+            "content_hash": hashlib.sha256(prior_text.encode()).hexdigest(),
+        })
+        evidence_records.append(prior_evidence)
     fields = [
-        ("business_type", "STRING", request.business_type),
-        ("franchise_status", "BOOLEAN", request.franchise_status),
-        ("employee_count", "INTEGER", request.employee_count),
-        ("lease_status", "ENUM", request.lease_status),
+        ("business_type", "STRING", request.business_type, evidence),
+        ("franchise_status", "BOOLEAN", request.franchise_status, evidence),
+        ("employee_count", "INTEGER", request.employee_count, evidence),
+        ("lease_status", "ENUM", request.lease_status, evidence),
         # BE stores the enum UNKNOWN; the Agent models UNKNOWN as status + null.
-        ("restoration_status", "ENUM", None),
-        ("restoration_scope", "ENUM", None),
-        ("restoration_scope_detail", "STRING", None),
-        ("demolition_required", "ENUM", None),
-        ("planned_closure_date", "DATE", normalized["planned_closure_date"]),
+        ("restoration_status", "ENUM", prior["restoration_status"], prior_evidence),
+        ("restoration_scope", "ENUM", prior["restoration_scope"], prior_evidence),
+        ("restoration_scope_detail", "STRING", prior["restoration_scope_detail"], prior_evidence),
+        ("demolition_required", "ENUM", prior["demolition_required"], prior_evidence),
+        ("planned_closure_date", "DATE", normalized["planned_closure_date"], evidence),
     ]
+    snapshot_key = text if not known else canonical({"form": normalized, "prior": known})
     snapshot = CaseSnapshot(
-        snapshot_id=uuid5(NAMESPACE, "snapshot:" + text),
+        snapshot_id=uuid5(NAMESPACE, "snapshot:" + snapshot_key),
         case_id=1,
         case_status="IN_PROGRESS",
         facts=[
@@ -150,22 +178,24 @@ def build_case_snapshot(payload: dict) -> tuple[CaseSnapshot, str]:
                 value_type=kind,
                 value=value,
                 status="UNKNOWN" if value is None else "CONFIRMED",
-                evidence_refs=[] if value is None else [evidence.evidence_id],
+                evidence_refs=[] if value is None else [source.evidence_id],
                 updated_at=None if value is None else FIXED_TIME,
             )
-            for name, kind, value in fields
+            for name, kind, value, source in fields
         ],
         procedure_progress=[],
-        evidence_records=[evidence],
+        evidence_records=evidence_records,
         captured_at=FIXED_TIME,
     )
     return snapshot, text
 
 
-def build_graph_input(payload: dict, *, result_text: str | None = None):
+def build_graph_input(
+    payload: dict, *, result_text: str | None = None, prior_facts: dict | None = None
+):
     """CASE_CREATED for the intake form, RESULT_SUBMITTED for a typed result."""
 
-    snapshot, form_text = build_case_snapshot(payload)
+    snapshot, form_text = build_case_snapshot(payload, prior_facts)
     text = form_text if result_text is None else result_text
     trigger_type = "CASE_CREATED" if result_text is None else "RESULT_SUBMITTED"
     event_id = f"synthetic-fe:{trigger_type}:" + digest(text).split(":")[1][:16]
@@ -186,6 +216,35 @@ def build_graph_input(payload: dict, *, result_text: str | None = None):
         case_snapshot=snapshot,
         trace_id="evaluate-planning",
     )
+
+
+def load_dataset(path: Path) -> dict[str, tuple[AgentGraphInput, dict]]:
+    """One AgentGraphInput per JSONL row, keyed by its id, with the row itself.
+
+    Each row carries its own intake answers and pre-input state, so rows run
+    independently; no row's output feeds the next. Only typed results are
+    supported: a conflict confirmation is a button press, not a result text.
+    """
+
+    items: dict[str, tuple[AgentGraphInput, dict]] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        row_id = row.get("start_set_id") or row["event_id"]
+        if row["trigger_type"] != "RESULT_SUBMITTED":
+            raise SystemExit(f"{row_id}: only RESULT_SUBMITTED rows can run")
+        if row_id in items:
+            raise SystemExit(f"{row_id}: duplicate id")
+        items[row_id] = (
+            build_graph_input(
+                row["case_create_request"],
+                result_text=row["raw_input"],
+                prior_facts=row["current_facts"],
+            ),
+            row,
+        )
+    return items
 
 
 class SnapshotStore:
@@ -253,6 +312,19 @@ def load_catalog(path: Path | None) -> ReviewedSupportCatalog:
             evidence_records=(),
         )
     return ReviewedSupportCatalog.model_validate_json(path.read_bytes())
+
+
+def code_version() -> dict:
+    """Which prompts and code ran: the commit, and whether edits sat on top of it."""
+
+    def git(*args):
+        done = subprocess.run(
+            ["git", *args], cwd=Path(__file__).parent, capture_output=True, text=True
+        )
+        return done.stdout.strip() if done.returncode == 0 else None
+
+    status = git("status", "--porcelain")
+    return {"git_commit": git("rev-parse", "HEAD"), "uncommitted_changes": bool(status)}
 
 
 def source_manifest(store, registry, catalog, catalog_path: Path | None) -> dict:
@@ -389,6 +461,14 @@ def decision_summary(outcome) -> dict:
             )
             for change in changes
         ],
+        "procedure_progress_changes": [
+            {
+                "step_code": change.procedure_step.step_code,
+                "before_status": as_text(change.before_status),
+                "proposed_status": as_text(change.proposed_status),
+            }
+            for change in subject.supervisor_draft.mutations.procedure_progress_changes
+        ],
         # Recorded, never gated: rework bookkeeping is not user-visible text.
         "review_attempt": subject.review_attempt,
         "draft_version": decision.draft_version,
@@ -483,10 +563,102 @@ def verdict(rows: list[dict]) -> dict:
     }
 
 
+# Enum fields a dataset row fixes; any change outside the expected ones is wrong.
+# restoration_scope_detail is free text, so it is recorded but never scored.
+SCORED_FIELDS = ("demolition_required", "restoration_scope", "restoration_status")
+# must_not items decidable from the outcome's state. The rest need a person to
+# read the Blocker and Next Action text, so they are listed, never auto-passed.
+STATE_CHECKS = {
+    "PLANNED_CLOSURE_DATE_CHANGED": lambda r: any(
+        c["field_path"] == "planned_closure_date" for c in r.get("fact_changes", [])
+    ),
+    "TAX_FILING_COMPLETED_WITHOUT_PROOF": lambda r: any(
+        c["step_code"] == "FILE_TAX_BUSINESS_CLOSURE" and c["proposed_status"] == "COMPLETED"
+        for c in r.get("procedure_progress_changes", [])
+    ),
+}
+# Both mean "a scored field changed when it should not have"; the change
+# comparison in score() already fails that, so nobody needs to read for them.
+SCORED_BY_COMPARISON = {"SILENT_FACT_OVERWRITE", "UNCONFIRMED_DEMOLITION_VALUE"}
+
+
+def score(row: dict, result: dict) -> dict:
+    """PASS / WRONG / RUN_FAILED for one dataset row against one trial.
+
+    A provider outage or safe failure is RUN_FAILED, not WRONG: it says nothing
+    about whether the model understood the owner's sentence.
+    """
+
+    status = result["status"]
+    if status not in ("REVIEWED_PLAN", "CONFLICT"):
+        reason = result.get("failure_code") or (result.get("error") or {}).get("type")
+        return {"result": "RUN_FAILED", "reasons": [f"{status}: {reason}"]}
+
+    reasons = []
+    if row["expected_branch"] == "CONFLICT":
+        if status != "CONFLICT":
+            reasons.append(f"expected CONFLICT, got {status}")
+    elif status == "CONFLICT":
+        reasons.append("unexpected CONFLICT")
+    else:
+        changed = {
+            c["field_path"]: c["proposed_value"]
+            for c in result["fact_changes"] if c["field_path"] in SCORED_FIELDS
+        }
+        expected = {
+            k: v for k, v in row["expected_fact_changes"].items() if k in SCORED_FIELDS
+        }
+        if changed != expected:
+            reasons.append(f"changes {changed} != expected {expected}")
+    for item in row["must_not"]:
+        if item in STATE_CHECKS and STATE_CHECKS[item](result):
+            reasons.append(f"must_not {item}")
+    return {
+        "result": "WRONG" if reasons else "PASS",
+        "reasons": reasons,
+        "human_check": [
+            item for item in row["must_not"]
+            if item not in STATE_CHECKS and item not in SCORED_BY_COMPARISON
+        ],
+        "detail_changed": any(
+            c["field_path"] == "restoration_scope_detail" for c in result.get("fact_changes", [])
+        ),
+    }
+
+
+def dataset_summary(rows: list[dict]) -> dict:
+    """Counts a person reads first; per-row reasons stay in each trial file."""
+
+    def passed_by(key):
+        groups: dict[str, list[str]] = {}
+        for row in rows:
+            groups.setdefault(row[key], []).append(row["score"]["result"])
+        return {k: f"{v.count('PASS')}/{len(v)}" for k, v in sorted(groups.items())}
+
+    return {
+        "results": dict(Counter(row["score"]["result"] for row in rows)),
+        "pass_by_difficulty": passed_by("difficulty"),
+        "pass_by_family": passed_by("scenario_family"),
+        # RUN_FAILED is shown with its codes, never folded into PASS or hidden.
+        "not_passed": [
+            {"case": row["case"], "repeat": row["repeat"], **row["score"]}
+            for row in rows if row["score"]["result"] != "PASS"
+        ],
+        "human_check_cases": sorted({
+            row["case"] for row in rows if row["score"].get("human_check")
+        }),
+    }
+
+
 async def run(args) -> None:
     graph_input_path = getattr(args, "graph_input", None)
+    dataset_path = getattr(args, "dataset", None)
     if graph_input_path is not None and (args.case or args.result_input is not None):
         raise SystemExit("--graph-input cannot be combined with --case or --result-input")
+    if dataset_path is not None and (
+        graph_input_path is not None or args.case or args.result_input is not None
+    ):
+        raise SystemExit("--dataset cannot be combined with --graph-input, --case or --result-input")
 
     store = SnapshotStore(args.procedure_snapshot)
     registry = build_registry(store)
@@ -505,7 +677,17 @@ async def run(args) -> None:
         if configured.get(role) != model
     }
 
-    if graph_input_path is not None:
+    if dataset_path is not None:
+        loaded = load_dataset(dataset_path)
+        cases = list(loaded)
+        requests = {case: request for case, (request, _row) in loaded.items()}
+        # The file digest proves which dataset ran; the rows' text is not copied.
+        case_inputs = {
+            "dataset_file": str(dataset_path),
+            "dataset_sha256": "sha256:" + hashlib.sha256(dataset_path.read_bytes()).hexdigest(),
+            "rows": len(cases),
+        }
+    elif graph_input_path is not None:
         case = graph_input_path.stem
         cases = [case]
         requests = {
@@ -528,6 +710,7 @@ async def run(args) -> None:
         "graph_input_digests": {
             case: canonical_digest(request) for case, request in requests.items()
         },
+        "code_version": code_version(),
         "configured_models": configured,
         "expected_models": expected,
         "model_mismatch": mismatched,
@@ -556,14 +739,20 @@ async def run(args) -> None:
         for case in cases:
             row = await trial(case, requests[case], store, registry, catalog)
             row["repeat"] = repeat
+            if dataset_path is not None:
+                expected_row = loaded[case][1]
+                row["difficulty"] = expected_row["difficulty"]
+                row["scenario_family"] = expected_row["scenario_family"]
+                row["score"] = score(expected_row, row)
             rows.append(row)
             (args.output / f"trial-{len(rows):03d}.json").write_text(
                 json.dumps(row, ensure_ascii=False, indent=2), encoding="utf-8"
             )
             print(
                 json.dumps(
-                    {key: row.get(key) for key in
-                     ("case", "repeat", "status", "action_code", "elapsed_ms")},
+                    {**{key: row.get(key) for key in
+                        ("case", "repeat", "status", "action_code", "elapsed_ms")},
+                     "score": (row.get("score") or {}).get("result")},
                     ensure_ascii=False,
                 ),
                 flush=True,
@@ -587,11 +776,15 @@ async def run(args) -> None:
         ),
         "trials": rows,
     }
+    if dataset_path is not None:
+        summary["dataset_score"] = dataset_summary(rows)
     (args.output / "results.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     print(json.dumps({k: summary[k] for k in ("verdict", "distinct_next_action_digests")},
                      ensure_ascii=False))
+    if dataset_path is not None:
+        print(json.dumps(summary["dataset_score"]["results"], ensure_ascii=False))
 
 
 if __name__ == "__main__":
@@ -601,6 +794,11 @@ if __name__ == "__main__":
     parser.add_argument(
         "--graph-input", type=Path,
         help="AgentGraphInput JSON; cannot be combined with --case or --result-input",
+    )
+    parser.add_argument(
+        "--dataset", type=Path,
+        help="JSONL rows with case_create_request, current_facts and raw_input; "
+        "cannot be combined with --graph-input, --case or --result-input",
     )
     parser.add_argument("--case", action="append", choices=sorted(CASES))
     parser.add_argument("--result-input", choices=sorted(RESULT_INPUTS))

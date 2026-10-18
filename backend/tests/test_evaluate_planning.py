@@ -7,8 +7,11 @@ from uuid import UUID
 import pytest
 from app.agent.schemas import ActionDecisionDraft, Blocker
 from scripts.evaluate_planning import (
+    CASES,
     FIXED_TIME,
+    build_case_snapshot,
     decision_summary,
+    score,
     verdict,
 )
 
@@ -48,7 +51,7 @@ def summary(blocker):
             review_attempt=1,
             supervisor_draft=SimpleNamespace(
                 decision=decision,
-                mutations=SimpleNamespace(fact_changes=[]),
+                mutations=SimpleNamespace(fact_changes=[], procedure_progress_changes=[]),
             ),
         ),
     )
@@ -97,3 +100,67 @@ def test_blocker_comparison_ignores_per_run_evidence_ids():
 
     assert first["blocker"] == "합성 조건 미충족"
     assert first["blocker_digest"] == second["blocker_digest"]
+
+
+def test_prior_facts_are_confirmed_with_their_own_evidence():
+    snapshot, _ = build_case_snapshot(
+        CASES["benchmark_case1"], {"demolition_required": "REQUIRED", "restoration_scope": None}
+    )
+    facts = {fact.field_path.value: fact for fact in snapshot.facts}
+
+    assert facts["demolition_required"].status == "CONFIRMED"
+    assert facts["demolition_required"].evidence_refs == ["synthetic-prior-result-input"]
+    assert facts["restoration_scope"].status == "UNKNOWN"
+    assert facts["lease_status"].evidence_refs == ["synthetic-fe-case-input"]
+
+
+def row(branch="REPLAN_OR_NEEDS_MORE_INFO", changes=None, must_not=()):
+    return {
+        "expected_branch": branch,
+        "expected_fact_changes": changes or {},
+        "must_not": list(must_not),
+    }
+
+
+def plan(*changes):
+    return {
+        "status": "REVIEWED_PLAN",
+        "fact_changes": [{"field_path": f, "proposed_value": v} for f, v in changes],
+        "procedure_progress_changes": [],
+    }
+
+
+@pytest.mark.parametrize(
+    ("expected", "result", "verdict_"),
+    [
+        (row(changes={"demolition_required": "REQUIRED"}),
+         plan(("demolition_required", "REQUIRED")), "PASS"),
+        # An unexpected scored change is the silent overwrite this product must not do.
+        (row(changes={"demolition_required": "REQUIRED"}),
+         plan(("demolition_required", "REQUIRED"), ("restoration_scope", "FULL")), "WRONG"),
+        (row(branch="CONFLICT"), plan(), "WRONG"),
+        (row(branch="CONFLICT"), {"status": "CONFLICT"}, "PASS"),
+        (row(), {"status": "CONFLICT"}, "WRONG"),
+        (row(), {"status": "SAFE_FAILURE", "failure_code": "PROVIDER_UNAVAILABLE"}, "RUN_FAILED"),
+    ],
+)
+def test_score_follows_the_agreed_rule(expected, result, verdict_):
+    assert score(expected, result)["result"] == verdict_
+
+
+def test_free_text_detail_is_recorded_not_scored():
+    result = score(row(changes={"restoration_scope": "PARTIAL"}),
+                   plan(("restoration_scope", "PARTIAL"), ("restoration_scope_detail", "바닥만")))
+
+    assert result["result"] == "PASS"
+    assert result["detail_changed"] is True
+
+
+def test_state_checked_must_not_fails_and_text_ones_go_to_a_person():
+    result = score(
+        row(must_not=["PLANNED_CLOSURE_DATE_CHANGED", "SILENT_FACT_OVERWRITE", "FABRICATED_EVIDENCE"]),
+        plan(("planned_closure_date", "2026-11-10")),
+    )
+
+    assert result["result"] == "WRONG"
+    assert result["human_check"] == ["FABRICATED_EVIDENCE"]
