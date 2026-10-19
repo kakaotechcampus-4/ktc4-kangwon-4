@@ -1,15 +1,22 @@
 """Reporting regressions using synthetic decisions; no provider or database calls."""
 
+import asyncio
 import json
+from pathlib import Path
 from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
-from app.agent.schemas import ActionDecisionDraft, Blocker
+from app.agent.graph import AgentGraph
+from app.agent.procedure_tool.stored_tool import StoredProcedureLookupTool
+from app.agent.schemas import ActionDecisionDraft, Blocker, ProcedureLookupInput
 from scripts.evaluate_planning import (
     CASES,
     FIXED_TIME,
+    SnapshotStore,
+    attach_fixture_sources,
     build_case_snapshot,
+    build_graph_input,
     decision_summary,
     overall_verdict,
     score,
@@ -175,3 +182,26 @@ def test_a_wrong_dataset_row_fails_the_run_even_if_repeats_agree():
     assert overall_verdict(per_case, wrong) == "FAIL"
     assert overall_verdict(per_case, passed) == "PASS"
     assert overall_verdict(per_case, None) == "PASS"
+
+
+def test_fixture_inputs_carry_the_reviewed_sources_the_lookup_accepts():
+    store = SnapshotStore(Path("app/common/reviewed-procedures.ko-KR.json"))
+    request = attach_fixture_sources(build_graph_input(CASES["benchmark_case1"]), store)
+
+    def found(graph_input):
+        lookup = ProcedureLookupInput(
+            lookup_goal="BUSINESS_CLOSURE",
+            evidence_records=[item for item in graph_input.case_snapshot.evidence_records
+                              if item.source_type == "OFFICIAL_DOCUMENT"],
+            search_queries=AgentGraph._procedure_queries(graph_input),
+            as_of=FIXED_TIME.date(), locale="ko-KR",
+            source_policy="OFFICIAL_ONLY", max_results_per_query=5,
+            based_on_snapshot_id=graph_input.case_snapshot.snapshot_id, review_feedback=[],
+        )
+        return asyncio.run(StoredProcedureLookupTool(store).lookup(lookup)).evidence_records
+
+    # Without the sources the lookup returns nothing, which left Info with no findings.
+    assert found(build_graph_input(CASES["benchmark_case1"])) == []
+    assert found(request) != []
+    # Attaching twice does not duplicate a source.
+    assert attach_fixture_sources(request, store) == request
