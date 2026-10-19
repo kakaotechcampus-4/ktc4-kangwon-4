@@ -45,6 +45,7 @@ def build_confirmed_conflict_overlay(
     whether the plan built on it is sound.
     """
 
+    conflict.assert_integrity()
     if conflict.snapshot_id != snapshot.snapshot_id:
         raise StaleConfirmationError(
             "confirmation was made against a different Case snapshot"
@@ -66,6 +67,11 @@ def build_confirmed_conflict_overlay(
         raise StaleConfirmationError(
             "the Case value changed after the conflict was raised"
         )
+
+    if not set(conflict.source_evidence_refs).issubset(
+        item.evidence_id for item in snapshot.evidence_records
+    ):
+        raise ValueError("confirmed-conflict evidence is missing from the snapshot")
 
     return FactChangeCandidate(
         candidate_id=uuid_factory(),

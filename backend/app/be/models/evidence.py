@@ -81,6 +81,10 @@ class ConflictReference(CreatedAtMixin, table=True):
         max_length=100, unique=True, description="opaque 참조값 — id와 별개의 비즈니스 키"
     )
     case_id: int = Field(sa_column=Column(BigInteger, ForeignKey("case.id"), nullable=False), description="대상 케이스")
+    case_history_id: int = Field(
+        sa_column=Column(BigInteger, ForeignKey("case_history.id"), nullable=False),
+        description="이 충돌을 일으킨 제출(raw_input)의 이력 — /confirm이 '이번에 하신 말씀'을 보여줄 때 씀",
+    )
 
     canonical_field: str = Field(max_length=100, description="충돌이 발생한 필드")
     committed_value: str | None = Field(
@@ -88,12 +92,22 @@ class ConflictReference(CreatedAtMixin, table=True):
     )
     proposed_value: str = Field(max_length=1000, description="새로 제안된 값")
     conflict_digest: str | None = Field(default=None, max_length=255, description="충돌 내용 다이제스트")
+    candidate_payload: dict | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+        description=(
+            "AI가 보낸 충돌 후보 원본(ConflictCandidate) 전체. 사용자가 고른 뒤 그대로 돌려줘야 "
+            "AI가 내용 다이제스트를 대조해 받아준다. 위 칸들은 화면에 보여주려고 글자로 바꾼 "
+            "값이라 숫자·참거짓·빈 값을 되돌릴 수 없다"
+        ),
+    )
     expires_at: datetime = Field(sa_column=Column(DateTime, nullable=False), description="만료 시각")
     used_at: datetime | None = Field(
         default=None, sa_column=Column(DateTime, nullable=True), description="사용(1회) 시각"
     )
 
     case: "Case" = Relationship(back_populates="conflict_references")
+    case_history: "CaseHistory" = Relationship()
 
 
 class DecisionRecord(CreatedAtMixin, table=True):

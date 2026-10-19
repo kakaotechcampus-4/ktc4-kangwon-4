@@ -20,7 +20,7 @@ from app.common.agent_service import build_planning_input, run_case_planning
 logger = logging.getLogger(__name__)
 
 
-async def run_first_judgment_in_background(case_id: int) -> None:
+async def run_first_judgment_in_background(case_history_id: int) -> None:
     """응답을 보낸 뒤 뒤에서 도는 진입점.
 
     요청에 딸린 세션은 응답과 함께 닫히므로 여기서 세션을 새로 연다. 실패해도 사용자에게
@@ -29,31 +29,40 @@ async def run_first_judgment_in_background(case_id: int) -> None:
 
     try:
         with Session(_engine) as session:
-            await run_first_judgment(session, case_id)
-    except Exception:
-        logger.exception("case %s 첫 판단 실패", case_id)
+            await run_first_judgment(session, case_history_id)
+    except Exception as error:
+        logger.exception("case_history %s 첫 판단 실패", case_history_id)
         try:
             with Session(_engine) as session:
-                decision_record_service.mark_judgment_failed(session, case_id)
+                # 무엇 때문에 끊겼는지 함께 넘긴다. 다시 해도 안 풀리는 종류면 화면에
+                # "다시 시도"를 띄우면 안 된다.
+                decision_record_service.mark_judgment_failed(session, case_history_id, error)
         except Exception:
-            logger.exception("case %s 판단 실패 상태 기록도 실패", case_id)
+            logger.exception("case_history %s 판단 실패 상태 기록도 실패", case_history_id)
 
 
 async def run_first_judgment(
-    session: Session, case_id: int
+    session: Session, case_history_id: int
 ) -> tuple[AgentGraphOutput, DecisionRecord | None]:
-    """판단 결과와, 저장된 검수 기록(정상 판단일 때만)을 함께 돌려준다."""
+    """판단 결과와, 저장된 검수 기록(정상 판단일 때만)을 함께 돌려준다.
 
-    # 이번 판단이 어느 입력에 대한 것인지는 여기서 정한다. Case 생성 판단이므로
-    # CASE_CREATED 이력이고, 결과 입력 판단이 붙으면 그때 그 입력의 이력을 넘기면 된다.
-    history = case_history_crud.get_case_created_history(session, case_id)
+    어느 입력을 판단할지는 호출부가 정해서 넘긴다. 여기서 CASE_CREATED 이력을 직접 찾으면
+    결과 제출 판단이 붙었을 때 방금 들어온 입력이 아니라 가입 때 입력을 판단하게 된다.
+    """
+
+    history = case_history_crud.get_case_history_by_id(session, case_history_id)
     if history is None:
-        raise ValueError(f"case {case_id} has no CASE_CREATED history")
+        raise ValueError(f"case_history {case_history_id} not found")
 
     graph_input = build_planning_input(
+        # TODO: 결과 제출 판단이 붙으면 이력의 source를 보고 RESULT_SUBMITTED를 함께 넘긴다.
         trigger_type="CASE_CREATED",
-        case_snapshot=case_snapshot_service.build_case_snapshot(session, case_id),
-        user_input=case_snapshot_service.build_user_input(history),
+        case_snapshot=case_snapshot_service.build_case_snapshot(session, history.case_id),
+        user_input=case_snapshot_service.build_user_input(
+            case_history_id=history.id,
+            raw_input=history.raw_input,
+            submitted_at=history.created_at,
+        ),
         # TODO: 프론트가 자기 쪽 이벤트 식별자를 보내주기로 하면 그 값을 넣는다. 아직 미협의.
         client_event_id=None,
     )

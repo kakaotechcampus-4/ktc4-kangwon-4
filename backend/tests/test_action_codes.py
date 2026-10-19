@@ -9,17 +9,21 @@ import pytest
 from pydantic import TypeAdapter, ValidationError
 
 from app.agent.action_catalog import build_action_candidates, resolve_procedure_bindings
+from app.agent.enrichment import build_confirmed_conflict_overlay, build_fact_overlays
 from app.agent.graph import AgentGraph
-from app.agent.review_tool import ReviewTool
+from app.agent.review_tool import ReviewIntegrityError, ReviewTool
 from app.agent.schemas import (
     AgentGraphInput,
     AgentGraphOutput,
     Blocker,
+    ConflictCandidate,
+    ConflictConfirmedTrigger,
     EvidenceRecord,
     InfoAnalysisResult,
     NextAction,
     ProcedureFinding,
     ProcedureLookupResult,
+    ProcedureProgressChangeCandidate,
     ReviewSourceResult,
     ReviewSubject,
     SupervisorAgentInput,
@@ -38,6 +42,18 @@ NOW = datetime(2026, 9, 25, tzinfo=timezone.utc)
 REF = "synthetic-document"
 TAX = "FILE_TAX_BUSINESS_CLOSURE"
 CONFIRM_TAX = "CONFIRM_TAX_CLOSURE_REQUIREMENTS"
+
+
+def result_fixes_xfail(*, raises=AssertionError):
+    # Only the split PR's missing API gates these known baseline failures.
+    # Do not probe behavior: it would hide later regressions. With the API
+    # present these remain ordinary tests, including failures of the new behavior.
+    return pytest.mark.xfail(
+        not hasattr(AgentGraph, "_requested_field_guidance"),
+        reason="Agent fixes in PR #74 have not been merged yet",
+        strict=True,
+        raises=raises,
+    )
 
 
 def evidence(**changes):
@@ -507,6 +523,101 @@ def test_review_checks_required_blocker_against_verified_candidate(
         else:
             assert subject.supervisor_draft.decision.blocker is not None
             assert result.verdict == "PASS"
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("problem", [
+    None,
+    *[
+        pytest.param(problem, marks=result_fixes_xfail(raises=pytest.fail.Exception))
+        for problem in ("missing", "fact", "progress")
+    ],
+])
+def test_review_preserves_only_the_confirmed_conflict_change(problem):
+    async def run():
+        request = supervisor_request()
+        conflict_evidence = evidence(
+            evidence_id="synthetic-conflict-source", source_type="USER_INPUT",
+            source_ref="synthetic-conflict-input", excerpt="프랜차이즈입니다.",
+        )
+        request.case_snapshot.evidence_records.append(conflict_evidence)
+        conflict = ConflictCandidate.create(
+            conflict_ref="synthetic-conflict", candidate_id=UUID(int=40),
+            snapshot_id=request.case_snapshot.snapshot_id,
+            field_path="franchise_status", committed_status="CONFIRMED",
+            committed_value=False, proposed_operation="SET",
+            proposed_status="CONFIRMED", proposed_value=True,
+            source_evidence_refs=[conflict_evidence.evidence_id], source_call_id=UUID(int=41),
+        )
+        request.trigger = ConflictConfirmedTrigger(
+            trigger_type="CONFLICT_CONFIRMED", input_event_id="synthetic-confirmation",
+            client_event_id=None, confirmed_conflict=conflict, confirmed_at=NOW,
+        )
+        request.fact_overlays = [build_confirmed_conflict_overlay(
+            request.case_snapshot, conflict, uuid_factory=lambda: UUID(int=42),
+        )]
+        draft = await SupervisorAgent(StubModel(), max_local_attempts=1).draft(request)
+        if problem == "missing":
+            draft.mutations.fact_changes = []
+        elif problem in {"fact", "progress"}:
+            text = "직원은 3명입니다." if problem == "fact" else "폐업 신고를 진행 중입니다."
+            unapproved = evidence(
+                evidence_id="synthetic-unapproved-input", source_type="USER_INPUT",
+                source_ref="synthetic-old-input", excerpt=text,
+            )
+            span = {"input_event_id": "synthetic-old-input", "text": text,
+                    "start_offset": 0, "end_offset": len(text)}
+            payload = request.source_results[1].output.model_dump()
+            payload["evidence_records"] = [unapproved]
+            if problem == "fact":
+                payload["fact_candidates"] = [{
+                    "candidate_id": UUID(int=43), "operation": "SET",
+                    "field_path": "employee_count", "value_type": "INTEGER", "value": 3,
+                    "source_span": span, "source_evidence_refs": [unapproved.evidence_id],
+                    "confidence_bps": 9500, "requires_confirmation": False,
+                    "reason_summary": "합성 직원 수 보고",
+                }]
+            else:
+                payload["procedure_progress_observations"] = [{
+                    "observation_id": UUID(int=43), "procedure_step": finding().procedure_step,
+                    "observed_status": "IN_PROGRESS", "source_span": span,
+                    "source_evidence_refs": [unapproved.evidence_id],
+                    "requires_confirmation": False, "reason_summary": "합성 진행 보고",
+                }]
+            info = InfoAnalysisResult.model_validate(payload)
+            request.source_results[1] = source(info)
+            if problem == "fact":
+                draft.mutations.fact_changes.extend(build_fact_overlays(
+                    request.case_snapshot, info, UUID(int=3),
+                    uuid_factory=lambda: UUID(int=44),
+                ))
+            else:
+                draft.mutations.procedure_progress_changes = [ProcedureProgressChangeCandidate(
+                    candidate_id=UUID(int=44), procedure_step=finding().procedure_step,
+                    before_status="NOT_STARTED", proposed_status="IN_PROGRESS",
+                    reason_summary="합성 진행 보고", execution_evidence_refs=[unapproved.evidence_id],
+                    procedure_analysis_call_id=UUID(int=3),
+                )]
+        subject = ReviewSubject.create(
+            schema_version="agent-io/2.0", review_subject_id=UUID(int=9),
+            review_attempt=1, run_id=UUID(int=2), case_id=1,
+            trigger=request.trigger, snapshot=request.case_snapshot,
+            known_procedure_steps=request.known_procedure_steps,
+            source_results=request.source_results, supervisor_draft=draft,
+        )
+        subject = ReviewSubject.model_validate_json(subject.model_dump_json())
+        client = StubModel()
+        tool = ReviewTool(client, max_output_attempts=1, provider_max_retries=0)
+        if problem:
+            message = "exactly one confirmed change" if problem == "missing" else "cannot create new facts or procedure progress"
+            with pytest.raises(ReviewIntegrityError, match=message):
+                await tool.review(subject)
+            assert client.calls == 0
+        else:
+            result = await tool.review(subject)
+            assert result.verdict == "PASS"
+            assert client.calls == 1
 
     asyncio.run(run())
 

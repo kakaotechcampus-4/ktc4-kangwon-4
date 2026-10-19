@@ -2,16 +2,9 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import re
 from collections.abc import Iterable, Mapping
-from datetime import date, datetime, timezone
-from enum import Enum
 from typing import Any
-from uuid import UUID
-
-from pydantic import BaseModel
 
 
 class GuardrailViolation(ValueError):
@@ -35,40 +28,6 @@ _SENSITIVE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("BEARER_TOKEN", re.compile(r"(?i)\bbearer\s+[a-z0-9._~+/=-]{12,}")),
     ("API_KEY", re.compile(r"(?i)\b(?:sk|pk)-[a-z0-9_-]{12,}")),
 )
-
-
-def _normalize(value: Any) -> Any:
-    if isinstance(value, BaseModel):
-        return _normalize(value.model_dump(mode="python"))
-    if isinstance(value, Mapping):
-        return {str(key): _normalize(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_normalize(item) for item in value]
-    if isinstance(value, datetime):
-        normalized = value.astimezone(timezone.utc)
-        return normalized.isoformat(timespec="microseconds").replace("+00:00", "Z")
-    if isinstance(value, date):
-        return value.isoformat()
-    if isinstance(value, (UUID, Enum)):
-        return str(value.value if isinstance(value, Enum) else value)
-    return value
-
-
-def canonical_json(value: Any) -> str:
-    """Serialize a schema value deterministically for review/evidence digests."""
-
-    return json.dumps(
-        _normalize(value),
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    )
-
-
-def sha256_digest(value: Any) -> str:
-    payload = canonical_json(value).encode("utf-8")
-    return "sha256:" + hashlib.sha256(payload).hexdigest()
 
 
 def exact_span(text: str, source_text: str) -> tuple[int, int]:

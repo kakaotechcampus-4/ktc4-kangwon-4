@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import re
 from collections.abc import Callable, Sequence
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from types import MappingProxyType
 from typing import Annotated, Any, Literal, Protocol
 from uuid import UUID, uuid4
@@ -73,146 +73,25 @@ class StructuredGenerator(Protocol):
 
 
 class InfoAnalysisGuardrailError(GuardrailViolation):
-    """Raised when a syntactically valid model result is not grounded.
-
-    ``rejected_fields`` names the canonical fields a deterministic check turned
-    down, so the bounded retry can say which ones to drop instead of repeating
-    "something was wrong". Only field names travel: a value or a source excerpt
-    would carry the user's own words, and this reaches the provider on retry.
-    """
+    """Raised when a syntactically valid model result is not grounded."""
 
     def __init__(
         self,
         message: str,
         *,
-        rejected_fields: Sequence[CaseFieldKey] = (),
         omitted_procedure_codes: Sequence[str] = (),
         procedure_source_errors: Sequence[str] = (),
         rejected_observation_codes: Sequence[str] = (),
+        fact_errors: Sequence[str] = (),
     ) -> None:
         super().__init__(message)
-        self.rejected_fields = tuple(rejected_fields)
+        # 재시도 때 모델에 그대로 보내므로 코드에 고정된 문장만 넣는다(사용자 원문 금지).
+        self.fact_errors = tuple(fact_errors)
         self.omitted_procedure_codes = tuple(omitted_procedure_codes)
         self.procedure_source_errors = tuple(procedure_source_errors)
         self.rejected_observation_codes = tuple(rejected_observation_codes)
 
 
-def _with_particles(prefix: str, suffix: str) -> tuple[str, ...]:
-    """Same assertion, different Korean particle.
-
-    "원상복구 범위는 일부", "범위가 일부", "범위를 일부로" all assert the same
-    scope; only the particle moves. Listing one form and missing the others
-    rejected a user who said it the second way. The particle set is explicit
-    rather than a wildcard so an unrelated sentence cannot slip through.
-    """
-
-    return tuple(
-        f"{prefix}{particle}{suffix}"
-        for particle in ("은", "는", "이", "가", "을", "를", "도", "")
-    )
-
-
-# Only BOOLEAN and ENUM fields belong here: the table maps a canonical value
-# to the words that assert it. business_type is neither -- schema_table.md
-# defines it as VARCHAR whose own example is "카페" -- so it previously sat
-# here under a canonical "CAFE" that exists nowhere in the schema. Any value
-# the model proposed then lost to that phantom, and the STRING branch below
-# could never be reached, which made business_type impossible to extract.
-_FACT_VALUE_CUES: dict[tuple[CaseFieldKey, object], tuple[str, ...]] = {
-    (CaseFieldKey.FRANCHISE_STATUS, True): ("프랜차이즈", "가맹점"),
-    (CaseFieldKey.FRANCHISE_STATUS, False): (
-        "비프랜차이즈",
-        "프랜차이즈가아니",
-        "가맹점이아니",
-        "독립매장",
-    ),
-    (CaseFieldKey.LEASE_STATUS, "LEASED_PAID"): (
-        "유상임차",
-        "유상으로임차",
-        "임대료를내고임차",
-        "임차료를내고사용",
-    ),
-    (CaseFieldKey.LEASE_STATUS, "LEASED_FREE"): (
-        "무상임차",
-        "무상으로임차",
-        "임대료없이임차",
-        "임차료없이사용",
-    ),
-    (CaseFieldKey.LEASE_STATUS, "OWNED"): ("자가", "본인소유", "직접소유"),
-    (CaseFieldKey.RESTORATION_STATUS, "NOT_STARTED"): (
-        "원상복구시작전",
-        "원상복구를시작하지않",
-    ),
-    (CaseFieldKey.RESTORATION_STATUS, "IN_PROGRESS"): (
-        "원상복구중",
-        "원상복구진행중",
-    ),
-    (CaseFieldKey.RESTORATION_STATUS, "COMPLETED"): (
-        "원상복구완료",
-        "원상복구를완료",
-        "원상복구와철거를모두완료",
-        "원상복구를마쳤",
-        "원상복구를끝냈",
-    ),
-    (CaseFieldKey.RESTORATION_STATUS, "NOT_REQUIRED"): (
-        *_with_particles("원상복구작업", "필요하지않"),
-        "원상복구불필요",
-        "원상복구가필요하지않",
-        "원상복구필요없",
-    ),
-    (CaseFieldKey.RESTORATION_SCOPE, "PARTIAL"): (
-        *_with_particles("원상복구범위", "일부"),
-        *_with_particles("원상복구", "일부"),
-        "부분원상복구",
-        "일부만원상복구",
-    ),
-    (CaseFieldKey.RESTORATION_SCOPE, "FULL"): (
-        *_with_particles("원상복구범위", "전체"),
-        *_with_particles("원상복구", "전체"),
-        "전체원상복구",
-        "전면원상복구",
-    ),
-    (CaseFieldKey.RESTORATION_SCOPE, "NOT_REQUIRED"): (
-        *_with_particles("원상복구범위", "없"),
-        "원상복구불필요",
-        "원상복구가필요하지않",
-        "원상복구필요없",
-    ),
-    (CaseFieldKey.DEMOLITION_REQUIRED, "REQUIRED"): (
-        *_with_particles("철거", "필요"),
-        *_with_particles("철거", "해야"),
-    ),
-    (CaseFieldKey.DEMOLITION_REQUIRED, "NOT_REQUIRED"): (
-        *_with_particles("철거", "불필요"),
-        *_with_particles("철거", "필요하지않"),
-        *_with_particles("철거", "필요없"),
-        "철거하지않아도",
-    ),
-}
-_FIELD_CUES: dict[CaseFieldKey, tuple[str, ...]] = {
-    CaseFieldKey.BUSINESS_TYPE: ("업종", "카페", "사업"),
-    CaseFieldKey.FRANCHISE_STATUS: ("프랜차이즈", "가맹"),
-    CaseFieldKey.EMPLOYEE_COUNT: ("직원", "근로자", "종업원"),
-    CaseFieldKey.LEASE_STATUS: ("임차", "임대차", "계약", "자가", "소유"),
-    CaseFieldKey.RESTORATION_STATUS: ("원상복구",),
-    CaseFieldKey.RESTORATION_SCOPE: ("원상복구",),
-    CaseFieldKey.RESTORATION_SCOPE_DETAIL: ("원상복구", "범위"),
-    CaseFieldKey.DEMOLITION_REQUIRED: ("철거",),
-    CaseFieldKey.PLANNED_CLOSURE_DATE: ("폐업", "종료", "예정일"),
-}
-_CLEAR_CUES = ("삭제", "지워", "제거", "입력취소", "잘못입력")
-_SCHEMA_FACT_UNCERTAINTY = re.compile(
-    r"인지|여부|모르|모릅|모름|불확실|미확인|추정|가정|가능성"
-    r"|확인(?:이)?필요|확인(?:해봐야|해야)"
-    r"|(?:일|할|을)수도|(?:인|한|일|할|은|는)것같"
-    r"|없(?:으면|어도|다면)|필요하지않(?:으면|아도|다면)"
-)
-_SCHEMA_FACT_NEGATION = re.compile(r"아니|아닌|아님|아닙|아닐|않|못|없|불필요")
-# 한 문장 안에서 앞 절을 뒤 절이 뒤집는 접속 표현.
-# "없다고 했는데 있대요"처럼 말하면 어느 쪽이 지금 사실인지 글만으로는 정할 수 없다.
-# 뒤집는 말 자체("있대요", "하라고 했어요")를 모으면 목록이 끝나지 않으므로,
-# 끝이 있는 접속 표현만 본다. 걸리면 버리지 않고 사장님께 되묻는다.
-_SCHEMA_FACT_REVERSAL = re.compile(r"지만|는데|인데|다가|그런데|결국")
 _COMPLETED_OBSERVATION = re.compile(
     r"(?:완료|끝냈|마쳤|처리했|신고했|제출했|반납했|해지했|탈퇴했|확인했|종료했)"
 )
@@ -407,13 +286,21 @@ class InfoAnalysisAgent:
             raise InfoAnalysisGuardrailError(
                 "information-analysis input failed sensitive-data preflight"
             ) from None
-        rejected_fields: tuple[CaseFieldKey, ...] = ()
         omitted_procedure_codes: tuple[str, ...] = ()
         procedure_source_errors: tuple[str, ...] = ()
         rejected_observation_codes: tuple[str, ...] = ()
+        fact_errors: tuple[str, ...] = ()
         for attempt in range(1, self._max_local_attempts + 1):
             messages = info_messages(prompt_input)
             if attempt > 1:
+                if fact_errors:
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": "The previous facts were rejected. "
+                            + " ".join(fact_errors),
+                        }
+                    )
                 if rejected_observation_codes:
                     messages.append(
                         {
@@ -461,29 +348,6 @@ class InfoAnalysisAgent:
                                 "the latest utterance. Return grounded findings, or an uncertainty with "
                                 "the document_path and its evidence_ref if the source cannot support a "
                                 "finding. Do not invent procedure content or assert applicability."
-                            ),
-                        }
-                    )
-                if rejected_fields:
-                    # Without this the retry only learns that something was
-                    # rejected, so it proposes the same field again and the
-                    # whole draft is discarded once per attempt.
-                    messages.append(
-                        {
-                            "role": "system",
-                            "content": (
-                                "A deterministic check rejected these fields "
-                                "because the proposed value is not stated in "
-                                "the exact source_text: "
-                                + ", ".join(field.value for field in rejected_fields)
-                                + ". If the input explicitly states a supported value, "
-                                "retry using the single exact sentence that asserts it; "
-                                "do not combine it with another sentence. Preserve any "
-                                "negation or uncertainty in that sentence. A clear value "
-                                "different from the snapshot is still a candidate for "
-                                "code-level conflict detection, not permission to overwrite. "
-                                "If no exact statement supports the value, omit the "
-                                "candidate and request clarification instead."
                             ),
                         }
                     )
@@ -538,7 +402,7 @@ class InfoAnalysisAgent:
                 )
                 return self._materialize(request, draft, procedure_bindings)
             except (GuardrailViolation, ValueError) as exc:
-                rejected_fields = getattr(exc, "rejected_fields", ())
+                fact_errors = getattr(exc, "fact_errors", ())
                 omitted_procedure_codes = getattr(exc, "omitted_procedure_codes", ())
                 procedure_source_errors = getattr(exc, "procedure_source_errors", ())
                 rejected_observation_codes = getattr(
@@ -791,159 +655,6 @@ class InfoAnalysisAgent:
         return re.sub(r"[^0-9a-z가-힣]+", "", value.casefold())
 
     @classmethod
-    def _fact_source_supports_value(
-        cls, fact: ExtractedFactDraft, *, input_text: str | None = None
-    ) -> bool:
-        """Require the proposed operation and value inside the exact source span.
-
-        Exact substring grounding alone proves only that the model copied user text.
-        These deterministic checks additionally bind that span to the proposed
-        canonical value.  Ambiguous or contradictory spans are rejected so the
-        bounded retry can omit the fact or request confirmation.
-        """
-
-        compact_source = cls._compact_text(fact.source_text)
-        field_cues = tuple(
-            cls._compact_text(cue) for cue in _FIELD_CUES[fact.field_path]
-        )
-
-        if fact.operation == FactOperation.CLEAR:
-            return any(cue in compact_source for cue in field_cues) and any(
-                cls._compact_text(cue) in compact_source for cue in _CLEAR_CUES
-            )
-
-        if fact.field_path in {
-            CaseFieldKey.LEASE_STATUS,
-            CaseFieldKey.RESTORATION_SCOPE,
-            CaseFieldKey.DEMOLITION_REQUIRED,
-        } or (
-            fact.field_path == CaseFieldKey.RESTORATION_STATUS
-            and fact.value in {"NOT_REQUIRED", "COMPLETED"}
-        ):
-            # Schema-aligned values describe asserted lease terms and scope.
-            statement = cls._containing_statement(input_text, fact.source_text)
-            if not cls._schema_enum_is_asserted(fact, statement):
-                return False
-
-        value_matches: list[tuple[int, int, object]] = []
-        for (field_path, candidate_value), cues in _FACT_VALUE_CUES.items():
-            if field_path != fact.field_path:
-                continue
-            for cue in cues:
-                compact_cue = cls._compact_text(cue)
-                for match in re.finditer(re.escape(compact_cue), compact_source):
-                    value_matches.append((match.start(), match.end(), candidate_value))
-
-        # A negative phrase often contains its positive form (for example,
-        # ``철거가 필요하지 않다`` contains ``철거가 필요``).  Suppress only a
-        # shorter occurrence covered by a longer, conflicting cue; genuinely
-        # contradictory statements remain ambiguous and are rejected.
-        decisive_matches = [
-            candidate
-            for candidate in value_matches
-            if not any(
-                other[0] <= candidate[0]
-                and candidate[1] <= other[1]
-                and (other[1] - other[0]) > (candidate[1] - candidate[0])
-                and other[2] != candidate[2]
-                for other in value_matches
-            )
-        ]
-        if decisive_matches:
-            matched_values = {item[2] for item in decisive_matches}
-            return len(matched_values) == 1 and cls._same_value_casefolded(
-                next(iter(matched_values)), fact.value
-            )
-
-        if fact.value_type == FactValueType.INTEGER:
-            assert type(fact.value) is int
-            number = re.escape(str(fact.value))
-            explicit_number = re.search(
-                rf"(?<!\d){number}(?:\s*명)?(?!\d)", fact.source_text
-            )
-            has_employee_context = any(
-                cue in compact_source for cue in field_cues
-            ) or bool(re.search(rf"(?<!\d){number}\s*명(?!\d)", fact.source_text))
-            return explicit_number is not None and has_employee_context
-
-        if fact.value_type == FactValueType.DATE:
-            parsed = (
-                fact.value
-                if type(fact.value) is date
-                else date.fromisoformat(str(fact.value))
-            )
-            year, month, day = parsed.year, parsed.month, parsed.day
-            date_forms = (
-                rf"{year}\s*[-./]\s*0?{month}\s*[-./]\s*0?{day}",
-                rf"{year}\s*년\s*0?{month}\s*월\s*0?{day}\s*일",
-            )
-            return any(
-                re.search(pattern, fact.source_text) for pattern in date_forms
-            ) and any(cue in compact_source for cue in field_cues)
-
-        if fact.value_type == FactValueType.STRING:
-            assert type(fact.value) is str
-            compact_value = cls._compact_text(fact.value)
-            return bool(compact_value) and compact_value in compact_source
-
-        # Every current BOOLEAN and ENUM value has an explicit cue registry.
-        # Missing registry coverage is intentionally fail-closed.
-        return False
-
-    @staticmethod
-    def _containing_statement(input_text: str | None, source_text: str) -> str:
-        """Return the whole sentence holding the quoted span.
-
-        A short quote must not erase the rest of its sentence: quoting only
-        "유상으로 임차" cannot hide the user's following "한 것은 아닙니다".
-        """
-
-        if input_text is None:
-            return source_text
-        start, end = exact_span(input_text, source_text)
-        left = max(input_text.rfind(mark, 0, start) for mark in ".!?\n")
-        if input_text[end - 1] in ".!?\n":
-            right = end
-        else:
-            boundary = re.search(r"[.!?\n]", input_text[end:])
-            right = end + boundary.end() if boundary else len(input_text)
-        return input_text[left + 1 : right]
-
-    @classmethod
-    def _schema_enum_is_asserted(cls, fact: ExtractedFactDraft, statement: str) -> bool:
-        """Reject negation/uncertainty for the schema-aligned enum cues only."""
-
-        compact = cls._compact_text(statement)
-        if "?" in statement or _SCHEMA_FACT_UNCERTAINTY.search(compact):
-            return False
-        if re.search(r"(?:나요|습니까|까요|인가요)\s*[.!]?\s*$", statement):
-            return False
-        # NOT_REQUIRED is itself expressed with negation. Remove only the
-        # exact supported cue, then reject additional negation such as
-        # "원상복구 불필요는 아닙니다". A bare "필요하지 않습니다" still passes.
-        cues = _FACT_VALUE_CUES.get((fact.field_path, fact.value), ())
-        if fact.value == "NOT_REQUIRED":
-            # A sentence can explicitly deny both scope and work requirements.
-            # Consume those supported negatives, but still require this field
-            # to match its own cue in _fact_source_supports_value. Never do
-            # this for REQUIRED: a short quote must not hide its negation.
-            cues = tuple(
-                cue
-                for (_, value), items in _FACT_VALUE_CUES.items()
-                if value == "NOT_REQUIRED"
-                for cue in items
-            )
-        for cue in sorted(cues, key=len, reverse=True):
-            compact = compact.replace(cls._compact_text(cue), "")
-        return _SCHEMA_FACT_NEGATION.search(compact) is None
-
-    @staticmethod
-    def _same_value_casefolded(left: object, right: object) -> bool:
-        if type(left) is str and type(right) is str:
-            return left.casefold() == right.casefold()
-        return type(left) is type(right) and left == right
-
-    @classmethod
     def _procedure_observation_is_explicit(
         cls,
         observation: ProcedureObservationDraft,
@@ -1009,7 +720,13 @@ class InfoAnalysisAgent:
 
         proposed_fields = [item.field_path for item in draft.facts]
         if len(set(proposed_fields)) != len(proposed_fields):
-            raise InfoAnalysisGuardrailError("model returned duplicate fact fields")
+            raise InfoAnalysisGuardrailError(
+                "model returned duplicate fact fields",
+                fact_errors=(
+                    "Return at most one fact per field_path. If the user stated "
+                    "conflicting values, return one fact with requires_confirmation=true.",
+                ),
+            )
 
         for semantic in draft.facts:
             if semantic.field_path not in allowed:
@@ -1030,24 +747,6 @@ class InfoAnalysisAgent:
                 # Re-stating an already unknown fact is not a mutation and must not
                 # require the model to fabricate a user-text source span.
                 continue
-            input_text = (
-                request.input.redacted_text if request.input is not None else ""
-            )
-            if not self._fact_source_supports_value(semantic, input_text=input_text):
-                raise InfoAnalysisGuardrailError(
-                    "fact value is not explicit in its source text",
-                    rejected_fields=(semantic.field_path,),
-                )
-            # 한 문장이 스스로를 뒤집으면("없다고 했는데 있대요") 어느 쪽이 지금 사실인지
-            # 글만으로는 정할 수 없다. 버리면 분석 전체가 실패하므로, 확정하지 않고
-            # 확인이 필요한 사실로 넘겨 사장님께 되묻는다.
-            statement_reverses = bool(
-                _SCHEMA_FACT_REVERSAL.search(
-                    self._compact_text(
-                        self._containing_statement(input_text, semantic.source_text)
-                    )
-                )
-            )
             span, evidence = self._ground_text(request, semantic.source_text)
             evidence_by_span[(span.start_offset, span.end_offset)] = evidence
             if current is not None and current.status == FactStatus.CONFIRMED:
@@ -1070,33 +769,41 @@ class InfoAnalysisAgent:
                 source_span=span,
                 source_evidence_refs=[evidence.evidence_id],
                 confidence_bps=semantic.confidence_bps,
-                requires_confirmation=(
-                    semantic.requires_confirmation or statement_reverses
-                ),
+                requires_confirmation=semantic.requires_confirmation,
                 reason_summary=semantic.reason_summary,
             )
             fact_candidates.append(candidate)
 
-        validate_restoration_state(
-            {
-                **{
-                    item.field_path: item.status for item in request.case_snapshot.facts
-                },
-                **{
-                    item.field_path: item.proposed_status
-                    for item in request.fact_overlays
-                },
-                **{
-                    item.field_path: (
-                        FactStatus.UNKNOWN
-                        if item.operation == FactOperation.CLEAR
-                        else FactStatus.CONFIRMED
-                    )
-                    for item in fact_candidates
-                    if not item.requires_confirmation
-                },
-            }
-        )
+        try:
+            validate_restoration_state(
+                {
+                    **{
+                        item.field_path: item.status for item in request.case_snapshot.facts
+                    },
+                    **{
+                        item.field_path: item.proposed_status
+                        for item in request.fact_overlays
+                    },
+                    **{
+                        item.field_path: (
+                            FactStatus.UNKNOWN
+                            if item.operation == FactOperation.CLEAR
+                            else FactStatus.CONFIRMED
+                        )
+                        for item in fact_candidates
+                        if not item.requires_confirmation
+                    },
+                }
+            )
+        except ValueError:
+            raise InfoAnalysisGuardrailError(
+                "restoration facts are inconsistent",
+                fact_errors=(
+                    "restoration_status can be confirmed only when restoration_scope "
+                    "is also confirmed. If the scope needs confirmation, set "
+                    "requires_confirmation=true on restoration_status too, or omit it.",
+                ),
+            ) from None
 
         observations: list[ProcedureProgressObservation] = []
         for semantic in draft.procedure_observations:

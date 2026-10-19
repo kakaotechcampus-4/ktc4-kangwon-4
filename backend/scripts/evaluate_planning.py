@@ -414,11 +414,7 @@ async def trial(case: str, request: AgentGraphInput, store, registry, catalog) -
                 known_procedure_steps=registry,
                 procedure_store=store,
                 support_catalog=catalog,
-                # A repeat must really re-run. A cached answer would return with
-                # zero provider calls and make every repeat trivially identical.
-                use_decision_cache=False,
             )
-        result["decision_cache_disabled"] = runtime.decision_cache is None
         result["limits"] = asdict(runtime.limits)
         outcome = await runtime.run_planning(request)
         result["status"] = as_text(outcome.outcome_type)
@@ -535,7 +531,6 @@ async def run(args) -> None:
         "configured_models": configured,
         "expected_models": expected,
         "model_mismatch": mismatched,
-        "decision_cache_enabled": False,
         "sources": source_manifest(store, registry, catalog, args.support_catalog),
         "scope": (
             "지정한 Agent 입력으로 전체 판단 경로를 반복 실행한다. "

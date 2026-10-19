@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { ApiError, postLogin, request, UnauthorizedError } from './api'
+import {
+  ApiError,
+  postLogin,
+  request,
+  REQUEST_TIMEOUT_MS,
+  TimeoutError,
+  UnauthorizedError,
+} from './api'
 import { createOAuthState, getAccessToken, saveTokens } from './auth'
 
 function jsonResponse(body: unknown, init: ResponseInit = {}) {
@@ -106,6 +113,63 @@ describe('request', () => {
     mockFetch(new Response(null, { status: 409 }))
 
     await expect(request('/cases', { method: 'POST' })).rejects.toMatchObject({ status: 409 })
+  })
+
+  /**
+   * 서버가 답을 아예 주지 않으면 그 요청은 영영 끝나지 않는다. 그러면 끝나기를 기다리는
+   * 쪽의 뒷정리도 같이 멈춰서, 자동 조회도 다시 확인 버튼도 막힌 채 화면이 굳는다.
+   *
+   * `AbortSignal.timeout()` 을 쓰지 않는 것은 가짜 타이머가 그것까지 바꾸지 못해서다.
+   * 런타임 내부 타이머라 가짜 시간이 흘러도 안 터지고, 테스트가 실제로 15초를 기다리게 된다.
+   */
+  describe('제한 시간', () => {
+    /** 응답을 주지 않다가, 요청이 취소되면 그 이유로 거부한다 — 실제 `fetch` 와 같다 */
+    function hangingFetch() {
+      const fetchMock = vi.fn(
+        (_url: string, init: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            init.signal?.addEventListener('abort', () => reject(init.signal?.reason))
+          }),
+      )
+      vi.stubGlobal('fetch', fetchMock)
+      return fetchMock
+    }
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('답이 오지 않으면 끊는다', async () => {
+      vi.useFakeTimers()
+      hangingFetch()
+
+      const pending = request('/cases')
+      const settled = expect(pending).rejects.toBeInstanceOf(TimeoutError)
+      await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS)
+
+      await settled
+    })
+
+    /**
+     * 응답을 받았다고 끝난 것이 아니다. 본문은 호출부가 나중에 읽는데, 여기서 타이머를
+     * 지워버리면 **헤더만 오고 본문이 멈추는 경우**를 아무도 못 막는다.
+     *
+     * 본문이 멈추는 상황 자체는 가짜 `fetch` 로 재현할 수 없다 — 실제 `fetch` 는 본문
+     * 스트림을 내부에서 `signal` 에 묶지만, 우리가 만든 `Response` 는 그 `signal` 과 아무
+     * 관계가 없다. 그래서 **우리 코드가 타이머를 살려뒀는지**만 본다.
+     */
+    it('응답을 받은 뒤에도 제한 시간이 살아 있다', async () => {
+      vi.useFakeTimers()
+      const fetchMock = mockFetch(jsonResponse({}))
+
+      await request('/cases')
+      const { init } = calledWith(fetchMock)
+      expect(init.signal?.aborted).toBe(false)
+
+      await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS)
+
+      expect(init.signal?.aborted).toBe(true)
+    })
   })
 })
 

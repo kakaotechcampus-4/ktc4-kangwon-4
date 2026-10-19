@@ -11,6 +11,7 @@ from test_action_codes import (
     REF,
     StubModel,
     evidence,
+    result_fixes_xfail,
     source,
     supervisor_request,
     support_sources,
@@ -928,5 +929,89 @@ def test_unusable_model_answers_the_same_as_a_working_one(error):
             subject(request, offline)
         )
         assert review.verdict == "PASS"
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("held_field", ["restoration_scope", "demolition_required"])
+@result_fixes_xfail()
+def test_held_fact_precedes_missing_questions_and_actions_and_passes_review(held_field):
+    from test_info_replanning import analyze_facts
+
+    text = (
+        "원상복구 범위는 없다고 했는데 임대인은 전부 하라고 했어요."
+        if held_field == "restoration_scope"
+        else "철거도 필요하지 않다고 했는데 결국 철거하래요."
+    )
+    result = analyze_facts([(held_field, "NOT_REQUIRED", text)], text, requires_confirmation=True)
+
+    async def run():
+        request = request_with_state()
+        assert candidates(request)  # 보류하기 전에는 실행 가능한 행동이 있다.
+        missing_questions(request, "business_type", "restoration_scope")
+        request.trigger.input.redacted_text = text
+        info = request.source_results[1].output
+        info.evidence_records.extend(result.evidence_records)
+        info.fact_candidates = result.fact_candidates
+        request.source_results[1] = source(info)
+        assert candidates(request) == []
+        draft = await SupervisorAgent(ChoiceModel(), max_local_attempts=1).draft(request)
+        decision = draft.decision
+        assert decision.decision_type == "NEEDS_MORE_INFO"
+        assert decision.next_action is None
+        assert decision.questions_for_user == [
+            "확인한 원상복구 범위가 있으면 알려주세요."
+            if held_field == "restoration_scope"
+            else "철거가 필요한지 확인한 내용이 있으면 알려주세요."
+        ]
+        assert result.fact_candidates[0].source_evidence_refs[0] in decision.blocker.evidence_refs
+        assert draft.mutations.fact_changes == []
+        assert draft.mutations.procedure_progress_changes == []
+        review = await ReviewTool(ChoiceModel(), max_output_attempts=1).review(subject(request, draft))
+        assert review.verdict == "PASS", review
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("blocks", [
+    ["SUPPORT_ANALYSIS"],
+    ["SUPPORT_ANALYSIS", "SUPERVISOR_DECISION"],
+    None,
+])
+@result_fixes_xfail()
+def test_held_fact_only_blocks_closure_when_not_support_only(blocks):
+    from test_info_replanning import analyze_facts
+
+    text = "원상복구 범위는 없다고 했는데 임대인은 전부 하라고 했어요."
+    result = analyze_facts([("restoration_scope", "NOT_REQUIRED", text)], text, requires_confirmation=True)
+
+    async def run():
+        request = request_with_state()
+        expected_action = candidates(request)[0]["actions"][0]
+        request.trigger.input.redacted_text = text
+        if blocks is not None:
+            missing_questions(request, "restoration_scope")
+            request.source_results[1].output.missing_fields[0].blocks = blocks
+        info = request.source_results[1].output
+        info.evidence_records.extend(result.evidence_records)
+        info.fact_candidates = result.fact_candidates
+        request.source_results[1] = source(info)
+        support_only = blocks == ["SUPPORT_ANALYSIS"]
+
+        assert bool(candidates(request)) is support_only
+        fallback = missing_info_fields(request.case_snapshot, request.source_results, mutations())
+        assert (fallback is None) is support_only
+        draft = await SupervisorAgent(ChoiceModel(), max_local_attempts=1).draft(request)
+        if support_only:
+            assert draft.decision.decision_type == "ACTION"
+            assert draft.decision.next_action.action_code == expected_action["action_code"]
+            assert draft.decision.next_action.questions_to_ask == expected_action["questions_to_ask"]
+        else:
+            assert draft.decision.decision_type == "NEEDS_MORE_INFO"
+            assert draft.decision.next_action is None
+            assert draft.decision.questions_for_user == ["확인한 원상복구 범위가 있으면 알려주세요."]
+        assert draft.mutations.fact_changes == []
+        review = await ReviewTool(ChoiceModel(), max_output_attempts=1).review(subject(request, draft))
+        assert review.verdict == "PASS", review
 
     asyncio.run(run())

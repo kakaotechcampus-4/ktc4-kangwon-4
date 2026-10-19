@@ -32,7 +32,11 @@ class Blocker(TimestampMixin, table=True):
     )
     status: str = Field(
         default="ACTIVE",
-        sa_column=Column(Enum("ACTIVE", "RESOLVED", name="blocker_status_enum"), server_default="ACTIVE"),
+        sa_column=Column(
+            Enum("ACTIVE", "RESOLVED", name="blocker_status_enum"),
+            server_default="ACTIVE",
+            nullable=False,
+        ),
     )
 
     resolved_at: datetime | None = Field(default=None, sa_column=Column(DateTime, nullable=True))

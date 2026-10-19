@@ -11,10 +11,12 @@ from sqlmodel import Session
 from datetime import datetime
 
 from app.agent.schemas import (
+    CaseFieldKey,
     ConflictOutcome,
     EvidenceRecord,
     FactChangeCandidate,
     FactOperation,
+    MutationSet,
     ProcedureProgressChangeCandidate,
     ReviewedPlanOutcome,
     SafeFailureOutcome,
@@ -34,7 +36,7 @@ from app.be.models.evidence import ConflictReference, DecisionRecord, Evidence, 
 from app.be.models.mixins import KST
 from app.be.models.procedure_step import CaseProcedureStepHistory
 from app.be.models.support_item import SupportMatch
-from app.be.services.case_snapshot import UNKNOWN_SENTINEL_FIELDS
+from app.be.services.case_snapshot import UNKNOWN_SENTINEL_FIELDS, StoredEvidenceMissingError
 
 # 충돌 확인 기한을 아직 정하지 않아, 만료로 막히지 않도록 멀리 둔다.
 _NO_EXPIRY = datetime(9999, 12, 31)
@@ -51,6 +53,14 @@ def save_reviewed_plan(
 
     # 저장 직전에 검수 증거를 다시 대조한다(AI팀 스펙의 처리 설명).
     outcome.assert_integrity()
+    # 대조 전에 읽기 트랜잭션을 끊는다. 이 세션은 판단 시작 때 스냅샷을 읽고 그대로 36~120초를
+    # 기다렸는데, MySQL 기본 격리 수준(REPEATABLE READ)에서는 같은 트랜잭션 안의 재조회가 처음
+    # 읽은 시점을 계속 본다. SQLAlchemy도 이미 읽어둔 객체를 그대로 돌려준다. 끊지 않으면 그
+    # 사이 바뀐 값을 못 보고 대조가 한 번도 걸리지 않는다.
+    # 여기까지 읽기만 했으므로 되돌릴 것이 없고, 대조와 쓰기는 그다음 트랜잭션에 함께 들어간다.
+    session.rollback()
+    # 쓰기 전에 본다. 하나라도 어긋나면 아무것도 반영하지 않는다.
+    _assert_changes_are_current(session, history, outcome.review_subject.supervisor_draft.mutations)
 
     decision = outcome.review_subject.supervisor_draft.decision
     proof = outcome.review_proof
@@ -85,7 +95,7 @@ def save_reviewed_plan(
     # 때문에, 저장하지 않으면 다음 판단의 스냅샷이 그대로여서 같은 판단이 반복된다.
     # 판단에 인용된 근거를 먼저 저장한다. AI가 돌려주는 evidence_refs는 번호뿐이라,
     # 본문을 남기지 않으면 나중에 그 번호로 조회해도 우리 테이블에 행이 없다.
-    _save_evidence_records(session, history, outcome.review_subject.source_results)
+    _save_evidence_records(session, history, _evidence_records_of(outcome.review_subject.source_results))
 
     mutations = outcome.review_subject.supervisor_draft.mutations
     _apply_fact_changes(session, history, mutations.fact_changes)
@@ -126,18 +136,30 @@ def save_conflict(session: Session, history: CaseHistory, outcome: ConflictOutco
     무엇에서 무엇으로 어긋났는지만 남기고, 반영은 사용자가 고른 뒤에 한다.
     """
 
+    # 충돌에 딸려 온 근거 본문도 남긴다. 되묻는 화면과 확인 뒤 판단이 이 번호로 조회하는데,
+    # 저장해 두지 않으면 우리 테이블에 행이 없다.
+    _save_evidence_records(session, history, outcome.evidence_records)
+
+    # 같은 충돌이 두 번 저장되는 것을 따로 막지 않는다. 전에 두었던 "이미 있으면 건너뛰기"는
+    # conflict_ref로 비교했는데, AI가 판단할 때마다 새 UUID로 만들어서(info_agent/agent.py의
+    # _conflict) 내용이 같아도 값이 달라 한 번도 걸리지 않았다.
+    # 막을 상황도 없다. 아직 안 고른 충돌이 있는 동안은 새 제출이 거부돼 두 번째 판단이 돌지
+    # 않고, 이미 고른 충돌은 그 사이 사정이 달라졌을 수 있어 다시 물어보는 쪽이 맞다.
     for conflict in outcome.conflicts:
-        if evidence_crud.get_conflict_reference(session, conflict.conflict_ref) is not None:
-            continue
         evidence_crud.create_conflict_reference(
             session,
             ConflictReference(
                 conflict_ref=conflict.conflict_ref,
                 case_id=history.case_id,
+                case_history_id=history.id,
                 canonical_field=conflict.field_path.value,
                 committed_value=_history_value(conflict.committed_value),
                 proposed_value=_history_value(conflict.proposed_value),
                 conflict_digest=conflict.conflict_digest,
+                # 위 두 값은 화면에 보여주려고 글자로 바꾼 것이라 숫자·참거짓·빈 값을
+                # 되돌릴 수 없다. 사용자가 고른 뒤 AI에 그대로 돌려주려면 원본이 따로
+                # 있어야 하고, AI는 받은 내용의 다이제스트를 대조해 다르면 거절한다.
+                candidate_payload=conflict.model_dump(mode="json"),
                 # TODO: 충돌 확인에 기한을 둘지 정하지 않았다. AI가 주는 값이 아니라 BE가 정해야
                 # 하는데, 기준이 없어 당장은 만료되지 않게 둔다. 충돌 확인 API를 만들 때 정한다.
                 expires_at=_NO_EXPIRY,
@@ -155,26 +177,98 @@ def save_safe_failure(session: Session, history: CaseHistory, outcome: SafeFailu
     """
 
     history.judgment_status = "FAILED"
+    # 왜 실패했는지. 이게 없으면 쌓인 실패가 전부 "다시 시도해보세요"로만 남아서,
+    # 형식이 틀린 건지 호출 예산을 다 쓴 건지 구분할 수 없다.
+    history.failure_code = outcome.failure_code
     history.recovery_action_code = outcome.recovery_action_code
+    history.retryable = outcome.retryable
     history.requested_field_paths = [field.value for field in outcome.requested_field_paths]
     session.commit()
 
 
-def mark_judgment_failed(session: Session, case_id: int) -> None:
+def mark_judgment_failed(session: Session, case_history_id: int, error: Exception | None = None) -> None:
     """판단이 결과를 내놓기도 전에 끊겼을 때 상태를 남긴다.
 
     AI가 돌려준 실패(SAFE_FAILURE)가 아니라, 그 전에 예외로 끊긴 경우다. 상태를 PENDING으로
-    두면 화면이 영영 "분석 중"에 머물게 된다. 우리 쪽 문제라 같은 입력으로 다시 해볼 만하므로
-    다음 행동은 RETRY로 둔다.
+    두면 화면이 영영 "분석 중"에 머물게 된다. 대개 우리 쪽 일시적인 문제라 같은 입력으로
+    다시 해볼 만하므로 다음 행동은 RETRY로 둔다.
+
+    끊긴 그 판단의 이력을 받는다. 여기서 CASE_CREATED 이력을 직접 찾으면, 결과 제출 판단이
+    터졌을 때 멀쩡한 가입 판단 결과를 FAILED로 덮고 정작 방금 들어온 입력은 PENDING에 남는다.
+
+    `error`는 무엇 때문에 끊겼는지다. 다시 해도 안 풀리는 종류면 RETRY로 안내하지 않는다.
     """
 
-    history = case_history_crud.get_case_created_history(session, case_id)
+    history = case_history_crud.get_case_history_by_id(session, case_history_id)
     if history is None:
         return
     history.judgment_status = "FAILED"
-    history.recovery_action_code = "RETRY"
+    # AI가 결과를 내기 전에 끊겨서 실패 종류를 받지 못했다. 없는 값을 지어내지 않는다.
+    history.failure_code = None
+    # 전에 저장된 행이 원인이면 다시 판단해도 같은 자리에서 또 터진다. 그 Case는 사람이
+    # 데이터를 고치기 전까지 못 빠져나오므로, 눌러도 안 되는 "다시 시도" 대신 문의로 보낸다.
+    retryable = not isinstance(error, StoredEvidenceMissingError)
+    history.recovery_action_code = "RETRY" if retryable else "CONTACT_SUPPORT"
+    history.retryable = retryable
     history.requested_field_paths = []
     session.commit()
+
+
+class StaleJudgmentError(RuntimeError):
+    """판단이 도는 사이 Case가 바뀌어, 그 판단을 반영하면 최신 값을 덮어쓰게 되는 상태."""
+
+
+def _assert_changes_are_current(session: Session, history: CaseHistory, mutations: MutationSet) -> None:
+    """AI가 보고 판단한 "바뀌기 전 값"이 지금도 그대로인지 확인한다.
+
+    판단은 실측 36~120초 걸린다. 그 사이 다른 입력이 반영되면 AI가 들고 있는 값은 이미
+    옛날 것이다. 그대로 덮어쓰면 최신 값이 사라지고, 완료된 절차가 진행 중으로 되돌아간다.
+
+    한 건이라도 어긋나면 나머지 판단도 같은 옛 스냅샷에서 나온 것이라 믿을 수 없다. 그래서
+    일부만 거르지 않고 판단 전체를 버린다. 쓰기 전에 검사해서 일부만 반영된 상태를 남기지
+    않는다. 여기서 던진 예외는 판단을 부른 쪽에서 FAILED(RETRY)로 남고, 다시 돌리면 그때는
+    최신 값으로 스냅샷을 만든다.
+    """
+
+    case = case_crud.get_case_by_id(session, history.case_id)
+    if case is None:
+        raise ValueError(f"case {history.case_id} not found")
+
+    for change in mutations.fact_changes:
+        stored = _comparable_case_value(case, change.field_path)
+        if stored != change.before_value:
+            raise StaleJudgmentError(
+                f"case {case.id}의 {change.field_path.value}: 판단이 본 값은 "
+                f"{change.before_value!r}인데 지금은 {stored!r}"
+            )
+
+    for change in mutations.procedure_progress_changes:
+        step = procedure_step_crud.get_case_procedure_step(
+            session, history.case_id, change.procedure_step.procedure_step_id
+        )
+        if step is None:
+            raise ValueError(
+                f"case {history.case_id} has no procedure step {change.procedure_step.step_code}"
+            )
+        if step.status != change.before_status.value:
+            raise StaleJudgmentError(
+                f"case {case.id}의 절차 {change.procedure_step.step_code}: 판단이 본 상태는 "
+                f"{change.before_status.value}인데 지금은 {step.status}"
+            )
+
+
+def _comparable_case_value(case: object, field_key: CaseFieldKey) -> object | None:
+    """Case 컬럼 값을 AI가 쓰는 표현으로 맞춘다.
+
+    DB는 "모름"을 필드마다 다르게 적는다 — 어떤 칸은 NULL이고, 어떤 칸은 "UNKNOWN"이라는
+    enum 값 자체가 미확인을 뜻한다(case_snapshot.UNKNOWN_SENTINEL_FIELDS). AI는 둘 다
+    값이 없는 것으로 본다. 맞춰 두지 않으면 안 바뀐 값도 어긋난 것으로 읽힌다.
+    """
+
+    value = getattr(case, field_key.value)
+    if value is None or (field_key in UNKNOWN_SENTINEL_FIELDS and value == "UNKNOWN"):
+        return None
+    return value
 
 
 def _apply_fact_changes(
@@ -194,15 +288,26 @@ def _apply_fact_changes(
         raise ValueError(f"case {history.case_id} not found")
 
     for change in fact_changes:
-        before = getattr(case, change.field_path.value)
+        # 컬럼에 글자 "UNKNOWN"이 들어 있는 필드가 있다. 그대로 적으면 "모름"이 이력에
+        # 두 모양(NULL과 "UNKNOWN")으로 남는다. AI가 보는 표현으로 맞춰서 적는다.
+        before = _comparable_case_value(case, change.field_path)
         setattr(case, change.field_path.value, _column_value(change))
         case_field_history_crud.create_case_field_history(
             session,
             CaseFieldHistory(
                 case_id=case.id,
+                # 어느 제출에서 나온 변경인지. 이 값이 있어야 "이번 판단에서 뭐가 바뀌었나"를
+                # 골라낼 수 있다(GET /cases의 changes).
+                case_history_id=history.id,
+                # 이 변경을 무엇을 보고 했는지. 다음 판단 스냅샷이 이 필드의 근거로 되돌려
+                # 준다(case_snapshot._build_facts). 안 남기면 바뀐 값에도 최초 폼 입력이
+                # 근거로 붙어 AI가 출처를 잘못 알게 된다.
+                source_evidence_refs=list(change.source_evidence_refs),
                 canonical_field=change.field_path.value,
-                before_value=_history_value(before),
-                after_value=_history_value(change.proposed_value),
+                # 값이 없으면 글자 "UNKNOWN"이 아니라 NULL로 둔다. Case 컬럼의 미확인
+                # enum과 이력의 "값이 없음"은 다른 뜻이다.
+                before_value=_nullable_value(before),
+                after_value=_nullable_value(change.proposed_value),
                 # AI가 보내는 값(INFO_ANALYSIS / CONFIRMED_CONFLICT)을 그대로 쓴다. 우리 식으로
                 # 다시 이름 붙이면 AI가 값을 늘릴 때마다 변환을 따라 고쳐야 한다.
                 source=change.source_type.value,
@@ -221,10 +326,17 @@ def _column_value(change: FactChangeCandidate) -> object | None:
     return "UNKNOWN" if change.field_path in UNKNOWN_SENTINEL_FIELDS else None
 
 
-def _history_value(value: object | None) -> str:
-    """변경 이력에 적을 값. after_value가 NOT NULL이라 둘 다 같은 규칙으로 적는다.
+def _nullable_value(value: object | None) -> str | None:
+    """값이 없으면 NULL로 둘 수 있는 칸에 적을 값(case_field_history)."""
 
-    값이 없을 때 한쪽은 NULL, 한쪽은 "UNKNOWN"으로 적으면 같은 상태가 두 모양으로 남는다.
+    return None if value is None else str(value)
+
+
+def _history_value(value: object | None) -> str:
+    """NULL을 못 받는 칸에 적을 값(conflict_reference.proposed_value 등).
+
+    원래 값이 무엇이었는지는 candidate_payload에 원본 그대로 남는다. 여기는 화면이 읽는
+    자리라 사람이 볼 수 있는 글자로 적는다.
     """
 
     return "UNKNOWN" if value is None else str(value)
@@ -293,17 +405,31 @@ def _apply_support_match_updates(
         match.match_status = check.match_status.value
 
 
-def _save_evidence_records(session: Session, history: CaseHistory, source_results: list) -> None:
+def _evidence_records_of(source_results: list) -> list[EvidenceRecord]:
+    """검수 대상에 붙어 온 Tool 결과들에서 근거 본문만 모은다."""
+
+    return [
+        record
+        for source in source_results
+        for record in getattr(source.output, "evidence_records", [])
+    ]
+
+
+def _save_evidence_records(
+    session: Session, history: CaseHistory, evidence_records: list[EvidenceRecord]
+) -> None:
     """판단에 쓰인 근거 본문을 Case의 evidence로 남긴다.
 
     절차 문서처럼 BE가 미리 넣어둔 근거는 그대로 다시 오므로 건너뛰고, 정보분석이 사용자
     글에서 떼어내 만든 근거(input:...)처럼 새로 생긴 것만 저장한다.
+
+    정상 판단과 충돌이 같이 쓴다. 충돌 쪽은 Tool 결과가 아니라 납작한 목록으로 와서,
+    모으는 일은 호출부에 두고 여기는 목록만 받는다.
     """
 
     records: dict[str, EvidenceRecord] = {}
-    for source in source_results:
-        for record in getattr(source.output, "evidence_records", []):
-            records.setdefault(record.evidence_id, record)
+    for record in evidence_records:
+        records.setdefault(record.evidence_id, record)
     if not records:
         return
 
