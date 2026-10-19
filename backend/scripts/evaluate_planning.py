@@ -650,6 +650,17 @@ def dataset_summary(rows: list[dict]) -> dict:
     }
 
 
+def overall_verdict(per_case: dict, dataset_rows: list[dict] | None) -> str:
+    """A wrong or failed dataset row fails the run even when every repeat agreed."""
+    if any(v["verdict"] != "PASS" for v in per_case.values()):
+        return "FAIL"
+    if dataset_rows is not None and any(
+        row["score"]["result"] != "PASS" for row in dataset_rows
+    ):
+        return "FAIL"
+    return "PASS"
+
+
 async def run(args) -> None:
     graph_input_path = getattr(args, "graph_input", None)
     dataset_path = getattr(args, "dataset", None)
@@ -767,7 +778,7 @@ async def run(args) -> None:
         case: verdict([row for row in rows if row["case"] == case]) for case in cases
     }
     summary = {
-        "verdict": "PASS" if all(v["verdict"] == "PASS" for v in per_case.values()) else "FAIL",
+        "verdict": overall_verdict(per_case, rows if dataset_path is not None else None),
         "per_case": per_case,
         # If every different intake converges on one action, the run shows
         # consistency, not that the model picks well among several candidates.

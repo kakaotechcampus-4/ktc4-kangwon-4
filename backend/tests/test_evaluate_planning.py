@@ -11,6 +11,7 @@ from scripts.evaluate_planning import (
     FIXED_TIME,
     build_case_snapshot,
     decision_summary,
+    overall_verdict,
     score,
     verdict,
 )
@@ -164,3 +165,13 @@ def test_state_checked_must_not_fails_and_text_ones_go_to_a_person():
 
     assert result["result"] == "WRONG"
     assert result["human_check"] == ["FABRICATED_EVIDENCE"]
+
+
+def test_a_wrong_dataset_row_fails_the_run_even_if_repeats_agree():
+    per_case = {"G01": {"verdict": "PASS"}}
+    wrong = [{"score": {"result": "WRONG"}}]
+    passed = [{"score": {"result": "PASS"}}]
+
+    assert overall_verdict(per_case, wrong) == "FAIL"
+    assert overall_verdict(per_case, passed) == "PASS"
+    assert overall_verdict(per_case, None) == "PASS"
