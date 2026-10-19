@@ -185,7 +185,9 @@ def test_a_wrong_dataset_row_fails_the_run_even_if_repeats_agree():
 
 
 def test_fixture_inputs_carry_the_reviewed_sources_the_lookup_accepts():
-    store = SnapshotStore(Path("app/common/reviewed-procedures.ko-KR.json"))
+    store = SnapshotStore(
+        Path(__file__).resolve().parents[1] / "app/common/reviewed-procedures.ko-KR.json"
+    )
     request = attach_fixture_sources(build_graph_input(CASES["benchmark_case1"]), store)
 
     def found(graph_input):
