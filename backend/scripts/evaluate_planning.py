@@ -263,6 +263,31 @@ class SnapshotStore:
         return self._records
 
 
+def attach_fixture_sources(request: AgentGraphInput, store: SnapshotStore) -> AgentGraphInput:
+    """Supply the reviewed Evidence a BE-built snapshot normally carries.
+
+    Only CLI-generated fixtures use this helper. A caller-supplied --graph-input
+    remains untouched, including deliberately missing or stale source records.
+    """
+    owned = request.model_copy(deep=True)
+    for record in store.records():
+        existing = [item for item in owned.case_snapshot.evidence_records
+                    if item.source_type == "OFFICIAL_DOCUMENT"
+                    and item.source_ref == record.canonical_url
+                    and item.source_version == store.snapshot_version]
+        if existing:
+            continue
+        owned.case_snapshot.evidence_records.append(EvidenceRecord(
+            evidence_id="synthetic-reviewed:" + digest([store.snapshot_version, record.record_id])[-40:],
+            source_type="OFFICIAL_DOCUMENT", source_ref=record.canonical_url,
+            source_version=store.snapshot_version, locator=None, excerpt=record.excerpt,
+            parent_evidence_refs=[], published_at=record.published_at,
+            retrieved_at=record.retrieved_at, freshness_status=record.freshness(FIXED_TIME.date()),
+            content_hash=record.content_hash,
+        ))
+    return AgentGraphInput.model_validate(owned.model_dump(mode="python"))
+
+
 # A step's name and aliases are how the Agent recognises "I already did that"
 # in the user's own words. Using the scraped document title instead made
 # "원상복구 범위를 확인했다" unrecognisable, and Info burned every retry on a
@@ -713,6 +738,9 @@ async def run(args) -> None:
             case: build_graph_input(CASES[case], result_text=result_text) for case in cases
         }
         case_inputs = {case: CASES[case] for case in cases}
+    if graph_input_path is None:
+        requests = {case: attach_fixture_sources(request, store)
+                    for case, request in requests.items()}
     manifest = {
         "trigger": as_text(requests[cases[0]].trigger.trigger_type),
         "result_input": args.result_input,
