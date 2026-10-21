@@ -1014,3 +1014,35 @@ def test_result_replanning_uses_reviewed_facts_without_repeating_scope_question(
         support.analyze.assert_not_awaited()
 
     asyncio.run(run())
+
+
+
+@pytest.mark.parametrize("forbidden", ["input_finding", "procedure_fact", "procedure_observation"])
+def test_explicit_stage_replies_are_not_repaired_by_the_fixture(forbidden):
+    request = request_for_replanning()
+    invalid = output([finding(TAX, "doc1")])
+    if forbidden == "procedure_fact":
+        invalid["facts"] = [{
+            "operation": "SET", "field_path": "restoration_scope", "value_type": "ENUM",
+            "value": "NOT_REQUIRED", "source_text": request.input.redacted_text,
+            "confidence_bps": 10000, "requires_confirmation": False, "reason_summary": "합성 잘못된 단계",
+        }]
+    elif forbidden == "procedure_observation":
+        invalid["procedure_observations"] = [{
+            "step_code": TAX, "observed_status": "COMPLETED", "source_text": request.input.redacted_text,
+            "requires_confirmation": False, "reason_summary": "합성 잘못된 단계",
+        }]
+    original = deepcopy(invalid)
+    client = Responses(
+        output([finding(TAX, "doc1"), finding(FOOD, "doc2")]),
+        input_responses=[invalid] if forbidden == "input_finding" else None,
+        procedure_responses={} if forbidden == "input_finding" else {TAX: [invalid]},
+    )
+    with pytest.raises(InfoAnalysisGuardrailError):
+        asyncio.run(InfoAnalysisAgent(client, max_local_attempts=1).analyze(request))
+    assert invalid == original
+    assert len(client.stage_messages("INPUT")) == 1
+    if forbidden == "input_finding":
+        assert client.stage_messages("PROCEDURE") == []
+    else:
+        assert len(client.stage_messages("PROCEDURE", TAX)) == 1

@@ -1,6 +1,7 @@
 # 절차조회(Procedure) Tool
 
-승인 목록은 개발자가 내용을 검수·승인한 공식 절차 자료 목록이다.
+승인 목록은 사람 검수 또는 공식 원문 대조를 거친 자동 검수로 승인한 공식 절차 자료다.
+고정 카페 자료는 `cafe.py`의 builder가 실제 검수 주체·시각·원문 해시를 포함해 만든다.
 BE가 Case snapshot에 담아 준 공식 근거를 사전에 읽은 승인 목록과 대조한다.
 Tool 조회 중 인터넷·DB·파일을 읽지 않는다. 빈 승인 목록을 받은 runtime은 그 목록을
 그대로 두며 파일로 채우지 않는다. 승인 목록이 있어도 DB 근거가 없으면 빈 결과를 반환한다.
@@ -8,7 +9,7 @@ Tool 조회 중 인터넷·DB·파일을 읽지 않는다. 빈 승인 목록을 
 
 ## 조회 (`StoredProcedureLookupTool`)
 
-`ProcedureLookupInput`(Case의 공식 Evidence·조회어·기준일) →
+`ProcedureLookupInput`(Case의 공식 Evidence·등록 절차 코드·조회어·기준일) →
 `ProcedureLookupResult`(문서·Evidence·상태·경고).
 `evidence_records`는 기본값 없는 필수 필드다. Tool 직접 호출 시에도 전달해야 하며 빈 목록은 허용한다.
 정상 반환의 `completion_status`는 `COMPLETE` 아니면 `NO_RESULTS`이며,
@@ -16,6 +17,7 @@ Tool 조회 중 인터넷·DB·파일을 읽지 않는다. 빈 승인 목록을 
 
 - 승인 목록과 URL·버전이 같은 DB 자료의 발췌·해시가 일치해야 한다. 같은 URL·버전의
   중복 자료나 원문·해시 불일치는 `PROCEDURE_SOURCE_MISMATCH` 오류다.
+- `procedure_step_codes`가 있으면 문서의 연결 코드로 조회하고 최대 40개 자료를 반환한다. 기존 검색어 경로는 조회어당 한도를 유지한다.
 - 현재 승인 버전의 DB 자료가 없으면 조회 대상에서 제외한다. 각 조회어별로 일치하는 문서가 없으면
   경고하며, 개별 자료 누락마다 경고하지는 않는다. 이전 버전의 DB 근거를 현재 버전으로 바꾸거나,
   없는 원문을 파일에서 채우지 않는다.
@@ -52,8 +54,8 @@ DB 상태를 Tool 안에서 `CURRENT`로 올리거나, 같은 근거 ID에 다�
 
 - `deprecated_at`이 있으면 무조건 막음
 - `applicable_business_type`이 `ALL`이 아니고 Case의 `business_type`과 다르면 막음
-- 선행 절차(`dependency_type=SEQUENTIAL`)가 `COMPLETED`가 아니면 막음
-- `eligibility_conditions`: `has_employee`(직원 수 > 0 비교) 또는 Case 필드 정확 일치만 지원. 그 외 조건 키·미확인 사실은 실행 가능으로 안 침
+- 선행 절차(`dependency_type=SEQUENTIAL`)가 미완료면 막음. 명확한 비대상 선행은 건너뛰며, 복구 범위 확인은 범위·철거 필요 사실이 모두 확인돼야 만족
+- `eligibility_conditions`: 기존 필드 정확 일치에 카페의 임차·복구 필요·보험 가입 이력 조건을 더한다. `procedure_applicability`는 대상/비대상/미확인을 구분한다. 현재 직원 0명을 과거 직원 없음으로 추정하지 않는다.
 
 `procedure_plan_constraints(...)`는 Supervisor의 ACTION target과 진행 변경 후보 전체에 위 규칙을
 적용한다. 등록 안 된 ID, 폐기된 절차, 이미 `COMPLETED`인 절차를 next action으로 막는다 —
