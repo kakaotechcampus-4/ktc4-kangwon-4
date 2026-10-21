@@ -149,9 +149,7 @@ def get_case(session: Session, member_id: int) -> CaseGetResponse:
     return CaseGetResponse(
         case=CaseGetDetailResponse(**case.model_dump()),
         blocker=(
-            latest_history.priority_blocker.description
-            if latest_history.priority_blocker and latest_history.judgment_status != "NEEDS_MORE_INFO"
-            else None
+            latest_history.priority_blocker.description if latest_history.priority_blocker else None
         ),
         next_action=next_action,
         judgment_status=latest_history.judgment_status,
