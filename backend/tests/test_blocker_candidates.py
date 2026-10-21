@@ -11,7 +11,6 @@ from test_action_codes import (
     REF,
     StubModel,
     evidence,
-    result_fixes_xfail,
     source,
     supervisor_request,
     support_sources,
@@ -944,7 +943,6 @@ def test_unusable_model_propagates_without_a_code_selected_fallback(error):
 
 
 @pytest.mark.parametrize("held_field", ["restoration_scope", "demolition_required"])
-@result_fixes_xfail()
 def test_model_can_select_a_held_fact_while_valid_actions_remain(held_field):
     from test_info_replanning import analyze_facts
 
@@ -988,7 +986,6 @@ def test_model_can_select_a_held_fact_while_valid_actions_remain(held_field):
     ["SUPPORT_ANALYSIS", "SUPERVISOR_DECISION"],
     None,
 ])
-@result_fixes_xfail()
 def test_held_fact_only_blocks_closure_when_not_support_only(blocks):
     from test_info_replanning import analyze_facts
 

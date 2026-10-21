@@ -44,18 +44,6 @@ TAX = "FILE_TAX_BUSINESS_CLOSURE"
 CONFIRM_TAX = "CONFIRM_TAX_CLOSURE_REQUIREMENTS"
 
 
-def result_fixes_xfail(*, raises=AssertionError):
-    # Only the split PR's missing API gates these known baseline failures.
-    # Do not probe behavior: it would hide later regressions. With the API
-    # present these remain ordinary tests, including failures of the new behavior.
-    return pytest.mark.xfail(
-        not hasattr(AgentGraph, "_requested_field_guidance"),
-        reason="Agent fixes in PR #74 have not been merged yet",
-        strict=True,
-        raises=raises,
-    )
-
-
 def evidence(**changes):
     return EvidenceRecord.model_validate(
         {
@@ -479,6 +467,10 @@ def test_review_blocks_wrong_target_even_when_its_model_returns_pass():
     asyncio.run(run())
 
 
+
+
+
+
 @pytest.mark.parametrize("action_code", [CONFIRM_TAX, TAX])
 @pytest.mark.parametrize("invented_blocker", [False, True])
 def test_review_checks_required_blocker_against_verified_candidate(
@@ -541,7 +533,7 @@ def test_review_checks_required_blocker_against_verified_candidate(
 @pytest.mark.parametrize("problem", [
     None,
     *[
-        pytest.param(problem, marks=result_fixes_xfail(raises=pytest.fail.Exception))
+        pytest.param(problem)
         for problem in ("missing", "fact", "progress")
     ],
 ])

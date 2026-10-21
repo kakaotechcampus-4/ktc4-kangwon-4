@@ -10,7 +10,6 @@ from pydantic import ValidationError
 from test_action_codes import (
     NOW,
     StubModel,
-    result_fixes_xfail,
     source,
     supervisor_request,
     support_sources,
@@ -20,9 +19,7 @@ from test_blocker_candidates import ChoiceModel
 from app.agent.graph import AgentGraph
 from app.agent.review_tool import ReviewTool
 from app.agent.schemas import (
-    CASE_FIELD_SPECS,
     AgentGraphInput,
-    CaseFieldKey,
     ConflictCandidate,
     InfoAnalysisResult,
     ReviewResult,
@@ -170,58 +167,12 @@ def test_info_question_keeps_closure_fields_but_omits_support_only_fields():
     failure = {"source_results": [source(info)]}
     requested = AgentGraph._requested_field_paths(failure)
     assert requested == ["restoration_scope"]
-    if hasattr(AgentGraph, "_requested_field_guidance"):
-        assert AgentGraph._requested_field_guidance(failure, requested) == {
-            "restoration_scope": "확인한 원상복구 범위가 있으면 알려주세요.",
-        }
-
-
-@pytest.mark.parametrize("linked_id,expected", [
-    (95, "임대인이 확인해 준 원상복구 범위가 무엇인가요?"),
-    (96, "원상복구 범위를 확인하셨나요?"),
-    (93, "원상복구 범위를 확인하셨나요?"),
-])
-@result_fixes_xfail(raises=AttributeError)
-def test_requested_guidance_prefers_linked_question_then_resolving_question(linked_id, expected):
-    info = supervisor_request().source_results[1].output
-    info = InfoAnalysisResult.model_validate(info.model_dump() | {
-        "missing_fields": [{
-            "field_path": "restoration_scope", "blocks": ["SUPERVISOR_DECISION"],
-            "reason_summary": "합성 미확인 항목", "question_candidate_id": UUID(int=linked_id),
-        }],
-        "question_candidates": [
-            {
-                "question_id": UUID(int=question_id), "text": text,
-                "resolves_field_paths": [field], "reason_summary": "합성 확인 질문",
-            }
-            for question_id, field, text in [
-                (93, "employee_count", "직원이 몇 명인가요?"),
-                (94, "restoration_scope", "원상복구 범위를 확인하셨나요?"),
-                (95, "restoration_scope", "임대인이 확인해 준 원상복구 범위가 무엇인가요?"),
-            ]
-        ],
-    })
-    failure = {"source_results": [source(info)]}
-
-    assert AgentGraph._requested_field_guidance(failure, [CaseFieldKey.RESTORATION_SCOPE]) == {
-        "restoration_scope": expected,
-    }
-
-
-@result_fixes_xfail(raises=AttributeError)
-def test_requested_guidance_fallback_covers_every_case_field():
-    guidance = AgentGraph._requested_field_guidance({}, list(CASE_FIELD_SPECS))
-
-    assert list(guidance) == list(CASE_FIELD_SPECS)
-    assert all(text.strip() for text in guidance.values())
-    assert guidance[CaseFieldKey.PLANNED_CLOSURE_DATE] == "예정한 폐업일이 언제인지 알려주세요."
 
 
 @pytest.mark.parametrize("recovery,retryable", [
     ("RETRY", True), ("CONTACT_SUPPORT", False), ("NONE", False),
 ])
-@result_fixes_xfail(raises=AttributeError)
-def test_non_input_recovery_has_no_field_guidance(recovery, retryable):
+def test_non_input_recovery_requests_no_fields(recovery, retryable):
     _, request, _, _, _ = graph_run_inputs("RESULT_SUBMITTED")
     info = supervisor_request().source_results[1].output
     info = InfoAnalysisResult.model_validate(info.model_dump() | {
@@ -236,17 +187,11 @@ def test_non_input_recovery_has_no_field_guidance(recovery, retryable):
     outcome = AgentGraph._build_safe_failure(request, run_id=UUID(int=2), trace_id=None, failure=failure)
 
     assert AgentGraph._requested_field_paths(failure) == ["restoration_scope"]
-    assert AgentGraph._requested_field_guidance(failure, outcome.requested_field_paths) == {}
+    assert outcome.requested_field_paths == []
 
 
 @pytest.mark.parametrize("code,retryable,fields,stale", [
-    pytest.param(
-        code, retryable, fields, stale,
-        marks=result_fixes_xfail(raises=pytest.fail.Exception)
-        if retryable != (code == "RETRY") or (
-            not fields and not stale if code == "RESUBMIT_INPUT" else bool(fields)
-        ) else (),
-    )
+    (code, retryable, fields, stale)
     for code, retryable, fields, stale in product(
         ["RETRY", "RESUBMIT_INPUT", "CONTACT_SUPPORT", "NONE"],
         [False, True], [[], ["restoration_scope"]], [False, True],
@@ -273,7 +218,6 @@ def test_safe_failure_recovery_combinations(code, retryable, fields, stale):
             SafeFailureOutcome.model_validate(payload)
 
 
-@result_fixes_xfail(raises=pytest.fail.Exception)
 def test_safe_failure_rejects_duplicate_requested_fields():
     _, request, _, _, _ = graph_run_inputs("RESULT_SUBMITTED")
     outcome = AgentGraph._build_safe_failure(request, run_id=UUID(int=2), trace_id=None, failure={})
@@ -286,8 +230,8 @@ def test_safe_failure_rejects_duplicate_requested_fields():
 
 
 @pytest.mark.parametrize("error,expected", [
-    pytest.param("timeout", "RUN_DEADLINE_EXCEEDED", marks=result_fixes_xfail()),
-    pytest.param("component", "COMPONENT_UNAVAILABLE", marks=result_fixes_xfail()),
+    pytest.param("timeout", "RUN_DEADLINE_EXCEEDED"),
+    pytest.param("component", "COMPONENT_UNAVAILABLE"),
     ("invalid_output", "STRUCTURED_OUTPUT_FAILED"),
 ])
 def test_graph_failure_with_missing_fields_keeps_recovery_combination(error, expected):
@@ -353,7 +297,6 @@ def test_graph_stale_confirmation_requires_new_choice_without_requested_fields(c
     info.analyze.assert_not_awaited()
 
 
-@result_fixes_xfail(raises=pytest.fail.Exception)
 def test_failure_builder_rejects_explicit_conflicting_recovery_and_retryable():
     _, request, _, _, _ = graph_run_inputs("RESULT_SUBMITTED")
     with pytest.raises(ValidationError):
@@ -364,14 +307,9 @@ def test_failure_builder_rejects_explicit_conflicting_recovery_and_retryable():
 
 
 @pytest.mark.parametrize("blocks,expected", [
-    pytest.param(None, ["restoration_scope"], marks=result_fixes_xfail()),
-    pytest.param(
-        ["SUPPORT_ANALYSIS"], [], marks=result_fixes_xfail(raises=AttributeError),
-    ),
-    pytest.param(
-        ["SUPPORT_ANALYSIS", "SUPERVISOR_DECISION"], ["restoration_scope"],
-        marks=result_fixes_xfail(raises=AttributeError),
-    ),
+    pytest.param(None, ["restoration_scope"]),
+    (["SUPPORT_ANALYSIS"], []),
+    (["SUPPORT_ANALYSIS", "SUPERVISOR_DECISION"], ["restoration_scope"]),
 ])
 def test_failure_requests_held_facts_without_missing_questions(blocks, expected):
     from test_info_replanning import analyze_facts
@@ -392,16 +330,12 @@ def test_failure_requests_held_facts_without_missing_questions(blocks, expected)
     failure = {"source_results": [source(held)]}
     requested = AgentGraph._requested_field_paths(failure)
     assert requested == expected
-    assert AgentGraph._requested_field_guidance(failure, requested) == (
-        {"restoration_scope": "확인한 원상복구 범위가 있으면 알려주세요."}
-        if expected else {}
-    )
 
 
 @pytest.mark.parametrize("failure", [
-    pytest.param("supervisor", marks=result_fixes_xfail()),
+    pytest.param("supervisor"),
     "timeout",
-    pytest.param("review_exhausted", marks=result_fixes_xfail()),
+    pytest.param("review_exhausted"),
     "support_rework",
 ])
 def test_graph_failure_keeps_held_fact_recovery(failure):
@@ -467,7 +401,6 @@ def test_graph_failure_keeps_held_fact_recovery(failure):
     SafeFailureOutcome.model_validate_json(outcome.model_dump_json())
 
 
-@result_fixes_xfail()
 def test_graph_delivers_held_fact_question_before_available_action():
     from test_info_replanning import analyze_facts
 

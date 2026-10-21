@@ -33,7 +33,6 @@ from app.agent.schemas import (
     MutationSet,
     ReviewSourceResult,
 )
-from app.agent.schemas import AgentFieldKey as CaseFieldKey
 
 _QUESTIONS = {
     "business_type": "어떤 가게를 운영하시나요?",
@@ -66,14 +65,6 @@ _FIELD_LABELS = {
     "demolition_required": "철거 필요 여부",
     "restoration_status": "원상복구 진행 상태",
 }
-
-
-
-def field_confirmation_question(field_path: CaseFieldKey) -> str:
-    """Reuse the Case confirmation question when Info has no specific question."""
-    if field_path == CaseFieldKey.PLANNED_CLOSURE_DATE:
-        return "예정한 폐업일이 언제인지 알려주세요."
-    return _QUESTIONS[field_path.value]
 
 
 def _values(snapshot: CaseSnapshot, mutations: MutationSet) -> dict[str, Any]:
