@@ -35,7 +35,7 @@ from app.agent.claim_safety import (
     is_overconfident,
     references_other_known_label,
 )
-from app.agent.enrichment import build_confirmed_conflict_overlay
+from app.agent.enrichment import build_conflict_overlays, evidence_records_equal
 from app.agent.guardrails import GuardrailViolation, ensure_no_sensitive_text
 from app.agent.procedure_tool.rules import procedure_plan_constraints
 from app.agent.projection import (
@@ -69,6 +69,7 @@ from app.agent.schemas import (
     SupportCheck,
     SupportMatchStatus,
     canonical_digest,
+    case_field_values_equal,
 )
 
 from .models import ReviewModelOutput, ReviewProviderOutput
@@ -200,6 +201,18 @@ class ReviewTool:
             "field is not a factual claim and must not receive MISSING_EVIDENCE. "
             "Only flag a question when its own wording asserts an unsupported fact."
         )
+        if isinstance(subject.trigger, ConflictConfirmedTrigger):
+            base_messages[0]["content"] += (
+                "\nCONFLICT_CONFIRMED의 confirmed_conflict는 사용자가 수락한 단건입니다. "
+                "일괄 conflicts와 selections는 배열 순서가 아니라 conflict_ref로 연결하세요. "
+                "accepted=true인 변경은 snapshot의 기존 값과 달라도 정상 검수 대상입니다. "
+                "accepted=false는 기존 값을 유지하며 해당 새 값을 반영하면 안 됩니다. "
+                "각 선택과 mutation의 field_path·before/proposed 값·operation·근거를 정확히 "
+                "대조하고, 거절 값 채택·수락 값 누락·다른 값 반영은 반려하세요. 수락되었다는 "
+                "이유만으로 다른 안전 검수를 통과시키지 마세요. trigger는 선택 대조용 문맥이며 "
+                "적용 오류의 issue는 해당 /supervisor_draft/mutations/ 또는 decision의 실제 "
+                "canonical 경로로 보고하세요. /trigger/ 경로를 재작업 대상으로 삼지 마세요."
+            )
         last_violation: ReviewOutputViolation | None = None
 
         for attempt in range(1, self._max_output_attempts + 1):
@@ -351,7 +364,7 @@ def _validate_integrity(subject: ReviewSubject) -> _ReviewContext:
     evidence_by_id: dict[str, EvidenceRecord] = {}
     for evidence in _walk_evidence_records(subject):
         existing = evidence_by_id.get(evidence.evidence_id)
-        if existing is not None and existing != evidence:
+        if existing is not None and not evidence_records_equal(existing, evidence):
             raise ReviewIntegrityError(
                 "the same evidence ID has conflicting content in the review package"
             )
@@ -399,19 +412,25 @@ def _validate_mutation_provenance(
 ) -> None:
     mutations = subject.supervisor_draft.mutations
     if isinstance(subject.trigger, ConflictConfirmedTrigger):
-        confirmed_changes = [
-            candidate
-            for candidate in mutations.fact_changes
-            if candidate.source_type == FactChangeSourceType.CONFIRMED_CONFLICT
-        ]
-        if len(confirmed_changes) != 1:
-            raise ReviewIntegrityError(
-                "conflict confirmation requires exactly one confirmed change"
+        try:
+            expected_changes = build_conflict_overlays(
+                subject.snapshot, subject.trigger
             )
-        if len(mutations.fact_changes) != 1 or mutations.procedure_progress_changes:
-            raise ReviewIntegrityError(
-                "conflict confirmation cannot create new facts or procedure progress"
-            )
+        except (TypeError, ValueError) as exc:
+            raise ReviewIntegrityError("conflict batch provenance is invalid") from exc
+        if (
+            len(mutations.fact_changes) != len(expected_changes)
+            or mutations.procedure_progress_changes
+        ):
+            raise ReviewIntegrityError("confirmation must contain only the accepted changes")
+        confirmed = [item for item in mutations.fact_changes
+                     if item.source_type == FactChangeSourceType.CONFIRMED_CONFLICT]
+        if len(confirmed) != len(expected_changes) or {
+            item.confirmed_conflict_ref for item in confirmed
+        } != {
+            item.confirmed_conflict_ref for item in expected_changes
+        }:
+            raise ReviewIntegrityError("mutations must match all accepted choices")
     snapshot_facts = {fact.field_path: fact for fact in subject.snapshot.facts}
     for candidate in mutations.fact_changes:
         if candidate.source_type == FactChangeSourceType.CONFIRMED_CONFLICT:
@@ -419,28 +438,22 @@ def _validate_mutation_provenance(
                 raise ReviewIntegrityError(
                     "confirmed-conflict mutation requires its confirmation trigger"
                 )
-            conflict = subject.trigger.confirmed_conflict
             try:
-                conflict.assert_integrity()
-                expected = build_confirmed_conflict_overlay(
-                    subject.snapshot,
-                    conflict,
-                    uuid_factory=lambda candidate_id=candidate.candidate_id: (
-                        candidate_id
-                    ),
+                expected = next(
+                    item
+                    for item in build_conflict_overlays(
+                        subject.snapshot, subject.trigger
+                    )
+                    if item.confirmed_conflict_ref == candidate.confirmed_conflict_ref
                 )
-            except (AttributeError, TypeError, ValueError) as exc:
-                raise ReviewIntegrityError(
-                    "confirmed-conflict provenance is invalid"
-                ) from exc
-            snapshot_evidence = {
-                item.evidence_id for item in subject.snapshot.evidence_records
-            }
-            if not set(conflict.source_evidence_refs).issubset(snapshot_evidence):
-                raise ReviewIntegrityError("confirmed-conflict evidence is missing")
+            except (StopIteration, TypeError, ValueError) as exc:
+                raise ReviewIntegrityError("mutation has no accepted conflict") from exc
+            expected = expected.model_copy(
+                update={"candidate_id": candidate.candidate_id}
+            )
             if canonical_digest(candidate) != canonical_digest(expected):
                 raise ReviewIntegrityError(
-                    "mutation differs from the confirmed conflict"
+                    "mutation differs from the accepted conflict"
                 )
             continue
         if candidate.source_type != FactChangeSourceType.INFO_ANALYSIS:
@@ -485,7 +498,9 @@ def _validate_mutation_provenance(
             and candidate.field_path == fact_candidate.field_path
             and candidate.value_type == fact_candidate.value_type
             and candidate.proposed_status == expected_status
-            and _strictly_equal_nullable(candidate.proposed_value, fact_candidate.value)
+            and case_field_values_equal(
+                candidate.field_path, candidate.proposed_value, fact_candidate.value
+            )
             and candidate.reason_summary == fact_candidate.reason_summary
             and candidate.source_evidence_refs == fact_candidate.source_evidence_refs
         ):
@@ -496,8 +511,8 @@ def _validate_mutation_provenance(
         before = snapshot_facts.get(candidate.field_path)
         before_status = before.status if before is not None else FactStatus.UNKNOWN
         before_value = before.value if before is not None else None
-        if candidate.before_status != before_status or not _strictly_equal_nullable(
-            candidate.before_value, before_value
+        if candidate.before_status != before_status or not case_field_values_equal(
+            candidate.field_path, candidate.before_value, before_value
         ):
             raise ReviewIntegrityError(
                 "fact mutation before state differs from the review snapshot"
@@ -648,12 +663,6 @@ def _require_source_output(
     return source
 
 
-def _strictly_equal_nullable(left: Any, right: Any) -> bool:
-    if left is None or right is None:
-        return left is right
-    return type(left) is type(right) and left == right
-
-
 _PROMPT_EXCLUDED_KEYS = {
     "candidate_id",
     "captured_at",
@@ -697,6 +706,29 @@ def _review_prompt_projection(
     procedure_bindings: ProcedureBindings | None = None,
 ) -> dict[str, Any]:
     """Build a minimal projection whose paths remain canonical ReviewSubject paths."""
+
+    confirmation_payload: dict[str, Any] = {}
+    if isinstance(subject.trigger, ConflictConfirmedTrigger):
+        # Preserve only the canonical choice links and values needed to judge
+        # accepted mutations; the validated baseline is already in snapshot.
+        def project_conflict(conflict):
+            return conflict.model_dump(mode="json", include={
+                "conflict_ref", "field_path", "committed_status", "committed_value",
+                "proposed_operation", "proposed_status", "proposed_value",
+                "source_evidence_refs",
+            })
+
+        if subject.trigger.confirmed_conflict is not None:
+            confirmation_payload["confirmed_conflict"] = project_conflict(
+                subject.trigger.confirmed_conflict
+            )
+        else:
+            confirmation_payload["conflicts"] = [
+                project_conflict(conflict) for conflict in subject.trigger.conflicts
+            ]
+            confirmation_payload["selections"] = [
+                selection.model_dump(mode="json") for selection in subject.trigger.selections
+            ]
 
     snapshot_payload = subject.snapshot.model_dump(
         mode="json", exclude={"evidence_records"}
@@ -794,6 +826,9 @@ def _review_prompt_projection(
         directly_used_refs.update(_walk_named_evidence_refs(output_payload))
     used_refs = set(directly_used_refs)
     pending = list(directly_used_refs)
+    confirmation_refs = _walk_named_evidence_refs(confirmation_payload)
+    used_refs.update(confirmation_refs)
+    pending.extend(confirmation_refs)
     while pending:
         evidence_ref = pending.pop()
         evidence = context.evidence_by_id[evidence_ref]
@@ -845,6 +880,7 @@ def _review_prompt_projection(
     trigger: dict[str, Any] = {
         "trigger_type": subject.trigger.trigger_type,
     }
+    trigger.update(confirmation_payload)
     redacted_input = getattr(subject.trigger, "input", None)
     if redacted_input is not None:
         trigger["input"] = {

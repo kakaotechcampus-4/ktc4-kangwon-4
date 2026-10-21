@@ -2,18 +2,25 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
+from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from app.agent.schemas import (
     CASE_FIELD_SPECS,
     CaseSnapshot,
     ConflictCandidate,
+    ConflictConfirmedTrigger,
+    EvidenceRecord,
     FactChangeCandidate,
     FactChangeSourceType,
     FactOperation,
     FactStatus,
     InfoAnalysisResult,
+)
+from app.agent.schemas import (
+    case_field_values_equal as same_fact_value,
 )
 
 
@@ -30,6 +37,70 @@ class StaleConfirmationError(ValueError):
         super().__init__(message)
         self.code = "STALE_CONFLICT_CONFIRMATION"
         self.retryable = False
+
+
+def _normalized_timestamp(value):
+    if isinstance(value, str):
+        try:
+            stamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if stamp.tzinfo is not None:
+                return stamp.astimezone(timezone.utc).replace(microsecond=0).isoformat()
+        except ValueError:
+            pass
+    return value
+
+
+def evidence_records_equal(left: EvidenceRecord, right: EvidenceRecord) -> bool:
+    """Allow DB timestamp precision only; source content and lineage stay exact."""
+    records = [item.model_dump(mode="json") for item in (left, right)]
+    for record in records:
+        for field in ("retrieved_at", "published_at"):
+            record[field] = _normalized_timestamp(record[field])
+    return records[0] == records[1]
+
+
+def confirmation_state(snapshot: CaseSnapshot) -> str:
+    """Compare stored DB views independently of read time, UUID and list order.
+
+    MySQL DATETIME round trips use second precision. Source hashes are already
+    normalized by EvidenceRecord. Text, provenance and status remain significant.
+    """
+    data = snapshot.model_dump(mode="json", exclude={"snapshot_id", "captured_at"})
+
+    def normalize(value, field=None):
+        if isinstance(value, dict):
+            return {key: normalize(item, key) for key, item in value.items()}
+        if isinstance(value, list):
+            items = [normalize(item) for item in value]
+            return sorted(items, key=lambda item: json.dumps(item, sort_keys=True))
+        if field in {"updated_at", "retrieved_at", "published_at"}:
+            return _normalized_timestamp(value)
+        return value
+
+    return json.dumps(normalize(data), ensure_ascii=False, sort_keys=True)
+
+
+def build_conflict_overlays(
+    snapshot: CaseSnapshot,
+    trigger: ConflictConfirmedTrigger,
+    *,
+    uuid_factory: Callable[[], UUID] = uuid4,
+) -> list[FactChangeCandidate]:
+    """Validate the complete batch first, including rejected proposals."""
+    baseline = trigger.conflict_snapshot
+    if baseline is not None and (
+        baseline.snapshot_id != snapshot.snapshot_id
+        or confirmation_state(baseline) != confirmation_state(snapshot)
+    ):
+        raise StaleConfirmationError("Case state changed after the conflict batch")
+    overlays = []
+    for conflict, accepted in trigger.choices():
+        candidate = build_confirmed_conflict_overlay(
+            snapshot, conflict, uuid_factory=uuid_factory
+        )
+        if accepted:
+            overlays.append(candidate)
+    return overlays
 
 
 def build_confirmed_conflict_overlay(
@@ -58,15 +129,8 @@ def build_confirmed_conflict_overlay(
         raise StaleConfirmationError(
             "the confirmed field is no longer a confirmed Case fact"
         )
-    # Compared by type as well as value so a stored 1 cannot silently satisfy a
-    # confirmation recorded against True.
-    if (
-        type(current.value) is not type(conflict.committed_value)
-        or current.value != conflict.committed_value
-    ):
-        raise StaleConfirmationError(
-            "the Case value changed after the conflict was raised"
-        )
+    if not same_fact_value(conflict.field_path, current.value, conflict.committed_value):
+        raise StaleConfirmationError("the Case value changed after the conflict was raised")
 
     if not set(conflict.source_evidence_refs).issubset(
         item.evidence_id for item in snapshot.evidence_records
@@ -120,8 +184,7 @@ def build_fact_overlays(
         if (
             candidate.operation == FactOperation.SET
             and before_status == FactStatus.CONFIRMED
-            and type(before_value) is type(candidate.value)
-            and before_value == candidate.value
+            and same_fact_value(candidate.field_path, before_value, candidate.value)
         ):
             continue
         overlays.append(
@@ -153,5 +216,8 @@ def build_fact_overlays(
 __all__ = [
     "StaleConfirmationError",
     "build_confirmed_conflict_overlay",
+    "build_conflict_overlays",
     "build_fact_overlays",
+    "confirmation_state",
+    "same_fact_value",
 ]

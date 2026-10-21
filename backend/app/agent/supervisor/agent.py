@@ -27,7 +27,7 @@ from app.agent.claim_safety import (
     REQUIRED_CLAIM_SOURCES,
     expand_evidence,
 )
-from app.agent.enrichment import build_fact_overlays
+from app.agent.enrichment import build_fact_overlays, evidence_records_equal
 from app.agent.guardrails import (
     GuardrailViolation,
     ensure_known_refs,
@@ -970,7 +970,7 @@ class SupervisorAgent:
         result: dict[str, EvidenceRecord] = {}
         for record in records:
             existing = result.get(record.evidence_id)
-            if existing is not None and existing != record:
+            if existing is not None and not evidence_records_equal(existing, record):
                 raise SupervisorGuardrailError("evidence ID collision")
             result[record.evidence_id] = record
         return result

@@ -621,7 +621,7 @@ def test_review_preserves_only_the_confirmed_conflict_change(problem):
         client = StubModel()
         tool = ReviewTool(client, max_output_attempts=1, provider_max_retries=0)
         if problem:
-            message = "exactly one confirmed change" if problem == "missing" else "cannot create new facts or procedure progress"
+            message = "confirmation must contain only the accepted changes"
             with pytest.raises(ReviewIntegrityError, match=message):
                 await tool.review(subject)
             assert client.calls == 0
