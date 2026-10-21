@@ -15,7 +15,6 @@ from app.agent.review_tool import ReviewIntegrityError, ReviewTool
 from app.agent.schemas import (
     AgentGraphInput,
     AgentGraphOutput,
-    Blocker,
     ConflictCandidate,
     ConflictConfirmedTrigger,
     EvidenceRecord,
@@ -486,15 +485,16 @@ def test_review_checks_required_blocker_against_verified_candidate(
         ).draft(request)
         assert draft.decision.blocker is not None
         assert draft.decision.blocker.evidence_refs == [REF]
-        assert draft.decision.next_action.action_code == CONFIRM_TAX
+        assert draft.decision.next_action.action_code == action_code
         assert draft.decision.questions_for_user == []
         assert any(
             "/blocker/" in claim.target_path for claim in draft.grounded_claims
         )
         if invented_blocker:
-            draft.decision.blocker = Blocker(
-                description="준비할 항목이 확인되지 않았습니다.", evidence_refs=[REF]
-            )
+            draft.decision.blocker.description = "준비할 항목이 확인되지 않았습니다."
+            for item in draft.decision.blockers:
+                if item.candidate_id == draft.decision.blocker.candidate_id:
+                    item.description = draft.decision.blocker.description
         subject = ReviewSubject.create(
             schema_version="agent-io/2.0",
             review_subject_id=UUID(int=9),

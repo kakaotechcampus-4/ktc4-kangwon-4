@@ -254,10 +254,11 @@ def test_support_program_count_does_not_change_closure_candidates():
 
 
 class ChoiceModel(StubModel):
-    def __init__(self, invalid=False, choice=0):
+    def __init__(self, invalid=False, choice=0, information=False):
         super().__init__()
         self.invalid = invalid
         self.choice = choice
+        self.information = information
 
     async def generate(self, model, messages, **kwargs):
         if kwargs["schema_name"] == "reborn_review_output":
@@ -265,11 +266,12 @@ class ChoiceModel(StubModel):
         self.calls += 1
         payload = json.loads(messages[1]["content"].removeprefix("INPUT_JSON="))
         rows = payload["contract"]["blocker_candidates"]
-        if not rows:
+        if not rows or self.information:
+            questions = payload["contract"]["information_blockers"]
             return model.model_validate(
                 {
                     "decision_type": "NEEDS_MORE_INFO",
-                    "blocker_candidate_id": None,
+                    "blocker_candidate_id": questions[self.choice]["candidate_id"] if questions else None,
                     "selection_summary": "이미 정해지지 않았습니다.",
                     "requires_human": True,
                     "evidence_refs": [REF],
@@ -845,7 +847,7 @@ def test_confirmation_precedes_filing_in_current_schema():
     )
 
 
-def test_different_valid_model_choices_produce_same_ranked_action():
+def test_different_valid_model_choices_keep_the_selected_priority_and_all_blockers():
     async def run():
         request = request_with_all_closure_steps(demolition_required="REQUIRED")
         decisions = []
@@ -858,13 +860,13 @@ def test_different_valid_model_choices_produce_same_ranked_action():
                 subject(request, draft)
             )
             assert review.verdict == "PASS"
-        assert all(decision == decisions[0] for decision in decisions)
+        assert len({decision[0].candidate_id for decision in decisions}) == 4
         assert decisions[0][1].action_code == "CONFIRM_RESTORATION_SCOPE"
 
     asyncio.run(run())
 
 
-def test_review_rejects_lower_priority_action_despite_model_pass():
+def test_review_rejects_a_missing_blocker_after_case_state_changes():
     async def run():
         # A tax action is valid by itself, but no longer first when landlord
         # confirmation is still unresolved in the Case being reviewed.
@@ -879,7 +881,7 @@ def test_review_rejects_lower_priority_action_despite_model_pass():
         assert review.verdict == "REVISE"
         assert any(
             issue.issue_code == "CONTRACT_VIOLATION"
-            and issue.target_path == "/supervisor_draft/decision/next_action"
+            and issue.target_path == "/supervisor_draft/decision/blockers"
             for issue in review.issues
         )
 
@@ -900,8 +902,7 @@ class UnusableModel(StubModel):
         raise self.error
 
 
-# 할 일 순서는 코드가 정하고 모델은 그 1순위밖에 고를 수 없다. 그래서 모델에게서
-# 쓸 답을 못 받아도 답은 이미 손에 있다. 판단 전체를 실패로 끝내면 사장님은 빈손이 된다.
+# A failed model must never be replaced by a code-selected candidate.
 @pytest.mark.parametrize("error", [
     LLMRequestError(
         "LLM provider returned HTTP 503 after 3 attempt(s)",
@@ -912,30 +913,21 @@ class UnusableModel(StubModel):
         code="STRUCTURED_OUTPUT_FAILED", retryable=True, attempts=3,
     ),
 ])
-def test_unusable_model_answers_the_same_as_a_working_one(error):
+def test_unusable_model_propagates_without_a_code_selected_fallback(error):
     async def run():
         request = request_with_all_closure_steps(demolition_required="REQUIRED")
-        working = await SupervisorAgent(ChoiceModel(), max_local_attempts=3).draft(
-            request
-        )
         model = UnusableModel(error)
-        offline = await SupervisorAgent(model, max_local_attempts=3).draft(request)
-        assert offline.decision.decision_type == "ACTION"
-        assert offline.decision.blocker == working.decision.blocker
-        assert offline.decision.next_action == working.decision.next_action
+        with pytest.raises(type(error)):
+            await SupervisorAgent(model, max_local_attempts=3).draft(request)
         # llm.py가 이미 재시도를 끝낸 뒤 던지므로 여기서 다시 부르지 않는다
         assert model.calls == 1
-        review = await ReviewTool(ChoiceModel(), max_output_attempts=1).review(
-            subject(request, offline)
-        )
-        assert review.verdict == "PASS"
 
     asyncio.run(run())
 
 
 @pytest.mark.parametrize("held_field", ["restoration_scope", "demolition_required"])
 @result_fixes_xfail()
-def test_held_fact_precedes_missing_questions_and_actions_and_passes_review(held_field):
+def test_model_can_select_a_held_fact_while_valid_actions_remain(held_field):
     from test_info_replanning import analyze_facts
 
     text = (
@@ -954,8 +946,8 @@ def test_held_fact_precedes_missing_questions_and_actions_and_passes_review(held
         info.evidence_records.extend(result.evidence_records)
         info.fact_candidates = result.fact_candidates
         request.source_results[1] = source(info)
-        assert candidates(request) == []
-        draft = await SupervisorAgent(ChoiceModel(), max_local_attempts=1).draft(request)
+        assert candidates(request)
+        draft = await SupervisorAgent(ChoiceModel(information=True, choice=int(held_field == "demolition_required")), max_local_attempts=1).draft(request)
         decision = draft.decision
         assert decision.decision_type == "NEEDS_MORE_INFO"
         assert decision.next_action is None
@@ -998,10 +990,10 @@ def test_held_fact_only_blocks_closure_when_not_support_only(blocks):
         request.source_results[1] = source(info)
         support_only = blocks == ["SUPPORT_ANALYSIS"]
 
-        assert bool(candidates(request)) is support_only
+        assert candidates(request)
         fallback = missing_info_fields(request.case_snapshot, request.source_results, mutations())
         assert (fallback is None) is support_only
-        draft = await SupervisorAgent(ChoiceModel(), max_local_attempts=1).draft(request)
+        draft = await SupervisorAgent(ChoiceModel(information=not support_only), max_local_attempts=1).draft(request)
         if support_only:
             assert draft.decision.decision_type == "ACTION"
             assert draft.decision.next_action.action_code == expected_action["action_code"]
