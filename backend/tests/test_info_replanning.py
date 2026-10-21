@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
-from test_action_codes import NOW, result_fixes_xfail, supervisor_request
+from test_action_codes import NOW, supervisor_request
 from test_blocker_candidates import ChoiceModel, request_with_state
 
 from app.agent.graph import AgentGraph
@@ -126,7 +126,6 @@ def output(findings, *, missing_detail=False, uncertainties=None):
     return {
         "completion_status": "NEEDS_USER_INPUT" if missing_detail else "COMPLETE",
         "facts": [],
-        "procedure_observations": [],
         "procedure_findings": findings,
         "missing_fields": [
             {
@@ -182,7 +181,7 @@ class Responses:
             reply["uncertainties"] = [item for item in reply["uncertainties"]
                                       if not item["target_path"].startswith("/procedure_lookup_result")]
         else:
-            reply["facts"], reply["procedure_observations"] = [], []
+            reply["facts"] = []
             reply["procedure_findings"] = [item for item in reply["procedure_findings"] if item["step_code"] == code]
             document_paths = {doc["document_path"] for doc in payload["procedure_lookup"]["documents"]}
             reply["uncertainties"] = [item for item in reply["uncertainties"]
@@ -411,7 +410,7 @@ def test_prompt_keeps_whole_case_and_progress_even_with_a_narrow_extraction_allo
         "restoration_scope",
     }
     assert projection["snapshot_procedure_progress"][0]["status"] == "COMPLETED"
-    assert set(projection["procedure_analysis_step_codes"]) == {TAX, FOOD}
+    assert InfoAnalysisAgent._analysis_step_codes(request) == {TAX, FOOD}
 
 
 
@@ -546,7 +545,13 @@ def test_document_based_progress_is_rejected_then_retried_without_losing_finding
         asyncio.run(
             InfoAnalysisAgent(Responses(wrong), max_local_attempts=1).analyze(request)
         )
-    client = Responses(wrong, corrected)
+    client = Responses(
+        corrected,
+        input_responses=[
+            wrong | {"procedure_findings": []},
+            corrected | {"procedure_findings": []},
+        ],
+    )
     result = asyncio.run(
         InfoAnalysisAgent(client, max_local_attempts=2).analyze(request)
     )
@@ -554,8 +559,8 @@ def test_document_based_progress_is_rejected_then_retried_without_losing_finding
     assert len(result.procedure_findings) == 3
     assert request.case_snapshot.model_dump(mode="json") == before
     feedback = " ".join(item["content"] for item in client.stage_messages("INPUT")[1])
-    assert f"Rejected procedure_observations for: {RESTORATION}" in feedback
-    assert "Still analyze the documents in procedure_findings" in feedback
+    assert "prior structured result failed" in feedback
+    assert "progress comes from structured choices" in feedback
 
 
 
@@ -612,7 +617,13 @@ def test_result_sentence_produces_only_the_three_stated_fact_changes(unsupported
         "source_text": "임대인에게 확인했습니다.", "requires_confirmation": False,
         "reason_summary": "절차를 식별하지 않는 확인 문장",
     }]
-    client = Responses(*([rejected] if unsupported_completion else []), response)
+    client = Responses(
+        response,
+        input_responses=[
+            *([rejected | {"procedure_findings": []}] if unsupported_completion else []),
+            response | {"procedure_findings": []},
+        ],
+    )
     result = asyncio.run(InfoAnalysisAgent(client).analyze(request))
     assert len(client.stage_messages("INPUT")) == 1 + int(unsupported_completion)
     assert {(fact.field_path, fact.value) for fact in result.fact_candidates} == {
@@ -770,7 +781,6 @@ def test_held_fact_still_produces_a_question_for_the_owner():
     ("restoration_scope", "원상복구 범위는 없다고 했는데 원상복구 작업도 필요하지 않습니다."),
     ("restoration_status", "원상복구 작업은 필요하지 않다고 했는데 원상복구 범위도 없대요."),
 ])
-@result_fixes_xfail()
 def test_connective_without_field_reversal_confirms_report(field, text):
     facts = [(field, "NOT_REQUIRED", text)]
     if field == "restoration_status":
@@ -784,10 +794,10 @@ def test_connective_without_field_reversal_confirms_report(field, text):
 @pytest.mark.parametrize("field,value,text", [
     ("employee_count", 3, "직원은 3명입니다."),
     ("employee_count", 0, "직원을 정리해서 지금은 0명으로 바뀌었어요."),
-    pytest.param("employee_count", 3, "직원은 3명인데 지금도 3명입니다.", marks=result_fixes_xfail()),
-    pytest.param("employee_count", 3, "직원은 3명이라고 했는데 지금도 3명이라고 합니다.", marks=result_fixes_xfail()),
-    pytest.param("restoration_scope_detail", "벽면", "원상복구 범위는 벽면이라고 했는데 지금도 벽면이라고 합니다.", marks=result_fixes_xfail()),
-    pytest.param("planned_closure_date", "2026-11-01", "폐업 예정일은 2026-11-01이라고 했는데 지금도 2026-11-01이라고 합니다.", marks=result_fixes_xfail()),
+    pytest.param("employee_count", 3, "직원은 3명인데 지금도 3명입니다."),
+    pytest.param("employee_count", 3, "직원은 3명이라고 했는데 지금도 3명이라고 합니다."),
+    pytest.param("restoration_scope_detail", "벽면", "원상복구 범위는 벽면이라고 했는데 지금도 벽면이라고 합니다."),
+    pytest.param("planned_closure_date", "2026-11-01", "폐업 예정일은 2026-11-01이라고 했는데 지금도 2026-11-01이라고 합니다."),
 ])
 def test_plain_or_repeated_report_produces_a_reviewable_change(field, value, text):
     from app.agent.enrichment import build_fact_overlays
@@ -837,8 +847,8 @@ def test_clearing_confirmed_closure_date_keeps_the_conflict_candidate():
 
 @pytest.mark.parametrize("invalid", [
     None,
-    pytest.param("digest", marks=result_fixes_xfail(raises=pytest.fail.Exception)),
-    pytest.param("evidence", marks=result_fixes_xfail(raises=pytest.fail.Exception)),
+    pytest.param("digest"),
+    pytest.param("evidence"),
 ])
 def test_confirmed_conflict_overlay_checks_original_before_planning(invalid):
     from app.agent.enrichment import build_confirmed_conflict_overlay
@@ -894,7 +904,6 @@ def snapshot_from_reviewed_facts(outcome):
 
 
 @pytest.mark.parametrize("held_demolition", [False, True])
-@result_fixes_xfail()
 def test_result_replanning_uses_reviewed_facts_without_repeating_scope_question(
     held_demolition,
 ):

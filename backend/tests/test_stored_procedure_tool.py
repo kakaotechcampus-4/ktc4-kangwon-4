@@ -6,6 +6,9 @@ from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
+from test_action_codes import StubModel, source, supervisor_request
+from test_info_replanning import Responses, finding, output
+
 from app.agent.info_agent.agent import InfoAnalysisAgent
 from app.agent.procedure_tool.store import ReviewedProcedureRecord
 from app.agent.procedure_tool.stored_tool import (
@@ -22,8 +25,6 @@ from app.agent.schemas import (
     ReviewSubject,
 )
 from app.agent.supervisor import SupervisorAgent
-from test_action_codes import StubModel, source, supervisor_request
-from test_info_replanning import Responses, finding, output
 
 NOW = datetime(2026, 10, 4, tzinfo=timezone.utc)
 
@@ -143,8 +144,8 @@ def test_mapped_db_evidence_reaches_info_supervisor_and_review():
         source_call_id=UUID(int=3), procedure_lookup_call_id=UUID(int=5),
         procedure_lookup_result=result, review_feedback=[],
     )
-    projected = InfoAnalysisAgent._prompt_input(info_request, bindings)
-    assert projected["procedure_analysis_step_codes"] == [ref.step_code]
+    projected = InfoAnalysisAgent._prompt_input(info_request)
+    assert InfoAnalysisAgent._analysis_step_codes(info_request, bindings) == {ref.step_code}
     assert projected["procedure_evidence_by_step"] == {ref.step_code: ["doc1"]}
     item = finding(ref.step_code, "doc1")
     item["summary"]["text"] = evidence.excerpt

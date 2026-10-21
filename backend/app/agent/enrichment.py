@@ -87,6 +87,7 @@ def build_conflict_overlays(
     uuid_factory: Callable[[], UUID] = uuid4,
 ) -> list[FactChangeCandidate]:
     """Validate the complete batch first, including rejected proposals."""
+    trigger.assert_pending_input_integrity()
     baseline = trigger.conflict_snapshot
     if baseline is not None and (
         baseline.snapshot_id != snapshot.snapshot_id
