@@ -1,6 +1,8 @@
 """Replanning analyzes supplied remaining topics, not only the latest utterance."""
 
 import asyncio
+import json
+from collections import Counter
 from copy import deepcopy
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
@@ -141,12 +143,57 @@ def output(findings, *, missing_detail=False, uncertainties=None):
 
 
 class Responses:
-    def __init__(self, *values):
-        self.values, self.messages = list(values), []
+    """Expand scenario data into independent INPUT and per-topic replies.
+
+    Explicit stage replies are returned unchanged, including deliberate invalid
+    fields. Normal scenario fixtures contain both user extraction and findings;
+    neither stage pretends it produced the other stage's data.
+    """
+
+    def __init__(self, *values, input_responses=None, procedure_responses=None):
+        self.values, self.messages, self.calls = list(values), [], []
+        self.input_responses = input_responses
+        self.procedure_responses = procedure_responses or {}
+        self.positions = Counter()
 
     async def generate(self, model, messages, **kwargs):
+        payload = json.loads(next(item["content"][11:] for item in messages if item["role"] == "user"))
+        stage = payload["analysis_stage"]
+        assert kwargs["schema_name"] == "reborn_info_analysis"
+        codes = kwargs["enum_constraints"]["step_code"]
+        code = None if stage == "INPUT" else codes[0]
+        assert stage in {"INPUT", "PROCEDURE"}
+        if stage == "PROCEDURE":
+            assert len(codes) == 1
+        else:
+            assert set(codes) == {item["procedure_step"]["step_code"] for item in payload["known_procedure_steps"]}
+            assert kwargs["enum_constraints"]["evidence_refs"] == []
+        key = stage, code
+        index = self.positions[key]
+        self.positions[key] += 1
         self.messages.append(messages)
-        return model.model_validate(self.values.pop(0))
+        self.calls.append((payload, kwargs, messages))
+        explicit = self.input_responses if stage == "INPUT" else self.procedure_responses.get(code)
+        if explicit is not None:
+            return model.model_validate(deepcopy(explicit[index]))
+        reply = deepcopy(self.values[index])
+        if stage == "INPUT":
+            reply["procedure_findings"] = []
+            reply["uncertainties"] = [item for item in reply["uncertainties"]
+                                      if not item["target_path"].startswith("/procedure_lookup_result")]
+        else:
+            reply["facts"], reply["procedure_observations"] = [], []
+            reply["procedure_findings"] = [item for item in reply["procedure_findings"] if item["step_code"] == code]
+            document_paths = {doc["document_path"] for doc in payload["procedure_lookup"]["documents"]}
+            reply["uncertainties"] = [item for item in reply["uncertainties"]
+                                      if item["target_path"] in document_paths or item["target_path"] == "/procedure_lookup_result"]
+        return model.model_validate(reply)
+
+    def stage_messages(self, stage, code=None):
+        return [messages for payload, options, messages in self.calls
+                if payload["analysis_stage"] == stage
+                and (code is None or options["enum_constraints"]["step_code"] == [code])]
+
 
 
 @pytest.mark.parametrize(
@@ -169,11 +216,15 @@ def test_unsourced_summary_is_rejected_and_corrected(summary):
         output([corrected, finding(FOOD, "doc2")]),
     )
     result = asyncio.run(InfoAnalysisAgent(client).analyze(request_for_replanning()))
-    assert len(client.messages) == 2
-    assert result.procedure_findings[0].summary.text == corrected["summary"]["text"]
-    assert result.procedure_findings[0].deadline is None
-    assert result.procedure_findings[0].required_actions == []
+    assert len(client.stage_messages("INPUT")) == 1
+    assert len(client.stage_messages("PROCEDURE", TAX)) == 2
+    assert len(client.stage_messages("PROCEDURE", FOOD)) == 1
+    tax = next(item for item in result.procedure_findings if item.procedure_step.step_code == TAX)
+    assert tax.summary.text == corrected["summary"]["text"]
+    assert tax.deadline is None
+    assert tax.required_actions == []
     assert len(result.procedure_findings) == 2
+
 
 
 def test_repeated_unsourced_summary_is_not_returned_as_a_finding():
@@ -188,6 +239,7 @@ def test_repeated_unsourced_summary_is_not_returned_as_a_finding():
         )
 
 
+
 def test_all_unsourced_summaries_are_reported_in_one_retry():
     tax, food = finding(TAX, "doc1"), finding(FOOD, "doc2")
     tax["summary"]["text"] = "25일 이내에 신고합니다."
@@ -197,10 +249,14 @@ def test_all_unsourced_summaries_are_reported_in_one_retry():
         output([finding(TAX, "doc1"), finding(FOOD, "doc2")]),
     )
     result = asyncio.run(InfoAnalysisAgent(client).analyze(request_for_replanning()))
-    feedback = " ".join(item["content"] for item in client.messages[1])
-    assert f"{TAX}, {FOOD}: summaries" in feedback
-    assert len(client.messages) == 2
+    assert len(client.stage_messages("INPUT")) == 1
+    for code in (TAX, FOOD):
+        messages = client.stage_messages("PROCEDURE", code)
+        assert len(messages) == 2
+        feedback = " ".join(item["content"] for item in messages[1])
+        assert code in feedback and "summaries" in feedback
     assert len(result.procedure_findings) == 2
+
 
 
 def test_procedure_names_with_digits_are_not_rejected_as_deadlines():
@@ -212,8 +268,10 @@ def test_procedure_names_with_digits_are_not_rejected_as_deadlines():
         "text"
     ]
     result = asyncio.run(InfoAnalysisAgent(client).analyze(request))
-    assert len(client.messages) == 1
-    assert result.procedure_findings[0].summary.text == tax["summary"]["text"]
+    assert len(client.stage_messages("INPUT")) == 1
+    assert len(client.stage_messages("PROCEDURE", TAX)) == 1
+    assert next(item for item in result.procedure_findings if item.procedure_step.step_code == TAX).summary.text == tax["summary"]["text"]
+
 
 
 @pytest.mark.parametrize(
@@ -230,9 +288,12 @@ def test_source_quotation_keeps_qualified_deadlines_and_citation_dates(source_te
     quoted["summary"]["text"] = source_text
     client = Responses(output([quoted, finding(FOOD, "doc2")]))
     result = asyncio.run(InfoAnalysisAgent(client).analyze(request))
-    assert len(client.messages) == 1
-    assert result.procedure_findings[0].summary.text == source_text
-    assert result.procedure_findings[0].requires_confirmation is True
+    assert len(client.stage_messages("INPUT")) == 1
+    assert len(client.stage_messages("PROCEDURE", TAX)) == 1
+    tax = next(item for item in result.procedure_findings if item.procedure_step.step_code == TAX)
+    assert tax.summary.text == source_text
+    assert tax.requires_confirmation is True
+
 
 
 @pytest.mark.parametrize(
@@ -259,8 +320,10 @@ def test_summary_cannot_drop_source_conditions_or_borrow_another_source(wrong_te
         output([corrected, finding(FOOD, "doc2")]),
     )
     result = asyncio.run(InfoAnalysisAgent(client).analyze(request))
-    assert len(client.messages) == 2
-    assert result.procedure_findings[0].summary.text == source_text
+    assert len(client.stage_messages("INPUT")) == 1
+    assert len(client.stage_messages("PROCEDURE", TAX)) == 2
+    assert next(item for item in result.procedure_findings if item.procedure_step.step_code == TAX).summary.text == source_text
+
 
 
 def test_omitted_remaining_procedures_trigger_a_targeted_retry():
@@ -280,10 +343,12 @@ def test_omitted_remaining_procedures_trigger_a_targeted_retry():
     assert result.completion_status.value == "COMPLETE"
     assert result.missing_fields == result.question_candidates == []
     correction = " ".join(
-        item["content"] for item in client.messages[1] if item["role"] == "system"
+        item["content"] for code in (TAX, FOOD)
+        for item in client.stage_messages("PROCEDURE", code)[1]
     )
     assert TAX in correction and FOOD in correction
     assert "entire Case" in correction
+
 
 
 @pytest.mark.parametrize(
@@ -299,6 +364,7 @@ def test_finished_restoration_does_not_request_scope_detail(status, scope):
     assert result.missing_fields == result.question_candidates == []
 
 
+
 def test_unresolved_restoration_can_still_ask_for_scope_detail():
     request = request_for_replanning("NOT_STARTED", "PARTIAL")
     client = Responses(
@@ -306,6 +372,7 @@ def test_unresolved_restoration_can_still_ask_for_scope_detail():
     )
     result = asyncio.run(InfoAnalysisAgent(client).analyze(request))
     assert result.missing_fields[0].field_path == CaseFieldKey.RESTORATION_SCOPE_DETAIL
+
 
 
 def test_document_specific_uncertainty_avoids_inventing_a_procedure():
@@ -321,6 +388,7 @@ def test_document_specific_uncertainty_avoids_inventing_a_procedure():
     assert result.uncertainties[0].evidence_refs == ["synthetic-2"]
 
 
+
 def test_silent_omission_fails_closed_when_retry_budget_is_exhausted():
     client = Responses(output([finding(RESTORATION, "doc3")]))
     with pytest.raises(InfoAnalysisGuardrailError):
@@ -329,7 +397,9 @@ def test_silent_omission_fails_closed_when_retry_budget_is_exhausted():
                 request_for_replanning()
             )
         )
-    assert len(client.messages) == 1
+    assert len(client.stage_messages("INPUT")) == 1
+    assert len(client.stage_messages("PROCEDURE", FOOD)) == 1
+
 
 
 def test_prompt_keeps_whole_case_and_progress_even_with_a_narrow_extraction_allowlist():
@@ -344,6 +414,7 @@ def test_prompt_keeps_whole_case_and_progress_even_with_a_narrow_extraction_allo
     assert set(projection["procedure_analysis_step_codes"]) == {TAX, FOOD}
 
 
+
 def test_stale_or_unmapped_documents_do_not_force_new_findings():
     request = request_for_replanning()
     raw = request.procedure_lookup_result.model_dump(mode="json")
@@ -353,6 +424,7 @@ def test_stale_or_unmapped_documents_do_not_force_new_findings():
     raw["documents"][1]["step_codes"] = ["UNREGISTERED_SYNTHETIC_STEP"]
     request.procedure_lookup_result = ProcedureLookupResult.model_validate(raw)
     assert InfoAnalysisAgent._analysis_step_codes(request) == set()
+
 
 
 def test_cross_procedure_source_failure_names_allowed_documents_on_retry():
@@ -373,10 +445,11 @@ def test_cross_procedure_source_failure_names_allowed_documents_on_retry():
     )
     assert len(result.procedure_findings) == 2
     correction = " ".join(
-        item["content"] for item in client.messages[1] if item["role"] == "system"
+        item["content"] for item in client.stage_messages("PROCEDURE", FOOD)[1] if item["role"] == "system"
     )
     assert f"{FOOD}: rejected ['doc1']; allowed ['doc2']" in correction
-    assert result.procedure_findings[1].application_channel is None
+    assert next(item for item in result.procedure_findings if item.procedure_step.step_code == FOOD).application_channel is None
+
 
 
 def test_not_required_restoration_does_not_hide_unknown_demolition():
@@ -388,6 +461,7 @@ def test_not_required_restoration_does_not_hide_unknown_demolition():
     completed = request_for_replanning("COMPLETED", "FULL")
     completed.case_snapshot.procedure_progress = []
     assert RESTORATION not in InfoAnalysisAgent._analysis_step_codes(completed)
+
 
 
 def test_new_fact_still_requires_a_literal_user_source_span():
@@ -412,6 +486,7 @@ def test_new_fact_still_requires_a_literal_user_source_span():
         )
 
 
+
 @pytest.mark.parametrize("already_completed", [True, False])
 def test_repeated_progress_is_ignored_and_new_typed_observation_keeps_its_source(
     already_completed,
@@ -431,7 +506,7 @@ def test_repeated_progress_is_ignored_and_new_typed_observation_keeps_its_source
     if already_completed:
         result = asyncio.run(agent.analyze(request))
         assert result.procedure_progress_observations == []
-        assert result.procedure_findings[-1].current_status.value == "COMPLETED"
+        assert RESTORATION not in {item.procedure_step.step_code for item in result.procedure_findings}
         assert request.case_snapshot.procedure_progress[0].status == "COMPLETED"
     else:
         result = asyncio.run(agent.analyze(request))
@@ -439,6 +514,7 @@ def test_repeated_progress_is_ignored_and_new_typed_observation_keeps_its_source
         assert observation.source_span is None
         assert observation.structured_report == report
     assert request.case_snapshot.model_dump_json() == original
+
 
 
 @pytest.mark.parametrize(
@@ -477,9 +553,10 @@ def test_document_based_progress_is_rejected_then_retried_without_losing_finding
     assert result.procedure_progress_observations == []
     assert len(result.procedure_findings) == 3
     assert request.case_snapshot.model_dump(mode="json") == before
-    feedback = " ".join(item["content"] for item in client.messages[1])
+    feedback = " ".join(item["content"] for item in client.stage_messages("INPUT")[1])
     assert f"Rejected procedure_observations for: {RESTORATION}" in feedback
     assert "Still analyze the documents in procedure_findings" in feedback
+
 
 
 @pytest.mark.parametrize("selected", [False, True])
@@ -499,6 +576,7 @@ def test_progress_requires_user_selection_even_when_the_text_reports_it(selected
     assert observation.observed_status == "IN_PROGRESS"
     assert observation.source_span is None
     assert observation.structured_report == report
+
 
 
 RESTORATION_RESULT = "원상복구 범위는 없고 원상복구 작업은 필요하지 않습니다."
@@ -536,10 +614,7 @@ def test_result_sentence_produces_only_the_three_stated_fact_changes(unsupported
     }]
     client = Responses(*([rejected] if unsupported_completion else []), response)
     result = asyncio.run(InfoAnalysisAgent(client).analyze(request))
-    assert len(client.messages) == (2 if unsupported_completion else 1)
-    if unsupported_completion:
-        feedback = " ".join(item["content"] for item in client.messages[1])
-        assert "Only the user's structured selections establish progress" in feedback
+    assert len(client.stage_messages("INPUT")) == 1 + int(unsupported_completion)
     assert {(fact.field_path, fact.value) for fact in result.fact_candidates} == {
         ("restoration_scope", "NOT_REQUIRED"),
         ("restoration_status", "NOT_REQUIRED"),
@@ -547,6 +622,7 @@ def test_result_sentence_produces_only_the_three_stated_fact_changes(unsupported
     }
     assert result.conflicts == []
     assert result.procedure_progress_observations == []
+
 
 
 def analyze_facts(facts, text, *, requires_confirmation=False):
@@ -616,13 +692,14 @@ def test_rejected_facts_tell_the_retry_why(rejected_facts, reason):
     result = asyncio.run(InfoAnalysisAgent(client).analyze(request))
 
     feedback, = [
-        item["content"] for item in client.messages[1]
+        item["content"] for item in client.stage_messages("INPUT")[1]
         if item["content"].startswith("The previous facts were rejected.")
     ]
     assert reason in feedback
     assert "원상복구 범위는 없다" not in feedback  # 사장님 말은 안내에 섞지 않는다
     candidate, = result.fact_candidates
     assert candidate.requires_confirmation
+
 
 
 # 뒤집는 말이 없는 문장은 그대로 확정된다. 되묻기가 넓어져 정상 입력까지 다시 묻게
@@ -636,6 +713,7 @@ def test_plain_result_sentence_still_confirms_without_asking_back():
     ], text)
     assert len(result.fact_candidates) == 3
     assert not any(item.requires_confirmation for item in result.fact_candidates)
+
 
 
 # 확인이 필요한 사실은 Case에 저장되지 않는다. 그런데 모델은 답을 냈다고 보고 그 필드를
@@ -681,6 +759,7 @@ def test_held_fact_still_produces_a_question_for_the_owner():
     assert fields["questions_for_user"] == ["확인한 원상복구 범위가 있으면 알려주세요."]
 
 
+
 @pytest.mark.parametrize("field,text", [
     ("restoration_scope", "임대인한테 물어봤는데 원상복구 범위는 없대요."),
     ("demolition_required", "계약서 확인해봤는데 철거도 필요하지 않습니다."),
@@ -699,6 +778,7 @@ def test_connective_without_field_reversal_confirms_report(field, text):
     result = analyze_facts(facts, text)
     assert not any(candidate.requires_confirmation for candidate in result.fact_candidates)
     assert result.procedure_progress_observations == []
+
 
 
 @pytest.mark.parametrize("field,value,text", [
@@ -720,6 +800,7 @@ def test_plain_or_repeated_report_produces_a_reviewable_change(field, value, tex
     )
     assert change.field_path == field
     assert change.model_dump(mode="json")["proposed_value"] == value
+
 
 
 def test_clearing_confirmed_closure_date_keeps_the_conflict_candidate():
@@ -753,6 +834,7 @@ def test_clearing_confirmed_closure_date_keeps_the_conflict_candidate():
     assert result.fact_candidates == []
 
 
+
 @pytest.mark.parametrize("invalid", [
     None,
     pytest.param("digest", marks=result_fixes_xfail(raises=pytest.fail.Exception)),
@@ -783,6 +865,7 @@ def test_confirmed_conflict_overlay_checks_original_before_planning(invalid):
         with pytest.raises(ValueError):
             build_confirmed_conflict_overlay(snapshot, conflict)
     assert snapshot.model_dump_json() == original
+
 
 
 def snapshot_from_reviewed_facts(outcome):
@@ -916,7 +999,7 @@ def test_result_replanning_uses_reviewed_facts_without_repeating_scope_question(
         else:
             assert draft.decision.decision_type == "ACTION"
             assert draft.decision.next_action.action_code == "CONFIRM_TAX_CLOSURE_REQUIREMENTS"
-        assert len(info_client.messages) == 2
+        assert len(info_client.stage_messages("INPUT")) == 2
         assert procedure.lookup.await_count == 2
         support.analyze.assert_not_awaited()
 

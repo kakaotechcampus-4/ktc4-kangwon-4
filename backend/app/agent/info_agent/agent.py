@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -19,6 +20,7 @@ from pydantic import (
     model_validator,
 )
 
+from app.agent import action_catalog, enrichment
 from app.agent.action_catalog import ProcedureBindings, resolve_procedure_bindings
 from app.agent.guardrails import (
     GuardrailViolation,
@@ -26,7 +28,10 @@ from app.agent.guardrails import (
     exact_span,
     resolve_evidence_aliases,
 )
-from app.agent.procedure_tool.rules import business_type_code
+from app.agent.procedure_tool.rules import (
+    procedure_applicability,
+    procedure_constraints,
+)
 from app.agent.projection import ensure_projection_has_no_obvious_sensitive_text
 from app.agent.prompts import info_messages
 from app.agent.schemas import (
@@ -46,9 +51,11 @@ from app.agent.schemas import (
     InfoCompletionStatus,
     MissingField,
     MissingFieldBlock,
+    MutationSet,
     NonNullStrictScalar,
     ProcedureCompletionStatus,
     ProcedureFinding,
+    ProcedureProgressChangeCandidate,
     ProcedureProgressObservation,
     ProcedureProgressReport,
     ProcedureProgressStatus,
@@ -93,6 +100,7 @@ class InfoAnalysisGuardrailError(GuardrailViolation):
         self.omitted_procedure_codes = tuple(omitted_procedure_codes)
         self.procedure_source_errors = tuple(procedure_source_errors)
         self.rejected_observation_codes = tuple(rejected_observation_codes)
+
 
 
 class ExtractedFactDraft(AgentSchema):
@@ -144,7 +152,10 @@ class ProcedureObservationDraft(AgentSchema):
     ]
     source_text: Annotated[StrictStr, Field(min_length=1)]
     requires_confirmation: StrictBool
+    requirements_confirmed: StrictBool = False
+    submitted: StrictBool = False
     reason_summary: Annotated[StrictStr, Field(min_length=1)]
+
 
 
 class ProcedureFindingDraft(AgentSchema):
@@ -161,6 +172,7 @@ class ProcedureFindingDraft(AgentSchema):
     application_url: SourcedText | None
     deadline: SourcedText | None
     evidence_refs: Annotated[list[StrictStr], Field(min_length=1)]
+
 
 
 class MissingFieldDraft(AgentSchema):
@@ -253,21 +265,21 @@ class InfoAnalysisAgent:
         procedure_bindings = resolve_procedure_bindings(
             request.known_procedure_steps, self._procedure_bindings
         )
-        prompt_input = self._prompt_input(request, procedure_bindings)
+        base_input = self._prompt_input(request, procedure_bindings)
+        prompt_input = {
+            **base_input, "analysis_stage": "INPUT",
+            "procedure_analysis_step_codes": [], "procedure_evidence_by_step": {},
+            "procedure_lookup": {**base_input["procedure_lookup"], "documents": []},
+        }
         evidence_by_alias = {
             alias: evidence_id
             for evidence_id, alias in self._procedure_evidence_aliases(request).items()
         }
-        permitted_step_codes = sorted(
-            {
-                code
-                for document in request.procedure_lookup_result.documents
-                for code in self._candidate_step_codes(
-                    document.step_codes,
-                    request.known_procedure_steps,
-                )
-            }
-        )
+        input_draft: InfoAnalysisDraft | None = None
+        parsed: _InputAnalysis | None = None
+        pending: MutationSet | None = None
+        required_codes: set[str] = set()
+        validated_parts: dict[str, InfoProviderOutput] = {}
         try:
             ensure_projection_has_no_obvious_sensitive_text(prompt_input)
         except GuardrailViolation:
@@ -350,24 +362,67 @@ class InfoAnalysisAgent:
                         ),
                     }
                 )
-            provider_output = await self._llm.generate(
-                InfoProviderOutput,
-                messages,
-                schema_name="reborn_info_analysis",
-                # The provider cannot emit a reference we did not offer, so a
-                # made-up or mistyped one is never generated. Validation below
-                # is unchanged; this only stops the wasted generation.
-                enum_constraints={
-                    "evidence_refs": sorted(evidence_by_alias),
-                    # A finding may only bind to a step one of the supplied
-                    # documents actually covers. Offering the union here stops
-                    # the model naming a step no document supports; the
-                    # per-document check below still rejects a mismatched pair.
-                    "step_code": permitted_step_codes,
-                },
-            )
             try:
-                draft = InfoAnalysisDraft.model_validate(
+                if parsed is None:
+                    raw_input = (
+                        await self._llm.generate(
+                            InfoProviderOutput, messages, schema_name="reborn_info_analysis",
+                            enum_constraints={
+                                "evidence_refs": [],
+                                "step_code": [step.procedure_step.step_code for step in request.known_procedure_steps],
+                            },
+                        ) if request.input is not None else self._empty_output()
+                    )
+                    candidate_draft = self._validated_draft(raw_input)
+                    if candidate_draft.procedure_findings or any(
+                        item.evidence_refs for item in candidate_draft.uncertainties
+                    ):
+                        raise InfoAnalysisGuardrailError(
+                            "input extraction cannot author official procedure findings or citations",
+                            fact_errors=("INPUT requires procedure_findings=[] and uncertainty evidence_refs=[].",),
+                        )
+                    candidate_input = self._input_analysis(request, candidate_draft)
+                    candidate_pending = self._preview_mutations(
+                        request, candidate_draft, candidate_input, procedure_bindings,
+                    )
+                    input_draft, parsed, pending = candidate_draft, candidate_input, candidate_pending
+                    if parsed.conflicts:
+                        return self._materialize(
+                            request, input_draft, procedure_bindings, input_analysis=parsed,
+                            required_step_codes=set(),
+                        )
+                    required_codes = self._analysis_step_codes(
+                        request, procedure_bindings, mutations=pending,
+                        observed_steps=parsed.observations,
+                    )
+                    prompt_input = {
+                        **base_input, "analysis_stage": "PROCEDURE", "input": None,
+                        "procedure_analysis_step_codes": sorted(required_codes),
+                        "fact_overlays": [change.model_dump(mode="json", include={
+                            "operation", "field_path", "proposed_status", "proposed_value", "reason_summary",
+                        }) for change in pending.fact_changes],
+                        "snapshot_procedure_progress": [item.model_dump(
+                            mode="json", exclude={"evidence_refs", "updated_at"},
+                        ) for item in action_catalog.effective_procedure_progress(request.case_snapshot, pending)],
+                    }
+                messages = [*info_messages(prompt_input), *messages[2:]]
+
+                def validate_part(
+                    part: InfoAnalysisDraft, code: str, checked_input: _InputAnalysis = parsed,
+                ) -> None:
+                    self._materialize(
+                        request, part, procedure_bindings, input_analysis=checked_input,
+                        required_step_codes={code},
+                    )
+
+                provider_output = await self._generate_batches(
+                    prompt_input,
+                    messages,
+                    sorted(required_codes),
+                    evidence_by_alias,
+                    validated_parts=validated_parts, validate_part=validate_part,
+                )
+                details = InfoAnalysisDraft.model_validate(
                     resolve_evidence_aliases(
                         self._validated_draft(provider_output).model_dump(
                             mode="python"
@@ -375,7 +430,19 @@ class InfoAnalysisAgent:
                         evidence_by_alias,
                     )
                 )
-                return self._materialize(request, draft, procedure_bindings)
+                combined = self._merge_batches([
+                    InfoProviderOutput.model_validate(input_draft.model_dump(mode="python")),
+                    InfoProviderOutput.model_validate(details.model_dump(mode="python")),
+                ])
+                draft = self._validated_draft(combined)
+                final_codes = self._analysis_step_codes(
+                    request, procedure_bindings, mutations=pending,
+                    observed_steps=parsed.observations,
+                )
+                return self._materialize(
+                    request, draft, procedure_bindings, input_analysis=parsed,
+                    required_step_codes=final_codes,
+                )
             except (GuardrailViolation, ValueError) as exc:
                 fact_errors = getattr(exc, "fact_errors", ())
                 omitted_procedure_codes = getattr(exc, "omitted_procedure_codes", ())
@@ -387,6 +454,7 @@ class InfoAnalysisAgent:
         raise InfoAnalysisGuardrailError(
             "information analysis failed deterministic semantic or grounding checks"
         ) from None
+
 
     @staticmethod
     def _validated_draft(raw_output: Any) -> InfoAnalysisDraft:
@@ -403,6 +471,7 @@ class InfoAnalysisAgent:
                 "information-analysis output violated the semantic contract"
             ) from None
 
+
     @staticmethod
     def _prompt_input(
         request: InfoAnalysisInput,
@@ -417,15 +486,16 @@ class InfoAnalysisAgent:
             # returns needs it: evidence for an extracted fact is built by the
             # runtime from the span the model quotes.
             "input": (
-                request.input.model_dump(mode="json", exclude={"input_event_id"})
+                {"redacted_text": request.input.redacted_text}
                 if request.input is not None
                 else None
             ),
             "snapshot_facts": [
-                fact.model_dump(mode="json") for fact in request.case_snapshot.facts
+                fact.model_dump(mode="json", exclude={"evidence_refs", "updated_at"})
+                for fact in request.case_snapshot.facts
             ],
             "snapshot_procedure_progress": [
-                item.model_dump(mode="json")
+                item.model_dump(mode="json", exclude={"evidence_refs", "updated_at"})
                 for item in request.case_snapshot.procedure_progress
             ],
             "procedure_analysis_step_codes": sorted(
@@ -441,11 +511,7 @@ class InfoAnalysisAgent:
                 if step.deprecated_at is None
             },
             "fact_overlays": [
-                {
-                    "field_path": item.field_path.value,
-                    "proposed_status": item.proposed_status.value,
-                    "proposed_value": item.proposed_value,
-                }
+                item.model_dump(mode="json", include={"field_path", "proposed_status", "proposed_value"})
                 for item in request.fact_overlays
             ],
             "allowed_field_paths": [item.value for item in request.allowed_field_paths],
@@ -459,10 +525,12 @@ class InfoAnalysisAgent:
                 if key in allowed
             },
             "known_procedure_steps": [
-                item.model_dump(mode="json") for item in request.known_procedure_steps
+                item.model_dump(
+                    mode="json", exclude={"registry_version", "deprecated_at"}
+                )
+                for item in request.known_procedure_steps
             ],
             "procedure_lookup": {
-                "call_id": str(request.procedure_lookup_call_id),
                 "completion_status": (
                     request.procedure_lookup_result.completion_status.value
                 ),
@@ -475,17 +543,11 @@ class InfoAnalysisAgent:
                         "excerpt": item.excerpt,
                         "freshness_status": item.freshness_status.value,
                         "evidence_ref": aliases_by_evidence[item.evidence_ref],
-                        "search_query": item.search_query,
                         "candidate_step_codes": (
                             InfoAnalysisAgent._candidate_step_codes(
                                 item.step_codes,
                                 request.known_procedure_steps,
                             )
-                        ),
-                        "permitted_relevance": (
-                            ["RELEVANT", "POSSIBLY_RELEVANT", "UNDETERMINED"]
-                            if item.freshness_status.value == "CURRENT"
-                            else ["UNDETERMINED"]
                         ),
                     }
                     for index, item in enumerate(
@@ -502,22 +564,30 @@ class InfoAnalysisAgent:
             ],
         }
 
+
     @staticmethod
     def _analysis_step_codes(
         request: InfoAnalysisInput,
         procedure_bindings: ProcedureBindings | None = None,
+        *,
+        mutations: MutationSet | None = None,
+        observed_steps: Sequence[ProcedureProgressObservation] = (),
     ) -> set[str]:
-        """Require consideration of supplied topics, never infer their legal content."""
+        """Select all currently usable topics and the proof for new progress."""
         resolved_bindings = resolve_procedure_bindings(
             request.known_procedure_steps, procedure_bindings
         )
-        values = {
-            item.field_path: item.value
-            for item in request.case_snapshot.facts
-            if item.status == FactStatus.CONFIRMED
-        }
-        for overlay in request.fact_overlays:
-            values[overlay.field_path] = overlay.proposed_value
+        pending = mutations if mutations is not None else MutationSet(
+            fact_changes=request.fact_overlays,
+            procedure_progress_changes=[], support_match_updates=[],
+        )
+        fact_changes = pending.fact_changes
+        progress_changes = pending.procedure_progress_changes
+        facts = {item.field_path: (item.status, item.value) for item in request.case_snapshot.facts}
+        facts.update({item.field_path: (item.proposed_status, item.proposed_value)
+                      for item in fact_changes})
+        values = {field: value for field, (status, value) in facts.items()
+                  if status == FactStatus.CONFIRMED}
         completed = {
             (
                 item.procedure_step.procedure_step_id,
@@ -526,12 +596,19 @@ class InfoAnalysisAgent:
             for item in request.case_snapshot.procedure_progress
             if item.status == ProcedureProgressStatus.COMPLETED
         }
-        restoration_not_required = (
-            values.get(AgentFieldKey.RESTORATION_SCOPE) == "NOT_REQUIRED"
+        for change in progress_changes:
+            if change.proposed_status == ProcedureProgressStatus.COMPLETED:
+                completed.add((change.procedure_step.procedure_step_id, change.procedure_step.step_code))
+        observed = {
+            item.procedure_step.step_code for item in observed_steps
+            if not item.requires_confirmation
+        }
+        restoration_scope_confirmed = (
+            values.get(AgentFieldKey.RESTORATION_SCOPE) in {"FULL", "PARTIAL", "NOT_REQUIRED"}
             or values.get(AgentFieldKey.RESTORATION_STATUS) == "NOT_REQUIRED"
         )
         if values.get(AgentFieldKey.RESTORATION_STATUS) == "COMPLETED" or (
-            restoration_not_required
+            restoration_scope_confirmed
             and values.get(AgentFieldKey.DEMOLITION_REQUIRED)
             in {"REQUIRED", "NOT_REQUIRED"}
         ):
@@ -549,19 +626,37 @@ class InfoAnalysisAgent:
             if document.freshness_status.value == "CURRENT"
             for code in document.step_codes
         }
+        unsupported_observations = [
+            step.procedure_step.step_code for step in request.known_procedure_steps
+            if step.procedure_step.step_code in observed and (
+                step.procedure_step.step_code not in supplied
+                or procedure_applicability(step, request.case_snapshot, fact_changes) is False
+                or step.deprecated_at is not None
+            )
+        ]
+        if unsupported_observations:
+            raise InfoAnalysisGuardrailError(
+                "reported progress requires an applicable current official source",
+                rejected_observation_codes=sorted(unsupported_observations),
+            )
         return {
             step.procedure_step.step_code
             for step in request.known_procedure_steps
             if step.deprecated_at is None
             and step.procedure_step.step_code in supplied
+            and procedure_applicability(step, request.case_snapshot, fact_changes) is not False
             and (
-                step.procedure_step.procedure_step_id,
-                step.procedure_step.step_code,
+                step.procedure_step.step_code in observed
+                or (
+                    (step.procedure_step.procedure_step_id, step.procedure_step.step_code) not in completed
+                    and not procedure_constraints(
+                        step, request.case_snapshot, fact_changes, progress_changes,
+                        known_steps=request.known_procedure_steps,
+                    )
+                )
             )
-            not in completed
-            and step.applicable_business_type
-            in {"ALL", business_type_code(values.get(AgentFieldKey.BUSINESS_TYPE))}
         }
+
 
     @classmethod
     def _validate_procedure_coverage(
@@ -569,6 +664,8 @@ class InfoAnalysisAgent:
         request: InfoAnalysisInput,
         draft: InfoAnalysisDraft,
         procedure_bindings: ProcedureBindings | None = None,
+        *,
+        required_step_codes: set[str] | None = None,
     ) -> None:
         accounted_for = {item.step_code for item in draft.procedure_findings}
         for index, document in enumerate(request.procedure_lookup_result.documents):
@@ -578,14 +675,17 @@ class InfoAnalysisAgent:
                 for item in draft.uncertainties
             ):
                 accounted_for.update(document.step_codes)
-        omitted = (
-            cls._analysis_step_codes(request, procedure_bindings) - accounted_for
+        required = (
+            cls._analysis_step_codes(request, procedure_bindings)
+            if required_step_codes is None else required_step_codes
         )
+        omitted = required - accounted_for
         if omitted:
             raise InfoAnalysisGuardrailError(
                 "supplied procedure topics were not analyzed",
                 omitted_procedure_codes=sorted(omitted),
             )
+
 
     @staticmethod
     def _procedure_evidence_aliases(request: InfoAnalysisInput) -> dict[str, str]:
@@ -790,13 +890,17 @@ class InfoAnalysisAgent:
         ])
         return _InputAnalysis(fact_candidates, conflicts, observations, evidence_by_span)
 
+
     def _materialize(
         self,
         request: InfoAnalysisInput,
         draft: InfoAnalysisDraft,
         procedure_bindings: ProcedureBindings,
+        *,
+        input_analysis: _InputAnalysis | None = None,
+        required_step_codes: set[str] | None = None,
     ) -> InfoAnalysisResult:
-        parsed = self._input_analysis(request, draft)
+        parsed = input_analysis or self._input_analysis(request, draft)
         fact_candidates, conflicts = parsed.facts, parsed.conflicts
         observations, evidence_by_span = parsed.observations, parsed.evidence_by_span
         allowed = set(request.allowed_field_paths)
@@ -804,9 +908,26 @@ class InfoAnalysisAgent:
             item.procedure_step.step_code: item.procedure_step
             for item in request.known_procedure_steps
         }
-        procedure_findings = self._procedure_findings(request, draft, known_steps, observations)
+        procedure_findings = self._procedure_findings(
+            request, draft, known_steps, observations
+        )
         if not conflicts:
-            self._validate_procedure_coverage(request, draft, procedure_bindings)
+            observed_codes = {
+                item.procedure_step.step_code for item in observations
+                if not item.requires_confirmation
+                and (required_step_codes is None or item.procedure_step.step_code in required_step_codes)
+            }
+            missing_observed = observed_codes - {
+                item.procedure_step.step_code for item in procedure_findings
+            }
+            if missing_observed:
+                raise InfoAnalysisGuardrailError(
+                    "reported progress requires a matching procedure finding",
+                    omitted_procedure_codes=sorted(missing_observed),
+                )
+            self._validate_procedure_coverage(
+                request, draft, procedure_bindings, required_step_codes=required_step_codes,
+            )
 
         values = {
             item.field_path: item.value
@@ -955,6 +1076,7 @@ class InfoAnalysisAgent:
             based_on_procedure_lookup_digest=self._procedure_lookup_digest(request),
         )
 
+
     def _procedure_findings(
         self,
         request: InfoAnalysisInput,
@@ -1089,6 +1211,7 @@ class InfoAnalysisAgent:
             )
         return findings
 
+
     @staticmethod
     def _retain_exact_procedure_details(
         finding: ProcedureFindingDraft,
@@ -1098,7 +1221,7 @@ class InfoAnalysisAgent:
 
         The required summary is validated as a source quotation separately.
         Optional action/document/channel/deadline fields survive only when the
-        cited official excerpt contains them; all findings need confirmation.
+        cited official excerpt contains them. Readiness comes from user evidence.
         """
 
         finding_refs = set(finding.evidence_refs)
@@ -1163,12 +1286,16 @@ class InfoAnalysisAgent:
             }
         )
 
+
     @staticmethod
     def _validate_procedure_details(
         finding: ProcedureFindingDraft,
         evidence_by_id: dict[str, EvidenceRecord],
     ) -> None:
-        sourced: list[SourcedText] = [finding.summary, *finding.required_actions]
+        sourced: list[SourcedText] = [
+            finding.summary,
+            *finding.required_actions,
+        ]
         sourced.extend(
             item
             for item in (
@@ -1188,7 +1315,10 @@ class InfoAnalysisAgent:
                 raise InfoAnalysisGuardrailError(
                     "required document references evidence outside its finding"
                 )
-        exact_details = [finding.summary, *finding.required_actions]
+        exact_details = [
+            finding.summary,
+            *finding.required_actions,
+        ]
         exact_details.extend(
             item
             for item in (
@@ -1225,6 +1355,7 @@ class InfoAnalysisAgent:
                         "required document detail is not present in its cited "
                         "official excerpt"
                     )
+
 
     @staticmethod
     def _procedure_lookup_digest(request: InfoAnalysisInput) -> str:
@@ -1291,6 +1422,215 @@ class InfoAnalysisAgent:
             source_evidence_refs=[evidence_id],
             source_call_id=source_call_id,
         )
+
+    @staticmethod
+    def _same_value(left: StrictScalar, right: StrictScalar) -> bool:
+        return type(left) is type(right) and left == right
+
+
+    @staticmethod
+    def _empty_output() -> InfoProviderOutput:
+        return InfoProviderOutput(
+            completion_status="COMPLETE", facts=[], procedure_observations=[],
+            procedure_findings=[], missing_fields=[], uncertainties=[],
+        )
+
+
+    async def _generate_batches(
+        self,
+        prompt_input: dict[str, Any],
+        messages: list[dict[str, str]],
+        step_codes: list[str],
+        evidence_by_alias: dict[str, str],
+        *,
+        validated_parts: dict[str, InfoProviderOutput] | None = None,
+        validate_part: Callable[[InfoAnalysisDraft, str], None] | None = None,
+    ) -> InfoProviderOutput:
+        active_codes = sorted(
+            set(step_codes).intersection(prompt_input["procedure_analysis_step_codes"])
+        )
+        if not active_codes:
+            return self._empty_output()
+        parts = validated_parts if validated_parts is not None else {}
+        semaphore = asyncio.Semaphore(2)
+
+        async def generate(code: str) -> InfoProviderOutput:
+            if code in parts:
+                return parts[code]
+            payload = self._batch_prompt_input(prompt_input, [code])
+            ensure_projection_has_no_obvious_sensitive_text(payload)
+            batch_messages = [
+                info_messages(payload)[1] if item["role"] == "user" else dict(item)
+                for item in messages
+            ]
+            async with semaphore:
+                raw = await self._llm.generate(
+                    InfoProviderOutput, batch_messages, schema_name="reborn_info_analysis",
+                    enum_constraints={
+                        "evidence_refs": sorted({
+                            item["evidence_ref"] for item in payload["procedure_lookup"]["documents"]
+                        }),
+                        "step_code": [code],
+                    },
+                )
+            part = self._validated_draft(raw)
+            if part.facts or part.procedure_observations:
+                raise InfoAnalysisGuardrailError(
+                    "procedure analysis cannot extract additional input facts or progress",
+                    procedure_source_errors=("PROCEDURE requires facts=[] and procedure_observations=[].",),
+                )
+            if any(item.step_code != code for item in part.procedure_findings):
+                raise InfoAnalysisGuardrailError(
+                    "procedure analysis escaped its assigned topic",
+                    procedure_source_errors=("Return only this call's permitted step code.",),
+                )
+            if validate_part is not None:
+                resolved = self._validated_draft(resolve_evidence_aliases(
+                    part.model_dump(mode="python"), evidence_by_alias,
+                ))
+                validate_part(resolved, code)
+            parts[code] = InfoProviderOutput.model_validate(part.model_dump(mode="python"))
+            return parts[code]
+
+        tasks = [asyncio.create_task(generate(code)) for code in active_codes]
+        try:
+            outputs = await asyncio.gather(*tasks)
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+        return self._merge_batches(outputs)
+
+
+    @staticmethod
+    def _batch_prompt_input(
+        prompt_input: dict[str, Any],
+        step_codes: Sequence[str],
+    ) -> dict[str, Any]:
+        owned = set(step_codes)
+        return {
+            **prompt_input,
+            "procedure_analysis_step_codes": [
+                code
+                for code in prompt_input["procedure_analysis_step_codes"]
+                if code in owned
+            ],
+            "procedure_evidence_by_step": {
+                code: refs
+                for code, refs in prompt_input["procedure_evidence_by_step"].items()
+                if code in owned
+            },
+            "known_procedure_steps": [
+                item
+                for item in prompt_input["known_procedure_steps"]
+                if item["procedure_step"]["step_code"] in owned
+            ],
+            "procedure_lookup": {
+                **prompt_input["procedure_lookup"],
+                "documents": [
+                    {
+                        **item,
+                        "candidate_step_codes": [
+                            code
+                            for code in item["candidate_step_codes"]
+                            if code in owned
+                        ],
+                    }
+                    for item in prompt_input["procedure_lookup"]["documents"]
+                    if owned.intersection(item["candidate_step_codes"])
+                ],
+            },
+        }
+
+
+    @staticmethod
+    def _merge_batches(parts: Sequence[InfoProviderOutput]) -> InfoProviderOutput:
+        missing: dict[AgentFieldKey, MissingFieldDraft] = {}
+        uncertainties: dict[str, Uncertainty] = {}
+        for part in parts:
+            for item in part.missing_fields:
+                if item.field_path not in missing:
+                    missing[item.field_path] = item.model_copy(deep=True)
+                else:
+                    previous = missing[item.field_path]
+                    previous.blocks = list(
+                        dict.fromkeys([*previous.blocks, *item.blocks])
+                    )
+            for item in part.uncertainties:
+                uncertainties.setdefault(item.model_dump_json(), item)
+        status = (
+            InfoCompletionStatus.NEEDS_USER_INPUT
+            if missing
+            else InfoCompletionStatus.PARTIAL
+            if any(
+                part.completion_status != InfoCompletionStatus.COMPLETE
+                for part in parts
+            )
+            else InfoCompletionStatus.COMPLETE
+        )
+        return InfoProviderOutput(
+            completion_status=status,
+            facts=parts[0].facts,
+            procedure_observations=[
+                item for part in parts for item in part.procedure_observations
+            ],
+            procedure_findings=[
+                item for part in parts for item in part.procedure_findings
+            ],
+            missing_fields=list(missing.values()),
+            uncertainties=list(uncertainties.values()),
+        )
+
+
+    def _preview_mutations(
+        self,
+        request: InfoAnalysisInput,
+        draft: InfoAnalysisDraft,
+        parsed: _InputAnalysis,
+        procedure_bindings: ProcedureBindings,
+    ) -> MutationSet:
+        """Use typed pending values only to decide which source topics to analyze."""
+        result = self._materialize(
+            request, draft, procedure_bindings, input_analysis=parsed,
+            required_step_codes=set(),
+        )
+        facts = [
+            *request.fact_overlays,
+            *enrichment.build_fact_overlays(request.case_snapshot, result, request.source_call_id, uuid_factory=self._uuid),
+        ]
+        if parsed.conflicts:
+            return MutationSet(fact_changes=facts, procedure_progress_changes=[], support_match_updates=[])
+        before = {
+            (item.procedure_step.procedure_step_id, item.procedure_step.step_code): item
+            for item in request.case_snapshot.procedure_progress
+        }
+        progress = []
+        for observation in parsed.observations:
+            if observation.requires_confirmation:
+                continue
+            current = before.get((
+                observation.procedure_step.procedure_step_id, observation.procedure_step.step_code,
+            ))
+            status = current.status if current else ProcedureProgressStatus.NOT_STARTED
+            requirements = current.requirements_confirmed if current else False
+            submitted = current.submitted if current else False
+            progress.append(ProcedureProgressChangeCandidate(
+                candidate_id=observation.observation_id,
+                procedure_step=observation.procedure_step,
+                before_status=status, proposed_status=observation.observed_status,
+                before_requirements_confirmed=requirements,
+                proposed_requirements_confirmed=requirements or observation.requirements_confirmed,
+                before_submitted=submitted, proposed_submitted=submitted or observation.submitted,
+                reason_summary=observation.reason_summary,
+                execution_evidence_refs=observation.source_evidence_refs,
+                procedure_analysis_call_id=request.source_call_id,
+            ))
+        return MutationSet(fact_changes=facts, procedure_progress_changes=progress, support_match_updates=[])
+
+
+
+
 
 
 
