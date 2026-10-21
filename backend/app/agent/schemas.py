@@ -2594,8 +2594,45 @@ class SafeFailureOutcome(AgentSchema):
         return self
 
 
+CRISIS_SUPPORT_TEXT = (
+    "지금은 폐업 안내를 잠시 멈추고 안전을 먼저 챙겨 주세요. "
+    "자살예방상담전화 109는 24시간 상담을 제공합니다. "
+    "당장 다칠 위험이 있거나 응급구조가 필요하면 119, "
+    "긴급한 경찰 도움이 필요하면 112로 연락해 주세요."
+)
+CRISIS_SUPPORT_SOURCES = (
+    "https://www.129.go.kr/109/",
+    "https://www.mois.go.kr/frt/sub/a06/b10/emergencycall/screen.do",
+)
+
+
+class CrisisSupportGuidance(AgentSchema):
+    """Fixed official guidance; a model cannot author or replace this content."""
+
+    text: NonEmptyStr = CRISIS_SUPPORT_TEXT
+    source_refs: list[NonEmptyStr] = Field(
+        default_factory=lambda: list(CRISIS_SUPPORT_SOURCES)
+    )
+
+    @model_validator(mode="after")
+    def validate_fixed_guidance(self) -> CrisisSupportGuidance:
+        if self.text != CRISIS_SUPPORT_TEXT or tuple(self.source_refs) != CRISIS_SUPPORT_SOURCES:
+            raise ValueError("crisis guidance must match the reviewed fixed content")
+        return self
+
+
+class CrisisSupportOutcome(AgentSchema):
+    """Pause business planning and return checked guidance without Case changes."""
+
+    outcome_type: Literal["CRISIS_SUPPORT"]
+    run_id: RuntimeUUID
+    case_id: PositiveStrictInt
+    snapshot_id: RuntimeUUID
+    guidance: CrisisSupportGuidance
+
+
 AgentRunOutcome: TypeAlias = Annotated[
-    ReviewedPlanOutcome | ConflictOutcome | SafeFailureOutcome,
+    ReviewedPlanOutcome | ConflictOutcome | CrisisSupportOutcome | SafeFailureOutcome,
     Field(discriminator="outcome_type"),
 ]
 
@@ -2699,6 +2736,8 @@ __all__ = [
     "ConflictPendingInput",
     "ConflictSelection",
     "ContentHash",
+    "CrisisSupportGuidance",
+    "CrisisSupportOutcome",
     "CriterionStatus",
     "DecisionAuthority",
     "DecisionDraft",

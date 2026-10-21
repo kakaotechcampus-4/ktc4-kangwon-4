@@ -11,6 +11,7 @@ from pathlib import Path
 from dotenv import dotenv_values
 
 from app.agent.action_catalog import ProcedureBindings, resolve_procedure_bindings
+from app.agent.content_safety import ContentSafetyGuard
 from app.agent.graph import AgentGraph
 from app.agent.info_agent import InfoAnalysisAgent
 from app.agent.llm import (
@@ -27,7 +28,7 @@ from app.agent.procedure_tool import (
 )
 from app.agent.review_tool import ReviewTool
 from app.agent.run_scope import RunDeadline, current_deadline, run_deadline_scope
-from app.agent.schemas import KnownProcedureStep
+from app.agent.schemas import CaseFact, KnownProcedureStep, RedactedInput
 from app.agent.supervisor import SupervisorAgent
 from app.agent.support_agent import ReviewedSupportCatalog, SupportAgent
 from app.agent.support_agent.wiki import SupportWikiStore
@@ -121,12 +122,14 @@ class AgentRuntime:
         clients: Sequence[StructuredLLMClient],
         procedure_tool: StoredProcedureLookupTool,
         trace_sink: TraceSink | None = None,
+        submission_safety: ContentSafetyGuard | None = None,
     ) -> None:
         self._graph = graph
         self._limits = limits
         self._clients = tuple(clients)
         self._procedure_tool = procedure_tool
         self._trace_sink = trace_sink
+        self._submission_safety = submission_safety
 
     @property
     def limits(self) -> RuntimeLimits:
@@ -159,6 +162,27 @@ class AgentRuntime:
             run_deadline_scope(deadline),
         ):
             return await self._graph.run(request)
+
+    async def check_submission(
+        self, redacted_text: str | RedactedInput, facts: Sequence[CaseFact] = (),
+    ) -> None:
+        """BE may call this before saving, without inventing a Case/snapshot ID.
+
+        ALLOW returns None; refusal/unavailability raises the safety exception.
+        Crisis support raises its signal only after checking the fixed guidance;
+        BE must stop saving business data and return that guidance to the user.
+        This performs no storage, redaction, authentication or user messaging.
+        """
+        if self._submission_safety is None:
+            raise configuration_error("submission safety is not configured")
+        budget = LLMCallBudget(max_calls=self._limits.max_llm_calls_per_run)
+        deadline = RunDeadline.after(self._limits.run_deadline_seconds)
+        outer = current_deadline()
+        if outer is not None:
+            deadline = RunDeadline(min(deadline.expires_at, outer.expires_at))
+        with (call_budget_scope(budget), usage_scope(UsageAccumulator()), run_deadline_scope(deadline)):
+            deadline.check()
+            await self._submission_safety.check_submission(redacted_text, facts)
 
     async def aclose(self) -> None:
         # Cleanup must attempt every transport and must not discard a reviewed
@@ -222,6 +246,7 @@ async def build_runtime(
             procedure_store, procedure_bindings=bindings
         )
         trace_sink = LangfuseTraceSink.from_env()
+        safety = ContentSafetyGuard(client)
         graph = AgentGraph(
             info_agent=InfoAnalysisAgent(info_client, procedure_bindings=bindings),
             procedure_tool=procedure_tool,
@@ -230,6 +255,7 @@ async def build_runtime(
             ),
             supervisor=SupervisorAgent(supervisor_client, procedure_bindings=bindings),
             review_tool=ReviewTool(client, procedure_bindings=bindings),
+            content_safety=safety,
             known_procedure_steps=known_procedure_steps,
             # No budget or usage object is handed to the graph: both belong to
             # a run, and run_planning installs them per run.
@@ -250,4 +276,5 @@ async def build_runtime(
         clients=clients,
         procedure_tool=procedure_tool,
         trace_sink=trace_sink,
+        submission_safety=safety,
     )

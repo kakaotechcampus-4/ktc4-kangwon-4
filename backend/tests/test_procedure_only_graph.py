@@ -57,6 +57,7 @@ def graph_run_inputs(trigger_type, review_tool=None):
     support = AsyncMock()
     support.analyze.side_effect = AssertionError("Support is outside the closure MVP")
     graph = AgentGraph(
+        content_safety=AsyncMock(),
         procedure_tool=procedure,
         info_agent=info,
         support_agent=support,

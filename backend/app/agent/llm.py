@@ -898,11 +898,13 @@ def _parse_response(
         raise _InvalidStructuredResponse("INVALID_PROVIDER_CHOICE")
     if choice.get("finish_reason") == "length":
         raise _InvalidStructuredResponse("OUTPUT_TOKEN_LIMIT", retryable=False)
+    if choice.get("finish_reason") == "content_filter":
+        raise _InvalidStructuredResponse("PROVIDER_REFUSAL", retryable=False)
     message = choice.get("message")
     if not isinstance(message, Mapping):
         raise _InvalidStructuredResponse("MISSING_PROVIDER_MESSAGE")
     if message.get("refusal"):
-        raise _InvalidStructuredResponse("PROVIDER_REFUSAL")
+        raise _InvalidStructuredResponse("PROVIDER_REFUSAL", retryable=False)
 
     parsed = message.get("parsed")
     candidate: Any

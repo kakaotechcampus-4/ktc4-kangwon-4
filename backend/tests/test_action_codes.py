@@ -706,6 +706,7 @@ def test_graph_distinguishes_missing_bindings_from_actionable_candidates(trigger
         )
         supervisor_client = StubModel(action_code)
         graph = AgentGraph(
+            content_safety=AsyncMock(),
             procedure_tool=procedure_runner,
             info_agent=info_runner,
             support_agent=support_runner,
