@@ -36,7 +36,7 @@ class ProcedureStoreError(RuntimeError):
 
 
 class ReviewedProcedureRecord(AgentSchema):
-    """One official document that a person checked and approved for serving.
+    """An official document approved by human or official-source comparison.
 
     ``excerpt`` and ``content_hash`` are the bytes that were actually fetched.
     They are not re-derived at request time, so a claim built on this record
@@ -63,7 +63,7 @@ class ReviewedProcedureRecord(AgentSchema):
         description="When the refresh command fetched this body."
     )
     reviewed_by: NonEmptyStr | None = Field(
-        description="Person who approved this text. Null means not reviewed yet."
+        description="Reviewer or automated source-comparison collector; null means unreviewed."
     )
     reviewed_at: AwareDatetime | None = Field(
         description="When that approval happened. Null means not reviewed yet."
@@ -147,7 +147,7 @@ class ReviewedProcedureRecord(AgentSchema):
     def freshness(self, as_of: date) -> FreshnessStatus:
         """Report how much this record may be relied on.
 
-        Only a record a person approved can read as ``CURRENT``.  An unreviewed
+        Only an approved record can read as ``CURRENT``. An unreviewed
         one stays ``UNKNOWN``, which is what keeps Info from stating deadlines
         and documents as settled fact and what makes Review block a bare claim
         built on it.  Serving unreviewed text as current would quietly undo
