@@ -71,7 +71,7 @@ def info_messages(value: BaseModel | dict[str, Any]) -> list[dict[str, str]]:
                 "proposed_status=CONFIRMED인 overlay는 이번 절차 판단에서 확인된 값으로 사용하고 "
                 "같은 사실을 다시 묻지 마세요. 실제 저장은 Review 승인 뒤에 이뤄집니다.\n\n"
                 "4. PROCEDURE에서는 procedure_analysis_step_codes의 각 절차마다 근거 있는 finding을 내세요. "
-                "이번 진행 변경의 근거가 필요한 절차도 분석 대상일 수 있습니다. 판단할 수 없으면 "
+                "이번 진행 변경의 근거가 필요한 절차와 완료된 세무 절차도 분석 대상일 수 있습니다. 판단할 수 없으면 "
                 "문서의 document_path를 target_path로, evidence_ref를 evidence_refs로 연결한 "
                 "uncertainty에 이유를 남기세요. 분석 대상 목록은 적용 자격·실행 순서의 확정이 아닙니다.\n\n"
                 "5. finding은 문서의 candidate_step_codes 중 의미가 맞는 하나에만 연결하고 없으면 생략하세요. "
@@ -106,11 +106,19 @@ def info_messages(value: BaseModel | dict[str, Any]) -> list[dict[str, str]]:
                 "선택한 뜻입니다. 현재 직원 0명·현재 미가입을 과거 직원 없음·가입 이력 없음으로 추정하지 마세요. "
                 "enrollment 사실은 이번 폐업으로 정리해야 할 가입 이력이며 현재 해지 여부와 다릅니다. "
                 "개별 직원 이름·번호는 받지 않습니다. 복구 불필요는 점포 반환 완료가 아닙니다.\n\n"
-                "" + SAFETY_RULES
+                "11. FILE_TAX_BUSINESS_CLOSURE가 이미 COMPLETED이거나 이번 검증된 선택으로 COMPLETED가 되는 경우에만 "
+                "그 finding에 공식 원문에 있는 폐업 후 세금 일정·문의처를 "
+                "followup_guidance에 정확히 연속 발췌하세요. 각 항목은 text/evidence_refs이며 일정·문의처만 담으세요. "
+                "신고·납부 대상과 기한 표현은 보존하되 일정·문의처와 관계없는 납부 의무 설명이나 "
+                "납부 실행 방법·장소(한국은행·체신관서 등)는 포함하지 마세요. "
+                "그 내용이 섞인 문장을 임의로 고치거나 떨어진 부분을 합치지 말고 일정·문의처만 담은 원문의 독립된 "
+                "문장을 선택하세요. 그런 발췌가 없으면 해당 항목을 생략하고 uncertainty에 이유를 남기세요. "
+                "자료에 없으면 []이며 예정 폐업일로 실제 폐업일을 가정하거나 날짜를 계산하지 마세요.\n" + SAFETY_RULES
             ),
         },
         {"role": "user", "content": "INPUT_JSON=" + _json_payload(value)},
     ]
+
 
 
 def support_messages(value: BaseModel | dict[str, Any]) -> list[dict[str, str]]:
@@ -189,11 +197,13 @@ def supervisor_messages(value: BaseModel | dict[str, Any]) -> list[dict[str, str
                 "없습니다. 근거 있는 선행조건을 고르거나 부족한 사실을 요청하세요 — "
                 "dependency type이나 eligibility condition을 지어내지 마세요. "
                 "runtime이 선택된 필드의 정확한 텍스트와 최종 경로를 "
-                "바인딩합니다.\n" + SAFETY_RULES
+                "바인딩합니다.\n"
+                "contract.completion_candidate가 있으면 COMPLETED를 명시적으로 선택하고 blocker_candidate_id=null, blocker=null, next_action=null, questions_for_user=[]와 grounded_claims=[]를 반환하세요. 완료 후보가 없으면 COMPLETED는 금지입니다.\n" + SAFETY_RULES
             ),
         },
         {"role": "user", "content": "INPUT_JSON=" + _json_payload(value)},
     ]
+
 
 
 def review_messages(value: BaseModel | dict[str, Any]) -> list[dict[str, str]]:
@@ -247,9 +257,7 @@ def review_messages(value: BaseModel | dict[str, Any]) -> list[dict[str, str]]:
                 "확인해야 합니다. 이미 확정된 사실을 모른다고 "
                 "하거나, 완료·금액·날짜·법률·세무·자격에 관한 별도 진술을 하면 "
                 "실제 근거와 대조하고 근거가 없으면 REVISE하세요.\n"
-                "절차 진행/flags는 사용자 procedure_reports 선택값만 사용하고 자유문장으로 변경하거나 추정하지 마세요. "
-                "requirements_confirmed는 요건과 준비 확인 보고이며 문서 조회만으로 충족되지 않습니다. "
-                "submitted는 제출이고 기관 처리 완료와 다릅니다. 처리 완료를 별도로 확인하세요.\n" + SAFETY_RULES
+                "COMPLETED에는 blocker/next_action/질문이 없고 적용 대상 카페 전체 완료와 공식 세금 후속 일정·문의처가 필요합니다. 절차 진행/flags는 사용자 procedure_reports 선택값만 사용하고 자유문장으로 변경하거나 추정하지 마세요. requirements_confirmed는 사용자의 요건과 준비 확인 보고이며 문서 조회만으로 충족되지 않습니다. submitted는 제출이고 기관 처리 완료와 다릅니다. 영업·세무 각각 처리 완료를 확인하세요. 직원 전원과 가입기관 전체의 처리 보고가 집계 완료의 조건입니다. 일부를 전체 완료로 해석하면 반려하세요. 현재 직원 0명·현재 미가입은 과거 이력 없음이 아닙니다.\n" + SAFETY_RULES
             ),
         },
         {"role": "user", "content": "INPUT_JSON=" + _json_payload(value)},

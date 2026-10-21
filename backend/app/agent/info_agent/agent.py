@@ -20,7 +20,7 @@ from pydantic import (
     model_validator,
 )
 
-from app.agent import action_catalog, enrichment
+from app.agent import action_catalog, completion, enrichment
 from app.agent.action_catalog import ProcedureBindings, resolve_procedure_bindings
 from app.agent.guardrails import (
     GuardrailViolation,
@@ -171,6 +171,7 @@ class ProcedureFindingDraft(AgentSchema):
     application_channel: SourcedText | None
     application_url: SourcedText | None
     deadline: SourcedText | None
+    followup_guidance: list[SourcedText] = Field(default_factory=list)
     evidence_refs: Annotated[list[StrictStr], Field(min_length=1)]
 
 
@@ -583,6 +584,9 @@ class InfoAnalysisAgent:
         )
         fact_changes = pending.fact_changes
         progress_changes = pending.procedure_progress_changes
+        completed_scope = completion.completed_scope_refs(
+            request.case_snapshot, request.known_procedure_steps, pending, resolved_bindings,
+        ) is not None
         facts = {item.field_path: (item.status, item.value) for item in request.case_snapshot.facts}
         facts.update({item.field_path: (item.proposed_status, item.proposed_value)
                       for item in fact_changes})
@@ -647,6 +651,11 @@ class InfoAnalysisAgent:
             and procedure_applicability(step, request.case_snapshot, fact_changes) is not False
             and (
                 step.procedure_step.step_code in observed
+                or (
+                    step.procedure_step == resolved_bindings.get("FILE_TAX_BUSINESS_CLOSURE")
+                    and (step.procedure_step.procedure_step_id, step.procedure_step.step_code) in completed
+                    and completed_scope
+                )
                 or (
                     (step.procedure_step.procedure_step_id, step.procedure_step.step_code) not in completed
                     and not procedure_constraints(
@@ -1206,6 +1215,7 @@ class InfoAnalysisAgent:
                     application_channel=semantic.application_channel,
                     application_url=semantic.application_url,
                     deadline=semantic.deadline,
+                    followup_guidance=semantic.followup_guidance,
                     evidence_refs=semantic.evidence_refs,
                 )
             )
@@ -1273,6 +1283,11 @@ class InfoAnalysisAgent:
         return finding.model_copy(
             update={
                 "required_actions": required_actions,
+                "followup_guidance": [
+                    detail
+                    for detail in finding.followup_guidance
+                    if exact_sourced(detail)
+                ],
                 "required_documents": required_documents,
                 "application_channel": (
                     finding.application_channel
@@ -1295,6 +1310,7 @@ class InfoAnalysisAgent:
         sourced: list[SourcedText] = [
             finding.summary,
             *finding.required_actions,
+            *finding.followup_guidance,
         ]
         sourced.extend(
             item
@@ -1318,6 +1334,7 @@ class InfoAnalysisAgent:
         exact_details = [
             finding.summary,
             *finding.required_actions,
+            *finding.followup_guidance,
         ]
         exact_details.extend(
             item
