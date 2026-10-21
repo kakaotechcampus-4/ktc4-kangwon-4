@@ -947,6 +947,7 @@ def _deterministic_safety_review(
             subject.source_results,
             draft.mutations,
             procedure_bindings,
+            known_procedure_steps=subject.known_procedure_steps,
         ),
     ):
         issues.append(

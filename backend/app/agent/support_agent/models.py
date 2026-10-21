@@ -8,7 +8,6 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.agent.schemas import (
     CASE_FIELD_SPECS,
-    CaseFieldKey,
     CriterionStatus,
     EvidenceRecord,
     FactValueType,
@@ -24,6 +23,7 @@ from app.agent.schemas import (
     Varchar50,
     validate_case_field_value,
 )
+from app.agent.schemas import AgentFieldKey as CaseFieldKey
 
 
 class SupportCatalogModel(BaseModel):

@@ -18,7 +18,6 @@ from app.agent.prompts import support_messages
 from app.agent.run_scope import RunDeadlineExceededError, current_deadline
 from app.agent.schemas import (
     CASE_FIELD_SPECS,
-    CaseFieldKey,
     CriterionStatus,
     EvidenceRecord,
     FactChangeCandidate,
@@ -36,6 +35,7 @@ from app.agent.schemas import (
     SupportSearchSummary,
     Uncertainty,
 )
+from app.agent.schemas import AgentFieldKey as CaseFieldKey
 
 from .models import (
     CatalogSourcedText,

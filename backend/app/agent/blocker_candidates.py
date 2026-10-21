@@ -18,12 +18,13 @@ from app.agent.action_catalog import (
 from app.agent.claim_safety import expand_evidence
 from app.agent.procedure_tool.rules import (
     business_type_code,
+    employment_history_conflicts,
+    procedure_applicability,
     procedure_constraints,
     procedure_plan_constraints,
 )
 from app.agent.schemas import (
     ActionDecisionDraft,
-    CaseFieldKey,
     CaseSnapshot,
     DecisionDraft,
     EvidenceRecord,
@@ -32,27 +33,40 @@ from app.agent.schemas import (
     MutationSet,
     ReviewSourceResult,
 )
+from app.agent.schemas import AgentFieldKey as CaseFieldKey
 
 _QUESTIONS = {
     "business_type": "어떤 가게를 운영하시나요?",
     "franchise_status": "프랜차이즈 가게인가요?",
     "lease_status": "가게 자리를 월세, 무상 임차, 자가 중 어떤 방식으로 사용하시나요?",
     "employee_count": "직원이 몇 명인가요?",
+    "had_employees": "직원을 고용한 적이 있나요?",
+    "pension_enrolled": "이번 폐업 대상 사업장의 국민연금 가입 이력이 있나요? 이미 탈퇴했어도 알려주세요.",
+    "health_insurance_enrolled": "이번 폐업 대상 사업장의 건강보험 가입 이력이 있나요? 이미 탈퇴했어도 알려주세요.",
+    "employment_insurance_enrolled": "이번 폐업 대상 사업장의 고용보험 가입 이력이 있나요? 이미 종료했어도 알려주세요.",
+    "industrial_accident_insurance_enrolled": "이번 폐업 대상 사업장의 산재보험 가입 이력이 있나요? 이미 종료했어도 알려주세요.",
     "restoration_scope": "확인한 원상복구 범위가 있으면 알려주세요.",
     "restoration_scope_detail": "확인한 원상복구 범위의 구체적인 내용을 알려주세요.",
     "demolition_required": "철거가 필요한지 확인한 내용이 있으면 알려주세요.",
     "restoration_status": "원상복구 작업이 어디까지 진행됐는지 알려주세요.",
 }
+
 _FIELD_LABELS = {
     "business_type": "가게 업종",
     "franchise_status": "프랜차이즈 여부",
     "lease_status": "가게 자리의 임차 형태",
     "employee_count": "직원 수",
+    "had_employees": "직원 고용 이력",
+    "pension_enrolled": "사업장 국민연금 가입 이력",
+    "health_insurance_enrolled": "사업장 건강보험 가입 이력",
+    "employment_insurance_enrolled": "사업장 고용보험 가입 이력",
+    "industrial_accident_insurance_enrolled": "사업장 산재보험 가입 이력",
     "restoration_scope": "원상복구 범위",
     "restoration_scope_detail": "원상복구 범위의 구체적인 내용",
     "demolition_required": "철거 필요 여부",
     "restoration_status": "원상복구 진행 상태",
 }
+
 
 
 def field_confirmation_question(field_path: CaseFieldKey) -> str:
@@ -256,6 +270,35 @@ def build_blocker_candidates(
                 if confirmation
                 else ["제출한 신고서와 첨부서류가 접수되었는지 확인해 주시겠습니까?"]
             )
+            if logical_code in {
+                "PERFORM_RESTORATION", "RETURN_PREMISES", "SETTLE_EMPLOYEE_PAYMENTS",
+            }:
+                preparation_title, execution_title, preparation_question, progress_question = {
+                    "PERFORM_RESTORATION": (
+                        "원상복구·철거 작업의 적용 여부와 준비사항을 확인하세요.",
+                        "확인한 범위의 원상복구·철거 작업을 진행하세요.",
+                        "확인한 범위에 맞춰 원상복구·철거 작업 준비를 마치셨나요?",
+                        "확인한 범위의 원상복구·철거 작업은 어디까지 진행됐나요?",
+                    ),
+                    "RETURN_PREMISES": (
+                        "임대인에게 점포 반환 준비사항을 확인하세요.",
+                        "임대인에게 점포를 반환하세요.",
+                        "임대인과 점포 반환 준비사항을 확인하셨나요?",
+                        "임대인에게 점포 반환을 마치셨나요?",
+                    ),
+                    "SETTLE_EMPLOYEE_PAYMENTS": (
+                        "대상 직원 전원의 임금·퇴직급여 정산 준비사항을 확인하세요.",
+                        "대상 직원 전원의 임금·퇴직급여 등 해당하는 금품을 정산하세요.",
+                        "대상 직원 전원에게 지급할 금품과 정산 준비사항을 확인하셨나요?",
+                        "대상 직원 전원의 임금·퇴직급여 등 해당하는 금품 정산을 모두 마치셨나요?",
+                    ),
+                }[logical_code]
+                title = preparation_title if confirmation else execution_title
+                reason = (
+                    f"제공된 공식 안내를 바탕으로 {label}의 적용 여부와 준비사항을 확인하세요."
+                    if confirmation else finding.required_actions[0].text
+                )
+                questions = [preparation_question if confirmation else progress_question]
         action = {key: row[key] for key in ("action_code", "target")}
         action.update(
             title=title, reason=reason, questions_to_ask=questions, evidence_refs=refs
@@ -307,6 +350,7 @@ def build_blocker_candidates(
             snapshot,
             mutations.fact_changes,
             mutations.procedure_progress_changes,
+            known_steps=steps,
         )
         for dependency in step.dependencies
         if dependency.dependency_type == "SEQUENTIAL"
@@ -341,6 +385,7 @@ def build_blocker_candidates(
     return sorted(groups.values(), key=priority)
 
 
+
 def missing_info_fields(
     snapshot: CaseSnapshot,
     sources: Sequence[ReviewSourceResult],
@@ -349,6 +394,7 @@ def missing_info_fields(
     *,
     held_only: bool = False,
     selected_candidate_id: str | None = None,
+    known_procedure_steps: Sequence[KnownProcedureStep] = (),
 ) -> dict[str, Any] | None:
     """Ask about one unresolved decision blocker in the existing question order."""
     values = _values(snapshot, mutations)
@@ -462,7 +508,23 @@ def missing_info_fields(
             and candidate.field_path.value == "restoration_scope_detail"
         )
     }
-    paths = held_paths if held_only else held_paths | missing_paths
+    required_history = set()
+    history_fields = {
+        "had_employees", "pension_enrolled", "health_insurance_enrolled",
+        "employment_insurance_enrolled", "industrial_accident_insurance_enrolled",
+    }
+    for step in known_procedure_steps:
+        if procedure_applicability(step, snapshot, mutations.fact_changes) is False:
+            continue
+        for condition in step.eligibility_conditions:
+            if condition.condition_key in history_fields:
+                required_history.add(condition.condition_key)
+            elif condition.condition_key == "has_workplace_insurance":
+                required_history.update(history_fields - {"had_employees"})
+    required_history.difference_update(values)
+    if employment_history_conflicts(values):
+        required_history.add("had_employees")
+    paths = held_paths if held_only else held_paths | missing_paths | required_history
     ordered = [path for path in _QUESTIONS if path in paths]
     if selected_candidate_id is None:
         missing = next(iter(ordered), None)
@@ -494,6 +556,8 @@ def candidate_decision_violations(
     fallback: dict[str, Any] | None,
 ) -> list[tuple[str, str]]:
     """Shared by Supervisor and independent Review, including a forced-model PASS."""
+    if decision.blocker is None:
+        return [("/decision/blocker", "an unfinished candidate decision requires a primary blocker")]
     expected = fallback
     expected_blockers = [item["blocker"] for item in candidates]
     if fallback is not None:
@@ -571,7 +635,10 @@ def resolved_blocker_candidates(snapshot, known_steps, mutations, bindings) -> l
     resolved = []
     for candidate_id in snapshot.active_blocker_candidate_ids:
         if candidate_id.startswith("missing:"):
-            if candidate_id.removeprefix("missing:") in values:
+            field = candidate_id.removeprefix("missing:")
+            if field in values and not (
+                field == "had_employees" and employment_history_conflicts(values)
+            ):
                 resolved.append(candidate_id)
         elif candidate_id.startswith("procedure:"):
             step = registry.get(candidate_id.removeprefix("procedure:"))

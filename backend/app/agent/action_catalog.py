@@ -37,6 +37,10 @@ _PROCEDURE_LOGICAL_CODES = frozenset(
         "FILE_TAX_BUSINESS_CLOSURE",
         "FILE_FOOD_SERVICE_CLOSURE",
         "REPORT_WORKPLACE_INSURANCE_CLOSURE",
+        "PERFORM_RESTORATION",
+        "RETURN_PREMISES",
+        "SETTLE_EMPLOYEE_PAYMENTS",
+        "REPORT_EMPLOYEE_INSURANCE_LOSS",
     }
 )
 
@@ -55,7 +59,7 @@ PROCEDURE_LABELS = {
 
 ADMINISTRATIVE_PROCEDURE_CODES = frozenset({
     "FILE_TAX_BUSINESS_CLOSURE", "FILE_FOOD_SERVICE_CLOSURE",
-    "REPORT_WORKPLACE_INSURANCE_CLOSURE",
+    "REPORT_EMPLOYEE_INSURANCE_LOSS", "REPORT_WORKPLACE_INSURANCE_CLOSURE",
 })
 
 
@@ -103,6 +107,16 @@ ACTION_DEFINITIONS: dict[str, ActionDefinition] = {
 }
 
 
+for _logical, _confirmation, _description in (
+    ("PERFORM_RESTORATION", "CONFIRM_RESTORATION_REQUIREMENTS", "확인한 범위의 원상복구·철거 작업을 진행한다."),
+    ("RETURN_PREMISES", "CONFIRM_PREMISES_RETURN_REQUIREMENTS", "점포를 임대인에게 반환한다."),
+    ("SETTLE_EMPLOYEE_PAYMENTS", "CONFIRM_EMPLOYEE_SETTLEMENT_REQUIREMENTS", "대상 직원 전체의 임금·퇴직급여 등 지급할 금품을 정산한다."),
+    ("REPORT_EMPLOYEE_INSURANCE_LOSS", "CONFIRM_EMPLOYEE_INSURANCE_LOSS_REQUIREMENTS", "대상 직원 전체의 해당 보험 자격상실을 신고한다."),
+):
+    ACTION_DEFINITIONS[_confirmation] = ActionDefinition(
+        f"{PROCEDURE_LABELS[_logical]}의 적용 여부와 준비사항을 확인한다.", _logical, True,
+    )
+    ACTION_DEFINITIONS[_logical] = ActionDefinition(_description, _logical, False)
 ACTION_DEFINITIONS["CONFIRM_PROCEDURE_COMPLETION"] = ActionDefinition(
     "제출한 신고의 해당 기관별 처리 결과를 확인한다. 접수만으로 완료 처리하지 않는다.",
     None, True,
