@@ -12,6 +12,7 @@ from pydantic import Field, StrictBool, StrictInt, StrictStr, model_validator
 from app.agent.action_catalog import (
     ProcedureBindings,
     build_action_candidates,
+    effective_procedure_progress,
     resolve_procedure_bindings,
 )
 from app.agent.blocker_candidates import (
@@ -595,7 +596,8 @@ class SupervisorAgent:
                 (
                     candidate
                     for candidate in build_action_candidates(
-                        sources, evidence, self._bindings(request)
+                        sources, evidence, self._bindings(request),
+                        procedure_progress=effective_procedure_progress(request.case_snapshot, mutations),
                     )
                     if candidate["action_code"] == action.action_code
                     and candidate["target"] == action.target.model_dump(mode="json")
@@ -839,7 +841,19 @@ class SupervisorAgent:
                         raise SupervisorGuardrailError(
                             "procedure finding current status differs from snapshot"
                         )
-                    if before_status == observation.observed_status:
+                    before_requirements = (
+                        prior.requirements_confirmed if prior else False
+                    )
+                    before_submitted = prior.submitted if prior else False
+                    proposed_requirements = (
+                        before_requirements or observation.requirements_confirmed
+                    )
+                    proposed_submitted = before_submitted or observation.submitted
+                    if (
+                        before_status == observation.observed_status
+                        and before_requirements == proposed_requirements
+                        and before_submitted == proposed_submitted
+                    ):
                         continue
                     progress_changes.append(
                         ProcedureProgressChangeCandidate(
@@ -847,6 +861,10 @@ class SupervisorAgent:
                             procedure_step=observation.procedure_step,
                             before_status=before_status,
                             proposed_status=observation.observed_status,
+                            before_requirements_confirmed=before_requirements,
+                            proposed_requirements_confirmed=proposed_requirements,
+                            before_submitted=before_submitted,
+                            proposed_submitted=proposed_submitted,
                             reason_summary=observation.reason_summary,
                             execution_evidence_refs=observation.source_evidence_refs,
                             procedure_analysis_call_id=source.meta.call_id,

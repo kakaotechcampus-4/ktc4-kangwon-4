@@ -541,8 +541,17 @@ def test_registered_filing_keeps_execution_and_confirmation_distinct():
     tax = next(row for row in rows if row["candidate_id"] == "procedure:1")
     by_code = {action["action_code"]: action for action in tax["actions"]}
     assert "준비사항을 확인" in by_code["CONFIRM_TAX_CLOSURE_REQUIREMENTS"]["title"]
-    filing = by_code["FILE_TAX_BUSINESS_CLOSURE"]
-    assert "제출하세요" in filing["title"]
+    assert set(by_code) == {"CONFIRM_TAX_CLOSURE_REQUIREMENTS"}
+    request = request_with_state(lease_status="OWNED")
+    request.case_snapshot.procedure_progress = [ProcedureProgress(
+        procedure_step=request.known_procedure_steps[0].procedure_step, status="IN_PROGRESS",
+        requirements_confirmed=True, evidence_refs=[REF], updated_at=NOW,
+    )]
+    info = request.source_results[1].output.model_copy(deep=True)
+    info.procedure_findings[0].requires_confirmation = False
+    request.source_results[1] = source(info)
+    filing = candidates(request)[0]["actions"][0]
+    assert filing["action_code"] == "FILE_TAX_BUSINESS_CLOSURE"
     assert (
         filing["reason"]
         == request_with_state()
@@ -552,6 +561,8 @@ def test_registered_filing_keeps_execution_and_confirmation_distinct():
         .text
     )
     assert "접수" in filing["questions_to_ask"][0]
+
+
 
 
 @pytest.mark.parametrize(
@@ -841,10 +852,17 @@ def test_confirmation_precedes_filing_in_current_schema():
         candidates(request)[0]["actions"][0]["action_code"]
         == "CONFIRM_TAX_CLOSURE_REQUIREMENTS"
     )
-    assert (
-        candidates(request)[0]["actions"][1]["action_code"]
-        == "FILE_TAX_BUSINESS_CLOSURE"
-    )
+    assert len(candidates(request)[0]["actions"]) == 1
+    request.case_snapshot.procedure_progress = [ProcedureProgress(
+        procedure_step=request.known_procedure_steps[0].procedure_step, status="IN_PROGRESS",
+        requirements_confirmed=True, evidence_refs=[REF], updated_at=NOW,
+    )]
+    info = request.source_results[1].output.model_copy(deep=True)
+    info.procedure_findings[0].requires_confirmation = False
+    request.source_results[1] = source(info)
+    assert candidates(request)[0]["actions"][0]["action_code"] == "FILE_TAX_BUSINESS_CLOSURE"
+
+
 
 
 def test_different_valid_model_choices_keep_the_selected_priority_and_all_blockers():

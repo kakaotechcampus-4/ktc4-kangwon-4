@@ -73,7 +73,7 @@ def info_messages(value: BaseModel | dict[str, Any]) -> list[dict[str, str]]:
                 " 섞지 마세요.\n\n"
                 "7. 세부사항도 원문 그대로 쓰고 해당 문서에 없는 선택사항은 null/[]로 두세요. 날짜·금액은 적용 대상과 조건을 유지해 "
                 "인용하세요. 특정 법인의 휴·폐업일 기준·승인 조건을 일반 신고기한으로 바꾸지 마세요. deadline은 Case에 적용됨이 확인되는 "
-                "명시적 신고·신청 기한만 조건을 포함해 발췌하고 아니면 null입니다. 모든 finding은 공식·사람의 확인이 필요하며 출처가 "
+                "명시적 신고·신청 기한만 조건을 포함해 발췌하고 아니면 null입니다. 출처가 "
                 "UNKNOWN/STALE이면 relevance=UNDETERMINED입니다.\n\n"
                 "8. 복구 범위가 NOT_REQUIRED이거나 복구 상태가 NOT_REQUIRED/COMPLETED이면 복구 세부범위를 다시 묻지 "
                 "마세요. 복구 불필요가 철거 불필요는 아닙니다. 절차나 복구가 미완료이고 demolition_required가 UNKNOWN이면 철거 "
@@ -223,7 +223,9 @@ def review_messages(value: BaseModel | dict[str, Any]) -> list[dict[str, str]]:
                 "다만 확인 행동의 절차 근거와 target은 제공된 Info finding에서 "
                 "확인해야 합니다. 이미 확정된 사실을 모른다고 "
                 "하거나, 완료·금액·날짜·법률·세무·자격에 관한 별도 진술을 하면 "
-                "실제 근거와 대조하고 근거가 없으면 REVISE하세요.\n" + SAFETY_RULES
+                "실제 근거와 대조하고 근거가 없으면 REVISE하세요.\n"
+                "requirements_confirmed는 요건과 준비 확인 보고이며 문서 조회만으로 충족되지 않습니다. "
+                "submitted는 제출이고 기관 처리 완료와 다릅니다. 처리 완료를 별도로 확인하세요.\n" + SAFETY_RULES
             ),
         },
         {"role": "user", "content": "INPUT_JSON=" + _json_payload(value)},

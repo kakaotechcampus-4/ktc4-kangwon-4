@@ -723,8 +723,8 @@ class InfoAnalysisAgent:
             raise InfoAnalysisGuardrailError(
                 "model returned duplicate fact fields",
                 fact_errors=(
-                    "Return at most one fact per field_path. If the user stated "
-                    "conflicting values, return one fact with requires_confirmation=true.",
+                    ("Return at most one fact per field_path. If the user stated "
+                    "conflicting values, return one fact with requires_confirmation=true."),
                 ),
             )
 
@@ -799,9 +799,9 @@ class InfoAnalysisAgent:
             raise InfoAnalysisGuardrailError(
                 "restoration facts are inconsistent",
                 fact_errors=(
-                    "restoration_status can be confirmed only when restoration_scope "
+                    ("restoration_status can be confirmed only when restoration_scope "
                     "is also confirmed. If the scope needs confirmation, set "
-                    "requires_confirmation=true on restoration_status too, or omit it.",
+                    "requires_confirmation=true on restoration_status too, or omit it."),
                 ),
             ) from None
 
@@ -1004,6 +1004,7 @@ class InfoAnalysisAgent:
         request: InfoAnalysisInput,
         draft: InfoAnalysisDraft,
         known_steps: dict[str, Any],
+        observations: Sequence[ProcedureProgressObservation] = (),
     ) -> list[ProcedureFinding]:
         evidence_by_id = {
             item.evidence_id: item
@@ -1024,6 +1025,15 @@ class InfoAnalysisAgent:
                 item.procedure_step.step_code,
             ): item.status
             for item in request.case_snapshot.procedure_progress
+        }
+        ready_steps = {
+            item.procedure_step.step_code
+            for item in request.case_snapshot.procedure_progress
+            if item.requirements_confirmed
+        } | {
+            item.procedure_step.step_code
+            for item in observations
+            if item.requirements_confirmed and not item.requires_confirmation
         }
         findings: list[ProcedureFinding] = []
         seen_steps: set[str] = set()
@@ -1112,7 +1122,7 @@ class InfoAnalysisAgent:
                         ProcedureProgressStatus.NOT_STARTED,
                     ),
                     decision_authority=semantic.decision_authority,
-                    requires_confirmation=True,
+                    requires_confirmation=semantic.step_code not in ready_steps,
                     required_actions=semantic.required_actions,
                     required_documents=semantic.required_documents,
                     application_channel=semantic.application_channel,

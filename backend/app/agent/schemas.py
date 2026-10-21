@@ -382,6 +382,8 @@ class CaseFact(AgentSchema):
 
 
 class ProcedureProgress(AgentSchema):
+    requirements_confirmed: StrictBool = False
+    submitted: StrictBool = False
     procedure_step: ProcedureStepRef
     status: ProcedureProgressStatus
     evidence_refs: list[NonEmptyStr]
@@ -389,7 +391,7 @@ class ProcedureProgress(AgentSchema):
 
     @model_validator(mode="after")
     def completed_requires_evidence(self) -> ProcedureProgress:
-        if self.status == ProcedureProgressStatus.COMPLETED and not self.evidence_refs:
+        if (self.status == ProcedureProgressStatus.COMPLETED or self.requirements_confirmed or self.submitted) and not self.evidence_refs:
             raise ValueError("COMPLETED procedure progress requires evidence")
         return self
 
@@ -707,6 +709,8 @@ class ProcedureProgressObservation(AgentSchema):
     ]
     source_span: VerifiedTextSpan
     source_evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
+    requirements_confirmed: StrictBool = False
+    submitted: StrictBool = False
     requires_confirmation: StrictBool
     reason_summary: NonEmptyStr
 
@@ -1374,7 +1378,7 @@ class ProcedureFinding(AgentSchema):
     relevance: ProcedureRelevance
     current_status: ProcedureProgressStatus
     decision_authority: DecisionAuthority
-    requires_confirmation: Literal[True]
+    requires_confirmation: StrictBool
     required_actions: list[SourcedText]
     required_documents: list[RequiredDocument]
     application_channel: SourcedText | None
@@ -1449,6 +1453,7 @@ ActionCode: TypeAlias = Literal[
     "CONFIRM_WORKPLACE_INSURANCE_CLOSURE_REQUIREMENTS",
     "REPORT_WORKPLACE_INSURANCE_CLOSURE",
     "CONFIRM_SUPPORT_PROGRAM_REQUIREMENTS",
+    "CONFIRM_PROCEDURE_COMPLETION",
 ]
 
 
@@ -1509,6 +1514,10 @@ DecisionDraft: TypeAlias = Annotated[
 
 
 class ProcedureProgressChangeCandidate(AgentSchema):
+    before_requirements_confirmed: StrictBool = False
+    proposed_requirements_confirmed: StrictBool = False
+    before_submitted: StrictBool = False
+    proposed_submitted: StrictBool = False
     candidate_id: RuntimeUUID
     procedure_step: ProcedureStepRef
     before_status: ProcedureProgressStatus
@@ -1525,7 +1534,15 @@ class ProcedureProgressChangeCandidate(AgentSchema):
             ProcedureProgressStatus.IN_PROGRESS: 1,
             ProcedureProgressStatus.COMPLETED: 2,
         }
-        if order[self.proposed_status] <= order[self.before_status]:
+        if self.before_requirements_confirmed and not self.proposed_requirements_confirmed:
+            raise ValueError("confirmed requirements cannot move backwards")
+        if self.before_submitted and not self.proposed_submitted:
+            raise ValueError("submission cannot move backwards")
+        status_forward = order[self.proposed_status] > order[self.before_status]
+        flags_forward = (
+            self.proposed_requirements_confirmed and not self.before_requirements_confirmed
+        ) or (self.proposed_submitted and not self.before_submitted)
+        if order[self.proposed_status] < order[self.before_status] or not (status_forward or flags_forward):
             raise ValueError("procedure progress change must move forward")
         return self
 

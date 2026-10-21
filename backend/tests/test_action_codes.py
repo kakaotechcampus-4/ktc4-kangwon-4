@@ -22,6 +22,7 @@ from app.agent.schemas import (
     NextAction,
     ProcedureFinding,
     ProcedureLookupResult,
+    ProcedureProgress,
     ProcedureProgressChangeCandidate,
     ReviewSourceResult,
     ReviewSubject,
@@ -209,9 +210,14 @@ def test_current_tax_procedure_offers_confirmation_and_execution():
     assert item.requires_confirmation is True  # This field is always true in the DTO.
     rows = build_action_candidates(procedure_sources(item), {REF: evidence()})
     by_code = {row["action_code"]: row for row in rows}
-    assert set(by_code) == {CONFIRM_TAX, TAX}
+    assert set(by_code) == {CONFIRM_TAX}
     assert by_code[CONFIRM_TAX]["confirmation_only"] is True
-    assert by_code[TAX]["confirmation_only"] is False
+    ready = ProcedureProgress(procedure_step=item.procedure_step, status="IN_PROGRESS",
+                              requirements_confirmed=True, evidence_refs=[REF], updated_at=NOW)
+    item.requires_confirmation = False
+    executed = build_action_candidates(procedure_sources(item), {REF: evidence()}, procedure_progress=[ready])
+    assert [row["action_code"] for row in executed] == [TAX]
+    assert executed[0]["confirmation_only"] is False
     assert all(row["target"] == action_payload()["target"] for row in rows)
 
 
@@ -480,6 +486,11 @@ def test_review_checks_required_blocker_against_verified_candidate(
 ):
     async def run():
         request = supervisor_request()
+        if action_code == TAX:
+            request.case_snapshot.procedure_progress = [ProcedureProgress(procedure_step=request.known_procedure_steps[0].procedure_step, status="IN_PROGRESS", requirements_confirmed=True, evidence_refs=[REF], updated_at=NOW)]
+            info = request.source_results[1].output.model_copy(deep=True)
+            info.procedure_findings[0].requires_confirmation = False
+            request.source_results[1] = source(info)
         draft = await SupervisorAgent(
             StubModel(action_code), max_local_attempts=1
         ).draft(request)
