@@ -22,6 +22,7 @@ from app.agent.schemas import (
     CaseSnapshot,
     InfoAnalysisInput,
     ProcedureLookupResult,
+    ProcedureProgressReport,
 )
 from app.agent.supervisor.agent import SupervisorAgent
 
@@ -87,6 +88,20 @@ def request_for_replanning(status="NOT_REQUIRED", scope="NOT_REQUIRED"):
         procedure_lookup_result=lookup,
         review_feedback=[],
     )
+
+
+def select_progress(request, code, status, *, ready=False, submitted=False):
+    report = ProcedureProgressReport(
+        procedure_step=next(
+            step.procedure_step for step in request.known_procedure_steps
+            if step.procedure_step.step_code == code
+        ),
+        status=status,
+        requirements_confirmed=ready,
+        submitted=submitted,
+    )
+    request.input.procedure_reports.append(report)
+    return report
 
 
 def finding(code, alias):
@@ -398,7 +413,7 @@ def test_new_fact_still_requires_a_literal_user_source_span():
 
 
 @pytest.mark.parametrize("already_completed", [True, False])
-def test_repeated_committed_progress_is_ignored_but_new_completion_stays_guarded(
+def test_repeated_progress_is_ignored_and_new_typed_observation_keeps_its_source(
     already_completed,
 ):
     request = request_for_replanning()
@@ -407,26 +422,23 @@ def test_repeated_committed_progress_is_ignored_but_new_completion_stays_guarded
     )
     if not already_completed:
         request.case_snapshot.procedure_progress[0].status = "NOT_STARTED"
+    report = select_progress(request, RESTORATION, "COMPLETED")
     raw = output(
         [finding(TAX, "doc1"), finding(FOOD, "doc2"), finding(RESTORATION, "doc3")]
     )
-    raw["procedure_observations"] = [
-        {
-            "step_code": RESTORATION,
-            "observed_status": "COMPLETED",
-            "source_text": request.input.redacted_text,
-            "requires_confirmation": False,
-            "reason_summary": "모델이 불필요를 완료로 반복 해석한 합성 사례",
-        }
-    ]
     agent = InfoAnalysisAgent(Responses(raw), max_local_attempts=1)
+    original = request.case_snapshot.model_dump_json()
     if already_completed:
         result = asyncio.run(agent.analyze(request))
         assert result.procedure_progress_observations == []
         assert result.procedure_findings[-1].current_status.value == "COMPLETED"
+        assert request.case_snapshot.procedure_progress[0].status == "COMPLETED"
     else:
-        with pytest.raises(InfoAnalysisGuardrailError):
-            asyncio.run(agent.analyze(request))
+        result = asyncio.run(agent.analyze(request))
+        observation = result.procedure_progress_observations[0]
+        assert observation.source_span is None
+        assert observation.structured_report == report
+    assert request.case_snapshot.model_dump_json() == original
 
 
 @pytest.mark.parametrize(
@@ -470,26 +482,23 @@ def test_document_based_progress_is_rejected_then_retried_without_losing_finding
     assert "Still analyze the documents in procedure_findings" in feedback
 
 
-def test_explicit_user_progress_is_still_extracted():
+@pytest.mark.parametrize("selected", [False, True])
+def test_progress_requires_user_selection_even_when_the_text_reports_it(selected):
     request = request_for_replanning()
     request.input.redacted_text = "합성 절차 3을 진행 중입니다."
     request.case_snapshot.procedure_progress = []
+    report = select_progress(request, RESTORATION, "IN_PROGRESS") if selected else None
     raw = output(
         [finding(TAX, "doc1"), finding(FOOD, "doc2"), finding(RESTORATION, "doc3")]
     )
-    raw["procedure_observations"] = [
-        {
-            "step_code": RESTORATION,
-            "observed_status": "IN_PROGRESS",
-            "source_text": request.input.redacted_text,
-            "requires_confirmation": False,
-            "reason_summary": "사용자가 본인의 실행 상태를 명시함",
-        }
-    ]
     result = asyncio.run(InfoAnalysisAgent(Responses(raw)).analyze(request))
+    if not selected:
+        assert result.procedure_progress_observations == []
+        return
     observation = result.procedure_progress_observations[0]
     assert observation.observed_status == "IN_PROGRESS"
-    assert observation.source_span.text == request.input.redacted_text
+    assert observation.source_span is None
+    assert observation.structured_report == report
 
 
 RESTORATION_RESULT = "원상복구 범위는 없고 원상복구 작업은 필요하지 않습니다."
@@ -530,7 +539,7 @@ def test_result_sentence_produces_only_the_three_stated_fact_changes(unsupported
     assert len(client.messages) == (2 if unsupported_completion else 1)
     if unsupported_completion:
         feedback = " ".join(item["content"] for item in client.messages[1])
-        assert "The quoted sentence itself must identify the procedure" in feedback
+        assert "Only the user's structured selections establish progress" in feedback
     assert {(fact.field_path, fact.value) for fact in result.fact_candidates} == {
         ("restoration_scope", "NOT_REQUIRED"),
         ("restoration_status", "NOT_REQUIRED"),

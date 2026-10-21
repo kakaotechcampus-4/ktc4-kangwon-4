@@ -360,6 +360,20 @@ def _validate_integrity(subject: ReviewSubject) -> _ReviewContext:
 
     _validate_procedure_analysis_provenance(sources_by_call_id)
     _validate_mutation_provenance(subject, sources_by_call_id)
+    for source in sources_by_call_id.values():
+        if not isinstance(source.output, InfoAnalysisResult):
+            continue
+        original_input = getattr(subject.trigger, "input", None)
+        if original_input is None:
+            pending = getattr(subject.trigger, "pending_input", None)
+            original_input = getattr(pending, "original_input", None)
+        for observation in source.output.procedure_progress_observations:
+            if original_input is None:
+                raise ReviewIntegrityError("procedure progress requires its original selected input")
+            try:
+                observation.assert_structured_report_integrity(original_input, evidence_by_id)
+            except (ValueError, TypeError, AttributeError) as exc:
+                raise ReviewIntegrityError("procedure progress differs from its structured input") from exc
     _validate_action_shape(subject, sources_by_call_id)
     return _ReviewContext(
         evidence_by_id=evidence_by_id,
@@ -423,6 +437,14 @@ def _validate_mutation_provenance(
             continue
         if candidate.source_type != FactChangeSourceType.INFO_ANALYSIS:
             raise ReviewIntegrityError("fact mutation has an unsupported source type")
+        if (
+            candidate.field_path == "restoration_status"
+            and candidate.operation == FactOperation.SET
+            and candidate.proposed_value == "COMPLETED"
+        ):
+            raise ReviewIntegrityError(
+                "Info fact mutation cannot establish restoration completion"
+            )
         if candidate.source_call_id is None:
             raise ReviewIntegrityError("fact mutation is missing its Info source call")
         source = _require_source_output(
