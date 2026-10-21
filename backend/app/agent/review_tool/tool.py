@@ -159,7 +159,7 @@ class ReviewTool:
             subject, context, procedure_bindings
         )
 
-        model_input = _review_prompt_projection(subject, context)
+        model_input = _review_prompt_projection(subject, context, procedure_bindings)
         try:
             ensure_projection_has_no_obvious_sensitive_text(model_input)
         except GuardrailViolation:
@@ -170,6 +170,8 @@ class ReviewTool:
         base_messages[0]["content"] += (
             "\n완료 후 followup_guidance는 Info에서 고정 복사합니다. 내용 오류는 고정 복사된 Supervisor 경로 대신 원본 "
             "Info finding.followup_guidance의 canonical 경로를 target_path로 하고 그 source의 meta.call_id를 target_call_id로 보고하세요. "
+            "grounded_claims의 text는 중복이어서 생략했습니다. target_path의 실제 사용자 문장을 검수하세요. "
+            "미사용 중간 Info 세부사항은 이번 검수에서 생략되지만 사용 중인 사용자 문장과 근거의 검수는 그대로 수행하세요."
         )
         base_messages[0]["content"] += (
             "\n행동 코드별 의미:\n"
@@ -534,8 +536,12 @@ def _validate_mutation_provenance(
         if (
             candidate.before_status != before_status
             or finding.current_status != before_status
-            or candidate.before_requirements_confirmed != (snapshot_progress.requirements_confirmed if snapshot_progress else False)
-            or candidate.before_submitted != (snapshot_progress.submitted if snapshot_progress else False)
+            or candidate.before_requirements_confirmed
+            != (
+                snapshot_progress.requirements_confirmed if snapshot_progress else False
+            )
+            or candidate.before_submitted
+            != (snapshot_progress.submitted if snapshot_progress else False)
         ):
             raise ReviewIntegrityError(
                 "procedure mutation before state differs from snapshot/finding"
@@ -550,8 +556,13 @@ def _validate_mutation_provenance(
                 and observation.source_evidence_refs
                 == candidate.execution_evidence_refs
                 and observation.reason_summary == candidate.reason_summary
-                and candidate.proposed_requirements_confirmed == (candidate.before_requirements_confirmed or observation.requirements_confirmed)
-                and candidate.proposed_submitted == (candidate.before_submitted or observation.submitted)
+                and candidate.proposed_requirements_confirmed
+                == (
+                    candidate.before_requirements_confirmed
+                    or observation.requirements_confirmed
+                )
+                and candidate.proposed_submitted
+                == (candidate.before_submitted or observation.submitted)
             )
         ]
         if len(matching_observations) != 1:
@@ -580,6 +591,7 @@ def _validate_mutation_provenance(
             raise ReviewIntegrityError(
                 "support mutation differs from its source SupportCheck"
             )
+
 
 
 def _validate_procedure_analysis_provenance(
@@ -682,6 +694,7 @@ _PROMPT_EXCLUDED_KEYS = {
 def _review_prompt_projection(
     subject: ReviewSubject,
     context: _ReviewContext,
+    procedure_bindings: ProcedureBindings | None = None,
 ) -> dict[str, Any]:
     """Build a minimal projection whose paths remain canonical ReviewSubject paths."""
 
@@ -696,18 +709,89 @@ def _review_prompt_projection(
         for source in subject.source_results
     ]
     supervisor_payload = subject.supervisor_draft.model_dump(mode="json")
+    for claim in supervisor_payload["grounded_claims"]:
+        claim.pop("text", None)
+
+    decision = subject.supervisor_draft.decision
+    detailed_steps = {
+        (change.procedure_step.procedure_step_id, change.procedure_step.step_code)
+        for change in subject.supervisor_draft.mutations.procedure_progress_changes
+    }
+    if decision.next_action is not None and isinstance(
+        decision.next_action.target, ProcedureActionTarget
+    ):
+        target = decision.next_action.target.procedure_step
+        detailed_steps.add((target.procedure_step_id, target.step_code))
+    if decision.decision_type == DecisionType.COMPLETED:
+        bindings = resolve_procedure_bindings(
+            subject.known_procedure_steps, procedure_bindings
+        )
+        tax = bindings.get("FILE_TAX_BUSINESS_CLOSURE")
+        if tax is not None:
+            detailed_steps.add((tax.procedure_step_id, tax.step_code))
 
     directly_used_refs = set(
         _walk_named_evidence_refs(snapshot_payload)
-        + [
-            evidence_ref
-            for source in subject.source_results
-            for evidence_ref in _walk_named_evidence_refs(
-                source.output.model_dump(mode="python", exclude={"evidence_records"})
-            )
-        ]
         + _walk_named_evidence_refs(supervisor_payload)
     )
+    for source, output_payload in zip(
+        subject.source_results, source_output_payloads, strict=True
+    ):
+        if isinstance(source.output, ProcedureLookupResult):
+            continue  # A retrieved document is not, by itself, a consumed source.
+        if isinstance(source.output, InfoAnalysisResult):
+            # Unused intermediate details are outside this call's semantic
+            # review; original values and digests remain in the full subject.
+            for finding in output_payload["procedure_findings"]:
+                reference = finding["procedure_step"]
+                if (
+                    reference["procedure_step_id"],
+                    reference["step_code"],
+                ) not in detailed_steps:
+                    for field in (
+                        "required_actions",
+                        "required_documents",
+                        "application_channel",
+                        "application_url",
+                        "deadline",
+                        "followup_guidance",
+                    ):
+                        finding.pop(field, None)
+            for uncertainty in source.output.uncertainties:
+                tokens = _json_pointer_tokens(uncertainty.target_path)
+                if tokens[:1] == ["procedure_lookup_result"]:
+                    lookup = context.sources_by_call_id[
+                        source.output.based_on_procedure_lookup_call_id
+                    ].output
+                    tokens = tokens[1:]
+                elif (
+                    len(tokens) >= 3
+                    and tokens[0] == "source_results"
+                    and tokens[1].isdigit()
+                    and tokens[2] == "output"
+                    and int(tokens[1]) < len(subject.source_results)
+                ):
+                    lookup = subject.source_results[int(tokens[1])].output
+                    tokens = tokens[3:]
+                else:
+                    continue
+                if not isinstance(lookup, ProcedureLookupResult):
+                    continue
+                if not tokens or tokens == ["documents"]:
+                    documents = lookup.documents
+                elif (
+                    len(tokens) >= 2
+                    and tokens[0] == "documents"
+                    and tokens[1].isdigit()
+                    and int(tokens[1]) < len(lookup.documents)
+                ):
+                    documents = [lookup.documents[int(tokens[1])]]
+                else:
+                    continue
+                directly_used_refs.update(
+                    document.evidence_ref for document in documents
+                )
+        directly_used_refs.update(_walk_named_evidence_refs(output_payload))
     used_refs = set(directly_used_refs)
     pending = list(directly_used_refs)
     while pending:
@@ -718,19 +802,35 @@ def _review_prompt_projection(
                 used_refs.add(parent_ref)
                 pending.append(parent_ref)
 
+    emitted_evidence: set[str] = set()
+
+    def project_evidence(evidence: EvidenceRecord):
+        if (
+            evidence.evidence_id not in used_refs
+            or evidence.evidence_id in emitted_evidence
+        ):
+            return None
+        emitted_evidence.add(evidence.evidence_id)
+        return _prompt_evidence_record(evidence)
+
     snapshot_payload["evidence_records"] = [
-        _prompt_evidence_record(evidence) if evidence.evidence_id in used_refs else None
-        for evidence in subject.snapshot.evidence_records
+        project_evidence(evidence) for evidence in subject.snapshot.evidence_records
     ]
     source_payloads: list[dict[str, Any]] = []
     for source, output_payload in zip(
         subject.source_results, source_output_payloads, strict=True
     ):
+        if isinstance(source.output, ProcedureLookupResult):
+            # Preserve canonical indices. Unreferenced documents/bodies are
+            # outside this model review; source safety still sees every body.
+            output_payload["documents"] = [
+                {key: value for key, value in document.items() if key != "excerpt"}
+                if document["evidence_ref"] in used_refs
+                else None
+                for document in output_payload["documents"]
+            ]
         output_payload["evidence_records"] = [
-            _prompt_evidence_record(evidence)
-            if evidence.evidence_id in used_refs
-            else None
-            for evidence in source.output.evidence_records
+            project_evidence(evidence) for evidence in source.output.evidence_records
         ]
         source_payloads.append(
             {
@@ -770,6 +870,7 @@ def _review_prompt_projection(
     }
 
 
+
 def _prompt_evidence_record(evidence: EvidenceRecord) -> dict[str, Any]:
     return _minimize_prompt_value(evidence.model_dump(mode="json"))
 
@@ -807,6 +908,7 @@ def _validate_action_shape(
     else:
         if decision.blocker is None or decision.next_action is not None:
             raise ReviewIntegrityError("NEEDS_MORE_INFO shape is invalid")
+
 
 
 def _deterministic_safety_review(
@@ -1067,6 +1169,7 @@ def _deterministic_safety_review(
         issues=tuple(_deduplicate_models(issues)),
         missing_evidence=tuple(_deduplicate_models(missing)),
     )
+
 
 
 def _action_target_findings(
@@ -1486,6 +1589,7 @@ def _visible_draft_strings(subject: ReviewSubject) -> list[tuple[str, str]]:
         for index, text in enumerate(decision.questions_for_user)
     )
     return values
+
 
 
 def _issue(

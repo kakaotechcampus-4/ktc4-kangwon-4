@@ -257,7 +257,7 @@ def review_messages(value: BaseModel | dict[str, Any]) -> list[dict[str, str]]:
                 "확인해야 합니다. 이미 확정된 사실을 모른다고 "
                 "하거나, 완료·금액·날짜·법률·세무·자격에 관한 별도 진술을 하면 "
                 "실제 근거와 대조하고 근거가 없으면 REVISE하세요.\n"
-                "COMPLETED에는 blocker/next_action/질문이 없고 적용 대상 카페 전체 완료와 공식 세금 후속 일정·문의처가 필요합니다. 절차 진행/flags는 사용자 procedure_reports 선택값만 사용하고 자유문장으로 변경하거나 추정하지 마세요. requirements_confirmed는 사용자의 요건과 준비 확인 보고이며 문서 조회만으로 충족되지 않습니다. submitted는 제출이고 기관 처리 완료와 다릅니다. 영업·세무 각각 처리 완료를 확인하세요. 직원 전원과 가입기관 전체의 처리 보고가 집계 완료의 조건입니다. 일부를 전체 완료로 해석하면 반려하세요. 현재 직원 0명·현재 미가입은 과거 이력 없음이 아닙니다.\n" + SAFETY_RULES
+                "COMPLETED에는 blocker/next_action/질문이 없고 적용 대상 카페 전체 완료와 공식 세금 후속 일정·문의처가 필요합니다. 절차 진행/flags는 사용자 procedure_reports 선택값만 사용하고 자유문장으로 변경하거나 추정하지 마세요. requirements_confirmed는 사용자의 요건과 준비 확인 보고이며 문서 조회만으로 충족되지 않습니다. submitted는 제출이고 기관 처리 완료와 다릅니다. 영업·세무 각각 처리 완료를 확인하세요. 직원 전원과 가입기관 전체의 처리 보고가 집계 완료의 조건입니다. 일부를 전체 완료로 해석하면 반려하세요. 현재 직원 0명·현재 미가입은 과거 이력 없음이 아닙니다. 동일 evidence_id 본문은 한 위치에만 있고 null은 중복·미사용 자리입니다.\n" + SAFETY_RULES
             ),
         },
         {"role": "user", "content": "INPUT_JSON=" + _json_payload(value)},
