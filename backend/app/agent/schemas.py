@@ -1191,6 +1191,8 @@ class ProcedureSourcePolicy(StrEnum):
 class ProcedureLookupInput(AgentSchema):
     """Complete request schema accepted by ``ProcedureLookupTool.lookup``."""
 
+    procedure_step_codes: list[UpperSnakeCode] = Field(default_factory=list)
+
     lookup_goal: Literal[ProcedureLookupGoal.BUSINESS_CLOSURE] = Field(
         description="Fixed lookup goal for business-closure procedures."
     )

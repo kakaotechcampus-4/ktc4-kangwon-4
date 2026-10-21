@@ -20,7 +20,6 @@ from langgraph.graph import END, START, StateGraph
 from app.agent.blocker_candidates import field_confirmation_question
 from app.agent.enrichment import build_confirmed_conflict_overlay, build_fact_overlays
 from app.agent.llm import current_call_budget
-from app.agent.procedure_tool.rules import business_type_code
 from app.agent.run_scope import current_deadline
 from app.agent.schemas import (
     CASE_FIELD_SPECS,
@@ -32,7 +31,6 @@ from app.agent.schemas import (
     ConflictOutcome,
     DiscoverSupportInput,
     FactChangeSourceType,
-    FactStatus,
     InfoAnalysisInput,
     InfoAnalysisResult,
     InvocationMeta,
@@ -454,6 +452,7 @@ class AgentGraph:
         )
         component_input = ProcedureLookupInput(
             lookup_goal="BUSINESS_CLOSURE",
+            procedure_step_codes=[step.procedure_step.step_code for step in self._known_procedure_steps],
             evidence_records=[
                 item for item in request.case_snapshot.evidence_records
                 if item.source_type == "OFFICIAL_DOCUMENT"
@@ -972,74 +971,9 @@ class AgentGraph:
 
     @staticmethod
     def _procedure_queries(request: AgentGraphInput) -> list[str]:
-        """Select at most four static topics without copying user text or facts."""
+        # Source selection uses the supplied registry codes, never user wording.
+        return ["카페 폐업 공식 절차"]
 
-        confirmed = {
-            fact.field_path.value: fact.value
-            for fact in request.case_snapshot.facts
-            if fact.status.value == "CONFIRMED"
-        }
-        if isinstance(request.trigger, ConflictConfirmedTrigger):
-            conflict = request.trigger.confirmed_conflict
-            if conflict.proposed_status == FactStatus.CONFIRMED:
-                confirmed[conflict.field_path.value] = conflict.proposed_value
-            else:
-                confirmed.pop(conflict.field_path.value, None)
-        trigger_input = getattr(request.trigger, "input", None)
-        redacted_text = trigger_input.redacted_text if trigger_input is not None else ""
-
-        queries: list[str] = []
-        if (
-            confirmed.get("lease_status") in {"LEASED_PAID", "LEASED_FREE"}
-            or any(
-                keyword in redacted_text
-                for keyword in ("임차", "임대", "원상복구", "원상회복", "철거", "반환")
-            )
-            or (
-                isinstance(request.trigger, ConflictConfirmedTrigger)
-                and request.trigger.confirmed_conflict.field_path.value
-                in {
-                    "lease_status",
-                    "restoration_status",
-                    "restoration_scope",
-                    "demolition_required",
-                }
-            )
-        ):
-            queries.append("임차 상가 원상복구 범위 확인 철거 절차")
-
-        # Entity type is not a CASE field in schema_table.md. Explicit wording
-        # may select a lookup topic, but never creates or confirms a Case fact.
-        if "개인사업자" in redacted_text:
-            queries.append("개인사업자 폐업 신고 절차 국세청")
-        elif "법인사업자" in redacted_text or "법인 사업자" in redacted_text:
-            queries.append("법인 사업자 폐업 신고 절차 국세청")
-        else:
-            queries.append("사업자 폐업 신고 절차 국세청")
-
-        business_type = business_type_code(confirmed.get("business_type"))
-        if business_type is None:
-            if any(keyword in redacted_text for keyword in ("카페", "휴게음식점")):
-                business_type = "CAFE"
-            elif any(
-                keyword in redacted_text for keyword in ("식당", "음식점", "일반음식점")
-            ):
-                business_type = "RESTAURANT"
-        business_queries = {
-            "CAFE": "휴게음식점 폐업 신고 절차 정부24",
-            "RESTAURANT": "일반음식점 폐업 신고 절차 정부24",
-        }
-        business_query = business_queries.get(business_type)
-        if business_query is not None:
-            queries.append(business_query)
-        employee_count = confirmed.get("employee_count")
-        employee_hint = any(
-            keyword in redacted_text
-            for keyword in ("직원", "근로자", "4대보험", "사업장 소멸")
-        )
-        if (type(employee_count) is int and employee_count > 0) or employee_hint:
-            queries.append("4대보험 탈퇴 사업장 폐업 신고 절차")
-        return queries
 
     def _emit(
         self,
