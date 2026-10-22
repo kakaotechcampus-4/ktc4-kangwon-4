@@ -1,14 +1,19 @@
-"""case 생성 직후 AI 첫 판단을 실행한다.
+"""들어온 입력 하나를 AI 판단에 태운다.
 
 입력 조립(case_snapshot) → AI 호출 → 결과 저장(decision_record)을 한 줄로 잇는다.
+
+처음에는 가입 직후 첫 판단에만 썼지만 결과 제출도 같은 길을 타서, 이름과 달리
+"첫" 판단 전용이 아니다. 어느 입력을 판단할지는 부르는 쪽이 정해서 넘긴다.
 """
 
 import logging
+from typing import Literal
 
 from sqlmodel import Session
 
 from app.be.crud import case_history as case_history_crud
 from app.be.db import _engine
+from app.be.models.case_history import CaseHistory
 from app.be.models.evidence import DecisionRecord
 from app.be.services import agent_runtime as agent_runtime_service
 from app.be.services import case_snapshot as case_snapshot_service
@@ -41,6 +46,24 @@ async def run_first_judgment_in_background(case_history_id: int) -> None:
             logger.exception("case_history %s 판단 실패 상태 기록도 실패", case_history_id)
 
 
+def _trigger_type_of(history: CaseHistory) -> Literal["CASE_CREATED", "RESULT_SUBMITTED"]:
+    """이 입력이 "가입하면서 받은 것"인지 "사장님이 결과를 알려준 것"인지 고른다.
+
+    AI는 둘을 다르게 읽는다. 가입 입력은 처음 보는 Case를 세우는 것이고, 결과 보고는
+    이미 세워둔 계획이 어디까지 갔는지를 고쳐 쓰는 것이다. 전부 가입으로 넘기면 AI가
+    사장님이 방금 알려준 진행 상황을 "처음 받은 값"으로 읽는다.
+
+    SYSTEM_BATCH는 아직 만드는 곳이 없다. 둘 중 아무 쪽으로 넘겨도 AI에게 틀리게
+    알려주는 것이라, 그 길이 생길 때 무엇으로 볼지 정하도록 여기서 멈춘다.
+    """
+
+    if history.source == "CASE_CREATED":
+        return "CASE_CREATED"
+    if history.source == "USER_INPUT":
+        return "RESULT_SUBMITTED"
+    raise ValueError(f"case_history {history.id}의 source {history.source}는 판단 트리거가 없다")
+
+
 async def run_first_judgment(
     session: Session, case_history_id: int
 ) -> tuple[AgentGraphOutput, DecisionRecord | None]:
@@ -55,8 +78,7 @@ async def run_first_judgment(
         raise ValueError(f"case_history {case_history_id} not found")
 
     graph_input = build_planning_input(
-        # TODO: 결과 제출 판단이 붙으면 이력의 source를 보고 RESULT_SUBMITTED를 함께 넘긴다.
-        trigger_type="CASE_CREATED",
+        trigger_type=_trigger_type_of(history),
         case_snapshot=case_snapshot_service.build_case_snapshot(session, history.case_id),
         user_input=case_snapshot_service.build_user_input(
             case_history_id=history.id,

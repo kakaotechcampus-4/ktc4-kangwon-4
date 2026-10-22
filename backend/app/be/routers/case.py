@@ -55,13 +55,18 @@ def get_case_results(
 @router.post("/cases/results", response_model=CaseResultsSubmitAcceptedResponse)
 def submit_case_results(
     submit_request: CaseResultsSubmitRequest,
+    background_tasks: BackgroundTasks,
     member_id: int = Depends(get_current_member_id),
     session: Session = Depends(get_db),
 ):
     response = case_service.submit_case_results(session, member_id, submit_request)
 
-    # TODO(AI팀 연동): 여기서 Agent 판단을 백그라운드로 실행하는 부분이 이어져야 한다.
-    # Case 생성 때와 같은 패턴.
+    # Case 생성 때와 같은 이유로 뒤에서 돌린다(create_case 주석). 이걸 걸지 않으면
+    # 접수만 되고 아무도 판단을 부르지 않아서, 그 이력은 PENDING에서 영영 안 바뀐다.
+    # 화면은 GET /cases/results/status로 다시 물어본다.
+    background_tasks.add_task(
+        first_judgment_service.run_first_judgment_in_background, response.case_history_id
+    )
 
     return response
 
