@@ -23,6 +23,7 @@ from app.agent.schemas import (
 __all__ = ["ProcedureLookupInputError", "StoredProcedureLookupTool"]
 
 _MAX_QUERY_LENGTH = 200
+_MAX_CODE_MATCHES = 40
 
 
 class ProcedureLookupInputError(RuntimeError):
@@ -35,7 +36,7 @@ class ProcedureLookupInputError(RuntimeError):
 
 
 class StoredProcedureLookupTool:
-    """Answer a procedure lookup from documents a person already approved."""
+    """Answer from documents approved by human or official-source comparison."""
 
     def __init__(
         self,
@@ -50,9 +51,7 @@ class StoredProcedureLookupTool:
         self._step_codes = (
             None
             if procedure_bindings is None
-            else {
-                logical: ref.step_code for logical, ref in procedure_bindings.items()
-            }
+            else {logical: ref.step_code for logical, ref in procedure_bindings.items()}
         )
         self._uuid = uuid_factory
 
@@ -67,7 +66,8 @@ class StoredProcedureLookupTool:
         available: list[tuple[ReviewedProcedureRecord, EvidenceRecord]] = []
         for record in self._store.records():
             candidates = [
-                item for item in request.evidence_records
+                item
+                for item in request.evidence_records
                 if item.source_type == "OFFICIAL_DOCUMENT"
                 and item.source_ref == record.canonical_url
                 and item.source_version == self._store.snapshot_version
@@ -81,7 +81,8 @@ class StoredProcedureLookupTool:
             ):
                 raise ProcedureLookupInputError(
                     "DB procedure source differs from the approved record",
-                    code="PROCEDURE_SOURCE_MISMATCH", retryable=False,
+                    code="PROCEDURE_SOURCE_MISMATCH",
+                    retryable=False,
                 )
             evidence = candidates[0]
             freshness = record.freshness(request.as_of)
@@ -90,19 +91,48 @@ class StoredProcedureLookupTool:
                 and freshness != FreshnessStatus.CURRENT
             ):
                 raise ProcedureLookupInputError(
-                    "DB procedure source needs a current human review",
-                    code="PROCEDURE_REVIEW_REQUIRED", retryable=False,
+                    "DB procedure source needs a current review",
+                    code="PROCEDURE_REVIEW_REQUIRED",
+                    retryable=False,
                 )
             available.append((record, evidence))
 
         selected: list[tuple[str, ReviewedProcedureRecord, EvidenceRecord]] = []
         seen_urls: set[str] = set()
         matched_queries: set[str] = set()
-        for query in request.search_queries:
-            matches = [item for item in available if item[0].matches(query)]
+        queries = (
+            request.search_queries[:1]
+            if request.procedure_step_codes
+            else request.search_queries
+        )
+        for query in queries:
+            requested_codes = set(request.procedure_step_codes)
+            matches = [
+                item
+                for item in available
+                if (
+                    bool(
+                        requested_codes
+                        & {
+                            self._step_codes[code]
+                            if self._step_codes is not None
+                            else code
+                            for code in item[0].step_codes
+                            if self._step_codes is None or code in self._step_codes
+                        }
+                    )
+                    if requested_codes
+                    else item[0].matches(query)
+                )
+            ]
             if matches:
                 matched_queries.add(query)
-            for record, evidence in matches[: request.max_results_per_query]:
+            # Registry-code lookup supplies the complete reviewed bundle once;
+            # the legacy per-query limit must not drop later insurance sources.
+            limit = (
+                _MAX_CODE_MATCHES if requested_codes else request.max_results_per_query
+            )
+            for record, evidence in matches[:limit]:
                 if record.canonical_url in seen_urls:
                     continue
                 seen_urls.add(record.canonical_url)
@@ -146,7 +176,7 @@ class StoredProcedureLookupTool:
                 )
             )
 
-        requested = len(request.search_queries)
+        requested = len(queries)
         document_count = len(documents)
         return ProcedureLookupResult(
             completion_status="COMPLETE" if documents else "NO_RESULTS",
