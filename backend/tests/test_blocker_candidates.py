@@ -686,6 +686,42 @@ def test_fallback_uses_confirmed_mutations_before_asking():
     assert result["blocker"]["description"] == "직원 수 확인이 필요합니다."
 
 
+@pytest.mark.parametrize("scope", [None, "NOT_REQUIRED", "PARTIAL", "FULL"])
+@pytest.mark.parametrize("overlay", [False, True])
+@pytest.mark.parametrize("held", [False, True])
+def test_progress_question_requires_confirmed_restoration_scope(scope, overlay, held):
+    from test_info_replanning import analyze_facts
+
+    request = request_with_state(restoration_scope=None if overlay else scope)
+    pending = mutations()
+    if overlay:
+        pending.fact_changes = [FactChangeCandidate(
+            candidate_id=UUID(int=51), operation="CLEAR" if scope is None else "SET",
+            source_fact_candidate_id=UUID(int=52), source_type="INFO_ANALYSIS",
+            field_path="restoration_scope", value_type="ENUM",
+            before_status="UNKNOWN", before_value=None,
+            proposed_status="UNKNOWN" if scope is None else "CONFIRMED", proposed_value=scope,
+            candidate_status="READY_FOR_REVIEW", reason_summary="합성 범위 변경",
+            source_evidence_refs=[REF], source_call_id=UUID(int=3), confirmed_conflict_ref=None,
+        )]
+    if held:
+        text = "원상복구 작업을 진행하고 있습니다."
+        result = analyze_facts([("restoration_status", "IN_PROGRESS", text)], text, requires_confirmation=True)
+        info = request.source_results[1].output
+        info.evidence_records.extend(result.evidence_records)
+        info.fact_candidates = result.fact_candidates
+        request.source_results[1] = source(info)
+    else:
+        missing_questions(request, "restoration_status")
+
+    result = missing_info_fields(request.case_snapshot, request.source_results, pending)
+
+    if scope in {"PARTIAL", "FULL"}:
+        assert result["blocker"]["candidate_id"] == "missing:restoration_status"
+    else:
+        assert result is None
+
+
 def test_single_missing_condition_passes_review_without_weakening_shared_guard():
     async def run():
         request = request_with_state()
