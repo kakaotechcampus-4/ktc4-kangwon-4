@@ -46,6 +46,11 @@ class StoredEvidenceMissingError(ValueError):
     (decision_record.mark_judgment_failed).
     """
 
+    # 예외에 직접 붙여 둔다. 실패 상태를 적는 쪽이 예외 종류를 하나씩 알아야 하면,
+    # 새 실패를 만들 때마다 그쪽을 같이 고쳐야 하고 빠뜨리면 조용히 RETRY가 된다.
+    # AI 쪽도 같은 방식으로 읽는다(graph.py).
+    retryable = False
+
 
 def build_user_input(case_history_id: int, raw_input: str, submitted_at: datetime) -> RedactedInput:
     """사용자가 넣은 입력 한 건을 AI가 받는 모양으로 바꾼다.

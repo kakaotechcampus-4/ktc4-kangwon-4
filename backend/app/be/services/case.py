@@ -41,7 +41,7 @@ def create_case(session: Session, member_id: int, case_request: CaseCreateReques
         raise HTTPException(status_code=409, detail="이미 등록된 Case가 있습니다.")
 
     # 검수 문서를 Case보다 먼저 읽는다. 파일이 깨져 있으면 판단도 같은 파일을 읽어서
-    # (first_judgment.py) AI를 부르기 전에 터진다. 그 상태로 Case만 만들어 두면 가입 직후
+    # (judgment.py) AI를 부르기 전에 터진다. 그 상태로 Case만 만들어 두면 가입 직후
     # FAILED인데 재판단 API가 없고 다시 가입하면 409라 빠져나올 길이 없다. 여기서 터지면
     # 가입 자체가 실패하므로, 파일을 고친 뒤 다시 시도하면 된다.
     procedure_store = reviewed_procedure_service.load_reviewed_procedures()
@@ -450,7 +450,7 @@ def _fill_temp_case_procedure_steps(session: Session, case_id: int) -> None:
     # AGENT_PROCEDURE_BINDINGS_MISSING으로 판단을 멈춘다.
     #
     # TODO: 실제 폐업절차는 이보다 많고 이름도 다를 것이다. 그때는 이 4개를 어느 실제 절차에
-    # 맺을지 정해 procedure_bindings를 직접 넘겨야 한다(first_judgment.py).
+    # 맺을지 정해 procedure_bindings를 직접 넘겨야 한다(judgment.py).
     temp_procedure_steps = [
         ("CONFIRM_RESTORATION_SCOPE", "원상복구 범위 확인"),
         ("FILE_TAX_BUSINESS_CLOSURE", "세무서 폐업 신고"),

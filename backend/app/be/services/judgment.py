@@ -25,7 +25,7 @@ from app.common.agent_service import build_planning_input, run_case_planning
 logger = logging.getLogger(__name__)
 
 
-async def run_first_judgment_in_background(case_history_id: int) -> None:
+async def run_judgment_in_background(case_history_id: int) -> None:
     """응답을 보낸 뒤 뒤에서 도는 진입점.
 
     요청에 딸린 세션은 응답과 함께 닫히므로 여기서 세션을 새로 연다. 실패해도 사용자에게
@@ -34,7 +34,7 @@ async def run_first_judgment_in_background(case_history_id: int) -> None:
 
     try:
         with Session(_engine) as session:
-            await run_first_judgment(session, case_history_id)
+            await run_judgment(session, case_history_id)
     except Exception as error:
         logger.exception("case_history %s 첫 판단 실패", case_history_id)
         try:
@@ -44,6 +44,17 @@ async def run_first_judgment_in_background(case_history_id: int) -> None:
                 decision_record_service.mark_judgment_failed(session, case_history_id, error)
         except Exception:
             logger.exception("case_history %s 판단 실패 상태 기록도 실패", case_history_id)
+
+
+class UnknownJudgmentTriggerError(ValueError):
+    """입력의 출처를 AI가 받는 트리거로 옮길 수 없는 상태.
+
+    방금 들어온 글이 아니라 그 입력을 만든 코드가 원인이라, 같은 입력으로 다시 판단해도
+    같은 자리에서 또 터진다. 그래서 "다시 시도"가 아니라 "문의"로 안내한다
+    (decision_record.mark_judgment_failed).
+    """
+
+    retryable = False
 
 
 def _trigger_type_of(history: CaseHistory) -> Literal["CASE_CREATED", "RESULT_SUBMITTED"]:
@@ -61,10 +72,12 @@ def _trigger_type_of(history: CaseHistory) -> Literal["CASE_CREATED", "RESULT_SU
         return "CASE_CREATED"
     if history.source == "USER_INPUT":
         return "RESULT_SUBMITTED"
-    raise ValueError(f"case_history {history.id}의 source {history.source}는 판단 트리거가 없다")
+    raise UnknownJudgmentTriggerError(
+        f"case_history {history.id}의 source {history.source}는 판단 트리거가 없다"
+    )
 
 
-async def run_first_judgment(
+async def run_judgment(
     session: Session, case_history_id: int
 ) -> tuple[AgentGraphOutput, DecisionRecord | None]:
     """판단 결과와, 저장된 검수 기록(정상 판단일 때만)을 함께 돌려준다.

@@ -13,7 +13,7 @@ from app.be.schemas.case import (
     CaseResultsSubmitResponse,
 )
 from app.be.services import case as case_service
-from app.be.services import first_judgment as first_judgment_service
+from app.be.services import judgment as judgment_service
 
 router = APIRouter()
 
@@ -31,7 +31,7 @@ def create_case(
     # 중간에 끊기거나 사용자가 화면을 떠났을 때 결과를 못 보므로, Case만 저장하고 바로
     # 응답한다. 판단은 뒤에서 돌면서 case_history.judgment_status를 갱신하고,
     # 화면은 GET /cases로 다시 물어본다.
-    background_tasks.add_task(first_judgment_service.run_first_judgment_in_background, case_history_id)
+    background_tasks.add_task(judgment_service.run_judgment_in_background, case_history_id)
 
     return case
 
@@ -65,7 +65,7 @@ def submit_case_results(
     # 접수만 되고 아무도 판단을 부르지 않아서, 그 이력은 PENDING에서 영영 안 바뀐다.
     # 화면은 GET /cases/results/status로 다시 물어본다.
     background_tasks.add_task(
-        first_judgment_service.run_first_judgment_in_background, response.case_history_id
+        judgment_service.run_judgment_in_background, response.case_history_id
     )
 
     return response

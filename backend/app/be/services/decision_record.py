@@ -36,7 +36,7 @@ from app.be.models.evidence import ConflictReference, DecisionRecord, Evidence, 
 from app.be.models.mixins import KST
 from app.be.models.procedure_step import CaseProcedureStepHistory
 from app.be.models.support_item import SupportMatch
-from app.be.services.case_snapshot import UNKNOWN_SENTINEL_FIELDS, StoredEvidenceMissingError
+from app.be.services.case_snapshot import UNKNOWN_SENTINEL_FIELDS
 
 # 충돌 확인 기한을 아직 정하지 않아, 만료로 막히지 않도록 멀리 둔다.
 _NO_EXPIRY = datetime(9999, 12, 31)
@@ -205,9 +205,10 @@ def mark_judgment_failed(session: Session, case_history_id: int, error: Exceptio
     history.judgment_status = "FAILED"
     # AI가 결과를 내기 전에 끊겨서 실패 종류를 받지 못했다. 없는 값을 지어내지 않는다.
     history.failure_code = None
-    # 전에 저장된 행이 원인이면 다시 판단해도 같은 자리에서 또 터진다. 그 Case는 사람이
-    # 데이터를 고치기 전까지 못 빠져나오므로, 눌러도 안 되는 "다시 시도" 대신 문의로 보낸다.
-    retryable = not isinstance(error, StoredEvidenceMissingError)
+    # 저장된 데이터나 설정이 원인이면 다시 판단해도 같은 자리에서 또 터진다. 그 Case는
+    # 사람이 고치기 전까지 못 빠져나오므로, 눌러도 안 되는 "다시 시도" 대신 문의로 보낸다.
+    # 어떤 실패가 그런지는 예외 자신이 들고 온다. 모르면 일시적인 문제로 본다.
+    retryable = bool(getattr(error, "retryable", True))
     history.recovery_action_code = "RETRY" if retryable else "CONTACT_SUPPORT"
     history.retryable = retryable
     history.requested_field_paths = []

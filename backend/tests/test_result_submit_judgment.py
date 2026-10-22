@@ -18,7 +18,7 @@ from app.be.crud import case_history as case_history_crud
 from app.be.routers import case as case_router
 from app.be.schemas.case import CaseResultsSubmitAcceptedResponse, CaseResultsSubmitRequest
 from app.be.services import case as case_service
-from app.be.services import first_judgment
+from app.be.services import judgment
 from app.be.services import agent_runtime as agent_runtime_service
 from app.be.services import case_snapshot as case_snapshot_service
 from app.be.services import decision_record as decision_record_service
@@ -52,8 +52,8 @@ def trigger_of(monkeypatch):
     async def fake_run_case_planning(*_args, **_kwargs):
         return SimpleNamespace(outcome_type="SAFE_FAILURE")
 
-    monkeypatch.setattr(first_judgment, "build_planning_input", fake_build_planning_input)
-    monkeypatch.setattr(first_judgment, "run_case_planning", fake_run_case_planning)
+    monkeypatch.setattr(judgment, "build_planning_input", fake_build_planning_input)
+    monkeypatch.setattr(judgment, "run_case_planning", fake_run_case_planning)
     monkeypatch.setattr(case_snapshot_service, "build_case_snapshot", lambda *_a, **_k: None)
     monkeypatch.setattr(case_snapshot_service, "build_user_input", lambda **_k: None)
     monkeypatch.setattr(agent_runtime_service, "build_known_procedure_steps", lambda *_a: [])
@@ -65,7 +65,7 @@ def trigger_of(monkeypatch):
         monkeypatch.setattr(
             case_history_crud, "get_case_history_by_id", lambda *_a: history(source)
         )
-        asyncio.run(first_judgment.run_first_judgment(MagicMock(spec=Session), HISTORY_ID))
+        asyncio.run(judgment.run_judgment(MagicMock(spec=Session), HISTORY_ID))
         return captured["trigger_type"]
 
     return run
@@ -81,8 +81,25 @@ def test_submitted_result_is_judged_as_a_result_report(trigger_of):
 
 
 def test_a_source_nobody_creates_stops_instead_of_guessing(trigger_of):
-    with pytest.raises(ValueError, match="SYSTEM_BATCH"):
+    with pytest.raises(judgment.UnknownJudgmentTriggerError, match="SYSTEM_BATCH"):
         trigger_of("SYSTEM_BATCH")
+
+
+def test_an_untranslatable_source_tells_the_user_to_contact_support(monkeypatch):
+    """다시 눌러도 같은 행의 같은 출처를 또 읽는다. "다시 시도"는 눌러도 안 되는 버튼이다."""
+
+    failed = SimpleNamespace(
+        judgment_status="PENDING", failure_code=None,
+        recovery_action_code=None, retryable=None, requested_field_paths=None,
+    )
+    monkeypatch.setattr(case_history_crud, "get_case_history_by_id", lambda *_: failed)
+
+    decision_record_service.mark_judgment_failed(
+        MagicMock(spec=Session), HISTORY_ID, judgment.UnknownJudgmentTriggerError("합성 결함")
+    )
+
+    assert failed.recovery_action_code == "CONTACT_SUPPORT"
+    assert failed.retryable is False
 
 
 def test_submitting_a_result_schedules_the_judgment(monkeypatch):
@@ -103,7 +120,7 @@ def test_submitting_a_result_schedules_the_judgment(monkeypatch):
     )
 
     assert [task.func for task in background_tasks.tasks] == [
-        first_judgment.run_first_judgment_in_background
+        judgment.run_judgment_in_background
     ]
     # 사장님이 보고 있던 직전 이력(5)이 아니라 방금 접수한 이력을 판단해야 한다.
     assert [task.args for task in background_tasks.tasks] == [(HISTORY_ID,)]
