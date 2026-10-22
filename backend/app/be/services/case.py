@@ -320,15 +320,17 @@ def get_case_results_submit_status(
     `get_case_results_entry()`와 응답 모양이 다르다. 그래서 별도 스키마(`result` 기반)를 쓴다.
 
     `case_history_id`는 "지금 조회하려는 게 어느 제출이냐"를 밝히는 값이다. Case 생성 판단은
-    이 조회 대상이 아니므로, 최신 판단을 찾을 때 USER_INPUT만 본다(get_latest_user_driven_
-    case_history와 다른 점).
+    이 조회 대상이 아니므로, 최신 판단을 찾을 때 USER_INPUT·CONFLICT_DECISION만 본다
+    (get_latest_user_driven_case_history와 다른 점).
     """
 
     case = case_crud.get_case_by_member_id(session, member_id)
     if case is None:
         raise HTTPException(status_code=404, detail="Case를 찾을 수 없습니다.")
 
-    latest_history = case_history_crud.get_latest_case_history_by_source(session, case.id, "USER_INPUT")
+    latest_history = case_history_crud.get_latest_case_history_by_sources(
+        session, case.id, ("USER_INPUT", "CONFLICT_DECISION")
+    )
     if latest_history is None:
         raise HTTPException(status_code=404, detail="조회할 제출 기록을 찾을 수 없습니다.")
 
