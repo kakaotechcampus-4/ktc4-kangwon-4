@@ -339,17 +339,14 @@ def get_case_results_submit_status(
 
     _assert_judgment_is_showable(latest_history)
 
-    # 충돌도 다른 상태와 똑같이 judgment_status로 가른다. Case 전체가 아니라 이 제출
-    # (latest_history)에 달린 충돌만 본다 — used_at이 실제로 찍히기 시작하면(충돌 확인 API),
-    # Case 전체로 찾는 조회는 다른 제출의 충돌을 집어올 수 있다.
+    # 충돌은 Case 전체가 아니라 이 이력(latest_history)에 달린 것만 본다.
+    # 예: 충돌 결정(CONFLICT_DECISION)이 처리 중이면 이전 이력의 충돌이 아직 미결로 남아 있어서,
+    # Case 전체로 찾으면 처리 중(PENDING)인 이 이력을 CONFLICT로 잘못 응답한다.
     if latest_history.judgment_status == "CONFLICT":
         pending_conflicts = conflict_reference_crud.get_pending_conflicts_by_case_history_id(
             session, latest_history.id
         )
         if not pending_conflicts:
-            # 미결 충돌이 있는 동안은 새 제출이 거부되므로(submit_case_results), 이 제출이
-            # CONFLICT인데 남은 충돌이 없다면 저장이 어긋난 것이다. 빈 목록을 CONFLICT라고
-            # 내보내면 화면이 고를 것 없는 되묻기를 띄운다.
             raise HTTPException(
                 status_code=500,
                 detail=f"case_history {latest_history.id}가 CONFLICT인데 확인 대기 중인 충돌이 없습니다.",
