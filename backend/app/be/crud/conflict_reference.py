@@ -33,3 +33,11 @@ def get_pending_conflicts_by_case_history_id(session: Session, case_history_id: 
         .where(ConflictReference.status == "PENDING")
         .order_by(ConflictReference.id)
     ).all()
+
+
+def get_conflict_reference_by_id(session: Session, conflict_reference_id: int) -> ConflictReference | None:
+    """충돌 한 건. 해결 여부와 상관없이 찾는다. 없으면 None."""
+
+    return session.exec(
+        select(ConflictReference).where(ConflictReference.id == conflict_reference_id)
+    ).one_or_none()
