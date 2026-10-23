@@ -11,6 +11,7 @@ DemolitionRequired = Literal["UNKNOWN", "REQUIRED", "NOT_REQUIRED"]
 JudgmentStatus = Literal["PENDING", "DONE", "NEEDS_MORE_INFO", "CONFLICT", "FAILED"]
 RecoveryActionCode = Literal["RETRY", "RESUBMIT_INPUT", "CONTACT_SUPPORT", "NONE"]
 ResultsSubmitResult = Literal["PENDING", "UPDATED", "NO_CHANGE", "NEEDS_MORE_INFO", "CONFLICT", "FAILED"]
+ConflictSide = Literal["PROPOSED", "STORED"]
 
 
 class CaseCreateRequest(BaseModel):
@@ -108,6 +109,15 @@ class CaseResultsSubmitRequest(BaseModel):
 
 class CaseResultsSubmitAcceptedResponse(BaseModel):
     case_history_id: int
+
+
+class CaseConflictsDecisionItem(BaseModel):
+    conflict_reference_id: int
+    side: ConflictSide
+
+
+class CaseConflictsDecisionRequest(BaseModel):
+    decisions: list[CaseConflictsDecisionItem]
 
 
 class CaseResultsSubmitResponse(BaseModel):

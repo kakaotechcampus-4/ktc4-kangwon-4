@@ -38,9 +38,6 @@ from app.be.models.procedure_step import CaseProcedureStepHistory
 from app.be.models.support_item import SupportMatch
 from app.be.services.case_snapshot import UNKNOWN_SENTINEL_FIELDS, StoredEvidenceMissingError
 
-# 충돌 확인 기한을 아직 정하지 않아, 만료로 막히지 않도록 멀리 둔다.
-_NO_EXPIRY = datetime(9999, 12, 31)
-
 
 def save_reviewed_plan(
     session: Session, history: CaseHistory, outcome: ReviewedPlanOutcome, *, trace_id: str | None = None
@@ -160,9 +157,6 @@ def save_conflict(session: Session, history: CaseHistory, outcome: ConflictOutco
                 # 되돌릴 수 없다. 사용자가 고른 뒤 AI에 그대로 돌려주려면 원본이 따로
                 # 있어야 하고, AI는 받은 내용의 다이제스트를 대조해 다르면 거절한다.
                 candidate_payload=conflict.model_dump(mode="json"),
-                # TODO: 충돌 확인에 기한을 둘지 정하지 않았다. AI가 주는 값이 아니라 BE가 정해야
-                # 하는데, 기준이 없어 당장은 만료되지 않게 둔다. 충돌 확인 API를 만들 때 정한다.
-                expires_at=_NO_EXPIRY,
             ),
         )
     history.judgment_status = "CONFLICT"

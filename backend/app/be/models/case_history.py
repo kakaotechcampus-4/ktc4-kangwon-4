@@ -12,9 +12,14 @@ class CaseHistory(CreatedAtMixin, table=True):
     id: int | None = Field(default=None, sa_column=Column(BigInteger, primary_key=True, autoincrement=True))
     case_id: int = Field(sa_column=Column(BigInteger, ForeignKey("case.id"), nullable=False))
 
-    raw_input: str = Field(sa_column=Column(Text, nullable=False), description="입력 원문")
+    # 입력 원문. USER_INPUT·CASE_CREATED는 사장님이 쓴 문장이 항상 들어가고, SYSTEM_BATCH는 배치 지시문이
+    # 들어갈 수 있다. 문장 없이 고른 값만 있는 CONFLICT_DECISION만 NULL이다.
+    raw_input: str | None = Field(default=None, sa_column=Column(Text, nullable=True), description="입력 원문")
     source: str = Field(
-        sa_column=Column(Enum("USER_INPUT", "SYSTEM_BATCH", "CASE_CREATED", name="case_history_source_enum"), nullable=False)
+        sa_column=Column(
+            Enum("USER_INPUT", "SYSTEM_BATCH", "CASE_CREATED", "CONFLICT_DECISION", name="case_history_source_enum"),
+            nullable=False,
+        )
     )
     judgment_status: str = Field(
         sa_column=Column(
