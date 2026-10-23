@@ -12,8 +12,8 @@ class CaseHistory(CreatedAtMixin, table=True):
     id: int | None = Field(default=None, sa_column=Column(BigInteger, primary_key=True, autoincrement=True))
     case_id: int = Field(sa_column=Column(BigInteger, ForeignKey("case.id"), nullable=False))
 
-    # 사장님이 쓴 원문. USER_INPUT·CASE_CREATED는 항상 들어간다.
-    # 사장님 문장이 없는 CONFLICT_DECISION(고른 값만 있음)·SYSTEM_BATCH만 NULL이다.
+    # 입력 원문. USER_INPUT·CASE_CREATED는 사장님이 쓴 문장이 항상 들어가고, SYSTEM_BATCH는 배치 지시문이
+    # 들어갈 수 있다. 문장 없이 고른 값만 있는 CONFLICT_DECISION만 NULL이다.
     raw_input: str | None = Field(default=None, sa_column=Column(Text, nullable=True), description="입력 원문")
     source: str = Field(
         sa_column=Column(
