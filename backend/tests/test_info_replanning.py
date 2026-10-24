@@ -6,15 +6,16 @@ from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
-from test_action_codes import NOW, result_fixes_xfail, supervisor_request
+from test_action_codes import NOW, StubModel, result_fixes_xfail, supervisor_request
 from test_blocker_candidates import ChoiceModel, request_with_state
+from test_procedure_only_graph import graph_run_inputs
 
 from app.agent.graph import AgentGraph
 from app.agent.info_agent.agent import (
     InfoAnalysisAgent,
     InfoAnalysisGuardrailError,
 )
-from app.agent.review_tool import ReviewTool
+from app.agent.review_tool import ReviewIntegrityError, ReviewTool
 from app.agent.schemas import (
     CASE_FIELD_SPECS,
     AgentGraphInput,
@@ -22,6 +23,8 @@ from app.agent.schemas import (
     CaseSnapshot,
     InfoAnalysisInput,
     ProcedureLookupResult,
+    ReviewSubject,
+    canonical_digest,
 )
 from app.agent.supervisor.agent import SupervisorAgent
 
@@ -33,7 +36,7 @@ RESTORATION = "CONFIRM_RESTORATION_SCOPE"
 def request_for_replanning(status="NOT_REQUIRED", scope="NOT_REQUIRED"):
     base = supervisor_request()
     data = base.case_snapshot.model_dump(mode="json")
-    for field, value in (("restoration_scope", scope), ("restoration_status", status)):
+    for field, value in (("restoration_scope", scope), ("restoration_status", status), ("demolition_required", "NOT_REQUIRED")):
         data["facts"].append(
             {
                 "field_path": field,
@@ -366,13 +369,15 @@ def test_cross_procedure_source_failure_names_allowed_documents_on_retry():
 
 def test_not_required_restoration_does_not_hide_unknown_demolition():
     request = request_for_replanning()
+    request.case_snapshot.facts = [fact for fact in request.case_snapshot.facts if fact.field_path != "demolition_required"]
     request.case_snapshot.procedure_progress = []
     assert RESTORATION in InfoAnalysisAgent._analysis_step_codes(request)
     projection = InfoAnalysisAgent._prompt_input(request)
     assert projection["procedure_evidence_by_step"][FOOD] == ["doc2"]
     completed = request_for_replanning("COMPLETED", "FULL")
+    completed.case_snapshot.facts = [fact for fact in completed.case_snapshot.facts if fact.field_path != "demolition_required"]
     completed.case_snapshot.procedure_progress = []
-    assert RESTORATION not in InfoAnalysisAgent._analysis_step_codes(completed)
+    assert RESTORATION in InfoAnalysisAgent._analysis_step_codes(completed)
 
 
 def test_new_fact_still_requires_a_literal_user_source_span():
@@ -398,12 +403,12 @@ def test_new_fact_still_requires_a_literal_user_source_span():
 
 
 @pytest.mark.parametrize("already_completed", [True, False])
-def test_repeated_committed_progress_is_ignored_but_new_completion_stays_guarded(
+def test_quoted_progress_is_ignored_if_already_completed_and_otherwise_retained(
     already_completed,
 ):
     request = request_for_replanning()
     request.input.redacted_text = (
-        "임대인에게 확인했습니다. 원상복구와 철거는 모두 필요하지 않습니다."
+        "임대인에게 원상복구 범위와 철거 필요 여부를 모두 확인했습니다."
     )
     if not already_completed:
         request.case_snapshot.procedure_progress[0].status = "NOT_STARTED"
@@ -416,17 +421,16 @@ def test_repeated_committed_progress_is_ignored_but_new_completion_stays_guarded
             "observed_status": "COMPLETED",
             "source_text": request.input.redacted_text,
             "requires_confirmation": False,
-            "reason_summary": "모델이 불필요를 완료로 반복 해석한 합성 사례",
+            "reason_summary": "사용자의 범위 확인 완료 보고",
         }
     ]
     agent = InfoAnalysisAgent(Responses(raw), max_local_attempts=1)
+    result = asyncio.run(agent.analyze(request))
     if already_completed:
-        result = asyncio.run(agent.analyze(request))
         assert result.procedure_progress_observations == []
-        assert result.procedure_findings[-1].current_status.value == "COMPLETED"
     else:
-        with pytest.raises(InfoAnalysisGuardrailError):
-            asyncio.run(agent.analyze(request))
+        observation, = result.procedure_progress_observations
+        assert observation.source_span.text == request.input.redacted_text
 
 
 @pytest.mark.parametrize(
@@ -467,10 +471,10 @@ def test_document_based_progress_is_rejected_then_retried_without_losing_finding
     assert request.case_snapshot.model_dump(mode="json") == before
     feedback = " ".join(item["content"] for item in client.messages[1])
     assert f"Rejected procedure_observations for: {RESTORATION}" in feedback
-    assert "Still analyze the documents in procedure_findings" in feedback
+    assert "Still analyze the official documents" in feedback
 
 
-def test_explicit_user_progress_is_still_extracted():
+def test_explicit_free_text_progress_retains_its_exact_user_source():
     request = request_for_replanning()
     request.input.redacted_text = "합성 절차 3을 진행 중입니다."
     request.case_snapshot.procedure_progress = []
@@ -486,10 +490,94 @@ def test_explicit_user_progress_is_still_extracted():
             "reason_summary": "사용자가 본인의 실행 상태를 명시함",
         }
     ]
-    result = asyncio.run(InfoAnalysisAgent(Responses(raw)).analyze(request))
-    observation = result.procedure_progress_observations[0]
-    assert observation.observed_status == "IN_PROGRESS"
+    result = asyncio.run(InfoAnalysisAgent(Responses(raw), max_local_attempts=1).analyze(request))
+    observation, = result.procedure_progress_observations
     assert observation.source_span.text == request.input.redacted_text
+    observation.assert_input_integrity(request.input, {item.evidence_id: item for item in result.evidence_records})
+
+
+@pytest.mark.parametrize("report,status,submitted,held", [
+    ("준비사항을 확인했습니다", "IN_PROGRESS", False, False),
+    ("제출했습니다", "IN_PROGRESS", True, False),
+    ("기관 처리 결과가 완료된 것을 확인했습니다", "COMPLETED", True, False),
+    ("처리된 것 같은데 확실하지 않습니다", "COMPLETED", False, True),
+])
+def test_free_text_filing_report_retains_stages_and_holds_uncertain_completion(report, status, submitted, held):
+    request = request_for_replanning()
+    request.input.redacted_text = f"사업자등록 폐업신고를 {report}."
+    request.known_procedure_steps[0].step_name = "사업자등록 폐업신고"
+    before = request.case_snapshot.model_dump_json()
+    raw = output([finding(TAX, "doc1"), finding(FOOD, "doc2")])
+    raw["procedure_observations"] = [{
+        "step_code": TAX, "observed_status": status,
+        "source_text": request.input.redacted_text,
+        "requirements_confirmed": not held, "submitted": submitted,
+        "requires_confirmation": held,
+        "reason_summary": "모델이 사용자 실행 보고를 해석한 사례",
+    }]
+    result = asyncio.run(InfoAnalysisAgent(Responses(raw), max_local_attempts=1).analyze(request))
+    observation, = result.procedure_progress_observations
+    assert observation.observed_status == status
+    assert observation.submitted is submitted
+    assert observation.requires_confirmation is held
+    observation.assert_input_integrity(request.input, {item.evidence_id: item for item in result.evidence_records})
+    assert {item.procedure_step.step_code for item in result.procedure_findings} == {TAX, FOOD}
+    assert request.case_snapshot.model_dump_json() == before
+
+
+@pytest.mark.parametrize("held,tamper", [(False, False), (True, False), (False, True)])
+def test_quoted_progress_reaches_review_and_a_forged_event_is_rejected(held, tamper):
+    graph, request, _, _, _ = graph_run_inputs("RESULT_SUBMITTED")
+    request.trigger.input.redacted_text = "사업자등록 폐업신고를 준비 중입니다."
+    raw = output([finding(TAX, "doc1")])
+    raw["procedure_observations"] = [{
+        "step_code": TAX, "observed_status": "IN_PROGRESS",
+        "source_text": request.trigger.input.redacted_text,
+        "requires_confirmation": held, "reason_summary": "사용자의 신고 준비 보고",
+    }]
+    graph._info_agent = InfoAnalysisAgent(Responses(raw), clock=lambda: NOW, max_local_attempts=1)
+    before = request.model_dump_json()
+    outcome = asyncio.run(graph.run(request))
+    assert outcome.outcome_type == "REVIEWED_PLAN", outcome
+    outcome.assert_integrity()
+    assert request.model_dump_json() == before
+    subject = outcome.review_subject.model_copy(deep=True)
+    assert bool(subject.supervisor_draft.mutations.procedure_progress_changes) is not held
+    if not tamper:
+        return
+    source = next(item for item in subject.source_results if item.meta.component == "INFO_AGENT")
+    source.output.procedure_progress_observations[0].source_span.input_event_id = "another-event"
+    source.output_digest = canonical_digest(source.output)
+    forged = ReviewSubject.create(**{
+        key: getattr(subject, key) for key in type(subject).model_fields if key != "subject_digest"
+    })
+    client = StubModel()
+    with pytest.raises(ReviewIntegrityError):
+        asyncio.run(ReviewTool(client).review(forged))
+    assert client.calls == 0
+
+
+@pytest.mark.parametrize("committed_status", ["NOT_STARTED", "COMPLETED"])
+def test_free_text_restoration_completion_preserves_committed_facts(committed_status):
+    request = request_for_replanning(status=committed_status, scope="FULL")
+    request.input.redacted_text = "원상복구 작업을 완료했습니다."
+    before = request.case_snapshot.model_dump_json()
+    raw = output([finding(TAX, "doc1"), finding(FOOD, "doc2")])
+    raw["facts"] = [{
+        "operation": "SET", "field_path": "restoration_status", "value_type": "ENUM",
+        "value": "COMPLETED", "source_text": request.input.redacted_text,
+        "confidence_bps": 9500, "requires_confirmation": False,
+        "reason_summary": "모델이 자유문장을 원상복구 완료로 해석한 사례",
+    }]
+    agent = InfoAnalysisAgent(Responses(raw), max_local_attempts=1)
+    if committed_status == "COMPLETED":
+        result = asyncio.run(agent.analyze(request))
+        assert result.fact_candidates == []
+        assert result.conflicts == []
+    else:
+        result = asyncio.run(agent.analyze(request))
+        assert result.conflicts[0].proposed_value == "COMPLETED"
+    assert request.case_snapshot.model_dump_json() == before
 
 
 RESTORATION_RESULT = "원상복구 범위는 없고 원상복구 작업은 필요하지 않습니다."
@@ -500,7 +588,7 @@ def test_result_sentence_produces_only_the_three_stated_fact_changes(unsupported
     request = request_for_replanning()
     snapshot = request.case_snapshot.model_dump(mode="json")
     for item in snapshot["facts"]:
-        if item["field_path"] in {"restoration_scope", "restoration_status"}:
+        if item["field_path"] in {"restoration_scope", "restoration_status", "demolition_required"}:
             item.update(status="UNKNOWN", value=None, evidence_refs=[], updated_at=None)
     snapshot["procedure_progress"] = []
     text = "임대인에게 확인했습니다. " + RESTORATION_RESULT + " 철거도 필요하지 않습니다."
@@ -522,15 +610,15 @@ def test_result_sentence_produces_only_the_three_stated_fact_changes(unsupported
     rejected = deepcopy(response)
     rejected["procedure_observations"] = [{
         "step_code": RESTORATION, "observed_status": "COMPLETED",
-        "source_text": "임대인에게 확인했습니다.", "requires_confirmation": False,
-        "reason_summary": "절차를 식별하지 않는 확인 문장",
+        "source_text": "사용자가 쓰지 않은 원상복구 완료 문장입니다.", "requires_confirmation": False,
+        "reason_summary": "원문에 없는 진행 보고",
     }]
     client = Responses(*([rejected] if unsupported_completion else []), response)
     result = asyncio.run(InfoAnalysisAgent(client).analyze(request))
     assert len(client.messages) == (2 if unsupported_completion else 1)
     if unsupported_completion:
         feedback = " ".join(item["content"] for item in client.messages[1])
-        assert "The quoted sentence itself must identify the procedure" in feedback
+        assert "progress must quote the user's own execution report" in feedback
     assert {(fact.field_path, fact.value) for fact in result.fact_candidates} == {
         ("restoration_scope", "NOT_REQUIRED"),
         ("restoration_status", "NOT_REQUIRED"),
@@ -549,7 +637,7 @@ def analyze_facts(facts, text, *, requires_confirmation=False):
     request = request_for_replanning()
     snapshot = request.case_snapshot.model_dump(mode="json")
     for item in snapshot["facts"]:
-        if item["field_path"] in {"restoration_scope", "restoration_status"}:
+        if item["field_path"] in {"restoration_scope", "restoration_status", "demolition_required"}:
             item.update(status="UNKNOWN", value=None, evidence_refs=[], updated_at=None)
     snapshot["procedure_progress"] = []
     request = InfoAnalysisInput.model_validate(request.model_dump() | {
@@ -591,7 +679,7 @@ def test_rejected_facts_tell_the_retry_why(rejected_facts, reason):
     request = request_for_replanning()
     snapshot = request.case_snapshot.model_dump(mode="json")
     for item in snapshot["facts"]:
-        if item["field_path"] in {"restoration_scope", "restoration_status"}:
+        if item["field_path"] in {"restoration_scope", "restoration_status", "demolition_required"}:
             item.update(status="UNKNOWN", value=None, evidence_refs=[], updated_at=None)
     snapshot["procedure_progress"] = []
     request = InfoAnalysisInput.model_validate(request.model_dump() | {
@@ -647,7 +735,7 @@ def test_held_fact_still_produces_a_question_for_the_owner():
     base = supervisor_request()
     snapshot = base.case_snapshot.model_dump(mode="json")
     for item in snapshot["facts"]:
-        if item["field_path"] in {"restoration_scope", "restoration_status"}:
+        if item["field_path"] in {"restoration_scope", "restoration_status", "demolition_required"}:
             item.update(status="UNKNOWN", value=None, evidence_refs=[], updated_at=None)
     snapshot["procedure_progress"] = []
     snapshot = CaseSnapshot.model_validate(snapshot)
@@ -885,6 +973,8 @@ def test_result_replanning_uses_reviewed_facts_without_repeating_scope_question(
         assert actual_source.source_ref == "scope-result"
         assert actual_source.excerpt == scope_text
 
+        if held_demolition:
+            graph._supervisor._llm = ChoiceModel(information=True)
         second = await graph.run(result_request(
             next_snapshot, "demolition-result", demolition_text + " " + status_text,
         ))

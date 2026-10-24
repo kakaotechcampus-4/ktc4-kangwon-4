@@ -7,11 +7,12 @@ from datetime import datetime, timezone
 from typing import Annotated, Any, Literal, Protocol
 from uuid import UUID, uuid4
 
-from pydantic import Field, StrictBool, StrictInt, StrictStr, model_validator
+from pydantic import Field, StrictBool, StrictStr, model_validator
 
 from app.agent.action_catalog import (
     ProcedureBindings,
     build_action_candidates,
+    effective_procedure_progress,
     resolve_procedure_bindings,
 )
 from app.agent.blocker_candidates import (
@@ -19,17 +20,11 @@ from app.agent.blocker_candidates import (
     candidate_decision_fields,
     candidate_decision_violations,
     missing_info_fields,
+    resolved_blocker_candidates,
 )
 from app.agent.claim_safety import (
     REQUIRED_CLAIM_SOURCES,
     expand_evidence,
-    has_confirmation_caveat,
-    has_explicit_eligibility_language,
-    has_procedure_language,
-    has_support_action_language,
-    high_risk_metadata,
-    is_overconfident,
-    references_other_known_label,
 )
 from app.agent.enrichment import build_fact_overlays
 from app.agent.guardrails import (
@@ -126,39 +121,12 @@ class GroundedClaimSemantic(AgentSchema):
         return self
 
 
-class GroundedClaimModelOutput(AgentSchema):
-    """Provider selects a visible field; runtime injects its path and exact text."""
-
-    claim_type: ClaimType
-    target_kind: Literal[
-        "SELECTION_SUMMARY",
-        "BLOCKER_DESCRIPTION",
-        "NEXT_ACTION_TITLE",
-        "NEXT_ACTION_REASON",
-        "NEXT_ACTION_QUESTION",
-        "USER_QUESTION",
-    ]
-    target_index: Annotated[StrictInt, Field(ge=0)] | None
-    assertion_level: Literal["INFORMATION", "NEEDS_CONFIRMATION"]
-    evidence_refs: Annotated[
-        list[Annotated[StrictStr, Field(min_length=1)]], Field(min_length=1)
-    ]
-
-
 class SupervisorModelOutput(AgentSchema):
-    """Provider-facing shape; runtime applies conditional invariants next."""
+    """Select a verified candidate; runtime owns its text, target and evidence."""
 
     decision_type: DecisionType
     blocker_candidate_id: StrictStr | None = None
-    selection_summary: Annotated[StrictStr, Field(min_length=1)]
-    requires_human: StrictBool
-    evidence_refs: Annotated[
-        list[Annotated[StrictStr, Field(min_length=1)]], Field(min_length=1)
-    ]
-    blocker: Blocker
-    next_action: NextActionSemantic | None
-    questions_for_user: list[Annotated[StrictStr, Field(min_length=1)]]
-    grounded_claims: list[GroundedClaimModelOutput]
+    action_code: ActionCode | None
 
 
 class SupervisorSemanticDraft(AgentSchema):
@@ -169,6 +137,7 @@ class SupervisorSemanticDraft(AgentSchema):
         list[Annotated[StrictStr, Field(min_length=1)]], Field(min_length=1)
     ]
     blocker: Blocker
+    blockers: list[Blocker]
     next_action: NextActionSemantic | None
     questions_for_user: list[Annotated[StrictStr, Field(min_length=1)]]
     grounded_claims: list[GroundedClaimSemantic]
@@ -193,7 +162,7 @@ def _now() -> datetime:
 
 
 class SupervisorAgent:
-    """Create the sole Blocker/Next Action draft and deterministic mutations."""
+    """Return every verified Blocker and preserve the model's valid priority."""
 
     def __init__(
         self,
@@ -277,18 +246,10 @@ class SupervisorAgent:
             for candidate in blocker_candidates
             for action in candidate["actions"]
         ]
-        # The model picks evidence from a list we supply, so it should pick by a
-        # short handle rather than copy a stored identifier. Measured runs had
-        # Review reject a draft because the blocker cited an ID that was not in
-        # the supplied set, which then burned three Supervisor reworks.
-        aliases_by_evidence = {
-            evidence_id: f"e{index}"
-            for index, evidence_id in enumerate(evidence_registry, start=1)
-        }
-        evidence_by_alias = {
-            alias: evidence_id for evidence_id, alias in aliases_by_evidence.items()
-        }
-
+        information_fields = missing_info_fields(
+            request.case_snapshot, source_results, mutations, bindings
+        )
+        information_blockers = information_fields["blockers"] if information_fields else []
         prompt_input = {
             "trigger": to_model_projection(request.trigger),
             "case_snapshot": to_model_projection(request.case_snapshot),
@@ -322,50 +283,11 @@ class SupervisorAgent:
             ),
             "contract": {
                 "action_count": 1,
-                "blocker_count": {"ACTION": [1], "NEEDS_MORE_INFO": [1]},
-                "action_questions_for_user": [],
-                "needs_more_info_requires_human": True,
-                "eligibility_assertion_level": "NEEDS_CONFIRMATION",
-                "claim_target_kinds": [
-                    "SELECTION_SUMMARY",
-                    "BLOCKER_DESCRIPTION",
-                    "NEXT_ACTION_TITLE",
-                    "NEXT_ACTION_REASON",
-                    "NEXT_ACTION_QUESTION",
-                    "USER_QUESTION",
-                ],
-                "claim_text_and_path_are_runtime_injected": True,
-                "support_eligibility_is_final": False,
-                "action_target_kinds": ["PROCEDURE"],
-                "action_requires_exactly_one_target": True,
+                "primary_blocker_count": 1,
+                "blocker_count": {"minimum": 1},
                 "allowed_actions": action_candidates,
                 "blocker_candidates": blocker_candidates,
-                "high_risk_visible_text_requires_exact_grounded_claim": [
-                    "support program",
-                    "amount",
-                    "date or deadline",
-                    "eligibility",
-                    "legal",
-                    "tax",
-                ],
-                "claim_source_rules": {
-                    "procedure_or_date": ["OFFICIAL_DOCUMENT", "OFFICIAL_API"],
-                    "all_other_high_risk_claims": [
-                        "OFFICIAL_DOCUMENT",
-                        "OFFICIAL_API",
-                    ],
-                    "transitive_parent_evidence_counts": True,
-                },
-                "allowed_evidence_refs": [
-                    {
-                        "evidence_ref": aliases_by_evidence[evidence.evidence_id],
-                        "source_type": evidence.source_type.value,
-                        "freshness_status": evidence.freshness_status.value,
-                    }
-                    for evidence in evidence_registry.values()
-                ],
-                "overconfident_language_is_forbidden": True,
-                "runtime_injects_ids_and_timestamps": True,
+                "information_blockers": information_blockers,
                 "revision": {
                     "previous_draft_is_context_only": True,
                     "address_every_blocking_review_issue": True,
@@ -377,7 +299,6 @@ class SupervisorAgent:
         }
         ensure_projection_has_no_obvious_sensitive_text(prompt_input)
 
-        llm_unavailable = False
         for attempt in range(1, self._max_local_attempts + 1):
             messages = supervisor_messages(prompt_input)
             if previous_draft is not None:
@@ -385,13 +306,11 @@ class SupervisorAgent:
                     {
                         "role": "system",
                         "content": (
-                            "This is a Review revision. Treat previous_draft only as "
-                            "context: materially change or otherwise address every BLOCKING "
-                            "item in review_feedback, especially each targeted field. Rebuild "
-                            "the semantic draft from the current component_results and select "
-                            "only their evidence IDs. Do not preserve or invent runtime IDs, "
-                            "timestamps, mutations, or source call IDs; the runtime rebuilds "
-                            "those and validates all selected evidence provenance."
+                            "This is a Review revision. Use previous_draft only as context. "
+                            "Address blocking review_feedback by selecting a valid current "
+                            "candidate and action. The runtime rebuilds all text, targets, "
+                            "evidence and mutations from the selected candidate; do not "
+                            "invent replacements for rejected source content."
                         ),
                     }
                 )
@@ -400,27 +319,11 @@ class SupervisorAgent:
                     {
                         "role": "system",
                         "content": (
-                            "The prior draft failed deterministic contract validation. "
-                            "For ACTION, use exactly one selected candidate's blocker, "
-                            "one next_action, and an empty "
-                            "questions_for_user list. For NEEDS_MORE_INFO, return a blocker, "
-                            "no next_action, requires_human=true, and at least one question. "
-                            "Every ACTION must select exactly one canonical target. Use "
-                            "target_kind=PROCEDURE with a procedure_step from an Info finding, "
-                            "and select the first ranked blocker candidate and its first action. "
-                            "Every ELIGIBILITY claim must use NEEDS_CONFIRMATION. Select only "
-                            "short evidence_ref handles listed in contract.allowed_evidence_refs; never "
-                            "use a call, candidate, finding, document, or question UUID as evidence. "
-                            "Select only an available grounded-claim target_kind and use a zero-based "
-                            "target_index only for an existing question. For NEEDS_MORE_INFO about "
-                            "missing Case facts, reuse Info question candidates, avoid eligibility "
-                            "wording, and omit grounded claims that lack official evidence. Every "
-                            "visible support-program name, amount, "
-                            "date/deadline, eligibility, legal, or tax statement needs an exact "
-                            "GroundedClaim selector backed by an allowed official document or "
-                            "official API source. Never use "
-                            "overconfident wording such as guaranteed or unconditional outcomes. "
-                            "Use only IDs, facts, procedure references and evidence in INPUT_JSON."
+                            "The prior selection failed contract validation. "
+                            "For ACTION, select one blocker_candidate_id and an action_code "
+                            "from that candidate's actions. For NEEDS_MORE_INFO, select an "
+                            "information_blockers candidate_id and action_code=null. "
+                            "Return only these three fields."
                         ),
                     }
                 )
@@ -438,16 +341,13 @@ class SupervisorAgent:
                     # producing a different decision_type on replay. Supervisor
                     # has no sampling-level determinism guarantee. Runtime reuse
                     # separately checks the full request, evidence and configuration.
-                    # Same reason as the Info Agent: the evidence list is closed, so
-                    # the provider is not allowed to name anything outside it.
                     enum_constraints={
-                        "evidence_refs": sorted(evidence_by_alias),
                         "action_code": [
-                            blocker_candidates[0]["actions"][0]["action_code"]
-                        ] if blocker_candidates else [],
+                            action["action_code"] for action in action_candidates
+                        ],
                         "blocker_candidate_id": [
-                            blocker_candidates[0]["candidate_id"]
-                        ] if blocker_candidates else [],
+                            item["candidate_id"] for item in blocker_candidates
+                        ] + [item["candidate_id"] for item in information_blockers],
                     },
                 )
                 semantic = self._candidate_semantic(
@@ -464,36 +364,10 @@ class SupervisorAgent:
                     mutations=mutations,
                 )
             except LLMClientError:
-                # 모델에게서 쓸 답을 받지 못한 경우다. 통신 장애(LLMRequestError)든
-                # 형식 불일치(LLMResponseError)든, llm.py가 이미 내부에서 재시도를
-                # 끝낸 뒤 던지므로 여기서 다시 부르면 이미 재시도한 호출을 통째로
-                # 반복하게 된다. 한 번이 최대 180초라 판단 전체 제한시간만 까먹는다.
-                # 아래에서 코드가 이미 정해 둔 1순위로 내보낸다.
-                llm_unavailable = True
-                break
+                # The shared client already bounded provider retries. Never invent a plan.
+                raise
             except (GuardrailViolation, ValueError):
                 continue
-        if llm_unavailable and blocker_candidates:
-            # 모델에 닿지 못했을 때만 쓴다. 순서는 코드가 이미 정해 뒀으므로 1순위를
-            # 그대로 내보내 사장님이 빈손으로 끝나지 않게 한다. 독립 Review는 그대로
-            # 거친다. 모델이 "답은 했는데 틀린" 경우는 여기로 오지 않는다 — 그건
-            # 덮어서 넘기지 않고 실패로 남긴다(test_invented_candidate_is_rejected...).
-            return self._materialize(
-                request,
-                list(source_results),
-                self._first_candidate_semantic(request, blocker_candidates),
-                draft_version=draft_version,
-                mutations=mutations,
-            )
-        fallback = self._missing_info_fallback(request, mutations)
-        if fallback is not None:
-            return self._materialize(
-                request,
-                list(source_results),
-                fallback,
-                draft_version=draft_version,
-                mutations=mutations,
-            )
         raise SupervisorGuardrailError(
             "Supervisor failed deterministic provenance checks"
         ) from None
@@ -510,108 +384,48 @@ class SupervisorAgent:
         request: SupervisorAgentInput,
         mutations: MutationSet,
     ) -> SupervisorSemanticDraft:
+        information = missing_info_fields(
+            request.case_snapshot, request.source_results, mutations, self._bindings(request),
+            selected_candidate_id=output.blocker_candidate_id if output.decision_type == DecisionType.NEEDS_MORE_INFO else None,
+        )
         if output.decision_type == DecisionType.NEEDS_MORE_INFO:
-            if candidates or output.blocker_candidate_id is not None:
-                raise SupervisorGuardrailError(
-                    "an available blocker candidate requires ACTION"
-                )
-            fields = missing_info_fields(
-                request.case_snapshot, request.source_results, mutations,
-                self._bindings(request),
-            )
-            if fields is None:
-                raise SupervisorGuardrailError("no grounded question fallback")
-            return SupervisorSemanticDraft(**fields, grounded_claims=[])
-        candidate = next(
-            (
-                item
-                for item in candidates
-                if item["candidate_id"] == output.blocker_candidate_id
-            ),
-            None,
-        )
-        if candidate is None or output.next_action is None:
-            raise SupervisorGuardrailError(
-                "Supervisor must select an available blocker candidate"
-            )
-        # Reject invented references before normalizing a valid model choice.
-        candidate_decision_fields(
-            candidate,
-            output.next_action.action_code,
-            output.next_action.target.model_dump(mode="json"),
-        )
-        return self._first_candidate_semantic(request, candidates)
+            if output.action_code is not None or information is None or output.blocker_candidate_id is None and len(information["blockers"]) > 1:
+                raise SupervisorGuardrailError("select one available information blocker")
+            fields = information
+        else:
+            candidate = next((item for item in candidates if item["candidate_id"] == output.blocker_candidate_id), None)
+            action = next((item for item in candidate["actions"] if item["action_code"] == output.action_code), None) if candidate else None
+            if action is None:
+                raise SupervisorGuardrailError("Supervisor must select an available candidate and one of its actions")
+            fields = candidate_decision_fields(candidate, output.action_code, action["target"])
+        fields["blockers"] = [item["blocker"] for item in candidates] + (information["blockers"] if information else [])
+        return SupervisorSemanticDraft(**fields, grounded_claims=self._candidate_claims(request, fields))
 
-    def _first_candidate_semantic(
-        self,
-        request: SupervisorAgentInput,
-        candidates: list[dict[str, Any]],
-    ) -> SupervisorSemanticDraft:
-        """Build the ACTION draft from the top-priority candidate alone.
-
-        Order and wording come from `blocker_candidates`, never from the
-        model, so this is exactly what the model path returns once its
-        choice has been normalized. Keeping it separate lets a bounded
-        model failure still answer instead of ending the whole run.
-        """
-        candidate = candidates[0]
-        action = candidate["actions"][0]
-        fields = candidate_decision_fields(
-            candidate, action["action_code"], action["target"]
-        )
+    @staticmethod
+    def _candidate_claims(request, fields) -> list[GroundedClaimSemantic]:
         base = "/supervisor_draft/decision"
         texts = {
-            f"{base}/selection_summary": fields["selection_summary"],
-            f"{base}/blocker/description": fields["blocker"]["description"],
-            f"{base}/next_action/title": action["title"],
-            f"{base}/next_action/reason": action["reason"],
-            **{
-                f"{base}/next_action/questions_to_ask/{index}": text
-                for index, text in enumerate(action["questions_to_ask"])
-            },
+            f"{base}/blockers/{index}/description": (item["description"], item["evidence_refs"])
+            for index, item in enumerate(fields["blockers"])
+            if item["candidate_id"].startswith("procedure:")
         }
-        names = frozenset(
-            check.program_name
-            for source in request.source_results
-            if isinstance(source.output, SupportAnalysisResult)
-            for check in source.output.support_checks
-        )
+        if fields["next_action"] is not None:
+            action = fields["next_action"]
+            texts.update({
+                f"{base}/selection_summary": (fields["selection_summary"], fields["evidence_refs"]),
+                f"{base}/blocker/description": (fields["blocker"]["description"], fields["blocker"]["evidence_refs"]),
+                f"{base}/next_action/title": (action["title"], action["evidence_refs"]),
+                f"{base}/next_action/reason": (action["reason"], action["evidence_refs"]),
+                **{f"{base}/next_action/questions_to_ask/{index}": (text, action["evidence_refs"])
+                   for index, text in enumerate(action["questions_to_ask"])},
+            })
         claims = []
-        for path, text in texts.items():
-            kinds, _ = high_risk_metadata(text, names)
-            claim_type = (
-                ClaimType.ELIGIBILITY
-                if ClaimType.ELIGIBILITY in kinds
-                else ClaimType.TAX
-                if ClaimType.TAX in kinds
-                else ClaimType.PROCEDURE
-            )
-            claims.append(
-                GroundedClaimSemantic(
-                    claim_type=claim_type,
-                    target_path=path,
-                    text=text,
-                    assertion_level="NEEDS_CONFIRMATION",
-                    evidence_refs=fields["evidence_refs"],
-                )
-            )
-        return SupervisorSemanticDraft(**fields, grounded_claims=claims)
-
-    def _missing_info_fallback(
-        self,
-        request: SupervisorAgentInput,
-        mutations: MutationSet,
-    ) -> SupervisorSemanticDraft | None:
-        """Build a conservative question-only draft after bounded model failure."""
-        fields = missing_info_fields(
-            request.case_snapshot, request.source_results, mutations,
-            self._bindings(request),
-        )
-        return (
-            SupervisorSemanticDraft(**fields, grounded_claims=[])
-            if fields is not None
-            else None
-        )
+        for path, (text, refs) in texts.items():
+            claims.append(GroundedClaimSemantic(
+                claim_type=ClaimType.PROCEDURE, target_path=path, text=text,
+                assertion_level="NEEDS_CONFIRMATION", evidence_refs=refs,
+            ))
+        return claims
 
     @staticmethod
     def _previous_draft_projection(draft: SupervisorDraft) -> dict[str, Any]:
@@ -639,6 +453,7 @@ class SupervisorAgent:
                 "requires_human": decision.requires_human,
                 "evidence_refs": list(decision.evidence_refs),
                 "blocker": blocker,
+                "blockers": [item.model_dump(mode="json") for item in decision.blockers],
                 "next_action": next_action,
                 "questions_for_user": list(decision.questions_for_user),
             },
@@ -665,7 +480,7 @@ class SupervisorAgent:
     ) -> SupervisorDraft:
         evidence = self._evidence(sources, request)
         known_evidence = set(evidence)
-        refs = [*semantic.evidence_refs, *semantic.blocker.evidence_refs]
+        refs = [*semantic.evidence_refs, *(ref for item in semantic.blockers for ref in item.evidence_refs)]
         if semantic.next_action is not None:
             refs.extend(semantic.next_action.evidence_refs)
         for claim in semantic.grounded_claims:
@@ -679,7 +494,8 @@ class SupervisorAgent:
                 (
                     candidate
                     for candidate in build_action_candidates(
-                        sources, evidence, self._bindings(request)
+                        sources, evidence, self._bindings(request),
+                        procedure_progress=effective_procedure_progress(request.case_snapshot, mutations),
                     )
                     if candidate["action_code"] == action.action_code
                     and candidate["target"] == action.target.model_dump(mode="json")
@@ -725,41 +541,6 @@ class SupervisorAgent:
                         "procedure action requires an explicit confirmation question"
                     )
 
-                support_names = {
-                    check.program_name
-                    for source in sources
-                    if isinstance(source.output, SupportAnalysisResult)
-                    for check in source.output.support_checks
-                }
-                combined = " ".join(
-                    [
-                        action.action_code,
-                        action.title,
-                        action.reason,
-                        *action.questions_to_ask,
-                    ]
-                )
-                procedure_labels = {
-                    label
-                    for matches_for_step in findings_by_step.values()
-                    for _, finding in matches_for_step
-                    for label in (finding.step_name, finding.procedure_step.step_code)
-                }
-                if (
-                    any(name in combined for name in support_names)
-                    or has_support_action_language(combined)
-                    or references_other_known_label(
-                        combined,
-                        selected_labels={
-                            target_finding.step_name,
-                            target_finding.procedure_step.step_code,
-                        },
-                        known_labels=procedure_labels,
-                    )
-                ):
-                    raise SupervisorGuardrailError(
-                        "one action cannot mix multiple canonical targets"
-                    )
             elif isinstance(action.target, SupportActionTarget):
                 target = action.target.support_program
                 matches = [
@@ -784,47 +565,6 @@ class SupervisorAgent:
                     raise SupervisorGuardrailError(
                         "support action requires an explicit confirmation question"
                     )
-                cleaned_values = [
-                    value.replace(target_support_check.program_name, " ")
-                    for value in (
-                        action.action_code,
-                        action.title,
-                        action.reason,
-                        *action.questions_to_ask,
-                    )
-                ]
-                support_names = {
-                    check.program_name
-                    for source in sources
-                    if isinstance(source.output, SupportAnalysisResult)
-                    for check in source.output.support_checks
-                }
-                procedure_labels = {
-                    label
-                    for matches_for_step in findings_by_step.values()
-                    for _, finding in matches_for_step
-                    for label in (finding.step_name, finding.procedure_step.step_code)
-                }
-                cleaned_text = " ".join(cleaned_values)
-                if (
-                    has_procedure_language(*cleaned_values)
-                    or references_other_known_label(
-                        " ".join(
-                            (
-                                action.action_code,
-                                action.title,
-                                action.reason,
-                                *action.questions_to_ask,
-                            )
-                        ),
-                        selected_labels={target_support_check.program_name},
-                        known_labels=support_names,
-                    )
-                    or any(label in cleaned_text for label in procedure_labels)
-                ):
-                    raise SupervisorGuardrailError(
-                        "one action cannot mix multiple canonical targets"
-                    )
             else:  # pragma: no cover - discriminated schema makes this unreachable
                 raise SupervisorGuardrailError("unknown next-action target kind")
 
@@ -838,6 +578,7 @@ class SupervisorAgent:
             "evidence_refs": semantic.evidence_refs,
             "based_on_call_ids": call_ids,
             "created_at": now,
+            "blockers": semantic.blockers,
         }
         if semantic.decision_type == DecisionType.ACTION:
             assert semantic.next_action is not None
@@ -911,6 +652,9 @@ class SupervisorAgent:
             mutations=mutations,
             grounded_claims=grounded_claims,
             source_call_ids=call_ids,
+            resolved_blocker_candidate_ids=resolved_blocker_candidates(
+                request.case_snapshot, request.known_procedure_steps, mutations, self._bindings(request),
+            ),
         )
         self._validate_claim_targets(draft)
         self._validate_pre_review_claim_safety(draft, evidence, sources)
@@ -925,20 +669,6 @@ class SupervisorAgent:
     ) -> None:
         """Reject drafts that deterministic Review would block for claim safety."""
 
-        support_program_names = frozenset(
-            check.program_name
-            for source in sources
-            if isinstance(source.output, SupportAnalysisResult)
-            for check in source.output.support_checks
-        )
-        visible_strings = dict(SupervisorAgent._visible_draft_strings(draft))
-
-        for text in visible_strings.values():
-            if is_overconfident(text):
-                raise SupervisorGuardrailError(
-                    "overconfident language is not allowed in a Supervisor draft"
-                )
-
         for claim in draft.grounded_claims:
             expanded = expand_evidence(
                 [evidence_by_id[ref] for ref in claim.evidence_refs],
@@ -947,46 +677,14 @@ class SupervisorAgent:
             has_non_current_evidence = any(
                 item.freshness_status != "CURRENT" for item in expanded
             )
-            if has_non_current_evidence:
-                if claim.assertion_level == "INFORMATION":
-                    raise SupervisorGuardrailError(
-                        "non-current evidence cannot support an information assertion"
-                    )
-                if not has_confirmation_caveat(claim.text):
-                    raise SupervisorGuardrailError(
-                        "non-current evidence requires an explicit confirmation caveat"
-                    )
+            if has_non_current_evidence and claim.assertion_level == "INFORMATION":
+                raise SupervisorGuardrailError(
+                    "non-current evidence cannot support an information assertion"
+                )
             allowed_sources = REQUIRED_CLAIM_SOURCES
             if not any(item.source_type in allowed_sources for item in expanded):
                 raise SupervisorGuardrailError(
                     "grounded claim lacks an allowed authoritative source"
-                )
-
-        claim_keys = {
-            (claim.target_path, claim.text, claim.claim_type)
-            for claim in draft.grounded_claims
-        }
-        for path, text in visible_strings.items():
-            risk_types, _ = high_risk_metadata(text, support_program_names)
-            matching_claims = [
-                claim
-                for claim in draft.grounded_claims
-                if claim.target_path == path and claim.text == text
-            ]
-            if has_explicit_eligibility_language(text) and not any(
-                claim.claim_type == ClaimType.ELIGIBILITY
-                and claim.assertion_level == "NEEDS_CONFIRMATION"
-                for claim in matching_claims
-            ):
-                raise SupervisorGuardrailError(
-                    "explicit eligibility language requires a confirmation-only "
-                    "ELIGIBILITY claim"
-                )
-            if risk_types and not any(
-                (path, text, claim_type) in claim_keys for claim_type in risk_types
-            ):
-                raise SupervisorGuardrailError(
-                    "high-risk visible text requires an exact grounded claim"
                 )
 
     def _build_mutations(
@@ -1041,7 +739,19 @@ class SupervisorAgent:
                         raise SupervisorGuardrailError(
                             "procedure finding current status differs from snapshot"
                         )
-                    if before_status == observation.observed_status:
+                    before_requirements = (
+                        prior.requirements_confirmed if prior else False
+                    )
+                    before_submitted = prior.submitted if prior else False
+                    proposed_requirements = (
+                        before_requirements or observation.requirements_confirmed
+                    )
+                    proposed_submitted = before_submitted or observation.submitted
+                    if (
+                        before_status == observation.observed_status
+                        and before_requirements == proposed_requirements
+                        and before_submitted == proposed_submitted
+                    ):
                         continue
                     progress_changes.append(
                         ProcedureProgressChangeCandidate(
@@ -1049,6 +759,10 @@ class SupervisorAgent:
                             procedure_step=observation.procedure_step,
                             before_status=before_status,
                             proposed_status=observation.observed_status,
+                            before_requirements_confirmed=before_requirements,
+                            proposed_requirements_confirmed=proposed_requirements,
+                            before_submitted=before_submitted,
+                            proposed_submitted=proposed_submitted,
                             reason_summary=observation.reason_summary,
                             execution_evidence_refs=observation.source_evidence_refs,
                             procedure_analysis_call_id=source.meta.call_id,
@@ -1140,7 +854,7 @@ class SupervisorAgent:
     @staticmethod
     def _free_text(draft: SupervisorDraft) -> list[str]:
         decision = draft.decision
-        values = [decision.selection_summary, decision.blocker.description]
+        values = [decision.selection_summary, *(item.description for item in decision.blockers)]
         if decision.next_action is not None:
             values.extend(
                 [
@@ -1160,6 +874,7 @@ class SupervisorAgent:
         values = [
             (f"{base}/selection_summary", decision.selection_summary),
             (f"{base}/blocker/description", decision.blocker.description),
+            *((f"{base}/blockers/{index}/description", item.description) for index, item in enumerate(decision.blockers)),
         ]
         if decision.next_action is not None:
             action_base = f"{base}/next_action"
