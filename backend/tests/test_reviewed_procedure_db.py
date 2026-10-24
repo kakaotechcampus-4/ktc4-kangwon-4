@@ -29,7 +29,6 @@ from app.be.crud.procedure_step import get_all_procedure_steps
 from app.be.models.mixins import KST
 from app.be.schemas.case import CaseCreateRequest
 from app.be.services import case as case_service
-from app.be.services.agent_runtime import empty_support_catalog
 from app.be.services.case import create_case
 from app.be.services.case_snapshot import build_case_snapshot
 from app.be.services.reviewed_procedure import (
@@ -328,7 +327,6 @@ def test_runtime_keeps_empty_store_without_reading_procedure_file(
             known_procedure_steps=build_known_procedure_steps(
                 get_all_procedure_steps(session), [], [], db_timezone=KST,
             ),
-            support_catalog=empty_support_catalog(),
             procedure_store=InMemoryReviewedProcedureStore("synthetic/empty", ()),
         )
         try:

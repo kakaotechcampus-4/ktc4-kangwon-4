@@ -255,6 +255,7 @@ def plan_with(runtime, bindings):
                 ),
             )
             assert build.await_args.kwargs["procedure_bindings"] is bindings
+            assert "support_catalog" not in build.await_args.kwargs
             return outcome
 
     return asyncio.run(run())
@@ -308,9 +309,6 @@ def test_runtime_keeps_empty_store_without_reading_procedure_file(monkeypatch, h
     async def run():
         runtime = await runtime_module.build_runtime(
             known_procedure_steps=known(row(11, "FILE_TAX_BUSINESS_CLOSURE")),
-            support_catalog=ReviewedSupportCatalog(
-                programs=[], evidence_records=[], catalog_version="synthetic/empty",
-            ),
             procedure_store=InMemoryReviewedProcedureStore("synthetic/empty", ()),
             limits=runtime_module.RuntimeLimits(5, 60),
         )

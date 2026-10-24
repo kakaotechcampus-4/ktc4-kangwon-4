@@ -113,7 +113,7 @@ async def run_case_planning(
     request: AgentGraphInput,
     *,
     known_procedure_steps: Sequence[KnownProcedureStep],
-    procedure_bindings: ProcedureBindings,
+    procedure_bindings: ProcedureBindings | None,
     procedure_store: ReviewedProcedureStore,
     support_catalog: ReviewedSupportCatalog,
     limits: RuntimeLimits | None = None,
@@ -126,8 +126,10 @@ async def run_case_planning(
 
     REVIEWED_PLAN carries a PASS proof and uncommitted mutations. CONFLICT
     carries candidates for BE to retain. SAFE_FAILURE carries recovery fields.
+    CRISIS_SUPPORT carries guidance without business mutations.
     The BE caller rechecks the current Case and persists the reviewed outcome;
     returning this result does not report database persistence.
+    support_catalog remains a compatible BE keyword; cafe planning does not use it.
     """
     owned_request = AgentGraphInput.model_validate(request.model_dump(mode="python"))
     if isinstance(owned_request.trigger, (CaseCreatedTrigger, ResultSubmittedTrigger)):
@@ -136,13 +138,11 @@ async def run_case_planning(
         KnownProcedureStep.model_validate(step.model_dump(mode="python"))
         for step in known_procedure_steps
     ]
-    catalog = ReviewedSupportCatalog.model_validate(support_catalog.model_dump())
     # A runtime is built per request, so no decision cache: it could never hit.
     runtime = await build_runtime(
         known_procedure_steps=registry,
         procedure_bindings=procedure_bindings,
         procedure_store=procedure_store,
-        support_catalog=catalog,
         limits=limits,
     )
     try:

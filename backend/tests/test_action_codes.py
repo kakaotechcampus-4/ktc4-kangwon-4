@@ -726,20 +726,10 @@ def test_graph_distinguishes_missing_bindings_from_actionable_candidates(trigger
                 }
             )
 
-        support_payload = support_sources()[0].output.model_dump()
-        if scenario != "support_action":
-            support_payload.update({
-                "completion_status": "NO_CANDIDATE",
-                "support_checks": [],
-                "no_candidate_reason_code": "NO_REVIEWED_CANDIDATE",
-            })
-        support = SupportAnalysisResult.model_validate(support_payload)
         procedure_runner = AsyncMock()
         procedure_runner.lookup.return_value = lookup
         info_runner = AsyncMock()
         info_runner.analyze.side_effect = analyze_info
-        support_runner = AsyncMock()
-        support_runner.analyze.return_value = support
         review_client = StubModel()
         action_code = (
             "CONFIRM_SUPPORT_PROGRAM_REQUIREMENTS"
@@ -747,9 +737,9 @@ def test_graph_distinguishes_missing_bindings_from_actionable_candidates(trigger
         )
         supervisor_client = StubModel(action_code)
         graph = AgentGraph(
+            content_safety=AsyncMock(),
             procedure_tool=procedure_runner,
             info_agent=info_runner,
-            support_agent=support_runner,
             supervisor=SupervisorAgent(
                 supervisor_client, clock=lambda: NOW, max_local_attempts=1,
             ),
@@ -785,7 +775,6 @@ def test_graph_distinguishes_missing_bindings_from_actionable_candidates(trigger
             (info_runner, "analyze"),
         ):
             getattr(runner, method).assert_awaited_once()
-        support_runner.analyze.assert_not_awaited()
         assert request.model_dump_json() == original
 
     asyncio.run(run())

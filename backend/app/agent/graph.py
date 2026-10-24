@@ -7,8 +7,11 @@ owns authorization, transaction and storage guardrails.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import time
 from collections.abc import Callable, Sequence
+from contextlib import suppress
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
@@ -17,7 +20,10 @@ from uuid import UUID, uuid4
 
 from langgraph.graph import END, START, StateGraph
 
+from app.agent import content_safety
+from app.agent import schemas as agent_schemas
 from app.agent.blocker_candidates import field_confirmation_question
+from app.agent.claim_safety import expand_evidence
 from app.agent.enrichment import build_conflict_overlays, build_fact_overlays
 from app.agent.llm import current_call_budget
 from app.agent.run_scope import current_deadline
@@ -32,14 +38,13 @@ from app.agent.schemas import (
     ConflictConfirmedTrigger,
     ConflictOutcome,
     ConflictPendingInput,
-    DiscoverSupportInput,
+    EvidenceRecord,
     FactChangeSourceType,
     InfoAnalysisInput,
     InfoAnalysisResult,
     InvocationMeta,
     KnownProcedureStep,
     MissingFieldBlock,
-    PlanningContext,
     ProcedureLookupInput,
     ProcedureLookupResult,
     ReviewedPlanOutcome,
@@ -52,8 +57,6 @@ from app.agent.schemas import (
     SafeFailureOutcome,
     SupervisorAgentInput,
     SupervisorDraft,
-    SupportAgentInput,
-    SupportAnalysisResult,
     canonical_digest,
     validate_procedure_registry,
 )
@@ -74,16 +77,20 @@ class ProcedureRunner(Protocol):
     async def lookup(self, request: ProcedureLookupInput) -> ProcedureLookupResult: ...
 
 
-class SupportRunner(Protocol):
-    async def analyze(self, request: SupportAgentInput) -> SupportAnalysisResult: ...
-
-
 class SupervisorRunner(Protocol):
     async def draft(self, request: SupervisorAgentInput) -> SupervisorDraft: ...
 
 
 class ReviewRunner(Protocol):
     async def review(self, subject: ReviewSubject) -> ReviewResult: ...
+
+
+class ContentSafetyRunner(Protocol):
+    async def check_input(self, request: AgentGraphInput) -> None: ...
+
+    async def check_output(self, outcome: AgentGraphOutput) -> None: ...
+
+    async def check_sources(self, evidence_records: Sequence[EvidenceRecord]) -> None: ...
 
 
 def _utc_now() -> datetime:
@@ -102,6 +109,9 @@ _REVIEW_TRACE_COUNTERS: ContextVar[_ReviewTraceCounters | None] = ContextVar(
 )
 
 
+_CHECKED_SOURCES: ContextVar[set[str] | None] = ContextVar("agent_checked_sources", default=None)
+
+
 class AgentGraph:
     """Run the Agent components and expose only reviewed or safe outcomes."""
 
@@ -110,9 +120,9 @@ class AgentGraph:
         *,
         info_agent: InfoRunner,
         procedure_tool: ProcedureRunner,
-        support_agent: SupportRunner,
         supervisor: SupervisorRunner,
         review_tool: ReviewRunner,
+        content_safety: ContentSafetyRunner,
         known_procedure_steps: Sequence[KnownProcedureStep],
         clock: Callable[[], datetime] = _utc_now,
         uuid_factory: Callable[[], UUID] = uuid4,
@@ -124,9 +134,9 @@ class AgentGraph:
             raise ValueError("max_review_revisions must be between 0 and 2")
         self._info_agent = info_agent
         self._procedure_tool = procedure_tool
-        self._support_agent = support_agent
         self._supervisor = supervisor
         self._review_tool = review_tool
+        self._content_safety = content_safety
         self._known_procedure_steps = [
             step.model_copy(deep=True) for step in known_procedure_steps
         ]
@@ -161,18 +171,49 @@ class AgentGraph:
         run_started = time.monotonic()
         review_counters = _ReviewTraceCounters()
         counter_scope = _REVIEW_TRACE_COUNTERS.set(review_counters)
+        source_scope = _CHECKED_SOURCES.set(set())
         outcome: AgentGraphOutput
         try:
-            result = await self.compiled.ainvoke(
-                initial,
-                config={"recursion_limit": 32},
-            )
+            try:
+                await self._check_content_safety(owned_request, run_id, "INPUT")
+            except content_safety.CrisisSupportRequired as signal:
+                outcome = agent_schemas.CrisisSupportOutcome(
+                    outcome_type="CRISIS_SUPPORT",
+                    run_id=run_id,
+                    case_id=owned_request.case_snapshot.case_id,
+                    snapshot_id=owned_request.case_snapshot.snapshot_id,
+                    guidance=agent_schemas.CrisisSupportGuidance.model_validate(
+                        signal.guidance.model_dump(mode="python")
+                    ),
+                )
+            else:
+                snapshot = owned_request.case_snapshot
+                refs = {ref for item in [*snapshot.facts, *snapshot.procedure_progress]
+                        for ref in item.evidence_refs}
+                if isinstance(owned_request.trigger, ConflictConfirmedTrigger):
+                    refs.update(ref for conflict, _ in owned_request.trigger.choices()
+                                for ref in conflict.source_evidence_refs)
+                    pending = owned_request.trigger.pending_input
+                    if pending is not None:
+                        refs.update(ref for item in [*pending.fact_candidates, *pending.procedure_progress_observations]
+                                    for ref in item.source_evidence_refs)
+                records = {item.evidence_id: item for item in snapshot.evidence_records}
+                await self._check_source_bodies(expand_evidence([
+                    item for item in records.values()
+                    if item.evidence_id in refs or item.source_type == "OFFICIAL_DOCUMENT"
+                ], records))
+                result = await self.compiled.ainvoke(
+                    initial,
+                    config={"recursion_limit": 32},
+                )
+                raw_outcome = result.get("outcome")
+                if raw_outcome is None:
+                    raise RuntimeError("Agent graph terminated without a safe outcome")
+                outcome = cast(AgentGraphOutput, raw_outcome)
             if canonical_digest(owned_request.case_snapshot) != snapshot_digest:
                 raise RuntimeError("Agent graph mutated its Case snapshot")
-            raw_outcome = result.get("outcome")
-            if raw_outcome is None:
-                raise RuntimeError("Agent graph terminated without a safe outcome")
-            outcome = cast(AgentGraphOutput, raw_outcome)
+            if outcome.outcome_type != "SAFE_FAILURE":
+                await self._check_content_safety(outcome, run_id, "OUTPUT")
         except Exception as exc:  # noqa: BLE001 - public graph boundary fails closed
             failure = self._failure(exc, None)
             outcome = self._build_safe_failure(
@@ -182,6 +223,7 @@ class AgentGraph:
                 failure=failure,
             )
         finally:
+            _CHECKED_SOURCES.reset(source_scope)
             _REVIEW_TRACE_COUNTERS.reset(counter_scope)
         self._emit_run_summary(
             run_id=run_id,
@@ -190,6 +232,50 @@ class AgentGraph:
             review_counters=review_counters,
         )
         return outcome
+
+    async def _check_content_safety(
+        self,
+        value: Any,
+        run_id: UUID,
+        stage: Literal["INPUT", "OUTPUT"],
+    ) -> None:
+        started = time.monotonic()
+        error: Exception | None = None
+        budget = current_call_budget()
+        calls_before = budget.spent if budget is not None else 0
+        try:
+            self._check_deadline()
+            if stage == "INPUT":
+                await self._content_safety.check_input(value)
+            else:
+                await self._content_safety.check_output(value)
+        except content_safety.CrisisSupportRequired as exc:
+            if stage != "INPUT":
+                error = exc
+            raise
+        except Exception as exc:
+            error = exc
+            raise
+        finally:
+            model, prompt_tokens, completion_tokens = (
+                self._usage.drain() if self._usage is not None else (None, None, None)
+            )
+            event = TraceEvent(
+                run_id=str(run_id),
+                call_id=str(self._uuid()),
+                component="CONTENT_SAFETY_" + stage,
+                status="ERROR" if error else "SUCCESS",
+                latency_ms=max(0, int((time.monotonic() - started) * 1000)),
+                attempt=1,
+                model=model,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                provider_calls=budget.spent - calls_before if budget is not None else None,
+                error_code=getattr(error, "code", type(error).__name__) if error else None,
+            )
+            # Telemetry failure must not suppress a safety exception in flight.
+            with suppress(Exception):
+                self._trace_sink.emit(event)
 
     def _emit_run_summary(
         self,
@@ -308,6 +394,23 @@ class AgentGraph:
         counters = _REVIEW_TRACE_COUNTERS.get()
         if counters is not None and meta.attempt > 1:
             counters.started_rework_rounds.add(meta.attempt - 1)
+
+    async def _check_source_bodies(self, records: Sequence[EvidenceRecord]) -> None:
+        checked = _CHECKED_SOURCES.get()
+        pending = []
+        pending_keys = set()
+        for item in records:
+            if not item.excerpt:
+                continue
+            key = hashlib.sha256(json.dumps([item.source_type.value, item.excerpt], ensure_ascii=False).encode()).hexdigest()
+            if (checked is None or key not in checked) and key not in pending_keys:
+                pending.append(item)
+                pending_keys.add(key)
+        if pending:
+            self._check_deadline()
+            await self._content_safety.check_sources(pending)
+            if checked is not None:
+                checked.update(pending_keys)
 
     async def _info_node(self, state: AgentGraphState) -> dict[str, Any]:
         request = state["request"]
@@ -501,6 +604,7 @@ class AgentGraph:
             self._check_deadline()
             self._record_rework_start(meta)
             output = await self._procedure_tool.lookup(component_input)
+            await self._check_source_bodies(output.evidence_records)
             source = ReviewSourceResult(
                 meta=meta,
                 output_digest=canonical_digest(output),
@@ -515,40 +619,6 @@ class AgentGraph:
             "source_results": [*state.get("source_results", []), source],
         }
 
-    async def _support_node(self, state: AgentGraphState) -> dict[str, Any]:
-        request = state["request"]
-        meta = self._meta(
-            state,
-            Component.SUPPORT_AGENT,
-            attempt=state.get("revision_count", 0) + 1,
-        )
-        context = PlanningContext(
-            case_snapshot=request.case_snapshot,
-            fact_overlays=state.get("fact_overlays", []),
-        )
-        component_input: SupportAgentInput = DiscoverSupportInput(
-            planning_context=context,
-            as_of=self._as_of(request),
-            review_feedback=state.get("review_feedback", []),
-        )
-        started = time.monotonic()
-        try:
-            self._check_deadline()
-            self._record_rework_start(meta)
-            output = await self._support_agent.analyze(component_input)
-            source = ReviewSourceResult(
-                meta=meta,
-                output_digest=canonical_digest(output),
-                output=output,
-            )
-        except Exception as exc:  # noqa: BLE001 - graph must fail closed
-            self._emit(meta, started, "ERROR", exc)
-            return self._failure(exc, Component.SUPPORT_AGENT)
-        self._emit(meta, started, "SUCCESS")
-        return {
-            "phase": "SUPPORT_ANALYSIS",
-            "source_results": [*state.get("source_results", []), source],
-        }
 
     async def _supervisor_node(self, state: AgentGraphState) -> dict[str, Any]:
         meta = self._meta(
@@ -940,6 +1010,17 @@ class AgentGraph:
         exc: Exception,
         component: Component | None,
     ) -> dict[str, Any]:
+        if isinstance(exc, (content_safety.SafetyBlockedError, content_safety.SafetyCheckUnavailableError)):
+            return {
+                "phase": "SAFE_FAILED",
+                "failure_code": (
+                    "COMPONENT_UNAVAILABLE" if exc.retryable else "STRUCTURED_OUTPUT_FAILED"
+                ),
+                "failure_message_code": exc.code,
+                "failed_component": None,
+                "retryable": exc.retryable,
+                "recovery_action_code": "RETRY" if exc.retryable else "NONE",
+            }
         name = exc.__class__.__name__
         if name == "ProcedureBindingConfigurationError":
             return {
@@ -985,8 +1066,6 @@ class AgentGraph:
             "ProcedureLookupInputError",
             "ReviewIntegrityError",
             "ReviewOutputViolation",
-            "SupportAnalysisGuardrailError",
-            "SupportAnalysisInputError",
             "SupervisorGuardrailError",
             "ValidationError",
         } or isinstance(exc, ValueError)
@@ -995,7 +1074,6 @@ class AgentGraph:
             "LLMRequestError",
             "ProcedureSearchConfigurationError",
             "ProcedureLookupRequestError",
-            "SupportCatalogUnavailableError",
         }
         if response_like and not unavailable_like:
             failure_code = "STRUCTURED_OUTPUT_FAILED"
