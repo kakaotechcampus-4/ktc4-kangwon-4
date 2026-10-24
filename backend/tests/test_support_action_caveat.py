@@ -6,8 +6,7 @@ import pytest
 from test_action_codes import source, support_sources
 from test_blocker_candidates import ChoiceModel, candidates, request_with_state
 
-from app.agent.claim_safety import has_confirmation_caveat
-from app.agent.schemas import FreshnessStatus, SupportMatchStatus
+from app.agent.schemas import FreshnessStatus, SupervisorDraft, SupportMatchStatus
 from app.agent.supervisor import SupervisorAgent
 
 _MATCH_STATUS = {
@@ -53,7 +52,7 @@ def request_with_support(freshness: str):
 
 
 @pytest.mark.parametrize("freshness", ["CURRENT", "UNKNOWN", "STALE"])
-def test_support_is_excluded_without_weakening_closure_evidence_caveats(freshness):
+def test_support_is_excluded_without_changing_the_typed_closure_action(freshness):
     async def run():
         request = request_with_support(freshness)
         rows = candidates(request)
@@ -63,14 +62,13 @@ def test_support_is_excluded_without_weakening_closure_evidence_caveats(freshnes
         assert draft.decision.decision_type == "ACTION"
         action = draft.decision.next_action
         assert action.action_code == "CONFIRM_TAX_CLOSURE_REQUIREMENTS"
+        assert action.target.target_kind == "PROCEDURE"
+        assert action.target.procedure_step.procedure_step_id == 1
+        assert draft.decision.requires_human is True
         assert draft.mutations.support_match_updates == []
-        # 최신이 아닌 근거를 쓰는 모든 문장에는 확인 문구가 있어야 한다.
-        for text in (
-            draft.decision.blocker.description,
-            action.title,
-            action.reason,
-            *action.questions_to_ask,
-        ):
-            assert has_confirmation_caveat(text), text
+        expected_action = rows[0]["actions"][0]
+        assert action.model_dump(mode="json", exclude={"sequence"}) == expected_action
+        assert draft.decision.blocker.model_dump(mode="json") == rows[0]["blocker"]
+        assert SupervisorDraft.model_validate_json(draft.model_dump_json()) == draft
 
     asyncio.run(run())

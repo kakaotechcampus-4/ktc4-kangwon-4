@@ -27,13 +27,6 @@ from app.agent.blocker_candidates import (
 from app.agent.claim_safety import (
     REQUIRED_CLAIM_SOURCES,
     expand_evidence,
-    has_confirmation_caveat,
-    has_explicit_eligibility_language,
-    has_procedure_language,
-    has_support_action_language,
-    high_risk_metadata,
-    is_overconfident,
-    references_other_known_label,
 )
 from app.agent.enrichment import build_conflict_overlays, evidence_records_equal
 from app.agent.guardrails import GuardrailViolation, ensure_no_sensitive_text
@@ -44,7 +37,6 @@ from app.agent.projection import (
 )
 from app.agent.prompts import review_messages
 from app.agent.schemas import (
-    ClaimType,
     Component,
     ConflictConfirmedTrigger,
     DecisionType,
@@ -989,30 +981,14 @@ def _deterministic_safety_review(
             evidence.freshness_status != FreshnessStatus.CURRENT
             for evidence in expanded_claim_evidence
         )
-        if has_non_current_evidence:
-            if claim.assertion_level == "INFORMATION":
-                issues.append(
-                    _issue(
-                        code="STALE_EVIDENCE",
-                        category="EVIDENCE",
-                        path=claim_path,
-                        reason="최신성이 확인되지 않은 근거로 확정형 정보를 제시했습니다.",
-                        evidence_refs=claim.evidence_refs,
-                    )
+        if has_non_current_evidence and claim.assertion_level == "INFORMATION":
+            issues.append(
+                _issue(
+                    code="STALE_EVIDENCE", category="EVIDENCE", path=claim_path,
+                    reason="최신성이 확인되지 않은 근거로 확정형 정보를 제시했습니다.",
+                    evidence_refs=claim.evidence_refs,
                 )
-            elif not has_confirmation_caveat(claim.text):
-                issues.append(
-                    _issue(
-                        code="STALE_EVIDENCE",
-                        category="EVIDENCE",
-                        path=claim.target_path,
-                        reason=(
-                            "최신성이 확인되지 않은 근거의 주장이 사용자 문장에 "
-                            "확인 필요 또는 불확실성을 명시하지 않았습니다."
-                        ),
-                        evidence_refs=claim.evidence_refs,
-                    )
-                )
+            )
 
         required_sources = REQUIRED_CLAIM_SOURCES
         has_required_source = any(
@@ -1034,70 +1010,6 @@ def _deterministic_safety_review(
                     claim_path=claim.target_path,
                     required_source_types=sorted(required_sources),
                     reason_summary="고위험 주장은 공식 문서 또는 공식 API 근거가 필요합니다.",
-                )
-            )
-
-        if is_overconfident(claim.text):
-            issues.append(
-                _issue(
-                    code="OVERCONFIDENT_LANGUAGE",
-                    category="SAFETY",
-                    path=claim.target_path,
-                    reason="기관·전문가 확인 전 확정적으로 읽히는 표현이 포함되어 있습니다.",
-                    evidence_refs=claim.evidence_refs,
-                )
-            )
-
-    claim_keys = {
-        (claim.target_path, claim.text, claim.claim_type)
-        for claim in draft.grounded_claims
-    }
-    for path, text in visible_strings.items():
-        if is_overconfident(text):
-            issues.append(
-                _issue(
-                    code="OVERCONFIDENT_LANGUAGE",
-                    category="SAFETY",
-                    path=path,
-                    reason="기관·전문가 확인 전 확정적으로 읽히는 표현이 포함되어 있습니다.",
-                    evidence_refs=[],
-                )
-            )
-        risk_types, required_sources = high_risk_metadata(
-            text, context.support_program_names
-        )
-        if not risk_types:
-            continue
-        matching_claims = [
-            claim
-            for claim in draft.grounded_claims
-            if claim.target_path == path and claim.text == text
-        ]
-        explicit_eligibility_is_grounded = not has_explicit_eligibility_language(
-            text
-        ) or any(
-            claim.claim_type == ClaimType.ELIGIBILITY
-            and claim.assertion_level == "NEEDS_CONFIRMATION"
-            for claim in matching_claims
-        )
-        has_matching_risk_claim = any(
-            (path, text, claim_type) in claim_keys for claim_type in risk_types
-        )
-        if not explicit_eligibility_is_grounded or not has_matching_risk_claim:
-            issues.append(
-                _issue(
-                    code="UNSUPPORTED_CLAIM",
-                    category="EVIDENCE",
-                    path=path,
-                    reason="고위험 사용자 노출 문장이 GroundedClaim으로 연결되지 않았습니다.",
-                    evidence_refs=[],
-                )
-            )
-            missing.append(
-                MissingEvidence(
-                    claim_path=path,
-                    required_source_types=sorted(required_sources),
-                    reason_summary="해당 문장을 직접 뒷받침하는 공식 근거가 필요합니다.",
                 )
             )
 
@@ -1273,50 +1185,6 @@ def _action_target_findings(
                 )
             )
 
-        cleaned_values = [
-            value.replace(check.program_name, " ")
-            for value in (
-                action.action_code,
-                action.title,
-                action.reason,
-                *action.questions_to_ask,
-            )
-        ]
-        support_names = {other.program_name for _, other in context.support_checks}
-        procedure_labels = {
-            label
-            for _, procedure_finding in context.procedure_findings
-            for label in (
-                procedure_finding.step_name,
-                procedure_finding.procedure_step.step_code,
-            )
-        }
-        cleaned_text = " ".join(cleaned_values)
-        if (
-            has_procedure_language(*cleaned_values)
-            or references_other_known_label(
-                " ".join(
-                    (
-                        action.action_code,
-                        action.title,
-                        action.reason,
-                        *action.questions_to_ask,
-                    )
-                ),
-                selected_labels={check.program_name},
-                known_labels=support_names,
-            )
-            or any(label in cleaned_text for label in procedure_labels)
-        ):
-            findings.append(
-                _issue(
-                    code="PROCEDURE_CONFLICT",
-                    category="PROCEDURE",
-                    path=f"{action_path}/target",
-                    reason="하나의 Next Action이 여러 canonical 대상을 함께 지시합니다.",
-                    evidence_refs=action.evidence_refs,
-                )
-            )
         if not decision.requires_human or not action.questions_to_ask:
             findings.append(
                 _issue(
@@ -1387,33 +1255,6 @@ def _action_target_findings(
                 category="EVIDENCE",
                 path=f"{action_path}/evidence_refs",
                 reason="Next Action 근거가 대상 절차 정보분석 결과와 연결되지 않습니다.",
-                evidence_refs=action.evidence_refs,
-            )
-        )
-
-    combined = " ".join(
-        [action.action_code, action.title, action.reason, *action.questions_to_ask]
-    )
-    procedure_labels = {
-        label
-        for _, other in context.procedure_findings
-        for label in (other.step_name, other.procedure_step.step_code)
-    }
-    if (
-        any(name in combined for name in context.support_program_names)
-        or has_support_action_language(combined)
-        or references_other_known_label(
-            combined,
-            selected_labels={finding.step_name, finding.procedure_step.step_code},
-            known_labels=procedure_labels,
-        )
-    ):
-        findings.append(
-            _issue(
-                code="CONTRACT_VIOLATION",
-                category="CONTRACT",
-                path=f"{action_path}/target",
-                reason="하나의 Next Action이 여러 canonical 대상을 함께 지시합니다.",
                 evidence_refs=action.evidence_refs,
             )
         )

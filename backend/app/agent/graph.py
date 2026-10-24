@@ -22,7 +22,6 @@ from langgraph.graph import END, START, StateGraph
 
 from app.agent import content_safety
 from app.agent import schemas as agent_schemas
-from app.agent.blocker_candidates import field_confirmation_question
 from app.agent.claim_safety import expand_evidence
 from app.agent.enrichment import build_conflict_overlays, build_fact_overlays
 from app.agent.llm import current_call_budget
@@ -812,48 +811,6 @@ class AgentGraph:
         # different sequence still produce the same outcome digest.
         return [key for key in CASE_FIELD_SPECS if key in found]
 
-    @staticmethod
-    def _requested_field_guidance(
-        failure: dict[str, Any], requested_field_paths: Sequence[CaseFieldKey]
-    ) -> dict[CaseFieldKey, str]:
-        """Use existing questions for the filtered fields requested by this failure."""
-        requested = set(requested_field_paths)
-        linked: dict[CaseFieldKey, str] = {}
-        resolving: dict[CaseFieldKey, str] = {}
-        for source in failure.get("source_results", []):
-            output = source.output
-            if not isinstance(output, InfoAnalysisResult):
-                continue
-            support_only = {
-                item.field_path
-                for item in output.missing_fields
-                if set(item.blocks) == {MissingFieldBlock.SUPPORT_ANALYSIS}
-            }
-            questions = {
-                item.question_id: item
-                for item in output.question_candidates
-                if not set(item.resolves_field_paths) & support_only
-            }
-            eligible = requested - support_only
-            for missing in output.missing_fields:
-                question = questions.get(missing.question_candidate_id)
-                if (
-                    missing.field_path in eligible
-                    and question is not None
-                    and missing.field_path in question.resolves_field_paths
-                ):
-                    linked.setdefault(missing.field_path, question.text)
-            for question in questions.values():
-                for field_path in question.resolves_field_paths:
-                    if field_path in eligible:
-                        resolving.setdefault(field_path, question.text)
-        return {
-            field_path: linked.get(
-                field_path,
-                resolving.get(field_path, field_confirmation_question(field_path)),
-            )
-            for field_path in requested_field_paths
-        }
 
     @staticmethod
     def _build_safe_failure(
