@@ -1,24 +1,32 @@
 # Agent 범위
 
-Agent는 폐업 Case의 확인된 사실과 근거로 **Blocker 1개·Next Action 1개** 판단.
-현재 MVP의 정상 판단에는 근거 있는 Blocker가 항상 1개 있다.
+Agent는 폐업 Case의 확인된 사실과 근거로 **전체 Blocker와 우선 한 가지·다음 행동 또는 확인 질문**을 판단한다.
+추적 대상이 모두 완료되면 세금 후속 안내와 함께 `COMPLETED`를 반환한다.
+`ACTION`·`NEEDS_MORE_INFO`에는 전체 유효 Blocker 목록과 그중 우선 1개가 있다.
+`COMPLETED`에는 Blocker·다음 행동·확인 질문이 없다.
 사용자가 현실에서 실행한 결과를 입력하면 같은 Case를 다시 판단한다.
 모든 정상 판단은 독립 Review를 거치며 Case 저장은 BE가 담당한다.
+
+2026-10-18 사용자 확정 A안은 **절차 진행·완료를 사용자가 정해진 상태로 직접 선택**하는 방식이다.
+사용자의 자연어 진행 보고를 LLM이 구조화하고, 원문 인용·상태 전이·Review를 통과한 변경만 반환한다. 모호한 보고는 확인 전 보류하며, 신고 제출·접수와 기관 처리 완료를 구분한다. 명시적 상태 선택도 지원한다.
 
 원상복구 범위·철거 필요 여부의 미확인은 Case의 후속 진척을 막는 조건이며, 이를 해소할
 임대인 확인 행동은 실행 가능하다. 확인 행동을 할 수 있다는 이유만으로 이 Blocker를 제거하지 않는다.
 일반 절차는 공식 안내에 따른 진행 상태와 준비사항 확인을 Blocker로 제시하며,
 확인된 사실과 후보에 없는 차단 조건을 만들어내지 않는다.
+요건 미확인·실행 전·제출 후 처리 대기를 구분하고, 제출한 신고를 미제출 상태로 설명하지 않는다.
+Supervisor는 유효한 행동·질문 후보에서 우선 항목을 고르며 질문 후보가 있다는 이유만으로 `NEEDS_MORE_INFO`를 강제하지 않는다.
 
 지원사업은 MVP 실행에서 제외한다. 지원 Agent를 호출하지 않고 지원 행동·추가 질문·변경 후보를 생성하지 않는다.
-기존 지원사업 코드·자료·입력 DTO는 유지한다. 폐업 절차의 선택 순서는 [Supervisor 우선순위](./supervisor.md#업무-순서-코드와-review에서-적용)를 따른다.
+기존 지원사업 코드·자료·입력 DTO는 유지한다. 폐업 절차의 선택은 [Supervisor](./supervisor.md)를 따른다.
 
 필드·타입·enum·NULL·기본값·관계·상태 전이는 실제 DTO·BE 모델·검증 코드가 기준이다.
 [schema_table.md](../schema/schema_table.md)는 설계 배경으로 참고하며 코드와 다르면 실제 코드를 확인한다.
 MVP 단순화를 이유로 제약을 완화하지 않는다.
 낙관적 락은 쓰지 않는다 — Agent는 `CASE.case_version`과 이를 참조하는 버전 컬럼을 구현하지 않고,
 각 결과가 BE에서 받은 같은 입력 묶음을 사용했는지는 `snapshot_id`로 확인한다.
-충돌 확인에서는 대상 필드의 기존 상태·값도 대조한다.
+일괄 충돌 확인에서는 원래 snapshot ID와 당시 사실·절차 진행·근거 전체를 현재 입력과 대조한다.
+조회 시각·목록 순서만 다른 것은 상태 변경으로 보지 않는다.
 
 **규칙은 문서가 아니라 코드에 둔다.** 각 문서는 해당 구성요소의 사실만 담고 코드를 가리킨다.
 문서와 코드가 다르면 코드가 맞다.
@@ -30,7 +38,7 @@ MVP 단순화를 이유로 제약을 완화하지 않는다.
 | 절차 조회·실행 가능 판정 | [procedure-tool.md](./procedure-tool.md) | `procedure_tool/` |
 | 지원조건 비교 | [support-agent.md](./support-agent.md) | `support_agent/agent.py` |
 | 독립 검수 | [review-tool.md](./review-tool.md) | `review_tool/tool.py` |
-| 근거·개인정보·상태 차단 | [guardrails.md](./guardrails.md) | `claim_safety.py`, `guardrails.py`, `projection.py`, `enrichment.py` |
+| 유해 조력·근거·개인정보·상태 차단 | [guardrails.md](./guardrails.md) | `content_safety.py`, `claim_safety.py`, `guardrails.py`, `projection.py`, `enrichment.py` |
 
 입출력 타입·enum·불변식은 [`schemas.py`](../../backend/app/agent/schemas.py)(검증자가 계약이다),
 호출 순서·재작업·실패 경로는 [`graph.py`](../../backend/app/agent/graph.py),
@@ -45,12 +53,32 @@ Agent는 SQL·ORM으로 DB를 직접 읽거나 쓰지 않는다 — 저장·재�
 BE가 가져다 쓰는 입출력 DTO는 [`app.common.agent_dto`](../../backend/app/common/agent_dto.py)에서
 공개한다. 기존 검증 모델을 그대로 사용하며 입력은 `AgentGraphInput`, 출력은
 `AgentGraphOutput`이다. 출력의 `outcome_type`은 `REVIEWED_PLAN` / `CONFLICT` /
-`SAFE_FAILURE` 중 하나다. 필드 구성과 BE의 처리 책임은 해당 모듈 설명을 따른다.
+`SAFE_FAILURE` / `CRISIS_SUPPORT` 중 하나다. 복수 Blocker·일괄 충돌·`COMPLETED`의 계약은
+[`schemas.py`](../../backend/app/agent/schemas.py)와 아래 연동 경계를 따른다.
 
 BE에 제공하는 공용 호출 함수는 [`app.common.agent_service.run_case_planning`](../../backend/app/common/agent_service.py)이다.
 `build_planning_input`은 저장된 입력 이벤트의 ID·시각·비식별 문장과 Case snapshot으로
-`CASE_CREATED` 또는 `RESULT_SUBMITTED` 입력을 조립한다. `build_conflict_input`은 BE가
-보관한 원래 충돌 후보와 확인 시각으로 `CONFLICT_CONFIRMED` 입력을 조립한다.
+`CASE_CREATED` 또는 `RESULT_SUBMITTED` 입력을 조립한다. `build_conflict_input`은 기존 단일 채택과
+원본 후보·전체 선택·기준 snapshot·원 보고를 받는 일괄 확인을 모두 지원한다.
+일괄 입력은 `build_conflict_input(conflicts=..., selections=..., conflict_snapshot=..., pending_input=...)`으로 조립한다.
+새 `CONFLICT`의 `pending_input`도 함께 보관·복원한다. 원래 보고를 생략하면 확인 입력이 거절된다.
+
+절차 결과의 A안 입력은 `RedactedInput.procedure_reports`의 `ProcedureProgressReport`다.
+다음은 신고서를 제출했지만 기관 처리 완료는 확인하지 않은 선택값의 모양이다. 절차 ID·코드는 실제 등록값을 사용한다.
+
+```json
+{
+  "procedure_step": {"procedure_step_id": 1, "step_code": "FILE_FOOD_SERVICE_CLOSURE"},
+  "status": "IN_PROGRESS",
+  "requirements_confirmed": true,
+  "submitted": true
+}
+```
+
+`status`는 `NOT_STARTED` / `IN_PROGRESS` / `COMPLETED`다. `COMPLETED`는 사용자가 해당 절차 전체의
+처리 완료를 확인했다고 선택한 값이며, 직원·보험 집계 절차는 대상 전원·가입기관 전체를 뜻한다.
+FE는 상태·요건 확인·제출 선택을 받고, BE는 원 이벤트·절차 참조와 함께 Agent DTO로 전달한 뒤
+Review가 승인한 변경만 저장해야 한다.
 
 ```python
 request = build_planning_input(
@@ -98,19 +126,19 @@ BE가 조회한 `ProcedureStep`·`StepDependency`·`StepEligibility` 행을 변�
 각각 `load_reviewed_procedure_store`·`load_reviewed_support_catalog`로 검증한다.
 BE 모델에 없는 검수·조건·근거 필드를 만들어 채우지는 않는다.
 
-### DB 원본 공급 (아직 연결 전)
+### 절차 데이터 공급
 
-현재 Case 생성·재적재 경로는 **승인 JSON → BE Evidence 저장 → DB snapshot 조회 →
-Agent 전달**이다(#65). 절차 원본 자체를 DB에서 공급하는 경로는 아직 없다.
+자료 적재·조회는 BE가 맡으며, Agent는 전달받은 절차 목록·검수 자료·Case 근거를 사용한다.
+기존 자료 적재 경로는 **승인 JSON → BE Evidence 저장 → DB snapshot 조회 → Agent 전달**이다.
 
-그 경로를 만들려면 BE에 `procedure_step.reviewed_source_snapshot` JSON 컬럼(제안명)이
-먼저 필요하다. **현재 BE 모델에는 이 컬럼이 없다.** 컬럼이 확정되면 DB JSON 값을
-자료 객체로 바꾸는 변환 함수를 그때 같이 넣는다. 지금 미리 넣으면 앱에서 부르는 곳이
-없고 없는 컬럼을 전제하게 되어, 테스트는 통과하지만 실제로는 쓸 수 없는 코드가 된다.
+실제 등록 데이터는 [cafe.py](../../backend/app/agent/procedure_tool/cafe.py)의
+`build_cafe_procedure_steps(step_ids)`와 `build_cafe_reviewed_snapshot()`으로 만든다.
+DB가 발급한 8개 절차 ID를 넣고 `model_dump(mode="json")`으로 전달할 수 있다.
+검수 자료는 공식 원문과 대조한 고정 버전이며 Agent 요청 중 수집하지 않는다.
 
-기존 두 규칙 테이블은 스키마를 유지하며 선후 관계·적용 조건 데이터는 따로 검수해야 한다.
-운영 절차의 ID·코드·표시 이름을 테스트용 값으로 대신하지 않는다. 원본 저장 구조 변경은
-[BE 요청사항](https://app.notion.com/p/3ef3c6661b7d80c9a697d4f39dce1841)에서 별도로 다룬다.
+BE는 이 DTO 데이터를 저장·조회하고 기존 `load_reviewed_procedure_store`에 공급한다.
+테이블 이름이나 아직 없는 컬럼을 Agent 계약의 근거로 삼지 않는다.
+공식자료 공유 저장과 Case별 참조, 실제 절차·선후 관계·적용 조건 등록도 BE가 담당한다.
 
 `procedure_bindings`의 키는 AI의 기존 절차 의미 코드, 값은 BE의 실제 `ProcedureStepRef`다.
 예를 들어 `"FILE_FOOD_SERVICE_CLOSURE"`에 BE에서 조회한 식품영업 폐업 절차의 ID·코드를 연결한다.
@@ -130,10 +158,23 @@ DB 근거가 없으면 JSON 본문으로 대신하지 않고 빈 결과를 반�
 환경변수는 [`.env.example`](../../.env.example)를 따르고, 공용 runtime은 요청마다
 `run_planning(AgentGraphInput)`으로 실행한 뒤 애플리케이션 종료 시 `aclose()`로 정리한다.
 
+### Agent 테스트
+
+backend 디렉토리에서 모의 회귀 검사를 실행한다. 합성 snapshot과 모의 모델을 사용하며 실제 LLM이나 MySQL을 호출하지 않는다.
+
+```bash
+PYTHONPATH=. python -m pytest tests --ignore=tests/test_reviewed_procedure_db.py -q
+```
+
+`test_reviewed_procedure_db.py`는 testcontainers로 격리 MySQL을 생성하는 별도 통합 검사다.
+[Agent CI](../../.github/workflows/agent-ci.yml)는 `develop` 대상 PR에서 위 모의 회귀 검사만 실행한다.
+실제 모델 평가는 별도 스크립트로 실행하며 모의 검사 통과로 대신하지 않는다.
+자료 로더의 무결성·저장·새 세션 재조회·실패 시 rollback과 Agent 입력/상태/검수 제약을 구분해 검사한다.
+
 ### 검수 절차 자료 저장·조회
 
-공식 안내문을 수집·발췌한 뒤 개발자가 내용을 검수·승인한 자료를 사용한다.
-현재 #65의 BE는 승인 JSON을 읽어 Case 생성 시 공식 문서 4건을 Case별 Evidence로 적재한다.
+공식 안내문을 수집·발췌한 뒤 공식 원문과 대조해 검수·승인한 자료를 사용한다.
+BE의 자료 적재 함수는 승인 JSON을 읽어 공식 문서를 Case별 Evidence로 적재한다.
 이후 DB에서 조립한 Case snapshot과 승인 목록을 Agent에 전달한다.
 
 승인 자료는
@@ -180,12 +221,17 @@ DB의 `evidence_id`를 그대로 반환한다. Agent는 전달받은 자료를 �
 [PM의 PR #48 결정](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/48#issuecomment-5945630407)은
 `CONFLICT`일 때 확인 화면을 두고, `UPDATED`는 다시 묻지 않는 것이다.
 Agent는 확정값과 다른 새 입력을 `CONFLICT`로 반환하고, 확인 입력 뒤 재계획한다.
-확인 시 원래 후보의 snapshot ID와 대상 필드의 현재 상태·값을 검사하며,
-사용자가 선택하기 전에는 충돌하는 값을 Case에 반영하지 않는다.
+모든 항목의 선택을 모아 한 번 재판단하고 Review를 거친다. 채택한 항목만 변경 후보로 만들며,
+전부 기존 값 유지도 변경 0개로 재판단한다. 거절한 원문을 새 결과 입력으로 다시 추출하지 않는다.
+원래 snapshot ID와 당시 사실·절차 진행·근거 전체를 현재 상태와 대조하고,
+사용자가 거절한 항목도 원본 무결성·현재 상태를 검증한다. 기준 내용이 달라졌으면 기존 확인을 거부한다.
+조회 시각·목록 순서만 다른 것은 상태 변경으로 보지 않는다. 실제 저장 직전 재검사는 BE 책임이다.
 
 `conflict_ref`는 후보를 찾는 참조, `conflict_digest`는 내용 변경을 확인하는 해시이며
 서로 대체하지 않는다. 호출자는 소유권·만료·중복 사용을 검증한 뒤 서버에서 복원한 원래 후보를
-`build_conflict_input()`에 전달해야 한다. 후보 보관·복원과 사용자 확인 연결, 실패 상태 구분의 진행 상황은
+`build_conflict_input(conflicts=..., selections=..., conflict_snapshot=..., pending_input=...)`에 전달한다.
+이 함수는 기존 단일 채택도 지원한다. 실제 BE 확인 API와 저장·복원 연결은 별도 작업이다.
+후보 보관·복원과 사용자 확인 연결, 실패 상태 구분의 진행 상황은
 [#57](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/issues/57)에서 관리한다.
 
 ### DB 칸에 맞추기
@@ -210,7 +256,7 @@ Agent가 만드는 값은 BE가 그대로 DB에 넣는다. 그래서 칸의 길�
 ## 포함 기능
 
 - **사실 추출:** 허용된 Case 필드의 변경 후보와 입력 근거를 만든다. Agent가 Case를 직접 수정하지 않는다.
-- **근거 조회:** 실제 절차·지원사업 식별자와 개발자가 내용을 검수·승인한 자료만 사용한다.
+- **근거 조회:** 실제 절차·지원사업 식별자와 공식 원문 대조를 거쳐 검수·승인한 자료만 사용한다.
 - **한 판단 지점:** Supervisor가 Blocker와 Next Action을 결정한다. 하위 Agent·Tool은 분석과 근거만 반환한다.
 - **필수 Review:** 모든 정상 판단을 독립 검수한다.
 - **재계획:** 같은 Case의 행동 결과를 반영한 후보와 새 판단을 만든다.
@@ -223,38 +269,31 @@ Agent가 만드는 값은 BE가 그대로 DB에 넣는다. 그래서 칸의 길�
 - 공식 문서 자동 수집·갱신·첨부파일 파싱·배치
 - 일반화된 자율 Tool 선택 계획과 Agent 구성 확장
 - 비용·반송률 대시보드, 관측된 결함과 무관한 성능·정규식 고도화
-- 전체 폐업 완료 자동 판정, 업종·지원사업 범위 확대
+- 카페 외 업종·지원사업 범위 확대, 세금 신고 완료 추적
 
 Review·충돌 보호·근거·개인정보 검증은 축소하지 않는다.
 폐업 결정·최적 폐업일·법률/세무/자격의 최종 판단·신청/계약/외부 연락 실행은
 [팀 공통 제외 범위](../../CLAUDE.md)를 따른다.
 
-## 완료 기준
+## 검증 기준
 
-`AgentRuntime.run_planning`의 입력부터 출력까지 실제 Graph·Info·Supervisor·Review 경로로 검증한다.
-현재 MVP 검증에서는 지원 자료를 빈 목록으로 전달하며 지원사업 정상 동작은 통과 조건에서 제외한다.
-Agent 동작 검증에는 실제 LLM 호출 필수. 모의 응답 테스트나 `--validate-only`만으로 완료 처리 금지.
-응답 재사용 비활성화와 호출별 모델·`schema_name`·HTTP 상태·최종 Review 결과 확인.
+모의 테스트는 입력·상태·근거·검수 제약과 호출 순서를 검사한다. 실제 모델의 의미 판단과
+BE 저장·재조회는 별도로 검증한다. 모의 테스트나 `--validate-only` 통과를 서비스 완료로 표시하지 않는다.
 
-| 확인 항목 | 통과 기준 | 2026-09-28 실행 |
-|---|---|---|
-| 최초 판단 | Blocker 1개와 실행할 Next Action 1개를 만들고 Review를 통과한다 | 입력 4종 × 3회 중 7회 검수 통과. 통과한 7회의 Blocker·Next Action이 모두 같았다. 실패 5회는 모두 Info 호출 실패이고 판단 내용의 불일치는 없었다 |
-| 핵심 재계획 | 행동 결과를 읽기 상태에 적용해 새 Next Action을 검수하고 근거가 연결된 후보와 함께 반환한다 | 결과 입력 문장 2종 × 3회가 모두 통과했고, 같은 문장의 세 번은 Blocker·Next Action·변경 후보가 같았다. 두 문장 모두 최초 판단과 다른 행동이 나왔고, 문장이 말한 값만 바뀌었다 |
-| 충돌 | `NOT_REQUIRED`와 `REQUIRED`가 충돌하면 후보·근거를 반환하고 멈춘다. 유효한 확인 뒤 재계획·Review를 수행한다 | 실제 호출로 확인하지 않았다 |
-| 추가 질문 | 판단에 필요한 값이 없으면 미확인을 유지하고 이해할 수 있는 확인 질문을 낸다 | 최초 판단 4종 모두 미확인 필드를 유지했다 |
-| 지원 근거 | 검수 Wiki의 조건만 사용한다. 조회만으로 신청 이력이 생기지 않는다 | 검수한 지원사업 1건으로 처음 실제 호출했다. 같은 자료를 최초 판단에 넣어도 행동이 바뀌지 않는 것을 따로 확인했다 |
-| 실패·오래된 입력 | 한도 소진은 미검수 초안 없는 `SAFE_FAILURE`로 끝낸다. snapshot·현재값이 다른 충돌 확인은 거부한다 | 실패 5회 모두 미검수 초안 없이 `SAFE_FAILURE`로 끝났다. 오래된 충돌 확인 거부는 실제 호출로 확인하지 않았다 |
+실제 모델 평가는 `scripts/evaluate_planning.py`의 `--suite core`와 `--suite safety`를 수동 실행한다.
+core는 정상 처리·절차 상태 선택·충돌 선택·전체 완료·안전 요청을 포함한 23종이며,
+각 사례를 3회 실행해 69회 모두 기대 판정을 만족해야 한다. safety는 안전 검사 13종이다.
 
-첫 행동과 현실 결과 이후 행동의 **차이**를 확인한다.
-실행 횟수·코드 존재·외부 API의 HTTP 200으로 대신하지 않는다.
-서비스 전체의 완료 증거는 같은 Case의 최초 판단 → 결과 입력 → 재계획 → 저장·재조회이며,
-Agent 응답 자체는 저장 성공이 아니다.
-합성 입력·실행 기록은 Git 추적에서 제외한다.
+```bash
+python -m scripts.evaluate_planning --suite core --repeats 3 \
+  --procedure-snapshot <검수 DTO 직렬화본> --output <새 임시 경로>
+```
 
-반복 평가에서는 입력·근거·Review 설정을 고정하고, 행동 코드·대상과 실제 확인 항목을
-함께 비교한다. Supervisor 단독 비교, 전체 Graph 실행, 판단 재사용은 구분해서 검증한다.
+평가는 코드·프롬프트·데이터셋 digest, 실제 모델/effort, 자료 버전, 호출·판정·시간을 기록한다.
+실패·중단은 보존하고 기대 판정이 틀리거나 실행 중 코드가 바뀌면 실패로 종료한다.
+원문·응답 전문·인증정보는 기록하지 않는다. 모의 테스트 수나 단일 성공으로 실제 모델 반복 검증을 대체하지 않는다.
 
-위 기록은 당시 입력 방식의 결과다. 현재 DB 근거 조회를 평가하려면
+DB 근거 조회를 평가하려면
 [`evaluate_planning.py`](../../backend/scripts/evaluate_planning.py)에 BE가 조회한 공식 근거를
 포함한 `--graph-input <AgentGraphInput JSON 경로>`를 전달한다. 기본 `--case`·`--dataset` 입력에는
 `--procedure-snapshot`으로 지정한 검수 파일의 문서를 공식 근거로 붙인다.
@@ -265,197 +304,18 @@ digest로 비교한다. 공식 근거는 DB ID를 유지하지만 파생 근거�
 판단 문구 비교에서는 근거 ID를 제외한다. DB 근거 보존 여부는 별도로 검증한다.
 실행마다 새 runtime을 만들고 판단 재사용을 꺼서, 반복이 실제로 다시 호출하도록 한다.
 
-이 기록으로 말할 수 없는 것: 네 입력 모두 원상복구·철거가 미확인이라 규칙 적용 후 후보가
-하나뿐이었다. 여러 후보 사이의 선택이 일관적인지는 증명하지 않는다.
-모델은 표본 수준의 재현성을 보장하지 않으므로 이 결과는 측정이지 보장이 아니다.
+기존 API 평가는 `scripts/evaluate_case_api.py`가 격리 MySQL에서 Case 생성→조회→새 DB 세션 읽기를
+확인한다. 실제 모델·Docker가 필요하다. 새 결과 제출·충돌 확인·완료 저장 API까지 검증하는 도구는 아니다.
 
-### 2026-09-29 로컬 BE 연결 검증
-
-AI 코드 `a7c78d8`, BE 브랜치 `d5e050a` 기준. 카카오 로그인·지원사업 정상 동작은 검증 범위에서 제외.
-합성 Case snapshot과 격리 MySQL의 절차 행을 새 `run_case_planning` 함수에 전달해 실제 LLM 호출.
-최종 실행 16회 모두 `gpt-5.6-sol`·`xhigh`, HTTP 200. 모의 LLM 응답·판단 재사용 없음.
-
-| 흐름 | 최종 실행 결과 |
-|---|---|
-| 최초 판단 | 원상복구 확인 Blocker·Next Action 생성, Review PASS |
-| 신고 요건 확인 | 당시 `blocker=null`로 검증. 현재 MVP 계약은 Blocker 필수이며 해당 출력은 사용하지 않음 |
-| 결과 입력 | 원상복구·철거 불필요 변경 후보 3개와 새 행동 생성, Review PASS |
-| 확정값과 충돌 | `CONFLICT` 반환, 자동 변경 없이 확인 후보 보존 |
-| 충돌 확인 | `CONFIRMED_CONFLICT` 출처의 변경 후보·새 행동 생성, Review PASS |
-| 공식 근거 부족 | `NEEDS_MORE_INFO`·확인 질문 반환, Next Action 없음, Review PASS |
-
-실제 HTTP `POST /cases`·`GET /cases`는 200, 저장된 Case의 재조회 일치, 중복 생성은 409 확인.
-**서버 → AI → 판단 저장 → 재조회 연결은 이 검증에서 미완료.** 검증에 사용한 BE(`d5e050a`)에는
-입력 근거·snapshot 생성, Agent 호출, 판단 저장 함수가 없으며 POST/GET은 Case 열만 반환. HTTP 호출 뒤 입력 이력·근거·판단 기록은
-각각 0건. 위 AI 함수 직접 호출 검증은 서버 전체 연결의 통과 증거가 아님.
-
-### 392294c 재검증 (2026-10-01)
-
-위 2026-09-29 기록의 기준 `a7c78d8`은 **이 브랜치 이력에 없다.** 브랜치를 둘로 나눠 다시 쓰는
-과정에서 빠졌고 이후 `app/agent`·`app/common`에서 9파일이 바뀌었다. 그래서 위 표는 이 브랜치
-코드의 증거가 아니며, 아래는 `392294c` 기준 측정이다.
-
-합성 Case snapshot과 검수된 절차·지원 스냅샷을 `run_case_planning`에 전달해 실제 LLM 호출.
-세 역할 모두 `gpt-5.6-sol`, 판단 재사용 꺼짐. 11회 실행, 제공자 호출 35회.
-
-| 흐름 | 최종 실행 결과 | 소요 |
-|---|---|---|
-| 최초 판단 (입력 4종) | `ACTION`, 원상복구 확인 Blocker·Next Action, Review PASS | 102~144초 |
-| 신고 요건 확인 | `ACTION`, 식품영업 폐업신고 확인 Blocker·Next Action, Review PASS | 150초 |
-| 결과 입력 (철거) | `ACTION`, 지원 요건 확인 Blocker·Next Action, Review PASS | 139초 |
-| 결과 입력 (범위·철거) | 당시 한도(150/300초)로 2회 모두 `SAFE_FAILURE`, 180/420초에서는 `ACTION`·PASS | 300초 / 143초 |
-| 확정값과 충돌 | `CONFLICT`, 자동 변경 없이 확인 후보 보존 | 103초 |
-| 충돌 확인 | `REVIEWED_PLAN`, 확인된 값의 변경 후보와 새 행동 | 169초 |
-
-2026-09-29 기록에서 `blocker=null`로 남아 있던 "신고 요건 확인"은, Blocker 필수 계약과 절차
-확인 후보 일반화가 함께 적용되면서 근거 있는 Blocker가 나온다.
-
-이 기록으로 말할 수 없는 것: 흐름마다 1회씩만 돌렸으므로 반복 일관성은 측정하지 않았다.
-
-이 측정에서 호출 지연은 이랬다. Info 제공자가 503을 돌려줄 때 **120초**를 쓰고(4회 모두
-120.2초로 상류 고정 타임아웃으로 보인다), 성공한 Info 호출은 최대 **102초**였다.
-Supervisor·Review는 5~8초다. 당시 한도 `AGENT_LLM_TIMEOUT_SECONDS=150`·
-`AGENT_RUN_DEADLINE_SECONDS=300`은 503을 한 번도 견디지 못해, 503 두 번 뒤 3회차가
-한도에 걸려 `SAFE_FAILURE`로 끝났다. 2회 모두 같은 방식으로 실패했다.
-
-이 실측에 따라 `.env.example`을 **180/420초**로 올렸다. 근거는 503 두 번 뒤 성공하는
-경로가 120+120+105초이고 검수가 16초를 더 쓰기 때문이다. 호출 한도를 180초로 둔 것은
-성공 호출 최대치(102초)와 150초가 너무 가까워서다. 코드 상한은 600초라 둘 다 유효하다.
-세 번 모두 503이면 여전히 `SAFE_FAILURE`로 끝나는데, 그건 제공자 장애라 맞는 동작이다.
-
-위 검증은 당시 Agent 직접 호출의 결과이며, 서버 전체 연결의 통과 증거는 아니다.
-이후 BE 연결 작업과 서비스 전체 검증 결과는
+연동 진행 상황과 미완료 작업은 README에 중복 기록하지 않고
 [#56](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/issues/56)·
-[#57](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/issues/57)에서 추적한다.
+[#57](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/issues/57)과
+[현재 AI 이슈](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/issues?q=is%3Aissue%20is%3Aopen%20AI)에서 추적한다.
+연결 여부는 실제 BE 라우터·서비스와 Agent 호출 코드로 확인한다.
+Agent 함수가 구현됐다는 이유로 저장·재조회까지 완료됐다고 표시하지 않는다.
 
-### 2026-10-07 폐업 우선순위 검증
-
-`feature/agent-procedure-db-source`에서 임대인 확인 우선, 선행·진행 중 절차 정렬,
-지원 분석 호출 제외와 결과 입력의 사실 근거 검증을 보완했다.
-전체 테스트 330개(격리 MySQL 포함)와 변경 파일 Ruff가 통과했다.
-
-실제 호출은 격리 MySQL에 검수 자료 4건과 Case 근거를 저장·재조회한 뒤 실행했다.
-BE 미구현 컬럼 `reviewed_source_snapshot`은 테스트 DB에만 추가했다. 운영 DB 반영이나
-결과 mutations 저장·재조회까지 완료했다는 증거는 아니다.
-모델은 `gpt-5.6-sol`·`xhigh`, 판단 캐시는 비활성화했고 지원 분석 호출은 없었다.
-
-| 입력 | 실제 결과 |
-|---|---|
-| 동일한 최초 판단 2회 | 137초·106초, 모두 Review PASS. Blocker·Next Action이 같고 임대인 확인을 선택 |
-| 원상복구 범위 전체·철거 필요 확인 결과 | 263초, Review PASS. 두 사실의 변경 후보와 식품영업 폐업신고 준비사항 확인 행동 반환. Info HTTP 503 한 번 후 재시도 성공 |
-| 원상복구 작업·철거 불필요를 다른 표현으로 입력 — 수정 전 | 329초, Info 3회 후 `STRUCTURED_OUTPUT_FAILED`. Supervisor·Review에 도달하지 않음 |
-| 같은 결과 입력 — 사실 근거 검증 보완 후 2회 | 185초·353초, 모두 Review PASS. 원상복구 범위·작업·철거의 `NOT_REQUIRED` 후보 3건과 식품영업 폐업신고 준비사항 확인 행동 반환. 근거가 불충분한 절차 완료 후보는 각각 1회·2회 거절한 뒤 재시도 성공 |
-| 같은 결과 입력 — 절차 진행 안내까지 보완한 최종 코드 | 157초, Review PASS. 같은 사실 후보 3건과 식품영업 폐업신고 준비사항 확인 행동 반환. Info·Supervisor·Review 각 1회, 모두 HTTP 200이며 재시도 없음 |
-
-위 실패를 재현한 뒤 기존 `info_agent/agent.py`의 근거 표현 목록을 보완했다.
-`원상복구 범위는 없고`, `원상복구 작업은 필요하지 않습니다`, `철거도 필요하지 않습니다`를
-각 필드의 `NOT_REQUIRED` 근거로 인정한다. 한 필드의 표현으로 다른 필드나 작업 완료를 추정하지
-않으며, 조건문·질문·가정·이중 부정과 짧게 인용해 부정을 숨기는 입력은 회귀 테스트로 차단했다.
-절차 진행 후보의 인용문에는 절차를 식별하는 말과 실행 상태가 함께 있어야 한다는 기존 검증
-조건도 최초 지시와 재시도 안내에 명시했다. 거절된 진행 후보 때문에 유효한 사실 후보나 절차
-분석까지 삭제하지 않도록 안내한다.
-
-결과 입력 2회의 행동 코드·대상·사실 변경 후보는 같았지만, Info의 `RELEVANT` /
-`POSSIBLY_RELEVANT` 분류가 달라 Blocker 설명과 확인 질문은 달랐다. 같은 검증 상태·후보의
-우선순위를 고정한 것이며 자유 입력부터 최종 문구까지 완전히 동일함을 보장하지 않는다.
-
-### 2026-10-07 열린 PR 통합 검증
-
-Agent `75af1c5`와 당시 `develop` `73b9f5d`를 기준으로 별도 임시 작업 트리에서 확인했다.
-#63(`8ea1414`)·#67을 함께 병합한 상태에서 백엔드 테스트 330개가 통과했다.
-FE 화면 동작과 운영 DB 저장·재조회까지 검증한 결과는 아니다.
-
-#65(`07aaf75`)를 처음 추가했을 때 `app/agent/runtime.py`와 `app/common/agent_data.py`에서 충돌했다.
-DB 자료 변환 함수는 유지하고 저장 함수의 BE 이관을 반영해 충돌을 풀어도,
-`test_agent_service.py`·`test_reviewed_procedure_db.py`·`test_reviewed_procedure_import.py`가
-이동·삭제된 이름을 import해 테스트 수집 오류 3건이 발생했다.
-
-이후 [#65의 AI 후속 수정 약속](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/65#issuecomment-6030409316)에
-맞춰 #65 원본 커밋을 현재 feature 브랜치에 통합했다. BE 파일은 #65의 내용 그대로 유지하고,
-저장 함수 참조를 `app.be.services.reviewed_procedure`로 바꿨다. 삭제된 `EmptyProcedureStore`는
-기존 빈 `InMemoryReviewedProcedureStore`로 대체했다. Case 생성 시 자동 적재되는 4건을 포함해
-검증하도록 테스트를 수정했으며 전체 331개가 통과했다.
-
-CLI는 현재 BE 방식인 `--case-id`·선택적 `--source`를 사용한다. 제안 DB 컬럼이나 절차 대응표를
-요구하지 않는다. 격리 MySQL에서 기본 재적재, 새 버전 추가, 재실행 중복 방지와 이전 근거 보존을
-검증했다. `procedure_bindings=None`도 BE가 사용하는 정확한 코드 자동 대응 값으로 타입과
-설명에 명시했다. 빈 대응표 `{}`와 구분하며 runtime의 파일 자동 보충은 복원하지 않았다.
-
-수정본 `25a5cd0`을 `develop` → #63 → #65 → #67 순서로 준비한 임시 통합본에 병합해
-충돌이 없음을 확인했고, 합본에서도 백엔드 테스트 331개가 통과했다. #65를 먼저 develop에
-병합하면 이번 PR의 비교에서 #65 원본 BE 변경은 빠지고 AI 후속 변경만 남는다.
-
-현재 BE의 Case 생성 → DB 근거 재조회 → `run_case_planning(procedure_bindings=None)`도
-실제 LLM으로 확인했다. 제안 DB 컬럼 추가 없이 151초에 `REVIEWED_PLAN`·Review PASS를
-반환했으며 임대인 원상복구 범위·철거 필요 여부 확인 행동을 선택했다.
-`gpt-5.6-sol`·`xhigh`, 판단 캐시 비활성화, Info·Supervisor·Review 각 1회와 HTTP 200을 확인했다.
-
-### 2026-10-09 리뷰 반영 (#69 1차 리뷰)
-
-`develop` `f352c01`을 병합한 뒤 리뷰 지적 중 AI 담당 두 건을 고쳤다.
-전체 테스트 328개(격리 MySQL 11개 포함)와 변경 파일 Ruff가 통과했다.
-실제 LLM 호출로 다시 확인한 결과는 아니며, 아래는 코드와 테스트 기준이다.
-
-**결과 입력의 반대 뜻 문장** — 리뷰어가 올린 9문장을 재현했고 전부 같은 결과가 나왔다.
-구멍은 `_schema_enum_is_asserted`가 인정한 단서를 지운 뒤 남은 글자에 부정어가 있는지만
-보기 때문이다. 반박하는 절에는 부정어가 없어 통과한다. 확인하면서 세 가지를 더 찾았다.
-
-- 이 구멍은 `develop`에도 있다. `원상복구 불필요하다고 했는데 결국 하래요.`가 그대로 통과한다
-- `필요 없음` 값만의 문제가 아니다. `원상복구 범위는 전체라고 했다가 일부래요.`도 통과한다
-- 부정어 목록에 `안`이 없어 `철거해야 한다고 했는데 안 해도 된대요.`가 통과한다
-
-반박하는 말(`있대요`·`하라고 했어요`)을 목록으로 모으면 말투만큼 늘어나 끝나지 않으므로,
-앞뒤를 뒤집는 접속 표현(`지만`·`는데`·`인데`·`다가`·`그런데`·`결국`)만 본다.
-걸리면 막지 않고 `requires_confirmation`을 켜 되묻는다. 막으면 재시도를 거쳐 분석 전체가
-실패해 사용자가 아무 답도 받지 못하기 때문이다. 확인이 필요한 사실은 덮개를 만들지 않고
-(`enrichment.py`) Case에도 저장되지 않는다(`review_tool/tool.py`).
-
-남은 한계: 반박이 **다음 문장**에 있으면 못 잡는다. 문장을 가져오는 범위가 마침표 하나
-안쪽이라 구조상 보이지 않는다. 이번 변경으로 좁아지거나 넓어지지 않은 기존 한계다.
-
-**모델에게서 쓸 답을 못 받았을 때** — 통신 장애든 응답 형식 불일치든 1순위 후보로
-ACTION 초안을 만든다. 이전에는 `generate()` 호출이 재시도 `try` 바깥이라 선언한 3회가
-이 오류들에 전혀 동작하지 않았고, 후보가 있어도 판단 전체가 실패했다. 모델이 답은
-했는데 틀린 경우는 그대로 실패로 남긴다. 자세한 내용은 [supervisor.md](./supervisor.md).
-
-Info·Review도 같은 구조이지만 고치지 않았다. 두 곳은 코드가 답을 대신 알 수 없고,
-`llm.py`가 이미 내부 재시도를 끝낸 뒤 오류를 던지므로 여기서 다시 부르면 이미
-재시도한 호출을 반복하게 된다. 위 2026-09-29 기록의 "503 한 번에 120초"가 그 경우다.
-
-**DB 원본 공급용 변환 함수 제거** — 앱에서 부르는 곳이 없고 BE 모델에 없는
-`reviewed_source_snapshot` 컬럼을 전제했다. 컬럼이 확정될 때 함께 넣는다.
-`app/common/`은 BE 소유이므로 이 PR에서 해당 디렉터리 변경은 모두 되돌렸다.
-
-### 2026-10-09 되묻기 연결과 실제 LLM 확인
-
-확인이 필요한 사실은 Case에 저장되지 않는데, 모델은 답을 냈다고 보고 그 필드를
-`missing_fields`에 넣지 않는다. 그래서 **사실은 보류됐는데 아무도 묻지 않는** 상태가
-되어 Supervisor가 쓸 후보도 질문도 없이 끝났다. `missing_info_fields`가 보류된 사실의
-필드를 되물을 대상에 넣고, 그 근거도 함께 모으도록 보완했다.
-
-`gpt-5.6-sol`·`xhigh`, 판단 캐시 비활성화. 아래는 `scripts/evaluate_planning.py`에
-추가한 두 시나리오로 확인한 결과다.
-
-| 입력 | 결과 |
-|---|---|
-| `scope_reversed` (뒤 절이 앞 절을 뒤집음) | 모델이 사실을 제안하지 않는 경우가 많았다. 제안하지 않으면 Info가 질문을 만들어 `NEEDS_MORE_INFO`로 끝난다(3회 중 2회) |
-| `scope_benign_connective` (접속 표현은 있지만 뒤집지 않음) | 모델이 사실을 제안한다. 보류는 의도대로 동작했으나(`확인필요=1`) 판단은 `SAFE_FAILURE`로 끝났다(3회 중 3회) |
-
-두 번째 결과를 같은 입력·변경 전 코드로 다시 확인했다. 변경 전도 `SAFE_FAILURE`였고,
-실패 지점만 Supervisor에서 Review로 뒤로 밀렸다. 이번 변경이 만든 회귀가 아니다.
-
-| | 변경 전 | 변경 후 |
-|---|---|---|
-| Info | 2회(1차 거부 → 2차 통과, 확인필요=0) | 2회(1차 거부 → 2차 통과, 확인필요=1) |
-| 실패 지점 | Supervisor, `STRUCTURED_OUTPUT_FAILED` | Review, `REVIEW_RETRY_EXHAUSTED` |
-
-**확인하지 못한 것**: 보류된 사실이 실제 화면까지 되묻기로 도달하는 전체 경로.
-모델이 사실을 제안하는 입력은 Supervisor·Review의 기존 불안정성에 먼저 걸리고,
-제안하지 않는 입력은 이 변경을 거치지 않는다. 10회 넘게 실행했지만 그 조합이 나오지
-않았다. 되묻기 생성 자체는 LLM 없이 결정적으로 확인했다
-(`test_held_fact_still_produces_a_question_for_the_owner`).
-
-1차 거부는 이번 변경과 무관한 기존 검사다. 모델이 한 문장을 근거로 서로 다른 사실을
-여러 개 제안해 `fact value is not explicit in its source text`로 거부됐다.
-애매한 입력에서 Supervisor나 Review가 반복 거부해 `SAFE_FAILURE`로 끝나는 경로는
-통신 장애보다 넓게 존재한다.
+실패 응답은 [`SafeFailureOutcome`](../../backend/app/agent/schemas.py)을 따른다.
+`RETRY`는 재시도 가능·빈 요청 필드, `RESUBMIT_INPUT`은 재시도 불가·입력할 필드 목록,
+`CONTACT_SUPPORT`와 `NONE`은 재시도 불가·빈 요청 필드다. 오래된 충돌 확인의
+`STALE_CONFLICT_CONFIRMATION`만 `RESUBMIT_INPUT`의 빈 필드를 허용한다.
+필드별 안내문을 만드는 사용처 없는 내부 함수는 유지하지 않으며, 요청 필드 자체의 계약은 보존한다.

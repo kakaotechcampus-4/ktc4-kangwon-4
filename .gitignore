@@ -83,6 +83,7 @@ langfuse_data/
 /handoff.md
 /AGENTS.md
 /docs/agent/handoof.md
+/docs/agent/be-db-change-request.json
 
 # ── Agent 로컬 도구·수집 데이터 ────────────────────────
 # Local pre-integration tools and collected data. Runtime must not import these.
@@ -105,6 +106,7 @@ langfuse_data/
 
 # ── Agent 로컬 검증·개인 문서 ─────────────────────────
 # Agent development checks and their local pytest bootstrap.
+/eval-runs/
 /backend/tests/agent/
 /backend/tests/conftest.py
 # Personal implementation notes and pre-BE verification material.
@@ -139,3 +141,6 @@ langfuse_data/
 
 # Vercel CLI가 만드는 로컬 연결 정보 (프로젝트·조직 ID)
 /frontend/**/.vercel
+/plan.md
+/todo.md
+/Tech_mentoring.md
