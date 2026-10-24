@@ -88,5 +88,10 @@ def ensure_no_sensitive_text(values: Iterable[str]) -> None:
 
     for value in values:
         for label, pattern in _SENSITIVE_PATTERNS:
+            # Runtime UUIDs can contain phone-shaped digits; prose still gets checked.
+            if label == "PHONE_NUMBER" and re.fullmatch(
+                r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}", value,
+            ):
+                continue
             if pattern.search(value):
                 raise GuardrailViolation(f"sensitive output detected: {label}")
