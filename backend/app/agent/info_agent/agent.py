@@ -21,6 +21,10 @@ from pydantic import (
 
 from app.agent import action_catalog, completion, enrichment
 from app.agent.action_catalog import ProcedureBindings, resolve_procedure_bindings
+from app.agent.enrichment import (
+    build_conflict_overlays,
+    evidence_records_equal,
+)
 from app.agent.guardrails import (
     GuardrailViolation,
     ensure_no_sensitive_text,
@@ -266,7 +270,7 @@ class InfoAnalysisAgent:
         procedure_bindings = resolve_procedure_bindings(
             request.known_procedure_steps, self._procedure_bindings
         )
-        base_input = self._prompt_input(request, procedure_bindings)
+        base_input = self._prompt_input(request)
         prompt_input = {
             **base_input, "analysis_stage": "INPUT",
             "procedure_analysis_step_codes": [], "procedure_evidence_by_step": {},
@@ -304,7 +308,7 @@ class InfoAnalysisAgent:
                 if rejected_observation_codes:
                     messages.append({
                         "role": "system",
-                        "content": "Rejected procedure_observations for: "
+                        "content": "Rejected procedure progress for: "
                         + ", ".join(rejected_observation_codes)
                         + ". Quote the user's exact report of that procedure and distinguish "
                         "preparation, submission and institutional processing. Mark ambiguous "
@@ -383,12 +387,12 @@ class InfoAnalysisAgent:
                         )
                     candidate_input = self._input_analysis(request, candidate_draft)
                     candidate_pending = self._preview_mutations(
-                        request, candidate_draft, candidate_input, procedure_bindings,
+                        request, candidate_draft, candidate_input,
                     )
                     input_draft, parsed, pending = candidate_draft, candidate_input, candidate_pending
                     if parsed.conflicts:
                         return self._materialize(
-                            request, input_draft, procedure_bindings, input_analysis=parsed,
+                            request, input_draft, input_analysis=parsed,
                             required_step_codes=set(),
                         )
                 # A rejected topic check must run again even with cached input facts.
@@ -457,7 +461,7 @@ class InfoAnalysisAgent:
                     details = self._validated_draft(self._empty_output())
                 draft = self._combine_drafts(input_draft, details)
                 return self._materialize(
-                    request, draft, procedure_bindings, input_analysis=parsed,
+                    request, draft, input_analysis=parsed,
                     required_step_codes=required_codes,
                 )
             except (GuardrailViolation, ValueError) as exc:
@@ -494,10 +498,19 @@ class InfoAnalysisAgent:
     @staticmethod
     def _prompt_input(
         request: InfoAnalysisInput,
-        procedure_bindings: ProcedureBindings | None = None,
     ) -> dict[str, Any]:
         allowed = set(request.allowed_field_paths)
         aliases_by_evidence = InfoAnalysisAgent._procedure_evidence_aliases(request)
+        pending_values = []
+        confirmation = request.conflict_confirmation
+        if confirmation is not None and confirmation.pending_input is not None:
+            build_conflict_overlays(request.case_snapshot, confirmation)
+            pending_values = [
+                {"field_path": item.field_path.value, "proposed_status": "CONFIRMED",
+                 "proposed_value": item.model_dump(mode="json")["value"]}
+                for item in confirmation.pending_input.fact_candidates
+                if not item.requires_confirmation
+            ]
         return {
             # The input event ID is a runtime handle, not evidence. Showing it
             # gave the model a second identifier to reach for, and measured runs
@@ -519,9 +532,6 @@ class InfoAnalysisAgent:
                 item.model_dump(mode="json", exclude={"evidence_refs", "updated_at"})
                 for item in request.case_snapshot.procedure_progress
             ],
-            "procedure_analysis_step_codes": sorted(
-                InfoAnalysisAgent._analysis_step_codes(request, procedure_bindings)
-            ),
             "procedure_evidence_by_step": {
                 step.procedure_step.step_code: [
                     aliases_by_evidence[document.evidence_ref]
@@ -534,7 +544,7 @@ class InfoAnalysisAgent:
             "fact_overlays": [
                 item.model_dump(mode="json", include={"field_path", "proposed_status", "proposed_value"})
                 for item in request.fact_overlays
-            ],
+            ] + pending_values,
             "allowed_field_paths": [item.value for item in request.allowed_field_paths],
             "canonical_field_registry": {
                 key.value: {
@@ -701,14 +711,12 @@ class InfoAnalysisAgent:
         }
 
 
-    @classmethod
+    @staticmethod
     def _validate_procedure_coverage(
-        cls,
         request: InfoAnalysisInput,
         draft: InfoAnalysisDraft,
-        procedure_bindings: ProcedureBindings | None = None,
         *,
-        required_step_codes: set[str] | None = None,
+        required_step_codes: set[str],
     ) -> None:
         accounted_for = {item.step_code for item in draft.procedure_findings}
         for index, document in enumerate(request.procedure_lookup_result.documents):
@@ -718,11 +726,7 @@ class InfoAnalysisAgent:
                 for item in draft.uncertainties
             ):
                 accounted_for.update(document.step_codes)
-        required = (
-            cls._analysis_step_codes(request, procedure_bindings)
-            if required_step_codes is None else required_step_codes
-        )
-        omitted = required - accounted_for
+        omitted = required_step_codes - accounted_for
         if omitted:
             raise InfoAnalysisGuardrailError(
                 "supplied procedure topics were not analyzed",
@@ -768,6 +772,66 @@ class InfoAnalysisAgent:
 
 
 
+    def _retained_input_analysis(self, request: InfoAnalysisInput) -> _InputAnalysis:
+        """Revalidate immutable typed reports without replaying the original INPUT call."""
+        confirmation = request.conflict_confirmation
+        if request.input is not None or confirmation is None or confirmation.pending_input is None:
+            raise InfoAnalysisGuardrailError("retained reports require their confirmation packet")
+        build_conflict_overlays(request.case_snapshot, confirmation)
+        packet = confirmation.pending_input
+        if request.source_call_id == packet.source_info_call_id:
+            raise InfoAnalysisGuardrailError("retained reports require a fresh Info call")
+        facts = [FactCandidate.model_validate(item.model_dump()) for item in packet.fact_candidates]
+        observations = [ProcedureProgressObservation.model_validate(item.model_dump())
+                        for item in packet.procedure_progress_observations]
+        committed = {item.field_path: item for item in request.case_snapshot.facts}
+        for fact in facts:
+            current = committed.get(fact.field_path)
+            if fact.field_path not in request.allowed_field_paths or (
+                current is not None and current.status == FactStatus.CONFIRMED
+            ) or fact.operation == FactOperation.CLEAR:
+                raise InfoAnalysisGuardrailError("retained fact is no longer a nonconflicting new report")
+        known_steps = {item.procedure_step.step_code: item.procedure_step
+                       for item in request.known_procedure_steps}
+        for observation in observations:
+            if known_steps.get(observation.procedure_step.step_code) != observation.procedure_step:
+                raise InfoAnalysisGuardrailError("retained progress has an unknown procedure reference")
+            if any(
+                item.procedure_step == observation.procedure_step
+                and item.status == observation.observed_status
+                and (
+                    not getattr(observation, "requirements_confirmed", False)
+                    or getattr(item, "requirements_confirmed", False)
+                )
+                and (
+                    not getattr(observation, "submitted", False)
+                    or getattr(item, "submitted", False)
+                )
+                for item in request.case_snapshot.procedure_progress
+            ):
+                raise InfoAnalysisGuardrailError("retained progress does not advance its original state")
+        try:
+            validate_restoration_state({
+                **{item.field_path: item.status for item in request.case_snapshot.facts},
+                **{item.field_path: item.proposed_status for item in request.fact_overlays},
+                **{item.field_path: FactStatus.CONFIRMED for item in facts if not item.requires_confirmation},
+            })
+        except ValueError:
+            raise InfoAnalysisGuardrailError("retained restoration facts are inconsistent") from None
+        evidence_by_id = {item.evidence_id: item for item in confirmation.conflict_snapshot.evidence_records}
+        current_evidence = {item.evidence_id: item for item in request.case_snapshot.evidence_records}
+        if any(ref not in current_evidence or not evidence_records_equal(current_evidence[ref], evidence_by_id[ref])
+               for item in [*facts, *observations] for ref in item.source_evidence_refs):
+            raise InfoAnalysisGuardrailError("retained input evidence must remain unchanged")
+        evidence_by_span = {
+            ((item.source_span.start_offset, item.source_span.end_offset)
+             if item.source_span is not None else item.source_evidence_refs[0]):
+                evidence_by_id[item.source_evidence_refs[0]].model_copy(deep=True)
+            for item in [*facts, *observations]
+        }
+        ensure_no_sensitive_text([item.reason_summary for item in [*facts, *observations]])
+        return _InputAnalysis(facts, [], observations, evidence_by_span)
+
     def _input_analysis(
         self,
         request: InfoAnalysisInput,
@@ -777,6 +841,9 @@ class InfoAnalysisAgent:
             raise InfoAnalysisGuardrailError(
                 "new facts and procedure progress require redacted input"
             )
+        confirmation = request.conflict_confirmation
+        if confirmation is not None and confirmation.pending_input is not None:
+            return self._retained_input_analysis(request)
         allowed = set(request.allowed_field_paths)
         known_steps = {
             item.procedure_step.step_code: item.procedure_step
@@ -964,12 +1031,11 @@ class InfoAnalysisAgent:
         self,
         request: InfoAnalysisInput,
         draft: InfoAnalysisDraft,
-        procedure_bindings: ProcedureBindings,
         *,
-        input_analysis: _InputAnalysis | None = None,
-        required_step_codes: set[str] | None = None,
+        input_analysis: _InputAnalysis,
+        required_step_codes: set[str],
     ) -> InfoAnalysisResult:
-        parsed = input_analysis or self._input_analysis(request, draft)
+        parsed = input_analysis
         fact_candidates, conflicts = parsed.facts, parsed.conflicts
         observations, evidence_by_span = parsed.observations, parsed.evidence_by_span
         allowed = set(request.allowed_field_paths)
@@ -984,7 +1050,7 @@ class InfoAnalysisAgent:
             observed_codes = {
                 item.procedure_step.step_code for item in observations
                 if not item.requires_confirmation
-                and (required_step_codes is None or item.procedure_step.step_code in required_step_codes)
+                and item.procedure_step.step_code in required_step_codes
             }
             missing_observed = observed_codes - {
                 item.procedure_step.step_code for item in procedure_findings
@@ -995,7 +1061,7 @@ class InfoAnalysisAgent:
                     omitted_procedure_codes=sorted(missing_observed),
                 )
             self._validate_procedure_coverage(
-                request, draft, procedure_bindings, required_step_codes=required_step_codes,
+                request, draft, required_step_codes=required_step_codes,
             )
 
         values = {
@@ -1504,14 +1570,9 @@ class InfoAnalysisAgent:
         )
 
     @staticmethod
-    def _same_value(left: StrictScalar, right: StrictScalar) -> bool:
-        return type(left) is type(right) and left == right
-
-
-    @staticmethod
     def _empty_output() -> InfoProviderOutput:
         return InfoProviderOutput(
-            completion_status="COMPLETE", facts=[], procedure_observations=[],
+            completion_status="COMPLETE", facts=[],
             procedure_findings=[], missing_fields=[], uncertainties=[],
         )
 
@@ -1552,11 +1613,10 @@ class InfoAnalysisAgent:
         request: InfoAnalysisInput,
         draft: InfoAnalysisDraft,
         parsed: _InputAnalysis,
-        procedure_bindings: ProcedureBindings,
     ) -> MutationSet:
         """Use typed pending values only to decide which source topics to analyze."""
         result = self._materialize(
-            request, draft, procedure_bindings, input_analysis=parsed,
+            request, draft, input_analysis=parsed,
             required_step_codes=set(),
         )
         facts = [
@@ -1606,5 +1666,4 @@ __all__ = [
     "InfoAnalysisGuardrailError",
     "InfoProviderOutput",
     "MissingFieldDraft",
-    "ProcedureObservationDraft",
 ]

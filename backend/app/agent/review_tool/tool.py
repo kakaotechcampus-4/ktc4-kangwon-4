@@ -212,6 +212,14 @@ class ReviewTool:
                 "적용 오류의 issue는 해당 /supervisor_draft/mutations/ 또는 decision의 실제 "
                 "canonical 경로로 보고하세요. /trigger/ 경로를 재작업 대상으로 삼지 마세요."
             )
+            if subject.trigger.pending_input is not None:
+                base_messages[0]["content"] += (
+                    "\npending_input은 충돌 당시 함께 받은 원문과 비충돌 사실·진행 후보입니다. "
+                    "original_input의 전체 문맥과 typed 후보·근거를 새 Info 분석 및 mutation과 "
+                    "대조하세요. 승인한 충돌 변경과 별도로 이 후보의 검증된 변경도 허용됩니다. "
+                    "거절한 충돌 값을 다시 채택하거나 원문에 없는 변경을 추가하면 안 됩니다. "
+                    "보관된 후보라는 이유만으로 의미·안전·근거 검수를 통과시키지 마세요."
+                )
         last_violation: ReviewOutputViolation | None = None
 
         for attempt in range(1, self._max_output_attempts + 1):
@@ -417,7 +425,8 @@ def _validate_mutation_provenance(
             )
         except (TypeError, ValueError) as exc:
             raise ReviewIntegrityError("conflict batch provenance is invalid") from exc
-        if (
+        pending = subject.trigger.pending_input
+        if pending is None and (
             len(mutations.fact_changes) != len(expected_changes)
             or mutations.procedure_progress_changes
         ):
@@ -430,6 +439,35 @@ def _validate_mutation_provenance(
             item.confirmed_conflict_ref for item in expected_changes
         }:
             raise ReviewIntegrityError("mutations must match all accepted choices")
+        if pending is not None:
+            fresh_calls: set[UUID] = set()
+            for source in sources_by_call_id.values():
+                if not isinstance(source.output, InfoAnalysisResult):
+                    continue
+                if source.meta.call_id == pending.source_info_call_id:
+                    raise ReviewIntegrityError("pending input requires a fresh Info source call")
+                for field, identity in (
+                    ("fact_candidates", "candidate_id"),
+                    ("procedure_progress_observations", "observation_id"),
+                ):
+                    retained = getattr(pending, field)
+                    current = getattr(source.output, field)
+                    expected = {str(getattr(item, identity)): canonical_digest(item)
+                                for item in retained}
+                    actual = {str(getattr(item, identity)): canonical_digest(item)
+                              for item in current}
+                    if len(expected) != len(retained) or len(actual) != len(current) or actual != expected:
+                        raise ReviewIntegrityError("fresh Info must preserve every pending candidate")
+                fresh_calls.add(source.meta.call_id)
+            if not fresh_calls or any(
+                item.source_call_id not in fresh_calls
+                for item in mutations.fact_changes
+                if item.source_type == FactChangeSourceType.INFO_ANALYSIS
+            ) or any(
+                item.procedure_analysis_call_id not in fresh_calls
+                for item in mutations.procedure_progress_changes
+            ):
+                raise ReviewIntegrityError("pending mutations require their fresh Info analysis")
     snapshot_facts = {fact.field_path: fact for fact in subject.snapshot.facts}
     for candidate in mutations.fact_changes:
         if candidate.source_type == FactChangeSourceType.CONFIRMED_CONFLICT:
@@ -719,6 +757,12 @@ def _review_prompt_projection(
             confirmation_payload["selections"] = [
                 selection.model_dump(mode="json") for selection in subject.trigger.selections
             ]
+        if subject.trigger.pending_input is not None:
+            confirmation_payload["pending_input"] = _minimize_prompt_value(
+                subject.trigger.pending_input.model_dump(mode="json", include={
+                    "original_input", "fact_candidates", "procedure_progress_observations",
+                })
+            )
 
     snapshot_payload = subject.snapshot.model_dump(
         mode="json", exclude={"evidence_records"}

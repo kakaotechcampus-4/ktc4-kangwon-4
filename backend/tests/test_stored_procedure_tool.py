@@ -148,8 +148,8 @@ def test_mapped_db_evidence_reaches_info_supervisor_and_review():
         source_call_id=UUID(int=3), procedure_lookup_call_id=UUID(int=5),
         procedure_lookup_result=result, review_feedback=[],
     )
-    projected = InfoAnalysisAgent._prompt_input(info_request, bindings)
-    assert projected["procedure_analysis_step_codes"] == [ref.step_code]
+    projected = InfoAnalysisAgent._prompt_input(info_request)
+    assert InfoAnalysisAgent._analysis_step_codes(info_request, bindings) == {ref.step_code}
     assert projected["procedure_evidence_by_step"] == {ref.step_code: ["doc1"]}
     item = finding(ref.step_code, "doc1")
     item["summary"]["text"] = evidence.excerpt
