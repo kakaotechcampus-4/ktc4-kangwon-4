@@ -9,18 +9,21 @@ from typing import Any
 
 from app.agent.action_catalog import (
     ACTION_DEFINITIONS,
+    PROCEDURE_LABELS,
     ProcedureBindings,
     build_action_candidates,
+    effective_procedure_progress,
     resolve_procedure_bindings,
 )
 from app.agent.claim_safety import expand_evidence
 from app.agent.procedure_tool.rules import (
+    employment_history_conflicts,
+    procedure_applicability,
     procedure_constraints,
     procedure_plan_constraints,
 )
 from app.agent.schemas import (
     ActionDecisionDraft,
-    CaseFieldKey,
     CaseSnapshot,
     DecisionDraft,
     EvidenceRecord,
@@ -29,32 +32,40 @@ from app.agent.schemas import (
     MutationSet,
     ReviewSourceResult,
 )
+from app.agent.schemas import AgentFieldKey as CaseFieldKey
 
-_PROCEDURE_LABELS = {
-    "FILE_TAX_BUSINESS_CLOSURE": "사업자 폐업신고",
-    "FILE_FOOD_SERVICE_CLOSURE": "식품영업 폐업신고",
-    "REPORT_WORKPLACE_INSURANCE_CLOSURE": "사업장 탈퇴 신고",
-}
 _QUESTIONS = {
     "business_type": "어떤 가게를 운영하시나요?",
     "franchise_status": "프랜차이즈 가게인가요?",
     "lease_status": "가게 자리를 월세, 무상 임차, 자가 중 어떤 방식으로 사용하시나요?",
     "employee_count": "직원이 몇 명인가요?",
+    "had_employees": "직원을 고용한 적이 있나요?",
+    "pension_enrolled": "이번 폐업 대상 사업장의 국민연금 가입 이력이 있나요? 이미 탈퇴했어도 알려주세요.",
+    "health_insurance_enrolled": "이번 폐업 대상 사업장의 건강보험 가입 이력이 있나요? 이미 탈퇴했어도 알려주세요.",
+    "employment_insurance_enrolled": "이번 폐업 대상 사업장의 고용보험 가입 이력이 있나요? 이미 종료했어도 알려주세요.",
+    "industrial_accident_insurance_enrolled": "이번 폐업 대상 사업장의 산재보험 가입 이력이 있나요? 이미 종료했어도 알려주세요.",
     "restoration_scope": "확인한 원상복구 범위가 있으면 알려주세요.",
     "restoration_scope_detail": "확인한 원상복구 범위의 구체적인 내용을 알려주세요.",
     "demolition_required": "철거가 필요한지 확인한 내용이 있으면 알려주세요.",
     "restoration_status": "원상복구 작업이 어디까지 진행됐는지 알려주세요.",
 }
+
 _FIELD_LABELS = {
     "business_type": "가게 업종",
     "franchise_status": "프랜차이즈 여부",
     "lease_status": "가게 자리의 임차 형태",
     "employee_count": "직원 수",
+    "had_employees": "직원 고용 이력",
+    "pension_enrolled": "사업장 국민연금 가입 이력",
+    "health_insurance_enrolled": "사업장 건강보험 가입 이력",
+    "employment_insurance_enrolled": "사업장 고용보험 가입 이력",
+    "industrial_accident_insurance_enrolled": "사업장 산재보험 가입 이력",
     "restoration_scope": "원상복구 범위",
     "restoration_scope_detail": "원상복구 범위의 구체적인 내용",
     "demolition_required": "철거 필요 여부",
     "restoration_status": "원상복구 진행 상태",
 }
+
 
 
 def field_confirmation_question(field_path: CaseFieldKey) -> str:
@@ -86,6 +97,7 @@ def _decision_fields(
         "requires_human": True,
         "evidence_refs": candidate["evidence_refs"],
         "blocker": candidate["blocker"],
+        "blockers": [candidate["blocker"]],
         "next_action": action,
         "questions_for_user": [],
     }
@@ -117,11 +129,6 @@ def build_blocker_candidates(
 ) -> list[dict[str, Any]]:
     """Rank all executable closure candidates; support is outside the MVP."""
     resolved_bindings = resolve_procedure_bindings(steps, procedure_bindings)
-    if missing_info_fields(
-        snapshot, sources, mutations, resolved_bindings, held_only=True
-    ) is not None:
-        return []
-
     values = _values(snapshot, mutations)
     state_refs = list(
         dict.fromkeys(ref for fact in snapshot.facts for ref in fact.evidence_refs)
@@ -132,7 +139,6 @@ def build_blocker_candidates(
         for ref in change.source_evidence_refs
         if ref not in state_refs
     )
-    completed = values.get("restoration_status") == "COMPLETED"
     missing = [
         label
         for key, label in (
@@ -142,8 +148,7 @@ def build_blocker_candidates(
         if key not in values
     ]
     restoration_first = (
-        not completed
-        and bool(missing)
+        bool(missing)
         and values.get("lease_status") in {"LEASED_PAID", "LEASED_FREE"}
     )
     findings = {
@@ -156,7 +161,14 @@ def build_blocker_candidates(
         for finding in source.output.procedure_findings
     }
     groups: dict[str, dict[str, Any]] = {}
-    for row in build_action_candidates(sources, evidence_by_id, resolved_bindings):
+    for row in build_action_candidates(
+        sources,
+        evidence_by_id,
+        resolved_bindings,
+        procedure_progress=effective_procedure_progress(
+            snapshot, mutations, known_steps=steps, procedure_bindings=resolved_bindings,
+        ),
+    ):
         target = row["target"]
         if target["target_kind"] != "PROCEDURE":
             continue
@@ -164,7 +176,7 @@ def build_blocker_candidates(
         step_code = reference["step_code"]
         finding = findings[(reference["procedure_step_id"], step_code)]
         definition = ACTION_DEFINITIONS[row["action_code"]]
-        logical_code = definition.procedure_logical_code
+        logical_code = row["logical_code"]
         # A current source can support asking whether a procedure applies.
         # Submission still requires established relevance and master rules.
         if finding.relevance != "RELEVANT":
@@ -182,6 +194,13 @@ def build_blocker_candidates(
                 continue
         key = f"procedure:{reference['procedure_step_id']}"
         refs = list(finding.evidence_refs)
+        for progress in snapshot.procedure_progress:
+            if progress.procedure_step == finding.procedure_step:
+                refs.extend(progress.evidence_refs)
+        for change in mutations.procedure_progress_changes:
+            if change.procedure_step == finding.procedure_step:
+                refs.extend(change.execution_evidence_refs)
+        refs = list(dict.fromkeys(refs))
         if logical_code == "CONFIRM_RESTORATION_SCOPE":
             if not restoration_first:
                 continue
@@ -199,36 +218,47 @@ def build_blocker_candidates(
             ]
         else:
             assert logical_code is not None
-            label = _PROCEDURE_LABELS[logical_code]
+            label = PROCEDURE_LABELS[logical_code]
             evidence = expand_evidence(
                 [evidence_by_id[ref] for ref in finding.evidence_refs],
                 evidence_by_id,
             )
             confirmation = definition.confirmation_only
             applicability_unknown = finding.relevance == "POSSIBLY_RELEVANT"
+            processing = row["phase"] == "PROCESSING"
             description = (
-                f"{label} 안내의 현재 적용 여부를 확인할 필요가 있습니다."
+                f"{label}는 제출됐지만 기관 처리 완료 여부는 아직 확인되지 않았습니다."
+                if processing
+                else f"{label} 완료가 아직 확인되지 않았습니다."
+                if not confirmation
+                else f"{label} 안내의 현재 적용 여부를 확인할 필요가 있습니다."
                 if any(item.freshness_status != "CURRENT" for item in evidence)
                 else f"{label} 대상 여부와 준비사항을 확인할 필요가 있습니다."
                 if applicability_unknown
                 else f"{label}의 진행 상태와 준비사항을 확인할 필요가 있습니다."
             )
             title = (
-                f"담당 기관에 {label} 대상 여부와 준비사항을 확인하세요."
+                f"담당 기관에 {label}의 처리 완료 여부를 확인하세요."
+                if processing
+                else f"담당 기관에 {label} 대상 여부와 준비사항을 확인하세요."
                 if applicability_unknown
                 else f"담당 기관에 {label} 준비사항을 확인하세요."
                 if confirmation
-                else f"{label}를 제출하세요."
+                else f"{label}를 진행하세요."
             )
             reason = (
-                "제공된 공식 안내가 가게에 적용되는지 담당 기관에 확인할 필요가 있습니다."
+                f"{label}의 제출과 기관 처리 완료는 구분해 확인해야 합니다."
+                if processing
+                else "제공된 공식 안내가 가게에 적용되는지 담당 기관에 확인할 필요가 있습니다."
                 if applicability_unknown
                 else f"제공된 공식 안내를 바탕으로 {label}에 필요한 준비를 확인하세요."
                 if confirmation
                 else finding.required_actions[0].text
             )
             questions = (
-                [
+                ["해당 절차의 기관 처리가 완료되었는지 확인해 주시겠습니까?"]
+                if processing
+                else [
                     (
                         f"제 가게가 {label} 대상인지, 해당하면 필요한 서류와 제출 방법은 "
                         "무엇인지 확인해 주시겠습니까?"
@@ -239,6 +269,35 @@ def build_blocker_candidates(
                 if confirmation
                 else ["제출한 신고서와 첨부서류가 접수되었는지 확인해 주시겠습니까?"]
             )
+            if logical_code in {
+                "PERFORM_RESTORATION", "RETURN_PREMISES", "SETTLE_EMPLOYEE_PAYMENTS",
+            }:
+                preparation_title, execution_title, preparation_question, progress_question = {
+                    "PERFORM_RESTORATION": (
+                        "원상복구·철거 작업의 적용 여부와 준비사항을 확인하세요.",
+                        "확인한 범위의 원상복구·철거 작업을 진행하세요.",
+                        "확인한 범위에 맞춰 원상복구·철거 작업 준비를 마치셨나요?",
+                        "확인한 범위의 원상복구·철거 작업은 어디까지 진행됐나요?",
+                    ),
+                    "RETURN_PREMISES": (
+                        "임대인에게 점포 반환 준비사항을 확인하세요.",
+                        "임대인에게 점포를 반환하세요.",
+                        "임대인과 점포 반환 준비사항을 확인하셨나요?",
+                        "임대인에게 점포 반환을 마치셨나요?",
+                    ),
+                    "SETTLE_EMPLOYEE_PAYMENTS": (
+                        "대상 직원 전원의 임금·퇴직급여 정산 준비사항을 확인하세요.",
+                        "대상 직원 전원의 임금·퇴직급여 등 해당하는 금품을 정산하세요.",
+                        "대상 직원 전원에게 지급할 금품과 정산 준비사항을 확인하셨나요?",
+                        "대상 직원 전원의 임금·퇴직급여 등 해당하는 금품 정산을 모두 마치셨나요?",
+                    ),
+                }[logical_code]
+                title = preparation_title if confirmation else execution_title
+                reason = (
+                    f"제공된 공식 안내를 바탕으로 {label}의 적용 여부와 준비사항을 확인하세요."
+                    if confirmation else finding.required_actions[0].text
+                )
+                questions = [preparation_question if confirmation else progress_question]
         action = {key: row[key] for key in ("action_code", "target")}
         action.update(
             title=title, reason=reason, questions_to_ask=questions, evidence_refs=refs
@@ -247,7 +306,7 @@ def build_blocker_candidates(
         candidate = {
             "candidate_id": key,
             "evidence_refs": decision_refs,
-            "blocker": {"description": description, "evidence_refs": decision_refs},
+            "blocker": {"candidate_id": key, "description": description, "evidence_refs": decision_refs},
             "actions": [action],
         }
         # Reuse the exact registry, dependency, applicability and completion guard
@@ -262,7 +321,8 @@ def build_blocker_candidates(
                 "based_on_call_ids": [str(source.meta.call_id) for source in sources],
             }
         )
-        if procedure_plan_constraints(steps, snapshot, mutations, preview):
+        if procedure_plan_constraints(steps, snapshot, mutations, preview,
+                                      procedure_bindings=resolved_bindings):
             continue
         if key in groups:
             groups[key]["actions"].append(action)
@@ -270,12 +330,10 @@ def build_blocker_candidates(
             groups[key] = candidate
     progress = {
         item.procedure_step.procedure_step_id: item.status
-        for item in snapshot.procedure_progress
+        for item in effective_procedure_progress(
+            snapshot, mutations, known_steps=steps, procedure_bindings=resolved_bindings,
+        )
     }
-    progress.update(
-        (change.procedure_step.procedure_step_id, change.proposed_status)
-        for change in mutations.procedure_progress_changes
-    )
     prerequisites = {
         dependency.prerequisite_procedure_step_id
         for step in steps
@@ -290,6 +348,8 @@ def build_blocker_candidates(
             snapshot,
             mutations.fact_changes,
             mutations.procedure_progress_changes,
+            known_steps=steps,
+            procedure_bindings=resolved_bindings,
         )
         for dependency in step.dependencies
         if dependency.dependency_type == "SEQUENTIAL"
@@ -297,7 +357,14 @@ def build_blocker_candidates(
 
     def priority(candidate: dict[str, Any]) -> tuple[bool, bool, bool, str]:
         action = candidate["actions"][0]
-        logical = ACTION_DEFINITIONS[action["action_code"]].procedure_logical_code
+        logical = next(
+            (
+                code
+                for code, ref in resolved_bindings.items()
+                if ref.model_dump(mode="json") == action["target"]["procedure_step"]
+            ),
+            None,
+        )
         step_id = action["target"]["procedure_step"]["procedure_step_id"]
         return (
             logical != "CONFIRM_RESTORATION_SCOPE",
@@ -317,6 +384,7 @@ def build_blocker_candidates(
     return sorted(groups.values(), key=priority)
 
 
+
 def missing_info_fields(
     snapshot: CaseSnapshot,
     sources: Sequence[ReviewSourceResult],
@@ -324,45 +392,11 @@ def missing_info_fields(
     procedure_bindings: ProcedureBindings | None = None,
     *,
     held_only: bool = False,
+    selected_candidate_id: str | None = None,
+    known_procedure_steps: Sequence[KnownProcedureStep] = (),
 ) -> dict[str, Any] | None:
     """Ask about one unresolved decision blocker in the existing question order."""
     values = _values(snapshot, mutations)
-    progress = {
-        (
-            item.procedure_step.procedure_step_id,
-            item.procedure_step.step_code,
-        ): item.status
-        for item in snapshot.procedure_progress
-    }
-    progress.update(
-        (
-            (item.procedure_step.procedure_step_id, item.procedure_step.step_code),
-            item.proposed_status,
-        )
-        for item in mutations.procedure_progress_changes
-    )
-    restoration_ref = (
-        procedure_bindings.get("CONFIRM_RESTORATION_SCOPE")
-        if procedure_bindings is not None
-        else None
-    )
-    restoration_questions_resolved = values.get(
-        "restoration_status"
-    ) == "COMPLETED" or any(
-        status == "COMPLETED"
-        and (
-            (
-                restoration_ref is not None
-                and (step_id, code)
-                == (
-                    restoration_ref.procedure_step_id,
-                    restoration_ref.step_code,
-                )
-            )
-            or (procedure_bindings is None and code == "CONFIRM_RESTORATION_SCOPE")
-        )
-        for (step_id, code), status in progress.items()
-    )
     restoration_detail_unnecessary = (
         values.get("restoration_status") == "NOT_REQUIRED"
         or values.get("restoration_scope") == "NOT_REQUIRED"
@@ -413,10 +447,6 @@ def missing_info_fields(
             for item in source.output.missing_fields
         )
         and not (
-            restoration_questions_resolved
-            and path.value.startswith(("restoration_", "demolition_"))
-        )
-        and not (
             restoration_detail_unnecessary and path.value == "restoration_scope_detail"
         )
     }
@@ -429,26 +459,49 @@ def missing_info_fields(
         if candidate.field_path.value in _QUESTIONS
         and candidate.field_path.value not in values
         and not (
-            restoration_questions_resolved
-            and candidate.field_path.value.startswith(("restoration_", "demolition_"))
-        )
-        and not (
             restoration_detail_unnecessary
             and candidate.field_path.value == "restoration_scope_detail"
         )
     }
-    paths = held_paths if held_only or held_paths else missing_paths
-    missing = next((path for path in _QUESTIONS if path in paths), None)
+    required_history = set()
+    history_fields = {
+        "had_employees", "pension_enrolled", "health_insurance_enrolled",
+        "employment_insurance_enrolled", "industrial_accident_insurance_enrolled",
+    }
+    for step in known_procedure_steps:
+        if procedure_applicability(step, snapshot, mutations.fact_changes) is False:
+            continue
+        for condition in step.eligibility_conditions:
+            if condition.condition_key in history_fields:
+                required_history.add(condition.condition_key)
+            elif condition.condition_key == "has_workplace_insurance":
+                required_history.update(history_fields - {"had_employees"})
+    required_history.difference_update(values)
+    if employment_history_conflicts(values):
+        required_history.add("had_employees")
+    paths = held_paths if held_only else held_paths | missing_paths | required_history
+    if values.get("restoration_scope") not in {"PARTIAL", "FULL"}:
+        paths.discard("restoration_status")
+    ordered = [path for path in _QUESTIONS if path in paths]
+    if selected_candidate_id is None:
+        missing = next(iter(ordered), None)
+    else:
+        missing = next((path for path in ordered if f"missing:{path}" == selected_candidate_id), None)
     if missing is None:
         return None
     questions = [_QUESTIONS[missing]]
     description = f"{_FIELD_LABELS[missing]} 확인이 필요합니다."
+    blockers = [
+        {"candidate_id": f"missing:{path}", "description": f"{_FIELD_LABELS[path]} 확인이 필요합니다.", "evidence_refs": refs}
+        for path in ordered
+    ]
     return {
         "decision_type": "NEEDS_MORE_INFO",
         "selection_summary": description,
         "requires_human": True,
         "evidence_refs": refs,
-        "blocker": {"description": description, "evidence_refs": refs},
+        "blocker": {"candidate_id": f"missing:{missing}", "description": description, "evidence_refs": refs},
+        "blockers": blockers,
         "next_action": None,
         "questions_for_user": questions,
     }
@@ -460,22 +513,100 @@ def candidate_decision_violations(
     fallback: dict[str, Any] | None,
 ) -> list[tuple[str, str]]:
     """Shared by Supervisor and independent Review, including a forced-model PASS."""
+    if decision.blocker is None:
+        return [("/decision/blocker", "an unfinished candidate decision requires a primary blocker")]
     expected = fallback
-    if decision.next_action is not None:
-        expected = (
-            _decision_fields(candidates[0], candidates[0]["actions"][0])
-            if candidates
-            else None
+    expected_blockers = [item["blocker"] for item in candidates]
+    if fallback is not None:
+        expected_blockers.extend(fallback["blockers"])
+    if fallback is not None and decision.next_action is None:
+        selected = next(
+            (
+                item
+                for item in fallback["blockers"]
+                if item["candidate_id"] == decision.blocker.candidate_id
+            ),
+            None,
         )
-    elif candidates:
-        expected = None
+        if selected is not None:
+            field_path = selected["candidate_id"].removeprefix("missing:")
+            expected = {
+                **fallback,
+                "blocker": selected,
+                "selection_summary": selected["description"],
+                "questions_for_user": [_QUESTIONS[field_path]],
+            }
+    if decision.next_action is not None:
+        selected = next(
+            (
+                item
+                for item in candidates
+                if item["candidate_id"] == decision.blocker.candidate_id
+            ),
+            None,
+        )
+        try:
+            expected = (
+                candidate_decision_fields(
+                    selected,
+                    decision.next_action.action_code,
+                    decision.next_action.target.model_dump(mode="json"),
+                )
+                if selected is not None
+                else None
+            )
+        except ValueError:
+            expected = None
     if expected is None:
         return [("/decision", "decision is outside the current blocker candidates")]
     actual = decision.model_dump(mode="json")
     if actual.get("next_action") is not None:
         actual["next_action"].pop("sequence")
-    return [
+    violations = [
         (f"/decision/{key}", "decision differs from verified blocker state or action")
         for key, value in expected.items()
-        if actual.get(key) != value
+        if key != "blockers" and actual.get(key) != value
     ]
+    expected_by_id = {item["candidate_id"]: item for item in expected_blockers}
+    actual_by_id = {
+        item.candidate_id: item.model_dump(mode="json") for item in decision.blockers
+    }
+    if len(actual_by_id) != len(decision.blockers) or actual_by_id != expected_by_id:
+        violations.append(
+            (
+                "/decision/blockers",
+                "blockers must contain every verified candidate exactly once",
+            )
+        )
+    return violations
+
+
+def resolved_blocker_candidates(snapshot, known_steps, mutations, bindings) -> list[str]:
+    """Only confirmed state can resolve a stored candidate; omission is no proof."""
+    values = _values(snapshot, mutations)
+    progress = {(item.procedure_step.procedure_step_id, item.procedure_step.step_code): item.status
+                for item in effective_procedure_progress(
+                    snapshot, mutations, known_steps=known_steps, procedure_bindings=bindings,
+                )}
+    registry = {str(item.procedure_step.procedure_step_id): item for item in known_steps}
+    resolved = []
+    for candidate_id in snapshot.active_blocker_candidate_ids:
+        if candidate_id.startswith("missing:"):
+            field = candidate_id.removeprefix("missing:")
+            if field in values and not (
+                field == "had_employees" and employment_history_conflicts(values)
+            ):
+                resolved.append(candidate_id)
+        elif candidate_id.startswith("procedure:"):
+            step = registry.get(candidate_id.removeprefix("procedure:"))
+            if step is None or step.deprecated_at is not None:
+                continue
+            excluded = procedure_applicability(step, snapshot, mutations.fact_changes) is False
+            if (
+                excluded
+                or progress.get((step.procedure_step.procedure_step_id, step.procedure_step.step_code)) == "COMPLETED"
+                or step.procedure_step == bindings.get("CONFIRM_RESTORATION_SCOPE")
+                and all(field in values for field in ("restoration_scope", "demolition_required"))
+            ):
+                resolved.append(candidate_id)
+    return resolved
