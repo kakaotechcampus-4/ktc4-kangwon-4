@@ -958,6 +958,7 @@ def _deterministic_safety_review(
             subject.source_results,
             draft.mutations,
             procedure_bindings,
+            known_procedure_steps=subject.known_procedure_steps,
         ),
     ):
         issues.append(
@@ -975,7 +976,10 @@ def _deterministic_safety_review(
         and candidate["target"] == action.target.model_dump(mode="json")
         for candidate in build_action_candidates(
             subject.source_results, context.evidence_by_id, procedure_bindings,
-            procedure_progress=effective_procedure_progress(subject.snapshot, draft.mutations),
+            procedure_progress=effective_procedure_progress(
+                subject.snapshot, draft.mutations, known_steps=subject.known_procedure_steps,
+                procedure_bindings=procedure_bindings,
+            ),
         )
     ):
         issues.append(
@@ -988,7 +992,8 @@ def _deterministic_safety_review(
             )
         )
     for path, reason in procedure_plan_constraints(
-        subject.known_procedure_steps, subject.snapshot, draft.mutations, draft.decision
+        subject.known_procedure_steps, subject.snapshot, draft.mutations, draft.decision,
+        procedure_bindings=procedure_bindings,
     ):
         issues.append(
             _issue(
