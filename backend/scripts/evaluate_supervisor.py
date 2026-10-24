@@ -17,18 +17,11 @@ from time import perf_counter
 from uuid import uuid4
 
 import httpx
+
 from app.agent.llm import LLMCallBudget, LLMConfig, StructuredLLMClient
 from app.agent.review_tool import ReviewTool
 from app.agent.schemas import ReviewSubject, SupervisorAgentInput, canonical_digest
 from app.agent.supervisor import SupervisorAgent
-
-
-class MeasuredSupervisor(SupervisorAgent):
-    fallback_used = False
-
-    def _missing_info_fallback(self, *args, **kwargs):
-        self.fallback_used = True
-        return super()._missing_info_fallback(*args, **kwargs)
 
 
 async def trial(request, config, review_config):
@@ -61,7 +54,6 @@ async def trial(request, config, review_config):
         "review_model": review_config.model,
         "review_reasoning_effort": review_config.reasoning_effort,
         "status": "ERROR",
-        "fallback_used": False,
         "stage": "SUPERVISOR",
         "calls": calls,
         "limits": {
@@ -88,14 +80,13 @@ async def trial(request, config, review_config):
             client=review_http,
             call_budget=budget,
         )
-        supervisor = MeasuredSupervisor(
+        supervisor = SupervisorAgent(
             supervisor_client,
             max_local_attempts=1,
             clock=lambda: request.case_snapshot.captured_at,
         )
         try:
             draft = await supervisor.draft(request.model_copy(deep=True))
-            result["fallback_used"] = supervisor.fallback_used
             result["supervisor_ms"] = round((perf_counter() - start) * 1000)
             result["draft"] = draft.model_dump(mode="json")
             result["stage"] = "REVIEW"
@@ -116,9 +107,7 @@ async def trial(request, config, review_config):
             ).review(subject)
             result["review"] = review.model_dump(mode="json")
             result["status"] = (
-                "SUPERVISOR_FALLBACK"
-                if supervisor.fallback_used
-                else "REVIEWED_PLAN"
+                "REVIEWED_PLAN"
                 if review.verdict.value == "PASS"
                 else "REVIEW_REJECTED"
             )
@@ -130,8 +119,6 @@ async def trial(request, config, review_config):
                 "code": getattr(exc, "code", None),
                 "status_code": getattr(exc, "status_code", None),
             }
-        finally:
-            result["fallback_used"] = supervisor.fallback_used
     result["elapsed_ms"] = round((perf_counter() - start) * 1000)
     result["provider_calls"] = budget.spent
     return result
