@@ -14,6 +14,7 @@ from app.agent.action_catalog import (
     ACTION_DEFINITIONS,
     ProcedureBindings,
     build_action_candidates,
+    effective_procedure_progress,
     resolve_procedure_bindings,
 )
 from app.agent.blocker_candidates import (
@@ -359,6 +360,17 @@ def _validate_integrity(subject: ReviewSubject) -> _ReviewContext:
 
     _validate_procedure_analysis_provenance(sources_by_call_id)
     _validate_mutation_provenance(subject, sources_by_call_id)
+    for source in subject.source_results:
+        if not isinstance(source.output, InfoAnalysisResult):
+            continue
+        for observation in source.output.procedure_progress_observations:
+            original_input = getattr(subject.trigger, "input", None)
+            if original_input is None:
+                raise ReviewIntegrityError("procedure progress requires its original input")
+            try:
+                observation.assert_input_integrity(original_input, evidence_by_id)
+            except (ValueError, TypeError, AttributeError) as exc:
+                raise ReviewIntegrityError("procedure progress differs from its original input") from exc
     _validate_action_shape(subject, sources_by_call_id)
     return _ReviewContext(
         evidence_by_id=evidence_by_id,
@@ -505,6 +517,8 @@ def _validate_mutation_provenance(
         if (
             candidate.before_status != before_status
             or finding.current_status != before_status
+            or candidate.before_requirements_confirmed != (snapshot_progress.requirements_confirmed if snapshot_progress else False)
+            or candidate.before_submitted != (snapshot_progress.submitted if snapshot_progress else False)
         ):
             raise ReviewIntegrityError(
                 "procedure mutation before state differs from snapshot/finding"
@@ -519,6 +533,8 @@ def _validate_mutation_provenance(
                 and observation.source_evidence_refs
                 == candidate.execution_evidence_refs
                 and observation.reason_summary == candidate.reason_summary
+                and candidate.proposed_requirements_confirmed == (candidate.before_requirements_confirmed or observation.requirements_confirmed)
+                and candidate.proposed_submitted == (candidate.before_submitted or observation.submitted)
             )
         ]
         if len(matching_observations) != 1:
@@ -958,7 +974,8 @@ def _deterministic_safety_review(
         candidate["action_code"] == action.action_code
         and candidate["target"] == action.target.model_dump(mode="json")
         for candidate in build_action_candidates(
-            subject.source_results, context.evidence_by_id, procedure_bindings
+            subject.source_results, context.evidence_by_id, procedure_bindings,
+            procedure_progress=effective_procedure_progress(subject.snapshot, draft.mutations),
         )
     ):
         issues.append(

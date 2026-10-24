@@ -9,8 +9,10 @@ from typing import Any
 
 from app.agent.action_catalog import (
     ACTION_DEFINITIONS,
+    PROCEDURE_LABELS,
     ProcedureBindings,
     build_action_candidates,
+    effective_procedure_progress,
     resolve_procedure_bindings,
 )
 from app.agent.claim_safety import expand_evidence
@@ -31,11 +33,6 @@ from app.agent.schemas import (
     ReviewSourceResult,
 )
 
-_PROCEDURE_LABELS = {
-    "FILE_TAX_BUSINESS_CLOSURE": "사업자 폐업신고",
-    "FILE_FOOD_SERVICE_CLOSURE": "식품영업 폐업신고",
-    "REPORT_WORKPLACE_INSURANCE_CLOSURE": "사업장 탈퇴 신고",
-}
 _QUESTIONS = {
     "business_type": "어떤 가게를 운영하시나요?",
     "franchise_status": "프랜차이즈 가게인가요?",
@@ -129,7 +126,6 @@ def build_blocker_candidates(
         for ref in change.source_evidence_refs
         if ref not in state_refs
     )
-    completed = values.get("restoration_status") == "COMPLETED"
     missing = [
         label
         for key, label in (
@@ -139,8 +135,7 @@ def build_blocker_candidates(
         if key not in values
     ]
     restoration_first = (
-        not completed
-        and bool(missing)
+        bool(missing)
         and values.get("lease_status") in {"LEASED_PAID", "LEASED_FREE"}
     )
     findings = {
@@ -153,7 +148,12 @@ def build_blocker_candidates(
         for finding in source.output.procedure_findings
     }
     groups: dict[str, dict[str, Any]] = {}
-    for row in build_action_candidates(sources, evidence_by_id, resolved_bindings):
+    for row in build_action_candidates(
+        sources,
+        evidence_by_id,
+        resolved_bindings,
+        procedure_progress=effective_procedure_progress(snapshot, mutations),
+    ):
         target = row["target"]
         if target["target_kind"] != "PROCEDURE":
             continue
@@ -161,7 +161,7 @@ def build_blocker_candidates(
         step_code = reference["step_code"]
         finding = findings[(reference["procedure_step_id"], step_code)]
         definition = ACTION_DEFINITIONS[row["action_code"]]
-        logical_code = definition.procedure_logical_code
+        logical_code = row["logical_code"]
         # A current source can support asking whether a procedure applies.
         # Submission still requires established relevance and master rules.
         if finding.relevance != "RELEVANT":
@@ -179,10 +179,12 @@ def build_blocker_candidates(
                 continue
         key = f"procedure:{reference['procedure_step_id']}"
         refs = list(finding.evidence_refs)
-        refs.extend(ref for item in snapshot.procedure_progress
-                    if item.procedure_step == finding.procedure_step for ref in item.evidence_refs)
-        refs.extend(ref for item in mutations.procedure_progress_changes
-                    if item.procedure_step == finding.procedure_step for ref in item.execution_evidence_refs)
+        for progress in snapshot.procedure_progress:
+            if progress.procedure_step == finding.procedure_step:
+                refs.extend(progress.evidence_refs)
+        for change in mutations.procedure_progress_changes:
+            if change.procedure_step == finding.procedure_step:
+                refs.extend(change.execution_evidence_refs)
         refs = list(dict.fromkeys(refs))
         if logical_code == "CONFIRM_RESTORATION_SCOPE":
             if not restoration_first:
@@ -201,36 +203,47 @@ def build_blocker_candidates(
             ]
         else:
             assert logical_code is not None
-            label = _PROCEDURE_LABELS[logical_code]
+            label = PROCEDURE_LABELS[logical_code]
             evidence = expand_evidence(
                 [evidence_by_id[ref] for ref in finding.evidence_refs],
                 evidence_by_id,
             )
             confirmation = definition.confirmation_only
             applicability_unknown = finding.relevance == "POSSIBLY_RELEVANT"
+            processing = row["phase"] == "PROCESSING"
             description = (
-                f"{label} 안내의 현재 적용 여부를 확인할 필요가 있습니다."
+                f"{label}는 제출됐지만 기관 처리 완료 여부는 아직 확인되지 않았습니다."
+                if processing
+                else f"{label} 완료가 아직 확인되지 않았습니다."
+                if not confirmation
+                else f"{label} 안내의 현재 적용 여부를 확인할 필요가 있습니다."
                 if any(item.freshness_status != "CURRENT" for item in evidence)
                 else f"{label} 대상 여부와 준비사항을 확인할 필요가 있습니다."
                 if applicability_unknown
                 else f"{label}의 진행 상태와 준비사항을 확인할 필요가 있습니다."
             )
             title = (
-                f"담당 기관에 {label} 대상 여부와 준비사항을 확인하세요."
+                f"담당 기관에 {label}의 처리 완료 여부를 확인하세요."
+                if processing
+                else f"담당 기관에 {label} 대상 여부와 준비사항을 확인하세요."
                 if applicability_unknown
                 else f"담당 기관에 {label} 준비사항을 확인하세요."
                 if confirmation
-                else f"{label}를 제출하세요."
+                else f"{label}를 진행하세요."
             )
             reason = (
-                "제공된 공식 안내가 가게에 적용되는지 담당 기관에 확인할 필요가 있습니다."
+                f"{label}의 제출과 기관 처리 완료는 구분해 확인해야 합니다."
+                if processing
+                else "제공된 공식 안내가 가게에 적용되는지 담당 기관에 확인할 필요가 있습니다."
                 if applicability_unknown
                 else f"제공된 공식 안내를 바탕으로 {label}에 필요한 준비를 확인하세요."
                 if confirmation
                 else finding.required_actions[0].text
             )
             questions = (
-                [
+                ["해당 절차의 기관 처리가 완료되었는지 확인해 주시겠습니까?"]
+                if processing
+                else [
                     (
                         f"제 가게가 {label} 대상인지, 해당하면 필요한 서류와 제출 방법은 "
                         "무엇인지 확인해 주시겠습니까?"
@@ -299,7 +312,14 @@ def build_blocker_candidates(
 
     def priority(candidate: dict[str, Any]) -> tuple[bool, bool, bool, str]:
         action = candidate["actions"][0]
-        logical = ACTION_DEFINITIONS[action["action_code"]].procedure_logical_code
+        logical = next(
+            (
+                code
+                for code, ref in resolved_bindings.items()
+                if ref.model_dump(mode="json") == action["target"]["procedure_step"]
+            ),
+            None,
+        )
         step_id = action["target"]["procedure_step"]["procedure_step_id"]
         return (
             logical != "CONFIRM_RESTORATION_SCOPE",
@@ -330,42 +350,6 @@ def missing_info_fields(
 ) -> dict[str, Any] | None:
     """Ask about one unresolved decision blocker in the existing question order."""
     values = _values(snapshot, mutations)
-    progress = {
-        (
-            item.procedure_step.procedure_step_id,
-            item.procedure_step.step_code,
-        ): item.status
-        for item in snapshot.procedure_progress
-    }
-    progress.update(
-        (
-            (item.procedure_step.procedure_step_id, item.procedure_step.step_code),
-            item.proposed_status,
-        )
-        for item in mutations.procedure_progress_changes
-    )
-    restoration_ref = (
-        procedure_bindings.get("CONFIRM_RESTORATION_SCOPE")
-        if procedure_bindings is not None
-        else None
-    )
-    restoration_questions_resolved = values.get(
-        "restoration_status"
-    ) == "COMPLETED" or any(
-        status == "COMPLETED"
-        and (
-            (
-                restoration_ref is not None
-                and (step_id, code)
-                == (
-                    restoration_ref.procedure_step_id,
-                    restoration_ref.step_code,
-                )
-            )
-            or (procedure_bindings is None and code == "CONFIRM_RESTORATION_SCOPE")
-        )
-        for (step_id, code), status in progress.items()
-    )
     restoration_detail_unnecessary = (
         values.get("restoration_status") == "NOT_REQUIRED"
         or values.get("restoration_scope") == "NOT_REQUIRED"
@@ -416,10 +400,6 @@ def missing_info_fields(
             for item in source.output.missing_fields
         )
         and not (
-            restoration_questions_resolved
-            and path.value.startswith(("restoration_", "demolition_"))
-        )
-        and not (
             restoration_detail_unnecessary and path.value == "restoration_scope_detail"
         )
     }
@@ -431,10 +411,6 @@ def missing_info_fields(
         for candidate in held
         if candidate.field_path.value in _QUESTIONS
         and candidate.field_path.value not in values
-        and not (
-            restoration_questions_resolved
-            and candidate.field_path.value.startswith(("restoration_", "demolition_"))
-        )
         and not (
             restoration_detail_unnecessary
             and candidate.field_path.value == "restoration_scope_detail"
