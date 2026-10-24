@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from types import MappingProxyType
 from typing import Annotated, Any, Literal, Protocol
@@ -52,6 +53,7 @@ from app.agent.schemas import (
     ProcedureCompletionStatus,
     ProcedureFinding,
     ProcedureProgressObservation,
+    ProcedureProgressReport,
     ProcedureProgressStatus,
     ProcedureRelevance,
     QuestionCandidate,
@@ -60,9 +62,11 @@ from app.agent.schemas import (
     StrictScalar,
     Uncertainty,
     VerifiedTextSpan,
+    procedure_report_evidence,
     validate_case_field_value,
     validate_restoration_state,
 )
+from app.agent.schemas import case_field_values_equal as same_fact_value
 
 
 class StructuredGenerator(Protocol):
@@ -155,7 +159,7 @@ class ProcedureFindingDraft(AgentSchema):
     summary: SourcedText
     relevance: ProcedureRelevance
     decision_authority: DecisionAuthority
-    requires_confirmation: Literal[True]
+    requires_confirmation: StrictBool
     required_actions: list[SourcedText]
     required_documents: list[RequiredDocument]
     application_channel: SourcedText | None
@@ -174,7 +178,7 @@ class MissingFieldDraft(AgentSchema):
 class InfoAnalysisDraft(AgentSchema):
     completion_status: InfoCompletionStatus
     facts: list[ExtractedFactDraft]
-    procedure_observations: list[ProcedureObservationDraft]
+    procedure_observations: list[ProcedureObservationDraft] = Field(default_factory=list)
     procedure_findings: list[ProcedureFindingDraft]
     missing_fields: list[MissingFieldDraft]
     uncertainties: list[Uncertainty]
@@ -201,7 +205,7 @@ class InfoProviderOutput(AgentSchema):
 
     completion_status: InfoCompletionStatus
     facts: list[ExtractedFactModelOutput]
-    procedure_observations: list[ProcedureObservationDraft]
+    procedure_observations: list[ProcedureObservationDraft] = Field(default_factory=list)
     procedure_findings: list[ProcedureFindingDraft]
     missing_fields: list[MissingFieldDraft]
     uncertainties: list[Uncertainty]
@@ -209,6 +213,14 @@ class InfoProviderOutput(AgentSchema):
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+@dataclass(frozen=True)
+class _InputAnalysis:
+    facts: list[FactCandidate]
+    conflicts: list[ConflictCandidate]
+    observations: list[ProcedureProgressObservation]
+    evidence_by_span: dict[tuple[int, int] | str, EvidenceRecord]
 
 
 class InfoAnalysisAgent:
@@ -283,18 +295,14 @@ class InfoAnalysisAgent:
                         }
                     )
                 if rejected_observation_codes:
-                    messages.append(
-                        {
-                            "role": "system",
-                            "content": (
-                                "Rejected procedure_observations for: "
-                                + ", ".join(rejected_observation_codes)
-                                + ". Quote the user's exact report of that procedure and distinguish "
-                                "preparation, submission and institutional processing. Mark ambiguous "
-                                "reports requires_confirmation=true. Still analyze the official documents."
-                            ),
-                        }
-                    )
+                    messages.append({
+                        "role": "system",
+                        "content": "Rejected procedure_observations for: "
+                        + ", ".join(rejected_observation_codes)
+                        + ". Quote the user's exact report of that procedure and distinguish "
+                        "preparation, submission and institutional processing. Mark ambiguous "
+                        "reports requires_confirmation=true. Still analyze the official documents.",
+                    })
                 if procedure_source_errors:
                     messages.append(
                         {
@@ -534,9 +542,7 @@ class InfoAnalysisAgent:
             in {"REQUIRED", "NOT_REQUIRED"}
         ):
             if restoration_step is not None:
-                completed.add(
-                    (restoration_step.procedure_step_id, restoration_step.step_code)
-                )
+                completed.add((restoration_step.procedure_step_id, restoration_step.step_code))
         elif restoration_step is not None:
             completed.discard((restoration_step.procedure_step_id, restoration_step.step_code))
         supplied = {
@@ -619,12 +625,13 @@ class InfoAnalysisAgent:
             and step.procedure_step.step_code in step_codes
         ]
 
-    def _materialize(
+
+
+    def _input_analysis(
         self,
         request: InfoAnalysisInput,
         draft: InfoAnalysisDraft,
-        procedure_bindings: ProcedureBindings,
-    ) -> InfoAnalysisResult:
+    ) -> _InputAnalysis:
         if request.input is None and (draft.facts or draft.procedure_observations):
             raise InfoAnalysisGuardrailError(
                 "new facts and procedure progress require redacted input"
@@ -635,7 +642,7 @@ class InfoAnalysisAgent:
             for item in request.known_procedure_steps
         }
         committed = {fact.field_path: fact for fact in request.case_snapshot.facts}
-        evidence_by_span: dict[tuple[int, int], EvidenceRecord] = {}
+        evidence_by_span: dict[tuple[int, int] | str, EvidenceRecord] = {}
         fact_candidates: list[FactCandidate] = []
         conflicts: list[ConflictCandidate] = []
 
@@ -644,8 +651,10 @@ class InfoAnalysisAgent:
             raise InfoAnalysisGuardrailError(
                 "model returned duplicate fact fields",
                 fact_errors=(
-                    ("Return at most one fact per field_path. If the user stated "
-                    "conflicting values, return one fact with requires_confirmation=true."),
+                    (
+                        "Return at most one fact per field_path. If the user stated "
+                        "conflicting values, return one fact with requires_confirmation=true."
+                    ),
                 ),
             )
 
@@ -659,7 +668,7 @@ class InfoAnalysisAgent:
                 current is not None
                 and current.status == FactStatus.CONFIRMED
                 and semantic.operation == FactOperation.SET
-                and self._same_value(current.value, semantic.value)
+                and same_fact_value(semantic.field_path, current.value, semantic.value)
             ):
                 continue
             if (
@@ -715,7 +724,8 @@ class InfoAnalysisAgent:
             validate_restoration_state(
                 {
                     **{
-                        item.field_path: item.status for item in request.case_snapshot.facts
+                        item.field_path: item.status
+                        for item in request.case_snapshot.facts
                     },
                     **{
                         item.field_path: item.proposed_status
@@ -736,9 +746,11 @@ class InfoAnalysisAgent:
             raise InfoAnalysisGuardrailError(
                 "restoration facts are inconsistent",
                 fact_errors=(
-                    ("restoration_status can be confirmed only when restoration_scope "
-                    "is also confirmed. If the scope needs confirmation, set "
-                    "requires_confirmation=true on restoration_status too, or omit it."),
+                    (
+                        "restoration_status can be confirmed only when restoration_scope "
+                        "is also confirmed. If the scope needs confirmation, set "
+                        "requires_confirmation=true on restoration_status too, or omit it."
+                    ),
                 ),
             ) from None
 
@@ -747,6 +759,8 @@ class InfoAnalysisAgent:
             step = known_steps.get(semantic.step_code)
             if step is None:
                 raise InfoAnalysisGuardrailError("model returned an unknown procedure step")
+            if any(report.procedure_step == step for report in request.input.procedure_reports):
+                continue
             if any(
                 item.procedure_step == step and item.status == semantic.observed_status
                 and (not semantic.requirements_confirmed or item.requirements_confirmed)
@@ -771,7 +785,54 @@ class InfoAnalysisAgent:
                 requires_confirmation=semantic.requires_confirmation,
                 reason_summary=semantic.reason_summary,
             ))
-        procedure_findings = self._procedure_findings(request, draft, known_steps)
+        if request.input is not None:
+            for index, selected in enumerate(request.input.procedure_reports):
+                report = ProcedureProgressReport.model_validate(selected.model_dump())
+                if known_steps.get(report.procedure_step.step_code) != report.procedure_step:
+                    raise InfoAnalysisGuardrailError("selected progress has an unknown procedure reference")
+                previous = next((item for item in request.case_snapshot.procedure_progress
+                                 if item.procedure_step == report.procedure_step), None)
+                if report.status == ProcedureProgressStatus.NOT_STARTED:
+                    if previous is not None and previous.status != report.status:
+                        raise InfoAnalysisGuardrailError("selected progress cannot move backwards")
+                    continue
+                if previous is not None and (
+                    previous.status == report.status
+                    and (not report.requirements_confirmed or previous.requirements_confirmed)
+                    and (not report.submitted or previous.submitted)
+                ):
+                    continue
+                evidence = procedure_report_evidence(request.input, index)
+                evidence_by_span[evidence.evidence_id] = evidence
+                observations.append(ProcedureProgressObservation(
+                    observation_id=self._uuid(), procedure_step=report.procedure_step,
+                    observed_status=report.status, source_span=None, structured_report=report,
+                    source_evidence_refs=[evidence.evidence_id],
+                    requirements_confirmed=report.requirements_confirmed, submitted=report.submitted,
+                    requires_confirmation=False, reason_summary="사용자가 절차 진행 상태를 직접 선택했습니다.",
+                ))
+
+        ensure_no_sensitive_text([
+            *(item.reason_summary for item in fact_candidates),
+            *(item.reason_summary for item in observations),
+        ])
+        return _InputAnalysis(fact_candidates, conflicts, observations, evidence_by_span)
+
+    def _materialize(
+        self,
+        request: InfoAnalysisInput,
+        draft: InfoAnalysisDraft,
+        procedure_bindings: ProcedureBindings,
+    ) -> InfoAnalysisResult:
+        parsed = self._input_analysis(request, draft)
+        fact_candidates, conflicts = parsed.facts, parsed.conflicts
+        observations, evidence_by_span = parsed.observations, parsed.evidence_by_span
+        allowed = set(request.allowed_field_paths)
+        known_steps = {
+            item.procedure_step.step_code: item.procedure_step
+            for item in request.known_procedure_steps
+        }
+        procedure_findings = self._procedure_findings(request, draft, known_steps, observations)
         if not conflicts:
             self._validate_procedure_coverage(request, draft, procedure_bindings)
 
@@ -927,6 +988,7 @@ class InfoAnalysisAgent:
         request: InfoAnalysisInput,
         draft: InfoAnalysisDraft,
         known_steps: dict[str, Any],
+        observations: Sequence[ProcedureProgressObservation] = (),
     ) -> list[ProcedureFinding]:
         evidence_by_id = {
             item.evidence_id: item
@@ -952,6 +1014,10 @@ class InfoAnalysisAgent:
             (item.procedure_step.procedure_step_id, item.procedure_step.step_code)
             for item in request.case_snapshot.procedure_progress
             if item.requirements_confirmed
+        } | {
+            (item.procedure_step.procedure_step_id, item.procedure_step.step_code)
+            for item in observations
+            if item.requirements_confirmed and not item.requires_confirmation
         }
         findings: list[ProcedureFinding] = []
         seen_steps: set[str] = set()
@@ -1254,9 +1320,6 @@ class InfoAnalysisAgent:
             source_call_id=source_call_id,
         )
 
-    @staticmethod
-    def _same_value(left: StrictScalar, right: StrictScalar) -> bool:
-        return type(left) is type(right) and left == right
 
 
 __all__ = [

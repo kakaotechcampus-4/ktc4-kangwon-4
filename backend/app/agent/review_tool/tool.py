@@ -360,13 +360,16 @@ def _validate_integrity(subject: ReviewSubject) -> _ReviewContext:
 
     _validate_procedure_analysis_provenance(sources_by_call_id)
     _validate_mutation_provenance(subject, sources_by_call_id)
-    for source in subject.source_results:
+    for source in sources_by_call_id.values():
         if not isinstance(source.output, InfoAnalysisResult):
             continue
+        original_input = getattr(subject.trigger, "input", None)
+        if original_input is None:
+            pending = getattr(subject.trigger, "pending_input", None)
+            original_input = getattr(pending, "original_input", None)
         for observation in source.output.procedure_progress_observations:
-            original_input = getattr(subject.trigger, "input", None)
             if original_input is None:
-                raise ReviewIntegrityError("procedure progress requires its original input")
+                raise ReviewIntegrityError("procedure progress requires its original selected input")
             try:
                 observation.assert_input_integrity(original_input, evidence_by_id)
             except (ValueError, TypeError, AttributeError) as exc:

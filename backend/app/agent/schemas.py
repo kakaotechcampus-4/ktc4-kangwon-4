@@ -500,12 +500,56 @@ class InputSourceType(StrEnum):
     EXPERT_CONFIRMATION = "EXPERT_CONFIRMATION"
 
 
+class ProcedureProgressReport(AgentSchema):
+    """A user's explicit progress selection; completion confirms the whole step.
+
+    For administrative steps COMPLETED means the user checked the institution's
+    processing result, rather than merely submitting an application. Aggregate
+    employee/insurance steps mean all applicable employees and institutions.
+    """
+
+    procedure_step: ProcedureStepRef
+    status: ProcedureProgressStatus = Field(description=(
+        "User-selected progress. COMPLETED confirms execution of the whole step; "
+        "for administrative steps the user checked institutional processing, not only submission. "
+        "Employee/insurance aggregates cover every applicable employee and institution."
+    ))
+    requirements_confirmed: StrictBool = False
+    submitted: StrictBool = False
+
+    @model_validator(mode="after")
+    def validate_not_started(self) -> ProcedureProgressReport:
+        if self.status == ProcedureProgressStatus.NOT_STARTED and (
+            self.requirements_confirmed or self.submitted
+        ):
+            raise ValueError("NOT_STARTED cannot confirm requirements or submission")
+        return self
+
+
 class RedactedInput(AgentSchema):
     input_event_id: NonEmptyStr
     source_type: InputSourceType
-    redacted_text: NonEmptyStr
+    redacted_text: StrictStr
     redactions: list[Redaction]
     submitted_at: AwareDatetime
+    procedure_reports: list[ProcedureProgressReport] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_procedure_reports(self) -> RedactedInput:
+        if not self.redacted_text and not self.procedure_reports:
+            raise ValueError("input requires redacted text or an explicit procedure report")
+        _ensure_unique(self.procedure_reports, lambda report: report.procedure_step.procedure_step_id,
+                       "reported procedure step ID")
+        _ensure_unique(self.procedure_reports, lambda report: report.procedure_step.step_code,
+                       "reported procedure step code")
+        return self
+
+    @model_serializer(mode="wrap")
+    def serialize_without_empty_reports(self, handler: Any) -> Any:
+        data = handler(self)
+        if not self.procedure_reports:
+            data.pop("procedure_reports", None)
+        return data
 
     @model_validator(mode="after")
     def validate_redactions(self) -> RedactedInput:
@@ -538,6 +582,23 @@ class VerifiedTextSpan(AgentSchema):
         if self.end_offset - self.start_offset != len(self.text):
             raise ValueError("span offsets must match text length")
         return self
+
+
+def procedure_report_evidence(original_input: RedactedInput, index: int) -> EvidenceRecord:
+    """Canonical evidence of one selected value, without inventing a text quote."""
+    if type(index) is not int or not 0 <= index < len(original_input.procedure_reports):
+        raise ValueError("procedure report index is outside the original submission")
+    report = ProcedureProgressReport.model_validate(original_input.procedure_reports[index].model_dump())
+    body = json.dumps(report.model_dump(mode="json"), ensure_ascii=False,
+                      sort_keys=True, separators=(",", ":"))
+    fingerprint = hashlib.sha256(body.encode("utf-8")).hexdigest()
+    return EvidenceRecord(
+        evidence_id=f"input:{original_input.input_event_id}:procedure:{index}:{fingerprint[:12]}",
+        source_type="USER_INPUT", source_ref=original_input.input_event_id,
+        source_version=None, locator=f"procedure_reports:{index}", excerpt=body,
+        parent_evidence_refs=[], published_at=None, retrieved_at=original_input.submitted_at,
+        freshness_status="CURRENT", content_hash=fingerprint,
+    )
 
 
 class FactCandidate(AgentSchema):
@@ -729,35 +790,74 @@ class ProcedureProgressObservation(AgentSchema):
         ProcedureProgressStatus.IN_PROGRESS,
         ProcedureProgressStatus.COMPLETED,
     ]
-    source_span: VerifiedTextSpan
+    source_span: VerifiedTextSpan | None = None
+    structured_report: ProcedureProgressReport | None = None
     source_evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
     requirements_confirmed: StrictBool = False
     submitted: StrictBool = False
     requires_confirmation: StrictBool
     reason_summary: NonEmptyStr
 
+
+    @model_validator(mode="after")
+    def validate_report_source(self) -> ProcedureProgressObservation:
+        if (self.source_span is None) == (self.structured_report is None):
+            raise ValueError("observation requires exactly one text span or structured report")
+        if self.structured_report is not None and (
+            self.procedure_step != self.structured_report.procedure_step
+            or self.observed_status != self.structured_report.status
+            or self.requirements_confirmed != self.structured_report.requirements_confirmed
+            or self.submitted != self.structured_report.submitted
+            or self.requires_confirmation
+        ):
+            raise ValueError("observation must equal the user's explicit progress selection")
+        return self
+
+    @model_serializer(mode="wrap")
+    def serialize_without_empty_report(self, handler: Any) -> Any:
+        data = handler(self)
+        if self.structured_report is None:
+            data.pop("structured_report", None)
+        return data
+
     def assert_input_integrity(
         self, original_input: RedactedInput, evidence_by_id: dict[str, EvidenceRecord],
     ) -> None:
-        """Bind the quoted report to its exact original event and evidence."""
+        """Bind a selected value or quoted report to the exact original event."""
+        self.validate_report_source()
         original = RedactedInput.model_validate(original_input.model_dump())
-        span = self.source_span
-        if (
-            span.input_event_id != original.input_event_id
-            or not 0 <= span.start_offset < span.end_offset <= len(original.redacted_text)
-            or original.redacted_text[span.start_offset:span.end_offset] != span.text
-        ):
-            raise ValueError("progress span differs from its original input")
-        fingerprint = hashlib.sha256(span.text.encode("utf-8")).hexdigest()
-        expected_id = f"input:{span.input_event_id}:{span.start_offset}:{span.end_offset}:{fingerprint[:12]}"
-        evidence = evidence_by_id.get(expected_id)
-        if self.source_evidence_refs != [expected_id] or evidence is None or (
-            evidence.source_type.value != original.source_type.value
-            or evidence.source_ref != original.input_event_id
-            or evidence.locator != f"text:{span.start_offset}-{span.end_offset}"
-            or evidence.excerpt != span.text or evidence.content_hash != fingerprint
-        ):
-            raise ValueError("progress evidence differs from its original quoted report")
+        if self.source_span is not None:
+            span = self.source_span
+            if (
+                span.input_event_id != original.input_event_id
+                or not 0 <= span.start_offset < span.end_offset <= len(original.redacted_text)
+                or original.redacted_text[span.start_offset:span.end_offset] != span.text
+            ):
+                raise ValueError("progress span differs from its original input")
+            fingerprint = hashlib.sha256(span.text.encode("utf-8")).hexdigest()
+            expected_id = f"input:{span.input_event_id}:{span.start_offset}:{span.end_offset}:{fingerprint[:12]}"
+            evidence = evidence_by_id.get(expected_id)
+            if self.source_evidence_refs != [expected_id] or evidence is None or (
+                evidence.source_type.value != original.source_type.value
+                or evidence.source_ref != original.input_event_id
+                or evidence.locator != f"text:{span.start_offset}-{span.end_offset}"
+                or evidence.excerpt != span.text or evidence.content_hash != fingerprint
+            ):
+                raise ValueError("progress evidence differs from its original quoted report")
+            return
+        matching = [index for index, report in enumerate(original.procedure_reports)
+                    if report == self.structured_report]
+        if len(matching) != 1:
+            raise ValueError("selected report does not match one original input report")
+        expected = procedure_report_evidence(original, matching[0])
+        actual = evidence_by_id.get(expected.evidence_id)
+        if self.source_evidence_refs != [expected.evidence_id] or actual is None:
+            raise ValueError("selected report evidence differs from the original event")
+        expected_data, actual_data = expected.model_dump(), actual.model_dump()
+        expected_time = expected_data.pop("retrieved_at").astimezone(timezone.utc).replace(microsecond=0)
+        actual_time = actual_data.pop("retrieved_at").astimezone(timezone.utc).replace(microsecond=0)
+        if expected_data != actual_data or expected_time != actual_time:
+            raise ValueError("selected report evidence differs from the original event")
 
 
 class ConflictCandidate(AgentSchema):
@@ -2449,6 +2549,7 @@ __all__ = [
     "ProcedureProgress",
     "ProcedureProgressChangeCandidate",
     "ProcedureProgressObservation",
+    "ProcedureProgressReport",
     "ProcedureProgressStatus",
     "ProcedureRelevance",
     "ProcedureSourceDocument",
@@ -2495,7 +2596,15 @@ __all__ = [
     "Varchar500",
     "VerifiedTextSpan",
     "canonical_digest",
+    "procedure_report_evidence",
     "validate_case_field_value",
     "validate_procedure_registry",
     "validate_restoration_state",
 ]
+
+
+def case_field_values_equal(field_path: str, left: StrictScalar, right: StrictScalar) -> bool:
+    """Preserve typed equality while allowing DATE's Python/JSON representation."""
+    if CASE_FIELD_SPECS[field_path][0] == FactValueType.DATE:
+        return str(left) == str(right)
+    return type(left) is type(right) and left == right
