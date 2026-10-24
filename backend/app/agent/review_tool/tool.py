@@ -10,6 +10,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ValidationError
 
+from app.agent import completion
 from app.agent.action_catalog import (
     ACTION_DEFINITIONS,
     ProcedureBindings,
@@ -62,6 +63,7 @@ from app.agent.schemas import (
     ReviewResult,
     ReviewSubject,
     ReviewVerdict,
+    SupervisorAgentInput,
     SupportActionTarget,
     SupportAnalysisResult,
     SupportCheck,
@@ -165,6 +167,10 @@ class ReviewTool:
                 "review input failed sensitive-data preflight"
             ) from None
         base_messages = review_messages(model_input)
+        base_messages[0]["content"] += (
+            "\n완료 후 followup_guidance는 Info에서 고정 복사합니다. 내용 오류는 고정 복사된 Supervisor 경로 대신 원본 "
+            "Info finding.followup_guidance의 canonical 경로를 target_path로 하고 그 source의 meta.call_id를 target_call_id로 보고하세요. "
+        )
         base_messages[0]["content"] += (
             "\n행동 코드별 의미:\n"
             + "\n".join(
@@ -777,6 +783,12 @@ def _validate_action_shape(
     sources_by_call_id: dict[UUID, Any],
 ) -> None:
     decision = subject.supervisor_draft.decision
+    if decision.decision_type == DecisionType.COMPLETED:
+        if decision.blocker is not None or decision.blockers or decision.next_action is not None or decision.questions_for_user:
+            raise ReviewIntegrityError("COMPLETED cannot contain a blocker, action or questions")
+        if not decision.followup_guidance:
+            raise ReviewIntegrityError("COMPLETED requires tax follow-up guidance")
+        return
     if decision.blocker is None:
         raise ReviewIntegrityError("MVP decisions require exactly one blocker")
     if decision.decision_type == DecisionType.ACTION:
@@ -945,34 +957,74 @@ def _deterministic_safety_review(
             )
 
     issues.extend(_action_target_findings(subject, context))
-    candidates = build_blocker_candidates(
-        subject.snapshot,
-        subject.known_procedure_steps,
-        subject.source_results,
-        draft.mutations,
-        context.evidence_by_id,
-        procedure_bindings,
-    )
-    for path, reason in candidate_decision_violations(
-        draft.decision,
-        candidates,
-        missing_info_fields(
+    if draft.decision.decision_type == DecisionType.COMPLETED:
+        completion_input = SupervisorAgentInput(
+            trigger=subject.trigger,
+            case_snapshot=subject.snapshot,
+            known_procedure_steps=subject.known_procedure_steps,
+            source_results=subject.source_results,
+            fact_overlays=draft.mutations.fact_changes,
+        )
+        expected = completion.completion_fields(
+            completion_input,
+            draft.mutations,
+            context.evidence_by_id,
+            procedure_bindings,
+        )
+        if (
+            expected is None
+            or any(
+                getattr(draft.decision, key) != value
+                for key, value in expected.items()
+                if key not in {"decision_type", "followup_guidance"}
+            )
+            or (
+                expected is not None
+                and [
+                    item.model_dump(mode="python")
+                    for item in draft.decision.followup_guidance
+                ]
+                != expected["followup_guidance"]
+            )
+        ):
+            issues.append(
+                _issue(
+                    code="CONTRACT_VIOLATION",
+                    category="CONTRACT",
+                    path="/supervisor_draft/decision/selection_summary",
+                    reason="적용 대상 전체의 완료와 세금 후속 안내가 확인되지 않았습니다.",
+                    evidence_refs=[],
+                )
+            )
+    else:
+        candidates = build_blocker_candidates(
             subject.snapshot,
+            subject.known_procedure_steps,
             subject.source_results,
             draft.mutations,
+            context.evidence_by_id,
             procedure_bindings,
-            known_procedure_steps=subject.known_procedure_steps,
-        ),
-    ):
-        issues.append(
-            _issue(
-                code="CONTRACT_VIOLATION",
-                category="CONTRACT",
-                path="/supervisor_draft" + path,
-                reason=reason,
-                evidence_refs=[],
-            )
         )
+        for path, reason in candidate_decision_violations(
+            draft.decision,
+            candidates,
+            missing_info_fields(
+                subject.snapshot,
+                subject.source_results,
+                draft.mutations,
+                procedure_bindings,
+                known_procedure_steps=subject.known_procedure_steps,
+            ),
+        ):
+            issues.append(
+                _issue(
+                    code="CONTRACT_VIOLATION",
+                    category="CONTRACT",
+                    path="/supervisor_draft" + path,
+                    reason=reason,
+                    evidence_refs=[],
+                )
+            )
     action = draft.decision.next_action
     if action is not None and not any(
         candidate["action_code"] == action.action_code
@@ -1402,9 +1454,17 @@ def _visible_draft_strings(subject: ReviewSubject) -> list[tuple[str, str]]:
     base = "/supervisor_draft/decision"
     values: list[tuple[str, str]] = [
         (f"{base}/selection_summary", decision.selection_summary),
-        (f"{base}/blocker/description", decision.blocker.description),
+        *(
+            ([(f"{base}/blocker/description", decision.blocker.description)])
+            if decision.blocker is not None
+            else []
+        ),
         *((f"{base}/blockers/{index}/description", item.description) for index, item in enumerate(decision.blockers)),
     ]
+    values.extend(
+        (f"{base}/followup_guidance/{index}/text", item.text)
+        for index, item in enumerate(getattr(decision, "followup_guidance", []))
+    )
     if decision.next_action is not None:
         action_base = f"{base}/next_action"
         values.extend(
