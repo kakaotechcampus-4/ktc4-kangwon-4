@@ -281,6 +281,25 @@ class ChoiceModel(StubModel):
         })
 
 
+def test_selection_only_output_preserves_verified_text_target_and_evidence():
+    class SelectionOnlyModel(ChoiceModel):
+        async def generate(self, model, messages, **kwargs):
+            assert set(model.model_fields) == {"decision_type", "blocker_candidate_id", "action_code"}
+            return await super().generate(model, messages, **kwargs)
+
+    request = request_with_state()
+    client = SelectionOnlyModel(choice=1)
+    expected = candidates(request)[1]
+    draft = asyncio.run(SupervisorAgent(client, max_local_attempts=1).draft(request))
+    assert client.calls == 1
+    assert draft.decision.blocker.model_dump(mode="json") == expected["blocker"]
+    action = draft.decision.next_action.model_dump(mode="json")
+    assert all(action[key] == expected["actions"][0][key] for key in (
+        "action_code", "title", "reason", "questions_to_ask", "target", "evidence_refs",
+    ))
+    assert asyncio.run(ReviewTool(ChoiceModel()).review(subject(request, draft))).verdict == "PASS"
+
+
 def subject(request, draft):
     return ReviewSubject.create(
         schema_version="agent-io/2.0",
@@ -655,6 +674,42 @@ def test_fallback_uses_confirmed_mutations_before_asking():
 
     assert result["questions_for_user"] == ["직원이 몇 명인가요?"]
     assert result["blocker"]["description"] == "직원 수 확인이 필요합니다."
+
+
+@pytest.mark.parametrize("scope", [None, "NOT_REQUIRED", "PARTIAL", "FULL"])
+@pytest.mark.parametrize("overlay", [False, True])
+@pytest.mark.parametrize("held", [False, True])
+def test_progress_question_requires_confirmed_restoration_scope(scope, overlay, held):
+    from test_info_replanning import analyze_facts
+
+    request = request_with_state(restoration_scope=None if overlay else scope)
+    pending = mutations()
+    if overlay:
+        pending.fact_changes = [FactChangeCandidate(
+            candidate_id=UUID(int=51), operation="CLEAR" if scope is None else "SET",
+            source_fact_candidate_id=UUID(int=52), source_type="INFO_ANALYSIS",
+            field_path="restoration_scope", value_type="ENUM",
+            before_status="UNKNOWN", before_value=None,
+            proposed_status="UNKNOWN" if scope is None else "CONFIRMED", proposed_value=scope,
+            candidate_status="READY_FOR_REVIEW", reason_summary="합성 범위 변경",
+            source_evidence_refs=[REF], source_call_id=UUID(int=3), confirmed_conflict_ref=None,
+        )]
+    if held:
+        text = "원상복구 작업을 진행하고 있습니다."
+        result = analyze_facts([("restoration_status", "IN_PROGRESS", text)], text, requires_confirmation=True)
+        info = request.source_results[1].output
+        info.evidence_records.extend(result.evidence_records)
+        info.fact_candidates = result.fact_candidates
+        request.source_results[1] = source(info)
+    else:
+        missing_questions(request, "restoration_status")
+
+    result = missing_info_fields(request.case_snapshot, request.source_results, pending)
+
+    if scope in {"PARTIAL", "FULL"}:
+        assert result["blocker"]["candidate_id"] == "missing:restoration_status"
+    else:
+        assert result is None
 
 
 def test_single_missing_condition_passes_review_without_weakening_shared_guard():
