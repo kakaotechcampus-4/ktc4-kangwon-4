@@ -508,8 +508,60 @@ def test_review_blocks_wrong_target_even_when_its_model_returns_pass():
     asyncio.run(run())
 
 
+def test_semantic_claim_checks_reach_independent_review_instead_of_regex_rejection():
+    class MeaningReview(StubModel):
+        async def generate(self, model, messages, **kwargs):
+            self.calls += 1
+            assert "단어·정규식" in messages[0]["content"]
+            assert "grounded_claims 누락·오분류" in messages[0]["content"]
+            assert "단순접수" in messages[0]["content"]
+            assert "무조건 받을 수 있습니다" in messages[1]["content"]
+            return model.model_validate({
+                "verdict": "REVISE",
+                "issues": [{
+                    "issue_code": "OVERCONFIDENT_LANGUAGE", "category": "SAFETY",
+                    "severity": "BLOCKING", "target_component": "SUPERVISOR",
+                    "target_call_id": None,
+                    "target_path": "/supervisor_draft/decision/selection_summary",
+                    "reason_summary": "합성 독립 의미 검수", "evidence_refs": [REF],
+                }],
+                "missing_evidence": [], "recommended_rework_targets": ["SUPERVISOR"],
+                "resolution_reason": "합성 독립 의미 검수 결과",
+            })
+
+    async def run():
+        request = supervisor_request()
+        draft = await SupervisorAgent(StubModel(), max_local_attempts=1).draft(request)
+        draft.decision.selection_summary = "이 지원금은 무조건 받을 수 있습니다."
+        draft.grounded_claims = []
+        reviewed = ReviewSubject.create(
+            schema_version="agent-io/2.0", review_subject_id=UUID(int=9), review_attempt=1,
+            run_id=UUID(int=2), case_id=1, trigger=request.trigger,
+            snapshot=request.case_snapshot, known_procedure_steps=request.known_procedure_steps,
+            source_results=request.source_results, supervisor_draft=draft,
+        )
+        client = MeaningReview()
+        result = await ReviewTool(client, max_output_attempts=1).review(reviewed)
+        assert client.calls == 1
+        assert result.verdict == "REVISE"
+        assert any(issue.issue_code == "OVERCONFIDENT_LANGUAGE" for issue in result.issues)
+    asyncio.run(run())
 
 
+@pytest.mark.parametrize("problem", ["stale_information", "unofficial_source"])
+def test_semantic_delegation_keeps_typed_freshness_and_official_source_guards(problem):
+    async def run():
+        request = supervisor_request()
+        draft = await SupervisorAgent(StubModel(), max_local_attempts=1).draft(request)
+        records = {REF: evidence()}
+        if problem == "stale_information":
+            records[REF].freshness_status = "STALE"
+            draft.grounded_claims[0].assertion_level = "INFORMATION"
+        else:
+            records[REF].source_type = "USER_INPUT"
+        with pytest.raises(SupervisorGuardrailError):
+            SupervisorAgent._validate_pre_review_claim_safety(draft, records, request.source_results)
+    asyncio.run(run())
 
 
 @pytest.mark.parametrize("action_code", [CONFIRM_TAX, TAX])
@@ -768,5 +820,18 @@ def test_graph_distinguishes_missing_bindings_from_actionable_candidates(trigger
         ):
             getattr(runner, method).assert_awaited_once()
         assert request.model_dump_json() == original
+
+    asyncio.run(run())
+
+
+def test_supervisor_leaves_unreported_overconfident_claims_for_independent_review():
+    async def run():
+        request = supervisor_request()
+        draft = await SupervisorAgent(StubModel(), max_local_attempts=1).draft(request)
+        draft.decision.selection_summary = "이 지원금은 무조건 받을 수 있습니다."
+        draft.grounded_claims = []
+        SupervisorAgent._validate_pre_review_claim_safety(
+            draft, {REF: evidence()}, request.source_results,
+        )
 
     asyncio.run(run())

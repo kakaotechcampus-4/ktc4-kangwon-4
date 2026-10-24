@@ -2,6 +2,7 @@
 
 import asyncio
 from dataclasses import replace
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import httpx
@@ -9,6 +10,7 @@ import pytest
 from pydantic import BaseModel
 
 from app.agent import runtime as runtime_module
+from app.agent.content_safety import ContentSafetyGuard, CrisisSupportRequired
 from app.agent.llm import (
     LLMBudgetExceededError,
     LLMCallBudget,
@@ -20,6 +22,7 @@ from app.agent.llm import (
 )
 from app.agent.run_scope import RunDeadline, current_deadline, run_deadline_scope
 from app.agent.runtime import AgentRuntime, RuntimeLimits
+from app.agent.schemas import CrisisSupportGuidance, RedactedInput
 
 
 class Answer(BaseModel):
@@ -136,6 +139,7 @@ def test_build_runtime_gives_each_component_its_configured_client(monkeypatch):
         assert "support_agent" not in graph_components
         assert graph_components["supervisor"]._llm is clients_by_prefix["SUPERVISOR_"]
         assert graph_components["review_tool"]._client is clients_by_prefix[""]
+        assert graph_components["content_safety"]._client is clients_by_prefix[""]
         assert (
             graph_components["review_tool"]._client
             is not clients_by_prefix["SUPERVISOR_"]
@@ -152,3 +156,68 @@ def test_build_runtime_gives_each_component_its_configured_client(monkeypatch):
         await runtime.aclose()
 
     asyncio.run(run())
+
+
+def test_submission_safety_has_a_fresh_budget_and_obeys_the_outer_deadline():
+    calls = []
+
+    class Safety:
+        async def check_submission(self, text, facts):
+            current_deadline().check()
+            current_call_budget().consume()
+            calls.append((text, facts))
+
+    async def run():
+        runtime = AgentRuntime(
+            graph=GraphStub(), limits=RuntimeLimits(1, 60), clients=[],
+            procedure_tool=None, submission_safety=Safety(),
+        )
+        await runtime.check_submission("합성 검사 입력")
+        submission = RedactedInput(
+            input_event_id="synthetic-submission", source_type="USER_INPUT",
+            redacted_text="합성 검사 입력", redactions=[],
+            submitted_at=datetime(2026, 10, 18, tzinfo=timezone.utc),
+        )
+        await runtime.check_submission(submission)
+        with run_deadline_scope(RunDeadline.after(0.000000001)):
+            with pytest.raises(Exception) as error:
+                await runtime.check_submission("시간이 지난 입력")
+            assert error.value.code == "RUN_DEADLINE_EXCEEDED"
+        assert len(calls) == 2
+        assert calls[1][0] is submission
+        assert runtime._graph.calls == 0
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("limit,expired", [(2, False), (1, False), (2, True)])
+def test_crisis_submission_checks_output_with_the_same_budget_and_deadline(limit, expired):
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        decision = "CRISIS_SUPPORT" if len(calls) == 1 else "ALLOW"
+        return httpx.Response(200, json={"choices": [{
+            "message": {"content": '{"decision":"' + decision + '"}'},
+        }]})
+
+    async def run():
+        config = LLMConfig(base_url="https://example.org/test", api_token="synthetic", model="test")
+        async with StructuredLLMClient(
+            config, transport=httpx.MockTransport(handler), call_budget=ScopedCallBudget(),
+        ) as client:
+            runtime = AgentRuntime(
+                graph=GraphStub(), limits=RuntimeLimits(limit, 60), clients=[],
+                procedure_tool=None, submission_safety=ContentSafetyGuard(client),
+            )
+            expected = Exception if expired else LLMBudgetExceededError if limit == 1 else CrisisSupportRequired
+            with run_deadline_scope(RunDeadline(0) if expired else None), pytest.raises(expected) as raised:
+                await runtime.check_submission("지금 안전한 위기 도움을 받고 싶어요.")
+            if expired:
+                assert raised.value.code == "RUN_DEADLINE_EXCEEDED"
+            elif limit == 2:
+                assert raised.value.guidance == CrisisSupportGuidance()
+            assert runtime._graph.calls == 0
+
+    asyncio.run(run())
+    assert len(calls) == (0 if expired else limit)

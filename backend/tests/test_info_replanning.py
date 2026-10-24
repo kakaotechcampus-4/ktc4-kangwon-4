@@ -1135,6 +1135,7 @@ def test_result_replanning_uses_reviewed_facts_without_repeating_scope_question(
     asyncio.run(run())
 
 
+
 @pytest.mark.parametrize("forbidden", ["input_finding", "procedure_fact", "procedure_observation"])
 def test_explicit_stage_replies_are_not_repaired_by_the_fixture(forbidden):
     request = request_for_replanning()
