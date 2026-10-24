@@ -441,6 +441,43 @@ class StubModel:
         })
 
 
+@pytest.mark.parametrize("changed_parent", [False, True])
+def test_parent_order_survives_supervisor_and_review_but_changed_lineage_is_rejected(changed_parent):
+    async def run():
+        request = supervisor_request()
+        child = evidence(parent_evidence_refs=["parent-a", "parent-b"])
+        request.case_snapshot.evidence_records = [
+            child, *(evidence(evidence_id=ref) for ref in ("parent-a", "parent-b", "parent-c")),
+        ]
+        lookup = request.source_results[0].output.model_copy(deep=True)
+        lookup.evidence_records[0] = child.model_copy(update={
+            "parent_evidence_refs": ["parent-c", "parent-a"] if changed_parent else ["parent-b", "parent-a"],
+        })
+        info = request.source_results[1].output.model_copy(update={
+            "based_on_procedure_lookup_digest": canonical_digest(lookup),
+        })
+        request.source_results = [source(lookup, "PROCEDURE_TOOL", 5), source(info)]
+        original = request.model_dump_json()
+        supervisor = SupervisorAgent(StubModel(), max_local_attempts=1)
+        if changed_parent:
+            with pytest.raises(SupervisorGuardrailError, match="evidence ID collision"):
+                await supervisor.draft(request)
+        else:
+            draft = await supervisor.draft(request)
+            subject = ReviewSubject.create(
+                schema_version="agent-io/2.0", review_subject_id=UUID(int=9),
+                review_attempt=1, run_id=UUID(int=2), case_id=1,
+                trigger=request.trigger, snapshot=request.case_snapshot,
+                known_procedure_steps=request.known_procedure_steps,
+                source_results=request.source_results, supervisor_draft=draft,
+            )
+            review = await ReviewTool(StubModel()).review(subject)
+            assert review.verdict.value == "PASS"
+        assert request.model_dump_json() == original
+
+    asyncio.run(run())
+
+
 def test_supervisor_blocks_action_not_in_the_selected_candidate():
     client = StubModel("CONFIRM_RESTORATION_SCOPE")
     with pytest.raises(SupervisorGuardrailError):
@@ -625,7 +662,7 @@ def test_review_preserves_only_the_confirmed_conflict_change(problem):
         client = StubModel()
         tool = ReviewTool(client, max_output_attempts=1, provider_max_retries=0)
         if problem:
-            message = "exactly one confirmed change" if problem == "missing" else "cannot create new facts or procedure progress"
+            message = "confirmation must contain only the accepted changes"
             with pytest.raises(ReviewIntegrityError, match=message):
                 await tool.review(subject)
             assert client.calls == 0
