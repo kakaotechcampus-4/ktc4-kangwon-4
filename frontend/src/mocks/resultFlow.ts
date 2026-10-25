@@ -150,20 +150,22 @@ const OUTCOMES: Record<string, SubmitOutcome> = {
       ],
     },
   },
-  invalid: {
-    kind: 'STAY',
-    state: {
-      kind: 'INVALID_TRANSITION',
-      message: '이미 철거가 끝난 것으로 기록되어 있어 이 내용은 반영할 수 없습니다.',
-    },
-  },
-  failed: {
+  // 판단 실패는 이유마다 문구가 갈려서 키도 갈린다. `/case` 의 `judgment-failed-*` 와 같은 나눔이다
+  'failed-retry': { kind: 'STAY', state: { kind: 'FAILED', notice: { kind: 'RETRY_AVAILABLE' } } },
+  'failed-detail': {
     kind: 'STAY',
     state: {
       kind: 'FAILED',
-      message: '다음 할 일을 다시 계산하지 못했습니다.',
+      notice: { kind: 'NEEDS_DETAIL', fields: ['원상복구 범위', '철거 필요 여부'], partial: false },
     },
   },
+  'failed-service': { kind: 'STAY', state: { kind: 'FAILED', notice: { kind: 'SERVICE_SIDE' } } },
+  'failed-none': { kind: 'STAY', state: { kind: 'FAILED', notice: { kind: 'NO_RECOVERY' } } },
+  'failed-unknown': { kind: 'STAY', state: { kind: 'FAILED', notice: { kind: 'UNKNOWN_CAUSE' } } },
+  'send-failed': { kind: 'STAY', state: { kind: 'SEND_FAILED' } },
+  stale: { kind: 'STAY', state: { kind: 'STALE' } },
+  'too-long': { kind: 'STAY', state: { kind: 'WAITED_TOO_LONG' } },
+  unrecognized: { kind: 'STAY', state: { kind: 'UNRECOGNIZED' } },
 }
 
 /**

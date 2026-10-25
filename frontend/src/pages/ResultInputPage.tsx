@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { type ComponentProps, useEffect, useRef, useState } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router'
 
 import { AppShell } from '../components/AppShell'
@@ -8,7 +8,7 @@ import { PendingCard } from '../components/PendingCard'
 import { ResultInputForm } from '../components/ResultInputForm'
 import { MOCK_SWITCH_ENABLED, readMockKey } from '../lib/mockSwitch'
 import { pendingMessages, resultInput, simulateSubmit } from '../mocks/resultFlow'
-import type { NextAction, SubmitState } from '../types/view'
+import type { FailureNotice, NextAction, SubmitState } from '../types/view'
 
 /**
  * ③ 결과 입력.
@@ -47,11 +47,15 @@ export function ResultInputPage() {
     (routeState as NextAction | null) ?? (MOCK_SWITCH_ENABLED ? resultInput.nextAction : null)
   const isPending = state.kind === 'PENDING'
   const canRetry = text.trim().length > 0
+  const notice = stayNotice(state, {
+    retry: { label: '다시 보내기', onClick: handleSubmit, disabled: !canRetry },
+    goToCase: { label: '지금 상황 보기', onClick: () => navigate({ pathname: '/case', search }) },
+  })
 
   if (!nextAction) return <Navigate to={{ pathname: '/', search }} replace />
 
   async function handleSubmit() {
-    // "다시 시도" 버튼도 이 함수를 부른다. 폼에만 검증을 두면 그 경로로 빈 입력이 나간다
+    // "다시 보내기" 버튼도 이 함수를 부른다. 폼에만 검증을 두면 그 경로로 빈 입력이 나간다
     if (text.trim().length === 0) return
 
     setState({ kind: 'PENDING' })
@@ -112,22 +116,117 @@ export function ResultInputPage() {
 
       {state.kind === 'NEEDS_MORE_INFO' && <FollowUpQuestionCard questions={state.questions} />}
 
-      {state.kind === 'INVALID_TRANSITION' && (
-        <NoticeCard
-          tone="WARNING"
-          title={state.message}
-          description="기록과 다른 부분이 있는지 확인하고 다시 말씀해 주세요."
-        />
-      )}
-
-      {state.kind === 'FAILED' && (
-        <NoticeCard
-          tone="NEUTRAL"
-          title={state.message}
-          description="잠시 후 다시 시도해 주세요. 같은 내용을 그대로 보내셔도 됩니다."
-          action={{ label: '다시 시도', onClick: handleSubmit, disabled: !canRetry }}
-        />
-      )}
+      {notice && <NoticeCard {...notice} />}
     </AppShell>
   )
+}
+
+type NoticeProps = ComponentProps<typeof NoticeCard>
+type NoticeAction = NonNullable<NoticeProps['action']>
+
+/**
+ * 더 적어야 할 항목을 한 문장으로. `/case` 의 `requestedText` 와 같은 모양이다.
+ *
+ * 항목을 문장 끝에 떼어 둔다. 앞에 두면 "범위를"·"업종을" 처럼 받침에 따라 조사가 갈린다.
+ */
+function detailText({ fields, partial }: { fields: string[]; partial: boolean }): string {
+  if (fields.length === 0) {
+    return '어떤 내용이 더 필요한지는 아직 확인되지 않았어요. 조금 더 자세히 적어서 다시 보내 주세요.'
+  }
+  return `이 내용을 조금 더 적어서 다시 보내 주세요 — ${fields.join(', ')}${partial ? ' 등' : ''}.`
+}
+
+/** 판단 실패 이유마다의 안내. "다시 보내기"는 같은 글을 그대로 보내도 될 때만 단다 */
+function failureNotice(notice: FailureNotice, retry: NoticeAction): NoticeProps {
+  switch (notice.kind) {
+    case 'RETRY_AVAILABLE':
+      return {
+        tone: 'NEUTRAL',
+        title: '이번 결과로 다음 할 일을 정하지 못했어요.',
+        description: '적어 주신 내용은 그대로 있어요. 같은 내용으로 다시 보내실 수 있어요.',
+        action: retry,
+      }
+
+    // 더 적어야 하는 실패에 "다시 보내기"를 달면 고치지 않은 글로 같은 실패를 되풀이한다.
+    // 아래 폼의 보내기 버튼이 그 자리다
+    case 'NEEDS_DETAIL':
+      return { tone: 'WARNING', title: '추가 확인이 필요해요.', description: detailText(notice) }
+
+    case 'SERVICE_SIDE':
+      return {
+        tone: 'NEUTRAL',
+        title: '서비스에서 확인이 필요한 문제가 생겼어요.',
+        description: '적어 주신 내용은 받았어요. 이 건은 저희 쪽에서 봐야 하는 문제예요.',
+      }
+
+    case 'NO_RECOVERY':
+      return {
+        tone: 'NEUTRAL',
+        title: '이번 결과로 다음 할 일을 정하지 못했어요.',
+        description: '이번 판단에 대해서는 더 해 보실 수 있는 것이 없어요.',
+      }
+
+    case 'UNKNOWN_CAUSE':
+      return {
+        tone: 'NEUTRAL',
+        title: '이번 결과로 다음 할 일을 정하지 못했어요.',
+        description: '자세한 이유는 확인되지 않았어요.',
+      }
+  }
+}
+
+/**
+ * 머무는 상태마다 띄울 안내 한 장. 안내할 것이 없는 상태면 `null`.
+ *
+ * `/case` 의 `failureCard` 를 바탕으로 이 화면에 맞게 고쳤다. 다른 점은 둘이다 —
+ * 사장님이 방금 글을 적어 보낸 참이고, 여기서는 **실제로 다시 보낼 수 있다.**
+ *
+ * 이 화면이 아는 판단이 낡았거나 끝을 못 본 경우는 `/case` 로 보낸다. 거기가 지금 판단을
+ * 다시 묻고 기다리는 자리라, 같은 기다림을 여기 하나 더 만들지 않는다.
+ */
+function stayNotice(
+  state: SubmitState,
+  actions: { retry: NoticeAction; goToCase: NoticeAction },
+): NoticeProps | null {
+  switch (state.kind) {
+    case 'IDLE':
+    case 'PENDING':
+    case 'NEEDS_MORE_INFO':
+      return null
+
+    case 'FAILED':
+      return failureNotice(state.notice, actions.retry)
+
+    case 'SEND_FAILED':
+      return {
+        tone: 'NEUTRAL',
+        title: '결과를 보내지 못했어요.',
+        description: '연결이 불안정했을 수 있어요. 적어 주신 내용은 그대로 있어요.',
+        action: actions.retry,
+      }
+
+    case 'STALE':
+      return {
+        tone: 'NEUTRAL',
+        title: '그사이 상황이 바뀌었어요.',
+        description: '다른 곳에서 결과를 보냈거나 새 판단이 나왔어요.',
+        action: actions.goToCase,
+      }
+
+    case 'WAITED_TOO_LONG':
+      return {
+        tone: 'NEUTRAL',
+        title: '판단이 오래 걸리고 있어요.',
+        description: '보내 주신 결과는 접수됐어요. 끝나면 지금 상황 화면에서 보실 수 있어요.',
+        action: actions.goToCase,
+      }
+
+    case 'UNRECOGNIZED':
+      return {
+        tone: 'NEUTRAL',
+        title: '판단 결과를 읽지 못했어요.',
+        description: '보내 주신 결과는 접수됐어요. 지금 상황 화면에서 다시 확인해 주세요.',
+        action: actions.goToCase,
+      }
+  }
 }
