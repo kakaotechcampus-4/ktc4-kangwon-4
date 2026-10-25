@@ -38,17 +38,21 @@ const TWO_CONFLICTS: ConfirmView = {
 /**
  * 앞뒤 화면을 실제 경로로 함께 등록한다. 히스토리가 어떻게 쌓이는지를 보는 테스트가
  * 있어서 이 화면만 띄워서는 확인할 수 없다. `/results`에서 넘어온 상황을 흉내 낸다.
+ *
+ * 기본은 Mock 으로 연다. 실서버에서는 아직 보낼 곳이 없어 진행 버튼이 잠기므로,
+ * 진행한 뒤를 보는 테스트는 Mock 경로로만 확인할 수 있다.
  */
-function renderWith(view: ConfirmView | null) {
+function renderWith(view: ConfirmView | null, search = '?mock=conflict') {
   const router = createMemoryRouter(
     [
       { path: '/', element: <p>진입 분기</p> },
+      { path: '/case', element: <p>현재 Case</p> },
       { path: '/results', element: <p>결과 입력</p> },
       { path: '/confirm', element: <ConfirmChangePage /> },
       { path: '/replan', element: <p>재계획 결과</p> },
     ],
     {
-      initialEntries: ['/results', { pathname: '/confirm', state: view }],
+      initialEntries: ['/results', { pathname: '/confirm', search, state: view }],
       initialIndex: 1,
     },
   )
@@ -150,5 +154,39 @@ describe('ConfirmChangePage', () => {
     renderWith(null)
 
     expect(proceedButton()).toBeInTheDocument()
+  })
+})
+
+/**
+ * 충돌 결정을 받는 API(#108)가 머지 전이다. 실제 충돌은 보여주고 고르게 하되 보내지는 못한다.
+ *
+ * 여기가 풀리면 Mock 재계획이 실서버 화면에 뜬다 — 사장님은 반영된 줄 알지만 서버 기록은
+ * 그대로다.
+ */
+describe('ConfirmChangePage — 서버', () => {
+  it('넘겨받은 충돌을 그리고 고를 수 있게 한다', () => {
+    renderWith(TWO_CONFLICTS, '')
+
+    chooseIncoming('필요함')
+
+    expect(screen.getByRole('button', { name: /필요함/ })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('다 골라도 보낼 수 없고, 현재 상황으로 가는 길을 남긴다', () => {
+    const router = renderWith(TWO_CONFLICTS, '')
+
+    chooseIncoming('필요함')
+    chooseIncoming('전체')
+
+    expect(proceedButton()).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '지금 상황 보기' }))
+    expect(router.state.location.pathname).toBe('/case')
+  })
+
+  /** 없는 충돌을 지어내 보여주면 사장님이 기록에 없는 것을 고르게 된다 */
+  it('넘겨받은 충돌 없이 열면 Mock 으로 채우지 않고 진입 분기로 돌려보낸다', async () => {
+    renderWith(null, '')
+
+    expect(await screen.findByText('진입 분기')).toBeInTheDocument()
   })
 })
