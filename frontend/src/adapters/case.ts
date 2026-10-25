@@ -33,14 +33,14 @@ import type {
  * 서버가 정한다 (`frontend/CLAUDE.md` 규칙 1·7).
  */
 
-const RESTORATION_SCOPE_LABEL: Record<RestorationScope, string | null> = {
+export const RESTORATION_SCOPE_LABEL: Record<RestorationScope, string | null> = {
   UNKNOWN: null,
   PARTIAL: '일부',
   FULL: '전체',
   NOT_REQUIRED: '필요 없음',
 }
 
-const DEMOLITION_LABEL: Record<DemolitionRequired, string | null> = {
+export const DEMOLITION_LABEL: Record<DemolitionRequired, string | null> = {
   UNKNOWN: null,
   REQUIRED: '필요함',
   NOT_REQUIRED: '필요 없음',
@@ -64,7 +64,7 @@ const DEMOLITION_LABEL: Record<DemolitionRequired, string | null> = {
  * 값이 없는 길이 셋이다 — `null`, 칸 자체가 안 온 `undefined`, 빈 문자열. 셋 다 모른다는
  * 뜻이라 같게 둔다. `toFact` 가 그 뒤를 미확인으로 처리한다.
  */
-function toDateLabel(value: string | null | undefined): string | null {
+export function toDateLabel(value: string | null | undefined): string | null {
   return value ? value.replaceAll('-', '.') : null
 }
 
@@ -132,7 +132,7 @@ export function toFacts(serverCase: CaseResponse): Fact[] {
  * 비어 있는 것과 모양이 다른 것을 같이 본다 — 둘 다 "그릴 것이 없다" 는 뜻이고,
  * 화면이 할 수 있는 일도 같다.
  */
-function isReadableText(value: unknown): value is string {
+export function isReadableText(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0
 }
 
@@ -145,7 +145,7 @@ function isReadableText(value: unknown): value is string {
  * 물어볼 말은 하나라도 글자가 아니면 **통째로 버린다.** 성한 것만 골라 그리면 사장님이
  * 그게 물어볼 말의 전부인 줄 알고, 빠뜨린 채로 임대인을 만난다.
  */
-function toNextAction(value: unknown): NextAction | null {
+export function toNextAction(value: unknown): NextAction | null {
   if (value === null || typeof value !== 'object') return null
 
   const { title, reason, questions_to_ask } = value as Partial<NextActionResponse>
