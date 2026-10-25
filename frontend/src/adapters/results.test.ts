@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import type { CaseResultsEntryResponse } from '../types/api'
-import { toChanges, toConflicts, toResultsEntry, toValueLabel } from './results'
+import type { CaseResultsEntryResponse, CaseResultsSubmitResponse } from '../types/api'
+import { toChanges, toConflicts, toResultsEntry, toSubmitOutcome, toValueLabel } from './results'
 
 /**
  * 서버가 값을 파이썬 표기 그대로 보낸다(`"True"`, `"FULL"`). 여기가 틀리면 사장님 화면에
@@ -195,5 +195,112 @@ describe('toResultsEntry', () => {
     ['모르는 상태다', entry({ judgment_status: 'ARCHIVED' as never, case_history_id: 12 })],
   ])('%s 면 알 수 없는 응답으로 둔다', (_, body) => {
     expect(toResultsEntry(body)).toEqual({ kind: 'UNRECOGNIZED' })
+  })
+})
+
+/** 판단 결과 응답. 칸은 모두 비워 두고 테스트마다 필요한 것만 채운다 */
+function judged(overrides: Partial<CaseResultsSubmitResponse>): CaseResultsSubmitResponse {
+  return {
+    result: 'UPDATED',
+    changes: null,
+    blocker: null,
+    next_action: null,
+    questions_for_user: null,
+    raw_input: null,
+    conflicts: null,
+    recovery_action_code: null,
+    requested_field_paths: null,
+    ...overrides,
+  }
+}
+
+const REPLANNED = {
+  changes: [{ field: 'demolition_required', stored_value: null, new_value: 'REQUIRED' }],
+  blocker: '철거 전에 지원 조건을 확인해야 합니다.',
+  next_action: NEXT_ACTION,
+}
+
+const CONFLICTS = [
+  { id: 3, field: 'demolition_required', stored_value: 'NOT_REQUIRED', proposed_value: 'REQUIRED' },
+]
+
+const UNRECOGNIZED = { kind: 'STAY', state: { kind: 'UNRECOGNIZED' } }
+
+describe('toSubmitOutcome', () => {
+  it('반영됐으면 바뀐 내용과 새 할 일을 싣고 재계획으로 보낸다', () => {
+    expect(toSubmitOutcome(judged(REPLANNED))).toEqual({
+      kind: 'REPLAN',
+      view: {
+        changes: [
+          { key: 'demolition_required', label: '철거 필요 여부', previousValue: null, newValue: '필요함' },
+        ],
+        blocker: { title: '철거 전에 지원 조건을 확인해야 합니다.' },
+        nextAction: { title: '임대인에게 원상복구 범위 묻기', reason: '', questions: [] },
+      },
+    })
+  })
+
+  it('바뀐 것이 없어도 재계획으로 보내고 변경 목록은 비운다', () => {
+    expect(toSubmitOutcome(judged({ ...REPLANNED, result: 'NO_CHANGE', changes: [] }))).toMatchObject({
+      kind: 'REPLAN',
+      view: { changes: [] },
+    })
+  })
+
+  it('되물을 것이 있으면 화면에 머물러 질문을 보여준다', () => {
+    expect(
+      toSubmitOutcome(judged({ result: 'NEEDS_MORE_INFO', questions_for_user: ['매장 전체인가요?'] })),
+    ).toEqual({ kind: 'STAY', state: { kind: 'NEEDS_MORE_INFO', questions: ['매장 전체인가요?'] } })
+  })
+
+  /** 서버는 그 글을 보고 충돌을 찾았다. 화면이 들고 있던 글이 아니라 그것을 보여준다 */
+  it('충돌이면 서버가 돌려준 글과 충돌 목록을 싣는다', () => {
+    expect(
+      toSubmitOutcome(judged({ result: 'CONFLICT', raw_input: '철거해야 한대요', conflicts: CONFLICTS })),
+    ).toMatchObject({
+      kind: 'CONFIRM',
+      view: { rawInput: '철거해야 한대요', conflicts: [{ referenceId: 3 }] },
+    })
+  })
+
+  /** 실패 이유를 읽는 규칙은 `/case` 와 같다. 칸 이름도 화면 말로 바뀌어 온다 */
+  it('판단에 실패하면 화면에 머물러 이유를 담는다', () => {
+    expect(
+      toSubmitOutcome(
+        judged({
+          result: 'FAILED',
+          recovery_action_code: 'RESUBMIT_INPUT',
+          requested_field_paths: ['restoration_scope'],
+        }),
+      ),
+    ).toEqual({
+      kind: 'STAY',
+      state: { kind: 'FAILED', notice: { kind: 'NEEDS_DETAIL', fields: ['원상복구 범위'], partial: false } },
+    })
+  })
+
+  /**
+   * 빠진 값을 다른 상태로 바꿔 보여주지 않는다. 할 일이 빈 반영을 "정보 부족"으로 그리면
+   * 서버가 틀린 것을 사장님이 덜 적은 탓으로 읽는다.
+   */
+  it.each([
+    ['반영인데 바뀐 내용이 없다', judged({ ...REPLANNED, changes: null })],
+    ['반영인데 바뀐 내용 한 줄이 깨졌다', judged({ ...REPLANNED, changes: [{ stored_value: null }] as never })],
+    ['반영인데 막힌 것이 없다', judged({ ...REPLANNED, blocker: '' })],
+    ['반영인데 할 일이 없다', judged({ ...REPLANNED, next_action: null })],
+    ['되묻는다면서 질문이 없다', judged({ result: 'NEEDS_MORE_INFO', questions_for_user: [] })],
+    ['질문에 글자가 아닌 것이 섞였다', judged({ result: 'NEEDS_MORE_INFO', questions_for_user: [3] as never })],
+    ['충돌인데 목록이 없다', judged({ result: 'CONFLICT', raw_input: '철거해야 한대요' })],
+    ['충돌인데 사장님이 한 말이 없다', judged({ result: 'CONFLICT', conflicts: CONFLICTS })],
+    // 기다리는 것은 `waitForResult` 가 맡는다. 여기서 또 기다리게 하면 자리가 둘이 된다.
+    // 다른 칸을 채워 둔다 — 비어 있으면 판단 중을 반영으로 잘못 읽어도 여기서 안 잡힌다
+    ['아직 판단 중이다', judged({ ...REPLANNED, result: 'PENDING' })],
+    ['모르는 결과다', judged({ result: 'REJECTED' as never })],
+  ])('%s 면 알 수 없는 응답으로 둔다', (_, body) => {
+    expect(toSubmitOutcome(body)).toEqual(UNRECOGNIZED)
+  })
+
+  it('본문이 비어 있어도 알 수 없는 응답으로 둔다', () => {
+    expect(toSubmitOutcome(null)).toEqual(UNRECOGNIZED)
   })
 })
