@@ -15,7 +15,7 @@ function renderFlow() {
       { path: '/results', element: <ResultInputPage /> },
       { path: '/replan', element: <p>재계획 결과</p> },
     ],
-    { initialEntries: ['/case', '/results'], initialIndex: 1 },
+    { initialEntries: ['/case', '/results?mock=updated'], initialIndex: 1 },
   )
 
   render(<RouterProvider router={router} />)

@@ -1,25 +1,55 @@
 import { type ComponentProps, useEffect, useRef, useState } from 'react'
-import { Navigate, useLocation, useNavigate } from 'react-router'
+import { useLocation, useNavigate } from 'react-router'
 
+import { toResultsEntry, toSubmitOutcome } from '../adapters/results'
 import { AppShell } from '../components/AppShell'
 import { FollowUpQuestionCard } from '../components/FollowUpQuestionCard'
 import { NoticeCard } from '../components/NoticeCard'
 import { PendingCard } from '../components/PendingCard'
 import { ResultInputForm } from '../components/ResultInputForm'
-import { MOCK_SWITCH_ENABLED, readMockKey } from '../lib/mockSwitch'
+import { ApiError, UnauthorizedError } from '../lib/api'
+import { usesMockData } from '../lib/auth'
+import { readMockKey } from '../lib/mockSwitch'
+import { fetchResultsEntry, submitResult, waitForResult } from '../lib/resultSubmit'
 import { pendingMessages, resultInput, simulateSubmit } from '../mocks/resultFlow'
-import type { FailureNotice, NextAction, SubmitState } from '../types/view'
+import type { FailureNotice, NextAction, SubmitOutcome, SubmitState } from '../types/view'
+
+/** 들어올 때 서버에 물은 결과. 폼은 `READY` 일 때만 연다 */
+type EntryQuery =
+  | { status: 'LOADING' }
+  /** `historyId` 는 이 결과가 어느 판단에 대한 것인지. 보낼 때마다 새 접수 번호로 바뀐다 */
+  | { status: 'READY'; nextAction: NextAction; historyId: number }
+  | { status: 'LOAD_FAILED' }
+  | { status: 'UNRECOGNIZED' }
+
+/**
+ * Mock 으로 볼 때의 진입. 서버를 부르지 않으니 판단 번호도 쓰지 않는다.
+ *
+ * `/case` Mock 의 할 일과 같은 이야기를 잇도록 `resultInput` 을 쓴다.
+ */
+const MOCK_ENTRY: EntryQuery = { status: 'READY', nextAction: resultInput.nextAction, historyId: 0 }
+
+const stay = (state: SubmitState): SubmitOutcome => ({ kind: 'STAY', state })
 
 /**
  * ③ 결과 입력.
  *
- * 응답에 따라 화면을 옮기거나(⑤·④) 이 자리에 머문다. 머무는 경우를 `SubmitState`로
- * 두어, 한 화면이 다섯 얼굴을 갖되 그 목록이 타입에 드러나게 했다.
+ * **들어올 때 서버에 먼저 묻는다.** 결과는 가장 최근 판단에 대해서만 보낼 수 있어서,
+ * 앞 화면이 넘겨준 할 일을 믿고 폼을 열면 그사이 바뀐 판단에 대해 적게 된다. 라우터
+ * state 로 받던 것을 버린 이유다 — 히스토리에 남은 값이 "지금 할 일"이라는 얼굴로 다시 뜬다.
+ *
+ * 보낸 뒤에는 응답에 따라 화면을 옮기거나(⑤·④) 이 자리에 머문다. 머무는 경우를
+ * `SubmitState` 로 두어, 그 목록이 타입에 드러나게 했다.
  */
 export function ResultInputPage() {
-  const { search, state: routeState } = useLocation()
+  const { search } = useLocation()
   const navigate = useNavigate()
+  // 가짜 토큰으로 서버를 부르면 곧바로 401 이라, 그 경우에는 아예 부르지 않는다
+  const usesMock = usesMockData(search)
 
+  const [fetched, setFetched] = useState<EntryQuery>({ status: 'LOADING' })
+  /** 다시 불러오기를 누를 때마다 올려 진입 조회를 다시 돌린다 */
+  const [attempt, setAttempt] = useState(0)
   const [text, setText] = useState('')
   const [state, setState] = useState<SubmitState>({ kind: 'IDLE' })
 
@@ -33,46 +63,126 @@ export function ResultInputPage() {
    * 실행할 때마다 다시 true로 세운다.
    */
   const alive = useRef(true)
+  /** 판단을 기다리는 중이면 그 기다림을 끊는 손잡이. 화면을 떠날 때 당긴다 */
+  const waiting = useRef<AbortController | null>(null)
   useEffect(() => {
     alive.current = true
     return () => {
       alive.current = false
+      waiting.current?.abort()
     }
   }, [])
 
-  // 어느 할 일의 결과인지는 앞 화면이 알려준다. 주소로 직접 열었을 때는 없으므로
-  // 개발·Preview에서만 Mock으로 떨어지고, 그 외에는 진입 분기로 돌린다 —
-  // 없는 할 일을 지어내 보여주면 사용자가 엉뚱한 대상에 결과를 보고하게 된다.
-  const nextAction =
-    (routeState as NextAction | null) ?? (MOCK_SWITCH_ENABLED ? resultInput.nextAction : null)
+  useEffect(() => {
+    if (usesMock) return
+    let current = true
+
+    fetchResultsEntry().then(
+      (body) => {
+        if (!current) return
+        const entry = toResultsEntry(body)
+
+        switch (entry.kind) {
+          case 'READY':
+            setFetched({ status: 'READY', nextAction: entry.nextAction, historyId: entry.historyId })
+            return
+          // 확인을 기다리는 충돌부터 풀어야 한다. 뒤로 가기로 이 화면에 돌아오지 않게 바꿔 낀다
+          case 'CONFIRM':
+            navigate('/confirm', { replace: true, state: entry.view })
+            return
+          // 판단 중·되물을 것 있음·판단 실패는 `/case` 가 안내한다
+          case 'ELSEWHERE':
+            navigate('/case', { replace: true })
+            return
+          case 'UNRECOGNIZED':
+            setFetched({ status: 'UNRECOGNIZED' })
+            return
+        }
+      },
+      (error: unknown) => {
+        if (!current) return
+        if (error instanceof UnauthorizedError) return navigate('/login', { replace: true })
+        // Case 가 없다. 진입 분기가 시작 화면으로 보낸다
+        if (error instanceof ApiError && error.status === 404) return navigate('/', { replace: true })
+        setFetched({ status: 'LOAD_FAILED' })
+      },
+    )
+
+    return () => {
+      current = false
+    }
+  }, [usesMock, attempt, navigate])
+
+  const entry = usesMock ? MOCK_ENTRY : fetched
   const isPending = state.kind === 'PENDING'
   const canRetry = text.trim().length > 0
+  const goToCase = { label: '지금 상황 보기', onClick: () => navigate({ pathname: '/case', search }) }
   const notice = stayNotice(state, {
     retry: { label: '다시 보내기', onClick: handleSubmit, disabled: !canRetry },
-    goToCase: { label: '지금 상황 보기', onClick: () => navigate({ pathname: '/case', search }) },
+    goToCase,
   })
 
-  if (!nextAction) return <Navigate to={{ pathname: '/', search }} replace />
+  /**
+   * 실제 서버에 보내고 판단을 기다린다. 화면을 떠났거나 다른 화면으로 보냈으면 `null`.
+   *
+   * 보내기와 기다리기의 실패를 따로 받는다. 보내다 실패하면 서버가 받았는지조차 모르고,
+   * 기다리다 실패하면 접수는 된 것이라 사장님에게 할 말이 다르다.
+   */
+  async function submitToServer(historyId: number, rawInput: string): Promise<SubmitOutcome | null> {
+    let acceptedId: number
+    try {
+      acceptedId = await submitResult(historyId, rawInput)
+    } catch (error: unknown) {
+      if (!alive.current) return null
+      if (error instanceof UnauthorizedError) {
+        navigate('/login', { replace: true })
+        return null
+      }
+      // 미결 충돌·직전 제출 판단 중·더 새로운 판단(409), Case 없음(404) — 이 화면이 아는 판단이 낡았다
+      if (error instanceof ApiError && (error.status === 409 || error.status === 404)) {
+        return stay({ kind: 'STALE' })
+      }
+      return stay({ kind: 'SEND_FAILED' })
+    }
+
+    // 방금 접수된 것이 이제 가장 최근 판단이다. 되묻거나 실패해 다시 보낼 때는 이 번호로 보낸다
+    setFetched((current) => (current.status === 'READY' ? { ...current, historyId: acceptedId } : current))
+
+    const controller = new AbortController()
+    waiting.current = controller
+    try {
+      const waited = await waitForResult(acceptedId, { signal: controller.signal })
+      switch (waited.kind) {
+        case 'SETTLED':
+          return toSubmitOutcome(waited.body)
+        case 'STALE':
+          return stay({ kind: 'STALE' })
+        case 'WAITED_TOO_LONG':
+          return stay({ kind: 'WAITED_TOO_LONG' })
+      }
+    } catch (error: unknown) {
+      if (controller.signal.aborted || !alive.current) return null
+      if (error instanceof UnauthorizedError) {
+        navigate('/login', { replace: true })
+        return null
+      }
+      // 다시 물어도 답이 같은 4xx 다. 접수는 됐으니 `/case` 에서 확인하게 한다
+      return stay({ kind: 'UNRECOGNIZED' })
+    } finally {
+      waiting.current = null
+    }
+  }
 
   async function handleSubmit() {
     // "다시 보내기" 버튼도 이 함수를 부른다. 폼에만 검증을 두면 그 경로로 빈 입력이 나간다
-    if (text.trim().length === 0) return
+    if (text.trim().length === 0 || entry.status !== 'READY') return
 
     setState({ kind: 'PENDING' })
 
-    // TODO(API): 계약이 확정되면 POST /cases/{caseId}/results 로 바꾼다.
-    // 진행 중인 요청 자체를 끊는 것은 그때 AbortController로 처리한다.
-    //
-    // 함께 챙길 것:
-    // - 대기 중 이탈해도 서버에는 이미 반영됐을 수 있다. /로 돌아왔을 때 그 변경이
-    //   보이도록 현재 Case를 다시 불러와야 한다.
-    // - "다시 시도"가 같은 요청을 두 번 만들 수 있다. §5 요청 예시에 clientEventId가
-    //   있지만 의미가 계약에 정의돼 있지 않다 — 중복 제거 키가 맞는지 BE에 먼저 확인하고,
-    //   맞다면 재시도 때 같은 값을 보낸다.
-    // 그때 실패 처리도 함께 넣는다 — 오류가 나면 PENDING에서 빠져나오지 못해
-    // 입력창이 잠긴 채로 남는다. FAILED 상태가 그 자리다.
-    const outcome = await simulateSubmit(readMockKey(search), text)
-    if (!alive.current) return
+    const outcome = usesMock
+      ? await simulateSubmit(readMockKey(search), text)
+      : await submitToServer(entry.historyId, text)
+    if (!alive.current || outcome === null) return
 
     switch (outcome.kind) {
       case 'REPLAN':
@@ -92,8 +202,53 @@ export function ResultInputPage() {
     }
   }
 
+  if (entry.status === 'LOADING') {
+    return (
+      <AppShell title="결과 알려주기">
+        <section className="rounded-2xl bg-white p-5" role="status" aria-live="polite">
+          <p className="text-base leading-relaxed text-gray-600">하시기로 한 일을 불러오고 있어요.</p>
+        </section>
+      </AppShell>
+    )
+  }
+
+  if (entry.status === 'LOAD_FAILED') {
+    return (
+      <AppShell title="결과 알려주기">
+        <NoticeCard
+          tone="NEUTRAL"
+          title="하시기로 한 일을 불러오지 못했어요."
+          description="연결 상태를 확인하고 다시 불러와 주세요."
+          action={{
+            label: '다시 불러오기',
+            onClick: () => {
+              setFetched({ status: 'LOADING' })
+              setAttempt((count) => count + 1)
+            },
+          }}
+        />
+      </AppShell>
+    )
+  }
+
+  // 다시 불러와도 같은 답이 온다. 지금 판단을 보여주는 자리로 보낸다
+  if (entry.status === 'UNRECOGNIZED') {
+    return (
+      <AppShell title="결과 알려주기">
+        <NoticeCard
+          tone="NEUTRAL"
+          title="지금 상황을 읽지 못했어요."
+          description="지금 상황 화면에서 다시 확인해 주세요."
+          action={goToCase}
+        />
+      </AppShell>
+    )
+  }
+
+  const { nextAction } = entry
+
   return (
-    // 순번은 `/case` 에서 넘어올 때 없다 — 서버가 보내지 않는 값이다.
+    // 순번은 서버가 보내지 않는 값이라 없을 수 있다.
     // 그대로 끼우면 "undefined번째 할 일의 결과" 가 뜬다
     <AppShell
       title="결과 알려주기"
