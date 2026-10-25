@@ -47,14 +47,6 @@ export const DEMOLITION_LABEL: Record<DemolitionRequired, string | null> = {
 }
 
 /**
- * 값이 없으면 미확인으로 둔다. 빈 문자열로 채우거나 목록에서 빼지 않는다 —
- * 모르는 것은 모른다고 보여주는 것이 이 제품의 약속이다.
- *
- * `undefined`까지 받는 것은 표에서 못 찾은 경우 때문이다. 서버가 우리가 모르는 값을
- * 보내면 조회 결과가 `undefined`인데, 그것을 확인된 값으로 취급하면 화면에 빈 줄이
- * "확인됨"으로 뜨고 "확인 N · 미확인 M" 숫자까지 틀어진다.
- */
-/**
  * `2026-10-04` 를 `2026.10.04` 로.
  *
  * `Date` 로 바꾸지 않는다. `new Date('2026-10-04')` 는 UTC 자정이라, 한국보다 느린
@@ -68,6 +60,14 @@ export function toDateLabel(value: string | null | undefined): string | null {
   return value ? value.replaceAll('-', '.') : null
 }
 
+/**
+ * 값이 없으면 미확인으로 둔다. 빈 문자열로 채우거나 목록에서 빼지 않는다 —
+ * 모르는 것은 모른다고 보여주는 것이 이 제품의 약속이다.
+ *
+ * `undefined`까지 받는 것은 표에서 못 찾은 경우 때문이다. 서버가 우리가 모르는 값을
+ * 보내면 조회 결과가 `undefined`인데, 그것을 확인된 값으로 취급하면 화면에 빈 줄이
+ * "확인됨"으로 뜨고 "확인 N · 미확인 M" 숫자까지 틀어진다.
+ */
 function toFact(key: string, label: string, value: string | null | undefined): Fact {
   if (value === null || value === undefined) return { key, label, status: 'UNKNOWN' }
   return { key, label, value, status: 'CONFIRMED' }
@@ -200,8 +200,13 @@ function toRequestedFields(paths: unknown): { fields: string[]; partial: boolean
  *
  * 같은 이유로 **다시 봐야 할 칸은 `RESUBMIT_INPUT` 에서만 읽는다.** 다른 코드에 칸이
  * 딸려 오면 그건 보내는 쪽이 어긋난 것이고, 짝을 맞추는 일은 거기서 한다(#74).
+ *
+ * 두 칸만 받는다. 결과 제출의 판단 응답(`/cases/results/status`)도 같은 두 칸으로
+ * 실패를 알려서, 응답 전체가 아니라 그 두 칸만 요구해야 양쪽에서 쓸 수 있다.
  */
-function toFailureNotice(envelope: CasesEnvelope): FailureNotice {
+export function toFailureNotice(
+  envelope: Pick<CasesEnvelope, 'recovery_action_code' | 'requested_field_paths'>,
+): FailureNotice {
   switch (envelope.recovery_action_code) {
     case 'RETRY':
       return { kind: 'RETRY_AVAILABLE' }
@@ -220,6 +225,20 @@ function toFailureNotice(envelope: CasesEnvelope): FailureNotice {
       // 그건 서버가 "할 수 있는 것이 없다" 고 **말한** 경우고, 여기는 말을 못 알아들은 경우다
       return { kind: 'UNKNOWN_CAUSE' }
   }
+}
+
+/**
+ * 서비스가 사장님에게 되묻는 질문 목록. 받을 수 없는 모양이면 `null`.
+ *
+ * 물어볼 것이 없는데 "물어볼 게 있다" 고 할 수는 없어서 빈 목록도 `null` 이다.
+ *
+ * 목록인지만 보면 모자라다. 글자가 아닌 것이 담겨 있어도 화면이 그릴 수 없어서,
+ * 카드가 목록을 펼치다 React 에 객체를 넘기고 거기서 앱이 내려간다. 바깥 그릇만
+ * 보고 안에 든 것을 안 보면 `next_action` 에서 막은 것과 같은 구멍이 남는다.
+ */
+export function toQuestionsForUser(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.length === 0 || !value.every(isReadableText)) return null
+  return value
 }
 
 /**
@@ -259,20 +278,10 @@ function toJudgmentView(envelope: CasesEnvelope): JudgmentView {
       return { status: 'DONE', blocker: { title: blocker }, nextAction }
     }
 
-    case 'NEEDS_MORE_INFO':
-      // 물어볼 것이 없는데 "물어볼 게 있다" 고 할 수는 없다.
-      //
-      // 목록인지만 보면 모자라다. 글자가 아닌 것이 담겨 있어도 화면이 그릴 수 없어서,
-      // 카드가 목록을 펼치다 React 에 객체를 넘기고 거기서 앱이 내려간다. 바깥 그릇만
-      // 보고 안에 든 것을 안 보면 `next_action` 에서 막은 것과 같은 구멍이 남는다
-      if (
-        !Array.isArray(questions_for_user) ||
-        questions_for_user.length === 0 ||
-        !questions_for_user.every(isReadableText)
-      ) {
-        return { status: 'UNRECOGNIZED' }
-      }
-      return { status: 'NEEDS_MORE_INFO', questions: questions_for_user }
+    case 'NEEDS_MORE_INFO': {
+      const questions = toQuestionsForUser(questions_for_user)
+      return questions === null ? { status: 'UNRECOGNIZED' } : { status: 'NEEDS_MORE_INFO', questions }
+    }
 
     default:
       // `null` 이거나 우리가 모르는 값. 서버가 상태를 늘렸다는 뜻이다

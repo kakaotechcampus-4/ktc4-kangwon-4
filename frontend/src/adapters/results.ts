@@ -1,12 +1,25 @@
 import { factLabelOf, fieldLabelOf, FRANCHISE_OPTIONS, LEASE_OPTIONS } from '../lib/caseOptions'
-import type { CaseResultsEntryResponse, LeaseStatus, RestorationStatus } from '../types/api'
-import type { ConfirmView, ConflictItem, FactChange, ResultsEntry } from '../types/view'
+import type {
+  CaseResultsEntryResponse,
+  CaseResultsSubmitResponse,
+  LeaseStatus,
+  RestorationStatus,
+} from '../types/api'
+import type {
+  ConfirmView,
+  ConflictItem,
+  FactChange,
+  ResultsEntry,
+  SubmitOutcome,
+} from '../types/view'
 import {
   DEMOLITION_LABEL,
   isReadableText,
   RESTORATION_SCOPE_LABEL,
   toDateLabel,
+  toFailureNotice,
   toNextAction,
+  toQuestionsForUser,
 } from './case'
 
 /**
@@ -184,5 +197,51 @@ export function toResultsEntry(body: CaseResultsEntryResponse): ResultsEntry {
 
     default:
       return { kind: 'UNRECOGNIZED' }
+  }
+}
+
+const UNRECOGNIZED: SubmitOutcome = { kind: 'STAY', state: { kind: 'UNRECOGNIZED' } }
+
+/**
+ * 보낸 결과의 판단(`GET /cases/results/status`)을 ③ 화면이 할 일로.
+ *
+ * 받는 것은 `waitForResult` 가 기다려 얻은 **`PENDING` 이 아닌 응답**이다. 그래도 `PENDING`
+ * 이 오면 알 수 없는 응답으로 둔다 — 여기서 다시 기다리게 만들면 기다리는 자리가 둘이 된다.
+ *
+ * 상태마다 같이 와야 하는 값이 빠진 응답은 **다른 상태로 바꿔 보여주지 않고**
+ * `UNRECOGNIZED` 로 둔다. `toJudgmentView` 와 같은 규칙이다. 본문이 `null` 이어도 같다.
+ */
+export function toSubmitOutcome(body: CaseResultsSubmitResponse | null): SubmitOutcome {
+  if (body === null || typeof body !== 'object') return UNRECOGNIZED
+
+  switch (body.result) {
+    case 'UPDATED':
+    case 'NO_CHANGE': {
+      // 바뀐 내용·막힌 것·할 일 중 하나라도 받을 수 없으면 ⑤가 빈 칸을 그린다
+      const changes = toChanges(body.changes)
+      const nextAction = toNextAction(body.next_action)
+      if (changes === null || !isReadableText(body.blocker) || nextAction === null) return UNRECOGNIZED
+
+      return { kind: 'REPLAN', view: { changes, blocker: { title: body.blocker }, nextAction } }
+    }
+
+    case 'NEEDS_MORE_INFO': {
+      const questions = toQuestionsForUser(body.questions_for_user)
+      if (questions === null) return UNRECOGNIZED
+      return { kind: 'STAY', state: { kind: 'NEEDS_MORE_INFO', questions } }
+    }
+
+    case 'CONFLICT': {
+      // 사장님이 한 말은 서버가 돌려준 것을 쓴다. 화면이 들고 있던 글과 다르면 서버가
+      // 판단한 쪽이 맞다 — 그 글을 보고 충돌을 찾았다
+      const view = toConfirmView(body.raw_input, body.conflicts)
+      return view === null ? UNRECOGNIZED : { kind: 'CONFIRM', view }
+    }
+
+    case 'FAILED':
+      return { kind: 'STAY', state: { kind: 'FAILED', notice: toFailureNotice(body) } }
+
+    default:
+      return UNRECOGNIZED
   }
 }
