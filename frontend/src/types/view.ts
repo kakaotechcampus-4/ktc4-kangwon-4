@@ -184,6 +184,14 @@ export type ConflictSide = 'STORED' | 'INCOMING'
 /** 기존 기록과 새 입력이 어긋난 항목 하나 */
 export interface ConflictItem {
   key: string
+  /**
+   * 서버가 이 충돌에 붙인 번호.
+   *
+   * 고른 쪽을 보낼 때 어느 항목에 대한 답인지 이 번호로 가리킨다. `key` 로 대신하지 않는다 —
+   * `key` 는 화면이 고른 것을 기억하는 열쇠고, 서버 번호와 섞으면 화면 열쇠를 바꿀 때
+   * 보내는 값까지 같이 바뀐다.
+   */
+  referenceId: number
   label: string
   storedValue: string
   incomingValue: string
@@ -206,7 +214,8 @@ export interface FactChange {
   label: string
   /** null = 이전에는 미확인이었다. 빈 문자열로 대신하지 않는다 */
   previousValue: string | null
-  newValue: string
+  /** null = 바뀐 뒤 미확인이 됐다. 서버가 칸을 비울 수도 있다 */
+  newValue: string | null
 }
 
 /**

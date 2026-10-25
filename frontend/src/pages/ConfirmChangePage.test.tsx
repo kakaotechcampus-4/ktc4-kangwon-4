@@ -20,12 +20,14 @@ const TWO_CONFLICTS: ConfirmView = {
   conflicts: [
     {
       key: 'demolition_required',
+      referenceId: 1,
       label: '철거 필요 여부',
       storedValue: '필요 없음',
       incomingValue: '필요함',
     },
     {
       key: 'restoration_scope',
+      referenceId: 2,
       label: '원상복구 범위',
       storedValue: '일부만',
       incomingValue: '전체',

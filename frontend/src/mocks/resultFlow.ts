@@ -128,6 +128,7 @@ export const conflictConfirm: ConfirmView = {
   conflicts: [
     {
       key: 'demolition_required',
+      referenceId: 1,
       label: '철거 필요 여부',
       storedValue: '필요 없음',
       incomingValue: '필요함',
