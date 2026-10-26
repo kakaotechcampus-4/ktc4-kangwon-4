@@ -28,8 +28,10 @@ from app.agent.schemas import (
     CaseFieldKey,
     CaseSnapshot,
     Component,
+    ConflictCandidate,
     ConflictConfirmedTrigger,
     ConflictOutcome,
+    ConflictPendingInput,
     DiscoverSupportInput,
     FactChangeSourceType,
     InfoAnalysisInput,
@@ -394,6 +396,9 @@ class AgentGraph:
         evidence_records = []
         pending = [
             ref for conflict in info.conflicts for ref in conflict.source_evidence_refs
+        ] + [
+            ref for item in [*info.fact_candidates, *info.procedure_progress_observations]
+            for ref in item.source_evidence_refs
         ]
         included = set()
         while pending:
@@ -409,15 +414,33 @@ class AgentGraph:
         baseline = request_snapshot_with_evidence(
             state["request"].case_snapshot, evidence_records
         )
+        original_input = getattr(state["request"].trigger, "input", None)
+        if original_input is None:
+            raise ValueError("a new conflict batch requires its original input")
+        packet = ConflictPendingInput.model_construct(
+            original_input=original_input.model_copy(deep=True),
+            source_info_call_id=info_sources[0].meta.call_id,
+            fact_candidates=[item.model_copy(deep=True) for item in info.fact_candidates],
+            procedure_progress_observations=[
+                item.model_copy(deep=True) for item in info.procedure_progress_observations
+            ],
+            pending_digest="sha256:" + "0" * 64,
+        )
+        packet.pending_digest = packet.calculate_digest(baseline, info.conflicts)
+        conflicts = [ConflictCandidate.create(
+            **item.model_dump(exclude={"conflict_digest", "pending_input_digest"}),
+            pending_input_digest=packet.pending_digest,
+        ) for item in info.conflicts]
         outcome = ConflictOutcome(
             outcome_type="CONFLICT",
             run_id=state["run_id"],
             case_id=state["request"].case_snapshot.case_id,
             trigger=state["request"].trigger,
             snapshot_id=state["request"].case_snapshot.snapshot_id,
-            conflicts=info.conflicts,
+            conflicts=conflicts,
             evidence_records=evidence_records,
             conflict_snapshot=baseline,
+            pending_input=packet,
             message_code="CONFIRM_CONFLICT",
         )
         return {"phase": "COMPLETED", "outcome": outcome}

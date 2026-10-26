@@ -882,6 +882,7 @@ class ConflictCandidate(AgentSchema):
     proposed_value: StrictScalar
     source_evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
     source_call_id: RuntimeUUID
+    pending_input_digest: Digest | None = None
 
     @model_validator(mode="after")
     def validate_proposal(self) -> ConflictCandidate:
@@ -914,10 +915,10 @@ class ConflictCandidate(AgentSchema):
     def calculate_digest(self) -> str:
         """Digest conflict content independently of its persisted lookup reference."""
 
-        return canonical_digest(
-            self,
-            exclude={"conflict_ref", "conflict_digest"},
-        )
+        excluded = {"conflict_ref", "conflict_digest"}
+        if self.pending_input_digest is None:
+            excluded.add("pending_input_digest")
+        return canonical_digest(self, exclude=excluded)
 
     @classmethod
     def create(cls, *, conflict_ref: str, **values: Any) -> ConflictCandidate:
@@ -946,6 +947,112 @@ class ConflictCandidate(AgentSchema):
         self.assert_integrity()
         return handler(self)
 
+
+
+class ConflictPendingInput(AgentSchema):
+    """Original typed reports retained until the complete conflict batch is answered."""
+
+    original_input: RedactedInput
+    source_info_call_id: RuntimeUUID
+    fact_candidates: list[FactCandidate]
+    procedure_progress_observations: list[ProcedureProgressObservation]
+    pending_digest: Digest
+
+    def calculate_digest(
+        self, snapshot: CaseSnapshot, conflicts: list[ConflictCandidate],
+    ) -> str:
+        """Requires the stored parent context; this packet has no standalone digest."""
+        data = {
+            "case_id": snapshot.case_id,
+            "snapshot_id": str(snapshot.snapshot_id),
+            "baseline": snapshot.model_dump(mode="json"),
+            "conflicts": sorted(
+                [item.model_dump(mode="json", exclude={
+                    "conflict_digest", "pending_input_digest",
+                }) for item in conflicts],
+                key=lambda item: item["conflict_ref"],
+            ),
+            "pending_input": self.model_dump(mode="json", exclude={"pending_digest"}),
+        }
+        encoded = json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return "sha256:" + hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+    def assert_integrity(
+        self, snapshot: CaseSnapshot, conflicts: list[ConflictCandidate],
+    ) -> None:
+        if self.pending_digest != self.calculate_digest(snapshot, conflicts):
+            raise ValueError("pending input does not match its complete stored context")
+        if any(item.source_call_id != self.source_info_call_id for item in conflicts):
+            raise ValueError("pending input and conflicts must share their original Info call")
+        _ensure_unique(self.fact_candidates, lambda item: item.candidate_id, "pending candidate_id")
+        _ensure_unique(self.fact_candidates, lambda item: item.field_path, "pending field_path")
+        _ensure_unique(self.procedure_progress_observations, lambda item: item.observation_id, "pending observation_id")
+        _ensure_unique(self.procedure_progress_observations, lambda item: (
+            item.procedure_step.procedure_step_id, item.procedure_step.step_code,
+        ), "pending procedure step")
+        if {item.field_path for item in self.fact_candidates} & {item.field_path for item in conflicts}:
+            raise ValueError("pending facts cannot replay a conflict field")
+        all_ids = [item.candidate_id for item in conflicts] + [
+            item.candidate_id for item in self.fact_candidates
+        ] + [item.observation_id for item in self.procedure_progress_observations]
+        if len(set(all_ids)) != len(all_ids):
+            raise ValueError("pending and conflict identifiers must be unique")
+        evidence_by_id = {item.evidence_id: item for item in snapshot.evidence_records}
+        for conflict in conflicts:
+            for ref in conflict.source_evidence_refs:
+                evidence = evidence_by_id.get(ref)
+                locator = re.fullmatch(r"text:(\d+)-(\d+)", evidence.locator or "") if evidence else None
+                if evidence is None or locator is None or (
+                    evidence.source_ref != self.original_input.input_event_id
+                    or evidence.source_type.value != self.original_input.source_type.value
+                ):
+                    raise ValueError("conflict evidence must belong to the original input")
+                start, end = map(int, locator.groups())
+                if not 0 <= start < end <= len(self.original_input.redacted_text):
+                    raise ValueError("conflict evidence span is outside the original input")
+                text = self.original_input.redacted_text[start:end]
+                fingerprint = hashlib.sha256(text.encode("utf-8")).hexdigest()
+                if not text or evidence.excerpt != text or evidence.content_hash != fingerprint or ref != (
+                    f"input:{self.original_input.input_event_id}:{start}:{end}:{fingerprint[:12]}"
+                ):
+                    raise ValueError("conflict evidence must preserve its original input span")
+        for item in [*self.fact_candidates, *self.procedure_progress_observations]:
+            span = item.source_span
+            if span is None:
+                validate_report = getattr(item, "assert_input_integrity", None)
+                if validate_report is None:
+                    raise ValueError("pending progress requires its original structured report")
+                validate_report(self.original_input, evidence_by_id)
+                continue
+            if (
+                span.input_event_id != self.original_input.input_event_id
+                or self.original_input.redacted_text[span.start_offset:span.end_offset] != span.text
+            ):
+                raise ValueError("pending span must match the original input event and text")
+            fingerprint = hashlib.sha256(span.text.encode("utf-8")).hexdigest()
+            expected_id = f"input:{span.input_event_id}:{span.start_offset}:{span.end_offset}:{fingerprint[:12]}"
+            if item.source_evidence_refs != [expected_id]:
+                raise ValueError("pending evidence must identify its original exact span")
+            evidence = evidence_by_id.get(expected_id)
+            if evidence is None or (
+                evidence.source_type.value != self.original_input.source_type.value
+                or evidence.source_ref != span.input_event_id
+                or evidence.locator != f"text:{span.start_offset}-{span.end_offset}"
+                or evidence.excerpt != span.text or evidence.content_hash != fingerprint
+            ):
+                raise ValueError("pending evidence does not match its original input span")
+        referenced = [ref for item in [*conflicts, *self.fact_candidates, *self.procedure_progress_observations]
+                      for ref in item.source_evidence_refs]
+        visited: set[str] = set()
+        while referenced:
+            ref = referenced.pop()
+            if ref in visited:
+                continue
+            evidence = evidence_by_id.get(ref)
+            if evidence is None:
+                raise ValueError("pending input contains unresolved evidence refs")
+            visited.add(ref)
+            referenced.extend(evidence.parent_evidence_refs)
 
 
 class InfoAnalysisInput(AgentSchema):
@@ -1898,13 +2005,16 @@ class ConflictConfirmedTrigger(AgentSchema):
     conflicts: list[ConflictCandidate] = Field(default_factory=list)
     selections: list[ConflictSelection] = Field(default_factory=list)
     conflict_snapshot: CaseSnapshot | None = None
+    pending_input: ConflictPendingInput | None = None
     confirmed_at: AwareDatetime
 
     @model_validator(mode="after")
     def validate_choices(self) -> ConflictConfirmedTrigger:
         if self.confirmed_conflict is not None:
-            if self.conflicts or self.selections or self.conflict_snapshot is not None:
+            if self.conflicts or self.selections or self.conflict_snapshot is not None or self.pending_input is not None:
                 raise ValueError("use either the legacy acceptance or a complete batch")
+            if self.confirmed_conflict.pending_input_digest is not None:
+                raise ValueError("a pending input requires complete batch confirmation")
             return self
         if not self.conflicts or not self.selections or self.conflict_snapshot is None:
             raise ValueError("batch confirmation requires candidates, choices and baseline")
@@ -1919,7 +2029,21 @@ class ConflictConfirmedTrigger(AgentSchema):
             conflict.assert_integrity()
             if conflict.snapshot_id != self.conflict_snapshot.snapshot_id:
                 raise ValueError("conflict batch must share its stored baseline")
+        self.assert_pending_input_integrity()
         return self
+
+    def assert_pending_input_integrity(self) -> None:
+        conflicts = [item for item, _ in self.choices()]
+        markers = {item.pending_input_digest for item in conflicts}
+        for conflict in conflicts:
+            conflict.assert_integrity()
+        if self.pending_input is None:
+            if markers != {None}:
+                raise ValueError("stored pending input must not be omitted")
+            return
+        if self.conflict_snapshot is None or markers != {self.pending_input.pending_digest}:
+            raise ValueError("all conflicts must bind the same pending input")
+        self.pending_input.assert_integrity(self.conflict_snapshot, conflicts)
 
     def choices(self) -> list[tuple[ConflictCandidate, bool]]:
         if self.confirmed_conflict is not None:
@@ -2366,6 +2490,7 @@ class ConflictOutcome(AgentSchema):
         description="Conflict source evidence and its parents to retain for confirmation."
     )
     conflict_snapshot: CaseSnapshot | None = None
+    pending_input: ConflictPendingInput | None = None
     message_code: Literal["CONFIRM_CONFLICT"] = Field(
         description="Caller instruction to request explicit user confirmation."
     )
@@ -2381,6 +2506,11 @@ class ConflictOutcome(AgentSchema):
         referenced = {
             ref for conflict in self.conflicts for ref in conflict.source_evidence_refs
         } | {
+            ref for item in (
+                [*self.pending_input.fact_candidates, *self.pending_input.procedure_progress_observations]
+                if self.pending_input is not None else []
+            ) for ref in item.source_evidence_refs
+        } | {
             ref
             for evidence in self.evidence_records
             for ref in evidence.parent_evidence_refs
@@ -2391,6 +2521,23 @@ class ConflictOutcome(AgentSchema):
             conflict.assert_integrity()
             if conflict.snapshot_id != self.snapshot_id:
                 raise ValueError("conflict does not match outcome snapshot")
+        markers = {item.pending_input_digest for item in self.conflicts}
+        if self.pending_input is None:
+            if markers != {None}:
+                raise ValueError("stored pending input must not be omitted")
+        else:
+            if self.conflict_snapshot is None or (
+                self.conflict_snapshot.case_id != self.case_id
+                or self.conflict_snapshot.snapshot_id != self.snapshot_id
+                or markers != {self.pending_input.pending_digest}
+            ):
+                raise ValueError("conflict outcome must bind its stored pending input")
+            if getattr(self.trigger, "input", None) != self.pending_input.original_input:
+                raise ValueError("pending input must preserve the original trigger input")
+            self.pending_input.assert_integrity(self.conflict_snapshot, self.conflicts)
+            stored_evidence = {item.evidence_id: item for item in self.conflict_snapshot.evidence_records}
+            if any(stored_evidence.get(item.evidence_id) != item for item in self.evidence_records):
+                raise ValueError("pending outcome evidence must equal its stored baseline evidence")
         return self
 
 
@@ -2566,6 +2713,7 @@ __all__ = [
     "ConflictCandidate",
     "ConflictConfirmedTrigger",
     "ConflictOutcome",
+    "ConflictPendingInput",
     "ConflictSelection",
     "ContentHash",
     "CriterionStatus",

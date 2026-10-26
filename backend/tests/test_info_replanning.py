@@ -8,10 +8,9 @@ from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
-from test_action_codes import NOW, result_fixes_xfail, supervisor_request
+from test_action_codes import NOW, supervisor_request
 from test_blocker_candidates import ChoiceModel, request_with_state
 
-from app.agent.action_catalog import resolve_procedure_bindings
 from app.agent.graph import AgentGraph
 from app.agent.info_agent.agent import (
     InfoAnalysisAgent,
@@ -129,7 +128,6 @@ def output(findings, *, missing_detail=False, uncertainties=None):
     return {
         "completion_status": "NEEDS_USER_INPUT" if missing_detail else "COMPLETE",
         "facts": [],
-        "procedure_observations": [],
         "procedure_findings": findings,
         "missing_fields": [
             {
@@ -447,7 +445,7 @@ def test_prompt_keeps_whole_case_and_progress_even_with_a_narrow_extraction_allo
         "restoration_scope",
     }
     assert projection["snapshot_procedure_progress"][0]["status"] == "COMPLETED"
-    assert set(projection["procedure_analysis_step_codes"]) == {TAX, FOOD}
+    assert InfoAnalysisAgent._analysis_step_codes(request) == {TAX, FOOD}
 
 
 
@@ -584,7 +582,13 @@ def test_document_based_progress_is_rejected_then_retried_without_losing_finding
         asyncio.run(
             InfoAnalysisAgent(Responses(wrong), max_local_attempts=1).analyze(request)
         )
-    client = Responses(wrong, corrected)
+    client = Responses(
+        corrected,
+        input_responses=[
+            wrong | {"procedure_findings": []},
+            corrected | {"procedure_findings": []},
+        ],
+    )
     result = asyncio.run(
         InfoAnalysisAgent(client, max_local_attempts=2).analyze(request)
     )
@@ -652,10 +656,7 @@ def test_free_text_filing_report_retains_stages_and_holds_uncertain_completion(r
     assert observation.requires_confirmation is held
     observation.assert_input_integrity(request.input, {item.evidence_id: item for item in result.evidence_records})
     extraction = agent._validated_draft(raw | {"procedure_findings": []})
-    mutations = agent._preview_mutations(
-        request, extraction, agent._input_analysis(request, extraction),
-        resolve_procedure_bindings(request.known_procedure_steps, None),
-    )
+    mutations = agent._preview_mutations(request, extraction, agent._input_analysis(request, extraction))
     assert bool(mutations.procedure_progress_changes) is not held
     assert {item.procedure_step.step_code for item in result.procedure_findings} == {TAX, FOOD}
     assert request.case_snapshot.model_dump_json() == before
@@ -736,7 +737,13 @@ def test_result_sentence_produces_only_the_three_stated_fact_changes(unsupported
         "source_text": "사용자가 쓰지 않은 원상복구 완료 문장입니다.", "requires_confirmation": False,
         "reason_summary": "원문에 없는 진행 보고",
     }]
-    client = Responses(*([rejected] if unsupported_completion else []), response)
+    client = Responses(
+        response,
+        input_responses=[
+            *([rejected | {"procedure_findings": []}] if unsupported_completion else []),
+            response | {"procedure_findings": []},
+        ],
+    )
     result = asyncio.run(InfoAnalysisAgent(client).analyze(request))
     assert len(client.stage_messages("INPUT")) == 1 + int(unsupported_completion)
     assert {(fact.field_path, fact.value) for fact in result.fact_candidates} == {
@@ -894,7 +901,6 @@ def test_held_fact_still_produces_a_question_for_the_owner():
     ("restoration_scope", "원상복구 범위는 없다고 했는데 원상복구 작업도 필요하지 않습니다."),
     ("restoration_status", "원상복구 작업은 필요하지 않다고 했는데 원상복구 범위도 없대요."),
 ])
-@result_fixes_xfail()
 def test_connective_without_field_reversal_confirms_report(field, text):
     facts = [(field, "NOT_REQUIRED", text)]
     if field == "restoration_status":
@@ -908,10 +914,10 @@ def test_connective_without_field_reversal_confirms_report(field, text):
 @pytest.mark.parametrize("field,value,text", [
     ("employee_count", 3, "직원은 3명입니다."),
     ("employee_count", 0, "직원을 정리해서 지금은 0명으로 바뀌었어요."),
-    pytest.param("employee_count", 3, "직원은 3명인데 지금도 3명입니다.", marks=result_fixes_xfail()),
-    pytest.param("employee_count", 3, "직원은 3명이라고 했는데 지금도 3명이라고 합니다.", marks=result_fixes_xfail()),
-    pytest.param("restoration_scope_detail", "벽면", "원상복구 범위는 벽면이라고 했는데 지금도 벽면이라고 합니다.", marks=result_fixes_xfail()),
-    pytest.param("planned_closure_date", "2026-11-01", "폐업 예정일은 2026-11-01이라고 했는데 지금도 2026-11-01이라고 합니다.", marks=result_fixes_xfail()),
+    pytest.param("employee_count", 3, "직원은 3명인데 지금도 3명입니다."),
+    pytest.param("employee_count", 3, "직원은 3명이라고 했는데 지금도 3명이라고 합니다."),
+    pytest.param("restoration_scope_detail", "벽면", "원상복구 범위는 벽면이라고 했는데 지금도 벽면이라고 합니다."),
+    pytest.param("planned_closure_date", "2026-11-01", "폐업 예정일은 2026-11-01이라고 했는데 지금도 2026-11-01이라고 합니다."),
 ])
 def test_plain_or_repeated_report_produces_a_reviewable_change(field, value, text):
     from app.agent.enrichment import build_fact_overlays
@@ -961,8 +967,8 @@ def test_clearing_confirmed_closure_date_keeps_the_conflict_candidate():
 
 @pytest.mark.parametrize("invalid", [
     None,
-    pytest.param("digest", marks=result_fixes_xfail(raises=pytest.fail.Exception)),
-    pytest.param("evidence", marks=result_fixes_xfail(raises=pytest.fail.Exception)),
+    pytest.param("digest"),
+    pytest.param("evidence"),
 ])
 def test_confirmed_conflict_overlay_checks_original_before_planning(invalid):
     from app.agent.enrichment import build_confirmed_conflict_overlay
@@ -1018,7 +1024,6 @@ def snapshot_from_reviewed_facts(outcome):
 
 
 @pytest.mark.parametrize("held_demolition", [False, True])
-@result_fixes_xfail()
 def test_result_replanning_uses_reviewed_facts_without_repeating_scope_question(
     held_demolition,
 ):

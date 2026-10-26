@@ -13,7 +13,11 @@ from app.agent.action_catalog import ProcedureBindings
 from app.agent.guardrails import ensure_no_sensitive_text
 from app.agent.procedure_tool.store import ReviewedProcedureStore
 from app.agent.runtime import RuntimeLimits, build_runtime
-from app.agent.schemas import KnownProcedureStep
+from app.agent.schemas import (
+    ConflictPendingInput,
+    ConflictSelection,
+    KnownProcedureStep,
+)
 from app.agent.support_agent import ReviewedSupportCatalog
 from app.common.agent_dto import (
     AgentGraphInput,
@@ -71,25 +75,33 @@ def build_planning_input(
 def build_conflict_input(
     *,
     case_snapshot: CaseSnapshot,
-    confirmed_conflict: ConflictCandidate,
+    confirmed_conflict: ConflictCandidate | None = None,
+    conflicts: Sequence[ConflictCandidate] = (),
+    selections: Sequence[ConflictSelection] = (),
+    conflict_snapshot: CaseSnapshot | None = None,
+    pending_input: ConflictPendingInput | None = None,
     input_event_id: str,
     confirmed_at: datetime,
     client_event_id: str | None = None,
     trace_id: str | None = None,
 ) -> AgentGraphInput:
-    """Accept the original candidate restored by BE, never a client field/value.
+    """Accept stored candidates and choices, never client-supplied field/values.
 
-    BE checks ownership, expiry and single use before restoring this candidate.
-    The Agent checks its digest/current Case values and reviews the new plan.
+    BE checks ownership, expiry and single use before restoring candidates.
+    A batch includes every choice and its original snapshot/pending input.
+    The existing single accepted candidate remains supported. The Agent checks
+    integrity/current Case values and reviews the new plan in either form.
     """
     return AgentGraphInput.model_validate({
         "trigger": ConflictConfirmedTrigger(
             trigger_type="CONFLICT_CONFIRMED",
             input_event_id=input_event_id,
             client_event_id=client_event_id,
-            confirmed_conflict=ConflictCandidate.model_validate(
-                confirmed_conflict.model_dump(mode="python")
-            ),
+            confirmed_conflict=confirmed_conflict,
+            conflicts=list(conflicts),
+            selections=list(selections),
+            conflict_snapshot=conflict_snapshot,
+            pending_input=pending_input,
             confirmed_at=confirmed_at,
         ).model_dump(mode="python"),
         "case_snapshot": case_snapshot.model_dump(mode="python"),
