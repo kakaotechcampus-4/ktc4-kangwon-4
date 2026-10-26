@@ -6,8 +6,10 @@ AI 입구 검사(app/agent/guardrails.py)에 걸려 판단 자체가 거절된�
 
 from datetime import datetime
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
+from sqlmodel import Session
 
 from app.agent.guardrails import GuardrailViolation, ensure_no_sensitive_text
 from app.agent.schemas import EvidenceSourceType, RedactionType
@@ -170,3 +172,61 @@ def test_an_account_number_is_hidden():
 def test_a_name_is_hidden_where_it_is_clearly_a_name(written, expected):
     # 이름은 다른 말과 모양이 같아서, 이름이라고 밝혔거나 부르는 자리에서만 가린다.
     assert redact(written)[0] == expected
+
+
+@pytest.mark.parametrize(
+    ("written", "expected"),
+    [
+        pytest.param("서울 마포구 고용센터로 가면 되나요", "서울 마포구 고용센터로 가면 되나요", id="조사 로가 붙은 기관명"),
+        pytest.param(
+            "서울특별시 마포구 월드컵북로 12에서 장사했습니다",
+            "서울특별시 마포구 [주소]에서 장사했습니다",
+            id="건물번호에 조사가 붙은 주소",
+        ),
+        pytest.param("제 이름은 이수입니다", "제 이름은 [이름]입니다", id="두 글자 이름"),
+        pytest.param("마포구 가면 됩니다", "마포구 가면 됩니다", id="면으로 끝나는 보통 말"),
+    ],
+)
+def test_the_boundary_between_an_address_or_name_and_the_words_after_it(written, expected):
+    """어디서 끝나는지를 틀리면 멀쩡한 말이 같이 지워진다(승준님 #109 리뷰)."""
+
+    assert redact(written)[0] == expected
+
+
+def test_a_hidden_spot_inside_a_saved_case_value_stays_hidden(monkeypatch):
+    """AI가 가린 글을 인용해 값을 쓰면 그 값에 가림 문구가 들어온다. 그대로 저장한다.
+
+    원래 글자로 되돌려 저장하면, 다음 판단 때 그 Case 값이 사실로 다시 AI에 넘어가면서
+    (case_snapshot._build_fact) 이번에 가린 개인정보가 그대로 나간다.
+    """
+
+    from app.agent.schemas import CaseFieldKey, FactOperation, FactValueType
+    from app.be.crud import case as case_crud
+    from app.be.crud import case_field_history as case_field_history_crud
+    from app.be.services import decision_record
+
+    hidden_value = "서울 마포구 [주소]의 벽과 바닥"
+    case = SimpleNamespace(id=1, restoration_scope_detail=None)
+    saved: list = []
+    monkeypatch.setattr(case_crud, "get_case_by_id", lambda *_: case)
+    monkeypatch.setattr(
+        case_field_history_crud, "create_case_field_history",
+        lambda _session, row: saved.append(row),
+    )
+    change = SimpleNamespace(
+        field_path=CaseFieldKey.RESTORATION_SCOPE_DETAIL,
+        value_type=FactValueType.STRING,
+        operation=FactOperation.SET,
+        proposed_value=hidden_value,
+        source_evidence_refs=["ev_1"],
+        source_type=SimpleNamespace(value="INFO_ANALYSIS"),
+        reason_summary="합성",
+    )
+
+    decision_record._apply_fact_changes(
+        MagicMock(spec=Session), SimpleNamespace(id=9, case_id=1), [change]
+    )
+
+    assert case.restoration_scope_detail == hidden_value
+    # GET /cases의 changes[].new_value가 이 값을 그대로 돌려준다.
+    assert saved[0].after_value == hidden_value
