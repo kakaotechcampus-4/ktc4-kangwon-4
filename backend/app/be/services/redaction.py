@@ -20,26 +20,48 @@ from app.agent.schemas import Redaction, RedactionType
 # 관할 구청이 어디인지가 폐업 절차를 가르기 때문에 통째로 지우면 안내가 틀어진다.
 _SIDO = r"(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)(?:특별자치시|특별자치도|특별시|광역시|도)?"
 _SIGUNGU = r"[가-힣]{1,5}(?:시|군|구)(?![가-힣])"
-# 읍·면·동·리, 도로명, 번지·호·층처럼 "그 아래 단위"로 보이는 토막.
-# 끝에 한글이 더 붙으면(예: 철거동의서) 주소가 아니므로 뺀다.
-_ADDRESS_PART = r"(?:[가-힣A-Za-z0-9]+(?:읍|면|동|리|로|길)(?![가-힣])|\d+(?:-\d+)?(?:번지|호|층|동)?)"
+# 읍·면·동·리나 도로명처럼 "그 아래 단위"로 읽히는 토막. 상세 주소는 **반드시 여기서
+# 시작한다**. 숫자만 보고 주소로 치면 "마포구 2명 있습니다"의 직원 수까지 지워진다
+# (승준님 #109 리뷰). 끝에 한글이 더 붙으면(철거동의서) 주소가 아니므로 뺀다.
+_PLACE = r"[가-힣A-Za-z0-9]+(?:읍|면|동|리|로|길)(?![가-힣])"
+# 번지·호·층은 단위가 붙어 있어 그 자체로 주소의 일부로 읽힌다.
+_NUMBERED = r"\d+(?:-\d+)?(?:번지|호|층)"
+# 도로명 뒤에 오는 건물번호. 뒤에 글자가 붙으면(2명, 3월) 주소가 아니다.
+_BARE_NUMBER = r"\d+(?:-\d+)?(?![\d가-힣])"
+
+# 흔한 성씨. 이름을 찾을 때 "성씨로 시작하는가"만 본다. 여기 없는 성씨는 못 찾는다.
+_SURNAME = (
+    r"(?:남궁|황보|제갈|독고|선우|서문|김|이|박|최|정|강|조|윤|장|임|오|한|신|서|권|황|안|송|"
+    r"류|유|홍|전|고|문|손|양|배|백|허|남|심|노|하|곽|성|차|주|우|구|민|진|지|엄|채|원|천|방|"
+    r"공|현|함|변|염|여|추|도|소|석|선|설|마|길|연|위|표|명|기|반|왕|금|옥|육|인|맹|제|모|탁)"
+)
 
 _RULES: tuple[tuple[RedactionType, str, re.Pattern[str]], ...] = (
-    # 긴 것부터 본다. 주민등록번호 앞 6자리를 전화번호로 먼저 집어가면 안 된다.
+    # 위에 있을수록 먼저 가져간다. 모양이 겹치는 번호들이 있어서(사업자등록번호와 계좌번호,
+    # 전화번호와 계좌번호) 무엇으로 볼지 여기 순서로 정한다.
     (
         RedactionType.NATIONAL_ID,
         "[주민등록번호]",
-        re.compile(r"(?<!\d)\d{6}\s*[- ]\s*[1-4]\d{6}(?!\d)|(?<!\d)\d{6}[1-4]\d{6}(?!\d)"),
+        # 하이픈이 있으면 뒷자리를 따지지 않는다. AI 입구 검사가 그렇게 보기 때문에,
+        # 여기서 좁히면 900101-5234567 같은 글이 안 가려진 채 거절당한다(승준님 #109 리뷰).
+        # 하이픈이 없을 때만 일곱 번째 자리로 가려, 긴 숫자를 주민번호로 오인하지 않는다.
+        re.compile(r"(?<!\d)\d{6}\s*[- ]\s*\d{7}(?!\d)|(?<!\d)\d{6}[1-4]\d{6}(?!\d)"),
     ),
     (
         RedactionType.OTHER,
         "[전화번호]",
-        re.compile(r"(?<!\d)01[016789][-. ]?\d{3,4}[-. ]?\d{4}(?!\d)"),
+        re.compile(r"(?<!\d)01[016789][-. ]?\d{3,4}[-. ]?\d{4}(?!\d)|(?<!\d)0\d{1,2}-\d{3,4}-\d{4}(?!\d)"),
     ),
     (
         RedactionType.OTHER,
         "[사업자등록번호]",
         re.compile(r"(?<!\d)\d{3}\s*-\s*\d{2}\s*-\s*\d{5}(?!\d)|(?<!\d)\d{10}(?!\d)"),
+    ),
+    (
+        RedactionType.ACCOUNT,
+        "[계좌번호]",
+        # 끝자리를 네 자리 이상으로 묶어 2026-10-26 같은 날짜를 계좌로 보지 않게 한다.
+        re.compile(r"(?<!\d)\d{2,6}-\d{2,6}-\d{4,8}(?!\d)"),
     ),
     (
         RedactionType.OTHER,
@@ -51,12 +73,40 @@ _RULES: tuple[tuple[RedactionType, str, re.Pattern[str]], ...] = (
         "[토큰]",
         re.compile(r"(?i)\b(?:bearer\s+[a-z0-9._~+/=-]{12,}|(?:sk|pk)-[a-z0-9_-]{12,})"),
     ),
+    (
+        RedactionType.OTHER,
+        "[이름]",
+        # 밝히고 쓴 이름. "이름은" 자체는 남겨야 AI가 무슨 말인지 안다.
+        re.compile(rf"이름은?\s*(?P<mask>{_SURNAME}[가-힣]{{1,2}})"),
+    ),
+    (
+        RedactionType.OTHER,
+        "[이름]",
+        # 부르는 자리의 이름. 성씨로 시작할 때만 본다 — 사람 이름은 다른 말과 모양이
+        # 같아서, 이 조건이 없으면 "저희 사장님"의 "저희"까지 가려진다.
+        re.compile(rf"(?<![가-힣]){_SURNAME}[가-힣]{{1,2}}(?=\s?(?:씨|님))"),
+    ),
+    (
+        RedactionType.OTHER,
+        "[이름]",
+        # 직함을 붙여 부르는 자리("김철수 사장님").
+        re.compile(rf"(?<![가-힣]){_SURNAME}[가-힣]{{1,2}}(?=\s?(?:사장|대표|이사|부장|과장|팀장|소장|실장))"),
+    ),
 )
 
+# 성씨+한두 글자로 보이지만 사람 이름이 아닌 말. 이걸 가리면 AI가 누가 한 말인지 잃는다.
+_NOT_NAMES = frozenset({
+    "사장", "대표", "이사", "부장", "과장", "차장", "팀장", "실장", "국장", "소장",
+    "임대인", "임차인", "건물주", "집주인", "손님", "고객", "직원", "알바", "기사",
+    "선생", "변호사", "세무사", "노무사", "법무사", "공무원", "담당자", "관리자",
+})
+
 # 시·도나 시·군·구 **다음에 오는** 상세 주소만 잡는다. 뒤에 상세 주소가 붙지 않으면
-# 그냥 지역을 말한 것이라 가릴 게 없다.
+# 그냥 지역을 말한 것이라 가릴 게 없다. 중간에 건물명이 끼어도("월드컵북로 12 가온빌딩
+# 305호") 이어서 가리도록, 모르는 토막 하나는 건너뛴다(승준님 #109 리뷰).
+_DETAIL_TAIL = rf"(?:\s+(?:{_PLACE}|{_NUMBERED}|{_BARE_NUMBER})|\s+\S+\s+(?:{_PLACE}|{_NUMBERED}))*"
 _ADDRESS = re.compile(
-    rf"(?:{_SIDO}\s*(?:{_SIGUNGU})?|{_SIGUNGU})\s*(?P<detail>{_ADDRESS_PART}(?:\s+{_ADDRESS_PART})*)"
+    rf"(?:{_SIDO}\s*(?:{_SIGUNGU})?|{_SIGUNGU})\s*(?P<detail>{_PLACE}{_DETAIL_TAIL})"
 )
 
 
@@ -73,7 +123,7 @@ def redact(text: str) -> tuple[str, list[Redaction]]:
     redactions: list[Redaction] = []
     cursor = 0
     length = 0
-    for start, end, redaction_type, placeholder in spans:
+    for start, end, redaction_type, placeholder, _ in spans:
         kept = text[cursor:start]
         masked_parts.append(kept)
         length += len(kept)
@@ -93,39 +143,44 @@ def redact(text: str) -> tuple[str, list[Redaction]]:
     return "".join(masked_parts), redactions
 
 
-def _find_spans(text: str) -> list[tuple[int, int, RedactionType, str]]:
+def _find_spans(text: str) -> list[tuple[int, int, RedactionType, str, int]]:
     """가릴 자리를 원문 기준으로 모아, 겹치는 것을 걸러 앞에서부터 정렬해 돌려준다."""
 
-    found: list[tuple[int, int, RedactionType, str]] = []
-    for redaction_type, placeholder, pattern in _RULES:
+    found: list[tuple[int, int, RedactionType, str, int]] = []
+    for priority, (redaction_type, placeholder, pattern) in enumerate(_RULES):
         for match in pattern.finditer(text):
-            found.append((match.start(), match.end(), redaction_type, placeholder))
+            # 규칙이 "밝힌 부분"만 가리고 싶을 때는 mask 자리를 따로 표시해 둔다.
+            start, end = match.span("mask" if "mask" in pattern.groupindex else 0)
+            if text[start:end] in _NOT_NAMES:
+                continue
+            found.append((start, end, redaction_type, placeholder, priority))
     spans = _without_overlaps(found)
     # 주소는 마지막에 맞춘다. 주소 뒤에 번호가 바로 붙으면("… 12 010-1234-5678") 번호
     # 앞자리가 주소의 일부로 먼저 잡혀서, 번호가 반만 가려진 채 남는다. 번호 쪽이
     # 무엇인지 더 분명하므로 그쪽을 살리고 주소는 그 앞까지만 가린다.
     for match in _ADDRESS.finditer(text):
         start, end = match.span("detail")
-        for taken_start, taken_end, _, _ in spans:
+        for taken_start, taken_end, *_ in spans:
             if taken_start < end and start < taken_end:
                 end = min(end, taken_start)
         end = len(text[start:end].rstrip()) + start
         if end > start:
-            spans.append((start, end, RedactionType.ADDRESS, "[주소]"))
+            spans.append((start, end, RedactionType.ADDRESS, "[주소]", len(_RULES)))
     return _without_overlaps(spans)
 
 
 def _without_overlaps(
-    spans: list[tuple[int, int, RedactionType, str]],
-) -> list[tuple[int, int, RedactionType, str]]:
+    spans: list[tuple[int, int, RedactionType, str, int]],
+) -> list[tuple[int, int, RedactionType, str, int]]:
     """앞에서부터, 같은 자리면 긴 쪽을 남긴다.
 
     계약이 겹친 자리를 거절하고(schemas.RedactedInput), 한 번 가린 글자를 또 가릴 일도 없다.
     """
 
-    kept: list[tuple[int, int, RedactionType, str]] = []
+    kept: list[tuple[int, int, RedactionType, str, int]] = []
     previous_end = 0
-    for span in sorted(spans, key=lambda item: (item[0], -item[1])):
+    # 같은 자리를 두 규칙이 가리키면 긴 쪽, 그래도 같으면 _RULES에서 위에 있는 쪽.
+    for span in sorted(spans, key=lambda item: (item[0], -item[1], item[4])):
         if span[0] < previous_end:
             continue
         kept.append(span)

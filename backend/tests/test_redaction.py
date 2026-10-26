@@ -116,3 +116,57 @@ def test_two_rules_matching_the_same_text_do_not_both_mark_it():
 
     assert "sk-abcdefghijklmn" not in user_input.redacted_text
     assert len(user_input.redactions) == 1
+
+
+@pytest.mark.parametrize(
+    "written",
+    [
+        pytest.param("서울 마포구 2명 있습니다", id="직원 수"),
+        pytest.param("마포구 3월 31일 철거해야 합니다", id="기한"),
+        pytest.param("마포구 4대보험 정리해야 해요", id="보험"),
+        pytest.param("2026-10-26까지 비워야 해요", id="날짜"),
+        pytest.param("저희 사장님이 그랬어요", id="직함만 부른 말"),
+        pytest.param("임대인님이 철거하래요", id="관계를 부른 말"),
+        pytest.param("이사님께 물어봤어요", id="성씨처럼 보이는 직함"),
+        pytest.param("손님이 많았어요", id="성씨처럼 보이는 보통 말"),
+        pytest.param("건물주님이 거절했어요", id="성씨가 아닌 말로 시작하는 호칭"),
+        pytest.param("회계사님께 물어봤어요", id="목록에 없는 직함"),
+        pytest.param("어머님이 보증 서주셨어요", id="가족을 부르는 말"),
+        pytest.param("마포구 12명 일했어요", id="지역 뒤 두 자리 숫자"),
+    ],
+)
+def test_numbers_and_titles_next_to_a_district_are_not_addresses_or_names(written):
+    """지역 뒤 숫자를 주소로, 직함을 이름으로 보면 AI가 판단할 근거를 잃는다(승준님 #109 리뷰)."""
+
+    assert redact(written)[0] == written
+
+
+def test_a_national_id_is_hidden_even_when_the_back_part_starts_with_other_digits():
+    # AI 입구 검사는 뒷자리를 따지지 않는다. 여기서 좁히면 안 가려진 채 거절당한다.
+    masked = redact("900101-5234567")[0]
+
+    assert masked == "[주민등록번호]"
+    ensure_no_sensitive_text([masked])
+
+
+def test_a_building_name_in_the_middle_does_not_stop_the_address():
+    masked = redact("서울특별시 마포구 월드컵북로 12 가온빌딩 305호예요")[0]
+
+    assert masked == "서울특별시 마포구 [주소]예요"
+
+
+def test_an_account_number_is_hidden():
+    assert redact("계좌번호는 110-123-456789입니다")[0] == "계좌번호는 [계좌번호]입니다"
+
+
+@pytest.mark.parametrize(
+    ("written", "expected"),
+    [
+        pytest.param("제 이름은 김철수입니다", "제 이름은 [이름]입니다", id="밝히고 쓴 이름"),
+        pytest.param("김철수씨가 왔어요", "[이름]씨가 왔어요", id="씨를 붙여 부른 이름"),
+        pytest.param("김철수 사장님이 그랬어요", "[이름] 사장님이 그랬어요", id="직함을 붙여 부른 이름"),
+    ],
+)
+def test_a_name_is_hidden_where_it_is_clearly_a_name(written, expected):
+    # 이름은 다른 말과 모양이 같아서, 이름이라고 밝혔거나 부르는 자리에서만 가린다.
+    assert redact(written)[0] == expected
