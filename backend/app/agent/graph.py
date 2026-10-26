@@ -18,7 +18,7 @@ from uuid import UUID, uuid4
 from langgraph.graph import END, START, StateGraph
 
 from app.agent.blocker_candidates import field_confirmation_question
-from app.agent.enrichment import build_confirmed_conflict_overlay, build_fact_overlays
+from app.agent.enrichment import build_conflict_overlays, build_fact_overlays
 from app.agent.llm import current_call_budget
 from app.agent.run_scope import current_deadline
 from app.agent.schemas import (
@@ -334,6 +334,7 @@ class AgentGraph:
             input=trigger_input,
             case_snapshot=request.case_snapshot,
             fact_overlays=confirmed_overlays,
+            conflict_confirmation=(request.trigger if isinstance(request.trigger, ConflictConfirmedTrigger) else None),
             allowed_field_paths=list(CASE_FIELD_SPECS),
             known_procedure_steps=[
                 step.model_copy(deep=True) for step in self._known_procedure_steps
@@ -405,6 +406,9 @@ class AgentGraph:
             included.add(ref)
             evidence_records.append(evidence)
             pending.extend(evidence.parent_evidence_refs)
+        baseline = request_snapshot_with_evidence(
+            state["request"].case_snapshot, evidence_records
+        )
         outcome = ConflictOutcome(
             outcome_type="CONFLICT",
             run_id=state["run_id"],
@@ -413,9 +417,11 @@ class AgentGraph:
             snapshot_id=state["request"].case_snapshot.snapshot_id,
             conflicts=info.conflicts,
             evidence_records=evidence_records,
+            conflict_snapshot=baseline,
             message_code="CONFIRM_CONFLICT",
         )
         return {"phase": "COMPLETED", "outcome": outcome}
+
 
     def _confirmed_conflict_node(self, state: AgentGraphState) -> dict[str, Any]:
         """Turn the user's confirmation into one reviewable change candidate.
@@ -433,16 +439,17 @@ class AgentGraph:
         started = time.monotonic()
         try:
             self._check_deadline()
-            overlay = build_confirmed_conflict_overlay(
+            overlays = build_conflict_overlays(
                 request.case_snapshot,
-                trigger.confirmed_conflict,
+                trigger,
                 uuid_factory=self._uuid,
             )
         except Exception as exc:  # noqa: BLE001 - graph must fail closed
             self._emit(meta, started, "ERROR", exc)
             return self._failure(exc, Component.INFO_AGENT)
         self._emit(meta, started, "SUCCESS")
-        return {"phase": "INFO_ANALYSIS", "fact_overlays": [overlay]}
+        return {"phase": "INFO_ANALYSIS", "fact_overlays": overlays}
+
 
     async def _procedure_node(self, state: AgentGraphState) -> dict[str, Any]:
         request = state["request"]
@@ -1033,6 +1040,17 @@ class AgentGraph:
         except Exception:  # noqa: BLE001 - telemetry is deliberately best-effort
             # Observability must not change planning behavior.
             return
+
+
+def request_snapshot_with_evidence(snapshot, records):
+    """Keep the exact confirmation baseline, including newly collected sources."""
+    by_id = {item.evidence_id: item for item in snapshot.evidence_records}
+    for record in records:
+        previous = by_id.get(record.evidence_id)
+        if previous is not None and canonical_digest(previous) != canonical_digest(record):
+            raise ValueError("conflict evidence ID refers to different contents")
+        by_id[record.evidence_id] = record
+    return snapshot.model_copy(update={"evidence_records": list(by_id.values())}, deep=True)
 
 
 __all__ = ["AgentGraph"]

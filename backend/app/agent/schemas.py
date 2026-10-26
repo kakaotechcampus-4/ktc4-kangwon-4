@@ -228,6 +228,7 @@ CASE_FIELD_SPECS: dict[AgentFieldKey, tuple[FactValueType, frozenset[str] | None
     AgentFieldKey.PLANNED_CLOSURE_DATE: (FactValueType.DATE, None),
 }
 
+
 REQUIRED_CASE_FIELDS = frozenset(
     {
         AgentFieldKey.BUSINESS_TYPE,
@@ -946,6 +947,7 @@ class ConflictCandidate(AgentSchema):
         return handler(self)
 
 
+
 class InfoAnalysisInput(AgentSchema):
     """Complete request schema accepted by ``InfoAnalysisAgent.analyze``."""
 
@@ -958,6 +960,7 @@ class InfoAnalysisInput(AgentSchema):
     case_snapshot: CaseSnapshot = Field(
         description="Immutable Case read view used as the analysis baseline."
     )
+    conflict_confirmation: ConflictConfirmedTrigger | None = None
     fact_overlays: list[FactChangeCandidate] = Field(
         default_factory=list,
         description="Uncommitted confirmed changes used to assess procedure relevance.",
@@ -987,14 +990,26 @@ class InfoAnalysisInput(AgentSchema):
 
     @model_validator(mode="after")
     def validate_input(self) -> InfoAnalysisInput:
-        if self.input is None and (
-            not self.fact_overlays
-            or any(
-                item.source_type != FactChangeSourceType.CONFIRMED_CONFLICT
-                for item in self.fact_overlays
-            )
-        ):
-            raise ValueError("Info without input requires confirmed-conflict overlays")
+        if self.input is None:
+            if self.conflict_confirmation is None:
+                if not self.fact_overlays or any(
+                    item.source_type != FactChangeSourceType.CONFIRMED_CONFLICT
+                    for item in self.fact_overlays
+                ):
+                    raise ValueError("Info without input requires conflict confirmation")
+            else:
+                accepted_refs = {
+                    conflict.conflict_ref
+                    for conflict, accepted in self.conflict_confirmation.choices()
+                    if accepted
+                }
+                if {item.confirmed_conflict_ref for item in self.fact_overlays} != accepted_refs:
+                    raise ValueError("Info overlays must equal accepted conflict choices")
+                if any(item.source_type != FactChangeSourceType.CONFIRMED_CONFLICT
+                       for item in self.fact_overlays):
+                    raise ValueError("confirmation cannot introduce new Info facts")
+        elif self.conflict_confirmation is not None:
+            raise ValueError("confirmation must not replay the rejected user text")
         if self.fact_overlays:
             PlanningContext(
                 case_snapshot=self.case_snapshot, fact_overlays=self.fact_overlays
@@ -1008,8 +1023,7 @@ class InfoAnalysisInput(AgentSchema):
                 if (
                     current is None
                     or current.status != overlay.before_status
-                    or type(current.value) is not type(overlay.before_value)
-                    or current.value != overlay.before_value
+                    or not case_field_values_equal(overlay.field_path, current.value, overlay.before_value)
                 ):
                     raise ValueError(
                         "Info overlay before state must match its snapshot"
@@ -1045,6 +1059,7 @@ class InfoAnalysisInput(AgentSchema):
         ):
             raise ValueError("procedure lookup snapshot must match Info snapshot")
         return self
+
 
 
 class InfoAnalysisResult(AgentSchema):
@@ -1388,6 +1403,7 @@ class ProcedureLookupInput(AgentSchema):
         if len(set(normalized)) != len(normalized):
             raise ValueError("search_queries must be unique")
         return normalized
+
 
 
 class ProcedureLookupWarning(AgentSchema):
@@ -1862,33 +1878,55 @@ class ResultSubmittedTrigger(AgentSchema):
         return self
 
 
+class ConflictSelection(AgentSchema):
+    conflict_ref: NonEmptyStr
+    accepted: StrictBool
+
+
 class ConflictConfirmedTrigger(AgentSchema):
-    """User chose which of two conflicting values for one Case field holds.
+    """Caller-restored conflict batch and the user's complete set of choices.
 
-    The confirmed candidate is restored by the caller from its own stored
-    conflict record, not resent by the client.  That is what makes this safe:
-    a client cannot use a confirmation to write an arbitrary field or value,
-    only to accept a proposal the Agent itself produced earlier.
-
-    The confirmed value still goes through Review like any other change. A
-    user saying "yes" settles which value was meant; it does not make the
-    resulting plan correct.
+    accepted=false retains the committed value. The original candidates and
+    baseline come from server storage; client-supplied candidates are forbidden.
+    confirmed_conflict keeps the previous single-accept calling convention.
     """
 
     trigger_type: Literal["CONFLICT_CONFIRMED"]
     input_event_id: NonEmptyStr
-    client_event_id: NonEmptyStr | None = Field(
-        description=(
-            "Client-provided event ID, distinct from input_event_id. Use null when "
-            "absent; this field does not implement duplicate-request prevention."
-        )
-    )
-    confirmed_conflict: ConflictCandidate = Field(
-        description="The original conflict candidate the user accepted."
-    )
-    confirmed_at: AwareDatetime = Field(
-        description="When the user confirmed; used as the planning as-of date."
-    )
+    client_event_id: NonEmptyStr | None
+    confirmed_conflict: ConflictCandidate | None = None
+    conflicts: list[ConflictCandidate] = Field(default_factory=list)
+    selections: list[ConflictSelection] = Field(default_factory=list)
+    conflict_snapshot: CaseSnapshot | None = None
+    confirmed_at: AwareDatetime
+
+    @model_validator(mode="after")
+    def validate_choices(self) -> ConflictConfirmedTrigger:
+        if self.confirmed_conflict is not None:
+            if self.conflicts or self.selections or self.conflict_snapshot is not None:
+                raise ValueError("use either the legacy acceptance or a complete batch")
+            return self
+        if not self.conflicts or not self.selections or self.conflict_snapshot is None:
+            raise ValueError("batch confirmation requires candidates, choices and baseline")
+        _ensure_unique(self.conflicts, lambda item: item.conflict_ref, "conflict_ref")
+        _ensure_unique(self.conflicts, lambda item: item.field_path, "conflict field_path")
+        _ensure_unique(self.selections, lambda item: item.conflict_ref, "selection conflict_ref")
+        if {item.conflict_ref for item in self.conflicts} != {
+            item.conflict_ref for item in self.selections
+        }:
+            raise ValueError("every stored conflict needs exactly one choice")
+        for conflict in self.conflicts:
+            conflict.assert_integrity()
+            if conflict.snapshot_id != self.conflict_snapshot.snapshot_id:
+                raise ValueError("conflict batch must share its stored baseline")
+        return self
+
+    def choices(self) -> list[tuple[ConflictCandidate, bool]]:
+        if self.confirmed_conflict is not None:
+            return [(self.confirmed_conflict, True)]
+        selections = {item.conflict_ref: item.accepted for item in self.selections}
+        return [(item, selections[item.conflict_ref]) for item in self.conflicts]
+
 
 
 RunTrigger: TypeAlias = Annotated[
@@ -2327,6 +2365,7 @@ class ConflictOutcome(AgentSchema):
     evidence_records: list[EvidenceRecord] = Field(
         description="Conflict source evidence and its parents to retain for confirmation."
     )
+    conflict_snapshot: CaseSnapshot | None = None
     message_code: Literal["CONFIRM_CONFLICT"] = Field(
         description="Caller instruction to request explicit user confirmation."
     )
@@ -2349,9 +2388,11 @@ class ConflictOutcome(AgentSchema):
         if referenced - known_evidence:
             raise ValueError("conflict outcome contains unresolved evidence refs")
         for conflict in self.conflicts:
+            conflict.assert_integrity()
             if conflict.snapshot_id != self.snapshot_id:
                 raise ValueError("conflict does not match outcome snapshot")
         return self
+
 
 
 class SafeFailureOutcome(AgentSchema):
@@ -2525,6 +2566,7 @@ __all__ = [
     "ConflictCandidate",
     "ConflictConfirmedTrigger",
     "ConflictOutcome",
+    "ConflictSelection",
     "ContentHash",
     "CriterionStatus",
     "DecisionAuthority",
