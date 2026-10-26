@@ -2,8 +2,8 @@
 
 입력 조립(case_snapshot) → AI 호출 → 결과 저장(decision_record)을 한 줄로 잇는다.
 
-처음에는 가입 직후 첫 판단에만 썼지만 결과 제출도 같은 길을 타서, 이름과 달리
-"첫" 판단 전용이 아니다. 어느 입력을 판단할지는 부르는 쪽이 정해서 넘긴다.
+처음에는 가입 직후 첫 판단에만 썼지만 결과 제출도 같은 길을 탄다. 어느 입력을
+판단할지는 부르는 쪽이 정해서 넘긴다.
 """
 
 import logging
@@ -36,7 +36,7 @@ async def run_judgment_in_background(case_history_id: int) -> None:
         with Session(_engine) as session:
             await run_judgment(session, case_history_id)
     except Exception as error:
-        logger.exception("case_history %s 첫 판단 실패", case_history_id)
+        logger.exception("case_history %s 판단 실패", case_history_id)
         try:
             with Session(_engine) as session:
                 # 무엇 때문에 끊겼는지 함께 넘긴다. 다시 해도 안 풀리는 종류면 화면에
