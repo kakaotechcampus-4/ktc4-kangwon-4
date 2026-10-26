@@ -48,6 +48,7 @@ def info_messages(value: BaseModel | dict[str, Any]) -> list[dict[str, str]]:
                 "모호한 보고는 requires_confirmation=true로 보류하세요. 신고서 제출은 IN_PROGRESS와 submitted=true이며 "
                 "기관 처리 결과를 확인했다는 사용자 보고만 행정 절차 COMPLETED로 제안하세요. "
                 "준비 확인은 requirements_confirmed로 구분하고 준비·제출을 완료로 추정하지 마세요. "
+                "procedure_reports의 명시적 선택이 있는 절차는 자연어 진행 후보에서 생략하세요. "
                 "snapshot_procedure_progress를 현재 진행 상태로 사용하고 상태나 준비·제출 flag가 변하지 않은 보고는 "
                 "반복하지 마세요. 기존 완료 사실은 유지하세요.\n\n"
                 "2. 사용자가 명확히 진술하고 source_text가 뒷받침하는 사실은 requires_confirmation=false로 제안하세요."
@@ -193,6 +194,7 @@ def review_messages(value: BaseModel | dict[str, Any]) -> list[dict[str, str]]:
                 "확인해야 합니다. 이미 확정된 사실을 모른다고 "
                 "하거나, 완료·금액·날짜·법률·세무·자격에 관한 별도 진술을 하면 "
                 "실제 근거와 대조하고 근거가 없으면 REVISE하세요.\n"
+                "절차 진행/flags는 사용자 procedure_reports 선택값 또는 검증된 사용자 원문 보고와 대조하세요. 같은 절차의 명시적 선택이 우선하며 공식자료만으로 진행을 확정하지 마세요. "
                 "requirements_confirmed는 요건과 준비 확인 보고이며 문서 조회만으로 충족되지 않습니다. "
                 "submitted는 제출이고 기관 처리 완료와 다릅니다. 처리 완료를 별도로 확인하세요.\n" + SAFETY_RULES
             ),
