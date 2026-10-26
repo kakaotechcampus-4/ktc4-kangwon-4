@@ -177,6 +177,17 @@ describe('waitForResult', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
+  /** 상한 직전에 끝난 판단을 두고 "오래 걸린다" 고 하면 안 된다 */
+  it('상한에 닿는 마지막 차례에도 물어본다', async () => {
+    const answers = [...Array.from({ length: TIMEOUT_MS / INTERVAL_MS - 1 }, () => PENDING), json(UPDATED)]
+    mockFetchSequence(...answers)
+    const waiting = waitForResult(13, { signal: new AbortController().signal })
+
+    await vi.advanceTimersByTimeAsync(TIMEOUT_MS)
+
+    await expect(waiting).resolves.toEqual({ kind: 'SETTLED', body: UPDATED })
+  })
+
   /** 판단 도중 서버가 다시 뜨면 그 제출은 영영 `PENDING` 이다(#40) */
   it('상한까지 판단 중이면 그만 기다린다', async () => {
     const fetchMock = mockFetchSequence(PENDING)

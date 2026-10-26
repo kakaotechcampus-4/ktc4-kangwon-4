@@ -313,8 +313,56 @@ describe('ResultInputPage — 서버', () => {
       await advance()
 
       expect(screen.getByRole('textbox')).toHaveValue('임대인이 철거하래요')
+      expect(screen.getByRole('textbox')).toBeDisabled()
       expect(screen.queryByRole('button', { name: '다시 보내기' })).not.toBeInTheDocument()
       fireEvent.click(screen.getByRole('button', { name: '지금 상황 보기' }))
+      expect(router.state.location.pathname).toBe('/case')
+    })
+
+    /**
+     * 판단은 끝났는데 읽지 못했다. 이미 반영됐을 수 있어 같은 글을 또 보내면 두 번 들어간다.
+     * 안내가 `/case` 로 보내는 상태에서는 폼도 닫아 둔다
+     */
+    it('판단 결과를 읽지 못하면 폼을 잠근다', async () => {
+      serve({ entry: [READY], submit: [ACCEPTED], judged: [json(null)] })
+      renderFlow()
+      await advance()
+
+      submit('임대인이 철거하래요')
+      await advance(INTERVAL_MS)
+
+      expect(screen.getByRole('textbox')).toBeDisabled()
+      expect(screen.getByRole('button', { name: '지금 상황 보기' })).toBeInTheDocument()
+    })
+
+    /**
+     * 뒤로 가면 이 화면이 다시 물어 충돌 화면으로 되돌려 보낸다. 결과 입력을 거쳐 가지 않아야
+     * 뒤로 가기 한 번에 빠져나온다
+     */
+    it('판단이 충돌이면 결과 입력을 거치지 않고 충돌 확인으로 간다', async () => {
+      serve({
+        entry: [READY],
+        submit: [ACCEPTED],
+        judged: [
+          json(
+            judgedBody({
+              result: 'CONFLICT',
+              raw_input: '임대인이 철거하래요',
+              conflicts: [{ id: 3, field: 'demolition_required', stored_value: 'NOT_REQUIRED', proposed_value: 'REQUIRED' }],
+            }),
+          ),
+        ],
+      })
+      const router = renderFlow()
+      await advance()
+
+      submit('임대인이 철거하래요')
+      await advance(INTERVAL_MS)
+      expect(router.state.location.pathname).toBe('/confirm')
+
+      await act(async () => {
+        await router.navigate(-1)
+      })
       expect(router.state.location.pathname).toBe('/case')
     })
 

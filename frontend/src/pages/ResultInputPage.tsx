@@ -115,6 +115,13 @@ export function ResultInputPage() {
 
   const entry = usesMock ? MOCK_ENTRY : fetched
   const isPending = state.kind === 'PENDING'
+  /*
+   * 보낸 뒤 이 화면이 끝을 모르는 상태에서는 폼을 잠근다. 안내는 `/case` 에서 확인하라고
+   * 하는데 폼이 열려 있으면 다시 보내게 된다 — 판단 중인 제출 위에 보내면 409 라 엉뚱한 안내가
+   * 뜨고, 이미 반영된 판단 위에 보내면 같은 결과가 두 번 들어간다.
+   */
+  const formLocked =
+    isPending || state.kind === 'STALE' || state.kind === 'WAITED_TOO_LONG' || state.kind === 'UNRECOGNIZED'
   const canRetry = text.trim().length > 0
   const goToCase = { label: '지금 상황 보기', onClick: () => navigate({ pathname: '/case', search }) }
   const notice = stayNotice(state, {
@@ -189,7 +196,8 @@ export function ResultInputPage() {
         navigate({ pathname: '/replan', search }, { state: outcome.view })
         return
       case 'CONFIRM':
-        navigate({ pathname: '/confirm', search }, { state: outcome.view })
+        // 뒤로 가면 이 화면이 다시 물어 충돌 화면으로 되돌려 보낸다. 거쳐 갈 이유가 없어 바꿔 낀다
+        navigate({ pathname: '/confirm', search }, { state: outcome.view, replace: true })
         return
       case 'STAY':
         setState(outcome.state)
@@ -264,7 +272,7 @@ export function ResultInputPage() {
         value={text}
         onChange={setText}
         onSubmit={handleSubmit}
-        disabled={isPending}
+        disabled={formLocked}
       />
 
       {isPending && <PendingCard messages={pendingMessages} />}
@@ -364,7 +372,7 @@ function stayNotice(
       return {
         tone: 'NEUTRAL',
         title: '그사이 상황이 바뀌었어요.',
-        description: '다른 곳에서 결과를 보냈거나 새 판단이 나왔어요.',
+        description: '이미 접수된 결과가 있거나 새 판단이 나왔어요. 지금 상황 화면에서 확인해 주세요.',
         action: actions.goToCase,
       }
 

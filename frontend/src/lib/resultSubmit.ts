@@ -100,6 +100,9 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
  *
  * `signal` 이 끊기면(화면을 떠나면) 기다리던 것을 멈추고 그 이유로 실패한다. 떠난 화면이
  * 몇 초 뒤 결과를 받아 사장님을 다른 화면으로 끌고 가면 안 된다.
+ *
+ * **상한은 물어본 뒤에 본다.** 쉬고 나서 바로 보면 상한에 닿는 마지막 차례에는 묻지 않고
+ * 끝나, 그사이 끝난 판단을 두고 "오래 걸린다" 고 하게 된다.
  */
 export async function waitForResult(
   historyId: number,
@@ -109,9 +112,9 @@ export async function waitForResult(
 
   for (;;) {
     await sleep(POLL_INTERVAL_MS, signal)
-    if (Date.now() - startedAt >= POLL_TIMEOUT_MS) return { kind: 'WAITED_TOO_LONG' }
 
-    let body: CaseResultsSubmitResponse
+    // `undefined` 는 이번에 답을 못 받았다는 뜻이다. 본문이 `null` 인 답과 구분한다
+    let body: CaseResultsSubmitResponse | undefined
     try {
       const response = await request(`/cases/results/status?case_history_id=${historyId}`)
       body = (await response.json()) as CaseResultsSubmitResponse
@@ -121,11 +124,11 @@ export async function waitForResult(
       if (error instanceof ApiError && (error.status === 404 || error.status === 409)) return { kind: 'STALE' }
       if (error instanceof ApiError && error.status < 500) throw error
       // 네트워크 실패·시간 초과·5xx·본문이 JSON 이 아님. 다음 간격에 다시 묻는다
-      continue
     }
 
     // 요청이 나가 있는 사이 화면을 떠났다
     if (signal.aborted) throw signal.reason
-    if (body?.result !== 'PENDING') return { kind: 'SETTLED', body }
+    if (body !== undefined && body?.result !== 'PENDING') return { kind: 'SETTLED', body }
+    if (Date.now() - startedAt >= POLL_TIMEOUT_MS) return { kind: 'WAITED_TOO_LONG' }
   }
 }
