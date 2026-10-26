@@ -22,6 +22,7 @@ from app.agent.review_tool import ReviewTool
 from app.agent.schemas import (
     CASE_FIELD_SPECS,
     AgentGraphInput,
+    CaseFact,
     CaseFieldKey,
     ConflictCandidate,
     InfoAnalysisResult,
@@ -397,6 +398,44 @@ def test_failure_requests_held_facts_without_missing_questions(blocks, expected)
     )
 
 
+@pytest.mark.parametrize("scope", [None, "NOT_REQUIRED", "PARTIAL", "FULL"])
+@pytest.mark.parametrize("origin", ["held", "missing", "question"])
+def test_failure_requests_restoration_progress_only_after_scope_confirmation(scope, origin):
+    from test_info_replanning import analyze_facts
+
+    _, request, _, _, _ = graph_run_inputs("RESULT_SUBMITTED")
+    request.case_snapshot.facts.append(CaseFact(
+        field_path="restoration_scope", value_type="ENUM", value=scope,
+        status="UNKNOWN" if scope is None else "CONFIRMED",
+        evidence_refs=[] if scope is None else ["synthetic-document"],
+        updated_at=None if scope is None else NOW,
+    ))
+    info = supervisor_request().source_results[1].output
+    if origin == "held":
+        text = "원상복구 범위는 전체이고 작업을 진행하고 있습니다."
+        result = analyze_facts([("restoration_scope", "FULL", text), ("restoration_status", "IN_PROGRESS", text)],
+                               text, requires_confirmation=True)
+        result.fact_candidates[0].requires_confirmation = False  # 아직 검수를 통과한 Case 사실은 아니다.
+        info.evidence_records.extend(result.evidence_records)
+        info.fact_candidates = result.fact_candidates
+    elif origin == "missing":
+        info = InfoAnalysisResult.model_validate(info.model_dump() | {"missing_fields": [{
+            "field_path": "restoration_status", "reason_summary": "합성 진행 확인",
+            "blocks": ["SUPERVISOR_DECISION"], "question_candidate_id": None,
+        }]})
+    else:
+        info = InfoAnalysisResult.model_validate(info.model_dump() | {"question_candidates": [{
+            "question_id": UUID(int=92), "text": "원상복구 진행을 알려주세요.",
+            "resolves_field_paths": ["restoration_status"], "reason_summary": "합성 진행 확인",
+        }]})
+    outcome = AgentGraph._build_safe_failure(
+        request, run_id=UUID(int=2), trace_id=None,
+        failure={"source_results": [source(info)]},
+    )
+
+    assert outcome.requested_field_paths == (["restoration_status"] if scope in {"PARTIAL", "FULL"} else [])
+
+
 @pytest.mark.parametrize("failure", [
     pytest.param("supervisor", marks=result_fixes_xfail()),
     "timeout",
@@ -467,13 +506,14 @@ def test_graph_failure_keeps_held_fact_recovery(failure):
 
 
 @result_fixes_xfail()
-def test_graph_delivers_model_selected_held_fact_question():
+@pytest.mark.parametrize("choose_question", [False, True])
+def test_graph_preserves_held_fact_with_a_model_selected_question_or_action(choose_question):
     from test_info_replanning import analyze_facts
 
     text = "원상복구 범위는 없다고 했는데 임대인은 전부 하라고 했어요."
     held = analyze_facts([("restoration_scope", "NOT_REQUIRED", text)], text, requires_confirmation=True)
     graph, request, _, info, _ = graph_run_inputs("RESULT_SUBMITTED")
-    graph._supervisor._llm = ChoiceModel(information=True)
+    graph._supervisor._llm = ChoiceModel(information=choose_question)
     request.trigger.input.redacted_text = text
     original = info.analyze.side_effect
 
@@ -489,9 +529,15 @@ def test_graph_delivers_model_selected_held_fact_question():
     assert outcome.outcome_type == "REVIEWED_PLAN", outcome
     outcome.assert_integrity()
     draft = outcome.review_subject.supervisor_draft
-    assert draft.decision.decision_type == "NEEDS_MORE_INFO"
-    assert draft.decision.next_action is None
-    assert draft.decision.questions_for_user == ["확인한 원상복구 범위가 있으면 알려주세요."]
-    assert held.fact_candidates[0].source_evidence_refs[0] in draft.decision.blocker.evidence_refs
+    if choose_question:
+        assert draft.decision.decision_type == "NEEDS_MORE_INFO"
+        assert draft.decision.next_action is None
+        assert draft.decision.questions_for_user == ["확인한 원상복구 범위가 있으면 알려주세요."]
+    else:
+        assert draft.decision.decision_type == "ACTION"
+        assert draft.decision.next_action.action_code == "CONFIRM_TAX_CLOSURE_REQUIREMENTS"
+    held_blocker = next(item for item in draft.decision.blockers
+                        if item.candidate_id == "missing:restoration_scope")
+    assert held.fact_candidates[0].source_evidence_refs[0] in held_blocker.evidence_refs
     assert draft.mutations.fact_changes == []
     assert draft.mutations.procedure_progress_changes == []

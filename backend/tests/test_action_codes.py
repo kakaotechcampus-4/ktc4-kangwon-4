@@ -445,6 +445,42 @@ def test_review_blocks_wrong_target_even_when_its_model_returns_pass():
     asyncio.run(run())
 
 
+def test_review_rejects_filing_before_confirmation_even_when_model_passes():
+    async def run():
+        request = supervisor_request()
+        draft = await SupervisorAgent(StubModel(), max_local_attempts=1).draft(request)
+        draft.decision.next_action.action_code = TAX
+        subject = ReviewSubject.create(
+            schema_version="agent-io/2.0", review_subject_id=UUID(int=9),
+            review_attempt=1, run_id=UUID(int=2), case_id=1, trigger=request.trigger,
+            snapshot=request.case_snapshot, known_procedure_steps=request.known_procedure_steps,
+            source_results=request.source_results, supervisor_draft=draft,
+        )
+        result = await ReviewTool(StubModel(), max_output_attempts=1).review(subject)
+        assert result.verdict == "REVISE"
+        assert any(issue.issue_code == "CONTRACT_VIOLATION"
+                   and issue.target_path.startswith("/supervisor_draft/decision")
+                   for issue in result.issues)
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("폐업 시 세금 신고를 함께 하세요.", "TAX"),
+    ("폐업일 2026-11-01까지 신고하세요.", "DATE_OR_DEADLINE"),
+    ("합성 테스트 절차입니다.", "PROCEDURE"),
+])
+def test_visible_reason_keeps_its_tax_or_deadline_claim_type(text, expected):
+    request = supervisor_request()
+    draft = asyncio.run(SupervisorAgent(StubModel(), max_local_attempts=1).draft(request))
+    fields = draft.decision.model_dump(mode="python")
+    fields["next_action"]["reason"] = text
+    claims = SupervisorAgent._candidate_claims(request, fields)
+    reason = next(item for item in claims if item.target_path.endswith("/next_action/reason"))
+    assert reason.claim_type == expected
+    assert reason.text == text and reason.evidence_refs == [REF]
+
+
 @pytest.mark.parametrize("action_code", [CONFIRM_TAX, TAX])
 @pytest.mark.parametrize("invented_blocker", [False, True])
 def test_review_checks_required_blocker_against_verified_candidate(
