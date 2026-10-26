@@ -40,14 +40,16 @@ def info_messages(value: BaseModel | dict[str, Any]) -> list[dict[str, str]]:
             "content": (
                 "당신은 RE:BORN 정보분석 구성요소입니다. 사용자 사실·진행 변경 후보를 추출하고 공식 절차 문서를 분석하세요. "
                 "지원사업은 MVP에서 제외하므로 지원조건 확인을 위한 추가 질문은 만들지 마세요.\n\n"
-                "1. facts와 procedure_observations는 최신 input에서만 추출하고 source_text는 "
-                "input.redacted_text에서 그 값을 가장 직접적으로 명시하는 최소 한 문장을 정확히 복사하세요. "
-                "여러 문장이 같은 사실을 설명해도 합치지 마세요. snapshot_facts의 CONFIRMED와 값·타입이 같은"
-                " SET, snapshot_procedure_progress와 같은 상태는 반복하지 마세요. 새 사실이나 실행 결과가 없으면 해당 "
-                "목록은 []입니다. 공식 안내·미확인을 IN_PROGRESS/COMPLETED로 바꾸지 마세요. input=null이면 두 목록을 "
-                "비우고 overlays에서 발화를 만들지 마세요. procedure_observations의 인용문 자체에 해당 절차의 "
-                "이름·별칭 또는 구별 가능한 절차 단어와 실행 상태가 함께 있어야 합니다. '확인했습니다'만으로 "
-                "어느 절차를 완료했는지 추정하거나 NOT_REQUIRED를 COMPLETED로 바꾸지 마세요.\n\n"
+                "1. facts는 최신 input에서만 추출하고 source_text는 input.redacted_text의 정확한 한 문장을 "
+                "복사하세요. 여러 문장을 합치지 마세요. snapshot_facts의 CONFIRMED와 값·타입이 같은 SET은 "
+                "반복하지 마세요. input=null이면 facts와 procedure_observations는 []이며 overlays에서 발화를 만들지 마세요. "
+                "procedure_observations는 사용자 본인의 실행 보고만 해당 절차에 연결하고 정확한 원문 한 문장을 "
+                "source_text로 인용하세요. 공식 안내·계획·질문을 실제 진행으로 바꾸지 마세요. "
+                "모호한 보고는 requires_confirmation=true로 보류하세요. 신고서 제출은 IN_PROGRESS와 submitted=true이며 "
+                "기관 처리 결과를 확인했다는 사용자 보고만 행정 절차 COMPLETED로 제안하세요. "
+                "준비 확인은 requirements_confirmed로 구분하고 준비·제출을 완료로 추정하지 마세요. "
+                "snapshot_procedure_progress를 현재 진행 상태로 사용하고 상태나 준비·제출 flag가 변하지 않은 보고는 "
+                "반복하지 마세요. 기존 완료 사실은 유지하세요.\n\n"
                 "2. 사용자가 명확히 진술하고 source_text가 뒷받침하는 사실은 requires_confirmation=false로 제안하세요."
                 " 기존 확정값과 달라도 명확한 새 진술은 facts에 제안하세요. 이는 Case 덮어쓰기가 아니며 코드가 "
                 "충돌 후보로 분리해 사용자 확인 전 반영을 차단합니다. 충돌한다는 이유만으로 명확한 새 값을 "
@@ -73,10 +75,10 @@ def info_messages(value: BaseModel | dict[str, Any]) -> list[dict[str, str]]:
                 " 섞지 마세요.\n\n"
                 "7. 세부사항도 원문 그대로 쓰고 해당 문서에 없는 선택사항은 null/[]로 두세요. 날짜·금액은 적용 대상과 조건을 유지해 "
                 "인용하세요. 특정 법인의 휴·폐업일 기준·승인 조건을 일반 신고기한으로 바꾸지 마세요. deadline은 Case에 적용됨이 확인되는 "
-                "명시적 신고·신청 기한만 조건을 포함해 발췌하고 아니면 null입니다. 모든 finding은 공식·사람의 확인이 필요하며 출처가 "
+                "명시적 신고·신청 기한만 조건을 포함해 발췌하고 아니면 null입니다. 출처가 "
                 "UNKNOWN/STALE이면 relevance=UNDETERMINED입니다.\n\n"
                 "8. 복구 범위가 NOT_REQUIRED이거나 복구 상태가 NOT_REQUIRED/COMPLETED이면 복구 세부범위를 다시 묻지 "
-                "마세요. 복구 불필요가 철거 불필요는 아닙니다. 절차나 복구가 미완료이고 demolition_required가 UNKNOWN이면 철거 "
+                "마세요. 복구 완료·불필요가 철거 불필요는 아닙니다. demolition_required가 UNKNOWN이면 철거 "
                 "필요 여부도 검토하세요. restoration_status는 restoration_scope가 snapshot·overlay·같은 "
                 "입력의 명확한 사실에서 확정된 경우만 확정하고, 아니면 상태 변경을 생략하고 범위를 물으세요. 확정된 상태를 유지하면서 scope를 "
                 "CLEAR하지 마세요.\n\n"
@@ -186,7 +188,9 @@ def review_messages(value: BaseModel | dict[str, Any]) -> list[dict[str, str]]:
                 "다만 확인 행동의 절차 근거와 target은 제공된 Info finding에서 "
                 "확인해야 합니다. 이미 확정된 사실을 모른다고 "
                 "하거나, 완료·금액·날짜·법률·세무·자격에 관한 별도 진술을 하면 "
-                "실제 근거와 대조하고 근거가 없으면 REVISE하세요.\n" + SAFETY_RULES
+                "실제 근거와 대조하고 근거가 없으면 REVISE하세요.\n"
+                "requirements_confirmed는 요건과 준비 확인 보고이며 문서 조회만으로 충족되지 않습니다. "
+                "submitted는 제출이고 기관 처리 완료와 다릅니다. 처리 완료를 별도로 확인하세요.\n" + SAFETY_RULES
             ),
         },
         {"role": "user", "content": "INPUT_JSON=" + _json_payload(value)},

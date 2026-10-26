@@ -22,6 +22,7 @@ from app.agent.schemas import (
     NextAction,
     ProcedureFinding,
     ProcedureLookupResult,
+    ProcedureProgress,
     ProcedureProgressChangeCandidate,
     ReviewSourceResult,
     ReviewSubject,
@@ -206,35 +207,48 @@ def test_invented_action_alias_is_rejected(model):
 
 def test_current_tax_procedure_offers_confirmation_and_execution():
     item = finding()
-    assert item.requires_confirmation is True  # This field is always true in the DTO.
+    assert item.requires_confirmation is True
     rows = build_action_candidates(procedure_sources(item), {REF: evidence()})
     by_code = {row["action_code"]: row for row in rows}
-    assert set(by_code) == {CONFIRM_TAX, TAX}
+    assert set(by_code) == {CONFIRM_TAX}
     assert by_code[CONFIRM_TAX]["confirmation_only"] is True
-    assert by_code[TAX]["confirmation_only"] is False
+    ready = ProcedureProgress(procedure_step=item.procedure_step, status="IN_PROGRESS",
+                              requirements_confirmed=True, evidence_refs=[REF], updated_at=NOW)
+    item.requires_confirmation = False
+    executed = build_action_candidates(procedure_sources(item), {REF: evidence()}, procedure_progress=[ready])
+    assert [row["action_code"] for row in executed] == [TAX]
+    assert executed[0]["confirmation_only"] is False
     assert all(row["target"] == action_payload()["target"] for row in rows)
 
 
 @pytest.mark.parametrize(
-    "freshness,relevance,has_actions",
+    "freshness,relevance,has_actions,can_execute",
     [
-        ("STALE", "RELEVANT", True),
-        ("UNKNOWN", "RELEVANT", True),
-        ("CURRENT", "UNDETERMINED", True),
-        ("CURRENT", "POSSIBLY_RELEVANT", True),
-        ("CURRENT", "RELEVANT", False),
+        ("CURRENT", "RELEVANT", True, True),
+        ("STALE", "RELEVANT", True, False),
+        ("UNKNOWN", "RELEVANT", True, False),
+        ("CURRENT", "UNDETERMINED", True, False),
+        ("CURRENT", "POSSIBLY_RELEVANT", True, False),
+        ("CURRENT", "RELEVANT", False, False),
     ],
 )
 def test_execution_requires_current_relevant_action_evidence(
-    freshness, relevance, has_actions
+    freshness, relevance, has_actions, can_execute
 ):
     item = finding(
-        relevance=relevance, **({} if has_actions else {"required_actions": []})
+        requires_confirmation=False,
+        relevance=relevance,
+        **({} if has_actions else {"required_actions": []}),
+    )
+    ready = ProcedureProgress(
+        procedure_step=item.procedure_step, status="IN_PROGRESS",
+        requirements_confirmed=True, evidence_refs=[REF], updated_at=NOW,
     )
     rows = build_action_candidates(
-        procedure_sources(item), {REF: evidence(freshness_status=freshness)}
+        procedure_sources(item), {REF: evidence(freshness_status=freshness)},
+        procedure_progress=[ready],
     )
-    assert TAX not in {row["action_code"] for row in rows}
+    assert (TAX in {row["action_code"] for row in rows}) is can_execute
 
 
 @pytest.mark.parametrize("records", [{}, {REF: evidence(source_type="USER_INPUT")}])
@@ -243,13 +257,26 @@ def test_user_input_or_missing_evidence_cannot_create_procedure_candidates(recor
 
 
 def test_stale_official_parent_blocks_execution_through_current_wiki():
+    item = finding(requires_confirmation=False)
+    ready = ProcedureProgress(
+        procedure_step=item.procedure_step, status="IN_PROGRESS",
+        requirements_confirmed=True, evidence_refs=[REF], updated_at=NOW,
+    )
     wiki = evidence(source_type="REVIEWED_WIKI", parent_evidence_refs=["parent"])
+    valid = build_action_candidates(
+        procedure_sources(item), {REF: wiki, "parent": evidence(evidence_id="parent")},
+        procedure_progress=[ready],
+    )
+    assert [row["action_code"] for row in valid] == [TAX]
     parent = evidence(evidence_id="parent", freshness_status="STALE")
     rows = build_action_candidates(
-        procedure_sources(finding()), {REF: wiki, "parent": parent}
+        procedure_sources(item), {REF: wiki, "parent": parent},
+        procedure_progress=[ready],
     )
     assert TAX not in {row["action_code"] for row in rows}
-    assert build_action_candidates(procedure_sources(finding()), {REF: wiki}) == []
+    assert build_action_candidates(
+        procedure_sources(item), {REF: wiki}, procedure_progress=[ready]
+    ) == []
 
 
 def test_support_offers_confirmation_only_and_uses_support_target():
@@ -279,15 +306,26 @@ def test_empty_candidates_keep_the_question_only_output_valid():
 
 def test_user_input_cannot_ground_execution_even_with_official_summary():
     item = finding(
+        requires_confirmation=False,
         required_actions=[{"text": "합성 사용자 요청", "evidence_refs": ["user"]}],
         evidence_refs=[REF, "user"],
     )
+    ready = ProcedureProgress(
+        procedure_step=item.procedure_step, status="IN_PROGRESS",
+        requirements_confirmed=True, evidence_refs=[REF], updated_at=NOW,
+    )
+    valid = build_action_candidates(
+        procedure_sources(item), {REF: evidence(), "user": evidence(evidence_id="user")},
+        procedure_progress=[ready],
+    )
+    assert [row["action_code"] for row in valid] == [TAX]
     rows = build_action_candidates(
         procedure_sources(item),
         {
             REF: evidence(),
             "user": evidence(evidence_id="user", source_type="USER_INPUT"),
         },
+        procedure_progress=[ready],
     )
     assert TAX not in {row["action_code"] for row in rows}
 
@@ -489,11 +527,10 @@ def test_review_checks_required_blocker_against_verified_candidate(
     async def run():
         request = supervisor_request()
         if action_code == TAX:
-            with pytest.raises(SupervisorGuardrailError):
-                await SupervisorAgent(
-                    StubModel(action_code), max_local_attempts=1
-                ).draft(request)
-            return
+            request.case_snapshot.procedure_progress = [ProcedureProgress(procedure_step=request.known_procedure_steps[0].procedure_step, status="IN_PROGRESS", requirements_confirmed=True, evidence_refs=[REF], updated_at=NOW)]
+            info = request.source_results[1].output.model_copy(deep=True)
+            info.procedure_findings[0].requires_confirmation = False
+            request.source_results[1] = source(info)
         draft = await SupervisorAgent(
             StubModel(action_code), max_local_attempts=1
         ).draft(request)
