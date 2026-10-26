@@ -70,6 +70,17 @@ def employment_history_conflicts(values: Mapping[str, object]) -> bool:
     )
 
 
+def employment_history(values: Mapping[str, object]) -> bool | None:
+    """Use a positive confirmed staff count for this decision, without storing a fact."""
+    if employment_history_conflicts(values):
+        return None
+    history = values.get(CaseFieldKey.HAD_EMPLOYEES)
+    if type(history) is bool:
+        return history
+    count = values.get(CaseFieldKey.EMPLOYEE_COUNT)
+    return True if type(count) is int and count > 0 else None
+
+
 def procedure_applicability(
     step: KnownProcedureStep,
     snapshot: CaseSnapshot,
@@ -152,8 +163,8 @@ def _applicability(
                 )
                 validate_case_field_value(field, value_type, expected, allow_null=False)
                 actual = values.get(field)
-                if field == CaseFieldKey.HAD_EMPLOYEES and employment_history_conflicts(values):
-                    actual = None
+                if field == CaseFieldKey.HAD_EMPLOYEES:
+                    actual = employment_history(values)
                 if type(actual) is date:
                     actual = actual.isoformat()
         except ValueError:

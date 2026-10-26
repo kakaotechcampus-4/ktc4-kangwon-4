@@ -672,6 +672,7 @@ class SupervisorAgent:
             source_call_ids=call_ids,
             resolved_blocker_candidate_ids=resolved_blocker_candidates(
                 request.case_snapshot, request.known_procedure_steps, mutations, self._bindings(request),
+                sources=sources,
             ),
         )
         self._validate_claim_targets(draft)

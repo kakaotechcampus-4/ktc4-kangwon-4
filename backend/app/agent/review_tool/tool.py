@@ -796,6 +796,7 @@ def _deterministic_safety_review(
     draft = subject.supervisor_draft
     expected_resolved = resolved_blocker_candidates(
         subject.snapshot, subject.known_procedure_steps, draft.mutations, procedure_bindings,
+        sources=subject.source_results,
     )
     if draft.resolved_blocker_candidate_ids != expected_resolved:
         issues.append(_issue(

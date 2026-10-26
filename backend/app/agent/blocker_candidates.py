@@ -17,6 +17,7 @@ from app.agent.action_catalog import (
 )
 from app.agent.claim_safety import expand_evidence
 from app.agent.procedure_tool.rules import (
+    employment_history,
     employment_history_conflicts,
     procedure_applicability,
     procedure_constraints,
@@ -130,6 +131,14 @@ def build_blocker_candidates(
     """Rank all executable closure candidates; support is outside the MVP."""
     resolved_bindings = resolve_procedure_bindings(steps, procedure_bindings)
     values = _values(snapshot, mutations)
+    history_question = missing_info_fields(
+        snapshot, sources, mutations, resolved_bindings,
+        selected_candidate_id="missing:had_employees", known_procedure_steps=steps,
+    )
+    history_dependent_steps = {
+        step.procedure_step.procedure_step_id for step in steps
+        if any(item.condition_key == "had_employees" for item in step.eligibility_conditions)
+    } if history_question is not None else set()
     state_refs = list(
         dict.fromkeys(ref for fact in snapshot.facts for ref in fact.evidence_refs)
     )
@@ -173,6 +182,8 @@ def build_blocker_candidates(
         if target["target_kind"] != "PROCEDURE":
             continue
         reference = target["procedure_step"]
+        if reference["procedure_step_id"] in history_dependent_steps:
+            continue
         step_code = reference["step_code"]
         finding = findings[(reference["procedure_step_id"], step_code)]
         definition = ACTION_DEFINITIONS[row["action_code"]]
@@ -479,6 +490,8 @@ def missing_info_fields(
     if employment_history_conflicts(values):
         required_history.add("had_employees")
     paths = held_paths | missing_paths | required_history
+    if employment_history(values) is not None and "had_employees" not in held_paths:
+        paths.discard("had_employees")
     if values.get("restoration_scope") not in {"PARTIAL", "FULL"}:
         paths.discard("restoration_status")
     ordered = [path for path in _QUESTIONS if path in paths]
@@ -580,9 +593,13 @@ def candidate_decision_violations(
     return violations
 
 
-def resolved_blocker_candidates(snapshot, known_steps, mutations, bindings) -> list[str]:
+def resolved_blocker_candidates(snapshot, known_steps, mutations, bindings, *, sources=()) -> list[str]:
     """Only confirmed state can resolve a stored candidate; omission is no proof."""
     values = _values(snapshot, mutations)
+    history_confirmed = employment_history(values) is not None and missing_info_fields(
+        snapshot, sources, mutations, bindings,
+        selected_candidate_id="missing:had_employees", known_procedure_steps=known_steps,
+    ) is None
     progress = {(item.procedure_step.procedure_step_id, item.procedure_step.step_code): item.status
                 for item in effective_procedure_progress(
                     snapshot, mutations, known_steps=known_steps, procedure_bindings=bindings,
@@ -592,9 +609,8 @@ def resolved_blocker_candidates(snapshot, known_steps, mutations, bindings) -> l
     for candidate_id in snapshot.active_blocker_candidate_ids:
         if candidate_id.startswith("missing:"):
             field = candidate_id.removeprefix("missing:")
-            if field in values and not (
-                field == "had_employees" and employment_history_conflicts(values)
-            ):
+            confirmed = history_confirmed if field == "had_employees" else field in values
+            if confirmed:
                 resolved.append(candidate_id)
         elif candidate_id.startswith("procedure:"):
             step = registry.get(candidate_id.removeprefix("procedure:"))
