@@ -203,4 +203,14 @@ def _without_overlaps(
     return kept
 
 
-__all__ = ["redact"]
+def hidden_originals(text: str) -> list[tuple[str, str]]:
+    """이 글에서 무엇을 가렸는지를 (가림 문구, 원래 글자) 짝으로, 나온 순서대로 돌려준다.
+
+    화면에 돌려줄 때 되돌리는 쪽이 쓴다(services.unmasking). redact가 주는 위치는 가린 뒤
+    글 기준이라 원래 글자를 못 찾는다. 같은 규칙으로 한 번 더 훑어 원문 쪽 자리를 준다.
+    """
+
+    return [(placeholder, text[start:end]) for start, end, _, placeholder, _ in _find_spans(text)]
+
+
+__all__ = ["hidden_originals", "redact"]
