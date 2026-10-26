@@ -1,0 +1,43 @@
+name: Agent CI
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "backend/app/agent/**"
+      - "backend/app/common/**"
+      - "backend/tests/**"
+      - "backend/scripts/**"
+      - "backend/requirements*.txt"
+      - ".github/workflows/agent-ci.yml"
+
+concurrency:
+  group: agent-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  mock-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      PYTHONPATH: .
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+      - name: Install pinned dependencies
+        run: python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: Run mocked Agent regression tests
+        # 실제 MySQL 통합 검사와 LLM 평가 스크립트는 실행하지 않는다.
+        run: python -m pytest tests --ignore=tests/test_reviewed_procedure_db.py -q

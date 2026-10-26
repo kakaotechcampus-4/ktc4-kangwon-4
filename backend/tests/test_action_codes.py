@@ -15,7 +15,6 @@ from app.agent.review_tool import ReviewIntegrityError, ReviewTool
 from app.agent.schemas import (
     AgentGraphInput,
     AgentGraphOutput,
-    Blocker,
     ConflictCandidate,
     ConflictConfirmedTrigger,
     EvidenceRecord,
@@ -270,22 +269,12 @@ def test_support_offers_confirmation_only_and_uses_support_target():
 
 def test_empty_candidates_keep_the_question_only_output_valid():
     assert build_action_candidates([], {}) == []
-    result = SupervisorModelOutput.model_validate(
-        {
-            "decision_type": "NEEDS_MORE_INFO",
-            "selection_summary": "추가 확인이 필요합니다.",
-            "requires_human": True,
-            "evidence_refs": ["synthetic-user-input"],
-            "blocker": {
-                "description": "입력되지 않은 항목이 있습니다.",
-                "evidence_refs": ["synthetic-user-input"],
-            },
-            "next_action": None,
-            "questions_for_user": ["어느 부분까지 확인하셨나요?"],
-            "grounded_claims": [],
-        }
-    )
-    assert result.next_action is None
+    result = SupervisorModelOutput.model_validate({
+        "decision_type": "NEEDS_MORE_INFO",
+        "blocker_candidate_id": None,
+        "action_code": None,
+    })
+    assert result.action_code is None
 
 
 def test_user_input_cannot_ground_execution_even_with_official_summary():
@@ -406,33 +395,15 @@ class StubModel:
                     "resolution_reason": "합성 테스트에서 모델이 PASS를 반환",
                 }
             )
-        action = action_payload(self.action_code, title="담당기관에 확인해 주세요")
-        action["evidence_refs"] = ["e1"]
         support_action = self.action_code == "CONFIRM_SUPPORT_PROGRAM_REQUIREMENTS"
-        if support_action:
-            action["target"] = {
-                "target_kind": "SUPPORT_PROGRAM",
-                "support_program": {"support_program_id": 1, "wiki_uuid": UUID(int=6)},
-            }
-        return model.model_validate(
-            {
-                "decision_type": "ACTION",
-                "blocker_candidate_id": "support:1" if support_action else "procedure:1",
-                "selection_summary": "확인이 필요합니다.",
-                "requires_human": True,
-                "evidence_refs": ["e1"],
-                "blocker": {
-                    "description": "준비할 항목이 확인되지 않았습니다.",
-                    "evidence_refs": ["e1"],
-                },
-                "next_action": action,
-                "questions_for_user": [],
-                "grounded_claims": [],
-            }
-        )
+        return model.model_validate({
+            "decision_type": "ACTION",
+            "blocker_candidate_id": "support:1" if support_action else "procedure:1",
+            "action_code": self.action_code,
+        })
 
 
-def test_supervisor_blocks_known_code_paired_with_wrong_procedure_target():
+def test_supervisor_blocks_action_not_in_the_selected_candidate():
     client = StubModel("CONFIRM_RESTORATION_SCOPE")
     with pytest.raises(SupervisorGuardrailError):
         asyncio.run(
@@ -474,6 +445,42 @@ def test_review_blocks_wrong_target_even_when_its_model_returns_pass():
     asyncio.run(run())
 
 
+def test_review_rejects_filing_before_confirmation_even_when_model_passes():
+    async def run():
+        request = supervisor_request()
+        draft = await SupervisorAgent(StubModel(), max_local_attempts=1).draft(request)
+        draft.decision.next_action.action_code = TAX
+        subject = ReviewSubject.create(
+            schema_version="agent-io/2.0", review_subject_id=UUID(int=9),
+            review_attempt=1, run_id=UUID(int=2), case_id=1, trigger=request.trigger,
+            snapshot=request.case_snapshot, known_procedure_steps=request.known_procedure_steps,
+            source_results=request.source_results, supervisor_draft=draft,
+        )
+        result = await ReviewTool(StubModel(), max_output_attempts=1).review(subject)
+        assert result.verdict == "REVISE"
+        assert any(issue.issue_code == "CONTRACT_VIOLATION"
+                   and issue.target_path.startswith("/supervisor_draft/decision")
+                   for issue in result.issues)
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("폐업 시 세금 신고를 함께 하세요.", "TAX"),
+    ("폐업일 2026-11-01까지 신고하세요.", "DATE_OR_DEADLINE"),
+    ("합성 테스트 절차입니다.", "PROCEDURE"),
+])
+def test_visible_reason_keeps_its_tax_or_deadline_claim_type(text, expected):
+    request = supervisor_request()
+    draft = asyncio.run(SupervisorAgent(StubModel(), max_local_attempts=1).draft(request))
+    fields = draft.decision.model_dump(mode="python")
+    fields["next_action"]["reason"] = text
+    claims = SupervisorAgent._candidate_claims(request, fields)
+    reason = next(item for item in claims if item.target_path.endswith("/next_action/reason"))
+    assert reason.claim_type == expected
+    assert reason.text == text and reason.evidence_refs == [REF]
+
+
 @pytest.mark.parametrize("action_code", [CONFIRM_TAX, TAX])
 @pytest.mark.parametrize("invented_blocker", [False, True])
 def test_review_checks_required_blocker_against_verified_candidate(
@@ -481,20 +488,27 @@ def test_review_checks_required_blocker_against_verified_candidate(
 ):
     async def run():
         request = supervisor_request()
+        if action_code == TAX:
+            with pytest.raises(SupervisorGuardrailError):
+                await SupervisorAgent(
+                    StubModel(action_code), max_local_attempts=1
+                ).draft(request)
+            return
         draft = await SupervisorAgent(
             StubModel(action_code), max_local_attempts=1
         ).draft(request)
         assert draft.decision.blocker is not None
         assert draft.decision.blocker.evidence_refs == [REF]
-        assert draft.decision.next_action.action_code == CONFIRM_TAX
+        assert draft.decision.next_action.action_code == action_code
         assert draft.decision.questions_for_user == []
         assert any(
             "/blocker/" in claim.target_path for claim in draft.grounded_claims
         )
         if invented_blocker:
-            draft.decision.blocker = Blocker(
-                description="준비할 항목이 확인되지 않았습니다.", evidence_refs=[REF]
-            )
+            draft.decision.blocker.description = "준비할 항목이 확인되지 않았습니다."
+            for item in draft.decision.blockers:
+                if item.candidate_id == draft.decision.blocker.candidate_id:
+                    item.description = draft.decision.blocker.description
         subject = ReviewSubject.create(
             schema_version="agent-io/2.0",
             review_subject_id=UUID(int=9),

@@ -15,6 +15,7 @@ from app.agent.action_catalog import (
 )
 from app.agent.claim_safety import expand_evidence
 from app.agent.procedure_tool.rules import (
+    business_type_code,
     procedure_constraints,
     procedure_plan_constraints,
 )
@@ -86,6 +87,7 @@ def _decision_fields(
         "requires_human": True,
         "evidence_refs": candidate["evidence_refs"],
         "blocker": candidate["blocker"],
+        "blockers": [candidate["blocker"]],
         "next_action": action,
         "questions_for_user": [],
     }
@@ -117,11 +119,6 @@ def build_blocker_candidates(
 ) -> list[dict[str, Any]]:
     """Rank all executable closure candidates; support is outside the MVP."""
     resolved_bindings = resolve_procedure_bindings(steps, procedure_bindings)
-    if missing_info_fields(
-        snapshot, sources, mutations, resolved_bindings, held_only=True
-    ) is not None:
-        return []
-
     values = _values(snapshot, mutations)
     state_refs = list(
         dict.fromkeys(ref for fact in snapshot.facts for ref in fact.evidence_refs)
@@ -182,6 +179,11 @@ def build_blocker_candidates(
                 continue
         key = f"procedure:{reference['procedure_step_id']}"
         refs = list(finding.evidence_refs)
+        refs.extend(ref for item in snapshot.procedure_progress
+                    if item.procedure_step == finding.procedure_step for ref in item.evidence_refs)
+        refs.extend(ref for item in mutations.procedure_progress_changes
+                    if item.procedure_step == finding.procedure_step for ref in item.execution_evidence_refs)
+        refs = list(dict.fromkeys(refs))
         if logical_code == "CONFIRM_RESTORATION_SCOPE":
             if not restoration_first:
                 continue
@@ -247,7 +249,7 @@ def build_blocker_candidates(
         candidate = {
             "candidate_id": key,
             "evidence_refs": decision_refs,
-            "blocker": {"description": description, "evidence_refs": decision_refs},
+            "blocker": {"candidate_id": key, "description": description, "evidence_refs": decision_refs},
             "actions": [action],
         }
         # Reuse the exact registry, dependency, applicability and completion guard
@@ -314,6 +316,7 @@ def build_blocker_candidates(
                 action["action_code"],
             )
         )
+        candidate["actions"] = candidate["actions"][:1]
     return sorted(groups.values(), key=priority)
 
 
@@ -323,7 +326,7 @@ def missing_info_fields(
     mutations: MutationSet,
     procedure_bindings: ProcedureBindings | None = None,
     *,
-    held_only: bool = False,
+    selected_candidate_id: str | None = None,
 ) -> dict[str, Any] | None:
     """Ask about one unresolved decision blocker in the existing question order."""
     values = _values(snapshot, mutations)
@@ -437,18 +440,29 @@ def missing_info_fields(
             and candidate.field_path.value == "restoration_scope_detail"
         )
     }
-    paths = held_paths if held_only or held_paths else missing_paths
-    missing = next((path for path in _QUESTIONS if path in paths), None)
+    paths = held_paths | missing_paths
+    if values.get("restoration_scope") not in {"PARTIAL", "FULL"}:
+        paths.discard("restoration_status")
+    ordered = [path for path in _QUESTIONS if path in paths]
+    if selected_candidate_id is None:
+        missing = next(iter(ordered), None)
+    else:
+        missing = next((path for path in ordered if f"missing:{path}" == selected_candidate_id), None)
     if missing is None:
         return None
     questions = [_QUESTIONS[missing]]
     description = f"{_FIELD_LABELS[missing]} 확인이 필요합니다."
+    blockers = [
+        {"candidate_id": f"missing:{path}", "description": f"{_FIELD_LABELS[path]} 확인이 필요합니다.", "evidence_refs": refs}
+        for path in ordered
+    ]
     return {
         "decision_type": "NEEDS_MORE_INFO",
         "selection_summary": description,
         "requires_human": True,
         "evidence_refs": refs,
-        "blocker": {"description": description, "evidence_refs": refs},
+        "blocker": {"candidate_id": f"missing:{missing}", "description": description, "evidence_refs": refs},
+        "blockers": blockers,
         "next_action": None,
         "questions_for_user": questions,
     }
@@ -461,21 +475,105 @@ def candidate_decision_violations(
 ) -> list[tuple[str, str]]:
     """Shared by Supervisor and independent Review, including a forced-model PASS."""
     expected = fallback
-    if decision.next_action is not None:
-        expected = (
-            _decision_fields(candidates[0], candidates[0]["actions"][0])
-            if candidates
-            else None
+    expected_blockers = [item["blocker"] for item in candidates]
+    if fallback is not None:
+        expected_blockers.extend(fallback["blockers"])
+    if fallback is not None and decision.next_action is None:
+        selected = next(
+            (
+                item
+                for item in fallback["blockers"]
+                if item["candidate_id"] == decision.blocker.candidate_id
+            ),
+            None,
         )
-    elif candidates:
-        expected = None
+        if selected is not None:
+            field_path = selected["candidate_id"].removeprefix("missing:")
+            expected = {
+                **fallback,
+                "blocker": selected,
+                "selection_summary": selected["description"],
+                "questions_for_user": [_QUESTIONS[field_path]],
+            }
+    if decision.next_action is not None:
+        selected = next(
+            (
+                item
+                for item in candidates
+                if item["candidate_id"] == decision.blocker.candidate_id
+            ),
+            None,
+        )
+        try:
+            expected = (
+                candidate_decision_fields(
+                    selected,
+                    decision.next_action.action_code,
+                    decision.next_action.target.model_dump(mode="json"),
+                )
+                if selected is not None
+                else None
+            )
+        except ValueError:
+            expected = None
     if expected is None:
         return [("/decision", "decision is outside the current blocker candidates")]
     actual = decision.model_dump(mode="json")
     if actual.get("next_action") is not None:
         actual["next_action"].pop("sequence")
-    return [
+    violations = [
         (f"/decision/{key}", "decision differs from verified blocker state or action")
         for key, value in expected.items()
-        if actual.get(key) != value
+        if key != "blockers" and actual.get(key) != value
     ]
+    expected_by_id = {item["candidate_id"]: item for item in expected_blockers}
+    actual_by_id = {
+        item.candidate_id: item.model_dump(mode="json") for item in decision.blockers
+    }
+    if len(actual_by_id) != len(decision.blockers) or actual_by_id != expected_by_id:
+        violations.append(
+            (
+                "/decision/blockers",
+                "blockers must contain every verified candidate exactly once",
+            )
+        )
+    return violations
+
+
+def resolved_blocker_candidates(snapshot, known_steps, mutations, bindings) -> list[str]:
+    """Only confirmed state can resolve a stored candidate; omission is no proof."""
+    values = _values(snapshot, mutations)
+    progress = {(item.procedure_step.procedure_step_id, item.procedure_step.step_code): item.status
+                for item in snapshot.procedure_progress}
+    progress.update({(item.procedure_step.procedure_step_id, item.procedure_step.step_code): item.proposed_status
+                     for item in mutations.procedure_progress_changes})
+    registry = {str(item.procedure_step.procedure_step_id): item for item in known_steps}
+    resolved = []
+    for candidate_id in snapshot.active_blocker_candidate_ids:
+        if candidate_id.startswith("missing:"):
+            if candidate_id.removeprefix("missing:") in values:
+                resolved.append(candidate_id)
+        elif candidate_id.startswith("procedure:"):
+            step = registry.get(candidate_id.removeprefix("procedure:"))
+            if step is None or step.deprecated_at is not None:
+                continue
+            business = values.get("business_type")
+            unmet_conditions = {f"eligibility condition is not met: {item.condition_key}"
+                                for item in step.eligibility_conditions}
+            excluded = (
+                business is not None and step.applicable_business_type != "ALL"
+                and business_type_code(business) != step.applicable_business_type
+            ) or any(
+                reason in unmet_conditions
+                for reason in procedure_constraints(
+                    step, snapshot, mutations.fact_changes, mutations.procedure_progress_changes,
+                )
+            )
+            if (
+                excluded
+                or progress.get((step.procedure_step.procedure_step_id, step.procedure_step.step_code)) == "COMPLETED"
+                or step.procedure_step == bindings.get("CONFIRM_RESTORATION_SCOPE")
+                and all(field in values for field in ("restoration_scope", "demolition_required"))
+            ):
+                resolved.append(candidate_id)
+    return resolved

@@ -885,6 +885,8 @@ def test_result_replanning_uses_reviewed_facts_without_repeating_scope_question(
         assert actual_source.source_ref == "scope-result"
         assert actual_source.excerpt == scope_text
 
+        if held_demolition:
+            graph._supervisor._llm = ChoiceModel(information=True)
         second = await graph.run(result_request(
             next_snapshot, "demolition-result", demolition_text + " " + status_text,
         ))
