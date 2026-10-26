@@ -20,6 +20,7 @@ from app.agent.blocker_candidates import (
     build_blocker_candidates,
     candidate_decision_violations,
     missing_info_fields,
+    resolved_blocker_candidates,
 )
 from app.agent.claim_safety import (
     REQUIRED_CLAIM_SOURCES,
@@ -777,6 +778,15 @@ def _deterministic_safety_review(
     issues: list[ReviewIssue] = []
     missing: list[MissingEvidence] = []
     draft = subject.supervisor_draft
+    expected_resolved = resolved_blocker_candidates(
+        subject.snapshot, subject.known_procedure_steps, draft.mutations, procedure_bindings,
+    )
+    if draft.resolved_blocker_candidate_ids != expected_resolved:
+        issues.append(_issue(
+            code="CONTRACT_VIOLATION", category="CONTRACT",
+            path="/supervisor_draft/resolved_blocker_candidate_ids",
+            reason="이전 문제의 해소 결과가 확인된 사실·진행 상태와 다릅니다.", evidence_refs=[],
+        ))
     visible_strings = dict(_visible_draft_strings(subject))
 
     for index, claim in enumerate(draft.grounded_claims):
@@ -1368,6 +1378,7 @@ def _visible_draft_strings(subject: ReviewSubject) -> list[tuple[str, str]]:
     values: list[tuple[str, str]] = [
         (f"{base}/selection_summary", decision.selection_summary),
         (f"{base}/blocker/description", decision.blocker.description),
+        *((f"{base}/blockers/{index}/description", item.description) for index, item in enumerate(decision.blockers)),
     ]
     if decision.next_action is not None:
         action_base = f"{base}/next_action"

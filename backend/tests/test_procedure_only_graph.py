@@ -467,12 +467,13 @@ def test_graph_failure_keeps_held_fact_recovery(failure):
 
 
 @result_fixes_xfail()
-def test_graph_delivers_held_fact_question_before_available_action():
+def test_graph_delivers_model_selected_held_fact_question():
     from test_info_replanning import analyze_facts
 
     text = "원상복구 범위는 없다고 했는데 임대인은 전부 하라고 했어요."
     held = analyze_facts([("restoration_scope", "NOT_REQUIRED", text)], text, requires_confirmation=True)
     graph, request, _, info, _ = graph_run_inputs("RESULT_SUBMITTED")
+    graph._supervisor._llm = ChoiceModel(information=True)
     request.trigger.input.redacted_text = text
     original = info.analyze.side_effect
 

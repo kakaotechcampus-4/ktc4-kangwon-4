@@ -35,12 +35,8 @@ _DEFAULT_TIMEOUT_SECONDS = 180.0
 _DEFAULT_MAX_RETRIES = 2
 _DEFAULT_RETRY_BACKOFF_SECONDS = 0.25
 _DEFAULT_MAX_RESPONSE_BYTES = 1_000_000
-# This counts HTTP attempts, not component attempts: each semantic attempt is a
-# generate() call that retries up to max_retries times. With the defaults that
-# makes the component limits worth 57 provider calls (Info 3x3 + Support 3x3 +
-# three Review rounds of Supervisor 3x3 + Review 2x2), and more when a rework
-# reruns Info or Support. 40 is deliberately below that ceiling: it is a cost
-# stop that can end a run whose component limits are not yet spent.
+# Every HTTP attempt, including retries and safety checks, spends the shared
+# run budget. This cost cap may stop a run before its component retries run out.
 _DEFAULT_MAX_CALLS_PER_RUN = 40
 _MAX_ALLOWED_RETRIES = 4
 _MAX_RETRY_BACKOFF_SECONDS = 60.0
@@ -122,9 +118,6 @@ class LLMCallBudget:
     @property
     def spent(self) -> int:
         return self._spent
-
-    def reset(self) -> None:
-        self._spent = 0
 
     def consume(self) -> None:
         if self._spent >= self._max_calls:
@@ -701,10 +694,21 @@ def restrict_string_enums(
         if not isinstance(node, dict):
             return node
         narrowed = dict(node)
-        if narrowed.get("type") == "array" and isinstance(narrowed.get("items"), dict):
-            narrowed["items"] = {"type": "string", "enum": list(allowed)}
+        ref = narrowed.get("$ref", "")
+        if ref.startswith("#/$defs/"):
+            definition = schema.get("$defs", {}).get(ref.removeprefix("#/$defs/"))
+            if isinstance(definition, dict):
+                narrowed = {**definition, **{key: value for key, value in narrowed.items() if key != "$ref"}}
+        if "anyOf" in narrowed:
+            narrowed["anyOf"] = [restrict(branch, allowed) for branch in narrowed["anyOf"]]
+        elif narrowed.get("type") == "array" and isinstance(narrowed.get("items"), dict):
+            narrowed["items"] = restrict(narrowed["items"], allowed)
         elif narrowed.get("type") == "string":
-            narrowed["enum"] = list(allowed)
+            existing = [narrowed["const"]] if "const" in narrowed else narrowed.get("enum")
+            permitted = [value for value in allowed if existing is None or value in existing]
+            if not permitted:
+                raise ValueError("dynamic enum has no supported values")
+            narrowed["enum"] = permitted
         return narrowed
 
     def walk(node: Any) -> Any:

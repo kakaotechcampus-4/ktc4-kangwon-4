@@ -27,6 +27,7 @@ from app.agent.schemas import (
     AgentGraphInput,
     AgentGraphOutput,
     CaseFieldKey,
+    CaseSnapshot,
     Component,
     ConflictConfirmedTrigger,
     ConflictOutcome,
@@ -660,7 +661,9 @@ class AgentGraph:
         return {"phase": "SAFE_FAILED", "outcome": outcome}
 
     @staticmethod
-    def _requested_field_paths(failure: dict[str, Any]) -> list[CaseFieldKey]:
+    def _requested_field_paths(
+        failure: dict[str, Any], case_snapshot: CaseSnapshot | None = None,
+    ) -> list[CaseFieldKey]:
         """Name the Case fields whose absence is what stopped this run.
 
         The Review result cannot answer this.  Its paths point inside the draft
@@ -696,6 +699,15 @@ class AgentGraph:
                 )
                 for question in output.question_candidates:
                     answerable.update(set(question.resolves_field_paths) - support_only)
+        restoration_required = case_snapshot is not None and any(
+            fact.field_path == "restoration_scope"
+            and fact.status == "CONFIRMED"
+            and fact.value in {"PARTIAL", "FULL"}
+            for fact in case_snapshot.facts
+        )
+        if not restoration_required:
+            for fields in (held_fields, blocks_decision, answerable):
+                fields.discard(CaseFieldKey.RESTORATION_STATUS)
         found = held_fields or blocks_decision or answerable
         # Canonical order, so two runs that found the same fields in a
         # different sequence still produce the same outcome digest.
@@ -752,7 +764,7 @@ class AgentGraph:
         trace_id: str | None,
         failure: dict[str, Any],
     ) -> SafeFailureOutcome:
-        available_fields = AgentGraph._requested_field_paths(failure)
+        available_fields = AgentGraph._requested_field_paths(failure, request.case_snapshot)
         retryable = failure.get("retryable", False)
         fallback_recovery = (
             "RETRY" if retryable else "RESUBMIT_INPUT" if available_fields else "NONE"
