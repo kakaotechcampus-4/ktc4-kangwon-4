@@ -395,6 +395,7 @@ class ProcedureProgress(AgentSchema):
 
 
 class CaseSnapshot(AgentSchema):
+    active_blocker_candidate_ids: list[NonEmptyStr] = Field(default_factory=list)
     snapshot_id: RuntimeUUID = Field(
         description=(
             "Caller-issued identity of the Case read view used for this planning run "
@@ -413,6 +414,7 @@ class CaseSnapshot(AgentSchema):
 
     @model_validator(mode="after")
     def validate_snapshot_integrity(self) -> CaseSnapshot:
+        _ensure_unique(self.active_blocker_candidate_ids, lambda item: item, "active blocker candidate_id")
         _ensure_unique(self.facts, lambda item: item.field_path, "fact field_path")
         statuses = {item.field_path: item.status for item in self.facts}
         if any(
@@ -1396,8 +1398,28 @@ class ProcedureFinding(AgentSchema):
 
 
 class Blocker(AgentSchema):
+    candidate_id: NonEmptyStr | None = None
     description: NonEmptyStr  # BLOCKER.description is TEXT.
     evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
+
+
+class _BlockerDecision(AgentSchema):
+    blocker: Blocker = Field(description="The selected priority blocker.")
+    blockers: Annotated[list[Blocker], Field(min_length=1)]
+
+    @model_validator(mode="before")
+    @classmethod
+    def accept_legacy_single_blocker(cls, value: Any) -> Any:
+        if isinstance(value, dict) and "blockers" not in value and value.get("blocker"):
+            return {**value, "blockers": [value["blocker"]]}
+        return value
+
+    @model_validator(mode="after")
+    def validate_blockers(self) -> _BlockerDecision:
+        _ensure_unique(self.blockers, lambda item: item.candidate_id or canonical_digest(item), "blocker candidate")
+        if self.blocker not in self.blockers:
+            raise ValueError("priority blocker must be included in blockers")
+        return self
 
 
 class ProcedureActionTarget(AgentSchema):
@@ -1443,7 +1465,7 @@ class DecisionType(StrEnum):
     NEEDS_MORE_INFO = "NEEDS_MORE_INFO"
 
 
-class ActionDecisionDraft(AgentSchema):
+class ActionDecisionDraft(_BlockerDecision):
     decision_type: Literal[DecisionType.ACTION]
     draft_id: RuntimeUUID
     draft_version: PositiveStrictInt
@@ -1464,7 +1486,7 @@ class ActionDecisionDraft(AgentSchema):
         return value
 
 
-class NeedsMoreInfoDecisionDraft(AgentSchema):
+class NeedsMoreInfoDecisionDraft(_BlockerDecision):
     decision_type: Literal[DecisionType.NEEDS_MORE_INFO]
     draft_id: RuntimeUUID
     draft_version: PositiveStrictInt
@@ -1572,8 +1594,9 @@ class GroundedClaim(AgentSchema):
 class SupervisorDraft(AgentSchema):
     """Complete success schema returned by ``SupervisorAgent.draft``."""
 
+    resolved_blocker_candidate_ids: list[NonEmptyStr] = Field(default_factory=list)
     decision: DecisionDraft = Field(
-        description="Exactly one Blocker and one Next Action, or a needs-more-information decision."
+        description="All verified Blockers, one priority Blocker, and one Next Action or information question."
     )
     mutations: MutationSet = Field(
         description="Uncommitted Case changes that require a matching Review PASS."
@@ -1591,6 +1614,7 @@ class SupervisorDraft(AgentSchema):
 
     @model_validator(mode="after")
     def validate_decision_and_sources(self) -> SupervisorDraft:
+        _ensure_unique(self.resolved_blocker_candidate_ids, lambda item: item, "resolved blocker candidate_id")
         if len(set(self.source_call_ids)) != len(self.source_call_ids):
             raise ValueError("source_call_ids must be unique")
         if set(self.source_call_ids) != set(self.decision.based_on_call_ids):
