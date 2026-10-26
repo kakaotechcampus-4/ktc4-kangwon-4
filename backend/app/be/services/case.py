@@ -281,9 +281,14 @@ def submit_case_results(
     Agent 판단은 최소 30초~2분 걸려서 이 요청·응답 안에서 끝낼 수 없다. 그래서 여기서는
     접수 가능한 상태인지만 확인하고 PENDING 이력을 남긴 뒤 끝난다 — 판단 결과는 이 응답이
     아니라 처리 상태를 조회하는 별도 조회 API가 준다.
+
+    "처리 중인지 확인"과 "새 이력 저장" 사이에 다른 요청이 끼면 같은 Case에 PENDING이 둘
+    생긴다. 그러면 판단이 두 번 돌아 서로의 결과를 덮고, 사장님은 같은 충돌을 두 번 확인하게
+    된다. 화면에서 버튼을 막는 것만으로는 막히지 않아 여기서 Case를 잠그고 확인한다
+    (FE 합의문 2026-10-22 3-3).
     """
 
-    case = case_crud.get_case_by_member_id(session, member_id)
+    case = case_crud.lock_case_by_member_id(session, member_id)
     if case is None:
         raise HTTPException(status_code=404, detail="Case를 찾을 수 없습니다.")
 
