@@ -38,6 +38,18 @@ _PROCEDURE_LOGICAL_CODES = frozenset(
 )
 
 
+PROCEDURE_LABELS = {
+    "CONFIRM_RESTORATION_SCOPE": "원상복구 범위 확인",
+    "PERFORM_RESTORATION": "원상복구·철거 작업",
+    "RETURN_PREMISES": "점포 반환",
+    "FILE_TAX_BUSINESS_CLOSURE": "사업자 폐업신고",
+    "FILE_FOOD_SERVICE_CLOSURE": "식품영업 폐업신고",
+    "SETTLE_EMPLOYEE_PAYMENTS": "직원 임금·퇴직급여 정산",
+    "REPORT_EMPLOYEE_INSURANCE_LOSS": "직원 보험 자격상실 신고",
+    "REPORT_WORKPLACE_INSURANCE_CLOSURE": "사업장 보험 탈퇴·소멸 신고",
+}
+
+
 ACTION_DEFINITIONS: dict[str, ActionDefinition] = {
     "CONFIRM_RESTORATION_SCOPE": ActionDefinition(
         "임대인에게 원상복구 범위와 철거 필요 여부를 확인한다.",
