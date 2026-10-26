@@ -25,14 +25,17 @@ from app.agent.guardrails import (
     exact_span,
     resolve_evidence_aliases,
 )
-from app.agent.procedure_tool.rules import business_type_code
+from app.agent.procedure_tool.rules import (
+    business_type_code,
+    employment_history_conflicts,
+)
 from app.agent.projection import ensure_projection_has_no_obvious_sensitive_text
 from app.agent.prompts import info_messages
 from app.agent.schemas import (
     CASE_FIELD_SPECS,
     REQUIRED_CASE_FIELDS,
+    AgentFieldKey,
     AgentSchema,
-    CaseFieldKey,
     ConflictCandidate,
     DecisionAuthority,
     EvidenceRecord,
@@ -93,7 +96,7 @@ class InfoAnalysisGuardrailError(GuardrailViolation):
 
 class ExtractedFactDraft(AgentSchema):
     operation: FactOperation
-    field_path: CaseFieldKey
+    field_path: AgentFieldKey
     value_type: FactValueType
     value: StrictScalar
     source_text: Annotated[StrictStr, Field(min_length=1)]
@@ -123,7 +126,7 @@ class ExtractedFactModelOutput(AgentSchema):
     """
 
     operation: FactOperation
-    field_path: CaseFieldKey
+    field_path: AgentFieldKey
     value_type: FactValueType
     value: StrictScalar
     source_text: Annotated[StrictStr, Field(min_length=1)]
@@ -162,7 +165,7 @@ class ProcedureFindingDraft(AgentSchema):
 
 
 class MissingFieldDraft(AgentSchema):
-    field_path: CaseFieldKey
+    field_path: AgentFieldKey
     reason_summary: Annotated[StrictStr, Field(min_length=1)]
     blocks: Annotated[list[MissingFieldBlock], Field(min_length=1)]
     question: Annotated[StrictStr, Field(min_length=1)]
@@ -521,13 +524,13 @@ class InfoAnalysisAgent:
             if item.status == ProcedureProgressStatus.COMPLETED
         }
         restoration_scope_confirmed = (
-            values.get(CaseFieldKey.RESTORATION_SCOPE) in {"FULL", "PARTIAL", "NOT_REQUIRED"}
-            or values.get(CaseFieldKey.RESTORATION_STATUS) == "NOT_REQUIRED"
+            values.get(AgentFieldKey.RESTORATION_SCOPE) in {"FULL", "PARTIAL", "NOT_REQUIRED"}
+            or values.get(AgentFieldKey.RESTORATION_STATUS) == "NOT_REQUIRED"
         )
         restoration_step = resolved_bindings.get("CONFIRM_RESTORATION_SCOPE")
         if (
             restoration_scope_confirmed
-            and values.get(CaseFieldKey.DEMOLITION_REQUIRED)
+            and values.get(AgentFieldKey.DEMOLITION_REQUIRED)
             in {"REQUIRED", "NOT_REQUIRED"}
         ):
             if restoration_step is not None:
@@ -553,7 +556,7 @@ class InfoAnalysisAgent:
             )
             not in completed
             and step.applicable_business_type
-            in {"ALL", business_type_code(values.get(CaseFieldKey.BUSINESS_TYPE))}
+            in {"ALL", business_type_code(values.get(AgentFieldKey.BUSINESS_TYPE))}
         }
 
     @classmethod
@@ -692,6 +695,22 @@ class InfoAnalysisAgent:
             )
             fact_candidates.append(candidate)
 
+        reported_conflict = employment_history_conflicts({
+            item.field_path: item.value for item in draft.facts if item.operation == FactOperation.SET
+        })
+        staff_values = {
+            **{item.field_path: item.value for item in request.case_snapshot.facts
+               if item.status == FactStatus.CONFIRMED},
+            **{item.field_path: item.proposed_value for item in request.fact_overlays},
+            **{item.field_path: item.value for item in fact_candidates if not item.requires_confirmation},
+        }
+        for candidate in fact_candidates:
+            if (reported_conflict
+                    and candidate.field_path in {AgentFieldKey.EMPLOYEE_COUNT, AgentFieldKey.HAD_EMPLOYEES}
+                    or candidate.field_path == AgentFieldKey.HAD_EMPLOYEES and candidate.value is False
+                    and employment_history_conflicts(staff_values)):
+                candidate.requires_confirmation = True
+
         try:
             validate_restoration_state(
                 {
@@ -772,8 +791,8 @@ class InfoAnalysisAgent:
             }
         )
         restoration_finished = values.get(
-            CaseFieldKey.RESTORATION_SCOPE
-        ) == "NOT_REQUIRED" or values.get(CaseFieldKey.RESTORATION_STATUS) in {
+            AgentFieldKey.RESTORATION_SCOPE
+        ) == "NOT_REQUIRED" or values.get(AgentFieldKey.RESTORATION_STATUS) in {
             "NOT_REQUIRED",
             "COMPLETED",
         }
@@ -784,7 +803,7 @@ class InfoAnalysisAgent:
             if missing.field_path not in allowed:
                 raise InfoAnalysisGuardrailError("missing field is outside allowlist")
             if (
-                missing.field_path == CaseFieldKey.RESTORATION_SCOPE_DETAIL
+                missing.field_path == AgentFieldKey.RESTORATION_SCOPE_DETAIL
                 and restoration_finished
             ):
                 continue

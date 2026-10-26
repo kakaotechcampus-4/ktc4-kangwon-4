@@ -131,6 +131,23 @@ class CaseFieldKey(StrEnum):
     PLANNED_CLOSURE_DATE = "planned_closure_date"
 
 
+class AgentFieldKey(StrEnum):
+    BUSINESS_TYPE = "business_type"
+    FRANCHISE_STATUS = "franchise_status"
+    EMPLOYEE_COUNT = "employee_count"
+    HAD_EMPLOYEES = "had_employees"
+    PENSION_ENROLLED = "pension_enrolled"
+    HEALTH_INSURANCE_ENROLLED = "health_insurance_enrolled"
+    EMPLOYMENT_INSURANCE_ENROLLED = "employment_insurance_enrolled"
+    INDUSTRIAL_ACCIDENT_INSURANCE_ENROLLED = "industrial_accident_insurance_enrolled"
+    LEASE_STATUS = "lease_status"
+    RESTORATION_STATUS = "restoration_status"
+    RESTORATION_SCOPE = "restoration_scope"
+    RESTORATION_SCOPE_DETAIL = "restoration_scope_detail"
+    DEMOLITION_REQUIRED = "demolition_required"
+    PLANNED_CLOSURE_DATE = "planned_closure_date"
+
+
 class FactValueType(StrEnum):
     STRING = "STRING"
     INTEGER = "INTEGER"
@@ -182,35 +199,40 @@ class EvidenceSourceType(StrEnum):
 # is represented internally by FactStatus.UNKNOWN and value=None; it is never a
 # confirmed enum value.  Lease terms and restoration scope must not be replaced
 # with contract-termination stages or responsibility for restoration costs.
-CASE_FIELD_SPECS: dict[CaseFieldKey, tuple[FactValueType, frozenset[str] | None]] = {
-    CaseFieldKey.BUSINESS_TYPE: (FactValueType.STRING, None),
-    CaseFieldKey.FRANCHISE_STATUS: (FactValueType.BOOLEAN, None),
-    CaseFieldKey.EMPLOYEE_COUNT: (FactValueType.INTEGER, None),
-    CaseFieldKey.LEASE_STATUS: (
+CASE_FIELD_SPECS: dict[AgentFieldKey, tuple[FactValueType, frozenset[str] | None]] = {
+    AgentFieldKey.BUSINESS_TYPE: (FactValueType.STRING, None),
+    AgentFieldKey.FRANCHISE_STATUS: (FactValueType.BOOLEAN, None),
+    AgentFieldKey.EMPLOYEE_COUNT: (FactValueType.INTEGER, None),
+    AgentFieldKey.HAD_EMPLOYEES: (FactValueType.BOOLEAN, None),
+    AgentFieldKey.PENSION_ENROLLED: (FactValueType.BOOLEAN, None),
+    AgentFieldKey.HEALTH_INSURANCE_ENROLLED: (FactValueType.BOOLEAN, None),
+    AgentFieldKey.EMPLOYMENT_INSURANCE_ENROLLED: (FactValueType.BOOLEAN, None),
+    AgentFieldKey.INDUSTRIAL_ACCIDENT_INSURANCE_ENROLLED: (FactValueType.BOOLEAN, None),
+    AgentFieldKey.LEASE_STATUS: (
         FactValueType.ENUM,
         frozenset({"LEASED_PAID", "LEASED_FREE", "OWNED"}),
     ),
-    CaseFieldKey.RESTORATION_STATUS: (
+    AgentFieldKey.RESTORATION_STATUS: (
         FactValueType.ENUM,
         frozenset({"NOT_STARTED", "IN_PROGRESS", "COMPLETED", "NOT_REQUIRED"}),
     ),
-    CaseFieldKey.RESTORATION_SCOPE: (
+    AgentFieldKey.RESTORATION_SCOPE: (
         FactValueType.ENUM,
         frozenset({"PARTIAL", "FULL", "NOT_REQUIRED"}),
     ),
-    CaseFieldKey.RESTORATION_SCOPE_DETAIL: (FactValueType.STRING, None),
-    CaseFieldKey.DEMOLITION_REQUIRED: (
+    AgentFieldKey.RESTORATION_SCOPE_DETAIL: (FactValueType.STRING, None),
+    AgentFieldKey.DEMOLITION_REQUIRED: (
         FactValueType.ENUM,
         frozenset({"REQUIRED", "NOT_REQUIRED"}),
     ),
-    CaseFieldKey.PLANNED_CLOSURE_DATE: (FactValueType.DATE, None),
+    AgentFieldKey.PLANNED_CLOSURE_DATE: (FactValueType.DATE, None),
 }
 
 REQUIRED_CASE_FIELDS = frozenset(
     {
-        CaseFieldKey.BUSINESS_TYPE,
-        CaseFieldKey.FRANCHISE_STATUS,
-        CaseFieldKey.LEASE_STATUS,
+        AgentFieldKey.BUSINESS_TYPE,
+        AgentFieldKey.FRANCHISE_STATUS,
+        AgentFieldKey.LEASE_STATUS,
     }
 )
 
@@ -218,14 +240,14 @@ REQUIRED_CASE_FIELDS = frozenset(
 # CASE column widths for the two free-text fields; the rest are enums,
 # integers or dates. CASE_FIELD_HISTORY.before_value/after_value are
 # VARCHAR(1000), so a value that fits its CASE column fits its history row too.
-CASE_FIELD_MAX_LENGTHS: dict[CaseFieldKey, int] = {
-    CaseFieldKey.BUSINESS_TYPE: 50,
-    CaseFieldKey.RESTORATION_SCOPE_DETAIL: 1000,
+CASE_FIELD_MAX_LENGTHS: dict[AgentFieldKey, int] = {
+    AgentFieldKey.BUSINESS_TYPE: 50,
+    AgentFieldKey.RESTORATION_SCOPE_DETAIL: 1000,
 }
 
 
 def validate_case_field_value(
-    field_path: CaseFieldKey,
+    field_path: AgentFieldKey,
     value_type: FactValueType,
     value: StrictScalar,
     *,
@@ -280,12 +302,12 @@ def _is_iso_date(value: str) -> bool:
     return True
 
 
-def validate_restoration_state(statuses: dict[CaseFieldKey, FactStatus]) -> None:
+def validate_restoration_state(statuses: dict[AgentFieldKey, FactStatus]) -> None:
     """A restoration status can be confirmed only after its scope is known."""
 
     if (
-        statuses.get(CaseFieldKey.RESTORATION_STATUS) == FactStatus.CONFIRMED
-        and statuses.get(CaseFieldKey.RESTORATION_SCOPE) != FactStatus.CONFIRMED
+        statuses.get(AgentFieldKey.RESTORATION_STATUS) == FactStatus.CONFIRMED
+        and statuses.get(AgentFieldKey.RESTORATION_SCOPE) != FactStatus.CONFIRMED
     ):
         raise ValueError(
             "confirmed restoration_status requires confirmed restoration_scope"
@@ -348,7 +370,7 @@ class SupportProgramRef(AgentSchema):
 
 
 class CaseFact(AgentSchema):
-    field_path: CaseFieldKey
+    field_path: AgentFieldKey
     value_type: FactValueType
     value: StrictScalar
     status: FactStatus
@@ -521,7 +543,7 @@ class VerifiedTextSpan(AgentSchema):
 class FactCandidate(AgentSchema):
     candidate_id: RuntimeUUID
     operation: FactOperation
-    field_path: CaseFieldKey
+    field_path: AgentFieldKey
     value_type: FactValueType
     value: StrictScalar
     source_span: VerifiedTextSpan
@@ -556,7 +578,7 @@ class FactChangeCandidate(AgentSchema):
     operation: FactOperation
     source_fact_candidate_id: RuntimeUUID
     source_type: FactChangeSourceType
-    field_path: CaseFieldKey
+    field_path: AgentFieldKey
     value_type: FactValueType
     before_status: FactStatus
     before_value: StrictScalar
@@ -672,7 +694,7 @@ class MissingFieldBlock(StrEnum):
 
 
 class MissingField(AgentSchema):
-    field_path: CaseFieldKey
+    field_path: AgentFieldKey
     reason_summary: NonEmptyStr
     blocks: Annotated[list[MissingFieldBlock], Field(min_length=1)]
     question_candidate_id: RuntimeUUID | None
@@ -696,7 +718,7 @@ class Uncertainty(AgentSchema):
 class QuestionCandidate(AgentSchema):
     question_id: RuntimeUUID
     text: NonEmptyStr
-    resolves_field_paths: Annotated[list[CaseFieldKey], Field(min_length=1)]
+    resolves_field_paths: Annotated[list[AgentFieldKey], Field(min_length=1)]
     reason_summary: NonEmptyStr
 
 
@@ -751,7 +773,7 @@ class ConflictCandidate(AgentSchema):
     conflict_digest: Digest
     candidate_id: RuntimeUUID
     snapshot_id: RuntimeUUID
-    field_path: CaseFieldKey
+    field_path: AgentFieldKey
     committed_status: Literal[FactStatus.CONFIRMED]
     committed_value: NonNullStrictScalar
     proposed_operation: FactOperation
@@ -841,7 +863,7 @@ class InfoAnalysisInput(AgentSchema):
         description="Uncommitted confirmed changes used to assess procedure relevance.",
     )
     allowed_field_paths: Annotated[
-        list[CaseFieldKey],
+        list[AgentFieldKey],
         Field(
             min_length=1,
             description="Canonical Case fields that this call may propose changing.",
@@ -1082,7 +1104,7 @@ class SupportCheck(AgentSchema):
     related_steps: list[ProcedureStepRef]
     match_status: SupportMatchStatus
     criteria: list[SupportCriterionResult]
-    unknown_field_paths: list[CaseFieldKey]
+    unknown_field_paths: list[AgentFieldKey]
     required_documents: list[RequiredDocument]
     application_channel: SourcedText | None
     application_url: SourcedText | None
@@ -1476,6 +1498,14 @@ ActionCode: TypeAlias = Literal[
     "CONFIRM_WORKPLACE_INSURANCE_CLOSURE_REQUIREMENTS",
     "REPORT_WORKPLACE_INSURANCE_CLOSURE",
     "CONFIRM_SUPPORT_PROGRAM_REQUIREMENTS",
+    "CONFIRM_RESTORATION_REQUIREMENTS",
+    "PERFORM_RESTORATION",
+    "CONFIRM_PREMISES_RETURN_REQUIREMENTS",
+    "RETURN_PREMISES",
+    "CONFIRM_EMPLOYEE_SETTLEMENT_REQUIREMENTS",
+    "SETTLE_EMPLOYEE_PAYMENTS",
+    "CONFIRM_EMPLOYEE_INSURANCE_LOSS_REQUIREMENTS",
+    "REPORT_EMPLOYEE_INSURANCE_LOSS",
     "CONFIRM_PROCEDURE_COMPLETION",
 ]
 
@@ -2242,7 +2272,7 @@ class SafeFailureOutcome(AgentSchema):
     recovery_action_code: Literal[
         "RETRY", "RESUBMIT_INPUT", "CONTACT_SUPPORT", "NONE"
     ] = Field(description="Permitted caller recovery action for this failure.")
-    requested_field_paths: list[CaseFieldKey] = Field(
+    requested_field_paths: list[AgentFieldKey] = Field(
         description="Canonical Case fields requested for a future resubmission."
     )
     retryable: StrictBool = Field(
@@ -2358,6 +2388,7 @@ __all__ = [
     "REQUIRED_CASE_FIELDS",
     "ActionCode",
     "ActionDecisionDraft",
+    "AgentFieldKey",
     "AgentGraphInput",
     "AgentGraphOutput",
     "AgentRunOutcome",
