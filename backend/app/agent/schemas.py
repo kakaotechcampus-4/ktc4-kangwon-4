@@ -1341,7 +1341,6 @@ class ProcedureLookupInput(AgentSchema):
     """Complete request schema accepted by ``ProcedureLookupTool.lookup``."""
 
     procedure_step_codes: list[UpperSnakeCode] = Field(default_factory=list)
-
     lookup_goal: Literal[ProcedureLookupGoal.BUSINESS_CLOSURE] = Field(
         description="Fixed lookup goal for business-closure procedures."
     )
@@ -1516,6 +1515,7 @@ class ProcedureRelevance(StrEnum):
 
 
 class ProcedureFinding(AgentSchema):
+    followup_guidance: list[SourcedText] = Field(default_factory=list)
     finding_id: RuntimeUUID
     procedure_step: ProcedureStepRef
     step_name: NonEmptyStr
@@ -1534,6 +1534,7 @@ class ProcedureFinding(AgentSchema):
     @model_validator(mode="after")
     def validate_evidence_refs(self) -> ProcedureFinding:
         refs = [*self.summary.evidence_refs]
+        refs.extend(ref for item in self.followup_guidance for ref in item.evidence_refs)
         refs.extend(ref for item in self.required_actions for ref in item.evidence_refs)
         refs.extend(
             ref for item in self.required_documents for ref in item.evidence_refs
@@ -1623,6 +1624,7 @@ class NextAction(AgentSchema):
 class DecisionType(StrEnum):
     ACTION = "ACTION"
     NEEDS_MORE_INFO = "NEEDS_MORE_INFO"
+    COMPLETED = "COMPLETED"
 
 
 class ActionDecisionDraft(_BlockerDecision):
@@ -1660,8 +1662,26 @@ class NeedsMoreInfoDecisionDraft(_BlockerDecision):
     questions_for_user: Annotated[list[NonEmptyStr], Field(min_length=1)]
 
 
+class CompletedDecisionDraft(AgentSchema):
+    """End tracked cafe procedures; tax follow-ups remain guidance only."""
+
+    decision_type: Literal[DecisionType.COMPLETED]
+    draft_id: RuntimeUUID
+    draft_version: PositiveStrictInt
+    selection_summary: NonEmptyStr
+    requires_human: StrictBool
+    evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
+    based_on_call_ids: Annotated[list[RuntimeUUID], Field(min_length=1)]
+    created_at: RuntimeDateTime
+    blocker: None = None
+    blockers: list[Blocker] = Field(default_factory=list, max_length=0)
+    next_action: None = None
+    questions_for_user: list[NonEmptyStr] = Field(default_factory=list, max_length=0)
+    followup_guidance: Annotated[list[SourcedText], Field(min_length=1)]
+
+
 DecisionDraft: TypeAlias = Annotated[
-    ActionDecisionDraft | NeedsMoreInfoDecisionDraft,
+    ActionDecisionDraft | NeedsMoreInfoDecisionDraft | CompletedDecisionDraft,
     Field(discriminator="decision_type"),
 ]
 
@@ -2500,6 +2520,7 @@ __all__ = [
     "CaseSnapshot",
     "CaseStatus",
     "ClaimType",
+    "CompletedDecisionDraft",
     "Component",
     "ConflictCandidate",
     "ConflictConfirmedTrigger",

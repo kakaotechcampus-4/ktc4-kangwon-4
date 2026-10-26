@@ -348,7 +348,7 @@ def test_omitted_remaining_procedures_trigger_a_targeted_retry():
     assert result.missing_fields == result.question_candidates == []
     correction = " ".join(
         item["content"] for code in (TAX, FOOD)
-        for item in client.stage_messages("PROCEDURE", code)[1]
+        for item in client.stage_messages("PROCEDURE", code)[1] if item["role"] == "system"
     )
     assert TAX in correction and FOOD in correction
     assert "entire Case" in correction
