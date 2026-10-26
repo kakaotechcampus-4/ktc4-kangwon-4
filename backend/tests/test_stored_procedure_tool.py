@@ -62,7 +62,11 @@ def lookup(*, evidence_changes=None, record_changes=None, missing=False, as_of=N
         based_on_snapshot_id=uuid4(), review_feedback=[],
     )
     original = record.model_dump()
-    tool = StoredProcedureLookupTool(store, procedure_bindings=procedure_bindings)
+    identifiers = iter((UUID(int=101), UUID(int=102)))
+    tool = StoredProcedureLookupTool(
+        store, procedure_bindings=procedure_bindings,
+        uuid_factory=lambda: next(identifiers),
+    )
     if after_init:
         after_init()
     result = asyncio.run(tool.lookup(request))
@@ -153,6 +157,7 @@ def test_mapped_db_evidence_reaches_info_supervisor_and_review():
     async def run():
         info = await InfoAnalysisAgent(
             Responses(output([item])), procedure_bindings=bindings,
+            uuid_factory=lambda: UUID(int=103),
         ).analyze(info_request)
         assert info.procedure_findings[0].procedure_step == ref
         assert info.procedure_findings[0].evidence_refs == [evidence.evidence_id]

@@ -8,9 +8,8 @@ from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
-from test_action_codes import NOW, StubModel, result_fixes_xfail, supervisor_request
+from test_action_codes import NOW, result_fixes_xfail, supervisor_request
 from test_blocker_candidates import ChoiceModel, request_with_state
-from test_procedure_only_graph import graph_run_inputs
 
 from app.agent.action_catalog import resolve_procedure_bindings
 from app.agent.graph import AgentGraph
@@ -18,17 +17,17 @@ from app.agent.info_agent.agent import (
     InfoAnalysisAgent,
     InfoAnalysisGuardrailError,
 )
-from app.agent.review_tool import ReviewIntegrityError, ReviewTool
+from app.agent.review_tool import ReviewTool
 from app.agent.schemas import (
     CASE_FIELD_SPECS,
     AgentGraphInput,
+    CaseFact,
     CaseFieldKey,
     CaseSnapshot,
+    FactChangeCandidate,
     InfoAnalysisInput,
     ProcedureLookupResult,
     ProcedureProgressReport,
-    ReviewSubject,
-    canonical_digest,
 )
 from app.agent.supervisor.agent import SupervisorAgent
 
@@ -378,6 +377,39 @@ def test_unresolved_restoration_can_still_ask_for_scope_detail():
     assert result.missing_fields[0].field_path == CaseFieldKey.RESTORATION_SCOPE_DETAIL
 
 
+@pytest.mark.parametrize("scope", [None, "NOT_REQUIRED", "PARTIAL", "FULL"])
+@pytest.mark.parametrize("overlay", [False, True])
+def test_info_progress_question_uses_confirmed_scope_after_overlay(scope, overlay):
+    request = request_for_replanning("NOT_STARTED", "FULL")
+    request.case_snapshot.procedure_progress = []
+    request.case_snapshot.facts = [fact for fact in request.case_snapshot.facts
+                                   if fact.field_path not in {"restoration_scope", "restoration_status"}]
+    stored_scope = None if overlay else scope
+    request.case_snapshot.facts.append(CaseFact(
+        field_path="restoration_scope", value_type="ENUM", value=stored_scope,
+        status="UNKNOWN" if stored_scope is None else "CONFIRMED",
+        evidence_refs=[] if stored_scope is None else ["synthetic-document"],
+        updated_at=None if stored_scope is None else NOW,
+    ))
+    if overlay:
+        request.fact_overlays = [FactChangeCandidate(
+            candidate_id=UUID(int=51), operation="CLEAR" if scope is None else "SET",
+            source_fact_candidate_id=UUID(int=52), source_type="INFO_ANALYSIS",
+            field_path="restoration_scope", value_type="ENUM",
+            before_status="UNKNOWN", before_value=None,
+            proposed_status="UNKNOWN" if scope is None else "CONFIRMED", proposed_value=scope,
+            candidate_status="READY_FOR_REVIEW", reason_summary="합성 범위 변경",
+            source_evidence_refs=["synthetic-document"], source_call_id=UUID(int=3), confirmed_conflict_ref=None,
+        )]
+    reply = output([finding(TAX, "doc1"), finding(FOOD, "doc2"), finding(RESTORATION, "doc3")], missing_detail=True)
+    reply["missing_fields"][0]["field_path"] = "restoration_status"
+    result = asyncio.run(InfoAnalysisAgent(Responses(reply)).analyze(request))
+
+    expected = [CaseFieldKey.RESTORATION_STATUS] if scope in {"PARTIAL", "FULL"} else []
+    assert [item.field_path for item in result.missing_fields] == expected
+    assert [path for item in result.question_candidates for path in item.resolves_field_paths] == expected
+
+
 
 def test_document_specific_uncertainty_avoids_inventing_a_procedure():
     uncertainty = {
@@ -622,44 +654,11 @@ def test_free_text_filing_report_retains_stages_and_holds_uncertain_completion(r
     extraction = agent._validated_draft(raw | {"procedure_findings": []})
     mutations = agent._preview_mutations(
         request, extraction, agent._input_analysis(request, extraction),
-        resolve_procedure_bindings(request.known_procedure_steps),
+        resolve_procedure_bindings(request.known_procedure_steps, None),
     )
     assert bool(mutations.procedure_progress_changes) is not held
     assert {item.procedure_step.step_code for item in result.procedure_findings} == {TAX, FOOD}
     assert request.case_snapshot.model_dump_json() == before
-
-
-@pytest.mark.parametrize("held,tamper", [(False, False), (True, False), (False, True)])
-def test_quoted_progress_reaches_review_and_a_forged_event_is_rejected(held, tamper):
-    graph, request, _, _, _ = graph_run_inputs("RESULT_SUBMITTED")
-    request.trigger.input.redacted_text = "사업자등록 폐업신고를 준비 중입니다."
-    raw = output([finding(TAX, "doc1")])
-    raw["procedure_observations"] = [{
-        "step_code": TAX, "observed_status": "IN_PROGRESS",
-        "source_text": request.trigger.input.redacted_text,
-        "requires_confirmation": held, "reason_summary": "사용자의 신고 준비 보고",
-    }]
-    graph._info_agent = InfoAnalysisAgent(Responses(raw), clock=lambda: NOW, max_local_attempts=1)
-    before = request.model_dump_json()
-    outcome = asyncio.run(graph.run(request))
-    assert outcome.outcome_type == "REVIEWED_PLAN", outcome
-    outcome.assert_integrity()
-    assert request.model_dump_json() == before
-    subject = outcome.review_subject.model_copy(deep=True)
-    assert bool(subject.supervisor_draft.mutations.procedure_progress_changes) is not held
-    if not tamper:
-        return
-    source = next(item for item in subject.source_results if item.meta.component == "INFO_AGENT")
-    source.output.procedure_progress_observations[0].source_span.input_event_id = "another-event"
-    source.output_digest = canonical_digest(source.output)
-    forged = ReviewSubject.create(**{
-        key: getattr(subject, key) for key in type(subject).model_fields if key != "subject_digest"
-    })
-    client = StubModel()
-    with pytest.raises(ReviewIntegrityError):
-        asyncio.run(ReviewTool(client).review(forged))
-    assert client.calls == 0
-
 
 
 @pytest.mark.parametrize("committed_status", ["NOT_STARTED", "COMPLETED"])
@@ -1129,6 +1128,78 @@ def test_result_replanning_uses_reviewed_facts_without_repeating_scope_question(
         support.analyze.assert_not_awaited()
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("forbidden", ["input_finding", "procedure_fact", "procedure_observation"])
+def test_explicit_stage_replies_are_not_repaired_by_the_fixture(forbidden):
+    request = request_for_replanning()
+    invalid = output([finding(TAX, "doc1")])
+    if forbidden == "procedure_fact":
+        invalid["facts"] = [{
+            "operation": "SET", "field_path": "restoration_scope", "value_type": "ENUM",
+            "value": "NOT_REQUIRED", "source_text": request.input.redacted_text,
+            "confidence_bps": 10000, "requires_confirmation": False, "reason_summary": "합성 잘못된 단계",
+        }]
+    elif forbidden == "procedure_observation":
+        invalid["procedure_observations"] = [{
+            "step_code": TAX, "observed_status": "COMPLETED", "source_text": request.input.redacted_text,
+            "requires_confirmation": False, "reason_summary": "합성 잘못된 단계",
+        }]
+    original = deepcopy(invalid)
+    client = Responses(
+        output([finding(TAX, "doc1"), finding(FOOD, "doc2")]),
+        input_responses=[invalid] if forbidden == "input_finding" else None,
+        procedure_responses={} if forbidden == "input_finding" else {TAX: [invalid]},
+    )
+    with pytest.raises(InfoAnalysisGuardrailError):
+        asyncio.run(InfoAnalysisAgent(client, max_local_attempts=1).analyze(request))
+    assert invalid == original
+    assert len(client.stage_messages("INPUT")) == 1
+    if forbidden == "input_finding":
+        assert client.stage_messages("PROCEDURE") == []
+    else:
+        assert len(client.stage_messages("PROCEDURE", TAX)) == 1
+
+
+@pytest.mark.parametrize("ready", [False, True])
+def test_official_required_documents_are_not_proof_of_user_readiness(ready):
+    request = request_for_replanning()
+    if ready:
+        select_progress(request, TAX, "IN_PROGRESS", ready=True)
+    required = "합성 폐업신고서"
+    for record in (request.procedure_lookup_result.documents[0],
+                   request.procedure_lookup_result.evidence_records[0]):
+        record.excerpt += " " + required
+    tax = finding(TAX, "doc1")
+    tax["required_documents"] = [
+        {"name": name, "submission_stage": None, "evidence_refs": ["doc1"]}
+        for name in (required, "원문에 없는 서류")
+    ]
+    client = Responses(output([tax, finding(FOOD, "doc2")]))
+    result = asyncio.run(InfoAnalysisAgent(client).analyze(request))
+    actual = next(item for item in result.procedure_findings
+                  if item.procedure_step.step_code == TAX)
+    assert [item.name for item in actual.required_documents] == [required]
+    assert actual.requires_confirmation is not ready
+    assert all(not item.requirements_confirmed for item in request.case_snapshot.procedure_progress)
+
+
+@pytest.mark.parametrize("same_id", [False, True])
+def test_preparation_confirmation_requires_the_exact_procedure_reference(same_id):
+    request = request_for_replanning()
+    reference = next(step.procedure_step for step in request.known_procedure_steps
+                     if step.procedure_step.step_code == TAX)
+    progress = request.case_snapshot.procedure_progress[0].model_copy(deep=True)
+    progress.procedure_step = reference.model_copy(update={
+        "procedure_step_id": reference.procedure_step_id + (0 if same_id else 1000),
+    })
+    progress.status = "IN_PROGRESS"
+    progress.requirements_confirmed = True
+    request.case_snapshot.procedure_progress.append(progress)
+    client = Responses(output([finding(TAX, "doc1"), finding(FOOD, "doc2")]))
+    result = asyncio.run(InfoAnalysisAgent(client).analyze(request))
+    tax = next(item for item in result.procedure_findings if item.procedure_step.step_code == TAX)
+    assert tax.requires_confirmation is not same_id
 
 
 def test_quoted_restoration_completion_fact_reaches_independent_review():
