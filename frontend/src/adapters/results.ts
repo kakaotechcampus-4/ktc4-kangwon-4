@@ -174,9 +174,12 @@ function toConfirmView(rawInput: unknown, conflicts: unknown): ConfirmView | nul
  * `GET /cases/results` 를 ③ 화면이 할 일로.
  *
  * 상태마다 같이 와야 하는 값이 정해져 있다. 빠진 응답은 **다른 상태로 바꿔 보여주지
- * 않고** `UNRECOGNIZED` 로 둔다. `toJudgmentView` 와 같은 규칙이다.
+ * 않고** `UNRECOGNIZED` 로 둔다. `toJudgmentView` 와 같은 규칙이다. 본문이 `null` 이어도 같다.
  */
-export function toResultsEntry(body: CaseResultsEntryResponse): ResultsEntry {
+export function toResultsEntry(body: CaseResultsEntryResponse | null): ResultsEntry {
+  // 본문이 비어 있으면 읽을 것이 없다. 여기서 막지 않으면 아래에서 터져 화면이 불러오는 중에 멈춘다
+  if (body === null || typeof body !== 'object') return { kind: 'UNRECOGNIZED' }
+
   switch (body.judgment_status) {
     case 'DONE': {
       // 번호가 없으면 결과를 보낼 수 없고, 할 일이 없으면 무엇에 대한 결과인지 보여줄 수 없다

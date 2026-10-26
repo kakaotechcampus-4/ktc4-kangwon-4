@@ -31,9 +31,10 @@ const POLL_INTERVAL_MS = 10_000
 const POLL_TIMEOUT_MS = 10 * 60 * 1000
 
 /** `/results` 에 들어올 때. 404 는 Case 가 없다는 뜻이고 `ApiError` 로 올라간다 */
-export async function fetchResultsEntry(): Promise<CaseResultsEntryResponse> {
+export async function fetchResultsEntry(): Promise<CaseResultsEntryResponse | null> {
   const response = await request('/cases/results')
-  return (await response.json()) as CaseResultsEntryResponse
+  // 본문이 `null` 일 수 있다고 타입에 드러낸다. 어댑터가 그 경우를 빠뜨리면 컴파일에서 막힌다
+  return (await response.json()) as CaseResultsEntryResponse | null
 }
 
 /**

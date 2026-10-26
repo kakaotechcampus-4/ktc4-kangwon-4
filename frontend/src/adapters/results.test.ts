@@ -170,6 +170,10 @@ describe('toResultsEntry', () => {
   })
 
   /** `/case` 가 이미 안내하는 상태들이다 */
+  it('본문이 비어 있으면 알 수 없는 응답으로 둔다', () => {
+    expect(toResultsEntry(null)).toEqual({ kind: 'UNRECOGNIZED' })
+  })
+
   it.each(['PENDING', 'NEEDS_MORE_INFO', 'FAILED'] as const)('%s 면 다른 화면으로 보낸다', (status) => {
     expect(toResultsEntry(entry({ judgment_status: status, case_history_id: 12 }))).toEqual({
       kind: 'ELSEWHERE',

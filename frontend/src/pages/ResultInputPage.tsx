@@ -116,12 +116,18 @@ export function ResultInputPage() {
   const entry = usesMock ? MOCK_ENTRY : fetched
   const isPending = state.kind === 'PENDING'
   /*
-   * 보낸 뒤 이 화면이 끝을 모르는 상태에서는 폼을 잠근다. 안내는 `/case` 에서 확인하라고
-   * 하는데 폼이 열려 있으면 다시 보내게 된다 — 판단 중인 제출 위에 보내면 409 라 엉뚱한 안내가
-   * 뜨고, 이미 반영된 판단 위에 보내면 같은 결과가 두 번 들어간다.
+   * 안내가 `/case` 로 보내는 상태에서는 폼을 잠근다. 안내와 폼이 서로 다른 말을 하면 안 된다.
+   *
+   * 끝을 모르는 상태(상황 바뀜·오래 걸림·읽지 못함)에서 다시 보내면, 판단 중인 제출 위에서는
+   * 409 라 엉뚱한 안내가 뜨고 이미 반영된 판단 위에서는 같은 결과가 두 번 들어간다.
+   * "더 해 보실 수 있는 것이 없다"·"저희 쪽 문제"라고 한 실패에서 보낼 수 있으면 그 말이 거짓이 된다.
    */
   const formLocked =
-    isPending || state.kind === 'STALE' || state.kind === 'WAITED_TOO_LONG' || state.kind === 'UNRECOGNIZED'
+    isPending ||
+    state.kind === 'STALE' ||
+    state.kind === 'WAITED_TOO_LONG' ||
+    state.kind === 'UNRECOGNIZED' ||
+    (state.kind === 'FAILED' && (state.notice.kind === 'SERVICE_SIDE' || state.notice.kind === 'NO_RECOVERY'))
   const canRetry = text.trim().length > 0
   const goToCase = { label: '지금 상황 보기', onClick: () => navigate({ pathname: '/case', search }) }
   const notice = stayNotice(state, {
@@ -300,7 +306,10 @@ function detailText({ fields, partial }: { fields: string[]; partial: boolean })
 }
 
 /** 판단 실패 이유마다의 안내. "다시 보내기"는 같은 글을 그대로 보내도 될 때만 단다 */
-function failureNotice(notice: FailureNotice, retry: NoticeAction): NoticeProps {
+function failureNotice(
+  notice: FailureNotice,
+  { retry, goToCase }: { retry: NoticeAction; goToCase: NoticeAction },
+): NoticeProps {
   switch (notice.kind) {
     case 'RETRY_AVAILABLE':
       return {
@@ -320,6 +329,7 @@ function failureNotice(notice: FailureNotice, retry: NoticeAction): NoticeProps 
         tone: 'NEUTRAL',
         title: '서비스에서 확인이 필요한 문제가 생겼어요.',
         description: '적어 주신 내용은 받았어요. 이 건은 저희 쪽에서 봐야 하는 문제예요.',
+        action: goToCase,
       }
 
     case 'NO_RECOVERY':
@@ -327,6 +337,7 @@ function failureNotice(notice: FailureNotice, retry: NoticeAction): NoticeProps 
         tone: 'NEUTRAL',
         title: '이번 결과로 다음 할 일을 정하지 못했어요.',
         description: '이번 판단에 대해서는 더 해 보실 수 있는 것이 없어요.',
+        action: goToCase,
       }
 
     case 'UNKNOWN_CAUSE':
@@ -358,7 +369,7 @@ function stayNotice(
       return null
 
     case 'FAILED':
-      return failureNotice(state.notice, actions.retry)
+      return failureNotice(state.notice, actions)
 
     case 'SEND_FAILED':
       return {
@@ -379,7 +390,7 @@ function stayNotice(
     case 'WAITED_TOO_LONG':
       return {
         tone: 'NEUTRAL',
-        title: '판단이 오래 걸리고 있어요.',
+        title: '판단 결과를 아직 받지 못했어요.',
         description: '보내 주신 결과는 접수됐어요. 끝나면 지금 상황 화면에서 보실 수 있어요.',
         action: actions.goToCase,
       }

@@ -226,6 +226,16 @@ describe('ResultInputPage — 서버', () => {
       expect(router.state.location.pathname).toBe(path)
     })
 
+    /** 읽을 것이 없는 답에 불러오는 중으로 멈춰 있으면 사장님은 기다리기만 한다 */
+    it('비어 있는 답이 오면 읽지 못했다고 알리고 현재 상황으로 가는 길을 둔다', async () => {
+      serve({ entry: [json(null)] })
+      renderFlow()
+      await advance()
+
+      expect(screen.queryByRole('status')).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '지금 상황 보기' })).toBeInTheDocument()
+    })
+
     it('불러오지 못하면 다시 불러올 수 있다', async () => {
       serve({ entry: [status(500), READY] })
       renderFlow()
@@ -384,6 +394,27 @@ describe('ResultInputPage — 서버', () => {
       await advance(INTERVAL_MS)
 
       expect(screen.queryByRole('button', { name: '다시 보내기' }) !== null).toBe(retryable)
+    })
+
+    /** "더 해 보실 수 있는 것이 없다" 고 해 놓고 보내기가 눌리면 안내와 화면이 다른 말을 한다 */
+    it.each([
+      ['RETRY', '열어 둔다', true],
+      ['RESUBMIT_INPUT', '열어 둔다', true],
+      ['CONTACT_SUPPORT', '잠근다', false],
+      ['NONE', '잠근다', false],
+    ] as const)('판단 실패(%s)에는 폼을 %s', async (code, _, open) => {
+      serve({
+        entry: [READY],
+        submit: [ACCEPTED],
+        judged: [json(judgedBody({ result: 'FAILED', recovery_action_code: code }))],
+      })
+      renderFlow()
+      await advance()
+
+      submit('임대인이 철거하래요')
+      await advance(INTERVAL_MS)
+
+      expect(screen.getByRole('textbox').hasAttribute('disabled')).toBe(!open)
     })
 
     /** 떠난 화면이 결과를 받아 사장님을 다른 화면으로 끌고 가면 안 된다 */
