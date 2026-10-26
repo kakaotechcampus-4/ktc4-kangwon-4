@@ -2,8 +2,8 @@
 
 This module performs no network or database access. Hashes identify fetched HTML
 or PDF bytes; excerpts normalize decorative source glyphs only. Automated
-comparison is recorded honestly as agent research, never as a named human approval. Re-review
-uses a new source version; this builder does not approve caller-supplied text.
+comparison supports human review; it does not approve these records for serving.
+A team member must read them and record their name and review time before use.
 """
 
 from collections.abc import Mapping
@@ -18,10 +18,8 @@ from app.agent.schemas import (
 )
 
 CAFE_REGISTRY_VERSION = "cafe-closure/2026-10-18"
-# Text-only correction; fetched-body hashes and collection/review times are unchanged.
+# Text-only correction; fetched-body hashes and collection times are unchanged.
 CAFE_SOURCE_VERSION = "cafe-official-sources/2026-10-18-text1"
-
-_REVIEWED_AT = "2026-10-18T06:25:35.432144+00:00"
 
 _OFFICIAL_RECORDS = (
     {
@@ -377,7 +375,7 @@ _OFFICIAL_RECORDS = (
 
 
 def build_cafe_reviewed_snapshot() -> ReviewedProcedureSnapshot:
-    """Return detached, reviewed records for this fixed collected version."""
+    """Return detached records awaiting human review for this collected version."""
     return ReviewedProcedureSnapshot.model_validate(
         {
             "snapshot_version": CAFE_SOURCE_VERSION,
@@ -388,8 +386,8 @@ def build_cafe_reviewed_snapshot() -> ReviewedProcedureSnapshot:
                     **record,
                     "source_domain": urlsplit(record["canonical_url"]).hostname,
                     "published_at": None,
-                    "reviewed_by": "agent research: official source comparison",
-                    "reviewed_at": _REVIEWED_AT,
+                    "reviewed_by": None,
+                    "reviewed_at": None,
                     "review_valid_days": 90,
                     "required_terms": ["폐업"],
                 }
@@ -400,7 +398,7 @@ def build_cafe_reviewed_snapshot() -> ReviewedProcedureSnapshot:
 
 
 def build_cafe_procedure_steps(step_ids: Mapping[str, int]) -> list[KnownProcedureStep]:
-    """Bind the eight approved topics to caller-issued DB IDs without guessing."""
+    """Bind the eight fixed topics to caller-issued DB IDs without guessing."""
     if set(step_ids) != set(PROCEDURE_LABELS):
         raise ValueError("all eight cafe procedure IDs are required")
     aliases = {

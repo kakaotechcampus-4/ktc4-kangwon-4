@@ -36,7 +36,7 @@ class ProcedureLookupInputError(RuntimeError):
 
 
 class StoredProcedureLookupTool:
-    """Answer from documents approved by human or official-source comparison."""
+    """Answer a procedure lookup from documents a person already approved."""
 
     def __init__(
         self,
@@ -91,7 +91,7 @@ class StoredProcedureLookupTool:
                 and freshness != FreshnessStatus.CURRENT
             ):
                 raise ProcedureLookupInputError(
-                    "DB procedure source needs a current review",
+                    "DB procedure source needs a current human review",
                     code="PROCEDURE_REVIEW_REQUIRED",
                     retryable=False,
                 )
