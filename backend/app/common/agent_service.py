@@ -87,7 +87,7 @@ def build_conflict_input(
 ) -> AgentGraphInput:
     """Accept stored candidates and choices, never client-supplied field/values.
 
-    BE checks ownership, expiry and single use before restoring candidates.
+    BE checks ownership and decision status before restoring candidates.
     A batch includes every choice and its original snapshot/pending input.
     The existing single accepted candidate remains supported. The Agent checks
     integrity/current Case values and reviews the new plan in either form.

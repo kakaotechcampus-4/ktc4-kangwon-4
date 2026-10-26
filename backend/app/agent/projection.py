@@ -30,9 +30,9 @@ def to_model_projection(value: BaseModel | dict[str, Any] | list[Any]) -> Any:
     """Remove runtime, source-location and evidence-content fields recursively.
 
     Evidence IDs, source classes, freshness and lineage remain available for
-    provenance reasoning.  The source reference, locator, excerpt and hashes do
-    not leave the runtime.  User text is supplied only to the Info Agent through
-    its explicit ``RedactedInput`` boundary.
+    provenance reasoning. This generic projection omits source bodies and user
+    text; Info, Review and safety checks add the BE-redacted text and referenced
+    evidence their explicit input projections require.
     """
 
     if isinstance(value, BaseModel):

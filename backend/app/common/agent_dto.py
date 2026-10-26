@@ -14,12 +14,15 @@ BE는 이 모듈에서 import하며, 필드 이름은 snake_case를 사용한다
     REVIEWED_PLAN: review_subject.supervisor_draft의 decision과 mutations,
         review_proof를 함께 반환한다. mutations는 아직 저장하지 않은 후보다.
         decision_type=NEEDS_MORE_INFO이면 next_action=None과 확인 질문이 온다.
-        MVP의 정상 판단은 Blocker 1개 필수. ACTION은 Next Action도 1개 반환.
+        blockers에 남은 문제와 blocker에 우선 문제를 반환한다.
+        ACTION은 Next Action 1개, COMPLETED는 blocker와 next_action 없이 반환한다.
         BE는 저장 직전 outcome.assert_integrity()와 현재 Case 상태를 재확인한다.
     CONFLICT: conflicts와 evidence_records를 보관하고 사용자 확인을 받는다.
+        conflict_snapshot과 pending_input도 함께 보관해 확인 시 복원한다.
         확인 전에는 Case를 변경하지 않는다.
     SAFE_FAILURE: failure_code / retryable / recovery_action_code를 처리한다.
         검수되지 않은 판단이나 변경 후보는 반환하지 않는다.
+    CRISIS_SUPPORT: 폐업 판단을 멈추고 guidance를 전달한다. Case 변경은 없다.
 
 호출 예 (권한·입력 정제·근거 준비를 마친 BE 코드에서):
     request = AgentGraphInput.model_validate(payload)
