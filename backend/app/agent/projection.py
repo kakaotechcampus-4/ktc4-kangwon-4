@@ -7,6 +7,23 @@ from typing import Any
 from pydantic import BaseModel
 
 from app.agent.guardrails import ensure_no_sensitive_text
+from app.be.services.redaction import redact
+
+
+def redact_model_facts(value: Any) -> Any:
+    """Mask user fact values in a model copy; keep originals and official text."""
+    if isinstance(value, BaseModel):
+        value = value.model_dump(mode="json")
+    if isinstance(value, list):
+        return [redact_model_facts(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    result = {key: redact_model_facts(item) for key, item in value.items()}
+    if value.get("field_path") in {"business_type", "restoration_scope_detail"}:
+        for key in ("value", "committed_value", "before_value", "proposed_value"):
+            if isinstance(result.get(key), str):
+                result[key] = redact(result[key])[0]
+    return result
 
 
 def to_model_projection(value: BaseModel | dict[str, Any] | list[Any]) -> Any:
@@ -80,8 +97,12 @@ def ensure_projection_has_no_obvious_sensitive_text(value: Any) -> None:
             for child in item:
                 walk(child)
 
-    walk(value)
+    walk(redact_model_facts(value))
     ensure_no_sensitive_text(strings)
 
 
-__all__ = ["ensure_projection_has_no_obvious_sensitive_text", "to_model_projection"]
+__all__ = [
+    "ensure_projection_has_no_obvious_sensitive_text",
+    "redact_model_facts",
+    "to_model_projection",
+]
