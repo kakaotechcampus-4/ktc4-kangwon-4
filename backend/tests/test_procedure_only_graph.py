@@ -2,6 +2,8 @@
 
 import asyncio
 from itertools import product
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import UUID
 
@@ -18,6 +20,8 @@ from test_action_codes import (
 from test_blocker_candidates import ChoiceModel
 
 from app.agent.graph import AgentGraph
+from app.agent.procedure_tool.store import ReviewedProcedureSnapshot
+from app.agent.procedure_tool.stored_tool import StoredProcedureLookupTool
 from app.agent.review_tool import ReviewTool
 from app.agent.schemas import (
     CASE_FIELD_SPECS,
@@ -25,6 +29,7 @@ from app.agent.schemas import (
     CaseFact,
     CaseFieldKey,
     ConflictCandidate,
+    EvidenceRecord,
     InfoAnalysisResult,
     ReviewResult,
     SafeFailureOutcome,
@@ -82,8 +87,42 @@ def test_closure_judgment_passes_review_without_support(trigger_type):
         "PROCEDURE_TOOL", "INFO_AGENT",
     ]
     procedure.lookup.assert_awaited_once()
+    lookup_request = procedure.lookup.await_args.args[0]
+    assert lookup_request.procedure_step_codes == [
+        item.procedure_step.step_code for item in graph._known_procedure_steps
+    ]
+    assert lookup_request.search_queries == ["등록 절차 코드 조회"]
     info.analyze.assert_awaited_once()
     support.analyze.assert_not_awaited()
+
+
+def test_empty_registry_keeps_all_four_bundled_source_topics(monkeypatch):
+    graph, request, procedure, _, _ = graph_run_inputs("CASE_CREATED")
+    monkeypatch.setattr(graph, "_known_procedure_steps", [])
+    snapshot = ReviewedProcedureSnapshot.model_validate_json(
+        (Path(__file__).parents[1] / "app/common/reviewed-procedures.ko-KR.json").read_text()
+    )
+    request.case_snapshot.evidence_records.extend([
+        EvidenceRecord(
+            evidence_id=record.record_id, source_type="OFFICIAL_DOCUMENT",
+            source_ref=record.canonical_url, source_version=snapshot.snapshot_version,
+            locator=None, excerpt=record.excerpt, parent_evidence_refs=[],
+            published_at=record.published_at, retrieved_at=record.retrieved_at,
+            freshness_status="CURRENT", content_hash=record.content_hash,
+        ) for record in snapshot.records
+    ])
+    store = SimpleNamespace(snapshot_version=snapshot.snapshot_version, records=lambda: snapshot.records)
+    procedure.lookup.side_effect = StoredProcedureLookupTool(store).lookup
+
+    state = asyncio.run(graph._procedure_node({"request": request, "run_id": UUID(int=91)}))
+
+    lookup_request = procedure.lookup.await_args.args[0]
+    assert lookup_request.procedure_step_codes == []
+    result = state["source_results"][0].output
+    assert {item.evidence_ref for item in result.documents} == {
+        record.record_id for record in snapshot.records
+    }
+    assert result.warnings == []
 
 
 @pytest.mark.parametrize("targets", [["SUPPORT_AGENT"], ["INFO_AGENT", "SUPPORT_AGENT"]])
