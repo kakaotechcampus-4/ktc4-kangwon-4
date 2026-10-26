@@ -20,7 +20,6 @@ from app.agent.llm import (
 )
 from app.agent.run_scope import RunDeadline, current_deadline, run_deadline_scope
 from app.agent.runtime import AgentRuntime, RuntimeLimits
-from app.agent.support_agent import ReviewedSupportCatalog
 
 
 class Answer(BaseModel):
@@ -130,14 +129,10 @@ def test_build_runtime_gives_each_component_its_configured_client(monkeypatch):
         monkeypatch.setattr(runtime_module, "AgentGraph", graph_factory)
         runtime = await runtime_module.build_runtime(
             known_procedure_steps=[],
-            support_catalog=ReviewedSupportCatalog(
-                catalog_version="synthetic", programs=(), evidence_records=()
-            ),
             procedure_store=SimpleNamespace(snapshot_version="v", records=list),
             limits=RuntimeLimits(1, 60),
         )
         assert graph_components["info_agent"]._llm is clients_by_prefix["INFO_"]
-        assert graph_components["support_agent"]._llm is clients_by_prefix[""]
         assert graph_components["supervisor"]._llm is clients_by_prefix["SUPERVISOR_"]
         assert graph_components["review_tool"]._client is clients_by_prefix[""]
         assert (

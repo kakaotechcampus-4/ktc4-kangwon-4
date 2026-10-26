@@ -518,7 +518,6 @@ async def trial(case: str, request: AgentGraphInput, store, registry, catalog) -
             runtime = await runtime_module.build_runtime(
                 known_procedure_steps=registry,
                 procedure_store=store,
-                support_catalog=catalog,
             )
         result["limits"] = asdict(runtime.limits)
         outcome = await runtime.run_planning(request)

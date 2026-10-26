@@ -1066,9 +1066,9 @@ def test_result_replanning_uses_reviewed_facts_without_repeating_scope_question(
         procedure.lookup.side_effect = lookup_for_snapshot
         support = AsyncMock()
         graph = AgentGraph(
+            content_safety=AsyncMock(),
             info_agent=InfoAnalysisAgent(info_client, max_local_attempts=1),
             procedure_tool=procedure,
-            support_agent=support,
             supervisor=SupervisorAgent(ChoiceModel(), max_local_attempts=1),
             review_tool=ReviewTool(ChoiceModel(), max_output_attempts=1),
             known_procedure_steps=template.known_procedure_steps,

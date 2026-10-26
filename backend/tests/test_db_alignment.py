@@ -28,7 +28,6 @@ from app.agent.schemas import (
     ProcedureSourceDocument,
 )
 from app.agent.supervisor.agent import SupervisorAgent
-from app.agent.support_agent.agent import SupportAgent
 from app.agent.support_agent.models import ReviewedSupportCatalog
 from app.be.models.blocker import Blocker as BlockerRow
 from app.be.models.case_history import CaseHistory
@@ -173,7 +172,7 @@ def test_procedure_document_hash_matches_normalized_evidence_hash():
 
 
 # 2. SUPPORT_ITEM/SUPPORT_MATCH.catalog_version is VARCHAR(50).
-def test_wiki_catalog_version_fits_its_column():
+def test_support_catalog_version_fits_its_column():
     source = ReviewedSupportCatalog.model_validate(
         {
             "catalog_version": "reviewed-support/2026-09-28 reviewed_by=Roka-jsj",
@@ -204,14 +203,7 @@ def test_wiki_catalog_version_fits_its_column():
         }
     )
 
-    class StubWiki:
-        async def lookup(self, ref):
-            return source
-
-    agent = SupportAgent(None, source, wiki_store=StubWiki())
-    merged, hit, missing = asyncio.run(agent._resolve_wiki(None, source))
-    assert (hit, missing) == ("HIT", [])
-    assert len(merged.catalog_version) <= 50
+    assert len(source.catalog_version) <= 50
 
     with pytest.raises(ValidationError):
         source.model_copy(update={"catalog_version": "wiki:" + HASH}).model_validate(
