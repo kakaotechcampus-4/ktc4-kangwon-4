@@ -133,6 +133,7 @@ def test_build_runtime_gives_each_component_its_configured_client(monkeypatch):
             limits=RuntimeLimits(1, 60),
         )
         assert graph_components["info_agent"]._llm is clients_by_prefix["INFO_"]
+        assert "support_agent" not in graph_components
         assert graph_components["supervisor"]._llm is clients_by_prefix["SUPERVISOR_"]
         assert graph_components["review_tool"]._client is clients_by_prefix[""]
         assert (

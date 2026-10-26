@@ -26,7 +26,6 @@ from app.agent.blocker_candidates import (
 from app.agent.claim_safety import (
     REQUIRED_CLAIM_SOURCES,
     expand_evidence,
-    high_risk_metadata,
 )
 from app.agent.enrichment import build_fact_overlays, evidence_records_equal
 from app.agent.guardrails import (
@@ -472,16 +471,8 @@ class SupervisorAgent:
             })
         claims = []
         for path, (text, refs) in texts.items():
-            kinds, _ = high_risk_metadata(text, frozenset())
-            claim_type = next(
-                (kind for kind in (
-                    ClaimType.ELIGIBILITY, ClaimType.TAX, ClaimType.DATE_OR_DEADLINE,
-                    ClaimType.AMOUNT, ClaimType.LEGAL,
-                ) if kind in kinds),
-                ClaimType.PROCEDURE,
-            )
             claims.append(GroundedClaimSemantic(
-                claim_type=claim_type, target_path=path, text=text,
+                claim_type=ClaimType.PROCEDURE, target_path=path, text=text,
                 assertion_level="NEEDS_CONFIRMATION", evidence_refs=refs,
             ))
         return claims

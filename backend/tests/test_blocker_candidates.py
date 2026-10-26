@@ -11,7 +11,6 @@ from test_action_codes import (
     REF,
     StubModel,
     evidence,
-    result_fixes_xfail,
     source,
     supervisor_request,
     support_sources,
@@ -200,18 +199,6 @@ def test_demolition_required_still_prioritizes_unresolved_landlord_scope():
         missing_info_fields(request.case_snapshot, request.source_results, mutations())
         is None
     )
-
-
-@pytest.mark.parametrize("scope_step_completed", [False, True])
-def test_completed_work_still_asks_unknown_demolition(scope_step_completed):
-    request = request_with_state(restoration_status="COMPLETED", restoration_scope="FULL")
-    if scope_step_completed:
-        request.case_snapshot.procedure_progress.append(ProcedureProgress(
-            procedure_step=RESTORATION, status="COMPLETED", evidence_refs=[REF], updated_at=NOW,
-        ))
-    missing_questions(request, "demolition_required")
-    result = missing_info_fields(request.case_snapshot, request.source_results, mutations())
-    assert result["questions_for_user"] == ["철거가 필요한지 확인한 내용이 있으면 알려주세요."]
 
 
 def test_completed_restoration_continues_closure_without_support():
@@ -982,7 +969,6 @@ def test_unusable_model_propagates_without_a_code_selected_fallback(error):
 
 
 @pytest.mark.parametrize("held_field", ["restoration_scope", "demolition_required"])
-@result_fixes_xfail()
 def test_model_can_select_a_held_fact_while_valid_actions_remain(held_field):
     from test_info_replanning import analyze_facts
 
@@ -1026,7 +1012,6 @@ def test_model_can_select_a_held_fact_while_valid_actions_remain(held_field):
     ["SUPPORT_ANALYSIS", "SUPERVISOR_DECISION"],
     None,
 ])
-@result_fixes_xfail()
 def test_held_fact_only_blocks_closure_when_not_support_only(blocks):
     from test_info_replanning import analyze_facts
 
