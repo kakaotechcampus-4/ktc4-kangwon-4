@@ -768,7 +768,10 @@ class InfoAnalysisAgent:
                 source_evidence_refs=[evidence.evidence_id],
                 requirements_confirmed=semantic.requirements_confirmed,
                 submitted=semantic.submitted,
-                requires_confirmation=semantic.requires_confirmation,
+                requires_confirmation=(
+                    semantic.requires_confirmation
+                    or semantic.observed_status == ProcedureProgressStatus.COMPLETED
+                ),
                 reason_summary=semantic.reason_summary,
             ))
         procedure_findings = self._procedure_findings(request, draft, known_steps)

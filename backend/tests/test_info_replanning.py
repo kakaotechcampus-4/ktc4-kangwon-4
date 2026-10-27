@@ -23,10 +23,13 @@ from app.agent.schemas import (
     CaseSnapshot,
     InfoAnalysisInput,
     ProcedureLookupResult,
+    ProcedureProgressChangeCandidate,
     ReviewSubject,
     canonical_digest,
 )
 from app.agent.supervisor.agent import SupervisorAgent
+from app.common.agent_dto import ProcedureCompletionConfirmation
+from app.common.agent_service import build_planning_input
 
 TAX = "FILE_TAX_BUSINESS_CLOSURE"
 FOOD = "FILE_FOOD_SERVICE_CLOSURE"
@@ -431,6 +434,7 @@ def test_quoted_progress_is_ignored_if_already_completed_and_otherwise_retained(
     else:
         observation, = result.procedure_progress_observations
         assert observation.source_span.text == request.input.redacted_text
+        assert observation.requires_confirmation is True
 
 
 @pytest.mark.parametrize(
@@ -502,7 +506,7 @@ def test_explicit_free_text_progress_retains_its_exact_user_source():
     ("기관 처리 결과가 완료된 것을 확인했습니다", "COMPLETED", True, False),
     ("처리된 것 같은데 확실하지 않습니다", "COMPLETED", False, True),
 ])
-def test_free_text_filing_report_retains_stages_and_holds_uncertain_completion(report, status, submitted, held):
+def test_free_text_filing_report_retains_stages_and_holds_completion_for_owner(report, status, submitted, held):
     request = request_for_replanning()
     request.input.redacted_text = f"사업자등록 폐업신고를 {report}."
     request.known_procedure_steps[0].step_name = "사업자등록 폐업신고"
@@ -519,7 +523,7 @@ def test_free_text_filing_report_retains_stages_and_holds_uncertain_completion(r
     observation, = result.procedure_progress_observations
     assert observation.observed_status == status
     assert observation.submitted is submitted
-    assert observation.requires_confirmation is held
+    assert observation.requires_confirmation is (held or status == "COMPLETED")
     observation.assert_input_integrity(request.input, {item.evidence_id: item for item in result.evidence_records})
     assert {item.procedure_step.step_code for item in result.procedure_findings} == {TAX, FOOD}
     assert request.case_snapshot.model_dump_json() == before
@@ -553,6 +557,235 @@ def test_quoted_progress_reaches_review_and_a_forged_event_is_rejected(held, tam
     })
     client = StubModel()
     with pytest.raises(ReviewIntegrityError):
+        asyncio.run(ReviewTool(client).review(forged))
+    assert client.calls == 0
+
+
+@pytest.mark.parametrize("submitted", [False, True])
+def test_completed_procedure_report_does_not_fail_the_remaining_plan(submitted):
+    info_request = request_for_replanning()
+    template = supervisor_request()
+    template.trigger.input.redacted_text = "원상복구 범위 확인을 진행 중입니다."
+    request = AgentGraphInput(
+        trigger=template.trigger, case_snapshot=info_request.case_snapshot,
+    )
+    raw = output([finding(TAX, "doc1"), finding(FOOD, "doc2"), finding(RESTORATION, "doc3")])
+    raw["procedure_observations"] = [{
+        "step_code": RESTORATION, "observed_status": "IN_PROGRESS",
+        "source_text": template.trigger.input.redacted_text,
+        "submitted": submitted, "requires_confirmation": False,
+        "reason_summary": "이미 완료된 절차를 다시 언급한 보고",
+    }]
+    procedure = AsyncMock()
+    procedure.lookup.return_value = info_request.procedure_lookup_result
+    graph = AgentGraph(
+        info_agent=InfoAnalysisAgent(Responses(raw), max_local_attempts=1),
+        procedure_tool=procedure, support_agent=AsyncMock(),
+        supervisor=SupervisorAgent(ChoiceModel(), max_local_attempts=1),
+        review_tool=ReviewTool(StubModel()),
+        known_procedure_steps=info_request.known_procedure_steps, clock=lambda: NOW,
+    )
+    before = request.model_dump_json()
+    outcome = asyncio.run(graph.run(request))
+    assert outcome.outcome_type == "REVIEWED_PLAN", outcome
+    outcome.assert_integrity()
+    assert outcome.review_subject.supervisor_draft.mutations.procedure_progress_changes == []
+    assert outcome.review_subject.supervisor_draft.next_action.target.procedure_step.step_code in {TAX, FOOD}
+    assert request.model_dump_json() == before
+
+
+def completion_report_graph(report, *, information=True):
+    info_request = request_for_replanning()
+    template = supervisor_request()
+    template.trigger.input.redacted_text = report
+    request = AgentGraphInput(
+        trigger=template.trigger.model_dump() | {"trigger_type": "RESULT_SUBMITTED"},
+        case_snapshot=info_request.case_snapshot,
+    )
+    raw = output([finding(TAX, "doc1"), finding(FOOD, "doc2")])
+    raw["procedure_observations"] = [{
+        "step_code": TAX, "observed_status": "COMPLETED", "source_text": report,
+        "requirements_confirmed": True, "submitted": True,
+        "requires_confirmation": False, "reason_summary": "모델이 해석한 기관 처리 완료",
+    }]
+    procedure = AsyncMock()
+    procedure.lookup.return_value = info_request.procedure_lookup_result
+    graph = AgentGraph(
+        info_agent=InfoAnalysisAgent(Responses(raw), max_local_attempts=1),
+        procedure_tool=procedure, support_agent=AsyncMock(),
+        supervisor=SupervisorAgent(ChoiceModel(information=information), max_local_attempts=1),
+        review_tool=ReviewTool(StubModel()),
+        known_procedure_steps=info_request.known_procedure_steps, clock=lambda: NOW,
+    )
+    return graph, request
+
+
+@pytest.mark.parametrize("report", [
+    "폐업 신고 아직 안 했어요.",
+    "사업자등록 폐업 신고의 기관 처리 결과가 완료된 것을 확인했습니다.",
+])
+@pytest.mark.parametrize("information", [True, False])
+def test_completion_report_stays_pending_until_owner_approval_even_when_model_says_done(report, information):
+    graph, request = completion_report_graph(report, information=information)
+    before = request.model_dump_json()
+    outcome = asyncio.run(graph.run(request))
+    assert outcome.outcome_type == "REVIEWED_PLAN", outcome
+    outcome.assert_integrity()
+    subject = outcome.review_subject
+    info = next(item.output for item in subject.source_results if item.meta.component == "INFO_AGENT")
+    observation, = info.procedure_progress_observations
+    assert observation.observed_status == "COMPLETED"
+    assert observation.requires_confirmation is True
+    assert subject.supervisor_draft.mutations.procedure_progress_changes == []
+    decision = subject.supervisor_draft.decision
+    assert any(item.candidate_id == "procedure:1" and "완료 보고" in item.description
+               for item in decision.blockers)
+    if information:
+        assert decision.decision_type == "NEEDS_MORE_INFO"
+        assert "완료" in " ".join(decision.questions_for_user)
+    else:
+        assert decision.decision_type == "ACTION"
+        assert decision.next_action.target.procedure_step.step_code == FOOD
+    assert request.model_dump_json() == before
+
+
+def completion_confirmation_request(request, outcome, confirmed):
+    subject = outcome.review_subject
+    info = next(item.output for item in subject.source_results if item.meta.component == "INFO_AGENT")
+    observation, = info.procedure_progress_observations
+    return build_planning_input(
+        trigger_type="RESULT_SUBMITTED", case_snapshot=request.case_snapshot,
+        user_input=request.trigger.input.model_copy(update={
+            "input_event_id": "synthetic-completion-choice", "redacted_text": "네" if confirmed else "아니오",
+        }),
+        client_event_id=request.trigger.client_event_id, trace_id=request.trace_id,
+        procedure_completion_confirmation=ProcedureCompletionConfirmation(
+            observation=observation, input=subject.trigger.input,
+            snapshot=subject.snapshot, confirmed=confirmed,
+        ),
+    )
+
+
+@pytest.mark.parametrize("confirmed", [True, False])
+def test_owner_completion_choice_uses_original_report_and_does_not_repeat_confirmation(confirmed):
+    graph, request = completion_report_graph("기관 처리 결과가 완료된 것을 확인했습니다.")
+    pending = asyncio.run(graph.run(request))
+    assert pending.outcome_type == "REVIEWED_PLAN", pending
+    choice = completion_confirmation_request(request, pending, confirmed)
+    raw = output([finding(TAX, "doc1"), finding(FOOD, "doc2")])
+    if not confirmed:
+        raw["procedure_observations"] = [{
+            "step_code": TAX, "observed_status": "COMPLETED", "source_text": "아니오",
+            "requires_confirmation": False, "reason_summary": "취소 답변을 완료로 오해한 모델",
+        }]
+    graph._info_agent = InfoAnalysisAgent(Responses(raw), max_local_attempts=1)
+    graph._supervisor = SupervisorAgent(ChoiceModel(), max_local_attempts=1)
+    before = choice.model_dump_json()
+    outcome = asyncio.run(graph.run(choice))
+    assert outcome.outcome_type == "REVIEWED_PLAN", outcome
+    outcome.assert_integrity()
+    draft = outcome.review_subject.supervisor_draft
+    assert draft.decision.decision_type == "ACTION"
+    assert draft.decision.questions_for_user == []
+    if confirmed:
+        change, = draft.mutations.procedure_progress_changes
+        assert change.procedure_step.step_code == TAX
+        assert change.proposed_status == "COMPLETED"
+        original = choice.trigger.procedure_completion_confirmation.observation
+        assert change.execution_evidence_refs == original.source_evidence_refs
+        assert draft.next_action.target.procedure_step.step_code == FOOD
+    else:
+        assert draft.mutations.procedure_progress_changes == []
+        assert draft.next_action.target.procedure_step.step_code in {TAX, FOOD}
+    assert choice.model_dump_json() == before
+
+
+def test_rejecting_completion_keeps_new_submission_report_and_other_facts():
+    graph, request = completion_report_graph("기관 처리 결과가 완료된 것을 확인했습니다.")
+    pending = asyncio.run(graph.run(request))
+    choice = completion_confirmation_request(request, pending, False)
+    choice.trigger.input.redacted_text = "아니요, 제출만 했어요. 직원은 2명입니다."
+    raw = output([finding(TAX, "doc1"), finding(FOOD, "doc2")])
+    raw["procedure_observations"] = [{
+        "step_code": TAX, "observed_status": "IN_PROGRESS", "source_text": "아니요, 제출만 했어요.",
+        "submitted": True, "requires_confirmation": False, "reason_summary": "완료가 아닌 제출 보고",
+    }]
+    raw["facts"] = [{
+        "operation": "SET", "field_path": "employee_count", "value_type": "INTEGER", "value": 2,
+        "source_text": "직원은 2명입니다.", "confidence_bps": 9500,
+        "requires_confirmation": False, "reason_summary": "확인 응답과 함께 알려준 직원 수",
+    }]
+    graph._info_agent = InfoAnalysisAgent(Responses(raw), max_local_attempts=1)
+    graph._supervisor = SupervisorAgent(ChoiceModel(), max_local_attempts=1)
+    before = choice.model_dump_json()
+    outcome = asyncio.run(graph.run(choice))
+    assert outcome.outcome_type == "REVIEWED_PLAN", outcome
+    outcome.assert_integrity()
+    mutations = outcome.review_subject.supervisor_draft.mutations
+    progress, = mutations.procedure_progress_changes
+    assert progress.procedure_step.step_code == TAX
+    assert progress.proposed_status == "IN_PROGRESS"
+    assert progress.proposed_submitted is True
+    fact, = mutations.fact_changes
+    assert (fact.field_path, fact.proposed_value) == ("employee_count", 2)
+    assert choice.model_dump_json() == before
+
+
+@pytest.mark.parametrize("tamper", ["input_event", "procedure", "status", "requirements", "submitted", "case"])
+def test_completion_confirmation_rejects_changed_original_or_current_state(tamper):
+    graph, request = completion_report_graph("기관 처리 결과가 완료된 것을 확인했습니다.")
+    pending = asyncio.run(graph.run(request))
+    choice = completion_confirmation_request(request, pending, True)
+    payload = choice.model_dump()
+    confirmation = payload["trigger"]["procedure_completion_confirmation"]
+    if tamper == "input_event":
+        confirmation["input"]["input_event_id"] = "another-original-report"
+        with pytest.raises(ValueError, match="progress span differs"):
+            AgentGraphInput.model_validate(payload)
+        return
+    if tamper == "procedure":
+        confirmation["observation"]["procedure_step"]["step_code"] = FOOD
+    elif tamper == "case":
+        payload["case_snapshot"]["case_id"] = 2
+    else:
+        payload["case_snapshot"]["procedure_progress"].append({
+            "procedure_step": confirmation["observation"]["procedure_step"],
+            "status": "IN_PROGRESS" if tamper == "status" else "NOT_STARTED",
+            "requirements_confirmed": tamper == "requirements", "submitted": tamper == "submitted",
+            "evidence_refs": ["synthetic-document"], "updated_at": NOW,
+        })
+    changed = AgentGraphInput.model_validate(payload)
+    graph._info_agent = InfoAnalysisAgent(
+        Responses(output([finding(TAX, "doc1"), finding(FOOD, "doc2")])), max_local_attempts=1,
+    )
+    before = changed.model_dump_json()
+    outcome = asyncio.run(graph.run(changed))
+    assert outcome.outcome_type == "SAFE_FAILURE", outcome
+    assert outcome.failed_component == "INFO_AGENT"
+    assert changed.model_dump_json() == before
+
+
+def test_independent_review_blocks_unapproved_completion_even_if_model_would_pass():
+    graph, request = completion_report_graph("기관 처리 결과가 완료된 것을 확인했습니다.")
+    pending = asyncio.run(graph.run(request))
+    subject = pending.review_subject.model_copy(deep=True)
+    info_source = next(item for item in subject.source_results if item.meta.component == "INFO_AGENT")
+    observation, = info_source.output.procedure_progress_observations
+    observation.requires_confirmation = False  # Supervisor까지 잘못 통과시킨 경우도 막는다.
+    info_source.output_digest = canonical_digest(info_source.output)
+    subject.supervisor_draft.mutations.procedure_progress_changes = [ProcedureProgressChangeCandidate(
+        candidate_id=uuid4(), procedure_step=observation.procedure_step,
+        before_status="NOT_STARTED", proposed_status="COMPLETED",
+        proposed_requirements_confirmed=observation.requirements_confirmed,
+        proposed_submitted=observation.submitted, reason_summary=observation.reason_summary,
+        execution_evidence_refs=observation.source_evidence_refs,
+        procedure_analysis_call_id=info_source.meta.call_id,
+    )]
+    forged = ReviewSubject.create(**{
+        key: getattr(subject, key) for key in type(subject).model_fields if key != "subject_digest"
+    })
+    client = StubModel()
+    with pytest.raises(ReviewIntegrityError, match="completion.*confirmation|confirmation.*completion"):
         asyncio.run(ReviewTool(client).review(forged))
     assert client.calls == 0
 

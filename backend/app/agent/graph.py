@@ -38,8 +38,10 @@ from app.agent.schemas import (
     KnownProcedureStep,
     MissingFieldBlock,
     PlanningContext,
+    ProcedureCompletionConfirmation,
     ProcedureLookupInput,
     ProcedureLookupResult,
+    ProcedureProgressStatus,
     ReviewedPlanOutcome,
     ReviewIssue,
     ReviewProof,
@@ -348,6 +350,7 @@ class AgentGraph:
             self._check_deadline()
             self._record_rework_start(meta)
             output = await self._info_agent.analyze(component_input)
+            output = self._restore_procedure_completion(request, output)
             source = ReviewSourceResult(
                 meta=meta,
                 output_digest=canonical_digest(output),
@@ -371,6 +374,47 @@ class AgentGraph:
             "source_results": [*state.get("source_results", []), source],
             "fact_overlays": overlays,
         }
+
+    def _restore_procedure_completion(
+        self, request: AgentGraphInput, output: InfoAnalysisResult,
+    ) -> InfoAnalysisResult:
+        output = output.model_copy(deep=True)
+        completed = {
+            item.procedure_step.procedure_step_id for item in request.case_snapshot.procedure_progress
+            if item.status == ProcedureProgressStatus.COMPLETED
+        }
+        output.procedure_progress_observations = [
+            item for item in output.procedure_progress_observations
+            if item.procedure_step.procedure_step_id not in completed
+        ]
+        for observation in output.procedure_progress_observations:
+            if observation.observed_status == ProcedureProgressStatus.COMPLETED:
+                observation.requires_confirmation = True
+        confirmation = getattr(request.trigger, "procedure_completion_confirmation", None)
+        if confirmation is None:
+            return output
+        confirmation = ProcedureCompletionConfirmation.model_validate(confirmation.model_dump())
+        confirmation.assert_current(request.case_snapshot)
+        target = confirmation.observation.procedure_step
+        if not any(item.procedure_step == target for item in self._known_procedure_steps):
+            raise ValueError("completion confirmation references an unknown procedure")
+        output.procedure_progress_observations = [
+            item for item in output.procedure_progress_observations
+            if item.procedure_step != target
+            or (not confirmation.confirmed and item.observed_status != ProcedureProgressStatus.COMPLETED)
+        ]
+        evidence = confirmation.source_evidence(request.case_snapshot)
+        output.evidence_records = [
+            item for item in output.evidence_records if item.evidence_id != evidence.evidence_id
+        ] + [evidence.model_copy(deep=True)]
+        if confirmation.confirmed and not any(
+            item.procedure_step == target and item.status == ProcedureProgressStatus.COMPLETED
+            for item in request.case_snapshot.procedure_progress
+        ):
+            output.procedure_progress_observations.append(
+                confirmation.observation.model_copy(update={"requires_confirmation": False}, deep=True)
+            )
+        return InfoAnalysisResult.model_validate(output.model_dump())
 
     def _conflict_node(self, state: AgentGraphState) -> dict[str, Any]:
         info_sources = [

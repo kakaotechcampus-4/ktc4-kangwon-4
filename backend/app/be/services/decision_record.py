@@ -235,6 +235,9 @@ def _assert_changes_are_current(session: Session, history: CaseHistory, mutation
         raise ValueError(f"case {history.case_id} not found")
 
     for change in mutations.fact_changes:
+        # 직원·보험 이력은 이번 판단에서만 쓰고, 기존 Case 컬럼만 저장한다.
+        if change.field_path not in CaseFieldKey:
+            continue
         stored = _comparable_case_value(case, change.field_path)
         if stored != change.before_value:
             raise StaleJudgmentError(
@@ -288,6 +291,8 @@ def _apply_fact_changes(
         raise ValueError(f"case {history.case_id} not found")
 
     for change in fact_changes:
+        if change.field_path not in CaseFieldKey:
+            continue
         # 컬럼에 글자 "UNKNOWN"이 들어 있는 필드가 있다. 그대로 적으면 "모름"이 이력에
         # 두 모양(NULL과 "UNKNOWN")으로 남는다. AI가 보는 표현으로 맞춰서 적는다.
         before = _comparable_case_value(case, change.field_path)
