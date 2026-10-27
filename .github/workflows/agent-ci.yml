@@ -27,6 +27,13 @@ jobs:
         working-directory: backend
     env:
       PYTHONPATH: .
+      # BE 라우터를 불러오는 모의 테스트에만 쓰는 설정이다.
+      ENVIRONMENT: dev
+      DATABASE_URL: "sqlite://"
+      KAKAO_CLIENT_ID: mock-client
+      KAKAO_CLIENT_SECRET: mock-secret
+      KAKAO_REDIRECT_URI: "http://localhost/callback"
+      JWT_SECRET_KEY: mock-jwt-secret-for-agent-ci-only
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
