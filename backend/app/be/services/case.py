@@ -172,6 +172,15 @@ def get_case_results_entry(session: Session, member_id: int) -> CaseResultsEntry
     if case is None:
         raise HTTPException(status_code=404, detail="Case를 찾을 수 없습니다.")
 
+    latest_history = case_history_crud.get_latest_user_driven_case_history(session, case.id)
+    if latest_history is None:
+        raise HTTPException(status_code=500, detail="Case에 대한 최초 판단 기록이 없습니다.")
+
+    # 충돌 결정을 처리하는 동안에도 충돌은 미결로 남아 있다(성공해야 해결 처리한다).
+    # 그래서 처리 중인지를 먼저 보지 않으면, 결정을 보낸 직후에도 확인 화면이 다시 나온다.
+    if latest_history.judgment_status == "PENDING":
+        return CaseResultsEntryResponse(judgment_status="PENDING", case_history_id=latest_history.id)
+
     pending_conflicts = conflict_reference_crud.get_pending_conflicts_by_case_id(session, case.id)
     if pending_conflicts:
         # 사전 검사 전제(미결 충돌은 항상 최대 1개)상 전부 같은 case_history에서 나온
@@ -191,14 +200,7 @@ def get_case_results_entry(session: Session, member_id: int) -> CaseResultsEntry
             ],
         )
 
-    latest_history = case_history_crud.get_latest_user_driven_case_history(session, case.id)
-    if latest_history is None:
-        raise HTTPException(status_code=500, detail="Case에 대한 최초 판단 기록이 없습니다.")
-
     _assert_judgment_is_showable(latest_history)
-
-    if latest_history.judgment_status == "PENDING":
-        return CaseResultsEntryResponse(judgment_status="PENDING", case_history_id=latest_history.id)
 
     if latest_history.judgment_status == "DONE":
         return CaseResultsEntryResponse(
