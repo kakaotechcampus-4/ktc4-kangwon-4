@@ -135,6 +135,7 @@ def test_two_hidden_spots_are_paired_in_the_order_they_appeared():
 def test_an_unknown_submission_leaves_the_value_hidden(monkeypatch):
     # 어느 입력에서 나온 값인지 모르면 되돌릴 짝도 없다. 가린 채로 두는 쪽이 안전하다.
     monkeypatch.setattr(case_history_crud, "get_case_histories_by_case_id", lambda *_: histories())
+    monkeypatch.setattr(case_field_history_crud, "get_case_field_histories_by_case_id", lambda *_: [])
     restorer = HiddenTextRestorer(MagicMock(spec=Session), CASE_ID)
 
     assert restorer.restore("마포구 [주소] 전체", None) == "마포구 [주소] 전체"

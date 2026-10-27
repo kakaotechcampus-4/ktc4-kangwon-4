@@ -13,7 +13,7 @@ from app.be.crud import evidence as evidence_crud
 from app.be.crud import procedure_step as procedure_step_crud
 from app.be.models.case import Case
 from app.be.models.case_history import CaseHistory
-from app.be.models.evidence import Evidence
+from app.be.models.evidence import ConflictReference, Evidence
 from app.be.models.mixins import kst_now
 from app.be.models.procedure_step import CaseProcedureStep, ProcedureStep
 from app.be.schemas.case import (
@@ -30,86 +30,52 @@ from app.be.schemas.case import (
 )
 from app.agent.procedure_tool.store import ReviewedProcedureStore
 from app.be.services import reviewed_procedure as reviewed_procedure_service
-from app.be.services.unmasking import HiddenTextRestorer
+from app.be.services.unmasking import build_restorer
 
 logger = logging.getLogger(__name__)
 
 
-def _value_sources(
-    session: Session, case_id: int
-) -> tuple[dict[int, int | None], dict[str, int | None]]:
-    """어느 입력이 어느 값을 만들었는지. 가림 문구를 되돌릴 때 짝을 찾는 데 쓴다.
+def _field_changes(session: Session, case_id: int, case_history_id: int) -> list[FieldChangeResponse]:
+    """이 제출에서 바뀐 값들. 화면에 낼 때만 가림 문구를 원래 글자로 되돌린다.
 
-    돌려주는 것은 두 가지다 — 변경 이력 행마다 "그 전 값"을 만든 입력, 그리고 필드마다
-    "지금 Case에 있는 값"을 만든 입력. 이전 값과 지금 값은 서로 다른 제출에서 나올 수
-    있어서, 한쪽 기준으로 되돌리면 남의 주소를 보여주게 된다.
+    이전 값과 새 값은 서로 다른 제출에서 나온다. 한쪽 기준으로 되돌리면 이전 값 자리에
+    남의 주소가 들어간다.
     """
 
-    previous_by_row_id: dict[int, int | None] = {}
-    current_by_field: dict[str, int | None] = {}
-    # 오래된 것부터 읽어 덮어쓰므로 마지막에 남는 것이 지금 값이다.
-    for row in case_field_history_crud.get_case_field_histories_by_case_id(session, case_id):
-        previous_by_row_id[row.id] = current_by_field.get(row.canonical_field)
-        current_by_field[row.canonical_field] = row.case_history_id
-    return previous_by_row_id, current_by_field
-
-
-def _has_hidden_text(*values: str | None) -> bool:
-    """가림 문구는 항상 대괄호로 시작한다. 대부분의 화면은 여기서 끝나 질의가 늘지 않는다."""
-
-    return any(value is not None and "[" in value for value in values)
-
-
-def _field_changes(session: Session, case_id: int, case_history_id: int) -> list[FieldChangeResponse]:
-    """이 제출에서 바뀐 값들. 화면에 낼 때만 가림 문구를 원래 글자로 되돌린다."""
-
     rows = case_field_history_crud.get_case_field_histories_by_case_history_id(session, case_history_id)
-    if not _has_hidden_text(*[row.before_value for row in rows], *[row.after_value for row in rows]):
-        return [
-            FieldChangeResponse(
-                field=row.canonical_field, stored_value=row.before_value, new_value=row.after_value
-            )
-            for row in rows
-        ]
-
-    restorer = HiddenTextRestorer(session, case_id)
-    previous_by_row_id, _ = _value_sources(session, case_id)
+    restorer = build_restorer(
+        session, case_id, [row.before_value for row in rows] + [row.after_value for row in rows]
+    )
     return [
         FieldChangeResponse(
             field=row.canonical_field,
-            stored_value=restorer.restore(row.before_value, previous_by_row_id.get(row.id)),
+            stored_value=restorer.restore(row.before_value, restorer.source_of_previous(row.id)),
             new_value=restorer.restore(row.after_value, row.case_history_id),
         )
         for row in rows
     ]
 
 
-def _conflict_items(session: Session, case_id: int, conflicts: list) -> list[ConflictItemResponse]:
-    """확인 화면에 띄울 충돌들. 이전 값과 새 값이 서로 다른 제출에서 나온다."""
+def _conflict_items(
+    session: Session, case_id: int, conflicts: list[ConflictReference]
+) -> list[ConflictItemResponse]:
+    """확인 화면에 띄울 충돌들.
 
-    if not _has_hidden_text(
-        *[conflict.committed_value for conflict in conflicts],
-        *[conflict.proposed_value for conflict in conflicts],
-    ):
-        return [
-            ConflictItemResponse(
-                id=conflict.id,
-                field=conflict.canonical_field,
-                stored_value=conflict.committed_value,
-                proposed_value=conflict.proposed_value,
-            )
-            for conflict in conflicts
-        ]
+    아직 확인 전이라 Case에는 이전 값이 그대로 있다. 새 값만 이번 제출에서 나온다.
+    """
 
-    restorer = HiddenTextRestorer(session, case_id)
-    _, current_by_field = _value_sources(session, case_id)
+    restorer = build_restorer(
+        session,
+        case_id,
+        [conflict.committed_value for conflict in conflicts]
+        + [conflict.proposed_value for conflict in conflicts],
+    )
     return [
         ConflictItemResponse(
             id=conflict.id,
             field=conflict.canonical_field,
-            # 아직 확인 전이라 Case에는 이전 값이 그대로 있다.
             stored_value=restorer.restore(
-                conflict.committed_value, current_by_field.get(conflict.canonical_field)
+                conflict.committed_value, restorer.source_of_current(conflict.canonical_field)
             ),
             proposed_value=restorer.restore(conflict.proposed_value, conflict.case_history_id),
         )
@@ -121,19 +87,13 @@ def _case_detail(session: Session, case: Case) -> CaseGetDetailResponse:
     """Case 자체를 화면에 낼 때. 자유 글 칸에만 가림 문구가 들어올 수 있다."""
 
     detail = CaseGetDetailResponse(**case.model_dump())
-    if not _has_hidden_text(detail.business_type, detail.restoration_scope_detail):
-        return detail
-
-    restorer = HiddenTextRestorer(session, case.id)
-    _, current_by_field = _value_sources(session, case.id)
+    restorer = build_restorer(
+        session, case.id, [detail.business_type, detail.restoration_scope_detail]
+    )
     return detail.model_copy(
         update={
-            "business_type": restorer.restore(
-                detail.business_type, current_by_field.get("business_type")
-            ),
-            "restoration_scope_detail": restorer.restore(
-                detail.restoration_scope_detail, current_by_field.get("restoration_scope_detail")
-            ),
+            field: restorer.restore(getattr(detail, field), restorer.source_of_current(field))
+            for field in ("business_type", "restoration_scope_detail")
         }
     )
 
