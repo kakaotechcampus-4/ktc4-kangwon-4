@@ -27,6 +27,13 @@ jobs:
         working-directory: backend
     env:
       PYTHONPATH: .
+      # 모의 테스트에서만 사용하는 설정이다.
+      ENVIRONMENT: dev
+      DATABASE_URL: "sqlite://"
+      KAKAO_CLIENT_ID: mock-client
+      KAKAO_CLIENT_SECRET: mock-secret
+      KAKAO_REDIRECT_URI: "http://localhost/callback"
+      JWT_SECRET_KEY: mock-jwt-secret-for-agent-ci-only
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

@@ -1,6 +1,8 @@
 """The closure MVP does not execute or request input for support programs."""
 
 import asyncio
+import json
+from datetime import date, timedelta
 from itertools import product
 from unittest.mock import AsyncMock
 from uuid import UUID
@@ -18,15 +20,18 @@ from test_action_codes import (
 from test_blocker_candidates import ChoiceModel
 
 from app.agent.graph import AgentGraph
-from app.agent.review_tool import ReviewTool
+from app.agent.review_tool import ReviewIntegrityError, ReviewTool
 from app.agent.schemas import (
     CASE_FIELD_SPECS,
     AgentGraphInput,
     CaseFact,
     CaseFieldKey,
     ConflictCandidate,
+    ConflictConfirmedTrigger,
     InfoAnalysisResult,
+    ProcedureProgress,
     ReviewResult,
+    ReviewSubject,
     SafeFailureOutcome,
     canonical_digest,
 )
@@ -541,3 +546,187 @@ def test_graph_preserves_held_fact_with_a_model_selected_question_or_action(choo
     assert held.fact_candidates[0].source_evidence_refs[0] in held_blocker.evidence_refs
     assert draft.mutations.fact_changes == []
     assert draft.mutations.procedure_progress_changes == []
+
+
+def batch_conflict_graph(accepted=(True, False)):
+    from test_info_replanning import Responses, finding, output
+
+    from app.agent.info_agent.agent import InfoAnalysisAgent
+
+    graph, original, procedure, _, _ = graph_run_inputs("RESULT_SUBMITTED")
+    snapshot = original.case_snapshot.model_copy(deep=True)
+    conflicts = [
+        ConflictCandidate.create(
+            conflict_ref=f"stored-conflict-{index}", candidate_id=UUID(int=100 + index),
+            snapshot_id=snapshot.snapshot_id, field_path=field,
+            committed_status="CONFIRMED", committed_value=before,
+            proposed_operation="SET", proposed_status="CONFIRMED", proposed_value=after,
+            source_evidence_refs=["synthetic-document"], source_call_id=UUID(int=110),
+        )
+        for index, (field, before, after) in enumerate([
+            ("franchise_status", False, True), ("lease_status", "OWNED", "LEASED_FREE"),
+        ])
+    ]
+    request = AgentGraphInput(
+        trigger=ConflictConfirmedTrigger(
+            trigger_type="CONFLICT_CONFIRMED", input_event_id="batch-choice", client_event_id=None,
+            conflicts=conflicts, selections=[
+                {"conflict_ref": item.conflict_ref, "accepted": chosen}
+                for item, chosen in zip(conflicts, accepted, strict=True)
+            ], conflict_snapshot=snapshot.model_copy(deep=True), confirmed_at=NOW,
+        ), case_snapshot=snapshot,
+    )
+    client = Responses(output([finding("FILE_TAX_BUSINESS_CLOSURE", "doc1")]))
+    graph._info_agent = InfoAnalysisAgent(client, clock=lambda: NOW, max_local_attempts=1)
+    return graph, request, client, procedure
+
+
+@pytest.mark.parametrize("accepted", [(True, False), (False, True), (False, False), (True, True)])
+def test_batch_conflicts_replan_once_with_only_the_selected_values(accepted):
+    graph, request, client, procedure = batch_conflict_graph(accepted)
+    before = request.model_dump_json()
+    outcome = asyncio.run(graph.run(request))
+    assert outcome.outcome_type == "REVIEWED_PLAN", outcome
+    outcome.assert_integrity()
+    changes = outcome.review_subject.supervisor_draft.mutations.fact_changes
+    assert {(item.confirmed_conflict_ref, item.proposed_value) for item in changes} == {
+        (item.conflict_ref, item.proposed_value)
+        for item, chosen in request.trigger.choices() if chosen
+    }
+    assert request.model_dump_json() == before
+    assert len(client.messages) == 1
+    assert json.loads(client.messages[0][1]["content"].removeprefix("INPUT_JSON="))["input"] is None
+    procedure.lookup.assert_awaited_once()
+    assert graph._review_tool._client.calls == 1
+
+
+@pytest.mark.parametrize("forgery", ["rejected_change", "missing_accepted", "different_value"])
+def test_batch_review_rejects_changes_that_differ_from_user_choices_before_model_pass(forgery):
+    from app.agent.enrichment import build_conflict_overlays
+
+    graph, request, _, _ = batch_conflict_graph()
+    outcome = asyncio.run(graph.run(request))
+    assert outcome.outcome_type == "REVIEWED_PLAN", outcome
+    original = outcome.review_subject
+    draft = original.supervisor_draft.model_copy(deep=True)
+    if forgery == "rejected_change":
+        altered = request.trigger.model_copy(deep=True)
+        altered.selections[1].accepted = True
+        draft.mutations.fact_changes = build_conflict_overlays(request.case_snapshot, altered)
+    elif forgery == "missing_accepted":
+        draft.mutations.fact_changes = []
+    else:
+        draft.mutations.fact_changes[0].proposed_value = False
+    subject = ReviewSubject.create(**{
+        key: getattr(original, key) for key in type(original).model_fields
+        if key not in {"subject_digest", "supervisor_draft"}
+    }, supervisor_draft=draft)
+    client = StubModel()
+    with pytest.raises(ReviewIntegrityError):
+        asyncio.run(ReviewTool(client).review(subject))
+    assert client.calls == 0
+
+
+def test_batch_review_failure_returns_no_changes_and_preserves_the_original_input():
+    graph, request, _, _ = batch_conflict_graph()
+    before = request.model_dump_json()
+
+    async def reject(subject):
+        return ReviewResult(
+            reviewed_subject_id=subject.review_subject_id,
+            reviewed_subject_digest=subject.subject_digest, verdict="REVISE", issues=[],
+            missing_evidence=[{
+                "claim_path": "/supervisor_draft/decision/blocker", "required_source_types": ["USER_INPUT"],
+                "reason_summary": "합성 검수 반려",
+            }], recommended_rework_targets=["SUPERVISOR"], resolution_reason="합성 검수 반려",
+        )
+
+    graph._max_review_revisions = 0
+    graph._review_tool = AsyncMock()
+    graph._review_tool.review.side_effect = reject
+    outcome = asyncio.run(graph.run(request))
+    assert outcome.outcome_type == "SAFE_FAILURE"
+    assert outcome.failure_code == "REVIEW_RETRY_EXHAUSTED"
+    assert outcome.failed_component == "REVIEW_TOOL"
+    assert not hasattr(outcome, "review_subject")
+    assert request.model_dump_json() == before
+
+
+@pytest.mark.parametrize("invalid", ["missing", "duplicate", "unknown_ref", "numeric_boolean"])
+def test_batch_conflicts_require_one_strict_choice_per_original_candidate(invalid):
+    _, request, _, _ = batch_conflict_graph()
+    data = request.trigger.model_dump(mode="json")
+    if invalid == "missing":
+        data["selections"].pop()
+    elif invalid == "duplicate":
+        data["selections"][1] = data["selections"][0]
+    elif invalid == "unknown_ref":
+        data["selections"][1]["conflict_ref"] = "not-an-original-candidate"
+    else:
+        data["selections"][0]["accepted"] = 1
+    with pytest.raises(ValidationError):
+        ConflictConfirmedTrigger.model_validate(data)
+
+
+@pytest.mark.parametrize("changed", ["snapshot_id", "case_id", "case_status", "fact", "progress", "evidence"])
+def test_even_rejecting_all_conflicts_requires_the_unchanged_original_state(changed):
+    graph, request, client, procedure = batch_conflict_graph((False, False))
+    current = request.case_snapshot
+    if changed == "snapshot_id":
+        current.snapshot_id = UUID(int=999)
+    elif changed == "case_id":
+        current.case_id = 2
+    elif changed == "case_status":
+        before = request.model_dump_json()
+        with pytest.raises(ValidationError):
+            current.case_status = type(current.case_status).COMPLETED
+        assert request.model_dump_json() == before
+        assert client.messages == []
+        procedure.lookup.assert_not_awaited()
+        return
+    elif changed == "fact":
+        current.facts[0].value = "다른 업종"
+    elif changed == "progress":
+        current.procedure_progress.append(ProcedureProgress.model_validate({
+            "procedure_step": graph._known_procedure_steps[0].procedure_step.model_dump(),
+            "status": "IN_PROGRESS", "evidence_refs": ["synthetic-document"], "updated_at": NOW,
+        }))
+    else:
+        current.evidence_records[0].excerpt = "달라진 공식 자료"
+    before = request.model_dump_json()
+    outcome = asyncio.run(graph.run(request))
+    assert outcome.outcome_type == "SAFE_FAILURE", outcome
+    assert outcome.failure_code == "STALE_CONFLICT_CONFIRMATION"
+    assert request.model_dump_json() == before
+    assert client.messages == []
+    procedure.lookup.assert_not_awaited()
+
+
+@pytest.mark.parametrize("operation", ["SET", "CLEAR"])
+def test_batch_date_choice_survives_stored_json_and_read_time_changes(operation):
+    from app.agent.enrichment import build_conflict_overlays
+
+    _, request, _, _ = batch_conflict_graph()
+    snapshot = request.case_snapshot
+    snapshot.facts.append(CaseFact(
+        field_path="planned_closure_date", value_type="DATE", value=date(2026, 10, 30),
+        status="CONFIRMED", evidence_refs=["synthetic-document"], updated_at=NOW,
+    ))
+    candidate = ConflictCandidate.create(
+        conflict_ref="date-choice", candidate_id=UUID(int=120), snapshot_id=snapshot.snapshot_id,
+        field_path="planned_closure_date", committed_status="CONFIRMED", committed_value=date(2026, 10, 30),
+        proposed_operation=operation, proposed_status="CONFIRMED" if operation == "SET" else "UNKNOWN",
+        proposed_value=date(2026, 11, 2) if operation == "SET" else None,
+        source_evidence_refs=["synthetic-document"], source_call_id=UUID(int=110),
+    )
+    trigger = ConflictConfirmedTrigger(
+        trigger_type="CONFLICT_CONFIRMED", input_event_id="date-choice", client_event_id=None,
+        conflicts=[candidate], selections=[{"conflict_ref": candidate.conflict_ref, "accepted": True}],
+        conflict_snapshot=snapshot.model_copy(deep=True), confirmed_at=NOW,
+    )
+    restored = ConflictConfirmedTrigger.model_validate_json(trigger.model_dump_json())
+    snapshot.facts.reverse()
+    snapshot.captured_at += timedelta(hours=1)
+    change, = build_conflict_overlays(snapshot, restored)
+    assert change.operation == operation
+    assert str(change.proposed_value) == ("2026-11-02" if operation == "SET" else "None")
