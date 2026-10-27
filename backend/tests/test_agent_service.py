@@ -287,7 +287,7 @@ def test_the_runtime_is_closed_and_flushed_when_planning_raises():
 @pytest.fixture
 def import_cli_context(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["import_reviewed_procedures", "--case-id", "1"])
-    monkeypatch.setitem(sys.modules, "app.be.db", SimpleNamespace(_engine=object()))
+    monkeypatch.setitem(sys.modules, "app.be.db", SimpleNamespace(get_engine=lambda: object()))
     session = MagicMock()
     session.__enter__.return_value = session
     monkeypatch.setattr(import_cli, "Session", MagicMock(return_value=session))
