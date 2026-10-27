@@ -301,6 +301,17 @@ def _validate_integrity(subject: ReviewSubject) -> _ReviewContext:
         raise ReviewIntegrityError("review subject cannot be digested") from exc
     if subject.subject_digest != calculated_digest:
         raise ReviewIntegrityError("review subject digest does not match its contents")
+    confirmation = getattr(subject.trigger, "procedure_completion_confirmation", None)
+    if confirmation is not None:
+        try:
+            confirmation.assert_current(subject.snapshot)
+            if not any(
+                item.procedure_step == confirmation.observation.procedure_step
+                for item in subject.known_procedure_steps
+            ):
+                raise ValueError("completion confirmation references an unknown procedure")
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise ReviewIntegrityError("completion confirmation does not match the Case") from exc
 
     call_ids = [source.meta.call_id for source in subject.source_results]
     if len(set(call_ids)) != len(call_ids):
@@ -365,6 +376,8 @@ def _validate_integrity(subject: ReviewSubject) -> _ReviewContext:
             continue
         for observation in source.output.procedure_progress_observations:
             original_input = getattr(subject.trigger, "input", None)
+            if confirmation is not None and confirmation.matches(observation):
+                original_input = confirmation.input
             if original_input is None:
                 raise ReviewIntegrityError("procedure progress requires its original input")
             try:
@@ -545,6 +558,13 @@ def _validate_mutation_provenance(
             raise ReviewIntegrityError(
                 "procedure mutation cannot use an observation requiring confirmation"
             )
+        if (
+            candidate.before_status != ProcedureProgressStatus.COMPLETED
+            and candidate.proposed_status == ProcedureProgressStatus.COMPLETED
+        ):
+            confirmation = getattr(subject.trigger, "procedure_completion_confirmation", None)
+            if confirmation is None or not confirmation.matches(matching_observations[0]):
+                raise ReviewIntegrityError("procedure completion requires explicit user confirmation")
 
     for candidate in mutations.support_match_updates:
         source = _require_source_output(
@@ -733,6 +753,16 @@ def _review_prompt_projection(
         trigger["input"] = {
             "source_type": redacted_input.source_type.value,
             "redacted_text": redacted_input.redacted_text,
+        }
+    confirmation = getattr(subject.trigger, "procedure_completion_confirmation", None)
+    if confirmation is not None:
+        trigger["procedure_completion_confirmation"] = {
+            "confirmed": confirmation.confirmed,
+            "observation": _minimize_prompt_value(confirmation.observation.model_dump(mode="json")),
+            "input": {
+                "source_type": confirmation.input.source_type.value,
+                "redacted_text": confirmation.input.redacted_text,
+            },
         }
     support_programs = getattr(subject.trigger, "support_programs", None)
     if support_programs is not None:

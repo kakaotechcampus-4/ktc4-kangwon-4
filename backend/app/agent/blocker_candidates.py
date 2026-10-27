@@ -106,6 +106,39 @@ def candidate_decision_fields(
     return _decision_fields(candidate, action)
 
 
+def _completion_questions(snapshot, sources, mutations, bindings):
+    completed = {
+        (item.procedure_step.procedure_step_id, item.procedure_step.step_code)
+        for item in effective_procedure_progress(snapshot, mutations)
+        if item.status == "COMPLETED"
+    }
+    questions = {}
+    for source in sources:
+        if not isinstance(source.output, InfoAnalysisResult):
+            continue
+        findings = {item.procedure_step.step_code: item for item in source.output.procedure_findings}
+        for observation in source.output.procedure_progress_observations:
+            step = observation.procedure_step
+            if observation.observed_status != "COMPLETED" or (step.procedure_step_id, step.step_code) in completed:
+                continue
+            label = next((PROCEDURE_LABELS[code] for code, ref in bindings.items() if ref == step), "해당 절차")
+            finding = findings.get(step.step_code)
+            refs = list(dict.fromkeys([
+                *observation.source_evidence_refs,
+                *(finding.evidence_refs if finding else []),
+            ]))
+            key = f"procedure:{step.procedure_step_id}"
+            questions[key] = {
+                "candidate_id": key,
+                "description": f"{label} 완료 보고를 확인해야 합니다.",
+                "evidence_refs": refs,
+            }
+    return list(questions.values())
+
+
+_COMPLETION_QUESTION = "해당 절차의 처리가 모두 끝났고, 완료로 기록해도 될까요?"
+
+
 def build_blocker_candidates(
     snapshot: CaseSnapshot,
     steps: Sequence[KnownProcedureStep],
@@ -116,6 +149,10 @@ def build_blocker_candidates(
 ) -> list[dict[str, Any]]:
     """Rank all executable closure candidates; support is outside the MVP."""
     resolved_bindings = resolve_procedure_bindings(steps, procedure_bindings)
+    pending_completions = {
+        item["candidate_id"]
+        for item in _completion_questions(snapshot, sources, mutations, resolved_bindings)
+    }
     values = _values(snapshot, mutations)
     state_refs = list(
         dict.fromkeys(ref for fact in snapshot.facts for ref in fact.evidence_refs)
@@ -178,6 +215,8 @@ def build_blocker_candidates(
             if any(item.freshness_status != "CURRENT" for item in evidence):
                 continue
         key = f"procedure:{reference['procedure_step_id']}"
+        if key in pending_completions:
+            continue
         refs = list(finding.evidence_refs)
         for progress in snapshot.procedure_progress:
             if progress.procedure_step == finding.procedure_step:
@@ -348,6 +387,9 @@ def missing_info_fields(
     selected_candidate_id: str | None = None,
 ) -> dict[str, Any] | None:
     """Ask about one unresolved decision blocker in the existing question order."""
+    completion_questions = _completion_questions(
+        snapshot, sources, mutations, procedure_bindings or {}
+    )
     values = _values(snapshot, mutations)
     restoration_detail_unnecessary = (
         values.get("restoration_status") == "NOT_REQUIRED"
@@ -382,6 +424,7 @@ def missing_info_fields(
         for ref in candidate.source_evidence_refs
         if ref not in refs
     )
+    refs.extend(ref for item in completion_questions for ref in item["evidence_refs"] if ref not in refs)
     if not refs:
         return None
     missing_paths = {
@@ -419,27 +462,26 @@ def missing_info_fields(
     if values.get("restoration_scope") not in {"PARTIAL", "FULL"}:
         paths.discard("restoration_status")
     ordered = [path for path in _QUESTIONS if path in paths]
-    if selected_candidate_id is None:
-        missing = next(iter(ordered), None)
-    else:
-        missing = next((path for path in ordered if f"missing:{path}" == selected_candidate_id), None)
-    if missing is None:
-        return None
-    questions = [_QUESTIONS[missing]]
-    description = f"{_FIELD_LABELS[missing]} 확인이 필요합니다."
-    blockers = [
+    blockers = completion_questions + [
         {"candidate_id": f"missing:{path}", "description": f"{_FIELD_LABELS[path]} 확인이 필요합니다.", "evidence_refs": refs}
         for path in ordered
     ]
+    selected = next((item for item in blockers if selected_candidate_id is None or item["candidate_id"] == selected_candidate_id), None)
+    if selected is None:
+        return None
+    question = (
+        _COMPLETION_QUESTION if selected["candidate_id"].startswith("procedure:")
+        else _QUESTIONS[selected["candidate_id"].removeprefix("missing:")]
+    )
     return {
         "decision_type": "NEEDS_MORE_INFO",
-        "selection_summary": description,
+        "selection_summary": selected["description"],
         "requires_human": True,
-        "evidence_refs": refs,
-        "blocker": {"candidate_id": f"missing:{missing}", "description": description, "evidence_refs": refs},
+        "evidence_refs": selected["evidence_refs"],
+        "blocker": selected,
         "blockers": blockers,
         "next_action": None,
-        "questions_for_user": questions,
+        "questions_for_user": [question],
     }
 
 
@@ -463,12 +505,16 @@ def candidate_decision_violations(
             None,
         )
         if selected is not None:
-            field_path = selected["candidate_id"].removeprefix("missing:")
+            question = (
+                _COMPLETION_QUESTION if selected["candidate_id"].startswith("procedure:")
+                else _QUESTIONS[selected["candidate_id"].removeprefix("missing:")]
+            )
             expected = {
                 **fallback,
                 "blocker": selected,
                 "selection_summary": selected["description"],
-                "questions_for_user": [_QUESTIONS[field_path]],
+                "evidence_refs": selected["evidence_refs"],
+                "questions_for_user": [question],
             }
     if decision.next_action is not None:
         selected = next(

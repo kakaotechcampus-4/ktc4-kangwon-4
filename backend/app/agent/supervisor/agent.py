@@ -744,10 +744,23 @@ class SupervisorAgent:
                     before_status = (
                         prior.status if prior else ProcedureProgressStatus.NOT_STARTED
                     )
+                    if observation.observed_status == ProcedureProgressStatus.COMPLETED:
+                        confirmation = getattr(request.trigger, "procedure_completion_confirmation", None)
+                        if before_status != ProcedureProgressStatus.COMPLETED and (
+                            confirmation is None or not confirmation.matches(observation)
+                        ):
+                            continue
+                        if before_status != ProcedureProgressStatus.COMPLETED:
+                            confirmation.assert_current(snapshot)
                     if finding.current_status != before_status:
                         raise SupervisorGuardrailError(
                             "procedure finding current status differs from snapshot"
                         )
+                    if (
+                        before_status == ProcedureProgressStatus.COMPLETED
+                        and observation.observed_status != ProcedureProgressStatus.COMPLETED
+                    ):
+                        continue
                     before_requirements = (
                         prior.requirements_confirmed if prior else False
                     )
