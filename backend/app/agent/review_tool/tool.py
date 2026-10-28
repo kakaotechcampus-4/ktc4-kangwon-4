@@ -14,6 +14,7 @@ from app.agent.action_catalog import (
     ACTION_DEFINITIONS,
     ProcedureBindings,
     build_action_candidates,
+    effective_procedure_progress,
     resolve_procedure_bindings,
 )
 from app.agent.blocker_candidates import (
@@ -300,6 +301,17 @@ def _validate_integrity(subject: ReviewSubject) -> _ReviewContext:
         raise ReviewIntegrityError("review subject cannot be digested") from exc
     if subject.subject_digest != calculated_digest:
         raise ReviewIntegrityError("review subject digest does not match its contents")
+    confirmation = getattr(subject.trigger, "procedure_completion_confirmation", None)
+    if confirmation is not None:
+        try:
+            confirmation.assert_current(subject.snapshot)
+            if not any(
+                item.procedure_step == confirmation.observation.procedure_step
+                for item in subject.known_procedure_steps
+            ):
+                raise ValueError("completion confirmation references an unknown procedure")
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise ReviewIntegrityError("completion confirmation does not match the Case") from exc
 
     call_ids = [source.meta.call_id for source in subject.source_results]
     if len(set(call_ids)) != len(call_ids):
@@ -359,6 +371,19 @@ def _validate_integrity(subject: ReviewSubject) -> _ReviewContext:
 
     _validate_procedure_analysis_provenance(sources_by_call_id)
     _validate_mutation_provenance(subject, sources_by_call_id)
+    for source in subject.source_results:
+        if not isinstance(source.output, InfoAnalysisResult):
+            continue
+        for observation in source.output.procedure_progress_observations:
+            original_input = getattr(subject.trigger, "input", None)
+            if confirmation is not None and confirmation.matches(observation):
+                original_input = confirmation.input
+            if original_input is None:
+                raise ReviewIntegrityError("procedure progress requires its original input")
+            try:
+                observation.assert_input_integrity(original_input, evidence_by_id)
+            except (ValueError, TypeError, AttributeError) as exc:
+                raise ReviewIntegrityError("procedure progress differs from its original input") from exc
     _validate_action_shape(subject, sources_by_call_id)
     return _ReviewContext(
         evidence_by_id=evidence_by_id,
@@ -505,6 +530,8 @@ def _validate_mutation_provenance(
         if (
             candidate.before_status != before_status
             or finding.current_status != before_status
+            or candidate.before_requirements_confirmed != (snapshot_progress.requirements_confirmed if snapshot_progress else False)
+            or candidate.before_submitted != (snapshot_progress.submitted if snapshot_progress else False)
         ):
             raise ReviewIntegrityError(
                 "procedure mutation before state differs from snapshot/finding"
@@ -519,6 +546,8 @@ def _validate_mutation_provenance(
                 and observation.source_evidence_refs
                 == candidate.execution_evidence_refs
                 and observation.reason_summary == candidate.reason_summary
+                and candidate.proposed_requirements_confirmed == (candidate.before_requirements_confirmed or observation.requirements_confirmed)
+                and candidate.proposed_submitted == (candidate.before_submitted or observation.submitted)
             )
         ]
         if len(matching_observations) != 1:
@@ -529,6 +558,13 @@ def _validate_mutation_provenance(
             raise ReviewIntegrityError(
                 "procedure mutation cannot use an observation requiring confirmation"
             )
+        if (
+            candidate.before_status != ProcedureProgressStatus.COMPLETED
+            and candidate.proposed_status == ProcedureProgressStatus.COMPLETED
+        ):
+            confirmation = getattr(subject.trigger, "procedure_completion_confirmation", None)
+            if confirmation is None or not confirmation.matches(matching_observations[0]):
+                raise ReviewIntegrityError("procedure completion requires explicit user confirmation")
 
     for candidate in mutations.support_match_updates:
         source = _require_source_output(
@@ -717,6 +753,16 @@ def _review_prompt_projection(
         trigger["input"] = {
             "source_type": redacted_input.source_type.value,
             "redacted_text": redacted_input.redacted_text,
+        }
+    confirmation = getattr(subject.trigger, "procedure_completion_confirmation", None)
+    if confirmation is not None:
+        trigger["procedure_completion_confirmation"] = {
+            "confirmed": confirmation.confirmed,
+            "observation": _minimize_prompt_value(confirmation.observation.model_dump(mode="json")),
+            "input": {
+                "source_type": confirmation.input.source_type.value,
+                "redacted_text": confirmation.input.redacted_text,
+            },
         }
     support_programs = getattr(subject.trigger, "support_programs", None)
     if support_programs is not None:
@@ -958,7 +1004,8 @@ def _deterministic_safety_review(
         candidate["action_code"] == action.action_code
         and candidate["target"] == action.target.model_dump(mode="json")
         for candidate in build_action_candidates(
-            subject.source_results, context.evidence_by_id, procedure_bindings
+            subject.source_results, context.evidence_by_id, procedure_bindings,
+            procedure_progress=effective_procedure_progress(subject.snapshot, draft.mutations),
         )
     ):
         issues.append(
