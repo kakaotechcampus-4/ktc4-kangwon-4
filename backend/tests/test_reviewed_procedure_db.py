@@ -382,7 +382,7 @@ def test_cli_reimport_and_new_source_version_preserve_existing_evidence(
         baseline = official_payloads(session, case_id)
     # The CLI's database import resolves only to this disposable test engine.
     database = ModuleType("app.be.db")
-    database._engine = mysql_engine
+    database.get_engine = lambda: mysql_engine
     monkeypatch.setitem(sys.modules, "app.be.db", database)
     monkeypatch.setattr(import_cli, "datetime", Mock(now=lambda tz: RETRIEVED.astimezone(tz)))
     command = ["import_reviewed_procedures", "--case-id", str(case_id)]
