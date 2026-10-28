@@ -29,22 +29,21 @@ export const resultInput: ResultInputView = {
 }
 
 /**
- * 처리 중에 순서대로 보여줄 문구.
+ * 처리 중에 순서대로 보여줄 문구. ③과 ④가 함께 쓴다.
  *
- * 정지한 스피너는 몇 초만 지나도 고장으로 읽히지만, 문구가 바뀌면 살아 있는 것으로
- * 읽힌다. `/results` 한 번에 여러 Agent와 Review가 도는 구조라 대기가 길 수 있다.
+ * Mock 이 아니라 실서버에서도 쓰는 문구다. 두 화면이 같은 말을 해야 해서 여기 남겨 둔다.
  *
- * TODO(API): 이 문구들은 Supervisor가 실제로 무엇을 부르는지 모르는 상태에서 추정해
- * 쓴 것이다. 지원금 Agent를 부르지 않는 요청에도 "지원을 찾는 중"이 뜨면 화면이 사실이
- * 아닌 것을 말하게 된다. 연동 시점에 두 갈래 중 하나로 정한다.
- *   - 서버가 진행 단계를 내려주면 그 값으로 바꾼다 (현재 계약에는 없음)
- *   - 내려주지 않으면 과정을 특정하지 않는 문구로 바꾼다 (진행감만 전달)
+ * **과정을 특정하지 않는다.** 서버가 지금 어느 단계인지 내려주지 않아서, "지원을 찾는 중"
+ * 처럼 적으면 지원을 찾지 않는 판단에도 그 말이 뜬다. 진행 중이라는 것만 전한다.
+ *
+ * 떠나도 된다는 말을 마지막에 둔다. 판단은 몇 분이 걸릴 수 있는데, 화면을 떠나면 결과가
+ * 사라지는 줄 알면 사장님이 그동안 화면에 묶인다. 서버는 뒤에서 판단을 이어가고(#107),
+ * 끝난 결과는 `/case` 에서 보인다.
  */
 export const pendingMessages = [
   '말씀하신 내용을 확인하고 있습니다',
-  '바뀐 내용이 어떤 절차에 영향을 주는지 살펴보는 중입니다',
-  '받으실 수 있는 지원이 있는지 찾아보는 중입니다',
   '다음에 하실 일을 정리하고 있습니다',
+  '화면을 떠나셔도 보내 주신 내용은 계속 처리됩니다',
 ]
 
 /** ⑤ 정상 — 철거가 필요하다고 확인되어 다음 할 일이 바뀐 상태 */
@@ -128,6 +127,7 @@ export const conflictConfirm: ConfirmView = {
   conflicts: [
     {
       key: 'demolition_required',
+      referenceId: 1,
       label: '철거 필요 여부',
       storedValue: '필요 없음',
       incomingValue: '필요함',
@@ -149,31 +149,31 @@ const OUTCOMES: Record<string, SubmitOutcome> = {
       ],
     },
   },
-  invalid: {
-    kind: 'STAY',
-    state: {
-      kind: 'INVALID_TRANSITION',
-      message: '이미 철거가 끝난 것으로 기록되어 있어 이 내용은 반영할 수 없습니다.',
-    },
-  },
-  failed: {
+  // 판단 실패는 이유마다 문구가 갈려서 키도 갈린다. `/case` 의 `judgment-failed-*` 와 같은 나눔이다
+  'failed-retry': { kind: 'STAY', state: { kind: 'FAILED', notice: { kind: 'RETRY_AVAILABLE' } } },
+  'failed-detail': {
     kind: 'STAY',
     state: {
       kind: 'FAILED',
-      message: '다음 할 일을 다시 계산하지 못했습니다.',
+      notice: { kind: 'NEEDS_DETAIL', fields: ['원상복구 범위', '철거 필요 여부'], partial: false },
     },
   },
+  'failed-service': { kind: 'STAY', state: { kind: 'FAILED', notice: { kind: 'SERVICE_SIDE' } } },
+  'failed-none': { kind: 'STAY', state: { kind: 'FAILED', notice: { kind: 'NO_RECOVERY' } } },
+  'failed-unknown': { kind: 'STAY', state: { kind: 'FAILED', notice: { kind: 'UNKNOWN_CAUSE' } } },
+  'send-failed': { kind: 'STAY', state: { kind: 'SEND_FAILED' } },
+  stale: { kind: 'STAY', state: { kind: 'STALE' } },
+  'too-long': { kind: 'STAY', state: { kind: 'WAITED_TOO_LONG' } },
+  unrecognized: { kind: 'STAY', state: { kind: 'UNRECOGNIZED' } },
 }
 
 /**
  * `?mock=` 키에 따라 제출 결과를 돌려준다.
  *
- * 사용자가 친 문장을 함께 받아 충돌 화면에 그대로 싣는다. 서버는 이 문장을 응답에
- * 돌려주지 않으므로(`docs/be-agent-integration-requirements.md` §6.1), 연동 후에도 프론트가 자기가 보낸
- * 문장을 넘겨야 한다.
+ * 사용자가 친 문장을 함께 받아 충돌 화면에 그대로 싣는다. 실서버는 판단한 문장을 응답
+ * (`raw_input`)에 돌려주는데, Mock 은 고정된 문장이라 방금 친 것으로 바꿔 끼워 흉내 낸다.
  *
  * 지연을 두는 것은 처리 중 화면을 눌러볼 수 있게 하려는 것이다.
- * TODO(API): 계약이 확정되면 이 함수를 `POST /cases/{caseId}/results` 호출로 바꾼다.
  */
 export function simulateSubmit(mockKey: string, rawInput: string): Promise<SubmitOutcome> {
   const outcome: SubmitOutcome = Object.hasOwn(OUTCOMES, mockKey)

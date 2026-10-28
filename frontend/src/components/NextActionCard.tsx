@@ -56,10 +56,9 @@ export function NextActionCard({ nextAction, locked = false }: NextActionCardPro
           최신 상태를 확인한 뒤에 알려주실 수 있어요
         </p>
       ) : (
-        /* 어떤 할 일의 결과인지 다음 화면이 알아야 한다. 모르면 직전 할 일을 보여주게 된다 */
+        // 할 일을 넘기지 않는다. 결과 입력 화면이 들어올 때 서버에 지금 판단을 다시 묻는다
         <Link
           to={{ pathname: '/results', search }}
-          state={nextAction}
           className="mt-4 flex min-h-13 w-full items-center justify-center rounded-xl bg-white text-base font-bold text-gray-900"
         >
           결과 알려주기

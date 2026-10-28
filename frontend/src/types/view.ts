@@ -155,16 +155,37 @@ export interface ResultInputView {
 }
 
 /**
+ * ③ 결과 입력 화면에 들어왔을 때 할 일.
+ *
+ * 결과는 **가장 최근 판단에 대해서만** 보낼 수 있다. 그래서 들어올 때 지금 판단이 어디까지
+ * 왔는지 서버에 먼저 묻고, 결과를 받을 수 있는 상태일 때만 폼을 연다.
+ */
+export type ResultsEntry =
+  /** 결과를 받을 수 있다. `historyId` 는 이 결과가 어느 판단에 대한 것인지 가리킨다 */
+  | { kind: 'READY'; nextAction: NextAction; historyId: number }
+  /** 확인을 기다리는 충돌이 있다. 그것부터 풀어야 해서 ④로 보낸다 */
+  | { kind: 'CONFIRM'; view: ConfirmView }
+  /**
+   * 지금은 결과를 받을 때가 아니다 — 판단 중이거나, 되물을 것이 있거나, 판단이 실패했다.
+   *
+   * 셋 다 `/case` 가 이미 안내하는 상태라 그쪽으로 보낸다. 여기서 같은 안내를 한 번 더
+   * 만들면 두 화면의 문구가 따로 놀게 된다.
+   */
+  | { kind: 'ELSEWHERE' }
+  /** 서버가 모르는 상태를 보냈거나, 상태와 내용의 조합이 계약과 어긋난다 */
+  | { kind: 'UNRECOGNIZED' }
+
+/**
  * 결과를 보낸 뒤 ③ 화면이 머무는 상태.
  *
  * 서버 응답 중 **화면을 옮기지 않는 것들**만 여기 온다. `UPDATED`·`NO_CHANGE`는
  * ⑤로, `CONFLICT`는 ④로 가므로 이 목록에 없다.
  *
- * `CASE_NOT_FOUND`는 여기 없다. 404라서 화면 상태가 아니라 통신 층에서 다룰 것이다.
- * TODO(API): fetch를 붙일 때 그 경로를 어디서 받을지 정한다.
+ * 서버의 `result` 값을 그대로 쓰지 않고 화면 상태로 다시 이름 붙인 것은, 보내기 실패나
+ * 오래 걸림처럼 **서버 응답이 아닌 상태**가 섞이기 때문이다. 변환은 어댑터가 맡는다.
  *
- * 서버의 `result` 값을 그대로 쓰지 않고 화면 상태로 다시 이름 붙인 것은,
- * `PENDING`처럼 서버에 없는 상태가 섞이기 때문이다. 변환은 어댑터가 맡는다.
+ * **어떤 상태에서도 적은 글은 지우지 않는다.** 다시 보내든 고쳐 보내든 사장님이 같은 말을
+ * 처음부터 다시 적게 하면 안 된다.
  */
 export type SubmitState =
   /** 아직 보내지 않음 */
@@ -173,10 +194,35 @@ export type SubmitState =
   | { kind: 'PENDING' }
   /** 입력만으로는 상태를 확정할 수 없어 되묻는다 */
   | { kind: 'NEEDS_MORE_INFO'; questions: string[] }
-  /** 지금 상태에서 있을 수 없는 변화라 정정을 요청한다 */
-  | { kind: 'INVALID_TRANSITION'; message: string }
-  /** 재계획에 실패했다. 사용자 탓이 아니므로 문구를 구분한다 */
-  | { kind: 'FAILED'; message: string }
+  /**
+   * 보낸 결과를 판단하지 못했다. 이유는 `/case` 와 같은 `FailureNotice` 로 담는다 —
+   * 서버가 같은 복구 코드를 보내므로 이름도 같아야 두 화면이 같은 실패를 같은 종류로 다룬다.
+   */
+  | { kind: 'FAILED'; notice: FailureNotice }
+  /**
+   * 보내기 자체가 실패했다 — 네트워크가 끊겼거나 서버가 답하지 못했다.
+   *
+   * `FAILED` 와 나눈다. 저쪽은 서버가 받아서 판단까지 해 본 것이고, 여기는 **받았는지조차
+   * 모르는 것**이다. 그래서 여기서만 같은 글을 그대로 다시 보내라고 할 수 있다.
+   */
+  | { kind: 'SEND_FAILED' }
+  /**
+   * 그사이 상황이 바뀌었다 — 이미 접수된 결과가 있거나, 새 판단이 나왔거나, 확인을
+   * 기다리는 충돌이 생겼다. 이 화면이 아는 판단이 낡았으니 `/case` 로 돌려보낸다.
+   *
+   * **원인을 단정하지 않는다.** 서버는 셋을 같은 409 로 준다. 응답이 늦어 "보내지 못함" 으로
+   * 보였던 제 제출이 이미 접수된 경우도 여기 온다 — "다른 곳에서 보냈다" 고 하면 틀린다.
+   */
+  | { kind: 'STALE' }
+  /**
+   * 접수는 됐는데 상한까지 판단 결과를 받지 못했다. 끝나면 `/case` 에서 보인다.
+   *
+   * 판단 중이라고 단정하지 않는다. 상태 조회가 계속 실패해도 여기 온다 — 사장님이 할 일은
+   * 어느 쪽이든 `/case` 에서 확인하는 것이라 나누지 않는다.
+   */
+  | { kind: 'WAITED_TOO_LONG' }
+  /** 서버가 모르는 결과를 보냈거나, 결과와 내용의 조합이 계약과 어긋난다 */
+  | { kind: 'UNRECOGNIZED' }
 
 /** ④에서 사용자가 고른 쪽 */
 export type ConflictSide = 'STORED' | 'INCOMING'
@@ -184,6 +230,14 @@ export type ConflictSide = 'STORED' | 'INCOMING'
 /** 기존 기록과 새 입력이 어긋난 항목 하나 */
 export interface ConflictItem {
   key: string
+  /**
+   * 서버가 이 충돌에 붙인 번호.
+   *
+   * 고른 쪽을 보낼 때 어느 항목에 대한 답인지 이 번호로 가리킨다. `key` 로 대신하지 않는다 —
+   * `key` 는 화면이 고른 것을 기억하는 열쇠고, 서버 번호와 섞으면 화면 열쇠를 바꿀 때
+   * 보내는 값까지 같이 바뀐다.
+   */
+  referenceId: number
   label: string
   storedValue: string
   incomingValue: string
@@ -206,7 +260,8 @@ export interface FactChange {
   label: string
   /** null = 이전에는 미확인이었다. 빈 문자열로 대신하지 않는다 */
   previousValue: string | null
-  newValue: string
+  /** null = 바뀐 뒤 미확인이 됐다. 서버가 칸을 비울 수도 있다 */
+  newValue: string | null
 }
 
 /**

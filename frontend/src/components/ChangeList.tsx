@@ -28,7 +28,7 @@ export function ChangeList({ changes }: ChangeListProps) {
                 →
               </span>
               <span className="sr-only">에서</span>
-              <span className="font-bold text-gray-900">{change.newValue}</span>
+              <span className="font-bold text-gray-900">{change.newValue ?? '미확인'}</span>
               <span className="sr-only">(으)로 바뀜</span>
             </p>
           </li>
