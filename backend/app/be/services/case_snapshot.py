@@ -28,6 +28,7 @@ from app.be.models.case import Case
 from app.be.models.evidence import Evidence
 from app.be.models.mixins import KST
 from app.be.models.procedure_step import CaseProcedureStep
+from app.be.services.redaction import redact
 
 # restoration_status/restoration_scope/demolition_required는 DB에서 "UNKNOWN"이라는 enum 값 자체가
 # "아직 확인 안 됨"을 뜻한다(NULL이 아님). 나머지 필드는 컬럼 값이 NULL이면 미확인이다.
@@ -46,6 +47,11 @@ class StoredEvidenceMissingError(ValueError):
     (decision_record.mark_judgment_failed).
     """
 
+    # 예외에 직접 붙여 둔다. 실패 상태를 적는 쪽이 예외 종류를 하나씩 알아야 하면,
+    # 새 실패를 만들 때마다 그쪽을 같이 고쳐야 하고 빠뜨리면 조용히 RETRY가 된다.
+    # AI 쪽도 같은 방식으로 읽는다(graph.py).
+    retryable = False
+
 
 def build_user_input(case_history_id: int, raw_input: str, submitted_at: datetime) -> RedactedInput:
     """사용자가 넣은 입력 한 건을 AI가 받는 모양으로 바꾼다.
@@ -57,13 +63,14 @@ def build_user_input(case_history_id: int, raw_input: str, submitted_at: datetim
     트리거(= 왜 판단을 부르는가)로 감싸는 일은 AI팀 입구(app/common/agent_service.py)가 한다.
     """
 
+    redacted_text, redactions = redact(raw_input)
     return RedactedInput(
         input_event_id=f"case_history:{case_history_id}",
         source_type=InputSourceType.USER_INPUT,
-        redacted_text=raw_input,
-        # case 생성 폼은 업종/임차형태 같은 정해진 값만 받아서 지울 개인정보가 없다.
-        # 자유 입력을 받는 화면이 생기면 그때 민감정보 제거 목록을 채워야 한다.
-        redactions=[],
+        # DB에는 사장님이 쓴 글이 그대로 남고, AI에게 넘기는 쪽만 가린다. 화면이 "내가
+        # 이렇게 썼지"를 그대로 보여줘야 하고, 가린 글을 저장하면 그걸 되돌릴 수 없다.
+        redacted_text=redacted_text,
+        redactions=redactions,
         # DB에는 timezone 없는 한국 시각을 저장하고(mixins.kst_now) AI 쪽은 timezone이 붙은
         # 시각만 받으므로, 저장된 값을 그대로 받아 여기서 tzinfo만 붙인다.
         submitted_at=submitted_at.replace(tzinfo=KST),
@@ -183,13 +190,17 @@ def _build_evidence_records(
 
 
 def _build_evidence_record(evidence: Evidence, parent_evidence_refs: list[str]) -> EvidenceRecord:
+    source_type = EvidenceSourceType(evidence.source_type)
     return EvidenceRecord(
         evidence_id=evidence.evidence_id,
-        source_type=EvidenceSourceType(evidence.source_type),
+        source_type=source_type,
         source_ref=evidence.source_ref,
         source_version=evidence.source_version,
         locator=evidence.locator,
-        excerpt=evidence.excerpt,
+        # 최신 입력만 가리면 소용이 없다. 같은 글이 근거로도 저장돼 있어서, 여기를 두면
+        # 검수 모델이 원문을 그대로 받는다(승준님 #107 리뷰). 공식 자료는 사람이 쓴 글이
+        # 아니라 가리지 않는다 — 가리면 저장된 content_hash와 어긋난다.
+        excerpt=_redacted_excerpt(evidence.excerpt, source_type),
         parent_evidence_refs=parent_evidence_refs,
         published_at=evidence.published_at.replace(tzinfo=KST) if evidence.published_at else None,
         retrieved_at=evidence.retrieved_at.replace(tzinfo=KST),
@@ -197,3 +208,10 @@ def _build_evidence_record(evidence: Evidence, parent_evidence_refs: list[str]) 
         # DB는 64자 hex만 저장하고, AI 쪽은 "sha256:" 접두사가 붙은 형식만 받는다.
         content_hash=f"sha256:{evidence.content_hash}" if evidence.content_hash else None,
     )
+
+
+def _redacted_excerpt(excerpt: str | None, source_type: EvidenceSourceType) -> str | None:
+    if excerpt is None or source_type is not EvidenceSourceType.USER_INPUT:
+        return excerpt
+    redacted_text, _ = redact(excerpt)
+    return redacted_text

@@ -166,6 +166,27 @@ def test_dependency_pointing_at_an_unloaded_step_is_rejected():
 
 
 # 3. Input assembly. Reject what MySQL would reject, while a retry is possible.
+@pytest.mark.parametrize("invalid", ["creation", "unredacted_original"])
+def test_completion_confirmation_keeps_the_result_input_boundary(invalid):
+    from test_info_replanning import completion_confirmation_request, completion_report_graph
+
+    graph, request = completion_report_graph("기관 처리 완료를 확인했습니다.")
+    pending = asyncio.run(graph.run(request))
+    choice = completion_confirmation_request(request, pending, True)
+    confirmation = choice.trigger.procedure_completion_confirmation
+    if invalid == "unredacted_original":
+        confirmation.input.redacted_text += " 연락처는 010-1234-5678입니다."
+    error = ValueError if invalid == "creation" else GuardrailViolation
+    match = "RESULT_SUBMITTED" if invalid == "creation" else "PHONE_NUMBER"
+    with pytest.raises(error, match=match):
+        build_planning_input(
+            trigger_type="CASE_CREATED" if invalid == "creation" else "RESULT_SUBMITTED",
+            case_snapshot=choice.case_snapshot,
+            user_input=choice.trigger.input,
+            procedure_completion_confirmation=confirmation,
+        )
+
+
 def test_planning_input_rejects_a_trace_id_longer_than_its_column():
     with pytest.raises(ValidationError):
         build_planning_input(
@@ -287,7 +308,7 @@ def test_the_runtime_is_closed_and_flushed_when_planning_raises():
 @pytest.fixture
 def import_cli_context(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["import_reviewed_procedures", "--case-id", "1"])
-    monkeypatch.setitem(sys.modules, "app.be.db", SimpleNamespace(_engine=object()))
+    monkeypatch.setitem(sys.modules, "app.be.db", SimpleNamespace(get_engine=lambda: object()))
     session = MagicMock()
     session.__enter__.return_value = session
     monkeypatch.setattr(import_cli, "Session", MagicMock(return_value=session))

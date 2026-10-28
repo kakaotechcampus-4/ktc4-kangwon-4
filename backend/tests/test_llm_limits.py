@@ -14,8 +14,11 @@ from app.agent.llm import (
     LLMRequestError,
     LLMResponseError,
     StructuredLLMClient,
+    restrict_string_enums,
+    sanitize_json_schema,
 )
 from app.agent.runtime import resolve_run_deadline_seconds
+from app.agent.supervisor.agent import SupervisorModelOutput
 
 
 class Answer(BaseModel):
@@ -46,12 +49,15 @@ def test_time_limits(tmp_path, seconds):
     assert resolve_run_deadline_seconds(**options) == (30 if seconds else 420)
 
 
-def generate(settings, handler):
+def generate(settings, handler, response_model=Answer, enum_constraints=None):
     async def run():
         async with StructuredLLMClient(
             settings, transport=httpx.MockTransport(handler)
         ) as client:
-            return await client.generate(Answer, [{"role": "user", "content": "test"}])
+            return await client.generate(
+                response_model, [{"role": "user", "content": "test"}],
+                enum_constraints=enum_constraints,
+            )
 
     return asyncio.run(run())
 
@@ -289,3 +295,47 @@ def test_stream_environment_is_optional_and_boolean(tmp_path, raw):
 def test_stream_config_rejects_non_boolean(value):
     with pytest.raises(LLMConfigurationError):
         config(stream=value)
+
+
+def test_supervisor_selection_enums_reach_the_api_and_preserve_nulls():
+    constraints = {
+        "decision_type": ["ACTION"], "blocker_candidate_id": ["procedure:1"],
+        "action_code": ["CONFIRM_TAX_CLOSURE_REQUIREMENTS"],
+    }
+    selection = {key: values[0] for key, values in constraints.items()}
+
+    def handler(request):
+        schema = json.loads(request.content)["response_format"]["json_schema"]["schema"]
+        properties = schema["properties"]
+        assert set(properties) == set(constraints)
+        assert properties["decision_type"]["enum"] == ["ACTION"]
+        for key in ("blocker_candidate_id", "action_code"):
+            branches = properties[key]["anyOf"]
+            assert {"type": "null"} in branches
+            assert next(item for item in branches if item.get("type") == "string")["enum"] == constraints[key]
+        assert schema["$defs"]["DecisionType"] == SupervisorModelOutput.model_json_schema()["$defs"]["DecisionType"]
+        return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps(selection)}}]})
+
+    result = generate(config(max_retries=0), handler, SupervisorModelOutput, constraints)
+    assert result.model_dump(mode="json") == selection
+
+
+def test_enum_restrictions_preserve_shared_definitions_and_evidence_items():
+    schema = sanitize_json_schema(SupervisorModelOutput.model_json_schema())
+    schema["properties"]["other_decision_type"] = {"$ref": "#/$defs/DecisionType"}
+    schema["properties"]["evidence_refs"] = {
+        "type": "array", "items": {"type": "string", "minLength": 1},
+    }
+    original = json.dumps(schema, sort_keys=True)
+    restricted = restrict_string_enums(schema, {
+        "decision_type": ["ACTION", "UNSUPPORTED"], "evidence_refs": ["e1"],
+    })
+    assert restricted["properties"]["decision_type"]["enum"] == ["ACTION"]
+    assert restricted["$defs"] == schema["$defs"]
+    assert restricted["properties"]["other_decision_type"] == {"$ref": "#/$defs/DecisionType"}
+    assert restricted["properties"]["evidence_refs"]["items"] == {
+        "type": "string", "minLength": 1, "enum": ["e1"],
+    }
+    assert json.dumps(schema, sort_keys=True) == original
+    with pytest.raises(ValueError, match="no supported values"):
+        restrict_string_enums(schema, {"decision_type": ["UNSUPPORTED"]})

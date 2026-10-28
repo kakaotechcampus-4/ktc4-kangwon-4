@@ -15,7 +15,6 @@ from app.agent.review_tool import ReviewIntegrityError, ReviewTool
 from app.agent.schemas import (
     AgentGraphInput,
     AgentGraphOutput,
-    Blocker,
     ConflictCandidate,
     ConflictConfirmedTrigger,
     EvidenceRecord,
@@ -23,6 +22,7 @@ from app.agent.schemas import (
     NextAction,
     ProcedureFinding,
     ProcedureLookupResult,
+    ProcedureProgress,
     ProcedureProgressChangeCandidate,
     ReviewSourceResult,
     ReviewSubject,
@@ -207,35 +207,48 @@ def test_invented_action_alias_is_rejected(model):
 
 def test_current_tax_procedure_offers_confirmation_and_execution():
     item = finding()
-    assert item.requires_confirmation is True  # This field is always true in the DTO.
+    assert item.requires_confirmation is True
     rows = build_action_candidates(procedure_sources(item), {REF: evidence()})
     by_code = {row["action_code"]: row for row in rows}
-    assert set(by_code) == {CONFIRM_TAX, TAX}
+    assert set(by_code) == {CONFIRM_TAX}
     assert by_code[CONFIRM_TAX]["confirmation_only"] is True
-    assert by_code[TAX]["confirmation_only"] is False
+    ready = ProcedureProgress(procedure_step=item.procedure_step, status="IN_PROGRESS",
+                              requirements_confirmed=True, evidence_refs=[REF], updated_at=NOW)
+    item.requires_confirmation = False
+    executed = build_action_candidates(procedure_sources(item), {REF: evidence()}, procedure_progress=[ready])
+    assert [row["action_code"] for row in executed] == [TAX]
+    assert executed[0]["confirmation_only"] is False
     assert all(row["target"] == action_payload()["target"] for row in rows)
 
 
 @pytest.mark.parametrize(
-    "freshness,relevance,has_actions",
+    "freshness,relevance,has_actions,can_execute",
     [
-        ("STALE", "RELEVANT", True),
-        ("UNKNOWN", "RELEVANT", True),
-        ("CURRENT", "UNDETERMINED", True),
-        ("CURRENT", "POSSIBLY_RELEVANT", True),
-        ("CURRENT", "RELEVANT", False),
+        ("CURRENT", "RELEVANT", True, True),
+        ("STALE", "RELEVANT", True, False),
+        ("UNKNOWN", "RELEVANT", True, False),
+        ("CURRENT", "UNDETERMINED", True, False),
+        ("CURRENT", "POSSIBLY_RELEVANT", True, False),
+        ("CURRENT", "RELEVANT", False, False),
     ],
 )
 def test_execution_requires_current_relevant_action_evidence(
-    freshness, relevance, has_actions
+    freshness, relevance, has_actions, can_execute
 ):
     item = finding(
-        relevance=relevance, **({} if has_actions else {"required_actions": []})
+        requires_confirmation=False,
+        relevance=relevance,
+        **({} if has_actions else {"required_actions": []}),
+    )
+    ready = ProcedureProgress(
+        procedure_step=item.procedure_step, status="IN_PROGRESS",
+        requirements_confirmed=True, evidence_refs=[REF], updated_at=NOW,
     )
     rows = build_action_candidates(
-        procedure_sources(item), {REF: evidence(freshness_status=freshness)}
+        procedure_sources(item), {REF: evidence(freshness_status=freshness)},
+        procedure_progress=[ready],
     )
-    assert TAX not in {row["action_code"] for row in rows}
+    assert (TAX in {row["action_code"] for row in rows}) is can_execute
 
 
 @pytest.mark.parametrize("records", [{}, {REF: evidence(source_type="USER_INPUT")}])
@@ -244,13 +257,26 @@ def test_user_input_or_missing_evidence_cannot_create_procedure_candidates(recor
 
 
 def test_stale_official_parent_blocks_execution_through_current_wiki():
+    item = finding(requires_confirmation=False)
+    ready = ProcedureProgress(
+        procedure_step=item.procedure_step, status="IN_PROGRESS",
+        requirements_confirmed=True, evidence_refs=[REF], updated_at=NOW,
+    )
     wiki = evidence(source_type="REVIEWED_WIKI", parent_evidence_refs=["parent"])
+    valid = build_action_candidates(
+        procedure_sources(item), {REF: wiki, "parent": evidence(evidence_id="parent")},
+        procedure_progress=[ready],
+    )
+    assert [row["action_code"] for row in valid] == [TAX]
     parent = evidence(evidence_id="parent", freshness_status="STALE")
     rows = build_action_candidates(
-        procedure_sources(finding()), {REF: wiki, "parent": parent}
+        procedure_sources(item), {REF: wiki, "parent": parent},
+        procedure_progress=[ready],
     )
     assert TAX not in {row["action_code"] for row in rows}
-    assert build_action_candidates(procedure_sources(finding()), {REF: wiki}) == []
+    assert build_action_candidates(
+        procedure_sources(item), {REF: wiki}, procedure_progress=[ready]
+    ) == []
 
 
 def test_support_offers_confirmation_only_and_uses_support_target():
@@ -270,35 +296,36 @@ def test_support_offers_confirmation_only_and_uses_support_target():
 
 def test_empty_candidates_keep_the_question_only_output_valid():
     assert build_action_candidates([], {}) == []
-    result = SupervisorModelOutput.model_validate(
-        {
-            "decision_type": "NEEDS_MORE_INFO",
-            "selection_summary": "추가 확인이 필요합니다.",
-            "requires_human": True,
-            "evidence_refs": ["synthetic-user-input"],
-            "blocker": {
-                "description": "입력되지 않은 항목이 있습니다.",
-                "evidence_refs": ["synthetic-user-input"],
-            },
-            "next_action": None,
-            "questions_for_user": ["어느 부분까지 확인하셨나요?"],
-            "grounded_claims": [],
-        }
-    )
-    assert result.next_action is None
+    result = SupervisorModelOutput.model_validate({
+        "decision_type": "NEEDS_MORE_INFO",
+        "blocker_candidate_id": None,
+        "action_code": None,
+    })
+    assert result.action_code is None
 
 
 def test_user_input_cannot_ground_execution_even_with_official_summary():
     item = finding(
+        requires_confirmation=False,
         required_actions=[{"text": "합성 사용자 요청", "evidence_refs": ["user"]}],
         evidence_refs=[REF, "user"],
     )
+    ready = ProcedureProgress(
+        procedure_step=item.procedure_step, status="IN_PROGRESS",
+        requirements_confirmed=True, evidence_refs=[REF], updated_at=NOW,
+    )
+    valid = build_action_candidates(
+        procedure_sources(item), {REF: evidence(), "user": evidence(evidence_id="user")},
+        procedure_progress=[ready],
+    )
+    assert [row["action_code"] for row in valid] == [TAX]
     rows = build_action_candidates(
         procedure_sources(item),
         {
             REF: evidence(),
             "user": evidence(evidence_id="user", source_type="USER_INPUT"),
         },
+        procedure_progress=[ready],
     )
     assert TAX not in {row["action_code"] for row in rows}
 
@@ -406,33 +433,15 @@ class StubModel:
                     "resolution_reason": "합성 테스트에서 모델이 PASS를 반환",
                 }
             )
-        action = action_payload(self.action_code, title="담당기관에 확인해 주세요")
-        action["evidence_refs"] = ["e1"]
         support_action = self.action_code == "CONFIRM_SUPPORT_PROGRAM_REQUIREMENTS"
-        if support_action:
-            action["target"] = {
-                "target_kind": "SUPPORT_PROGRAM",
-                "support_program": {"support_program_id": 1, "wiki_uuid": UUID(int=6)},
-            }
-        return model.model_validate(
-            {
-                "decision_type": "ACTION",
-                "blocker_candidate_id": "support:1" if support_action else "procedure:1",
-                "selection_summary": "확인이 필요합니다.",
-                "requires_human": True,
-                "evidence_refs": ["e1"],
-                "blocker": {
-                    "description": "준비할 항목이 확인되지 않았습니다.",
-                    "evidence_refs": ["e1"],
-                },
-                "next_action": action,
-                "questions_for_user": [],
-                "grounded_claims": [],
-            }
-        )
+        return model.model_validate({
+            "decision_type": "ACTION",
+            "blocker_candidate_id": "support:1" if support_action else "procedure:1",
+            "action_code": self.action_code,
+        })
 
 
-def test_supervisor_blocks_known_code_paired_with_wrong_procedure_target():
+def test_supervisor_blocks_action_not_in_the_selected_candidate():
     client = StubModel("CONFIRM_RESTORATION_SCOPE")
     with pytest.raises(SupervisorGuardrailError):
         asyncio.run(
@@ -474,6 +483,42 @@ def test_review_blocks_wrong_target_even_when_its_model_returns_pass():
     asyncio.run(run())
 
 
+def test_review_rejects_filing_before_confirmation_even_when_model_passes():
+    async def run():
+        request = supervisor_request()
+        draft = await SupervisorAgent(StubModel(), max_local_attempts=1).draft(request)
+        draft.decision.next_action.action_code = TAX
+        subject = ReviewSubject.create(
+            schema_version="agent-io/2.0", review_subject_id=UUID(int=9),
+            review_attempt=1, run_id=UUID(int=2), case_id=1, trigger=request.trigger,
+            snapshot=request.case_snapshot, known_procedure_steps=request.known_procedure_steps,
+            source_results=request.source_results, supervisor_draft=draft,
+        )
+        result = await ReviewTool(StubModel(), max_output_attempts=1).review(subject)
+        assert result.verdict == "REVISE"
+        assert any(issue.issue_code == "CONTRACT_VIOLATION"
+                   and issue.target_path.startswith("/supervisor_draft/decision")
+                   for issue in result.issues)
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("폐업 시 세금 신고를 함께 하세요.", "TAX"),
+    ("폐업일 2026-11-01까지 신고하세요.", "DATE_OR_DEADLINE"),
+    ("합성 테스트 절차입니다.", "PROCEDURE"),
+])
+def test_visible_reason_keeps_its_tax_or_deadline_claim_type(text, expected):
+    request = supervisor_request()
+    draft = asyncio.run(SupervisorAgent(StubModel(), max_local_attempts=1).draft(request))
+    fields = draft.decision.model_dump(mode="python")
+    fields["next_action"]["reason"] = text
+    claims = SupervisorAgent._candidate_claims(request, fields)
+    reason = next(item for item in claims if item.target_path.endswith("/next_action/reason"))
+    assert reason.claim_type == expected
+    assert reason.text == text and reason.evidence_refs == [REF]
+
+
 @pytest.mark.parametrize("action_code", [CONFIRM_TAX, TAX])
 @pytest.mark.parametrize("invented_blocker", [False, True])
 def test_review_checks_required_blocker_against_verified_candidate(
@@ -481,20 +526,26 @@ def test_review_checks_required_blocker_against_verified_candidate(
 ):
     async def run():
         request = supervisor_request()
+        if action_code == TAX:
+            request.case_snapshot.procedure_progress = [ProcedureProgress(procedure_step=request.known_procedure_steps[0].procedure_step, status="IN_PROGRESS", requirements_confirmed=True, evidence_refs=[REF], updated_at=NOW)]
+            info = request.source_results[1].output.model_copy(deep=True)
+            info.procedure_findings[0].requires_confirmation = False
+            request.source_results[1] = source(info)
         draft = await SupervisorAgent(
             StubModel(action_code), max_local_attempts=1
         ).draft(request)
         assert draft.decision.blocker is not None
         assert draft.decision.blocker.evidence_refs == [REF]
-        assert draft.decision.next_action.action_code == CONFIRM_TAX
+        assert draft.decision.next_action.action_code == action_code
         assert draft.decision.questions_for_user == []
         assert any(
             "/blocker/" in claim.target_path for claim in draft.grounded_claims
         )
         if invented_blocker:
-            draft.decision.blocker = Blocker(
-                description="준비할 항목이 확인되지 않았습니다.", evidence_refs=[REF]
-            )
+            draft.decision.blocker.description = "준비할 항목이 확인되지 않았습니다."
+            for item in draft.decision.blockers:
+                if item.candidate_id == draft.decision.blocker.candidate_id:
+                    item.description = draft.decision.blocker.description
         subject = ReviewSubject.create(
             schema_version="agent-io/2.0",
             review_subject_id=UUID(int=9),

@@ -20,27 +20,28 @@ from langgraph.graph import END, START, StateGraph
 from app.agent.blocker_candidates import field_confirmation_question
 from app.agent.enrichment import build_confirmed_conflict_overlay, build_fact_overlays
 from app.agent.llm import current_call_budget
-from app.agent.procedure_tool.rules import business_type_code
 from app.agent.run_scope import current_deadline
 from app.agent.schemas import (
     CASE_FIELD_SPECS,
     AgentGraphInput,
     AgentGraphOutput,
     CaseFieldKey,
+    CaseSnapshot,
     Component,
     ConflictConfirmedTrigger,
     ConflictOutcome,
     DiscoverSupportInput,
     FactChangeSourceType,
-    FactStatus,
     InfoAnalysisInput,
     InfoAnalysisResult,
     InvocationMeta,
     KnownProcedureStep,
     MissingFieldBlock,
     PlanningContext,
+    ProcedureCompletionConfirmation,
     ProcedureLookupInput,
     ProcedureLookupResult,
+    ProcedureProgressStatus,
     ReviewedPlanOutcome,
     ReviewIssue,
     ReviewProof,
@@ -349,6 +350,7 @@ class AgentGraph:
             self._check_deadline()
             self._record_rework_start(meta)
             output = await self._info_agent.analyze(component_input)
+            output = self._restore_procedure_completion(request, output)
             source = ReviewSourceResult(
                 meta=meta,
                 output_digest=canonical_digest(output),
@@ -372,6 +374,47 @@ class AgentGraph:
             "source_results": [*state.get("source_results", []), source],
             "fact_overlays": overlays,
         }
+
+    def _restore_procedure_completion(
+        self, request: AgentGraphInput, output: InfoAnalysisResult,
+    ) -> InfoAnalysisResult:
+        output = output.model_copy(deep=True)
+        completed = {
+            item.procedure_step.procedure_step_id for item in request.case_snapshot.procedure_progress
+            if item.status == ProcedureProgressStatus.COMPLETED
+        }
+        output.procedure_progress_observations = [
+            item for item in output.procedure_progress_observations
+            if item.procedure_step.procedure_step_id not in completed
+        ]
+        for observation in output.procedure_progress_observations:
+            if observation.observed_status == ProcedureProgressStatus.COMPLETED:
+                observation.requires_confirmation = True
+        confirmation = getattr(request.trigger, "procedure_completion_confirmation", None)
+        if confirmation is None:
+            return output
+        confirmation = ProcedureCompletionConfirmation.model_validate(confirmation.model_dump())
+        confirmation.assert_current(request.case_snapshot)
+        target = confirmation.observation.procedure_step
+        if not any(item.procedure_step == target for item in self._known_procedure_steps):
+            raise ValueError("completion confirmation references an unknown procedure")
+        output.procedure_progress_observations = [
+            item for item in output.procedure_progress_observations
+            if item.procedure_step != target
+            or (not confirmation.confirmed and item.observed_status != ProcedureProgressStatus.COMPLETED)
+        ]
+        evidence = confirmation.source_evidence(request.case_snapshot)
+        output.evidence_records = [
+            item for item in output.evidence_records if item.evidence_id != evidence.evidence_id
+        ] + [evidence.model_copy(deep=True)]
+        if confirmation.confirmed and not any(
+            item.procedure_step == target and item.status == ProcedureProgressStatus.COMPLETED
+            for item in request.case_snapshot.procedure_progress
+        ):
+            output.procedure_progress_observations.append(
+                confirmation.observation.model_copy(update={"requires_confirmation": False}, deep=True)
+            )
+        return InfoAnalysisResult.model_validate(output.model_dump())
 
     def _conflict_node(self, state: AgentGraphState) -> dict[str, Any]:
         info_sources = [
@@ -454,11 +497,16 @@ class AgentGraph:
         )
         component_input = ProcedureLookupInput(
             lookup_goal="BUSINESS_CLOSURE",
+            procedure_step_codes=[step.procedure_step.step_code for step in self._known_procedure_steps],
             evidence_records=[
                 item for item in request.case_snapshot.evidence_records
                 if item.source_type == "OFFICIAL_DOCUMENT"
             ],
-            search_queries=self._procedure_queries(request),
+            search_queries=(
+                ["등록 절차 코드 조회"]
+                if self._known_procedure_steps
+                else self._procedure_queries(request)
+            ),
             as_of=self._as_of(request),
             locale="ko-KR",
             source_policy="OFFICIAL_ONLY",
@@ -660,7 +708,9 @@ class AgentGraph:
         return {"phase": "SAFE_FAILED", "outcome": outcome}
 
     @staticmethod
-    def _requested_field_paths(failure: dict[str, Any]) -> list[CaseFieldKey]:
+    def _requested_field_paths(
+        failure: dict[str, Any], case_snapshot: CaseSnapshot | None = None,
+    ) -> list[CaseFieldKey]:
         """Name the Case fields whose absence is what stopped this run.
 
         The Review result cannot answer this.  Its paths point inside the draft
@@ -696,6 +746,15 @@ class AgentGraph:
                 )
                 for question in output.question_candidates:
                     answerable.update(set(question.resolves_field_paths) - support_only)
+        restoration_required = case_snapshot is not None and any(
+            fact.field_path == "restoration_scope"
+            and fact.status == "CONFIRMED"
+            and fact.value in {"PARTIAL", "FULL"}
+            for fact in case_snapshot.facts
+        )
+        if not restoration_required:
+            for fields in (held_fields, blocks_decision, answerable):
+                fields.discard(CaseFieldKey.RESTORATION_STATUS)
         found = held_fields or blocks_decision or answerable
         # Canonical order, so two runs that found the same fields in a
         # different sequence still produce the same outcome digest.
@@ -752,7 +811,7 @@ class AgentGraph:
         trace_id: str | None,
         failure: dict[str, Any],
     ) -> SafeFailureOutcome:
-        available_fields = AgentGraph._requested_field_paths(failure)
+        available_fields = AgentGraph._requested_field_paths(failure, request.case_snapshot)
         retryable = failure.get("retryable", False)
         fallback_recovery = (
             "RETRY" if retryable else "RESUBMIT_INPUT" if available_fields else "NONE"
@@ -972,74 +1031,14 @@ class AgentGraph:
 
     @staticmethod
     def _procedure_queries(request: AgentGraphInput) -> list[str]:
-        """Select at most four static topics without copying user text or facts."""
+        """Keep the four reviewed topics available without a procedure registry."""
+        return [
+            "사업자 폐업 신고 절차 국세청",
+            "휴게음식점 폐업 신고 절차 정부24",
+            "4대보험 탈퇴 사업장 폐업 신고 절차",
+            "임차 상가 원상복구 범위 확인 철거 절차",
+        ]
 
-        confirmed = {
-            fact.field_path.value: fact.value
-            for fact in request.case_snapshot.facts
-            if fact.status.value == "CONFIRMED"
-        }
-        if isinstance(request.trigger, ConflictConfirmedTrigger):
-            conflict = request.trigger.confirmed_conflict
-            if conflict.proposed_status == FactStatus.CONFIRMED:
-                confirmed[conflict.field_path.value] = conflict.proposed_value
-            else:
-                confirmed.pop(conflict.field_path.value, None)
-        trigger_input = getattr(request.trigger, "input", None)
-        redacted_text = trigger_input.redacted_text if trigger_input is not None else ""
-
-        queries: list[str] = []
-        if (
-            confirmed.get("lease_status") in {"LEASED_PAID", "LEASED_FREE"}
-            or any(
-                keyword in redacted_text
-                for keyword in ("임차", "임대", "원상복구", "원상회복", "철거", "반환")
-            )
-            or (
-                isinstance(request.trigger, ConflictConfirmedTrigger)
-                and request.trigger.confirmed_conflict.field_path.value
-                in {
-                    "lease_status",
-                    "restoration_status",
-                    "restoration_scope",
-                    "demolition_required",
-                }
-            )
-        ):
-            queries.append("임차 상가 원상복구 범위 확인 철거 절차")
-
-        # Entity type is not a CASE field in schema_table.md. Explicit wording
-        # may select a lookup topic, but never creates or confirms a Case fact.
-        if "개인사업자" in redacted_text:
-            queries.append("개인사업자 폐업 신고 절차 국세청")
-        elif "법인사업자" in redacted_text or "법인 사업자" in redacted_text:
-            queries.append("법인 사업자 폐업 신고 절차 국세청")
-        else:
-            queries.append("사업자 폐업 신고 절차 국세청")
-
-        business_type = business_type_code(confirmed.get("business_type"))
-        if business_type is None:
-            if any(keyword in redacted_text for keyword in ("카페", "휴게음식점")):
-                business_type = "CAFE"
-            elif any(
-                keyword in redacted_text for keyword in ("식당", "음식점", "일반음식점")
-            ):
-                business_type = "RESTAURANT"
-        business_queries = {
-            "CAFE": "휴게음식점 폐업 신고 절차 정부24",
-            "RESTAURANT": "일반음식점 폐업 신고 절차 정부24",
-        }
-        business_query = business_queries.get(business_type)
-        if business_query is not None:
-            queries.append(business_query)
-        employee_count = confirmed.get("employee_count")
-        employee_hint = any(
-            keyword in redacted_text
-            for keyword in ("직원", "근로자", "4대보험", "사업장 소멸")
-        )
-        if (type(employee_count) is int and employee_count > 0) or employee_hint:
-            queries.append("4대보험 탈퇴 사업장 폐업 신고 절차")
-        return queries
 
     def _emit(
         self,
