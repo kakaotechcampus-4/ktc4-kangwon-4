@@ -89,10 +89,15 @@ def build_restorer(
 
 
 def restore_hidden_text(value: str, raw_input: str) -> str:
-    """값 안의 가림 문구를, 그 입력에서 가렸던 원래 글자로 나온 순서대로 바꾼다.
+    """값 안의 가림 문구를, 그 입력에서 가렸던 원래 글자로 바꾼다.
 
-    같은 종류를 여러 번 가린 글(주소 두 개)이면 순서로 짝짓는다. 값에 있는 개수가 원문에서
-    가린 개수보다 많으면 어느 것과 짝인지 알 수 없으므로, 그 종류는 손대지 않는다.
+    한 종류를 여러 번 가렸는데 **가린 글자가 서로 다르면 그 종류는 손대지 않는다.** 값에
+    남은 가림 문구가 그중 어느 것인지 알 방법이 없기 때문이다.
+
+    나온 순서로 짝지어 보려 했지만 두 가지가 어긋났다(#109 리뷰). AI가 주소 둘 중 **뒤엣것만**
+    값에 담으면 앞엣것이 들어가고, 둘 다 담되 **순서를 바꿔** 쓰면 서로 뒤바뀐다. AI가 값에
+    쓰는 말은 원문 순서를 지킬 의무가 없어서, 개수를 맞춰 보는 것으로도 막히지 않는다.
+
     틀린 주소를 보여주는 것은 [주소]를 보여주는 것보다 나쁘다.
     """
 
@@ -102,12 +107,8 @@ def restore_hidden_text(value: str, raw_input: str) -> str:
 
     restored = value
     for placeholder, texts in originals.items():
-        if restored.count(placeholder) > len(texts):
-            continue
-        for text in texts:
-            if placeholder not in restored:
-                break
-            restored = restored.replace(placeholder, text, 1)
+        if len(set(texts)) == 1:
+            restored = restored.replace(placeholder, texts[0])
     return restored
 
 

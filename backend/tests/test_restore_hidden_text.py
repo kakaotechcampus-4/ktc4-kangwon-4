@@ -117,19 +117,49 @@ def test_a_value_without_a_hidden_spot_is_left_alone(monkeypatch):
     assert changes[0].new_value == "PARTIAL"
 
 
-def test_more_hidden_spots_than_the_input_had_are_left_as_they_are():
-    # 어느 주소와 짝인지 알 수 없다. 틀린 주소를 보여주는 것은 [주소]를 보여주는 것보다 나쁘다.
-    value = "[주소]와 [주소]"
+def test_only_part_of_the_hidden_addresses_ends_up_in_the_value(monkeypatch):
+    """AI가 주소 둘 중 뒤엣것만 값에 담으면, 순서로 짝지을 때 앞엣것이 들어간다(현석님 #111 리뷰)."""
 
-    assert restore_hidden_text(value, "마포구 월드컵북로 12에서 장사했습니다") == value
+    raw_input = (
+        "지금 매장은 서울특별시 마포구 월드컵북로 12 1층인데, "
+        "원상복구 범위는 서울특별시 강남구 테헤란로 5 2층 전체래요."
+    )
+    value = "서울특별시 강남구 [주소] 전체"
+
+    assert restore_hidden_text(value, raw_input) == value
 
 
-def test_two_hidden_spots_are_paired_in_the_order_they_appeared():
+def test_the_value_puts_the_hidden_addresses_in_a_different_order(monkeypatch):
+    """개수가 같아도 AI가 순서를 바꿔 쓰면 서로 뒤바뀐다(승준님 #111 리뷰).
+
+    AI가 값에 쓰는 말은 원문 순서를 지킬 의무가 없다. 그래서 개수를 맞춰 보는 것으로는
+    막히지 않고, 가린 글자가 서로 다르면 손대지 않는 수밖에 없다.
+    """
+
+    raw_input = (
+        "원상복구 제외 범위는 서울특별시 마포구 월드컵북로 12 1층이고, "
+        "포함 범위는 서울특별시 강남구 테헤란로 5 2층입니다."
+    )
+    value = "포함: 서울특별시 강남구 [주소], 제외: 서울특별시 마포구 [주소]"
+
+    assert restore_hidden_text(value, raw_input) == value
+
+
+def test_the_same_text_hidden_twice_is_still_restored():
+    # 가린 글자가 같으면 어느 것과 짝지어도 결과가 같다. 이때까지 막을 이유는 없다.
     restored = restore_hidden_text(
-        "[주소]에서 [주소]로 옮겼어요", "마포구 월드컵북로 12에서 강남구 테헤란로 5로 옮겼어요"
+        "[주소]에서 [주소]로", "마포구 월드컵북로 12에서 마포구 월드컵북로 12로"
     )
 
-    assert restored == "월드컵북로 12에서 테헤란로 5로 옮겼어요"
+    assert restored == "월드컵북로 12에서 월드컵북로 12로"
+
+
+def test_one_kind_being_unclear_does_not_block_the_others():
+    restored = restore_hidden_text(
+        "[주소] / [전화번호]", "마포구 월드컵북로 12 그리고 010-1234-5678과 02-123-4567"
+    )
+
+    assert restored == "월드컵북로 12 / [전화번호]"
 
 
 def test_an_unknown_submission_leaves_the_value_hidden(monkeypatch):
