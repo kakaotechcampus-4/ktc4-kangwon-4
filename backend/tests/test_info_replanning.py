@@ -1,6 +1,7 @@
 """Replanning analyzes supplied remaining topics, not only the latest utterance."""
 
 import asyncio
+import json
 from copy import deepcopy
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
@@ -1150,6 +1151,7 @@ def test_staff_history_guides_this_plan_without_becoming_case_changes(employee_c
         procedure, support = AsyncMock(), AsyncMock()
         procedure.lookup.return_value = template.source_results[0].output
         review_model = StubModel()
+        review_model.generate = AsyncMock(wraps=review_model.generate)
         graph = AgentGraph(
             info_agent=InfoAnalysisAgent(Responses(response), max_local_attempts=1),
             procedure_tool=procedure, support_agent=support,
@@ -1174,6 +1176,14 @@ def test_staff_history_guides_this_plan_without_becoming_case_changes(employee_c
                     if source.meta.component == "INFO_AGENT")
         assert {(fact.field_path, fact.value) for fact in info.fact_candidates} == set(reports)
         assert review_model.calls == 1
+        messages = review_model.generate.call_args.args[1]
+        review_input = json.loads(messages[1]["content"].removeprefix("INPUT_JSON="))
+        review_info = next(source["output"] for source in review_input["source_results"]
+                           if source["meta"]["component"] == "INFO_AGENT")
+        assert {(fact["field_path"], fact["value"]) for fact in review_info["fact_candidates"]} == set(reports)
+        for field, _ in reports:
+            if field not in CaseFieldKey:
+                assert field in messages[0]["content"]
         support.analyze.assert_not_awaited()
 
         # 검수 결과를 만든 뒤 내부 전용 변경을 끼워 넣어도 저장 후보가 될 수 없다.
