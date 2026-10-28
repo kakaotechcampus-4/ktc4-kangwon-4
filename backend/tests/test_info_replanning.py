@@ -1,6 +1,7 @@
 """Replanning analyzes supplied remaining topics, not only the latest utterance."""
 
 import asyncio
+import json
 from copy import deepcopy
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
@@ -11,6 +12,7 @@ from test_blocker_candidates import ChoiceModel, request_with_state
 from test_procedure_only_graph import graph_run_inputs
 
 from app.agent.graph import AgentGraph
+from app.agent.enrichment import build_fact_overlays
 from app.agent.info_agent.agent import (
     InfoAnalysisAgent,
     InfoAnalysisGuardrailError,
@@ -22,6 +24,7 @@ from app.agent.schemas import (
     CaseFieldKey,
     CaseSnapshot,
     InfoAnalysisInput,
+    ProcedureEligibility,
     ProcedureLookupResult,
     ProcedureProgressChangeCandidate,
     ReviewSubject,
@@ -1120,6 +1123,91 @@ def snapshot_from_reviewed_facts(outcome):
         "facts": list(facts.values()),
         "evidence_records": list(records.values()),
     })
+
+
+@pytest.mark.parametrize("employee_count", [None, 0, 2])
+def test_staff_history_guides_this_plan_without_becoming_case_changes(employee_count):
+    async def run():
+        template = supervisor_request()
+        template.known_procedure_steps[0].eligibility_conditions = [
+            ProcedureEligibility(condition_key="pension_enrolled", condition_value="true"),
+        ]
+        text = "과거 고용과 네 보험 가입 이력이 있습니다."
+        if employee_count is not None:
+            text = f"현재 직원은 {employee_count}명이고 " + text
+        response = output([finding(TAX, "doc1")])
+        reports = [
+            (field.value, True) for field in CASE_FIELD_SPECS if field not in CaseFieldKey
+        ]
+        if employee_count is not None:
+            reports.insert(0, ("employee_count", employee_count))
+        response["facts"] = [
+            {"operation": "SET", "field_path": field,
+             "value_type": "INTEGER" if field == "employee_count" else "BOOLEAN",
+             "value": value, "source_text": text, "confidence_bps": 9500,
+             "requires_confirmation": False, "reason_summary": "합성 직원·보험 이력 보고"}
+            for field, value in reports
+        ]
+        procedure, support = AsyncMock(), AsyncMock()
+        procedure.lookup.return_value = template.source_results[0].output
+        review_model = StubModel()
+        review_model.generate = AsyncMock(wraps=review_model.generate)
+        graph = AgentGraph(
+            info_agent=InfoAnalysisAgent(Responses(response), max_local_attempts=1),
+            procedure_tool=procedure, support_agent=support,
+            supervisor=SupervisorAgent(StubModel(), max_local_attempts=1),
+            review_tool=ReviewTool(review_model, max_output_attempts=1),
+            known_procedure_steps=template.known_procedure_steps,
+            clock=lambda: NOW, max_review_revisions=0,
+        )
+        request = build_planning_input(
+            trigger_type="RESULT_SUBMITTED", case_snapshot=template.case_snapshot,
+            user_input=template.trigger.input.model_copy(update={"redacted_text": text}),
+        )
+        outcome = await graph.run(request)
+        assert outcome.outcome_type == "REVIEWED_PLAN", outcome
+        outcome.assert_integrity()
+        draft = outcome.review_subject.supervisor_draft
+        assert draft.decision.next_action.action_code == "CONFIRM_TAX_CLOSURE_REQUIREMENTS"
+        expected = [] if employee_count is None else [("employee_count", employee_count)]
+        assert [(change.field_path, change.proposed_value)
+                for change in draft.mutations.fact_changes] == expected
+        info = next(source.output for source in outcome.review_subject.source_results
+                    if source.meta.component == "INFO_AGENT")
+        assert {(fact.field_path, fact.value) for fact in info.fact_candidates} == set(reports)
+        assert review_model.calls == 1
+        messages = review_model.generate.call_args.args[1]
+        review_input = json.loads(messages[1]["content"].removeprefix("INPUT_JSON="))
+        review_info = next(source["output"] for source in review_input["source_results"]
+                           if source["meta"]["component"] == "INFO_AGENT")
+        assert {(fact["field_path"], fact["value"]) for fact in review_info["fact_candidates"]} == set(reports)
+        for field, _ in reports:
+            if field not in CaseFieldKey:
+                assert field in messages[0]["content"]
+        support.analyze.assert_not_awaited()
+
+        # 검수 결과를 만든 뒤 내부 전용 변경을 끼워 넣어도 저장 후보가 될 수 없다.
+        original = outcome.model_dump_json()
+        subject = outcome.review_subject
+        info_source = next(source for source in subject.source_results
+                           if source.meta.component == "INFO_AGENT")
+        for change in build_fact_overlays(subject.snapshot, info, info_source.meta.call_id):
+            if change.field_path in CaseFieldKey:
+                continue
+            altered = draft.model_copy(deep=True)
+            altered.mutations.fact_changes.append(change)
+            altered_subject = ReviewSubject.create(
+                **subject.model_dump(exclude={"subject_digest", "supervisor_draft"}),
+                supervisor_draft=altered,
+            )
+            rejected_model = StubModel()
+            with pytest.raises(ReviewIntegrityError, match="stored Case field"):
+                await ReviewTool(rejected_model, max_output_attempts=1).review(altered_subject)
+            assert rejected_model.calls == 0
+        assert outcome.model_dump_json() == original
+        outcome.assert_integrity()
+
+    asyncio.run(run())
 
 
 @pytest.mark.parametrize("held_demolition", [False, True])

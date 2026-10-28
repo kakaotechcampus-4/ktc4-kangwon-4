@@ -1,11 +1,15 @@
 """Evaluate the MVP subset of stored procedure rules against proposed Case state."""
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import date
 
+from ..action_catalog import (
+    ProcedureBindings,
+    effective_procedure_progress,
+    resolve_procedure_bindings,
+)
 from ..schemas import (
     CASE_FIELD_SPECS,
-    CaseFieldKey,
     CaseSnapshot,
     DecisionDraft,
     FactChangeCandidate,
@@ -17,6 +21,7 @@ from ..schemas import (
     ProcedureProgressStatus,
     validate_case_field_value,
 )
+from ..schemas import AgentFieldKey as CaseFieldKey
 
 # CASE.business_type holds the words the user typed ("카페"), while
 # PROCEDURE_STEP.applicable_business_type holds a code ("CAFE"). Comparing them
@@ -47,14 +52,49 @@ def business_type_code(value: object) -> object:
     return _BUSINESS_TYPE_CODES.get(value.strip(), value)
 
 
-def procedure_constraints(
+_INSURANCE_FIELDS = (
+    CaseFieldKey.PENSION_ENROLLED,
+    CaseFieldKey.HEALTH_INSURANCE_ENROLLED,
+    CaseFieldKey.EMPLOYMENT_INSURANCE_ENROLLED,
+    CaseFieldKey.INDUSTRIAL_ACCIDENT_INSURANCE_ENROLLED,
+)
+
+
+def employment_history_conflicts(values: Mapping[str, object]) -> bool:
+    """A positive current staff count cannot establish no employment history."""
+    count = values.get(CaseFieldKey.EMPLOYEE_COUNT)
+    return (
+        type(count) is int
+        and count > 0
+        and values.get(CaseFieldKey.HAD_EMPLOYEES) is False
+    )
+
+
+def employment_history(values: Mapping[str, object]) -> bool | None:
+    """Use a positive confirmed staff count for this decision, without storing a fact."""
+    if employment_history_conflicts(values):
+        return None
+    history = values.get(CaseFieldKey.HAD_EMPLOYEES)
+    if type(history) is bool:
+        return history
+    count = values.get(CaseFieldKey.EMPLOYEE_COUNT)
+    return True if type(count) is int and count > 0 else None
+
+
+def procedure_applicability(
     step: KnownProcedureStep,
     snapshot: CaseSnapshot,
     fact_overlays: Sequence[FactChangeCandidate] = (),
-    progress_changes: Sequence[ProcedureProgressChangeCandidate] = (),
-) -> list[str]:
-    """Return unmet master rules; an empty result does not establish source quality."""
+) -> bool | None:
+    """Distinguish a known exclusion from missing applicability facts."""
+    return _applicability(step, snapshot, fact_overlays)[0]
 
+
+def _applicability(
+    step: KnownProcedureStep,
+    snapshot: CaseSnapshot,
+    fact_overlays: Sequence[FactChangeCandidate],
+) -> tuple[bool | None, list[str]]:
     facts = {fact.field_path: (fact.status, fact.value) for fact in snapshot.facts}
     facts.update(
         (change.field_path, (change.proposed_status, change.proposed_value))
@@ -65,34 +105,20 @@ def procedure_constraints(
         for key, (status, value) in facts.items()
         if status == FactStatus.CONFIRMED
     }
-    progress = {
-        item.procedure_step.procedure_step_id: item.status
-        for item in snapshot.procedure_progress
-    }
-    progress.update(
-        (change.procedure_step.procedure_step_id, change.proposed_status)
-        for change in progress_changes
-    )
-    reasons = []
-    if step.deprecated_at is not None:
-        reasons.append("procedure is deprecated")
-    if (
-        step.applicable_business_type != "ALL"
-        and business_type_code(values.get(CaseFieldKey.BUSINESS_TYPE))
-        != step.applicable_business_type
-    ):
-        reasons.append("applicable_business_type is not confirmed for this Case")
-    for dependency in step.dependencies:
-        if dependency.dependency_type != "SEQUENTIAL":
-            reasons.append("unsupported dependency_type")
-        elif (
-            progress.get(dependency.prerequisite_procedure_step_id)
-            != ProcedureProgressStatus.COMPLETED
+    excluded = step.deprecated_at is not None
+    unknown = False
+    reasons = ["procedure is deprecated"] if excluded else []
+    if step.applicable_business_type != "ALL":
+        business = values.get(CaseFieldKey.BUSINESS_TYPE)
+        if business is None:
+            unknown = True
+        elif business_type_code(business) != step.applicable_business_type:
+            excluded = True
+        if (
+            business is None
+            or business_type_code(business) != step.applicable_business_type
         ):
-            reasons.append(
-                f"prerequisite procedure {dependency.prerequisite_procedure_step_id} is not completed"
-            )
-    # ponytail: support equality and has_employee only; add operators for concrete master rules.
+            reasons.append("applicable_business_type is not confirmed for this Case")
     for condition in step.eligibility_conditions:
         key, raw = condition.condition_key, condition.condition_value
         try:
@@ -100,6 +126,31 @@ def procedure_constraints(
                 expected = _boolean(raw)
                 count = values.get(CaseFieldKey.EMPLOYEE_COUNT)
                 actual = None if count is None else count > 0
+            elif key == "has_workplace_insurance":
+                expected = _boolean(raw)
+                insured = [values.get(field) for field in _INSURANCE_FIELDS]
+                actual = (
+                    True
+                    if any(value is True for value in insured)
+                    else (False if all(value is False for value in insured) else None)
+                )
+            elif key == "is_leased":
+                expected = _boolean(raw)
+                lease = values.get(CaseFieldKey.LEASE_STATUS)
+                actual = (
+                    None if lease is None else lease in {"LEASED_PAID", "LEASED_FREE"}
+                )
+            elif key == "restoration_required":
+                expected = _boolean(raw)
+                scope = values.get(CaseFieldKey.RESTORATION_SCOPE)
+                demolition = values.get(CaseFieldKey.DEMOLITION_REQUIRED)
+                actual = (
+                    True
+                    if scope in {"PARTIAL", "FULL"} or demolition == "REQUIRED"
+                    else False
+                    if scope == "NOT_REQUIRED" and demolition == "NOT_REQUIRED"
+                    else None
+                )
             else:
                 field = CaseFieldKey(key)
                 value_type, _ = CASE_FIELD_SPECS[field]
@@ -112,15 +163,89 @@ def procedure_constraints(
                 )
                 validate_case_field_value(field, value_type, expected, allow_null=False)
                 actual = values.get(field)
+                if field == CaseFieldKey.HAD_EMPLOYEES:
+                    actual = employment_history(values)
                 if type(actual) is date:
                     actual = actual.isoformat()
         except ValueError:
+            unknown = True
             reasons.append(f"unsupported or invalid eligibility condition: {key}")
             continue
         if actual is None:
+            unknown = True
             reasons.append(f"eligibility fact is not confirmed: {key}")
         elif type(actual) is not type(expected) or actual != expected:
+            excluded = True
             reasons.append(f"eligibility condition is not met: {key}")
+    return (False if excluded else None if unknown else True), reasons
+
+
+def procedure_constraints(
+    step: KnownProcedureStep,
+    snapshot: CaseSnapshot,
+    fact_overlays: Sequence[FactChangeCandidate] = (),
+    progress_changes: Sequence[ProcedureProgressChangeCandidate] = (),
+    *,
+    known_steps: Sequence[KnownProcedureStep] = (),
+    procedure_bindings: ProcedureBindings | None = None,
+) -> list[str]:
+    """Return unmet master rules; an empty result does not establish source quality."""
+
+    registry = {item.procedure_step.procedure_step_id: item for item in known_steps}
+    scope_step = resolve_procedure_bindings(known_steps, procedure_bindings).get("CONFIRM_RESTORATION_SCOPE")
+    progress = {
+        item.procedure_step.procedure_step_id: item.status
+        for item in effective_procedure_progress(
+            snapshot, MutationSet(fact_changes=list(fact_overlays),
+                                  procedure_progress_changes=list(progress_changes), support_match_updates=[]),
+            known_steps=known_steps, procedure_bindings=procedure_bindings,
+        )
+        if item.procedure_step.procedure_step_id not in registry
+        or item.procedure_step == registry[item.procedure_step.procedure_step_id].procedure_step
+    }
+    _, reasons = _applicability(step, snapshot, fact_overlays)
+    for dependency in step.dependencies:
+        if dependency.dependency_type != "SEQUENTIAL":
+            reasons.append("unsupported dependency_type")
+            continue
+        prerequisite = registry.get(dependency.prerequisite_procedure_step_id)
+        if (
+            prerequisite is not None
+            and procedure_applicability(
+                prerequisite,
+                snapshot,
+                fact_overlays,
+            )
+            is False
+        ):
+            continue
+        if (
+            prerequisite is not None
+            and prerequisite.procedure_step == scope_step
+        ):
+            confirmed = {
+                fact.field_path
+                for fact in snapshot.facts
+                if fact.status == FactStatus.CONFIRMED
+            }
+            for change in fact_overlays:
+                if change.proposed_status == FactStatus.CONFIRMED:
+                    confirmed.add(change.field_path)
+                else:
+                    confirmed.discard(change.field_path)
+            if {
+                CaseFieldKey.RESTORATION_SCOPE,
+                CaseFieldKey.DEMOLITION_REQUIRED,
+            }.issubset(confirmed):
+                continue
+            reasons.append("restoration scope and demolition need confirmed facts")
+        elif (
+            progress.get(dependency.prerequisite_procedure_step_id)
+            != ProcedureProgressStatus.COMPLETED
+        ):
+            reasons.append(
+                f"prerequisite procedure {dependency.prerequisite_procedure_step_id} is not completed"
+            )
     return reasons
 
 
@@ -135,6 +260,8 @@ def procedure_plan_constraints(
     snapshot: CaseSnapshot,
     mutations: MutationSet,
     decision: DecisionDraft,
+    *,
+    procedure_bindings: ProcedureBindings | None = None,
 ) -> list[tuple[str, str]]:
     """Bind procedure targets to the supplied registry and their final Case state."""
 
@@ -150,13 +277,36 @@ def procedure_plan_constraints(
     registry = {step.procedure_step.procedure_step_id: step for step in steps}
     progress = {
         item.procedure_step.procedure_step_id: item.status
-        for item in snapshot.procedure_progress
+        for item in effective_procedure_progress(
+            snapshot, mutations, known_steps=steps, procedure_bindings=procedure_bindings,
+        )
+        if item.procedure_step.procedure_step_id in registry
+        and item.procedure_step == registry[item.procedure_step.procedure_step_id].procedure_step
     }
-    progress.update(
-        (item.procedure_step.procedure_step_id, item.proposed_status)
-        for item in mutations.procedure_progress_changes
+    confirmed = {item.field_path for item in snapshot.facts if item.status == FactStatus.CONFIRMED}
+    for item in mutations.fact_changes:
+        if item.proposed_status == FactStatus.CONFIRMED:
+            confirmed.add(item.field_path)
+        else:
+            confirmed.discard(item.field_path)
+    unknown_insurance_steps = {
+        step_id for step_id, step in registry.items()
+        if not set(_INSURANCE_FIELDS).issubset(confirmed)
+        and any(condition.condition_key == "has_workplace_insurance"
+                for condition in step.eligibility_conditions)
+    }
+    insurance_history_error = (
+        "aggregate insurance submission/completion requires all four enrollment histories"
     )
     violations = []
+    for index, change in enumerate(mutations.procedure_progress_changes):
+        if change.procedure_step.procedure_step_id in unknown_insurance_steps and (
+            change.proposed_submitted or change.proposed_status == ProcedureProgressStatus.COMPLETED
+        ):
+            violations.append((
+                f"/mutations/procedure_progress_changes/{index}",
+                insurance_history_error,
+            ))
     for reference, path, is_action in targets:
         step = registry.get(reference.procedure_step_id)
         if step is None or step.procedure_step != reference:
@@ -165,8 +315,21 @@ def procedure_plan_constraints(
             )
             continue
         reasons = procedure_constraints(
-            step, snapshot, mutations.fact_changes, mutations.procedure_progress_changes
+            step,
+            snapshot,
+            mutations.fact_changes,
+            mutations.procedure_progress_changes,
+            known_steps=steps,
+            procedure_bindings=procedure_bindings,
         )
+        if (
+            is_action
+            and action.action_code in {
+                "REPORT_WORKPLACE_INSURANCE_CLOSURE", "REPORT_EMPLOYEE_INSURANCE_LOSS",
+            }
+            and reference.procedure_step_id in unknown_insurance_steps
+        ):
+            reasons.append(insurance_history_error)
         if (
             is_action
             and progress.get(reference.procedure_step_id)

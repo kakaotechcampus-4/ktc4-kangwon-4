@@ -48,6 +48,7 @@ from app.agent.schemas import (
     ActionDecisionDraft,
     AgentSchema,
     Blocker,
+    CaseFieldKey,
     ClaimType,
     DecisionType,
     EvidenceRecord,
@@ -248,7 +249,8 @@ class SupervisorAgent:
             for action in candidate["actions"]
         ]
         information_fields = missing_info_fields(
-            request.case_snapshot, source_results, mutations, bindings
+            request.case_snapshot, source_results, mutations, bindings,
+            known_procedure_steps=request.known_procedure_steps,
         )
         information_blockers = information_fields["blockers"] if information_fields else []
         prompt_input = {
@@ -264,6 +266,8 @@ class SupervisorAgent:
                         request.case_snapshot,
                         mutations.fact_changes,
                         mutations.procedure_progress_changes,
+                        known_steps=request.known_procedure_steps,
+                        procedure_bindings=bindings,
                     ),
                 }
                 for step in request.known_procedure_steps
@@ -388,6 +392,7 @@ class SupervisorAgent:
         information = missing_info_fields(
             request.case_snapshot, request.source_results, mutations, self._bindings(request),
             selected_candidate_id=output.blocker_candidate_id if output.decision_type == DecisionType.NEEDS_MORE_INFO else None,
+            known_procedure_steps=request.known_procedure_steps,
         )
         if output.decision_type == DecisionType.NEEDS_MORE_INFO:
             if output.action_code is not None or information is None or output.blocker_candidate_id is None and len(information["blockers"]) > 1:
@@ -504,7 +509,10 @@ class SupervisorAgent:
                     candidate
                     for candidate in build_action_candidates(
                         sources, evidence, self._bindings(request),
-                        procedure_progress=effective_procedure_progress(request.case_snapshot, mutations),
+                        procedure_progress=effective_procedure_progress(
+                            request.case_snapshot, mutations, known_steps=request.known_procedure_steps,
+                            procedure_bindings=self._bindings(request),
+                        ),
                     )
                     if candidate["action_code"] == action.action_code
                     and candidate["target"] == action.target.model_dump(mode="json")
@@ -629,7 +637,8 @@ class SupervisorAgent:
             )
 
         violations = procedure_plan_constraints(
-            request.known_procedure_steps, request.case_snapshot, mutations, decision
+            request.known_procedure_steps, request.case_snapshot, mutations, decision,
+            procedure_bindings=self._bindings(request),
         )
         violations.extend(
             candidate_decision_violations(
@@ -643,7 +652,8 @@ class SupervisorAgent:
                     self._bindings(request),
                 ),
                 missing_info_fields(
-                    request.case_snapshot, sources, mutations, self._bindings(request)
+                    request.case_snapshot, sources, mutations, self._bindings(request),
+                    known_procedure_steps=request.known_procedure_steps,
                 ),
             )
         )
@@ -658,11 +668,18 @@ class SupervisorAgent:
         ]
         draft = SupervisorDraft(
             decision=decision,
-            mutations=mutations,
+            # 직원·보험 이력은 이번 판단에만 쓰고 Case 변경 후보에는 넣지 않는다.
+            mutations=mutations.model_copy(update={
+                "fact_changes": [
+                    change for change in mutations.fact_changes
+                    if change.field_path in CaseFieldKey
+                ],
+            }),
             grounded_claims=grounded_claims,
             source_call_ids=call_ids,
             resolved_blocker_candidate_ids=resolved_blocker_candidates(
                 request.case_snapshot, request.known_procedure_steps, mutations, self._bindings(request),
+                sources=sources,
             ),
         )
         self._validate_claim_targets(draft)
