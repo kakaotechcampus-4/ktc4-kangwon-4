@@ -13,7 +13,7 @@ from app.be.crud import evidence as evidence_crud
 from app.be.crud import procedure_step as procedure_step_crud
 from app.be.models.case import Case
 from app.be.models.case_history import CaseHistory
-from app.be.models.evidence import Evidence
+from app.be.models.evidence import ConflictReference, Evidence
 from app.be.models.mixins import kst_now
 from app.be.models.procedure_step import CaseProcedureStep, ProcedureStep
 from app.be.schemas.case import (
@@ -31,8 +31,72 @@ from app.be.schemas.case import (
 )
 from app.agent.procedure_tool.store import ReviewedProcedureStore
 from app.be.services import reviewed_procedure as reviewed_procedure_service
+from app.be.services.unmasking import build_restorer
 
 logger = logging.getLogger(__name__)
+
+
+def _field_changes(session: Session, case_id: int, case_history_id: int) -> list[FieldChangeResponse]:
+    """이 제출에서 바뀐 값들. 화면에 낼 때만 가림 문구를 원래 글자로 되돌린다.
+
+    이전 값과 새 값은 서로 다른 제출에서 나온다. 한쪽 기준으로 되돌리면 이전 값 자리에
+    남의 주소가 들어간다.
+    """
+
+    rows = case_field_history_crud.get_case_field_histories_by_case_history_id(session, case_history_id)
+    restorer = build_restorer(
+        session, case_id, [row.before_value for row in rows] + [row.after_value for row in rows]
+    )
+    return [
+        FieldChangeResponse(
+            field=row.canonical_field,
+            stored_value=restorer.restore(row.before_value, restorer.source_of_previous(row.id)),
+            new_value=restorer.restore(row.after_value, row.case_history_id),
+        )
+        for row in rows
+    ]
+
+
+def _conflict_items(
+    session: Session, case_id: int, conflicts: list[ConflictReference]
+) -> list[ConflictItemResponse]:
+    """확인 화면에 띄울 충돌들.
+
+    아직 확인 전이라 Case에는 이전 값이 그대로 있다. 새 값만 이번 제출에서 나온다.
+    """
+
+    restorer = build_restorer(
+        session,
+        case_id,
+        [conflict.committed_value for conflict in conflicts]
+        + [conflict.proposed_value for conflict in conflicts],
+    )
+    return [
+        ConflictItemResponse(
+            id=conflict.id,
+            field=conflict.canonical_field,
+            stored_value=restorer.restore(
+                conflict.committed_value, restorer.source_of_current(conflict.canonical_field)
+            ),
+            proposed_value=restorer.restore(conflict.proposed_value, conflict.case_history_id),
+        )
+        for conflict in conflicts
+    ]
+
+
+def _case_detail(session: Session, case: Case) -> CaseGetDetailResponse:
+    """Case 자체를 화면에 낼 때. 자유 글 칸에만 가림 문구가 들어올 수 있다."""
+
+    detail = CaseGetDetailResponse(**case.model_dump())
+    restorer = build_restorer(
+        session, case.id, [detail.business_type, detail.restoration_scope_detail]
+    )
+    return detail.model_copy(
+        update={
+            field: restorer.restore(getattr(detail, field), restorer.source_of_current(field))
+            for field in ("business_type", "restoration_scope_detail")
+        }
+    )
 
 
 def create_case(session: Session, member_id: int, case_request: CaseCreateRequest) -> tuple[Case, int]:
@@ -137,10 +201,7 @@ def get_case(session: Session, member_id: int) -> CaseGetResponse:
     )
 
     changes = (
-        [
-            FieldChangeResponse(field=h.canonical_field, stored_value=h.before_value, new_value=h.after_value)
-            for h in case_field_history_crud.get_case_field_histories_by_case_history_id(session, latest_history.id)
-        ]
+        _field_changes(session, case.id, latest_history.id)
         # 충돌을 확인한 뒤 되묻는 경우(NEEDS_MORE_INFO)에도 검수를 통과한 변경은 저장된다.
         # DONE만 보면 그 변경이 화면에 안 보인다.
         if latest_history.judgment_status in ("DONE", "NEEDS_MORE_INFO")
@@ -148,7 +209,7 @@ def get_case(session: Session, member_id: int) -> CaseGetResponse:
     )
 
     return CaseGetResponse(
-        case=CaseGetDetailResponse(**case.model_dump()),
+        case=_case_detail(session, case),
         blocker=(
             latest_history.priority_blocker.description if latest_history.priority_blocker else None
         ),
@@ -189,15 +250,7 @@ def get_case_results_entry(session: Session, member_id: int) -> CaseResultsEntry
         return CaseResultsEntryResponse(
             judgment_status="CONFLICT",
             raw_input=raw_input,
-            conflicts=[
-                ConflictItemResponse(
-                    id=conflict.id,
-                    field=conflict.canonical_field,
-                    stored_value=conflict.committed_value,
-                    proposed_value=conflict.proposed_value,
-                )
-                for conflict in pending_conflicts
-            ],
+            conflicts=_conflict_items(session, case.id, pending_conflicts),
         )
 
     _assert_judgment_is_showable(latest_history)
@@ -406,15 +459,7 @@ def get_case_results_submit_status(
         return CaseResultsSubmitResponse(
             result="CONFLICT",
             raw_input=latest_history.raw_input,
-            conflicts=[
-                ConflictItemResponse(
-                    id=conflict.id,
-                    field=conflict.canonical_field,
-                    stored_value=conflict.committed_value,
-                    proposed_value=conflict.proposed_value,
-                )
-                for conflict in pending_conflicts
-            ],
+            conflicts=_conflict_items(session, case.id, pending_conflicts),
         )
 
     if latest_history.judgment_status == "PENDING":
@@ -442,10 +487,7 @@ def get_case_results_submit_status(
             detail=f"처리 상태 조회가 다루지 않는 판단 상태입니다: {latest_history.judgment_status}",
         )
 
-    changes = [
-        FieldChangeResponse(field=h.canonical_field, stored_value=h.before_value, new_value=h.after_value)
-        for h in case_field_history_crud.get_case_field_histories_by_case_history_id(session, latest_history.id)
-    ]
+    changes = _field_changes(session, case.id, latest_history.id)
     return CaseResultsSubmitResponse(
         result="UPDATED" if changes else "NO_CHANGE",
         changes=changes,
