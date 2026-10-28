@@ -17,6 +17,7 @@ from app.be.models.evidence import ConflictReference, Evidence
 from app.be.models.mixins import kst_now
 from app.be.models.procedure_step import CaseProcedureStep, ProcedureStep
 from app.be.schemas.case import (
+    CaseConflictsDecisionRequest,
     CaseCreateRequest,
     CaseGetDetailResponse,
     CaseGetResponse,
@@ -105,7 +106,7 @@ def create_case(session: Session, member_id: int, case_request: CaseCreateReques
         raise HTTPException(status_code=409, detail="이미 등록된 Case가 있습니다.")
 
     # 검수 문서를 Case보다 먼저 읽는다. 파일이 깨져 있으면 판단도 같은 파일을 읽어서
-    # (first_judgment.py) AI를 부르기 전에 터진다. 그 상태로 Case만 만들어 두면 가입 직후
+    # (judgment.py) AI를 부르기 전에 터진다. 그 상태로 Case만 만들어 두면 가입 직후
     # FAILED인데 재판단 API가 없고 다시 가입하면 409라 빠져나올 길이 없다. 여기서 터지면
     # 가입 자체가 실패하므로, 파일을 고친 뒤 다시 시도하면 된다.
     procedure_store = reviewed_procedure_service.load_reviewed_procedures()
@@ -210,9 +211,7 @@ def get_case(session: Session, member_id: int) -> CaseGetResponse:
     return CaseGetResponse(
         case=_case_detail(session, case),
         blocker=(
-            latest_history.priority_blocker.description
-            if latest_history.priority_blocker and latest_history.judgment_status != "NEEDS_MORE_INFO"
-            else None
+            latest_history.priority_blocker.description if latest_history.priority_blocker else None
         ),
         next_action=next_action,
         judgment_status=latest_history.judgment_status,
@@ -234,6 +233,15 @@ def get_case_results_entry(session: Session, member_id: int) -> CaseResultsEntry
     if case is None:
         raise HTTPException(status_code=404, detail="Case를 찾을 수 없습니다.")
 
+    latest_history = case_history_crud.get_latest_user_driven_case_history(session, case.id)
+    if latest_history is None:
+        raise HTTPException(status_code=500, detail="Case에 대한 최초 판단 기록이 없습니다.")
+
+    # 충돌 결정을 처리하는 동안에도 충돌은 미결로 남아 있다(성공해야 해결 처리한다).
+    # 그래서 처리 중인지를 먼저 보지 않으면, 결정을 보낸 직후에도 확인 화면이 다시 나온다.
+    if latest_history.judgment_status == "PENDING":
+        return CaseResultsEntryResponse(judgment_status="PENDING", case_history_id=latest_history.id)
+
     pending_conflicts = conflict_reference_crud.get_pending_conflicts_by_case_id(session, case.id)
     if pending_conflicts:
         # 사전 검사 전제(미결 충돌은 항상 최대 1개)상 전부 같은 case_history에서 나온
@@ -245,14 +253,7 @@ def get_case_results_entry(session: Session, member_id: int) -> CaseResultsEntry
             conflicts=_conflict_items(session, case.id, pending_conflicts),
         )
 
-    latest_history = case_history_crud.get_latest_user_driven_case_history(session, case.id)
-    if latest_history is None:
-        raise HTTPException(status_code=500, detail="Case에 대한 최초 판단 기록이 없습니다.")
-
     _assert_judgment_is_showable(latest_history)
-
-    if latest_history.judgment_status == "PENDING":
-        return CaseResultsEntryResponse(judgment_status="PENDING", case_history_id=latest_history.id)
 
     if latest_history.judgment_status == "DONE":
         return CaseResultsEntryResponse(
@@ -366,6 +367,55 @@ def submit_case_results(
     return CaseResultsSubmitAcceptedResponse(case_history_id=history.id)
 
 
+def submit_case_conflicts_decision(
+    session: Session, member_id: int, decision_request: CaseConflictsDecisionRequest
+) -> CaseResultsSubmitAcceptedResponse:
+    """충돌 확인(`/confirm`)에서 사용자가 충돌마다 고른 결정을 접수한다.
+
+    결과 제출 접수(submit_case_results)처럼 접수만 하고 PENDING 이력을 남긴 뒤 끝난다.
+    결과는 GET /cases/results/status로 조회한다.
+    """
+
+    case = case_crud.get_case_by_member_id(session, member_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case를 찾을 수 없습니다.")
+
+    pending_conflicts = conflict_reference_crud.get_pending_conflicts_by_case_id(session, case.id)
+    if not pending_conflicts:
+        raise HTTPException(status_code=409, detail="확인 대기 중인 충돌이 없습니다.")
+
+    latest_history = case_history_crud.get_latest_user_driven_case_history(session, case.id)
+    if latest_history is None:
+        raise HTTPException(status_code=500, detail="Case에 대한 최초 판단 기록이 없습니다.")
+
+    if latest_history.judgment_status == "PENDING":
+        raise HTTPException(status_code=409, detail="직전 충돌 결정을 아직 처리 중입니다.")
+
+    requested_ids = [decision.conflict_reference_id for decision in decision_request.decisions]
+    if len(requested_ids) != len(set(requested_ids)):
+        raise HTTPException(status_code=422, detail="같은 충돌에 대한 결정이 중복되었습니다.")
+
+    pending_ids = {conflict.id for conflict in pending_conflicts}
+    for conflict_reference_id in requested_ids:
+        if conflict_reference_id in pending_ids:
+            continue
+        conflict = conflict_reference_crud.get_conflict_reference_by_id(session, conflict_reference_id)
+        # 남의 Case 충돌도 "없음"과 똑같이 응답해서, 그런 충돌이 있다는 사실을 알려주지 않는다.
+        if conflict is None or conflict.case_id != case.id:
+            raise HTTPException(status_code=422, detail="존재하지 않는 충돌입니다.")
+        raise HTTPException(status_code=409, detail="이미 해결된 충돌입니다.")
+
+    if pending_ids - set(requested_ids):
+        raise HTTPException(status_code=422, detail="결정하지 않은 충돌이 있습니다.")
+
+    history = case_history_crud.create_case_history(
+        session,
+        CaseHistory(case_id=case.id, source="CONFLICT_DECISION", judgment_status="PENDING"),
+    )
+    session.commit()
+    return CaseResultsSubmitAcceptedResponse(case_history_id=history.id)
+
+
 def get_case_results_submit_status(
     session: Session, member_id: int, case_history_id: int
 ) -> CaseResultsSubmitResponse:
@@ -375,15 +425,17 @@ def get_case_results_submit_status(
     `get_case_results_entry()`와 응답 모양이 다르다. 그래서 별도 스키마(`result` 기반)를 쓴다.
 
     `case_history_id`는 "지금 조회하려는 게 어느 제출이냐"를 밝히는 값이다. Case 생성 판단은
-    이 조회 대상이 아니므로, 최신 판단을 찾을 때 USER_INPUT만 본다(get_latest_user_driven_
-    case_history와 다른 점).
+    이 조회 대상이 아니므로, 최신 판단을 찾을 때 USER_INPUT·CONFLICT_DECISION만 본다
+    (get_latest_user_driven_case_history와 다른 점).
     """
 
     case = case_crud.get_case_by_member_id(session, member_id)
     if case is None:
         raise HTTPException(status_code=404, detail="Case를 찾을 수 없습니다.")
 
-    latest_history = case_history_crud.get_latest_case_history_by_source(session, case.id, "USER_INPUT")
+    latest_history = case_history_crud.get_latest_case_history_by_sources(
+        session, case.id, ("USER_INPUT", "CONFLICT_DECISION")
+    )
     if latest_history is None:
         raise HTTPException(status_code=404, detail="조회할 제출 기록을 찾을 수 없습니다.")
 
@@ -392,17 +444,14 @@ def get_case_results_submit_status(
 
     _assert_judgment_is_showable(latest_history)
 
-    # 충돌도 다른 상태와 똑같이 judgment_status로 가른다. Case 전체가 아니라 이 제출
-    # (latest_history)에 달린 충돌만 본다 — used_at이 실제로 찍히기 시작하면(충돌 확인 API),
-    # Case 전체로 찾는 조회는 다른 제출의 충돌을 집어올 수 있다.
+    # 충돌은 Case 전체가 아니라 이 이력(latest_history)에 달린 것만 본다.
+    # 예: 충돌 결정(CONFLICT_DECISION)이 처리 중이면 이전 이력의 충돌이 아직 미결로 남아 있어서,
+    # Case 전체로 찾으면 처리 중(PENDING)인 이 이력을 CONFLICT로 잘못 응답한다.
     if latest_history.judgment_status == "CONFLICT":
         pending_conflicts = conflict_reference_crud.get_pending_conflicts_by_case_history_id(
             session, latest_history.id
         )
         if not pending_conflicts:
-            # 미결 충돌이 있는 동안은 새 제출이 거부되므로(submit_case_results), 이 제출이
-            # CONFLICT인데 남은 충돌이 없다면 저장이 어긋난 것이다. 빈 목록을 CONFLICT라고
-            # 내보내면 화면이 고를 것 없는 되묻기를 띄운다.
             raise HTTPException(
                 status_code=500,
                 detail=f"case_history {latest_history.id}가 CONFLICT인데 확인 대기 중인 충돌이 없습니다.",
@@ -492,7 +541,7 @@ def _fill_temp_case_procedure_steps(session: Session, case_id: int) -> None:
     # AGENT_PROCEDURE_BINDINGS_MISSING으로 판단을 멈춘다.
     #
     # TODO: 실제 폐업절차는 이보다 많고 이름도 다를 것이다. 그때는 이 4개를 어느 실제 절차에
-    # 맺을지 정해 procedure_bindings를 직접 넘겨야 한다(first_judgment.py).
+    # 맺을지 정해 procedure_bindings를 직접 넘겨야 한다(judgment.py).
     temp_procedure_steps = [
         ("CONFIRM_RESTORATION_SCOPE", "원상복구 범위 확인"),
         ("FILE_TAX_BUSINESS_CLOSURE", "세무서 폐업 신고"),
