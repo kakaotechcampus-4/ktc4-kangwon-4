@@ -9,6 +9,7 @@ BE는 이 모듈에서 import하며, 필드 이름은 snake_case를 사용한다
     trace_id: 호출 추적용 식별자. 없으면 None.
     미확인 사실은 status="UNKNOWN", value=None, evidence_refs=[]로 보낸다.
     충돌 확인 후보는 클라이언트 입력이 아닌 BE가 보관한 원본을 사용한다.
+    절차 완료 확인도 BE가 보관한 원보고·관찰·당시 snapshot과 사용자 선택을 전달한다.
 
 응답 — AgentGraphOutput (outcome_type으로 구분)
     REVIEWED_PLAN: review_subject.supervisor_draft의 decision과 mutations,
@@ -49,6 +50,7 @@ from app.agent.schemas import (
     ConflictOutcome,
     ConflictSelection,
     EvidenceRecord,
+    ProcedureCompletionConfirmation,
     ProcedureProgress,
     RedactedInput,
     Redaction,
@@ -68,6 +70,7 @@ __all__ = [
     "ConflictOutcome",
     "ConflictSelection",
     "EvidenceRecord",
+    "ProcedureCompletionConfirmation",
     "ProcedureProgress",
     "RedactedInput",
     "Redaction",

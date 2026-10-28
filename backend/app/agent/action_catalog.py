@@ -7,10 +7,13 @@ from typing import Any
 
 from app.agent.claim_safety import REQUIRED_CLAIM_SOURCES, expand_evidence
 from app.agent.schemas import (
+    CaseSnapshot,
     EvidenceRecord,
     FreshnessStatus,
     InfoAnalysisResult,
     KnownProcedureStep,
+    MutationSet,
+    ProcedureProgress,
     ProcedureRelevance,
     ProcedureStepRef,
     ReviewSourceResult,
@@ -48,6 +51,12 @@ PROCEDURE_LABELS = {
     "REPORT_EMPLOYEE_INSURANCE_LOSS": "직원 보험 자격상실 신고",
     "REPORT_WORKPLACE_INSURANCE_CLOSURE": "사업장 보험 탈퇴·소멸 신고",
 }
+
+
+ADMINISTRATIVE_PROCEDURE_CODES = frozenset({
+    "FILE_TAX_BUSINESS_CLOSURE", "FILE_FOOD_SERVICE_CLOSURE",
+    "REPORT_WORKPLACE_INSURANCE_CLOSURE",
+})
 
 
 ACTION_DEFINITIONS: dict[str, ActionDefinition] = {
@@ -92,6 +101,12 @@ ACTION_DEFINITIONS: dict[str, ActionDefinition] = {
         True,
     ),
 }
+
+
+ACTION_DEFINITIONS["CONFIRM_PROCEDURE_COMPLETION"] = ActionDefinition(
+    "제출한 신고의 해당 기관별 처리 결과를 확인한다. 접수만으로 완료 처리하지 않는다.",
+    None, True,
+)
 
 
 def _step_key(step: ProcedureStepRef) -> tuple[int, str]:
@@ -167,6 +182,26 @@ def _evidence(
     )
 
 
+def effective_procedure_progress(
+    snapshot: CaseSnapshot, mutations: MutationSet,
+) -> list[ProcedureProgress]:
+    """Keep the original snapshot intact while reviewing proposed progress."""
+    progress = {
+        _step_key(item.procedure_step): item.model_copy(deep=True)
+        for item in snapshot.procedure_progress
+    }
+    for change in mutations.procedure_progress_changes:
+        progress[_step_key(change.procedure_step)] = ProcedureProgress(
+            procedure_step=change.procedure_step,
+            status=change.proposed_status,
+            requirements_confirmed=change.proposed_requirements_confirmed,
+            submitted=change.proposed_submitted,
+            evidence_refs=list(change.execution_evidence_refs),
+            updated_at=snapshot.captured_at,
+        )
+    return list(progress.values())
+
+
 def _source_procedure_bindings(
     sources: Sequence[ReviewSourceResult],
     bindings: ProcedureBindings | None,
@@ -192,13 +227,16 @@ def build_action_candidates(
     sources: Sequence[ReviewSourceResult],
     evidence_by_id: Mapping[str, EvidenceRecord],
     procedure_bindings: ProcedureBindings | None = None,
+    *,
+    procedure_progress: Sequence[ProcedureProgress] = (),
 ) -> list[dict[str, Any]]:
     """List grounded action kinds; existing plan guards check Case constraints."""
 
     resolved_bindings = _source_procedure_bindings(sources, procedure_bindings)
     candidates: list[dict[str, Any]] = []
+    progress_by_step = {_step_key(item.procedure_step): item for item in procedure_progress}
 
-    def append(code: str, target: dict[str, Any]) -> None:
+    def append(code: str, target: dict[str, Any], *, logical_code: str | None = None) -> None:
         definition = ACTION_DEFINITIONS[code]
         candidates.append(
             {
@@ -206,6 +244,11 @@ def build_action_candidates(
                 "target": target,
                 "description": definition.description,
                 "confirmation_only": definition.confirmation_only,
+                "logical_code": logical_code or definition.procedure_logical_code,
+                "phase": (
+                    "PROCESSING" if code == "CONFIRM_PROCEDURE_COMPLETION"
+                    else "REQUIREMENTS" if definition.confirmation_only else "EXECUTION"
+                ),
             }
         )
 
@@ -228,6 +271,25 @@ def build_action_candidates(
                         for item in evidence
                     )
                 )
+                progress = progress_by_step.get(_step_key(finding.procedure_step))
+                logical_code = next((
+                    code for code, ref in resolved_bindings.items()
+                    if _step_key(ref) == _step_key(finding.procedure_step)
+                ), None)
+                if finding.current_status == "COMPLETED" or (
+                    progress is not None and progress.status == "COMPLETED"
+                ):
+                    continue
+                if (
+                    logical_code in ADMINISTRATIVE_PROCEDURE_CODES
+                    and progress is not None and progress.submitted
+                ):
+                    append("CONFIRM_PROCEDURE_COMPLETION", {
+                        "target_kind": "PROCEDURE",
+                        "procedure_step": finding.procedure_step.model_dump(mode="json"),
+                    }, logical_code=logical_code)
+                    continue
+                ready = not finding.requires_confirmation
                 for code, definition in ACTION_DEFINITIONS.items():
                     bound_step = (
                         resolved_bindings.get(definition.procedure_logical_code)
@@ -237,7 +299,11 @@ def build_action_candidates(
                     if (
                         bound_step is not None
                         and _step_key(bound_step) == _step_key(finding.procedure_step)
-                        and (definition.confirmation_only or executable)
+                        and (
+                            code == "CONFIRM_RESTORATION_SCOPE"
+                            or (definition.confirmation_only and not (ready and executable))
+                            or (not definition.confirmation_only and ready and executable)
+                        )
                     ):
                         append(
                             code,

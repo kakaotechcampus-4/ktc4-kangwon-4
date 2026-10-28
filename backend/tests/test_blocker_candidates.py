@@ -177,7 +177,7 @@ def test_overlay_is_used_before_selecting_confirmation_questions():
 @pytest.mark.parametrize(
     "state",
     [
-        {"restoration_status": "COMPLETED"},
+        {"restoration_status": "COMPLETED", "restoration_scope": "FULL", "demolition_required": "NOT_REQUIRED"},
         {"restoration_scope": "PARTIAL", "demolition_required": "NOT_REQUIRED"},
         {"lease_status": "OWNED"},
     ],
@@ -202,8 +202,20 @@ def test_demolition_required_still_prioritizes_unresolved_landlord_scope():
     )
 
 
+@pytest.mark.parametrize("scope_step_completed", [False, True])
+def test_completed_work_still_asks_unknown_demolition(scope_step_completed):
+    request = request_with_state(restoration_status="COMPLETED", restoration_scope="FULL")
+    if scope_step_completed:
+        request.case_snapshot.procedure_progress.append(ProcedureProgress(
+            procedure_step=RESTORATION, status="COMPLETED", evidence_refs=[REF], updated_at=NOW,
+        ))
+    missing_questions(request, "demolition_required")
+    result = missing_info_fields(request.case_snapshot, request.source_results, mutations())
+    assert result["questions_for_user"] == ["철거가 필요한지 확인한 내용이 있으면 알려주세요."]
+
+
 def test_completed_restoration_continues_closure_without_support():
-    request = request_with_state(restoration_status="COMPLETED")
+    request = request_with_state(restoration_status="COMPLETED", restoration_scope="FULL", demolition_required="NOT_REQUIRED")
     request.source_results.extend(support_sources())
     rows = candidates(request)
     assert [row["candidate_id"] for row in rows] == ["procedure:1"]
@@ -347,7 +359,7 @@ def test_model_state_invention_is_replaced_and_review_cannot_override_guard():
 @pytest.mark.parametrize(
     "state",
     [
-        {"restoration_scope": "PARTIAL", "restoration_status": "COMPLETED"},
+        {"restoration_scope": "PARTIAL", "restoration_status": "COMPLETED", "demolition_required": "NOT_REQUIRED"},
         {"restoration_scope": "PARTIAL", "demolition_required": "NOT_REQUIRED"},
     ],
 )
@@ -407,7 +419,7 @@ def test_mvp_schema_rejects_removing_a_verified_blocker(
 def test_unverified_procedure_source_keeps_source_confirmation_blocker(
     freshness, stale_parent
 ):
-    request = request_with_state(restoration_status="COMPLETED")
+    request = request_with_state(restoration_status="COMPLETED", restoration_scope="FULL", demolition_required="NOT_REQUIRED")
     records = request.source_results[0].output.evidence_records
     if stale_parent:
         records[0].parent_evidence_refs = ["parent"]
@@ -526,12 +538,33 @@ def test_landlord_priority_passes_review_and_does_not_create_support_mutations()
     asyncio.run(run())
 
 
-def test_unconfirmed_filing_keeps_only_confirmation_action():
+def test_registered_filing_keeps_execution_and_confirmation_distinct():
     rows = candidates(request_with_state(lease_status="OWNED"))
     tax = next(row for row in rows if row["candidate_id"] == "procedure:1")
     by_code = {action["action_code"]: action for action in tax["actions"]}
-    assert set(by_code) == {"CONFIRM_TAX_CLOSURE_REQUIREMENTS"}
     assert "준비사항을 확인" in by_code["CONFIRM_TAX_CLOSURE_REQUIREMENTS"]["title"]
+    assert set(by_code) == {"CONFIRM_TAX_CLOSURE_REQUIREMENTS"}
+    request = request_with_state(lease_status="OWNED")
+    request.case_snapshot.procedure_progress = [ProcedureProgress(
+        procedure_step=request.known_procedure_steps[0].procedure_step, status="IN_PROGRESS",
+        requirements_confirmed=True, evidence_refs=[REF], updated_at=NOW,
+    )]
+    info = request.source_results[1].output.model_copy(deep=True)
+    info.procedure_findings[0].requires_confirmation = False
+    request.source_results[1] = source(info)
+    filing = candidates(request)[0]["actions"][0]
+    assert filing["action_code"] == "FILE_TAX_BUSINESS_CLOSURE"
+    assert (
+        filing["reason"]
+        == request_with_state()
+        .source_results[1]
+        .output.procedure_findings[0]
+        .required_actions[0]
+        .text
+    )
+    assert "접수" in filing["questions_to_ask"][0]
+
+
 
 
 @pytest.mark.parametrize(
@@ -548,7 +581,7 @@ def test_fallback_does_not_reask_unnecessary_restoration_details(resolution):
     values = {
         "scope_not_required": {"restoration_scope": "NOT_REQUIRED"},
         "status_not_required": {"restoration_status": "NOT_REQUIRED"},
-        "status_completed": {"restoration_status": "COMPLETED"},
+        "status_completed": {"restoration_status": "COMPLETED", "restoration_scope": "FULL", "demolition_required": "NOT_REQUIRED"},
     }.get(resolution, {})
     request = request_with_state(**values)
     changes = mutations()
@@ -858,6 +891,16 @@ def test_confirmation_precedes_filing_in_current_schema():
         == "CONFIRM_TAX_CLOSURE_REQUIREMENTS"
     )
     assert len(candidates(request)[0]["actions"]) == 1
+    request.case_snapshot.procedure_progress = [ProcedureProgress(
+        procedure_step=request.known_procedure_steps[0].procedure_step, status="IN_PROGRESS",
+        requirements_confirmed=True, evidence_refs=[REF], updated_at=NOW,
+    )]
+    info = request.source_results[1].output.model_copy(deep=True)
+    info.procedure_findings[0].requires_confirmation = False
+    request.source_results[1] = source(info)
+    assert candidates(request)[0]["actions"][0]["action_code"] == "FILE_TAX_BUSINESS_CLOSURE"
+
+
 
 
 def test_different_valid_model_choices_keep_the_selected_priority_and_all_blockers():
@@ -883,7 +926,7 @@ def test_review_rejects_a_missing_blocker_after_case_state_changes():
     async def run():
         # A tax action is valid by itself, but no longer first when landlord
         # confirmation is still unresolved in the Case being reviewed.
-        completed = request_with_state(restoration_status="COMPLETED")
+        completed = request_with_state(restoration_status="COMPLETED", restoration_scope="FULL", demolition_required="NOT_REQUIRED")
         draft = await SupervisorAgent(ChoiceModel(), max_local_attempts=1).draft(
             completed
         )

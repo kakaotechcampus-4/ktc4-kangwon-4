@@ -101,9 +101,15 @@ class ConflictReference(CreatedAtMixin, table=True):
             "값이라 숫자·참거짓·빈 값을 되돌릴 수 없다"
         ),
     )
-    expires_at: datetime = Field(sa_column=Column(DateTime, nullable=False), description="만료 시각")
-    used_at: datetime | None = Field(
-        default=None, sa_column=Column(DateTime, nullable=True), description="사용(1회) 시각"
+    status: str = Field(
+        default="PENDING",
+        sa_column=Column(
+            Enum("PENDING", "CONFIRMED", "REJECTED", name="conflict_reference_status_enum"), nullable=False
+        ),
+        description="PENDING=아직 결정 안 됨, CONFIRMED=새 값 채택, REJECTED=기존 값 유지",
+    )
+    decided_at: datetime | None = Field(
+        default=None, sa_column=Column(DateTime, nullable=True), description="결정된 시각. 결정 전엔 NULL"
     )
 
     case: "Case" = Relationship(back_populates="conflict_references")

@@ -28,9 +28,9 @@ def main() -> None:
         else load_reviewed_procedures()
     )
     # Only an explicit CLI invocation configures a DB connection; never reset tables.
-    from app.be.db import _engine
+    from app.be.db import get_engine
 
-    with Session(_engine) as session:
+    with Session(get_engine()) as session:
         try:
             rows = import_reviewed_procedures(
                 session, args.case_id, store, as_of=datetime.now(KST).date()

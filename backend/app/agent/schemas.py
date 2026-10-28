@@ -389,6 +389,8 @@ class CaseFact(AgentSchema):
 
 
 class ProcedureProgress(AgentSchema):
+    requirements_confirmed: StrictBool = False
+    submitted: StrictBool = False
     procedure_step: ProcedureStepRef
     status: ProcedureProgressStatus
     evidence_refs: list[NonEmptyStr]
@@ -396,7 +398,7 @@ class ProcedureProgress(AgentSchema):
 
     @model_validator(mode="after")
     def completed_requires_evidence(self) -> ProcedureProgress:
-        if self.status == ProcedureProgressStatus.COMPLETED and not self.evidence_refs:
+        if (self.status == ProcedureProgressStatus.COMPLETED or self.requirements_confirmed or self.submitted) and not self.evidence_refs:
             raise ValueError("COMPLETED procedure progress requires evidence")
         return self
 
@@ -714,8 +716,99 @@ class ProcedureProgressObservation(AgentSchema):
     ]
     source_span: VerifiedTextSpan
     source_evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
+    requirements_confirmed: StrictBool = False
+    submitted: StrictBool = False
     requires_confirmation: StrictBool
     reason_summary: NonEmptyStr
+
+    def assert_input_integrity(
+        self, original_input: RedactedInput, evidence_by_id: dict[str, EvidenceRecord],
+    ) -> None:
+        """Bind the quoted report to its exact original event and evidence."""
+        original = RedactedInput.model_validate(original_input.model_dump())
+        span = self.source_span
+        if (
+            span.input_event_id != original.input_event_id
+            or not 0 <= span.start_offset < span.end_offset <= len(original.redacted_text)
+            or original.redacted_text[span.start_offset:span.end_offset] != span.text
+        ):
+            raise ValueError("progress span differs from its original input")
+        fingerprint = hashlib.sha256(span.text.encode("utf-8")).hexdigest()
+        expected_id = f"input:{span.input_event_id}:{span.start_offset}:{span.end_offset}:{fingerprint[:12]}"
+        evidence = evidence_by_id.get(expected_id)
+        if self.source_evidence_refs != [expected_id] or evidence is None or (
+            evidence.source_type.value != original.source_type.value
+            or evidence.source_ref != original.input_event_id
+            or evidence.locator != f"text:{span.start_offset}-{span.end_offset}"
+            or evidence.excerpt != span.text or evidence.content_hash != fingerprint
+        ):
+            raise ValueError("progress evidence differs from its original quoted report")
+
+
+class ProcedureCompletionConfirmation(AgentSchema):
+    """Original held report restored by BE after an explicit user choice.
+
+    BE must restore its own retained observation, input and snapshot after
+    checking ownership; a client-supplied observation is not trusted approval.
+    """
+
+    observation: ProcedureProgressObservation
+    input: RedactedInput
+    snapshot: CaseSnapshot
+    confirmed: StrictBool
+
+    @model_validator(mode="after")
+    def validate_original_report(self) -> ProcedureCompletionConfirmation:
+        if (
+            self.observation.observed_status != ProcedureProgressStatus.COMPLETED
+            or not self.observation.requires_confirmation
+        ):
+            raise ValueError("completion confirmation requires an original held completion")
+        self.source_evidence(self.snapshot)
+        return self
+
+    def matches(self, observation: ProcedureProgressObservation) -> bool:
+        return self.confirmed and (
+            observation.model_dump(exclude={"requires_confirmation"})
+            == self.observation.model_dump(exclude={"requires_confirmation"})
+        )
+
+    def assert_current(self, snapshot: CaseSnapshot) -> None:
+        self.validate_original_report()
+        if snapshot.case_id != self.snapshot.case_id:
+            raise ValueError("completion confirmation belongs to another Case")
+
+        def progress_state(source: CaseSnapshot) -> tuple[ProcedureProgressStatus, bool, bool]:
+            prior = next((item for item in source.procedure_progress
+                          if item.procedure_step == self.observation.procedure_step), None)
+            return (
+                (prior.status, prior.requirements_confirmed, prior.submitted)
+                if prior else (ProcedureProgressStatus.NOT_STARTED, False, False)
+            )
+
+        current = progress_state(snapshot)
+        if current[0] != ProcedureProgressStatus.COMPLETED and current != progress_state(self.snapshot):
+            raise ValueError("procedure progress changed after the completion report")
+        self.source_evidence(snapshot)
+
+    def source_evidence(self, snapshot: CaseSnapshot) -> EvidenceRecord:
+        """Reuse stored evidence or recover only the exact original quoted report."""
+        span = self.observation.source_span
+        fingerprint = hashlib.sha256(span.text.encode("utf-8")).hexdigest()
+        evidence_id = f"input:{span.input_event_id}:{span.start_offset}:{span.end_offset}:{fingerprint[:12]}"
+        evidence = next((item for item in snapshot.evidence_records
+                         if item.evidence_id == evidence_id), None)
+        if evidence is None:
+            evidence = EvidenceRecord(
+                evidence_id=evidence_id, source_type=self.input.source_type.value,
+                source_ref=self.input.input_event_id, source_version=None,
+                locator=f"text:{span.start_offset}-{span.end_offset}", excerpt=span.text,
+                parent_evidence_refs=[], published_at=None,
+                retrieved_at=self.input.submitted_at, freshness_status="CURRENT",
+                content_hash=fingerprint,
+            )
+        self.observation.assert_input_integrity(self.input, {evidence_id: evidence})
+        return evidence
 
 
 class ConflictCandidate(AgentSchema):
@@ -1391,7 +1484,7 @@ class ProcedureFinding(AgentSchema):
     relevance: ProcedureRelevance
     current_status: ProcedureProgressStatus
     decision_authority: DecisionAuthority
-    requires_confirmation: Literal[True]
+    requires_confirmation: StrictBool
     required_actions: list[SourcedText]
     required_documents: list[RequiredDocument]
     application_channel: SourcedText | None
@@ -1466,6 +1559,7 @@ ActionCode: TypeAlias = Literal[
     "CONFIRM_WORKPLACE_INSURANCE_CLOSURE_REQUIREMENTS",
     "REPORT_WORKPLACE_INSURANCE_CLOSURE",
     "CONFIRM_SUPPORT_PROGRAM_REQUIREMENTS",
+    "CONFIRM_PROCEDURE_COMPLETION",
 ]
 
 
@@ -1526,6 +1620,10 @@ DecisionDraft: TypeAlias = Annotated[
 
 
 class ProcedureProgressChangeCandidate(AgentSchema):
+    before_requirements_confirmed: StrictBool = False
+    proposed_requirements_confirmed: StrictBool = False
+    before_submitted: StrictBool = False
+    proposed_submitted: StrictBool = False
     candidate_id: RuntimeUUID
     procedure_step: ProcedureStepRef
     before_status: ProcedureProgressStatus
@@ -1542,7 +1640,15 @@ class ProcedureProgressChangeCandidate(AgentSchema):
             ProcedureProgressStatus.IN_PROGRESS: 1,
             ProcedureProgressStatus.COMPLETED: 2,
         }
-        if order[self.proposed_status] <= order[self.before_status]:
+        if self.before_requirements_confirmed and not self.proposed_requirements_confirmed:
+            raise ValueError("confirmed requirements cannot move backwards")
+        if self.before_submitted and not self.proposed_submitted:
+            raise ValueError("submission cannot move backwards")
+        status_forward = order[self.proposed_status] > order[self.before_status]
+        flags_forward = (
+            self.proposed_requirements_confirmed and not self.before_requirements_confirmed
+        ) or (self.proposed_submitted and not self.before_submitted)
+        if order[self.proposed_status] < order[self.before_status] or not (status_forward or flags_forward):
             raise ValueError("procedure progress change must move forward")
         return self
 
@@ -1672,6 +1778,7 @@ class CaseCreatedTrigger(AgentSchema):
 
 class ResultSubmittedTrigger(AgentSchema):
     trigger_type: Literal["RESULT_SUBMITTED"]
+    procedure_completion_confirmation: ProcedureCompletionConfirmation | None = None
     input_event_id: NonEmptyStr
     client_event_id: NonEmptyStr | None = Field(
         description=(
@@ -1686,6 +1793,11 @@ class ResultSubmittedTrigger(AgentSchema):
     def validate_event(self) -> ResultSubmittedTrigger:
         if self.input.input_event_id != self.input_event_id:
             raise ValueError("trigger and input event IDs must match")
+        if (
+            self.procedure_completion_confirmation is not None
+            and self.procedure_completion_confirmation.input.input_event_id == self.input_event_id
+        ):
+            raise ValueError("completion confirmation requires a separate user event")
         return self
 
 
@@ -2436,6 +2548,7 @@ __all__ = [
     "ProcedureProgress",
     "ProcedureProgressChangeCandidate",
     "ProcedureProgressObservation",
+    "ProcedureCompletionConfirmation",
     "ProcedureProgressStatus",
     "ProcedureRelevance",
     "ProcedureSourceDocument",

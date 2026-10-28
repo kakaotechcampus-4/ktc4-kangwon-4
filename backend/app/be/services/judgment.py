@@ -12,7 +12,7 @@ from typing import Literal
 from sqlmodel import Session
 
 from app.be.crud import case_history as case_history_crud
-from app.be.db import _engine
+from app.be.db import get_engine
 from app.be.models.case_history import CaseHistory
 from app.be.models.evidence import DecisionRecord
 from app.be.services import agent_runtime as agent_runtime_service
@@ -33,12 +33,12 @@ async def run_judgment_in_background(case_history_id: int) -> None:
     """
 
     try:
-        with Session(_engine) as session:
+        with Session(get_engine()) as session:
             await run_judgment(session, case_history_id)
     except Exception as error:
         logger.exception("case_history %s 판단 실패", case_history_id)
         try:
-            with Session(_engine) as session:
+            with Session(get_engine()) as session:
                 # 무엇 때문에 끊겼는지 함께 넘긴다. 다시 해도 안 풀리는 종류면 화면에
                 # "다시 시도"를 띄우면 안 된다.
                 decision_record_service.mark_judgment_failed(session, case_history_id, error)

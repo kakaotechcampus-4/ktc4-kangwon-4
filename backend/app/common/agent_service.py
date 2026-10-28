@@ -22,6 +22,7 @@ from app.common.agent_dto import (
     CaseSnapshot,
     ConflictCandidate,
     ConflictConfirmedTrigger,
+    ProcedureCompletionConfirmation,
     RedactedInput,
     ResultSubmittedTrigger,
 )
@@ -40,6 +41,7 @@ def build_planning_input(
     user_input: RedactedInput,
     client_event_id: str | None = None,
     trace_id: str | None = None,
+    procedure_completion_confirmation: ProcedureCompletionConfirmation | None = None,
 ) -> AgentGraphInput:
     """Use the persisted input event's ID/time, not invented run-time values.
 
@@ -52,6 +54,12 @@ def build_planning_input(
     if trigger_type not in {"CASE_CREATED", "RESULT_SUBMITTED"}:
         raise ValueError("input trigger must be CASE_CREATED or RESULT_SUBMITTED")
     ensure_no_sensitive_text([user_input.redacted_text])
+    confirmation_fields = {}
+    if procedure_completion_confirmation is not None:
+        if trigger_type != "RESULT_SUBMITTED":
+            raise ValueError("completion confirmation requires RESULT_SUBMITTED")
+        ensure_no_sensitive_text([procedure_completion_confirmation.input.redacted_text])
+        confirmation_fields["procedure_completion_confirmation"] = procedure_completion_confirmation
     trigger_model = (
         CaseCreatedTrigger if trigger_type == "CASE_CREATED" else ResultSubmittedTrigger
     )
@@ -62,6 +70,7 @@ def build_planning_input(
             client_event_id=client_event_id,
             input=user_input,
             submitted_at=user_input.submitted_at,
+            **confirmation_fields,
         ).model_dump(mode="python"),
         "case_snapshot": case_snapshot.model_dump(mode="python"),
         "trace_id": trace_id,
@@ -120,6 +129,9 @@ async def run_case_planning(
     owned_request = AgentGraphInput.model_validate(request.model_dump(mode="python"))
     if isinstance(owned_request.trigger, (CaseCreatedTrigger, ResultSubmittedTrigger)):
         ensure_no_sensitive_text([owned_request.trigger.input.redacted_text])
+    confirmation = getattr(owned_request.trigger, "procedure_completion_confirmation", None)
+    if confirmation is not None:
+        ensure_no_sensitive_text([confirmation.input.redacted_text])
     registry = [
         KnownProcedureStep.model_validate(step.model_dump(mode="python"))
         for step in known_procedure_steps

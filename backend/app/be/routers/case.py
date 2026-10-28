@@ -4,6 +4,7 @@ from sqlmodel import Session
 from app.be.db import get_db
 from app.be.dependencies.auth import get_current_member_id
 from app.be.schemas.case import (
+    CaseConflictsDecisionRequest,
     CaseCreateRequest,
     CaseCreateResponse,
     CaseGetResponse,
@@ -67,6 +68,20 @@ def submit_case_results(
     background_tasks.add_task(
         judgment_service.run_judgment_in_background, response.case_history_id
     )
+
+    return response
+
+
+@router.post("/cases/results/decision", response_model=CaseResultsSubmitAcceptedResponse)
+def submit_case_conflicts_decision(
+    decision_request: CaseConflictsDecisionRequest,
+    member_id: int = Depends(get_current_member_id),
+    session: Session = Depends(get_db),
+):
+    response = case_service.submit_case_conflicts_decision(session, member_id, decision_request)
+
+    # TODO(AI팀 연동): 여기서 충돌 결정 판단을 백그라운드로 실행하는 부분이 이어져야 한다.
+    # 사용자 선택(decision_request.decisions)은 DB에 저장하지 않으므로 이 호출에 인자로 넘긴다.
 
     return response
 
