@@ -48,6 +48,7 @@ from app.agent.schemas import (
     ActionDecisionDraft,
     AgentSchema,
     Blocker,
+    CaseFieldKey,
     ClaimType,
     DecisionType,
     EvidenceRecord,
@@ -667,7 +668,13 @@ class SupervisorAgent:
         ]
         draft = SupervisorDraft(
             decision=decision,
-            mutations=mutations,
+            # 직원·보험 이력은 이번 판단에만 쓰고 Case 변경 후보에는 넣지 않는다.
+            mutations=mutations.model_copy(update={
+                "fact_changes": [
+                    change for change in mutations.fact_changes
+                    if change.field_path in CaseFieldKey
+                ],
+            }),
             grounded_claims=grounded_claims,
             source_call_ids=call_ids,
             resolved_blocker_candidate_ids=resolved_blocker_candidates(
