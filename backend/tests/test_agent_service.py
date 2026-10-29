@@ -28,7 +28,11 @@ from app.common.agent_data import (
     build_known_procedure_steps,
 )
 from app.common.agent_dto import CaseSnapshot, RedactedInput
-from app.common.agent_service import build_planning_input, run_case_planning
+from app.common.agent_service import (
+    build_conflict_input,
+    build_planning_input,
+    run_case_planning,
+)
 from scripts import import_reviewed_procedures as import_cli
 
 SEOUL = ZoneInfo("Asia/Seoul")
@@ -215,6 +219,29 @@ def test_planning_input_rejects_an_unknown_trigger():
             case_snapshot=case_snapshot(),
             user_input=redacted_input(),
         )
+
+
+@pytest.mark.parametrize("legacy", [True, False])
+def test_public_conflict_input_preserves_legacy_and_batch_choices_without_mutating_source(legacy):
+    from test_procedure_only_graph import batch_conflict_graph
+
+    _, source, _, _ = batch_conflict_graph()
+    original = source.model_dump_json()
+    trigger = source.trigger
+    values = {"confirmed_conflict": trigger.conflicts[0]} if legacy else {
+        "conflicts": trigger.conflicts, "selections": trigger.selections,
+        "conflict_snapshot": trigger.conflict_snapshot,
+    }
+    request = build_conflict_input(
+        case_snapshot=source.case_snapshot, input_event_id="stored-choice", confirmed_at=NOW, **values,
+    )
+    assert source.model_dump_json() == original
+    assert request.case_snapshot == source.case_snapshot
+    assert request.case_snapshot is not source.case_snapshot
+    assert request.trigger.choices() == (
+        [(trigger.conflicts[0], True)] if legacy else trigger.choices()
+    )
+    assert request.trigger.choices()[0][0] is not trigger.conflicts[0]
 
 
 # 4. The run itself. The real runtime opens provider clients and a trace sink,
