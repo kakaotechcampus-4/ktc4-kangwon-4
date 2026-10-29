@@ -432,8 +432,9 @@ class CaseSnapshot(AgentSchema):
             "Caller-issued identity of the Case read view used for this planning run "
             "and its review proof. Conflict confirmation must be built with the stored "
             "ConflictOutcome.snapshot_id, and a batch confirmation must also match the "
-            "stored conflict_snapshot state; a mismatch causes "
-            "STALE_CONFLICT_CONFIRMATION. Every other run takes a newly issued ID."
+            "stored conflict_snapshot state (every field except snapshot_id and "
+            "captured_at; list order and fractions of a second are ignored); a mismatch "
+            "causes STALE_CONFLICT_CONFIRMATION. Every other run takes a newly issued ID."
         )
     )
     case_id: PositiveStrictInt
@@ -1849,7 +1850,11 @@ class ConflictConfirmedTrigger(AgentSchema):
     )
     confirmed_conflict: ConflictCandidate | None = Field(
         default=None,
-        description="The original conflict candidate the user accepted."
+        description=(
+            "Legacy single acceptance. It checks only the snapshot ID and the conflicted "
+            "field, so once the stored snapshot ID is reused it cannot notice other Case "
+            "changes. Use conflicts, selections and conflict_snapshot even for one conflict."
+        ),
     )
     conflicts: list[ConflictCandidate] = Field(
         default_factory=list,
@@ -2334,7 +2339,12 @@ class ConflictOutcome(AgentSchema):
         ),
     ]
     evidence_records: list[EvidenceRecord] = Field(
-        description="Conflict source evidence and its parents to retain for confirmation."
+        description=(
+            "Conflict source evidence and its parents. BE saves the rows its table lacks "
+            "with every field unchanged (including freshness_status); if a time column "
+            "drops fractions of a second it must truncate, not round. The Case rebuilt "
+            "at confirmation must then equal conflict_snapshot."
+        )
     )
     conflict_snapshot: CaseSnapshot = Field(
         description=(
