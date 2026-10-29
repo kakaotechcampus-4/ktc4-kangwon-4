@@ -730,3 +730,72 @@ def test_batch_date_choice_survives_stored_json_and_read_time_changes(operation)
     change, = build_conflict_overlays(snapshot, restored)
     assert change.operation == operation
     assert str(change.proposed_value) == ("2026-11-02" if operation == "SET" else "None")
+
+
+@pytest.mark.parametrize("rebuilt", [
+    "same_state", "new_snapshot_id", "no_conflict_evidence", "active_blocker", "progress_flag",
+])
+def test_real_conflict_snapshot_matches_what_be_rebuilds_after_storing_it(rebuilt):
+    """BE stores the outcome as JSON, then rebuilds the Case from its DB: second-precision times,
+    another row order and captured_at, the conflict evidence it inserted, the stored snapshot ID."""
+    from test_info_replanning import Responses, finding, output
+
+    from app.agent.enrichment import StaleConfirmationError, build_conflict_overlays
+    from app.agent.info_agent.agent import InfoAnalysisAgent
+    from app.agent.schemas import CaseSnapshot, ConflictSelection
+    from app.common.agent_service import build_conflict_input
+
+    graph, request, _, _, _ = graph_run_inputs("RESULT_SUBMITTED")
+    snapshot = request.case_snapshot.model_copy(deep=True)
+    snapshot.procedure_progress.append(ProcedureProgress.model_validate({
+        "procedure_step": graph._known_procedure_steps[0].procedure_step.model_dump(),
+        "status": "IN_PROGRESS", "requirements_confirmed": True,
+        "evidence_refs": ["synthetic-document"], "updated_at": NOW,
+    }))
+    text = "임대 계약은 자가인 줄 알았는데 무상 임차라고 하셨습니다."
+    request = AgentGraphInput(trigger=request.trigger.model_dump() | {
+        "input": request.trigger.input.model_dump() | {"redacted_text": text},
+    }, case_snapshot=snapshot)
+    answer = output([finding("FILE_TAX_BUSINESS_CLOSURE", "doc1")])
+    answer["facts"] = [{
+        "operation": "SET", "field_path": "lease_status", "value_type": "ENUM", "value": "LEASED_FREE",
+        "source_text": "무상 임차라고 하셨습니다", "confidence_bps": 9500,
+        "requires_confirmation": False, "reason_summary": "합성 임대차 정정",
+    }]
+    graph._info_agent = InfoAnalysisAgent(
+        Responses(answer), clock=lambda: NOW + timedelta(microseconds=700000), max_local_attempts=1,
+    )
+    outcome = asyncio.run(graph.run(request))
+    assert outcome.outcome_type == "CONFLICT", outcome
+
+    stored = json.loads(json.dumps({
+        "conflicts": [item.model_dump(mode="json") for item in outcome.conflicts],
+        "conflict_snapshot": outcome.conflict_snapshot.model_dump(mode="json"),
+    }))
+    rows = [] if rebuilt == "no_conflict_evidence" else [
+        item.model_copy(update={"retrieved_at": item.retrieved_at.replace(microsecond=0)})
+        for item in outcome.evidence_records
+    ]
+    live = snapshot.model_copy(update={
+        "snapshot_id": UUID(int=999) if rebuilt == "new_snapshot_id" else outcome.snapshot_id,
+        "captured_at": snapshot.captured_at + timedelta(minutes=5),
+        "evidence_records": [*snapshot.evidence_records, *rows][::-1],
+        "facts": snapshot.facts[::-1],
+    }, deep=True)
+    if rebuilt == "active_blocker":
+        live.active_blocker_candidate_ids = ["held:other"]
+    if rebuilt == "progress_flag":
+        live.procedure_progress[-1].submitted = True
+
+    conflicts = [ConflictCandidate.model_validate(item) for item in stored["conflicts"]]
+    confirmation = build_conflict_input(
+        case_snapshot=live, conflicts=conflicts, input_event_id="be-confirm", confirmed_at=NOW,
+        conflict_snapshot=CaseSnapshot.model_validate(stored["conflict_snapshot"]),
+        selections=[ConflictSelection(conflict_ref=item.conflict_ref, accepted=True) for item in conflicts],
+    )
+    if rebuilt == "same_state":
+        change, = build_conflict_overlays(confirmation.case_snapshot, confirmation.trigger)
+        assert change.proposed_value == "LEASED_FREE"
+    else:
+        with pytest.raises(StaleConfirmationError):
+            build_conflict_overlays(confirmation.case_snapshot, confirmation.trigger)

@@ -408,10 +408,10 @@ class CaseSnapshot(AgentSchema):
     snapshot_id: RuntimeUUID = Field(
         description=(
             "Caller-issued identity of the Case read view used for this planning run "
-            "and its review proof. Conflict confirmation must match the original "
-            "candidate's snapshot ID and current field state/value; a mismatch causes "
-            "STALE_CONFLICT_CONFIRMATION. How the caller stores and reuses this ID "
-            "and the conflict candidate is a separate integration decision."
+            "and its review proof. Conflict confirmation must be built with the stored "
+            "ConflictOutcome.snapshot_id, and a batch confirmation must also match the "
+            "stored conflict_snapshot state; a mismatch causes "
+            "STALE_CONFLICT_CONFIRMATION. Every other run takes a newly issued ID."
         )
     )
     case_id: PositiveStrictInt
@@ -1821,9 +1821,24 @@ class ConflictConfirmedTrigger(AgentSchema):
         default=None,
         description="The original conflict candidate the user accepted."
     )
-    conflicts: list[ConflictCandidate] = Field(default_factory=list)
-    selections: list[ConflictSelection] = Field(default_factory=list)
-    conflict_snapshot: CaseSnapshot | None = None
+    conflicts: list[ConflictCandidate] = Field(
+        default_factory=list,
+        description="Batch only: the stored ConflictOutcome.conflicts, unchanged.",
+    )
+    selections: list[ConflictSelection] = Field(
+        default_factory=list,
+        description=(
+            "Batch only: exactly one choice per conflict; accepted=true uses the new "
+            "value, false keeps the existing one."
+        ),
+    )
+    conflict_snapshot: CaseSnapshot | None = Field(
+        default=None,
+        description=(
+            "Batch only: the stored ConflictOutcome.conflict_snapshot, unchanged. "
+            "The request's case_snapshot must carry its snapshot_id and equal state."
+        ),
+    )
     confirmed_at: AwareDatetime = Field(
         description="When the user confirmed; used as the planning as-of date."
     )
@@ -2291,7 +2306,13 @@ class ConflictOutcome(AgentSchema):
     evidence_records: list[EvidenceRecord] = Field(
         description="Conflict source evidence and its parents to retain for confirmation."
     )
-    conflict_snapshot: CaseSnapshot | None = None
+    conflict_snapshot: CaseSnapshot = Field(
+        description=(
+            "Case state the conflicts were found against, with the conflict evidence "
+            "already merged in. BE stores it whole and returns it unchanged as "
+            "ConflictConfirmedTrigger.conflict_snapshot."
+        )
+    )
     message_code: Literal["CONFIRM_CONFLICT"] = Field(
         description="Caller instruction to request explicit user confirmation."
     )
@@ -2314,22 +2335,20 @@ class ConflictOutcome(AgentSchema):
         if referenced - known_evidence:
             raise ValueError("conflict outcome contains unresolved evidence refs")
         baseline = self.conflict_snapshot
-        if baseline is not None:
-            if baseline.case_id != self.case_id or baseline.snapshot_id != self.snapshot_id:
-                raise ValueError("conflict snapshot must match its outcome Case and snapshot ID")
-            stored = {item.evidence_id: item for item in baseline.evidence_records}
-            if any(stored.get(item.evidence_id) != item for item in self.evidence_records):
-                raise ValueError("conflict evidence must be retained unchanged in its snapshot")
+        if baseline.case_id != self.case_id or baseline.snapshot_id != self.snapshot_id:
+            raise ValueError("conflict snapshot must match its outcome Case and snapshot ID")
+        stored = {item.evidence_id: item for item in baseline.evidence_records}
+        if any(stored.get(item.evidence_id) != item for item in self.evidence_records):
+            raise ValueError("conflict evidence must be retained unchanged in its snapshot")
         for conflict in self.conflicts:
             conflict.assert_integrity()
             if conflict.snapshot_id != self.snapshot_id:
                 raise ValueError("conflict does not match outcome snapshot")
-            if baseline is not None:
-                current = next((item for item in baseline.facts if item.field_path == conflict.field_path), None)
-                if current is None or current.status != conflict.committed_status or not case_field_values_equal(
-                    conflict.field_path, current.value, conflict.committed_value,
-                ):
-                    raise ValueError("conflict committed value must match its stored snapshot")
+            current = next((item for item in baseline.facts if item.field_path == conflict.field_path), None)
+            if current is None or current.status != conflict.committed_status or not case_field_values_equal(
+                conflict.field_path, current.value, conflict.committed_value,
+            ):
+                raise ValueError("conflict committed value must match its stored snapshot")
         return self
 
 
