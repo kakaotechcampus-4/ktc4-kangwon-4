@@ -34,7 +34,12 @@ from app.agent.claim_safety import (
     is_overconfident,
     references_other_known_label,
 )
-from app.agent.enrichment import build_conflict_overlays, evidence_records_equal, same_fact_value
+from app.agent.enrichment import (
+    build_conflict_overlays,
+    build_fact_overlays,
+    evidence_records_equal,
+    same_fact_value,
+)
 from app.agent.guardrails import GuardrailViolation, ensure_no_sensitive_text
 from app.agent.procedure_tool.rules import procedure_plan_constraints
 from app.agent.projection import (
@@ -43,6 +48,7 @@ from app.agent.projection import (
 )
 from app.agent.prompts import review_messages
 from app.agent.schemas import (
+    CaseFieldKey,
     ClaimType,
     Component,
     ConflictConfirmedTrigger,
@@ -54,6 +60,7 @@ from app.agent.schemas import (
     FreshnessStatus,
     InfoAnalysisResult,
     MissingEvidence,
+    MutationSet,
     ProcedureActionTarget,
     ProcedureFinding,
     ProcedureLookupResult,
@@ -420,6 +427,8 @@ def _validate_mutation_provenance(
             )
     snapshot_facts = {fact.field_path: fact for fact in subject.snapshot.facts}
     for candidate in mutations.fact_changes:
+        if candidate.field_path not in CaseFieldKey:
+            raise ReviewIntegrityError("fact mutation must reference a stored Case field")
         if candidate.source_type == FactChangeSourceType.CONFIRMED_CONFLICT:
             if not isinstance(subject.trigger, ConflictConfirmedTrigger):
                 raise ReviewIntegrityError(
@@ -807,8 +816,26 @@ def _deterministic_safety_review(
     issues: list[ReviewIssue] = []
     missing: list[MissingEvidence] = []
     draft = subject.supervisor_draft
+    # 반환 목록과 검수 원본은 그대로 두고, 이번 판단의 직원·보험 정보도 검수한다.
+    mutations = MutationSet(
+        fact_changes=[
+            *draft.mutations.fact_changes,
+            *[
+                change
+                for source in subject.source_results
+                if isinstance(source.output, InfoAnalysisResult)
+                for change in build_fact_overlays(
+                    subject.snapshot, source.output, source.meta.call_id,
+                )
+                if change.field_path not in CaseFieldKey
+            ],
+        ],
+        procedure_progress_changes=draft.mutations.procedure_progress_changes,
+        support_match_updates=draft.mutations.support_match_updates,
+    )
     expected_resolved = resolved_blocker_candidates(
-        subject.snapshot, subject.known_procedure_steps, draft.mutations, procedure_bindings,
+        subject.snapshot, subject.known_procedure_steps, mutations, procedure_bindings,
+        sources=subject.source_results,
     )
     if draft.resolved_blocker_candidate_ids != expected_resolved:
         issues.append(_issue(
@@ -959,7 +986,7 @@ def _deterministic_safety_review(
         subject.snapshot,
         subject.known_procedure_steps,
         subject.source_results,
-        draft.mutations,
+        mutations,
         context.evidence_by_id,
         procedure_bindings,
     )
@@ -969,8 +996,9 @@ def _deterministic_safety_review(
         missing_info_fields(
             subject.snapshot,
             subject.source_results,
-            draft.mutations,
+            mutations,
             procedure_bindings,
+            known_procedure_steps=subject.known_procedure_steps,
         ),
     ):
         issues.append(
@@ -988,7 +1016,10 @@ def _deterministic_safety_review(
         and candidate["target"] == action.target.model_dump(mode="json")
         for candidate in build_action_candidates(
             subject.source_results, context.evidence_by_id, procedure_bindings,
-            procedure_progress=effective_procedure_progress(subject.snapshot, draft.mutations),
+            procedure_progress=effective_procedure_progress(
+                subject.snapshot, mutations, known_steps=subject.known_procedure_steps,
+                procedure_bindings=procedure_bindings,
+            ),
         )
     ):
         issues.append(
@@ -1001,7 +1032,8 @@ def _deterministic_safety_review(
             )
         )
     for path, reason in procedure_plan_constraints(
-        subject.known_procedure_steps, subject.snapshot, draft.mutations, draft.decision
+        subject.known_procedure_steps, subject.snapshot, mutations, draft.decision,
+        procedure_bindings=procedure_bindings,
     ):
         issues.append(
             _issue(

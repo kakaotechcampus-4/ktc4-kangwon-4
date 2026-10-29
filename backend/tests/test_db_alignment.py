@@ -10,29 +10,38 @@ import asyncio
 import hashlib
 import json
 from datetime import datetime, timezone
+from unittest.mock import Mock
 from uuid import UUID
 
 import pytest
 from pydantic import ValidationError
 from sqlalchemy import Text
-from test_action_codes import StubModel, action_payload, supervisor_request
+from test_action_codes import StubModel, action_payload, source, supervisor_request
 
+from app.agent.review_tool import ReviewTool
 from app.agent.procedure_tool.rules import procedure_constraints
 from app.agent.schemas import (
     Blocker,
     CaseSnapshot,
     EvidenceRecord,
+    FactCandidate,
     KnownProcedureStep,
     NextAction,
+    ProcedureEligibility,
     ProcedureLookupResult,
     ProcedureSourceDocument,
+    ReviewedPlanOutcome,
+    ReviewProof,
+    ReviewSubject,
 )
 from app.agent.supervisor.agent import SupervisorAgent
 from app.agent.support_agent.agent import SupportAgent
 from app.agent.support_agent.models import ReviewedSupportCatalog
 from app.be.models.blocker import Blocker as BlockerRow
+from app.be.models.case import Case
 from app.be.models.case_history import CaseHistory
 from app.be.models.evidence import Evidence as EvidenceRow
+from app.be.services import decision_record
 from scripts.evaluate_planning import CASES, build_case_snapshot
 
 NOW = datetime(2026, 9, 29, tzinfo=timezone.utc)
@@ -282,3 +291,90 @@ def test_intake_snapshot_uses_a_db_compatible_evidence_hash():
     snapshot, text = build_case_snapshot(CASES["benchmark_case1"])
 
     assert snapshot.evidence_records[0].content_hash == hashlib.sha256(text.encode()).hexdigest()
+
+
+@pytest.mark.parametrize("stored_count", [None, 7])
+def test_reviewed_staff_facts_keep_internal_context_and_save_only_case_fields(monkeypatch, stored_count):
+    async def reviewed_outcome():
+        request = supervisor_request()
+        request.known_procedure_steps[0].eligibility_conditions = [
+            ProcedureEligibility(condition_key="pension_enrolled", condition_value="true"),
+        ]
+        text = "직원은 2명이며 고용 이력과 네 보험 가입 이력이 있습니다."
+        request.trigger.input.redacted_text = text
+        user_evidence = evidence(
+            evidence_id="synthetic-staff-report", source_type="USER_INPUT",
+            source_ref=request.trigger.input.input_event_id, excerpt=text,
+            content_hash=hashlib.sha256(text.encode()).hexdigest(),
+        )
+        info = request.source_results[1].output.model_copy(deep=True)
+        info.evidence_records = [user_evidence]
+        info.fact_candidates = [
+            FactCandidate(
+                candidate_id=UUID(int=100 + index), operation="SET", field_path=field,
+                value_type="INTEGER" if field == "employee_count" else "BOOLEAN", value=value,
+                source_span={"input_event_id": request.trigger.input.input_event_id,
+                             "text": text, "start_offset": 0, "end_offset": len(text)},
+                source_evidence_refs=[user_evidence.evidence_id], confidence_bps=9500,
+                requires_confirmation=False, reason_summary="합성 직원·보험 이력 보고",
+            )
+            for index, (field, value) in enumerate([
+                ("employee_count", 2), ("had_employees", True), ("pension_enrolled", True),
+                ("health_insurance_enrolled", True), ("employment_insurance_enrolled", True),
+                ("industrial_accident_insurance_enrolled", True),
+            ])
+        ]
+        request.source_results[1] = source(info)
+        original_info = request.source_results[1].model_dump_json()
+        draft = await SupervisorAgent(StubModel(), max_local_attempts=1).draft(request)
+        assert [item.field_path for item in draft.mutations.fact_changes] == ["employee_count"]
+        assert draft.next_action.action_code == "CONFIRM_TAX_CLOSURE_REQUIREMENTS"
+        subject = ReviewSubject.create(
+            schema_version="agent-io/2.0", review_subject_id=UUID(int=90), review_attempt=1,
+            run_id=UUID(int=2), case_id=1, trigger=request.trigger, snapshot=request.case_snapshot,
+            known_procedure_steps=request.known_procedure_steps,
+            source_results=request.source_results, supervisor_draft=draft,
+        )
+        result = await ReviewTool(StubModel(), max_output_attempts=1).review(subject)
+        assert request.source_results[1].model_dump_json() == original_info
+        meta = request.source_results[1].meta.model_copy(
+            update={"component": "REVIEW_TOOL", "call_id": UUID(int=91)},
+        )
+        return ReviewedPlanOutcome(
+            outcome_type="REVIEWED_PLAN", review_subject=subject,
+            review_proof=ReviewProof.from_passed_review(
+                subject=subject, result=result, review_meta=meta, reviewed_at=NOW,
+            ),
+        )
+
+    outcome = asyncio.run(reviewed_outcome())
+    before = outcome.model_dump_json()
+    case = Case(id=1, member_id=1, business_type="카페", lease_status="OWNED", employee_count=stored_count)
+    history = CaseHistory(id=2, case_id=1, source="USER_INPUT", raw_input="합성 직원 보고", judgment_status="PENDING")
+    session, fact_writer, record_writer = Mock(), Mock(), Mock()
+    monkeypatch.setattr(decision_record.case_crud, "get_case_by_id", lambda *_: case)
+    monkeypatch.setattr(decision_record.blocker_crud, "create_blocker", Mock(return_value=Mock(id=1)))
+    monkeypatch.setattr(decision_record, "_save_evidence_records", Mock())
+    monkeypatch.setattr(decision_record.case_field_history_crud, "create_case_field_history", fact_writer)
+    monkeypatch.setattr(decision_record.evidence_crud, "create_decision_record", record_writer)
+    if stored_count is not None:
+        with pytest.raises(decision_record.StaleJudgmentError, match="employee_count"):
+            decision_record.save_reviewed_plan(session, history, outcome)
+        fact_writer.assert_not_called()
+        record_writer.assert_not_called()
+        session.commit.assert_not_called()
+        assert case.employee_count == stored_count
+    else:
+        decision_record.save_reviewed_plan(session, history, outcome)
+        assert case.employee_count == 2
+        fact_writer.assert_called_once()
+        saved = fact_writer.call_args.args[1]
+        assert (saved.canonical_field, saved.before_value, saved.after_value) == ("employee_count", None, "2")
+        record_writer.assert_called_once()
+        assert record_writer.call_args.args[1].subject_digest == outcome.review_subject.subject_digest
+        session.commit.assert_called_once()
+        assert history.judgment_status == "DONE"
+    outcome.assert_integrity()
+    assert len(outcome.review_subject.source_results[1].output.fact_candidates) == 6
+    assert len(outcome.review_subject.supervisor_draft.mutations.fact_changes) == 1
+    assert outcome.model_dump_json() == before

@@ -164,3 +164,118 @@ export interface CasesEnvelope {
    */
   requested_field_paths: string[] | null
 }
+
+/**
+ * 판단이 바꾼 Case 칸 하나. 재계획 결과의 "방금 반영된 내용" 이 된다.
+ *
+ * **값이 서버 쪽 표기 그대로 글자로 온다.** BE 가 원래 값을 파이썬 `str()` 로 적어서,
+ * 선택값은 `"FULL"`, 예/아니오는 `"True"`, 숫자는 `"3"` 이다. 화면 말로 바꾸는 것은 어댑터가 한다.
+ *
+ * `null` 은 그 칸이 비어 있었다(또는 비워졌다)는 뜻이다.
+ */
+export interface FieldChangeResponse {
+  /** 칸 이름. `requested_field_paths` 와 같은 어휘다 */
+  field: string
+  stored_value: string | null
+  new_value: string | null
+}
+
+/**
+ * 기록과 어긋나 사장님 확인을 기다리는 항목 하나.
+ *
+ * `id` 는 충돌 결정을 보낼 때 어느 항목에 대한 답인지 가리키는 번호다.
+ *
+ * `stored_value` 는 기록이 비어 있으면 `null` 이 아니라 **글자 `"UNKNOWN"`** 으로 온다.
+ * BE 가 빈칸을 못 받는 자리에 적으면서 그렇게 바꾼다.
+ */
+export interface ConflictItemResponse {
+  id: number
+  field: string
+  stored_value: string | null
+  proposed_value: string
+}
+
+/**
+ * `GET /cases/results` 응답. `/results` 에 들어올 때 부른다.
+ *
+ * 결과를 보낼 대상(`case_history_id`)과 지금 판단 상태를 함께 준다. 결과는 **가장 최근
+ * 판단에 대해서만** 보낼 수 있어서, 이 번호 없이 보내면 서버가 409 로 돌려보낸다.
+ *
+ * 상태마다 채워지는 칸이 다르다. 안 쓰는 칸은 `null` 로 온다.
+ *   DONE             case_history_id · next_action
+ *   PENDING          case_history_id
+ *   NEEDS_MORE_INFO  case_history_id · questions_for_user
+ *   FAILED           case_history_id · recovery_action_code · requested_field_paths
+ *   CONFLICT         raw_input · conflicts (번호는 없다 — 충돌을 먼저 풀어야 한다)
+ */
+export interface CaseResultsEntryResponse {
+  judgment_status: JudgmentStatus
+  case_history_id: number | null
+  raw_input: string | null
+  conflicts: ConflictItemResponse[] | null
+  next_action: NextActionResponse | null
+  questions_for_user: string[] | null
+  recovery_action_code: RecoveryActionCode | null
+  requested_field_paths: string[] | null
+}
+
+/** `POST /cases/results` 로 보내는 것 */
+export interface CaseResultsSubmitRequest {
+  /** 사장님이 적은 글 그대로 */
+  raw_input: string
+  /** 이 결과가 어느 판단에 대한 것인지. `GET /cases/results` 에서 받은 번호다 */
+  case_history_id: number
+}
+
+/**
+ * `POST /cases/results` 응답. **접수 번호만 온다.**
+ *
+ * 판단은 뒤에서 돌고 몇 분이 걸릴 수 있어서, 결과는 이 번호로 따로 물어봐야 한다.
+ */
+export interface CaseResultsSubmitAcceptedResponse {
+  case_history_id: number
+}
+
+/**
+ * 보낸 결과를 판단한 상태.
+ *
+ *   PENDING          아직 판단 중 — 잠시 후 다시 물어봐야 한다
+ *   UPDATED          Case 가 바뀌었고 다음 할 일을 다시 정했다
+ *   NO_CHANGE        바뀐 것은 없고 다음 할 일도 그대로다
+ *   NEEDS_MORE_INFO  정하려면 사장님께 더 여쭤봐야 한다
+ *   CONFLICT         말씀이 기록과 어긋나 어느 쪽이 맞는지 확인해야 한다
+ *   FAILED           판단 실패
+ *
+ * `JudgmentStatus` 와 마찬가지로 이것이 다가 아닐 수 있다. 모르는 값은 어댑터가 가려낸다.
+ */
+export type ResultsSubmitResult =
+  | 'PENDING'
+  | 'UPDATED'
+  | 'NO_CHANGE'
+  | 'NEEDS_MORE_INFO'
+  | 'CONFLICT'
+  | 'FAILED'
+
+/**
+ * `GET /cases/results/status?case_history_id=` 응답.
+ *
+ * 상태마다 채워지는 칸이 다르다. 안 쓰는 칸은 `null` 로 온다.
+ *   UPDATED · NO_CHANGE  changes · blocker · next_action (NO_CHANGE 는 changes 가 빈 목록)
+ *   NEEDS_MORE_INFO      questions_for_user
+ *   CONFLICT             raw_input · conflicts
+ *   FAILED               recovery_action_code · requested_field_paths
+ *
+ * `raw_input` 이 돌아오므로 충돌 화면에 보여줄 문장을 FE 가 따로 들고 다니지 않아도 된다.
+ */
+export interface CaseResultsSubmitResponse {
+  result: ResultsSubmitResult
+  changes: FieldChangeResponse[] | null
+  /** 지금 진행을 막고 있는 것. 제목 한 줄 */
+  blocker: string | null
+  next_action: NextActionResponse | null
+  questions_for_user: string[] | null
+  raw_input: string | null
+  conflicts: ConflictItemResponse[] | null
+  recovery_action_code: RecoveryActionCode | null
+  requested_field_paths: string[] | null
+}

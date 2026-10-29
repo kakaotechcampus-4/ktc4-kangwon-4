@@ -3,8 +3,9 @@ import { Navigate, useLocation, useNavigate } from 'react-router'
 
 import { AppShell } from '../components/AppShell'
 import { ConflictChoice } from '../components/ConflictChoice'
+import { NoticeCard } from '../components/NoticeCard'
 import { PendingCard } from '../components/PendingCard'
-import { MOCK_SWITCH_ENABLED } from '../lib/mockSwitch'
+import { usesMockData } from '../lib/auth'
 import { conflictConfirm, pendingMessages, simulateConfirm } from '../mocks/resultFlow'
 import type { ConfirmView, ConflictSide } from '../types/view'
 
@@ -15,12 +16,21 @@ import type { ConfirmView, ConflictSide } from '../types/view'
  *
  * `rollback` API가 계약에서 빠져, 값을 되돌릴 수 있는 지점은 여기뿐이다.
  * 그래서 한 항목이라도 고르지 않으면 진행할 수 없게 한다.
+ *
+ * **실서버에서는 아직 고른 것을 보내지 않는다.** 충돌 결정을 받는 API(#108)가 머지 전이라,
+ * 실제 충돌을 보여주고 고르게는 하되 보내는 버튼만 잠근다. 보낼 곳이 생기면 버튼만 풀면
+ * 되도록 항목마다 서버 번호(`referenceId`)를 이미 들고 있다.
  */
 export function ConfirmChangePage() {
   const { search, state } = useLocation()
   const navigate = useNavigate()
 
-  const view = (state as ConfirmView | null) ?? (MOCK_SWITCH_ENABLED ? conflictConfirm : null)
+  // 가짜 토큰으로 서버를 부르면 곧바로 401 이라, 그 경우에는 아예 부르지 않는다
+  const usesMock = usesMockData(search)
+
+  // 주소로 직접 열었을 때는 넘겨받은 충돌이 없다. Mock 으로 볼 때만 준비된 것으로 그린다 —
+  // 없는 충돌을 지어내 보여주면 사장님이 기록에 없는 것을 고르게 된다
+  const view = (state as ConfirmView | null) ?? (usesMock ? conflictConfirm : null)
   const [choices, setChoices] = useState<Record<string, ConflictSide>>({})
   const [isPending, setIsPending] = useState(false)
 
@@ -49,19 +59,15 @@ export function ConfirmChangePage() {
   const { rawInput, conflicts } = view
   const allDecided = conflicts.every((conflict) => choices[conflict.key])
 
+  // 보낼 곳이 없는 동안은 다 골라도 누를 수 없다. 눌리는데 아무 일도 없으면 고장으로 읽힌다
+  const canSend = usesMock
+
   async function handleConfirm() {
     setIsPending(true)
 
-    // TODO(API): POST /cases/{caseId}/results/confirm 으로 선택값을 보낸다.
-    // 요청 형태는 confirmedChanges: [{ field, value }] 배열이다.
-    // 진행 중인 요청 자체를 끊는 것은 그때 AbortController로 처리한다.
-    //
-    // 이 요청에는 동시성 보호가 없다 — `/results`의 expectedVersion에 해당하는 필드가
-    // 계약에 빠져 있다(be-agent-integration-requirements.md §4에 P0 결정으로 기록됨).
-    // 같은 결정이 두 번
-    // 도착해도 서버가 걸러낼 수단이 없으므로, 보호 방식이 정해지면 함께 맞춘다.
-    // 실패 시 대기 상태에서 빠져나올 경로도 그때 함께 만든다 — 지금은 Mock이라
-    // 실패하지 않지만, fetch로 바꾸면 오류가 나도 화면이 잠긴 채로 남는다.
+    // TODO(#108): 실서버에서는 고른 쪽을 항목의 `referenceId` 와 함께 보내고, 판단이 끝날
+    // 때까지 기다린다. 보내기·기다리기 실패에서 빠져나올 길도 그때 `/results` 와 같게 만든다 —
+    // 지금은 Mock 이라 실패하지 않지만, 서버로 바꾸면 오류가 나도 화면이 잠긴 채로 남는다.
     const replan = await simulateConfirm(choices)
     if (!alive.current) return
     // 이미 해결한 충돌 화면으로 뒤로 돌아가 같은 결정을 다시 제출하는 일을 막는다.
@@ -95,7 +101,7 @@ export function ConfirmChangePage() {
 
         <button
           type="button"
-          disabled={!allDecided}
+          disabled={!allDecided || !canSend}
           onClick={handleConfirm}
           className="min-h-13 w-full rounded-xl bg-gray-900 text-base font-bold text-white disabled:bg-gray-200 disabled:text-gray-400"
         >
@@ -105,6 +111,14 @@ export function ConfirmChangePage() {
 
       {isPending && <PendingCard messages={pendingMessages} />}
 
+      {!canSend && (
+        <NoticeCard
+          tone="NEUTRAL"
+          title="선택을 보내는 기능은 준비 중이에요."
+          description="고르신 내용은 아직 저장되지 않아요. 기록은 지금 그대로 남아 있습니다."
+          action={{ label: '지금 상황 보기', onClick: () => navigate({ pathname: '/case', search }) }}
+        />
+      )}
     </AppShell>
   )
 }

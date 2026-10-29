@@ -21,6 +21,19 @@ describe('ChangeList', () => {
     expect(screen.getByText('필요함')).toBeInTheDocument()
   })
 
+  it('바뀐 값이 없으면 미확인으로 보여준다', () => {
+    render(
+      <ChangeList
+        changes={[
+          { key: 'demolition_required', label: '철거 필요 여부', previousValue: '필요함', newValue: null },
+        ]}
+      />,
+    )
+
+    expect(screen.getByText('필요함')).toBeInTheDocument()
+    expect(screen.getByText('미확인')).toBeInTheDocument()
+  })
+
   it('이전 값이 있으면 그 값을 그대로 보여준다', () => {
     render(
       <ChangeList
