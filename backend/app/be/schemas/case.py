@@ -15,6 +15,7 @@ ConflictSide = Literal["PROPOSED", "STORED"]
 
 
 class CaseCreateRequest(BaseModel):
+    store_name: str | None = Field(default=None, max_length=50)
     business_type: str = Field(max_length=50)
     franchise_status: bool
     employee_count: int | None = Field(default=None, ge=0, le=1000)
@@ -27,6 +28,7 @@ class CaseCreateResponse(BaseModel):
 
     id: int
     member_id: int
+    store_name: str | None
     business_type: str
     franchise_status: bool
     employee_count: int | None
@@ -47,6 +49,7 @@ class CaseGetDetailResponse(BaseModel):
 
     id: int
     member_id: int
+    store_name: str | None
     business_type: str
     franchise_status: bool
     employee_count: int | None

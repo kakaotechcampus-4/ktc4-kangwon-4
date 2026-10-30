@@ -87,7 +87,7 @@ def test_the_case_itself_shows_the_restored_free_text(case_with_two_submissions)
     case = SimpleNamespace(
         id=CASE_ID,
         model_dump=lambda: dict(
-            id=CASE_ID, member_id=1, business_type="한식음식점", franchise_status=False,
+            id=CASE_ID, member_id=1, store_name=None, business_type="한식음식점", franchise_status=False,
             employee_count=2, lease_status="LEASED_PAID", restoration_status="IN_PROGRESS",
             restoration_scope="PARTIAL", restoration_scope_detail="서울특별시 강남구 [주소]만",
             demolition_required="NOT_REQUIRED", planned_closure_date=None,

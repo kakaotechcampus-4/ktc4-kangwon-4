@@ -12,6 +12,8 @@ class Case(TimestampMixin, table=True):
     id: int | None = Field(default=None, sa_column=Column(BigInteger, primary_key=True, autoincrement=True))
     member_id: int = Field(sa_column=Column(BigInteger, ForeignKey("members.id"), nullable=False, unique=True))
 
+    # AI 판단에 쓰지 않는다.
+    store_name: str | None = Field(default=None, sa_column=Column(String(50), nullable=True))
     business_type: str = Field(max_length=50)
     franchise_status: bool = Field(default=False)
     employee_count: int | None = Field(default=None)
