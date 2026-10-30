@@ -51,6 +51,7 @@ MEMBERS ──1:N──► CASE ──1:N──► CASE_FIELD_HISTORY
 |---|---|---|---|---|---|
 | id | BIGINT | PK | NOT NULL, AUTO_INCREMENT | 1 | |
 | member_id | BIGINT | FK | NOT NULL | 1 | |
+| store_name | VARCHAR(50) | | NULLABLE | `"강원 커피"` | 화면 표시용 가게 이름. AI 판단에 쓰지 않음 |
 | business_type | VARCHAR | | NOT NULL | `"카페"` | |
 | franchise_status | BOOLEAN | | NOT NULL, DEFAULT false | `false` | |
 | employee_count | INT | | NULLABLE | `2` | |
