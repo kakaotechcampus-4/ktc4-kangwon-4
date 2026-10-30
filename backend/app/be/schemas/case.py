@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 LeaseStatus = Literal["LEASED_PAID", "LEASED_FREE", "OWNED"]
 CaseStatus = Literal["IN_PROGRESS", "COMPLETED"]
@@ -15,9 +15,9 @@ ConflictSide = Literal["PROPOSED", "STORED"]
 
 
 class CaseCreateRequest(BaseModel):
-    business_type: str
+    business_type: str = Field(max_length=50)
     franchise_status: bool
-    employee_count: int | None = None
+    employee_count: int | None = Field(default=None, ge=0, le=1000)
     lease_status: LeaseStatus
     planned_closure_date: date | None = None
 
