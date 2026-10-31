@@ -1,29 +1,38 @@
 """Replanning analyzes supplied remaining topics, not only the latest utterance."""
 
 import asyncio
+import json
 from copy import deepcopy
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
-from test_action_codes import NOW, result_fixes_xfail, supervisor_request
+from test_action_codes import NOW, StubModel, result_fixes_xfail, supervisor_request
 from test_blocker_candidates import ChoiceModel, request_with_state
+from test_procedure_only_graph import graph_run_inputs
 
 from app.agent.graph import AgentGraph
+from app.agent.enrichment import build_fact_overlays
 from app.agent.info_agent.agent import (
     InfoAnalysisAgent,
     InfoAnalysisGuardrailError,
 )
-from app.agent.review_tool import ReviewTool
+from app.agent.review_tool import ReviewIntegrityError, ReviewTool
 from app.agent.schemas import (
     CASE_FIELD_SPECS,
     AgentGraphInput,
     CaseFieldKey,
     CaseSnapshot,
     InfoAnalysisInput,
+    ProcedureEligibility,
     ProcedureLookupResult,
+    ProcedureProgressChangeCandidate,
+    ReviewSubject,
+    canonical_digest,
 )
 from app.agent.supervisor.agent import SupervisorAgent
+from app.common.agent_dto import ProcedureCompletionConfirmation
+from app.common.agent_service import build_planning_input
 
 TAX = "FILE_TAX_BUSINESS_CLOSURE"
 FOOD = "FILE_FOOD_SERVICE_CLOSURE"
@@ -33,7 +42,7 @@ RESTORATION = "CONFIRM_RESTORATION_SCOPE"
 def request_for_replanning(status="NOT_REQUIRED", scope="NOT_REQUIRED"):
     base = supervisor_request()
     data = base.case_snapshot.model_dump(mode="json")
-    for field, value in (("restoration_scope", scope), ("restoration_status", status)):
+    for field, value in (("restoration_scope", scope), ("restoration_status", status), ("demolition_required", "NOT_REQUIRED")):
         data["facts"].append(
             {
                 "field_path": field,
@@ -366,13 +375,15 @@ def test_cross_procedure_source_failure_names_allowed_documents_on_retry():
 
 def test_not_required_restoration_does_not_hide_unknown_demolition():
     request = request_for_replanning()
+    request.case_snapshot.facts = [fact for fact in request.case_snapshot.facts if fact.field_path != "demolition_required"]
     request.case_snapshot.procedure_progress = []
     assert RESTORATION in InfoAnalysisAgent._analysis_step_codes(request)
     projection = InfoAnalysisAgent._prompt_input(request)
     assert projection["procedure_evidence_by_step"][FOOD] == ["doc2"]
     completed = request_for_replanning("COMPLETED", "FULL")
+    completed.case_snapshot.facts = [fact for fact in completed.case_snapshot.facts if fact.field_path != "demolition_required"]
     completed.case_snapshot.procedure_progress = []
-    assert RESTORATION not in InfoAnalysisAgent._analysis_step_codes(completed)
+    assert RESTORATION in InfoAnalysisAgent._analysis_step_codes(completed)
 
 
 def test_new_fact_still_requires_a_literal_user_source_span():
@@ -398,12 +409,12 @@ def test_new_fact_still_requires_a_literal_user_source_span():
 
 
 @pytest.mark.parametrize("already_completed", [True, False])
-def test_repeated_committed_progress_is_ignored_but_new_completion_stays_guarded(
+def test_quoted_progress_is_ignored_if_already_completed_and_otherwise_retained(
     already_completed,
 ):
     request = request_for_replanning()
     request.input.redacted_text = (
-        "임대인에게 확인했습니다. 원상복구와 철거는 모두 필요하지 않습니다."
+        "임대인에게 원상복구 범위와 철거 필요 여부를 모두 확인했습니다."
     )
     if not already_completed:
         request.case_snapshot.procedure_progress[0].status = "NOT_STARTED"
@@ -416,17 +427,17 @@ def test_repeated_committed_progress_is_ignored_but_new_completion_stays_guarded
             "observed_status": "COMPLETED",
             "source_text": request.input.redacted_text,
             "requires_confirmation": False,
-            "reason_summary": "모델이 불필요를 완료로 반복 해석한 합성 사례",
+            "reason_summary": "사용자의 범위 확인 완료 보고",
         }
     ]
     agent = InfoAnalysisAgent(Responses(raw), max_local_attempts=1)
+    result = asyncio.run(agent.analyze(request))
     if already_completed:
-        result = asyncio.run(agent.analyze(request))
         assert result.procedure_progress_observations == []
-        assert result.procedure_findings[-1].current_status.value == "COMPLETED"
     else:
-        with pytest.raises(InfoAnalysisGuardrailError):
-            asyncio.run(agent.analyze(request))
+        observation, = result.procedure_progress_observations
+        assert observation.source_span.text == request.input.redacted_text
+        assert observation.requires_confirmation is True
 
 
 @pytest.mark.parametrize(
@@ -467,10 +478,10 @@ def test_document_based_progress_is_rejected_then_retried_without_losing_finding
     assert request.case_snapshot.model_dump(mode="json") == before
     feedback = " ".join(item["content"] for item in client.messages[1])
     assert f"Rejected procedure_observations for: {RESTORATION}" in feedback
-    assert "Still analyze the documents in procedure_findings" in feedback
+    assert "Still analyze the official documents" in feedback
 
 
-def test_explicit_user_progress_is_still_extracted():
+def test_explicit_free_text_progress_retains_its_exact_user_source():
     request = request_for_replanning()
     request.input.redacted_text = "합성 절차 3을 진행 중입니다."
     request.case_snapshot.procedure_progress = []
@@ -486,10 +497,323 @@ def test_explicit_user_progress_is_still_extracted():
             "reason_summary": "사용자가 본인의 실행 상태를 명시함",
         }
     ]
-    result = asyncio.run(InfoAnalysisAgent(Responses(raw)).analyze(request))
-    observation = result.procedure_progress_observations[0]
-    assert observation.observed_status == "IN_PROGRESS"
+    result = asyncio.run(InfoAnalysisAgent(Responses(raw), max_local_attempts=1).analyze(request))
+    observation, = result.procedure_progress_observations
     assert observation.source_span.text == request.input.redacted_text
+    observation.assert_input_integrity(request.input, {item.evidence_id: item for item in result.evidence_records})
+
+
+@pytest.mark.parametrize("report,status,submitted,held", [
+    ("준비사항을 확인했습니다", "IN_PROGRESS", False, False),
+    ("제출했습니다", "IN_PROGRESS", True, False),
+    ("기관 처리 결과가 완료된 것을 확인했습니다", "COMPLETED", True, False),
+    ("처리된 것 같은데 확실하지 않습니다", "COMPLETED", False, True),
+])
+def test_free_text_filing_report_retains_stages_and_holds_completion_for_owner(report, status, submitted, held):
+    request = request_for_replanning()
+    request.input.redacted_text = f"사업자등록 폐업신고를 {report}."
+    request.known_procedure_steps[0].step_name = "사업자등록 폐업신고"
+    before = request.case_snapshot.model_dump_json()
+    raw = output([finding(TAX, "doc1"), finding(FOOD, "doc2")])
+    raw["procedure_observations"] = [{
+        "step_code": TAX, "observed_status": status,
+        "source_text": request.input.redacted_text,
+        "requirements_confirmed": not held, "submitted": submitted,
+        "requires_confirmation": held,
+        "reason_summary": "모델이 사용자 실행 보고를 해석한 사례",
+    }]
+    result = asyncio.run(InfoAnalysisAgent(Responses(raw), max_local_attempts=1).analyze(request))
+    observation, = result.procedure_progress_observations
+    assert observation.observed_status == status
+    assert observation.submitted is submitted
+    assert observation.requires_confirmation is (held or status == "COMPLETED")
+    observation.assert_input_integrity(request.input, {item.evidence_id: item for item in result.evidence_records})
+    assert {item.procedure_step.step_code for item in result.procedure_findings} == {TAX, FOOD}
+    assert request.case_snapshot.model_dump_json() == before
+
+
+@pytest.mark.parametrize("held,tamper", [(False, False), (True, False), (False, True)])
+def test_quoted_progress_reaches_review_and_a_forged_event_is_rejected(held, tamper):
+    graph, request, _, _, _ = graph_run_inputs("RESULT_SUBMITTED")
+    request.trigger.input.redacted_text = "사업자등록 폐업신고를 준비 중입니다."
+    raw = output([finding(TAX, "doc1")])
+    raw["procedure_observations"] = [{
+        "step_code": TAX, "observed_status": "IN_PROGRESS",
+        "source_text": request.trigger.input.redacted_text,
+        "requires_confirmation": held, "reason_summary": "사용자의 신고 준비 보고",
+    }]
+    graph._info_agent = InfoAnalysisAgent(Responses(raw), clock=lambda: NOW, max_local_attempts=1)
+    before = request.model_dump_json()
+    outcome = asyncio.run(graph.run(request))
+    assert outcome.outcome_type == "REVIEWED_PLAN", outcome
+    outcome.assert_integrity()
+    assert request.model_dump_json() == before
+    subject = outcome.review_subject.model_copy(deep=True)
+    assert bool(subject.supervisor_draft.mutations.procedure_progress_changes) is not held
+    if not tamper:
+        return
+    source = next(item for item in subject.source_results if item.meta.component == "INFO_AGENT")
+    source.output.procedure_progress_observations[0].source_span.input_event_id = "another-event"
+    source.output_digest = canonical_digest(source.output)
+    forged = ReviewSubject.create(**{
+        key: getattr(subject, key) for key in type(subject).model_fields if key != "subject_digest"
+    })
+    client = StubModel()
+    with pytest.raises(ReviewIntegrityError):
+        asyncio.run(ReviewTool(client).review(forged))
+    assert client.calls == 0
+
+
+@pytest.mark.parametrize("submitted", [False, True])
+def test_completed_procedure_report_does_not_fail_the_remaining_plan(submitted):
+    info_request = request_for_replanning()
+    template = supervisor_request()
+    template.trigger.input.redacted_text = "원상복구 범위 확인을 진행 중입니다."
+    request = AgentGraphInput(
+        trigger=template.trigger, case_snapshot=info_request.case_snapshot,
+    )
+    raw = output([finding(TAX, "doc1"), finding(FOOD, "doc2"), finding(RESTORATION, "doc3")])
+    raw["procedure_observations"] = [{
+        "step_code": RESTORATION, "observed_status": "IN_PROGRESS",
+        "source_text": template.trigger.input.redacted_text,
+        "submitted": submitted, "requires_confirmation": False,
+        "reason_summary": "이미 완료된 절차를 다시 언급한 보고",
+    }]
+    procedure = AsyncMock()
+    procedure.lookup.return_value = info_request.procedure_lookup_result
+    graph = AgentGraph(
+        info_agent=InfoAnalysisAgent(Responses(raw), max_local_attempts=1),
+        procedure_tool=procedure, support_agent=AsyncMock(),
+        supervisor=SupervisorAgent(ChoiceModel(), max_local_attempts=1),
+        review_tool=ReviewTool(StubModel()),
+        known_procedure_steps=info_request.known_procedure_steps, clock=lambda: NOW,
+    )
+    before = request.model_dump_json()
+    outcome = asyncio.run(graph.run(request))
+    assert outcome.outcome_type == "REVIEWED_PLAN", outcome
+    outcome.assert_integrity()
+    assert outcome.review_subject.supervisor_draft.mutations.procedure_progress_changes == []
+    assert outcome.review_subject.supervisor_draft.next_action.target.procedure_step.step_code in {TAX, FOOD}
+    assert request.model_dump_json() == before
+
+
+def completion_report_graph(report, *, information=True):
+    info_request = request_for_replanning()
+    template = supervisor_request()
+    template.trigger.input.redacted_text = report
+    request = AgentGraphInput(
+        trigger=template.trigger.model_dump() | {"trigger_type": "RESULT_SUBMITTED"},
+        case_snapshot=info_request.case_snapshot,
+    )
+    raw = output([finding(TAX, "doc1"), finding(FOOD, "doc2")])
+    raw["procedure_observations"] = [{
+        "step_code": TAX, "observed_status": "COMPLETED", "source_text": report,
+        "requirements_confirmed": True, "submitted": True,
+        "requires_confirmation": False, "reason_summary": "모델이 해석한 기관 처리 완료",
+    }]
+    procedure = AsyncMock()
+    procedure.lookup.return_value = info_request.procedure_lookup_result
+    graph = AgentGraph(
+        info_agent=InfoAnalysisAgent(Responses(raw), max_local_attempts=1),
+        procedure_tool=procedure, support_agent=AsyncMock(),
+        supervisor=SupervisorAgent(ChoiceModel(information=information), max_local_attempts=1),
+        review_tool=ReviewTool(StubModel()),
+        known_procedure_steps=info_request.known_procedure_steps, clock=lambda: NOW,
+    )
+    return graph, request
+
+
+@pytest.mark.parametrize("report", [
+    "폐업 신고 아직 안 했어요.",
+    "사업자등록 폐업 신고의 기관 처리 결과가 완료된 것을 확인했습니다.",
+])
+@pytest.mark.parametrize("information", [True, False])
+def test_completion_report_stays_pending_until_owner_approval_even_when_model_says_done(report, information):
+    graph, request = completion_report_graph(report, information=information)
+    before = request.model_dump_json()
+    outcome = asyncio.run(graph.run(request))
+    assert outcome.outcome_type == "REVIEWED_PLAN", outcome
+    outcome.assert_integrity()
+    subject = outcome.review_subject
+    info = next(item.output for item in subject.source_results if item.meta.component == "INFO_AGENT")
+    observation, = info.procedure_progress_observations
+    assert observation.observed_status == "COMPLETED"
+    assert observation.requires_confirmation is True
+    assert subject.supervisor_draft.mutations.procedure_progress_changes == []
+    decision = subject.supervisor_draft.decision
+    assert any(item.candidate_id == "procedure:1" and "완료 보고" in item.description
+               for item in decision.blockers)
+    if information:
+        assert decision.decision_type == "NEEDS_MORE_INFO"
+        assert "완료" in " ".join(decision.questions_for_user)
+    else:
+        assert decision.decision_type == "ACTION"
+        assert decision.next_action.target.procedure_step.step_code == FOOD
+    assert request.model_dump_json() == before
+
+
+def completion_confirmation_request(request, outcome, confirmed):
+    subject = outcome.review_subject
+    info = next(item.output for item in subject.source_results if item.meta.component == "INFO_AGENT")
+    observation, = info.procedure_progress_observations
+    return build_planning_input(
+        trigger_type="RESULT_SUBMITTED", case_snapshot=request.case_snapshot,
+        user_input=request.trigger.input.model_copy(update={
+            "input_event_id": "synthetic-completion-choice", "redacted_text": "네" if confirmed else "아니오",
+        }),
+        client_event_id=request.trigger.client_event_id, trace_id=request.trace_id,
+        procedure_completion_confirmation=ProcedureCompletionConfirmation(
+            observation=observation, input=subject.trigger.input,
+            snapshot=subject.snapshot, confirmed=confirmed,
+        ),
+    )
+
+
+@pytest.mark.parametrize("confirmed", [True, False])
+def test_owner_completion_choice_uses_original_report_and_does_not_repeat_confirmation(confirmed):
+    graph, request = completion_report_graph("기관 처리 결과가 완료된 것을 확인했습니다.")
+    pending = asyncio.run(graph.run(request))
+    assert pending.outcome_type == "REVIEWED_PLAN", pending
+    choice = completion_confirmation_request(request, pending, confirmed)
+    raw = output([finding(TAX, "doc1"), finding(FOOD, "doc2")])
+    if not confirmed:
+        raw["procedure_observations"] = [{
+            "step_code": TAX, "observed_status": "COMPLETED", "source_text": "아니오",
+            "requires_confirmation": False, "reason_summary": "취소 답변을 완료로 오해한 모델",
+        }]
+    graph._info_agent = InfoAnalysisAgent(Responses(raw), max_local_attempts=1)
+    graph._supervisor = SupervisorAgent(ChoiceModel(), max_local_attempts=1)
+    before = choice.model_dump_json()
+    outcome = asyncio.run(graph.run(choice))
+    assert outcome.outcome_type == "REVIEWED_PLAN", outcome
+    outcome.assert_integrity()
+    draft = outcome.review_subject.supervisor_draft
+    assert draft.decision.decision_type == "ACTION"
+    assert draft.decision.questions_for_user == []
+    if confirmed:
+        change, = draft.mutations.procedure_progress_changes
+        assert change.procedure_step.step_code == TAX
+        assert change.proposed_status == "COMPLETED"
+        original = choice.trigger.procedure_completion_confirmation.observation
+        assert change.execution_evidence_refs == original.source_evidence_refs
+        assert draft.next_action.target.procedure_step.step_code == FOOD
+    else:
+        assert draft.mutations.procedure_progress_changes == []
+        assert draft.next_action.target.procedure_step.step_code in {TAX, FOOD}
+    assert choice.model_dump_json() == before
+
+
+def test_rejecting_completion_keeps_new_submission_report_and_other_facts():
+    graph, request = completion_report_graph("기관 처리 결과가 완료된 것을 확인했습니다.")
+    pending = asyncio.run(graph.run(request))
+    choice = completion_confirmation_request(request, pending, False)
+    choice.trigger.input.redacted_text = "아니요, 제출만 했어요. 직원은 2명입니다."
+    raw = output([finding(TAX, "doc1"), finding(FOOD, "doc2")])
+    raw["procedure_observations"] = [{
+        "step_code": TAX, "observed_status": "IN_PROGRESS", "source_text": "아니요, 제출만 했어요.",
+        "submitted": True, "requires_confirmation": False, "reason_summary": "완료가 아닌 제출 보고",
+    }]
+    raw["facts"] = [{
+        "operation": "SET", "field_path": "employee_count", "value_type": "INTEGER", "value": 2,
+        "source_text": "직원은 2명입니다.", "confidence_bps": 9500,
+        "requires_confirmation": False, "reason_summary": "확인 응답과 함께 알려준 직원 수",
+    }]
+    graph._info_agent = InfoAnalysisAgent(Responses(raw), max_local_attempts=1)
+    graph._supervisor = SupervisorAgent(ChoiceModel(), max_local_attempts=1)
+    before = choice.model_dump_json()
+    outcome = asyncio.run(graph.run(choice))
+    assert outcome.outcome_type == "REVIEWED_PLAN", outcome
+    outcome.assert_integrity()
+    mutations = outcome.review_subject.supervisor_draft.mutations
+    progress, = mutations.procedure_progress_changes
+    assert progress.procedure_step.step_code == TAX
+    assert progress.proposed_status == "IN_PROGRESS"
+    assert progress.proposed_submitted is True
+    fact, = mutations.fact_changes
+    assert (fact.field_path, fact.proposed_value) == ("employee_count", 2)
+    assert choice.model_dump_json() == before
+
+
+@pytest.mark.parametrize("tamper", ["input_event", "procedure", "status", "requirements", "submitted", "case"])
+def test_completion_confirmation_rejects_changed_original_or_current_state(tamper):
+    graph, request = completion_report_graph("기관 처리 결과가 완료된 것을 확인했습니다.")
+    pending = asyncio.run(graph.run(request))
+    choice = completion_confirmation_request(request, pending, True)
+    payload = choice.model_dump()
+    confirmation = payload["trigger"]["procedure_completion_confirmation"]
+    if tamper == "input_event":
+        confirmation["input"]["input_event_id"] = "another-original-report"
+        with pytest.raises(ValueError, match="progress span differs"):
+            AgentGraphInput.model_validate(payload)
+        return
+    if tamper == "procedure":
+        confirmation["observation"]["procedure_step"]["step_code"] = FOOD
+    elif tamper == "case":
+        payload["case_snapshot"]["case_id"] = 2
+    else:
+        payload["case_snapshot"]["procedure_progress"].append({
+            "procedure_step": confirmation["observation"]["procedure_step"],
+            "status": "IN_PROGRESS" if tamper == "status" else "NOT_STARTED",
+            "requirements_confirmed": tamper == "requirements", "submitted": tamper == "submitted",
+            "evidence_refs": ["synthetic-document"], "updated_at": NOW,
+        })
+    changed = AgentGraphInput.model_validate(payload)
+    graph._info_agent = InfoAnalysisAgent(
+        Responses(output([finding(TAX, "doc1"), finding(FOOD, "doc2")])), max_local_attempts=1,
+    )
+    before = changed.model_dump_json()
+    outcome = asyncio.run(graph.run(changed))
+    assert outcome.outcome_type == "SAFE_FAILURE", outcome
+    assert outcome.failed_component == "INFO_AGENT"
+    assert changed.model_dump_json() == before
+
+
+def test_independent_review_blocks_unapproved_completion_even_if_model_would_pass():
+    graph, request = completion_report_graph("기관 처리 결과가 완료된 것을 확인했습니다.")
+    pending = asyncio.run(graph.run(request))
+    subject = pending.review_subject.model_copy(deep=True)
+    info_source = next(item for item in subject.source_results if item.meta.component == "INFO_AGENT")
+    observation, = info_source.output.procedure_progress_observations
+    observation.requires_confirmation = False  # Supervisor까지 잘못 통과시킨 경우도 막는다.
+    info_source.output_digest = canonical_digest(info_source.output)
+    subject.supervisor_draft.mutations.procedure_progress_changes = [ProcedureProgressChangeCandidate(
+        candidate_id=uuid4(), procedure_step=observation.procedure_step,
+        before_status="NOT_STARTED", proposed_status="COMPLETED",
+        proposed_requirements_confirmed=observation.requirements_confirmed,
+        proposed_submitted=observation.submitted, reason_summary=observation.reason_summary,
+        execution_evidence_refs=observation.source_evidence_refs,
+        procedure_analysis_call_id=info_source.meta.call_id,
+    )]
+    forged = ReviewSubject.create(**{
+        key: getattr(subject, key) for key in type(subject).model_fields if key != "subject_digest"
+    })
+    client = StubModel()
+    with pytest.raises(ReviewIntegrityError, match="completion.*confirmation|confirmation.*completion"):
+        asyncio.run(ReviewTool(client).review(forged))
+    assert client.calls == 0
+
+
+@pytest.mark.parametrize("committed_status", ["NOT_STARTED", "COMPLETED"])
+def test_free_text_restoration_completion_preserves_committed_facts(committed_status):
+    request = request_for_replanning(status=committed_status, scope="FULL")
+    request.input.redacted_text = "원상복구 작업을 완료했습니다."
+    before = request.case_snapshot.model_dump_json()
+    raw = output([finding(TAX, "doc1"), finding(FOOD, "doc2")])
+    raw["facts"] = [{
+        "operation": "SET", "field_path": "restoration_status", "value_type": "ENUM",
+        "value": "COMPLETED", "source_text": request.input.redacted_text,
+        "confidence_bps": 9500, "requires_confirmation": False,
+        "reason_summary": "모델이 자유문장을 원상복구 완료로 해석한 사례",
+    }]
+    agent = InfoAnalysisAgent(Responses(raw), max_local_attempts=1)
+    if committed_status == "COMPLETED":
+        result = asyncio.run(agent.analyze(request))
+        assert result.fact_candidates == []
+        assert result.conflicts == []
+    else:
+        result = asyncio.run(agent.analyze(request))
+        assert result.conflicts[0].proposed_value == "COMPLETED"
+    assert request.case_snapshot.model_dump_json() == before
 
 
 RESTORATION_RESULT = "원상복구 범위는 없고 원상복구 작업은 필요하지 않습니다."
@@ -500,7 +824,7 @@ def test_result_sentence_produces_only_the_three_stated_fact_changes(unsupported
     request = request_for_replanning()
     snapshot = request.case_snapshot.model_dump(mode="json")
     for item in snapshot["facts"]:
-        if item["field_path"] in {"restoration_scope", "restoration_status"}:
+        if item["field_path"] in {"restoration_scope", "restoration_status", "demolition_required"}:
             item.update(status="UNKNOWN", value=None, evidence_refs=[], updated_at=None)
     snapshot["procedure_progress"] = []
     text = "임대인에게 확인했습니다. " + RESTORATION_RESULT + " 철거도 필요하지 않습니다."
@@ -522,15 +846,15 @@ def test_result_sentence_produces_only_the_three_stated_fact_changes(unsupported
     rejected = deepcopy(response)
     rejected["procedure_observations"] = [{
         "step_code": RESTORATION, "observed_status": "COMPLETED",
-        "source_text": "임대인에게 확인했습니다.", "requires_confirmation": False,
-        "reason_summary": "절차를 식별하지 않는 확인 문장",
+        "source_text": "사용자가 쓰지 않은 원상복구 완료 문장입니다.", "requires_confirmation": False,
+        "reason_summary": "원문에 없는 진행 보고",
     }]
     client = Responses(*([rejected] if unsupported_completion else []), response)
     result = asyncio.run(InfoAnalysisAgent(client).analyze(request))
     assert len(client.messages) == (2 if unsupported_completion else 1)
     if unsupported_completion:
         feedback = " ".join(item["content"] for item in client.messages[1])
-        assert "The quoted sentence itself must identify the procedure" in feedback
+        assert "progress must quote the user's own execution report" in feedback
     assert {(fact.field_path, fact.value) for fact in result.fact_candidates} == {
         ("restoration_scope", "NOT_REQUIRED"),
         ("restoration_status", "NOT_REQUIRED"),
@@ -549,7 +873,7 @@ def analyze_facts(facts, text, *, requires_confirmation=False):
     request = request_for_replanning()
     snapshot = request.case_snapshot.model_dump(mode="json")
     for item in snapshot["facts"]:
-        if item["field_path"] in {"restoration_scope", "restoration_status"}:
+        if item["field_path"] in {"restoration_scope", "restoration_status", "demolition_required"}:
             item.update(status="UNKNOWN", value=None, evidence_refs=[], updated_at=None)
     snapshot["procedure_progress"] = []
     request = InfoAnalysisInput.model_validate(request.model_dump() | {
@@ -591,7 +915,7 @@ def test_rejected_facts_tell_the_retry_why(rejected_facts, reason):
     request = request_for_replanning()
     snapshot = request.case_snapshot.model_dump(mode="json")
     for item in snapshot["facts"]:
-        if item["field_path"] in {"restoration_scope", "restoration_status"}:
+        if item["field_path"] in {"restoration_scope", "restoration_status", "demolition_required"}:
             item.update(status="UNKNOWN", value=None, evidence_refs=[], updated_at=None)
     snapshot["procedure_progress"] = []
     request = InfoAnalysisInput.model_validate(request.model_dump() | {
@@ -647,7 +971,7 @@ def test_held_fact_still_produces_a_question_for_the_owner():
     base = supervisor_request()
     snapshot = base.case_snapshot.model_dump(mode="json")
     for item in snapshot["facts"]:
-        if item["field_path"] in {"restoration_scope", "restoration_status"}:
+        if item["field_path"] in {"restoration_scope", "restoration_status", "demolition_required"}:
             item.update(status="UNKNOWN", value=None, evidence_refs=[], updated_at=None)
     snapshot["procedure_progress"] = []
     snapshot = CaseSnapshot.model_validate(snapshot)
@@ -801,6 +1125,91 @@ def snapshot_from_reviewed_facts(outcome):
     })
 
 
+@pytest.mark.parametrize("employee_count", [None, 0, 2])
+def test_staff_history_guides_this_plan_without_becoming_case_changes(employee_count):
+    async def run():
+        template = supervisor_request()
+        template.known_procedure_steps[0].eligibility_conditions = [
+            ProcedureEligibility(condition_key="pension_enrolled", condition_value="true"),
+        ]
+        text = "과거 고용과 네 보험 가입 이력이 있습니다."
+        if employee_count is not None:
+            text = f"현재 직원은 {employee_count}명이고 " + text
+        response = output([finding(TAX, "doc1")])
+        reports = [
+            (field.value, True) for field in CASE_FIELD_SPECS if field not in CaseFieldKey
+        ]
+        if employee_count is not None:
+            reports.insert(0, ("employee_count", employee_count))
+        response["facts"] = [
+            {"operation": "SET", "field_path": field,
+             "value_type": "INTEGER" if field == "employee_count" else "BOOLEAN",
+             "value": value, "source_text": text, "confidence_bps": 9500,
+             "requires_confirmation": False, "reason_summary": "합성 직원·보험 이력 보고"}
+            for field, value in reports
+        ]
+        procedure, support = AsyncMock(), AsyncMock()
+        procedure.lookup.return_value = template.source_results[0].output
+        review_model = StubModel()
+        review_model.generate = AsyncMock(wraps=review_model.generate)
+        graph = AgentGraph(
+            info_agent=InfoAnalysisAgent(Responses(response), max_local_attempts=1),
+            procedure_tool=procedure, support_agent=support,
+            supervisor=SupervisorAgent(StubModel(), max_local_attempts=1),
+            review_tool=ReviewTool(review_model, max_output_attempts=1),
+            known_procedure_steps=template.known_procedure_steps,
+            clock=lambda: NOW, max_review_revisions=0,
+        )
+        request = build_planning_input(
+            trigger_type="RESULT_SUBMITTED", case_snapshot=template.case_snapshot,
+            user_input=template.trigger.input.model_copy(update={"redacted_text": text}),
+        )
+        outcome = await graph.run(request)
+        assert outcome.outcome_type == "REVIEWED_PLAN", outcome
+        outcome.assert_integrity()
+        draft = outcome.review_subject.supervisor_draft
+        assert draft.decision.next_action.action_code == "CONFIRM_TAX_CLOSURE_REQUIREMENTS"
+        expected = [] if employee_count is None else [("employee_count", employee_count)]
+        assert [(change.field_path, change.proposed_value)
+                for change in draft.mutations.fact_changes] == expected
+        info = next(source.output for source in outcome.review_subject.source_results
+                    if source.meta.component == "INFO_AGENT")
+        assert {(fact.field_path, fact.value) for fact in info.fact_candidates} == set(reports)
+        assert review_model.calls == 1
+        messages = review_model.generate.call_args.args[1]
+        review_input = json.loads(messages[1]["content"].removeprefix("INPUT_JSON="))
+        review_info = next(source["output"] for source in review_input["source_results"]
+                           if source["meta"]["component"] == "INFO_AGENT")
+        assert {(fact["field_path"], fact["value"]) for fact in review_info["fact_candidates"]} == set(reports)
+        for field, _ in reports:
+            if field not in CaseFieldKey:
+                assert field in messages[0]["content"]
+        support.analyze.assert_not_awaited()
+
+        # 검수 결과를 만든 뒤 내부 전용 변경을 끼워 넣어도 저장 후보가 될 수 없다.
+        original = outcome.model_dump_json()
+        subject = outcome.review_subject
+        info_source = next(source for source in subject.source_results
+                           if source.meta.component == "INFO_AGENT")
+        for change in build_fact_overlays(subject.snapshot, info, info_source.meta.call_id):
+            if change.field_path in CaseFieldKey:
+                continue
+            altered = draft.model_copy(deep=True)
+            altered.mutations.fact_changes.append(change)
+            altered_subject = ReviewSubject.create(
+                **subject.model_dump(exclude={"subject_digest", "supervisor_draft"}),
+                supervisor_draft=altered,
+            )
+            rejected_model = StubModel()
+            with pytest.raises(ReviewIntegrityError, match="stored Case field"):
+                await ReviewTool(rejected_model, max_output_attempts=1).review(altered_subject)
+            assert rejected_model.calls == 0
+        assert outcome.model_dump_json() == original
+        outcome.assert_integrity()
+
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("held_demolition", [False, True])
 @result_fixes_xfail()
 def test_result_replanning_uses_reviewed_facts_without_repeating_scope_question(
@@ -885,6 +1294,8 @@ def test_result_replanning_uses_reviewed_facts_without_repeating_scope_question(
         assert actual_source.source_ref == "scope-result"
         assert actual_source.excerpt == scope_text
 
+        if held_demolition:
+            graph._supervisor._llm = ChoiceModel(information=True)
         second = await graph.run(result_request(
             next_snapshot, "demolition-result", demolition_text + " " + status_text,
         ))

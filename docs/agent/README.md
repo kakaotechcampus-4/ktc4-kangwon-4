@@ -256,8 +256,9 @@ Agent 응답 자체는 저장 성공이 아니다.
 
 위 기록은 당시 입력 방식의 결과다. 현재 DB 근거 조회를 평가하려면
 [`evaluate_planning.py`](../../backend/scripts/evaluate_planning.py)에 BE가 조회한 공식 근거를
-포함한 `--graph-input <AgentGraphInput JSON 경로>`를 전달한다. 기본 `--case` 입력은
-공식 DB 근거가 없으므로 검수 파일만 지정해도 공식 문서를 반환하지 않는다.
+포함한 `--graph-input <AgentGraphInput JSON 경로>`를 전달한다. 기본 `--case`·`--dataset` 입력에는
+`--procedure-snapshot`으로 지정한 검수 파일의 문서를 공식 근거로 붙인다.
+`--graph-input`으로 준 입력에는 붙이지 않는다.
 `--case`·`--result-input`과 동시 사용 불가. 합성 입력·호출 기록은 Git 추적에서 제외.
 같은 판단인지는 Blocker 설명과 Next Action 전체(행동 코드·대상·제목·이유·확인 질문)를
 digest로 비교한다. 공식 근거는 DB ID를 유지하지만 파생 근거는 실행마다 ID가 달라질 수 있어

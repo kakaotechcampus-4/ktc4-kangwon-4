@@ -149,8 +149,15 @@ PR 브랜치마다 Preview 주소가 달라 등록할 수 없어서, **리뷰어
 /?mock=unrecognized         서버가 모르는 판단 상태를 보냈을 때
 /results?mock=conflict      제출하면 충돌 확인으로
 /results?mock=more-info     추가 질문
-/results?mock=invalid       정정 요청
-/results?mock=failed        재시도 안내
+/results?mock=failed-retry     판단 실패 — 같은 내용으로 다시 보낼 수 있는 경우
+/results?mock=failed-detail    판단 실패 — 더 적어서 보내야 할 항목을 짚어준 경우
+/results?mock=failed-service   판단 실패 — 서비스가 들여다봐야 하는 경우
+/results?mock=failed-none      판단 실패 — 이번 판단에 할 수 있는 것이 없는 경우
+/results?mock=failed-unknown   판단 실패 — 이유를 알 수 없는 경우
+/results?mock=send-failed      결과를 보내지 못함
+/results?mock=stale            그사이 상황이 바뀜
+/results?mock=too-long         판단이 오래 걸림
+/results?mock=unrecognized     판단 결과를 읽지 못함
 /replan?mock=no-change      바뀐 것 없음
 ```
 

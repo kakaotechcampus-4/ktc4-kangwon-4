@@ -108,8 +108,8 @@ CASE에 대한 발화·이벤트 원본 이력.
 |---|---|---|---|---|---|
 | id | BIGINT | PK | NOT NULL, AUTO_INCREMENT | 1 | |
 | case_id | BIGINT | FK | NOT NULL | 1 | |
-| raw_input | TEXT | | NOT NULL | `"임대인이랑 얘기 끝났어요, 다음 달까지 나가기로 했어요"` | 입력 원문 (사용자 발화, Case 생성 요청, 또는 배치가 에이전트에 전달한 지시문) |
-| source | ENUM | | NOT NULL | `USER_INPUT` | `USER_INPUT` / `SYSTEM_BATCH` / `CASE_CREATED` — `CASE_CREATED`는 Case 생성 직후 첫 Blocker/Next Action 판단 |
+| raw_input | TEXT | | NULLABLE | `"임대인이랑 얘기 끝났어요, 다음 달까지 나가기로 했어요"` | 입력 원문. `USER_INPUT`·`CASE_CREATED`는 사장님이 쓴 문장이 항상 들어가고, `SYSTEM_BATCH`는 배치가 에이전트에 전달한 지시문이 들어갈 수 있다. 문장 없이 고른 값만 있는 `CONFLICT_DECISION`만 NULL |
+| source | ENUM | | NOT NULL | `USER_INPUT` | `USER_INPUT` / `SYSTEM_BATCH` / `CASE_CREATED` / `CONFLICT_DECISION` — `CASE_CREATED`는 Case 생성 직후 첫 Blocker/Next Action 판단, `CONFLICT_DECISION`은 충돌 확인(`POST /cases/results/decision`)에서 고른 결정에 대한 판단 |
 | judgment_status | ENUM | | NOT NULL | `PENDING` | 판단 진행 상태. 입력을 받으면 `PENDING`으로 시작해 판단이 끝나면 갱신된다 — `PENDING` / `DONE` / `NEEDS_MORE_INFO` / `CONFLICT` / `FAILED` |
 | next_action | TEXT | | NULLABLE | `"부가가치세 확정신고를 진행하세요"` | 다음 액션 제안, 판단이 발생한 경우에만 채워짐 (AI 문장은 길이 제한이 없어 TEXT) |
 | next_action_reason | TEXT | | NULLABLE | `"신고 기한이 폐업일로부터 25일이기 때문입니다"` | 다음 행동을 해야 하는 이유 |
@@ -376,8 +376,8 @@ CASE 필드 값 충돌을 확인하기 위한 1회성 참조.
 | proposed_value | VARCHAR | | NOT NULL ⚠️ 추정 | `"FULL"` | 새로 제안된 값 |
 | conflict_digest | VARCHAR | | NULLABLE ⚠️ 추정 | `"d4e5f6..."` | 충돌 내용 다이제스트 |
 | candidate_payload | JSON | | NULLABLE | `{"field_path": "employee_count", "committed_value": 2, ...}` | Agent가 보낸 충돌 후보 원본 전체. 위 칸들은 화면용이라 글자로 바꿔 숫자·참거짓·빈 값을 되돌릴 수 없는데, 확인할 때 Agent가 내용 다이제스트를 대조해 다르면 거절한다 |
-| expires_at | DATETIME | | NOT NULL | `2026-09-11 10:00:00` | 만료 시각 |
-| used_at | DATETIME | | NULLABLE | `NULL` | 사용(1회) 시각 (nullable) — 1회 사용 검증용 |
+| status | ENUM | | NOT NULL, DEFAULT `PENDING` | `"PENDING"` | 결정 상태. `PENDING`=아직 결정 안 됨, `CONFIRMED`=새 값 채택, `REJECTED`=기존 값 유지 |
+| decided_at | DATETIME | | NULLABLE | `NULL` | 결정된 시각. 결정 전엔 NULL |
 | created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP ⚠️ 추정 | `2026-09-10 10:00:00` | |
 
 ### DECISION_RECORD

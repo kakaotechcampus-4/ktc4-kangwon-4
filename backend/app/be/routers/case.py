@@ -4,6 +4,7 @@ from sqlmodel import Session
 from app.be.db import get_db
 from app.be.dependencies.auth import get_current_member_id
 from app.be.schemas.case import (
+    CaseConflictsDecisionRequest,
     CaseCreateRequest,
     CaseCreateResponse,
     CaseGetResponse,
@@ -13,7 +14,7 @@ from app.be.schemas.case import (
     CaseResultsSubmitResponse,
 )
 from app.be.services import case as case_service
-from app.be.services import first_judgment as first_judgment_service
+from app.be.services import judgment as judgment_service
 
 router = APIRouter()
 
@@ -31,7 +32,7 @@ def create_case(
     # 중간에 끊기거나 사용자가 화면을 떠났을 때 결과를 못 보므로, Case만 저장하고 바로
     # 응답한다. 판단은 뒤에서 돌면서 case_history.judgment_status를 갱신하고,
     # 화면은 GET /cases로 다시 물어본다.
-    background_tasks.add_task(first_judgment_service.run_first_judgment_in_background, case_history_id)
+    background_tasks.add_task(judgment_service.run_judgment_in_background, case_history_id)
 
     return case
 
@@ -55,13 +56,32 @@ def get_case_results(
 @router.post("/cases/results", response_model=CaseResultsSubmitAcceptedResponse)
 def submit_case_results(
     submit_request: CaseResultsSubmitRequest,
+    background_tasks: BackgroundTasks,
     member_id: int = Depends(get_current_member_id),
     session: Session = Depends(get_db),
 ):
     response = case_service.submit_case_results(session, member_id, submit_request)
 
-    # TODO(AI팀 연동): 여기서 Agent 판단을 백그라운드로 실행하는 부분이 이어져야 한다.
-    # Case 생성 때와 같은 패턴.
+    # Case 생성 때와 같은 이유로 뒤에서 돌린다(create_case 주석). 이걸 걸지 않으면
+    # 접수만 되고 아무도 판단을 부르지 않아서, 그 이력은 PENDING에서 영영 안 바뀐다.
+    # 화면은 GET /cases/results/status로 다시 물어본다.
+    background_tasks.add_task(
+        judgment_service.run_judgment_in_background, response.case_history_id
+    )
+
+    return response
+
+
+@router.post("/cases/results/decision", response_model=CaseResultsSubmitAcceptedResponse)
+def submit_case_conflicts_decision(
+    decision_request: CaseConflictsDecisionRequest,
+    member_id: int = Depends(get_current_member_id),
+    session: Session = Depends(get_db),
+):
+    response = case_service.submit_case_conflicts_decision(session, member_id, decision_request)
+
+    # TODO(AI팀 연동): 여기서 충돌 결정 판단을 백그라운드로 실행하는 부분이 이어져야 한다.
+    # 사용자 선택(decision_request.decisions)은 DB에 저장하지 않으므로 이 호출에 인자로 넘긴다.
 
     return response
 

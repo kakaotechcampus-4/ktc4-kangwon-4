@@ -131,6 +131,23 @@ class CaseFieldKey(StrEnum):
     PLANNED_CLOSURE_DATE = "planned_closure_date"
 
 
+class AgentFieldKey(StrEnum):
+    BUSINESS_TYPE = "business_type"
+    FRANCHISE_STATUS = "franchise_status"
+    EMPLOYEE_COUNT = "employee_count"
+    HAD_EMPLOYEES = "had_employees"
+    PENSION_ENROLLED = "pension_enrolled"
+    HEALTH_INSURANCE_ENROLLED = "health_insurance_enrolled"
+    EMPLOYMENT_INSURANCE_ENROLLED = "employment_insurance_enrolled"
+    INDUSTRIAL_ACCIDENT_INSURANCE_ENROLLED = "industrial_accident_insurance_enrolled"
+    LEASE_STATUS = "lease_status"
+    RESTORATION_STATUS = "restoration_status"
+    RESTORATION_SCOPE = "restoration_scope"
+    RESTORATION_SCOPE_DETAIL = "restoration_scope_detail"
+    DEMOLITION_REQUIRED = "demolition_required"
+    PLANNED_CLOSURE_DATE = "planned_closure_date"
+
+
 class FactValueType(StrEnum):
     STRING = "STRING"
     INTEGER = "INTEGER"
@@ -182,35 +199,40 @@ class EvidenceSourceType(StrEnum):
 # is represented internally by FactStatus.UNKNOWN and value=None; it is never a
 # confirmed enum value.  Lease terms and restoration scope must not be replaced
 # with contract-termination stages or responsibility for restoration costs.
-CASE_FIELD_SPECS: dict[CaseFieldKey, tuple[FactValueType, frozenset[str] | None]] = {
-    CaseFieldKey.BUSINESS_TYPE: (FactValueType.STRING, None),
-    CaseFieldKey.FRANCHISE_STATUS: (FactValueType.BOOLEAN, None),
-    CaseFieldKey.EMPLOYEE_COUNT: (FactValueType.INTEGER, None),
-    CaseFieldKey.LEASE_STATUS: (
+CASE_FIELD_SPECS: dict[AgentFieldKey, tuple[FactValueType, frozenset[str] | None]] = {
+    AgentFieldKey.BUSINESS_TYPE: (FactValueType.STRING, None),
+    AgentFieldKey.FRANCHISE_STATUS: (FactValueType.BOOLEAN, None),
+    AgentFieldKey.EMPLOYEE_COUNT: (FactValueType.INTEGER, None),
+    AgentFieldKey.HAD_EMPLOYEES: (FactValueType.BOOLEAN, None),
+    AgentFieldKey.PENSION_ENROLLED: (FactValueType.BOOLEAN, None),
+    AgentFieldKey.HEALTH_INSURANCE_ENROLLED: (FactValueType.BOOLEAN, None),
+    AgentFieldKey.EMPLOYMENT_INSURANCE_ENROLLED: (FactValueType.BOOLEAN, None),
+    AgentFieldKey.INDUSTRIAL_ACCIDENT_INSURANCE_ENROLLED: (FactValueType.BOOLEAN, None),
+    AgentFieldKey.LEASE_STATUS: (
         FactValueType.ENUM,
         frozenset({"LEASED_PAID", "LEASED_FREE", "OWNED"}),
     ),
-    CaseFieldKey.RESTORATION_STATUS: (
+    AgentFieldKey.RESTORATION_STATUS: (
         FactValueType.ENUM,
         frozenset({"NOT_STARTED", "IN_PROGRESS", "COMPLETED", "NOT_REQUIRED"}),
     ),
-    CaseFieldKey.RESTORATION_SCOPE: (
+    AgentFieldKey.RESTORATION_SCOPE: (
         FactValueType.ENUM,
         frozenset({"PARTIAL", "FULL", "NOT_REQUIRED"}),
     ),
-    CaseFieldKey.RESTORATION_SCOPE_DETAIL: (FactValueType.STRING, None),
-    CaseFieldKey.DEMOLITION_REQUIRED: (
+    AgentFieldKey.RESTORATION_SCOPE_DETAIL: (FactValueType.STRING, None),
+    AgentFieldKey.DEMOLITION_REQUIRED: (
         FactValueType.ENUM,
         frozenset({"REQUIRED", "NOT_REQUIRED"}),
     ),
-    CaseFieldKey.PLANNED_CLOSURE_DATE: (FactValueType.DATE, None),
+    AgentFieldKey.PLANNED_CLOSURE_DATE: (FactValueType.DATE, None),
 }
 
 REQUIRED_CASE_FIELDS = frozenset(
     {
-        CaseFieldKey.BUSINESS_TYPE,
-        CaseFieldKey.FRANCHISE_STATUS,
-        CaseFieldKey.LEASE_STATUS,
+        AgentFieldKey.BUSINESS_TYPE,
+        AgentFieldKey.FRANCHISE_STATUS,
+        AgentFieldKey.LEASE_STATUS,
     }
 )
 
@@ -218,14 +240,14 @@ REQUIRED_CASE_FIELDS = frozenset(
 # CASE column widths for the two free-text fields; the rest are enums,
 # integers or dates. CASE_FIELD_HISTORY.before_value/after_value are
 # VARCHAR(1000), so a value that fits its CASE column fits its history row too.
-CASE_FIELD_MAX_LENGTHS: dict[CaseFieldKey, int] = {
-    CaseFieldKey.BUSINESS_TYPE: 50,
-    CaseFieldKey.RESTORATION_SCOPE_DETAIL: 1000,
+CASE_FIELD_MAX_LENGTHS: dict[AgentFieldKey, int] = {
+    AgentFieldKey.BUSINESS_TYPE: 50,
+    AgentFieldKey.RESTORATION_SCOPE_DETAIL: 1000,
 }
 
 
 def validate_case_field_value(
-    field_path: CaseFieldKey,
+    field_path: AgentFieldKey,
     value_type: FactValueType,
     value: StrictScalar,
     *,
@@ -280,12 +302,12 @@ def _is_iso_date(value: str) -> bool:
     return True
 
 
-def validate_restoration_state(statuses: dict[CaseFieldKey, FactStatus]) -> None:
+def validate_restoration_state(statuses: dict[AgentFieldKey, FactStatus]) -> None:
     """A restoration status can be confirmed only after its scope is known."""
 
     if (
-        statuses.get(CaseFieldKey.RESTORATION_STATUS) == FactStatus.CONFIRMED
-        and statuses.get(CaseFieldKey.RESTORATION_SCOPE) != FactStatus.CONFIRMED
+        statuses.get(AgentFieldKey.RESTORATION_STATUS) == FactStatus.CONFIRMED
+        and statuses.get(AgentFieldKey.RESTORATION_SCOPE) != FactStatus.CONFIRMED
     ):
         raise ValueError(
             "confirmed restoration_status requires confirmed restoration_scope"
@@ -348,7 +370,7 @@ class SupportProgramRef(AgentSchema):
 
 
 class CaseFact(AgentSchema):
-    field_path: CaseFieldKey
+    field_path: AgentFieldKey
     value_type: FactValueType
     value: StrictScalar
     status: FactStatus
@@ -382,6 +404,8 @@ class CaseFact(AgentSchema):
 
 
 class ProcedureProgress(AgentSchema):
+    requirements_confirmed: StrictBool = False
+    submitted: StrictBool = False
     procedure_step: ProcedureStepRef
     status: ProcedureProgressStatus
     evidence_refs: list[NonEmptyStr]
@@ -389,12 +413,13 @@ class ProcedureProgress(AgentSchema):
 
     @model_validator(mode="after")
     def completed_requires_evidence(self) -> ProcedureProgress:
-        if self.status == ProcedureProgressStatus.COMPLETED and not self.evidence_refs:
+        if (self.status == ProcedureProgressStatus.COMPLETED or self.requirements_confirmed or self.submitted) and not self.evidence_refs:
             raise ValueError("COMPLETED procedure progress requires evidence")
         return self
 
 
 class CaseSnapshot(AgentSchema):
+    active_blocker_candidate_ids: list[NonEmptyStr] = Field(default_factory=list)
     snapshot_id: RuntimeUUID = Field(
         description=(
             "Caller-issued identity of the Case read view used for this planning run "
@@ -413,6 +438,7 @@ class CaseSnapshot(AgentSchema):
 
     @model_validator(mode="after")
     def validate_snapshot_integrity(self) -> CaseSnapshot:
+        _ensure_unique(self.active_blocker_candidate_ids, lambda item: item, "active blocker candidate_id")
         _ensure_unique(self.facts, lambda item: item.field_path, "fact field_path")
         statuses = {item.field_path: item.status for item in self.facts}
         if any(
@@ -517,7 +543,7 @@ class VerifiedTextSpan(AgentSchema):
 class FactCandidate(AgentSchema):
     candidate_id: RuntimeUUID
     operation: FactOperation
-    field_path: CaseFieldKey
+    field_path: AgentFieldKey
     value_type: FactValueType
     value: StrictScalar
     source_span: VerifiedTextSpan
@@ -552,7 +578,7 @@ class FactChangeCandidate(AgentSchema):
     operation: FactOperation
     source_fact_candidate_id: RuntimeUUID
     source_type: FactChangeSourceType
-    field_path: CaseFieldKey
+    field_path: AgentFieldKey
     value_type: FactValueType
     before_status: FactStatus
     before_value: StrictScalar
@@ -668,7 +694,7 @@ class MissingFieldBlock(StrEnum):
 
 
 class MissingField(AgentSchema):
-    field_path: CaseFieldKey
+    field_path: AgentFieldKey
     reason_summary: NonEmptyStr
     blocks: Annotated[list[MissingFieldBlock], Field(min_length=1)]
     question_candidate_id: RuntimeUUID | None
@@ -692,7 +718,7 @@ class Uncertainty(AgentSchema):
 class QuestionCandidate(AgentSchema):
     question_id: RuntimeUUID
     text: NonEmptyStr
-    resolves_field_paths: Annotated[list[CaseFieldKey], Field(min_length=1)]
+    resolves_field_paths: Annotated[list[AgentFieldKey], Field(min_length=1)]
     reason_summary: NonEmptyStr
 
 
@@ -705,8 +731,99 @@ class ProcedureProgressObservation(AgentSchema):
     ]
     source_span: VerifiedTextSpan
     source_evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
+    requirements_confirmed: StrictBool = False
+    submitted: StrictBool = False
     requires_confirmation: StrictBool
     reason_summary: NonEmptyStr
+
+    def assert_input_integrity(
+        self, original_input: RedactedInput, evidence_by_id: dict[str, EvidenceRecord],
+    ) -> None:
+        """Bind the quoted report to its exact original event and evidence."""
+        original = RedactedInput.model_validate(original_input.model_dump())
+        span = self.source_span
+        if (
+            span.input_event_id != original.input_event_id
+            or not 0 <= span.start_offset < span.end_offset <= len(original.redacted_text)
+            or original.redacted_text[span.start_offset:span.end_offset] != span.text
+        ):
+            raise ValueError("progress span differs from its original input")
+        fingerprint = hashlib.sha256(span.text.encode("utf-8")).hexdigest()
+        expected_id = f"input:{span.input_event_id}:{span.start_offset}:{span.end_offset}:{fingerprint[:12]}"
+        evidence = evidence_by_id.get(expected_id)
+        if self.source_evidence_refs != [expected_id] or evidence is None or (
+            evidence.source_type.value != original.source_type.value
+            or evidence.source_ref != original.input_event_id
+            or evidence.locator != f"text:{span.start_offset}-{span.end_offset}"
+            or evidence.excerpt != span.text or evidence.content_hash != fingerprint
+        ):
+            raise ValueError("progress evidence differs from its original quoted report")
+
+
+class ProcedureCompletionConfirmation(AgentSchema):
+    """Original held report restored by BE after an explicit user choice.
+
+    BE must restore its own retained observation, input and snapshot after
+    checking ownership; a client-supplied observation is not trusted approval.
+    """
+
+    observation: ProcedureProgressObservation
+    input: RedactedInput
+    snapshot: CaseSnapshot
+    confirmed: StrictBool
+
+    @model_validator(mode="after")
+    def validate_original_report(self) -> ProcedureCompletionConfirmation:
+        if (
+            self.observation.observed_status != ProcedureProgressStatus.COMPLETED
+            or not self.observation.requires_confirmation
+        ):
+            raise ValueError("completion confirmation requires an original held completion")
+        self.source_evidence(self.snapshot)
+        return self
+
+    def matches(self, observation: ProcedureProgressObservation) -> bool:
+        return self.confirmed and (
+            observation.model_dump(exclude={"requires_confirmation"})
+            == self.observation.model_dump(exclude={"requires_confirmation"})
+        )
+
+    def assert_current(self, snapshot: CaseSnapshot) -> None:
+        self.validate_original_report()
+        if snapshot.case_id != self.snapshot.case_id:
+            raise ValueError("completion confirmation belongs to another Case")
+
+        def progress_state(source: CaseSnapshot) -> tuple[ProcedureProgressStatus, bool, bool]:
+            prior = next((item for item in source.procedure_progress
+                          if item.procedure_step == self.observation.procedure_step), None)
+            return (
+                (prior.status, prior.requirements_confirmed, prior.submitted)
+                if prior else (ProcedureProgressStatus.NOT_STARTED, False, False)
+            )
+
+        current = progress_state(snapshot)
+        if current[0] != ProcedureProgressStatus.COMPLETED and current != progress_state(self.snapshot):
+            raise ValueError("procedure progress changed after the completion report")
+        self.source_evidence(snapshot)
+
+    def source_evidence(self, snapshot: CaseSnapshot) -> EvidenceRecord:
+        """Reuse stored evidence or recover only the exact original quoted report."""
+        span = self.observation.source_span
+        fingerprint = hashlib.sha256(span.text.encode("utf-8")).hexdigest()
+        evidence_id = f"input:{span.input_event_id}:{span.start_offset}:{span.end_offset}:{fingerprint[:12]}"
+        evidence = next((item for item in snapshot.evidence_records
+                         if item.evidence_id == evidence_id), None)
+        if evidence is None:
+            evidence = EvidenceRecord(
+                evidence_id=evidence_id, source_type=self.input.source_type.value,
+                source_ref=self.input.input_event_id, source_version=None,
+                locator=f"text:{span.start_offset}-{span.end_offset}", excerpt=span.text,
+                parent_evidence_refs=[], published_at=None,
+                retrieved_at=self.input.submitted_at, freshness_status="CURRENT",
+                content_hash=fingerprint,
+            )
+        self.observation.assert_input_integrity(self.input, {evidence_id: evidence})
+        return evidence
 
 
 class ConflictCandidate(AgentSchema):
@@ -722,7 +839,7 @@ class ConflictCandidate(AgentSchema):
     conflict_digest: Digest
     candidate_id: RuntimeUUID
     snapshot_id: RuntimeUUID
-    field_path: CaseFieldKey
+    field_path: AgentFieldKey
     committed_status: Literal[FactStatus.CONFIRMED]
     committed_value: NonNullStrictScalar
     proposed_operation: FactOperation
@@ -812,7 +929,7 @@ class InfoAnalysisInput(AgentSchema):
         description="Uncommitted confirmed changes used to assess procedure relevance.",
     )
     allowed_field_paths: Annotated[
-        list[CaseFieldKey],
+        list[AgentFieldKey],
         Field(
             min_length=1,
             description="Canonical Case fields that this call may propose changing.",
@@ -1053,7 +1170,7 @@ class SupportCheck(AgentSchema):
     related_steps: list[ProcedureStepRef]
     match_status: SupportMatchStatus
     criteria: list[SupportCriterionResult]
-    unknown_field_paths: list[CaseFieldKey]
+    unknown_field_paths: list[AgentFieldKey]
     required_documents: list[RequiredDocument]
     application_channel: SourcedText | None
     application_url: SourcedText | None
@@ -1188,6 +1305,8 @@ class ProcedureSourcePolicy(StrEnum):
 
 class ProcedureLookupInput(AgentSchema):
     """Complete request schema accepted by ``ProcedureLookupTool.lookup``."""
+
+    procedure_step_codes: list[UpperSnakeCode] = Field(default_factory=list)
 
     lookup_goal: Literal[ProcedureLookupGoal.BUSINESS_CLOSURE] = Field(
         description="Fixed lookup goal for business-closure procedures."
@@ -1370,7 +1489,7 @@ class ProcedureFinding(AgentSchema):
     relevance: ProcedureRelevance
     current_status: ProcedureProgressStatus
     decision_authority: DecisionAuthority
-    requires_confirmation: Literal[True]
+    requires_confirmation: StrictBool
     required_actions: list[SourcedText]
     required_documents: list[RequiredDocument]
     application_channel: SourcedText | None
@@ -1396,8 +1515,28 @@ class ProcedureFinding(AgentSchema):
 
 
 class Blocker(AgentSchema):
+    candidate_id: NonEmptyStr | None = None
     description: NonEmptyStr  # BLOCKER.description is TEXT.
     evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
+
+
+class _BlockerDecision(AgentSchema):
+    blocker: Blocker = Field(description="The selected priority blocker.")
+    blockers: Annotated[list[Blocker], Field(min_length=1)]
+
+    @model_validator(mode="before")
+    @classmethod
+    def accept_legacy_single_blocker(cls, value: Any) -> Any:
+        if isinstance(value, dict) and "blockers" not in value and value.get("blocker"):
+            return {**value, "blockers": [value["blocker"]]}
+        return value
+
+    @model_validator(mode="after")
+    def validate_blockers(self) -> _BlockerDecision:
+        _ensure_unique(self.blockers, lambda item: item.candidate_id or canonical_digest(item), "blocker candidate")
+        if self.blocker not in self.blockers:
+            raise ValueError("priority blocker must be included in blockers")
+        return self
 
 
 class ProcedureActionTarget(AgentSchema):
@@ -1425,6 +1564,15 @@ ActionCode: TypeAlias = Literal[
     "CONFIRM_WORKPLACE_INSURANCE_CLOSURE_REQUIREMENTS",
     "REPORT_WORKPLACE_INSURANCE_CLOSURE",
     "CONFIRM_SUPPORT_PROGRAM_REQUIREMENTS",
+    "CONFIRM_RESTORATION_REQUIREMENTS",
+    "PERFORM_RESTORATION",
+    "CONFIRM_PREMISES_RETURN_REQUIREMENTS",
+    "RETURN_PREMISES",
+    "CONFIRM_EMPLOYEE_SETTLEMENT_REQUIREMENTS",
+    "SETTLE_EMPLOYEE_PAYMENTS",
+    "CONFIRM_EMPLOYEE_INSURANCE_LOSS_REQUIREMENTS",
+    "REPORT_EMPLOYEE_INSURANCE_LOSS",
+    "CONFIRM_PROCEDURE_COMPLETION",
 ]
 
 
@@ -1443,7 +1591,7 @@ class DecisionType(StrEnum):
     NEEDS_MORE_INFO = "NEEDS_MORE_INFO"
 
 
-class ActionDecisionDraft(AgentSchema):
+class ActionDecisionDraft(_BlockerDecision):
     decision_type: Literal[DecisionType.ACTION]
     draft_id: RuntimeUUID
     draft_version: PositiveStrictInt
@@ -1464,7 +1612,7 @@ class ActionDecisionDraft(AgentSchema):
         return value
 
 
-class NeedsMoreInfoDecisionDraft(AgentSchema):
+class NeedsMoreInfoDecisionDraft(_BlockerDecision):
     decision_type: Literal[DecisionType.NEEDS_MORE_INFO]
     draft_id: RuntimeUUID
     draft_version: PositiveStrictInt
@@ -1485,6 +1633,10 @@ DecisionDraft: TypeAlias = Annotated[
 
 
 class ProcedureProgressChangeCandidate(AgentSchema):
+    before_requirements_confirmed: StrictBool = False
+    proposed_requirements_confirmed: StrictBool = False
+    before_submitted: StrictBool = False
+    proposed_submitted: StrictBool = False
     candidate_id: RuntimeUUID
     procedure_step: ProcedureStepRef
     before_status: ProcedureProgressStatus
@@ -1501,7 +1653,15 @@ class ProcedureProgressChangeCandidate(AgentSchema):
             ProcedureProgressStatus.IN_PROGRESS: 1,
             ProcedureProgressStatus.COMPLETED: 2,
         }
-        if order[self.proposed_status] <= order[self.before_status]:
+        if self.before_requirements_confirmed and not self.proposed_requirements_confirmed:
+            raise ValueError("confirmed requirements cannot move backwards")
+        if self.before_submitted and not self.proposed_submitted:
+            raise ValueError("submission cannot move backwards")
+        status_forward = order[self.proposed_status] > order[self.before_status]
+        flags_forward = (
+            self.proposed_requirements_confirmed and not self.before_requirements_confirmed
+        ) or (self.proposed_submitted and not self.before_submitted)
+        if order[self.proposed_status] < order[self.before_status] or not (status_forward or flags_forward):
             raise ValueError("procedure progress change must move forward")
         return self
 
@@ -1572,8 +1732,9 @@ class GroundedClaim(AgentSchema):
 class SupervisorDraft(AgentSchema):
     """Complete success schema returned by ``SupervisorAgent.draft``."""
 
+    resolved_blocker_candidate_ids: list[NonEmptyStr] = Field(default_factory=list)
     decision: DecisionDraft = Field(
-        description="Exactly one Blocker and one Next Action, or a needs-more-information decision."
+        description="All verified Blockers, one priority Blocker, and one Next Action or information question."
     )
     mutations: MutationSet = Field(
         description="Uncommitted Case changes that require a matching Review PASS."
@@ -1591,6 +1752,7 @@ class SupervisorDraft(AgentSchema):
 
     @model_validator(mode="after")
     def validate_decision_and_sources(self) -> SupervisorDraft:
+        _ensure_unique(self.resolved_blocker_candidate_ids, lambda item: item, "resolved blocker candidate_id")
         if len(set(self.source_call_ids)) != len(self.source_call_ids):
             raise ValueError("source_call_ids must be unique")
         if set(self.source_call_ids) != set(self.decision.based_on_call_ids):
@@ -1629,6 +1791,7 @@ class CaseCreatedTrigger(AgentSchema):
 
 class ResultSubmittedTrigger(AgentSchema):
     trigger_type: Literal["RESULT_SUBMITTED"]
+    procedure_completion_confirmation: ProcedureCompletionConfirmation | None = None
     input_event_id: NonEmptyStr
     client_event_id: NonEmptyStr | None = Field(
         description=(
@@ -1643,6 +1806,11 @@ class ResultSubmittedTrigger(AgentSchema):
     def validate_event(self) -> ResultSubmittedTrigger:
         if self.input.input_event_id != self.input_event_id:
             raise ValueError("trigger and input event IDs must match")
+        if (
+            self.procedure_completion_confirmation is not None
+            and self.procedure_completion_confirmation.input.input_event_id == self.input_event_id
+        ):
+            raise ValueError("completion confirmation requires a separate user event")
         return self
 
 
@@ -2176,7 +2344,7 @@ class SafeFailureOutcome(AgentSchema):
     recovery_action_code: Literal[
         "RETRY", "RESUBMIT_INPUT", "CONTACT_SUPPORT", "NONE"
     ] = Field(description="Permitted caller recovery action for this failure.")
-    requested_field_paths: list[CaseFieldKey] = Field(
+    requested_field_paths: list[AgentFieldKey] = Field(
         description="Canonical Case fields requested for a future resubmission."
     )
     retryable: StrictBool = Field(
@@ -2292,6 +2460,7 @@ __all__ = [
     "REQUIRED_CASE_FIELDS",
     "ActionCode",
     "ActionDecisionDraft",
+    "AgentFieldKey",
     "AgentGraphInput",
     "AgentGraphOutput",
     "AgentRunOutcome",
@@ -2352,6 +2521,7 @@ __all__ = [
     "ProcedureProgress",
     "ProcedureProgressChangeCandidate",
     "ProcedureProgressObservation",
+    "ProcedureCompletionConfirmation",
     "ProcedureProgressStatus",
     "ProcedureRelevance",
     "ProcedureSourceDocument",

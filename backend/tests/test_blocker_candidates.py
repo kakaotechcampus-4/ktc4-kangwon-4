@@ -177,7 +177,7 @@ def test_overlay_is_used_before_selecting_confirmation_questions():
 @pytest.mark.parametrize(
     "state",
     [
-        {"restoration_status": "COMPLETED"},
+        {"restoration_status": "COMPLETED", "restoration_scope": "FULL", "demolition_required": "NOT_REQUIRED"},
         {"restoration_scope": "PARTIAL", "demolition_required": "NOT_REQUIRED"},
         {"lease_status": "OWNED"},
     ],
@@ -202,8 +202,20 @@ def test_demolition_required_still_prioritizes_unresolved_landlord_scope():
     )
 
 
+@pytest.mark.parametrize("scope_step_completed", [False, True])
+def test_completed_work_still_asks_unknown_demolition(scope_step_completed):
+    request = request_with_state(restoration_status="COMPLETED", restoration_scope="FULL")
+    if scope_step_completed:
+        request.case_snapshot.procedure_progress.append(ProcedureProgress(
+            procedure_step=RESTORATION, status="COMPLETED", evidence_refs=[REF], updated_at=NOW,
+        ))
+    missing_questions(request, "demolition_required")
+    result = missing_info_fields(request.case_snapshot, request.source_results, mutations())
+    assert result["questions_for_user"] == ["철거가 필요한지 확인한 내용이 있으면 알려주세요."]
+
+
 def test_completed_restoration_continues_closure_without_support():
-    request = request_with_state(restoration_status="COMPLETED")
+    request = request_with_state(restoration_status="COMPLETED", restoration_scope="FULL", demolition_required="NOT_REQUIRED")
     request.source_results.extend(support_sources())
     rows = candidates(request)
     assert [row["candidate_id"] for row in rows] == ["procedure:1"]
@@ -254,10 +266,11 @@ def test_support_program_count_does_not_change_closure_candidates():
 
 
 class ChoiceModel(StubModel):
-    def __init__(self, invalid=False, choice=0):
+    def __init__(self, invalid=False, choice=0, information=False):
         super().__init__()
         self.invalid = invalid
         self.choice = choice
+        self.information = information
 
     async def generate(self, model, messages, **kwargs):
         if kwargs["schema_name"] == "reborn_review_output":
@@ -265,46 +278,38 @@ class ChoiceModel(StubModel):
         self.calls += 1
         payload = json.loads(messages[1]["content"].removeprefix("INPUT_JSON="))
         rows = payload["contract"]["blocker_candidates"]
-        if not rows:
-            return model.model_validate(
-                {
-                    "decision_type": "NEEDS_MORE_INFO",
-                    "blocker_candidate_id": None,
-                    "selection_summary": "이미 정해지지 않았습니다.",
-                    "requires_human": True,
-                    "evidence_refs": [REF],
-                    "blocker": {
-                        "description": "판단에 필요한 정보를 확인해 주세요.",
-                        "evidence_refs": [REF],
-                    },
-                    "next_action": None,
-                    "questions_for_user": [],
-                    "grounded_claims": [],
-                }
-            )
+        if not rows or self.information:
+            questions = payload["contract"]["information_blockers"]
+            return model.model_validate({
+                "decision_type": "NEEDS_MORE_INFO",
+                "blocker_candidate_id": questions[self.choice]["candidate_id"] if questions else None,
+                "action_code": None,
+            })
         row = rows[self.choice]
-        action = row["actions"][0]
-        return model.model_validate(
-            {
-                "decision_type": "ACTION",
-                "blocker_candidate_id": "invented"
-                if self.invalid
-                else row["candidate_id"],
-                "selection_summary": "현재 아무것도 정해지지 않았습니다.",
-                "requires_human": True,
-                "evidence_refs": [REF],
-                "blocker": {
-                    "description": "철거가 필요합니다.",
-                    "evidence_refs": [REF],
-                },
-                "next_action": {
-                    **action,
-                    "reason": "원상복구 범위가 정해지지 않았습니다.",
-                },
-                "questions_for_user": [],
-                "grounded_claims": [],
-            }
-        )
+        return model.model_validate({
+            "decision_type": "ACTION",
+            "blocker_candidate_id": "invented" if self.invalid else row["candidate_id"],
+            "action_code": row["actions"][0]["action_code"],
+        })
+
+
+def test_selection_only_output_preserves_verified_text_target_and_evidence():
+    class SelectionOnlyModel(ChoiceModel):
+        async def generate(self, model, messages, **kwargs):
+            assert set(model.model_fields) == {"decision_type", "blocker_candidate_id", "action_code"}
+            return await super().generate(model, messages, **kwargs)
+
+    request = request_with_state()
+    client = SelectionOnlyModel(choice=1)
+    expected = candidates(request)[1]
+    draft = asyncio.run(SupervisorAgent(client, max_local_attempts=1).draft(request))
+    assert client.calls == 1
+    assert draft.decision.blocker.model_dump(mode="json") == expected["blocker"]
+    action = draft.decision.next_action.model_dump(mode="json")
+    assert all(action[key] == expected["actions"][0][key] for key in (
+        "action_code", "title", "reason", "questions_to_ask", "target", "evidence_refs",
+    ))
+    assert asyncio.run(ReviewTool(ChoiceModel()).review(subject(request, draft))).verdict == "PASS"
 
 
 def subject(request, draft):
@@ -354,7 +359,7 @@ def test_model_state_invention_is_replaced_and_review_cannot_override_guard():
 @pytest.mark.parametrize(
     "state",
     [
-        {"restoration_scope": "PARTIAL", "restoration_status": "COMPLETED"},
+        {"restoration_scope": "PARTIAL", "restoration_status": "COMPLETED", "demolition_required": "NOT_REQUIRED"},
         {"restoration_scope": "PARTIAL", "demolition_required": "NOT_REQUIRED"},
     ],
 )
@@ -366,8 +371,7 @@ def test_ready_procedure_keeps_one_verified_confirmation_blocker(state):
         assert all("확인할 필요" in row["blocker"]["description"] for row in rows)
         assert all(row["evidence_refs"] == [REF] for row in rows)
 
-        # ChoiceModel invents a demolition blocker; only the verified candidate
-        # supplies the MVP's one evidence-backed blocker in the reviewed output.
+        # The selected candidate supplies the evidence-backed blocker.
         draft = await SupervisorAgent(ChoiceModel(), max_local_attempts=1).draft(
             request
         )
@@ -415,7 +419,7 @@ def test_mvp_schema_rejects_removing_a_verified_blocker(
 def test_unverified_procedure_source_keeps_source_confirmation_blocker(
     freshness, stale_parent
 ):
-    request = request_with_state(restoration_status="COMPLETED")
+    request = request_with_state(restoration_status="COMPLETED", restoration_scope="FULL", demolition_required="NOT_REQUIRED")
     records = request.source_results[0].output.evidence_records
     if stale_parent:
         records[0].parent_evidence_refs = ["parent"]
@@ -539,8 +543,17 @@ def test_registered_filing_keeps_execution_and_confirmation_distinct():
     tax = next(row for row in rows if row["candidate_id"] == "procedure:1")
     by_code = {action["action_code"]: action for action in tax["actions"]}
     assert "준비사항을 확인" in by_code["CONFIRM_TAX_CLOSURE_REQUIREMENTS"]["title"]
-    filing = by_code["FILE_TAX_BUSINESS_CLOSURE"]
-    assert "제출하세요" in filing["title"]
+    assert set(by_code) == {"CONFIRM_TAX_CLOSURE_REQUIREMENTS"}
+    request = request_with_state(lease_status="OWNED")
+    request.case_snapshot.procedure_progress = [ProcedureProgress(
+        procedure_step=request.known_procedure_steps[0].procedure_step, status="IN_PROGRESS",
+        requirements_confirmed=True, evidence_refs=[REF], updated_at=NOW,
+    )]
+    info = request.source_results[1].output.model_copy(deep=True)
+    info.procedure_findings[0].requires_confirmation = False
+    request.source_results[1] = source(info)
+    filing = candidates(request)[0]["actions"][0]
+    assert filing["action_code"] == "FILE_TAX_BUSINESS_CLOSURE"
     assert (
         filing["reason"]
         == request_with_state()
@@ -550,6 +563,8 @@ def test_registered_filing_keeps_execution_and_confirmation_distinct():
         .text
     )
     assert "접수" in filing["questions_to_ask"][0]
+
+
 
 
 @pytest.mark.parametrize(
@@ -566,7 +581,7 @@ def test_fallback_does_not_reask_unnecessary_restoration_details(resolution):
     values = {
         "scope_not_required": {"restoration_scope": "NOT_REQUIRED"},
         "status_not_required": {"restoration_status": "NOT_REQUIRED"},
-        "status_completed": {"restoration_status": "COMPLETED"},
+        "status_completed": {"restoration_status": "COMPLETED", "restoration_scope": "FULL", "demolition_required": "NOT_REQUIRED"},
     }.get(resolution, {})
     request = request_with_state(**values)
     changes = mutations()
@@ -682,6 +697,42 @@ def test_fallback_uses_confirmed_mutations_before_asking():
 
     assert result["questions_for_user"] == ["직원이 몇 명인가요?"]
     assert result["blocker"]["description"] == "직원 수 확인이 필요합니다."
+
+
+@pytest.mark.parametrize("scope", [None, "NOT_REQUIRED", "PARTIAL", "FULL"])
+@pytest.mark.parametrize("overlay", [False, True])
+@pytest.mark.parametrize("held", [False, True])
+def test_progress_question_requires_confirmed_restoration_scope(scope, overlay, held):
+    from test_info_replanning import analyze_facts
+
+    request = request_with_state(restoration_scope=None if overlay else scope)
+    pending = mutations()
+    if overlay:
+        pending.fact_changes = [FactChangeCandidate(
+            candidate_id=UUID(int=51), operation="CLEAR" if scope is None else "SET",
+            source_fact_candidate_id=UUID(int=52), source_type="INFO_ANALYSIS",
+            field_path="restoration_scope", value_type="ENUM",
+            before_status="UNKNOWN", before_value=None,
+            proposed_status="UNKNOWN" if scope is None else "CONFIRMED", proposed_value=scope,
+            candidate_status="READY_FOR_REVIEW", reason_summary="합성 범위 변경",
+            source_evidence_refs=[REF], source_call_id=UUID(int=3), confirmed_conflict_ref=None,
+        )]
+    if held:
+        text = "원상복구 작업을 진행하고 있습니다."
+        result = analyze_facts([("restoration_status", "IN_PROGRESS", text)], text, requires_confirmation=True)
+        info = request.source_results[1].output
+        info.evidence_records.extend(result.evidence_records)
+        info.fact_candidates = result.fact_candidates
+        request.source_results[1] = source(info)
+    else:
+        missing_questions(request, "restoration_status")
+
+    result = missing_info_fields(request.case_snapshot, request.source_results, pending)
+
+    if scope in {"PARTIAL", "FULL"}:
+        assert result["blocker"]["candidate_id"] == "missing:restoration_status"
+    else:
+        assert result is None
 
 
 def test_single_missing_condition_passes_review_without_weakening_shared_guard():
@@ -839,13 +890,20 @@ def test_confirmation_precedes_filing_in_current_schema():
         candidates(request)[0]["actions"][0]["action_code"]
         == "CONFIRM_TAX_CLOSURE_REQUIREMENTS"
     )
-    assert (
-        candidates(request)[0]["actions"][1]["action_code"]
-        == "FILE_TAX_BUSINESS_CLOSURE"
-    )
+    assert len(candidates(request)[0]["actions"]) == 1
+    request.case_snapshot.procedure_progress = [ProcedureProgress(
+        procedure_step=request.known_procedure_steps[0].procedure_step, status="IN_PROGRESS",
+        requirements_confirmed=True, evidence_refs=[REF], updated_at=NOW,
+    )]
+    info = request.source_results[1].output.model_copy(deep=True)
+    info.procedure_findings[0].requires_confirmation = False
+    request.source_results[1] = source(info)
+    assert candidates(request)[0]["actions"][0]["action_code"] == "FILE_TAX_BUSINESS_CLOSURE"
 
 
-def test_different_valid_model_choices_produce_same_ranked_action():
+
+
+def test_different_valid_model_choices_keep_the_selected_priority_and_all_blockers():
     async def run():
         request = request_with_all_closure_steps(demolition_required="REQUIRED")
         decisions = []
@@ -858,17 +916,17 @@ def test_different_valid_model_choices_produce_same_ranked_action():
                 subject(request, draft)
             )
             assert review.verdict == "PASS"
-        assert all(decision == decisions[0] for decision in decisions)
+        assert len({decision[0].candidate_id for decision in decisions}) == 4
         assert decisions[0][1].action_code == "CONFIRM_RESTORATION_SCOPE"
 
     asyncio.run(run())
 
 
-def test_review_rejects_lower_priority_action_despite_model_pass():
+def test_review_rejects_a_missing_blocker_after_case_state_changes():
     async def run():
         # A tax action is valid by itself, but no longer first when landlord
         # confirmation is still unresolved in the Case being reviewed.
-        completed = request_with_state(restoration_status="COMPLETED")
+        completed = request_with_state(restoration_status="COMPLETED", restoration_scope="FULL", demolition_required="NOT_REQUIRED")
         draft = await SupervisorAgent(ChoiceModel(), max_local_attempts=1).draft(
             completed
         )
@@ -879,7 +937,7 @@ def test_review_rejects_lower_priority_action_despite_model_pass():
         assert review.verdict == "REVISE"
         assert any(
             issue.issue_code == "CONTRACT_VIOLATION"
-            and issue.target_path == "/supervisor_draft/decision/next_action"
+            and issue.target_path == "/supervisor_draft/decision/blockers"
             for issue in review.issues
         )
 
@@ -900,8 +958,7 @@ class UnusableModel(StubModel):
         raise self.error
 
 
-# 할 일 순서는 코드가 정하고 모델은 그 1순위밖에 고를 수 없다. 그래서 모델에게서
-# 쓸 답을 못 받아도 답은 이미 손에 있다. 판단 전체를 실패로 끝내면 사장님은 빈손이 된다.
+# A failed model must never be replaced by a code-selected candidate.
 @pytest.mark.parametrize("error", [
     LLMRequestError(
         "LLM provider returned HTTP 503 after 3 attempt(s)",
@@ -912,30 +969,21 @@ class UnusableModel(StubModel):
         code="STRUCTURED_OUTPUT_FAILED", retryable=True, attempts=3,
     ),
 ])
-def test_unusable_model_answers_the_same_as_a_working_one(error):
+def test_unusable_model_propagates_without_a_code_selected_fallback(error):
     async def run():
         request = request_with_all_closure_steps(demolition_required="REQUIRED")
-        working = await SupervisorAgent(ChoiceModel(), max_local_attempts=3).draft(
-            request
-        )
         model = UnusableModel(error)
-        offline = await SupervisorAgent(model, max_local_attempts=3).draft(request)
-        assert offline.decision.decision_type == "ACTION"
-        assert offline.decision.blocker == working.decision.blocker
-        assert offline.decision.next_action == working.decision.next_action
+        with pytest.raises(type(error)):
+            await SupervisorAgent(model, max_local_attempts=3).draft(request)
         # llm.py가 이미 재시도를 끝낸 뒤 던지므로 여기서 다시 부르지 않는다
         assert model.calls == 1
-        review = await ReviewTool(ChoiceModel(), max_output_attempts=1).review(
-            subject(request, offline)
-        )
-        assert review.verdict == "PASS"
 
     asyncio.run(run())
 
 
 @pytest.mark.parametrize("held_field", ["restoration_scope", "demolition_required"])
 @result_fixes_xfail()
-def test_held_fact_precedes_missing_questions_and_actions_and_passes_review(held_field):
+def test_model_can_select_a_held_fact_while_valid_actions_remain(held_field):
     from test_info_replanning import analyze_facts
 
     text = (
@@ -954,8 +1002,8 @@ def test_held_fact_precedes_missing_questions_and_actions_and_passes_review(held
         info.evidence_records.extend(result.evidence_records)
         info.fact_candidates = result.fact_candidates
         request.source_results[1] = source(info)
-        assert candidates(request) == []
-        draft = await SupervisorAgent(ChoiceModel(), max_local_attempts=1).draft(request)
+        assert candidates(request)
+        draft = await SupervisorAgent(ChoiceModel(information=True, choice=int(held_field == "demolition_required")), max_local_attempts=1).draft(request)
         decision = draft.decision
         assert decision.decision_type == "NEEDS_MORE_INFO"
         assert decision.next_action is None
@@ -998,10 +1046,10 @@ def test_held_fact_only_blocks_closure_when_not_support_only(blocks):
         request.source_results[1] = source(info)
         support_only = blocks == ["SUPPORT_ANALYSIS"]
 
-        assert bool(candidates(request)) is support_only
+        assert candidates(request)
         fallback = missing_info_fields(request.case_snapshot, request.source_results, mutations())
         assert (fallback is None) is support_only
-        draft = await SupervisorAgent(ChoiceModel(), max_local_attempts=1).draft(request)
+        draft = await SupervisorAgent(ChoiceModel(information=not support_only), max_local_attempts=1).draft(request)
         if support_only:
             assert draft.decision.decision_type == "ACTION"
             assert draft.decision.next_action.action_code == expected_action["action_code"]

@@ -14,12 +14,14 @@ from app.agent.action_catalog import (
     ACTION_DEFINITIONS,
     ProcedureBindings,
     build_action_candidates,
+    effective_procedure_progress,
     resolve_procedure_bindings,
 )
 from app.agent.blocker_candidates import (
     build_blocker_candidates,
     candidate_decision_violations,
     missing_info_fields,
+    resolved_blocker_candidates,
 )
 from app.agent.claim_safety import (
     REQUIRED_CLAIM_SOURCES,
@@ -32,7 +34,7 @@ from app.agent.claim_safety import (
     is_overconfident,
     references_other_known_label,
 )
-from app.agent.enrichment import build_confirmed_conflict_overlay
+from app.agent.enrichment import build_confirmed_conflict_overlay, build_fact_overlays
 from app.agent.guardrails import GuardrailViolation, ensure_no_sensitive_text
 from app.agent.procedure_tool.rules import procedure_plan_constraints
 from app.agent.projection import (
@@ -41,6 +43,7 @@ from app.agent.projection import (
 )
 from app.agent.prompts import review_messages
 from app.agent.schemas import (
+    CaseFieldKey,
     ClaimType,
     Component,
     ConflictConfirmedTrigger,
@@ -52,6 +55,7 @@ from app.agent.schemas import (
     FreshnessStatus,
     InfoAnalysisResult,
     MissingEvidence,
+    MutationSet,
     ProcedureActionTarget,
     ProcedureFinding,
     ProcedureLookupResult,
@@ -299,6 +303,17 @@ def _validate_integrity(subject: ReviewSubject) -> _ReviewContext:
         raise ReviewIntegrityError("review subject cannot be digested") from exc
     if subject.subject_digest != calculated_digest:
         raise ReviewIntegrityError("review subject digest does not match its contents")
+    confirmation = getattr(subject.trigger, "procedure_completion_confirmation", None)
+    if confirmation is not None:
+        try:
+            confirmation.assert_current(subject.snapshot)
+            if not any(
+                item.procedure_step == confirmation.observation.procedure_step
+                for item in subject.known_procedure_steps
+            ):
+                raise ValueError("completion confirmation references an unknown procedure")
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise ReviewIntegrityError("completion confirmation does not match the Case") from exc
 
     call_ids = [source.meta.call_id for source in subject.source_results]
     if len(set(call_ids)) != len(call_ids):
@@ -358,6 +373,19 @@ def _validate_integrity(subject: ReviewSubject) -> _ReviewContext:
 
     _validate_procedure_analysis_provenance(sources_by_call_id)
     _validate_mutation_provenance(subject, sources_by_call_id)
+    for source in subject.source_results:
+        if not isinstance(source.output, InfoAnalysisResult):
+            continue
+        for observation in source.output.procedure_progress_observations:
+            original_input = getattr(subject.trigger, "input", None)
+            if confirmation is not None and confirmation.matches(observation):
+                original_input = confirmation.input
+            if original_input is None:
+                raise ReviewIntegrityError("procedure progress requires its original input")
+            try:
+                observation.assert_input_integrity(original_input, evidence_by_id)
+            except (ValueError, TypeError, AttributeError) as exc:
+                raise ReviewIntegrityError("procedure progress differs from its original input") from exc
     _validate_action_shape(subject, sources_by_call_id)
     return _ReviewContext(
         evidence_by_id=evidence_by_id,
@@ -390,6 +418,8 @@ def _validate_mutation_provenance(
             )
     snapshot_facts = {fact.field_path: fact for fact in subject.snapshot.facts}
     for candidate in mutations.fact_changes:
+        if candidate.field_path not in CaseFieldKey:
+            raise ReviewIntegrityError("fact mutation must reference a stored Case field")
         if candidate.source_type == FactChangeSourceType.CONFIRMED_CONFLICT:
             if not isinstance(subject.trigger, ConflictConfirmedTrigger):
                 raise ReviewIntegrityError(
@@ -504,6 +534,8 @@ def _validate_mutation_provenance(
         if (
             candidate.before_status != before_status
             or finding.current_status != before_status
+            or candidate.before_requirements_confirmed != (snapshot_progress.requirements_confirmed if snapshot_progress else False)
+            or candidate.before_submitted != (snapshot_progress.submitted if snapshot_progress else False)
         ):
             raise ReviewIntegrityError(
                 "procedure mutation before state differs from snapshot/finding"
@@ -518,6 +550,8 @@ def _validate_mutation_provenance(
                 and observation.source_evidence_refs
                 == candidate.execution_evidence_refs
                 and observation.reason_summary == candidate.reason_summary
+                and candidate.proposed_requirements_confirmed == (candidate.before_requirements_confirmed or observation.requirements_confirmed)
+                and candidate.proposed_submitted == (candidate.before_submitted or observation.submitted)
             )
         ]
         if len(matching_observations) != 1:
@@ -528,6 +562,13 @@ def _validate_mutation_provenance(
             raise ReviewIntegrityError(
                 "procedure mutation cannot use an observation requiring confirmation"
             )
+        if (
+            candidate.before_status != ProcedureProgressStatus.COMPLETED
+            and candidate.proposed_status == ProcedureProgressStatus.COMPLETED
+        ):
+            confirmation = getattr(subject.trigger, "procedure_completion_confirmation", None)
+            if confirmation is None or not confirmation.matches(matching_observations[0]):
+                raise ReviewIntegrityError("procedure completion requires explicit user confirmation")
 
     for candidate in mutations.support_match_updates:
         source = _require_source_output(
@@ -717,6 +758,16 @@ def _review_prompt_projection(
             "source_type": redacted_input.source_type.value,
             "redacted_text": redacted_input.redacted_text,
         }
+    confirmation = getattr(subject.trigger, "procedure_completion_confirmation", None)
+    if confirmation is not None:
+        trigger["procedure_completion_confirmation"] = {
+            "confirmed": confirmation.confirmed,
+            "observation": _minimize_prompt_value(confirmation.observation.model_dump(mode="json")),
+            "input": {
+                "source_type": confirmation.input.source_type.value,
+                "redacted_text": confirmation.input.redacted_text,
+            },
+        }
     support_programs = getattr(subject.trigger, "support_programs", None)
     if support_programs is not None:
         trigger["support_programs"] = [
@@ -777,6 +828,33 @@ def _deterministic_safety_review(
     issues: list[ReviewIssue] = []
     missing: list[MissingEvidence] = []
     draft = subject.supervisor_draft
+    # 반환 목록과 검수 원본은 그대로 두고, 이번 판단의 직원·보험 정보도 검수한다.
+    mutations = MutationSet(
+        fact_changes=[
+            *draft.mutations.fact_changes,
+            *[
+                change
+                for source in subject.source_results
+                if isinstance(source.output, InfoAnalysisResult)
+                for change in build_fact_overlays(
+                    subject.snapshot, source.output, source.meta.call_id,
+                )
+                if change.field_path not in CaseFieldKey
+            ],
+        ],
+        procedure_progress_changes=draft.mutations.procedure_progress_changes,
+        support_match_updates=draft.mutations.support_match_updates,
+    )
+    expected_resolved = resolved_blocker_candidates(
+        subject.snapshot, subject.known_procedure_steps, mutations, procedure_bindings,
+        sources=subject.source_results,
+    )
+    if draft.resolved_blocker_candidate_ids != expected_resolved:
+        issues.append(_issue(
+            code="CONTRACT_VIOLATION", category="CONTRACT",
+            path="/supervisor_draft/resolved_blocker_candidate_ids",
+            reason="이전 문제의 해소 결과가 확인된 사실·진행 상태와 다릅니다.", evidence_refs=[],
+        ))
     visible_strings = dict(_visible_draft_strings(subject))
 
     for index, claim in enumerate(draft.grounded_claims):
@@ -920,7 +998,7 @@ def _deterministic_safety_review(
         subject.snapshot,
         subject.known_procedure_steps,
         subject.source_results,
-        draft.mutations,
+        mutations,
         context.evidence_by_id,
         procedure_bindings,
     )
@@ -930,8 +1008,9 @@ def _deterministic_safety_review(
         missing_info_fields(
             subject.snapshot,
             subject.source_results,
-            draft.mutations,
+            mutations,
             procedure_bindings,
+            known_procedure_steps=subject.known_procedure_steps,
         ),
     ):
         issues.append(
@@ -948,7 +1027,11 @@ def _deterministic_safety_review(
         candidate["action_code"] == action.action_code
         and candidate["target"] == action.target.model_dump(mode="json")
         for candidate in build_action_candidates(
-            subject.source_results, context.evidence_by_id, procedure_bindings
+            subject.source_results, context.evidence_by_id, procedure_bindings,
+            procedure_progress=effective_procedure_progress(
+                subject.snapshot, mutations, known_steps=subject.known_procedure_steps,
+                procedure_bindings=procedure_bindings,
+            ),
         )
     ):
         issues.append(
@@ -961,7 +1044,8 @@ def _deterministic_safety_review(
             )
         )
     for path, reason in procedure_plan_constraints(
-        subject.known_procedure_steps, subject.snapshot, draft.mutations, draft.decision
+        subject.known_procedure_steps, subject.snapshot, mutations, draft.decision,
+        procedure_bindings=procedure_bindings,
     ):
         issues.append(
             _issue(
@@ -1368,6 +1452,7 @@ def _visible_draft_strings(subject: ReviewSubject) -> list[tuple[str, str]]:
     values: list[tuple[str, str]] = [
         (f"{base}/selection_summary", decision.selection_summary),
         (f"{base}/blocker/description", decision.blocker.description),
+        *((f"{base}/blockers/{index}/description", item.description) for index, item in enumerate(decision.blockers)),
     ]
     if decision.next_action is not None:
         action_base = f"{base}/next_action"
