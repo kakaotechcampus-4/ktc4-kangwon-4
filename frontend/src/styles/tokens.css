@@ -81,6 +81,9 @@
 }
 
 @theme {
+  /* 글꼴. 글꼴 파일은 `main.tsx`가 불러온다 */
+  --font-sans: 'Pretendard Variable', Pretendard, -apple-system, 'Apple SD Gothic Neo', sans-serif;
+
   /*
    * 글자 크기. 이름은 픽셀 그대로다(`text-17` = 17px, 줄높이 24px).
    * 시안의 크기·줄높이 29쌍에서 1px 차이 나는 줄높이를 합쳐 11단계로 줄였다.
