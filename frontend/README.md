@@ -53,13 +53,16 @@ Vite 가 읽지 않습니다. 고친 뒤에는 개발 서버를 다시 띄웁니
 | React Router | 라우팅. v7부터 `react-router-dom`이 아니라 `react-router` 한 패키지입니다 |
 | Fetch API | 통신 |
 | React 내장 | 상태관리 (`useState` / `useContext`) |
+| Pretendard | 본문 글꼴. npm 패키지로 직접 배포 (`src/main.tsx`) |
 
 Mobile-first 반응형, 기준 폭 375px.
 
 서버 통신은 `src/lib/api.ts` 한곳을 거칩니다. 주소와 `Access-Token` 헤더를 여기서 붙이고,
 인증이 통하지 않으면 로그인 화면으로 돌려보냅니다.
 
-**아직 도입하지 않은 것** — 웹폰트, 상태관리 라이브러리
+색·글자 크기·모서리·그림자는 `src/styles/tokens.css`의 토큰으로 씁니다. 규칙은 `docs/ui-guidelines.md`에 있습니다.
+
+**아직 도입하지 않은 것** — 상태관리 라이브러리
 
 ## 화면
 
@@ -194,11 +197,13 @@ frontend/
 │  │                  view.ts — 화면이 필요한 모양 (camelCase)
 │  ├─ mocks/          Mock 전환(?mock=)용 데이터
 │  ├─ lib/            화면에 속하지 않는 보조 코드
+│  ├─ styles/         tokens.css — 색·글자 크기·모서리·그림자 토큰
+│  ├─ assets/         brand/ — 워드마크·망치 마크 SVG
 │  ├─ routes.tsx      라우트 정의
 │  ├─ main.tsx        진입점
 │  ├─ App.tsx         RouterProvider
 │  ├─ vite-env.d.ts   환경변수 타입 선언
-│  └─ index.css       Tailwind import
+│  └─ index.css       Tailwind·토큰 import, 본문 기본 스타일
 ├─ index.html
 ├─ .env.example       로컬 BE 에 붙일 때만 필요
 ├─ vercel.json        SPA fallback + API 프록시
