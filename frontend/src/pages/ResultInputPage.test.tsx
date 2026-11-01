@@ -28,8 +28,8 @@ function renderFlow(results = '/results') {
 
 /** 입력하고 제출한다. 클릭은 fireEvent로 — userEvent는 가짜 타이머와 맞물리면 멈춘다 */
 function submit(text: string) {
-  fireEvent.change(screen.getByLabelText(/어떻게 되었나요/), { target: { value: text } })
-  fireEvent.click(screen.getByRole('button', { name: /알려주기/ }))
+  fireEvent.change(screen.getByLabelText('어떻게 됐나요?'), { target: { value: text } })
+  fireEvent.click(screen.getByRole('button', { name: '보내기' }))
 }
 
 /** 가짜 시계를 돌리고, 그 사이 끝난 요청과 그에 따른 렌더까지 반영한다 */
@@ -45,6 +45,27 @@ afterEach(() => {
 })
 
 describe('ResultInputPage — Mock', () => {
+  /** 눌러도 아무 일이 없는 버튼은 고장으로 읽힌다. 적기 전에는 꺼 둔다 */
+  it('아무것도 적지 않으면 보내기가 꺼져 있다', async () => {
+    renderFlow('/results?mock=updated')
+
+    expect(await screen.findByRole('button', { name: '보내기' })).toBeDisabled()
+    fireEvent.change(screen.getByLabelText('어떻게 됐나요?'), { target: { value: '   ' } })
+    expect(screen.getByRole('button', { name: '보내기' })).toBeDisabled()
+  })
+
+  /** 판단은 길면 2분 걸린다. 그동안 눌리는 폼이 그대로 있으면 같은 글을 또 보내게 된다 */
+  it('보내는 동안은 폼 대신 기다린다고 알린다', async () => {
+    vi.useFakeTimers()
+    renderFlow('/results?mock=updated')
+
+    submit('임대인이 철거하래요')
+    await advance()
+
+    expect(screen.getByRole('status')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '보내기' })).not.toBeInTheDocument()
+  })
+
   /** 기다린 사람은 결과 화면으로 간다 — 아래 테스트가 이동 자체를 막아버리지 않았는지 함께 본다 */
   it('응답이 오면 재계획 화면으로 이동한다', async () => {
     vi.useFakeTimers()
@@ -123,7 +144,7 @@ function serve({ entry = [], submit = [], judged = [] }: Partial<Record<'entry' 
 function sentBodies(fetchMock: ReturnType<typeof serve>) {
   return fetchMock.mock.calls
     .filter(([, init]) => init.method === 'POST')
-    .map(([, init]) => JSON.parse(init.body as string) as { case_history_id: number })
+    .map(([, init]) => JSON.parse(init.body as string) as { case_history_id: number; raw_input: string })
 }
 
 function entryBody(overrides: Partial<CaseResultsEntryResponse>): CaseResultsEntryResponse {
@@ -204,7 +225,76 @@ describe('ResultInputPage — 서버', () => {
       expect(router.state.location.pathname).toBe('/case')
     })
 
-    it.each(['PENDING', 'NEEDS_MORE_INFO', 'FAILED'] as const)(
+    /** 홈의 "답하러 가기"로 들어온 경우다. 할 일의 결과가 아니라 질문의 답을 받는다 */
+    it('리본이 되물은 상태면 질문마다 답할 칸을 연다', async () => {
+      serve({
+        entry: [
+          json(
+            entryBody({
+              judgment_status: 'NEEDS_MORE_INFO',
+              next_action: null,
+              questions_for_user: ['직원이 몇 명인가요?', '프랜차이즈 가게인가요?'],
+            }),
+          ),
+        ],
+      })
+      renderFlow()
+      await advance()
+
+      expect(screen.getByLabelText('직원이 몇 명인가요?')).toBeEnabled()
+      expect(screen.getByLabelText('프랜차이즈 가게인가요?')).toBeEnabled()
+    })
+
+    /**
+     * 재판단 때 AI는 직전 질문을 모른다. "2명이요"만 가면 무엇의 답인지 알 수 없다.
+     * 답하지 않은 질문은 보내지 않는다 — 모르는 것까지 적게 하면 지어낸 답이 들어간다.
+     */
+    it('답은 질문을 붙여 보내고, 답하지 않은 질문은 뺀다', async () => {
+      const fetchMock = serve({
+        entry: [
+          json(
+            entryBody({
+              judgment_status: 'NEEDS_MORE_INFO',
+              next_action: null,
+              questions_for_user: ['직원이 몇 명인가요?', '프랜차이즈 가게인가요?'],
+            }),
+          ),
+        ],
+        submit: [ACCEPTED],
+      })
+      renderFlow()
+      await advance()
+
+      fireEvent.change(screen.getByLabelText('직원이 몇 명인가요?'), { target: { value: '2명이요' } })
+      fireEvent.click(screen.getByRole('button', { name: '보내기' }))
+      await advance()
+
+      expect(sentBodies(fetchMock).map((body) => body.raw_input)).toEqual([
+        '[리본이 물어본 것] 직원이 몇 명인가요?\n[사장님 답] 2명이요',
+      ])
+    })
+
+    /** 보내다 실패했다고 질문이 사라지면, 사장님은 무엇에 답하던 중이었는지 잃는다 */
+    it('보낸 뒤 되물은 질문은 보내다 실패해도 답과 함께 남는다', async () => {
+      serve({
+        entry: [READY],
+        submit: [ACCEPTED, status(500)],
+        judged: [json(judgedBody({ result: 'NEEDS_MORE_INFO', questions_for_user: ['매장 전체인가요?'] }))],
+      })
+      renderFlow()
+      await advance()
+
+      submit('임대인이 철거하래요')
+      await advance(INTERVAL_MS)
+      fireEvent.change(screen.getByLabelText('매장 전체인가요?'), { target: { value: '네, 전체래요' } })
+      fireEvent.click(screen.getByRole('button', { name: '보내기' }))
+      await advance()
+
+      expect(screen.getByLabelText('매장 전체인가요?')).toHaveValue('네, 전체래요')
+      expect(screen.getByRole('button', { name: '다시 보내기' })).toBeEnabled()
+    })
+
+    it.each(['PENDING', 'FAILED'] as const)(
       '판단이 %s 면 현재 Case 로 돌려보낸다',
       async (judgment) => {
         serve({ entry: [json(entryBody({ judgment_status: judgment, next_action: null }))] })
@@ -292,12 +382,14 @@ describe('ResultInputPage — 서버', () => {
 
       submit('임대인이 철거하래요')
       await advance(INTERVAL_MS)
-      expect(screen.getByText('매장 전체인가요?')).toBeInTheDocument()
 
-      submit('매장 전체래요')
+      // 되물으면 같은 화면이 그 질문에 답하는 모양으로 바뀐다
+      fireEvent.change(screen.getByLabelText('매장 전체인가요?'), { target: { value: '네, 전체래요' } })
+      fireEvent.click(screen.getByRole('button', { name: '보내기' }))
       await advance()
 
       expect(sentBodies(fetchMock).map((body) => body.case_history_id)).toEqual([12, 13])
+      expect(sentBodies(fetchMock)[1].raw_input).toBe('[리본이 물어본 것] 매장 전체인가요?\n[사장님 답] 네, 전체래요')
     })
 
     /** 무엇이 실패했든 적은 글을 다시 쓰게 하지 않는다 */

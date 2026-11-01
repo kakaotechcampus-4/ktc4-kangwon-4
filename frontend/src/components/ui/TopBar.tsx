@@ -2,7 +2,8 @@ import { IconChevronLeftLine } from '@karrotmarket/react-monochrome-icon'
 import { useLocation, useNavigate } from 'react-router'
 
 interface TopBarProps {
-  title: string
+  /** 비우면 뒤로 버튼만 둔다. 화면 안에 더 큰 제목(`h1`)이 있는 할 일 상세 같은 화면이다 */
+  title?: string
 }
 
 /**
@@ -29,7 +30,7 @@ export function TopBar({ title }: TopBarProps) {
       >
         <IconChevronLeftLine size={24} aria-hidden="true" />
       </button>
-      <h1 className="text-center text-18 font-bold">{title}</h1>
+      {title && <h1 className="text-center text-18 font-bold">{title}</h1>}
     </header>
   )
 }

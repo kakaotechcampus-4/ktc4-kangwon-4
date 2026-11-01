@@ -75,6 +75,7 @@ function renderAt(path: string) {
         ],
       },
       { path: '/start', element: <p>시작 화면</p> },
+      { path: '/task', element: <p>할 일 상세 화면</p> },
       { path: '/results', element: <p>결과 입력 화면</p> },
     ],
     { initialEntries: [path] },
@@ -153,7 +154,7 @@ describe('CurrentCasePage', () => {
       expect(
         await screen.findByRole('heading', { level: 2, name: '다음 할 일을 정하고 있어요' }),
       ).toBeInTheDocument()
-      expect(screen.queryByRole('button', { name: '결과 알려주기' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: '물어볼 내용 보기' })).not.toBeInTheDocument()
     })
 
     it('판단이 끝나면 할 일과 이유를 보여준다', async () => {
@@ -169,14 +170,23 @@ describe('CurrentCasePage', () => {
       ).toBeInTheDocument()
     })
 
-    it('결과 알려주기를 누르면 결과 입력으로 간다', async () => {
+    it('물어볼 내용 보기를 누르면 할 일 상세로 간다', async () => {
       saveTokens('access-1', 'refresh-1')
       mockCase(DONE)
       renderAt('/case')
 
-      fireEvent.click(await screen.findByRole('button', { name: '결과 알려주기' }))
+      fireEvent.click(await screen.findByRole('button', { name: '물어볼 내용 보기' }))
 
-      expect(await screen.findByText('결과 입력 화면')).toBeInTheDocument()
+      expect(await screen.findByText('할 일 상세 화면')).toBeInTheDocument()
+    })
+
+    /** 물어볼 말이 없는 할 일에 "물어볼 내용 보기"라고 하면 거짓말이 된다 */
+    it('물어볼 말이 없으면 자세히 보기로 부른다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      mockCase({ ...DONE, next_action: { ...DONE.next_action, questions_to_ask: [] } })
+      renderAt('/case')
+
+      expect(await screen.findByRole('button', { name: '자세히 보기' })).toBeEnabled()
     })
 
     it('되물을 것이 있으면 질문을 보여준다', async () => {
@@ -189,18 +199,16 @@ describe('CurrentCasePage', () => {
       expect(await screen.findByText('철거까지 하시나요?')).toBeInTheDocument()
     })
 
-    /**
-     * 답을 보내는 길은 서버에 있지만 연결은 4번 PR에서 한다. 그 전에 눌리면
-     * 아무 데도 못 가는 버튼이 된다.
-     */
-    it('되물을 것이 있으면 답하러 가기는 아직 꺼 둔다', async () => {
+    it('되물을 것이 있으면 답하러 가기를 눌러 답 입력으로 간다', async () => {
       saveTokens('access-1', 'refresh-1')
       mockCase(
         envelope({ judgment_status: 'NEEDS_MORE_INFO', questions_for_user: ['철거까지 하시나요?'] }),
       )
       renderAt('/case')
 
-      expect(await screen.findByRole('button', { name: '답하러 가기' })).toBeDisabled()
+      fireEvent.click(await screen.findByRole('button', { name: '답하러 가기' }))
+
+      expect(await screen.findByText('결과 입력 화면')).toBeInTheDocument()
     })
 
     it('판단에 실패하면 무엇을 못 했는지 알린다', async () => {
@@ -369,11 +377,11 @@ describe('CurrentCasePage', () => {
       ).toBeInTheDocument()
     })
 
-    it('결과 알려주기를 잠근다', async () => {
+    it('할 일 상세로 가는 길을 잠근다', async () => {
       await renderStale()
 
-      expect(screen.getByRole('button', { name: '결과 알려주기' })).toBeDisabled()
-      expect(screen.getByText('최신 상태를 확인한 뒤에 알려주실 수 있어요')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '물어볼 내용 보기' })).toBeDisabled()
+      expect(screen.getByText('최신 상태를 확인한 뒤에 볼 수 있어요')).toBeInTheDocument()
     })
 
     /** 조회까지 막으면 회복할 길이 없어진다 */
@@ -410,7 +418,7 @@ describe('CurrentCasePage', () => {
       expect(
         await screen.findByRole('heading', { level: 2, name: '이 내용을 알려주세요' }),
       ).toBeInTheDocument()
-      expect(screen.queryByRole('button', { name: '결과 알려주기' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: '물어볼 내용 보기' })).not.toBeInTheDocument()
     })
   })
 })

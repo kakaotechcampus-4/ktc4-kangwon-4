@@ -173,7 +173,9 @@ function judgmentCard(judgment: JudgmentView, waitedTooLong: boolean): JudgmentC
           title: nextAction.title,
           description: nextAction.reason,
         },
-        main: (stale) => <ResultButton locked={stale} />,
+        main: (stale) => (
+          <TaskButton hasQuestions={(nextAction.questions?.length ?? 0) > 0} locked={stale} />
+        ),
       }
     }
 
@@ -205,8 +207,8 @@ function judgmentCard(judgment: JudgmentView, waitedTooLong: boolean): JudgmentC
       }
 
     /*
-      답을 보내는 길은 서버에 이미 있다(`POST /cases/results`). 연결은 결과 입력을 새로 만드는
-      4번 PR에서 한다. 그때까지 버튼 자리만 두고 꺼 둔다.
+      답은 할 일의 결과와 같은 길(`POST /cases/results`)로 보낸다. 결과 입력 화면이 질문에
+      답하는 모양으로 열린다.
     */
     case 'NEEDS_MORE_INFO':
       return {
@@ -225,12 +227,7 @@ function judgmentCard(judgment: JudgmentView, waitedTooLong: boolean): JudgmentC
             </ul>
           ),
         },
-        // TODO(4번 PR): 결과 입력 화면에 잇는다
-        main: () => (
-          <Button size="lg" disabled>
-            답하러 가기
-          </Button>
-        ),
+        main: (stale) => <AnswerButton locked={stale} />,
       }
 
     /*
@@ -295,22 +292,47 @@ function judgmentCard(judgment: JudgmentView, waitedTooLong: boolean): JudgmentC
 }
 
 /**
- * "결과 알려주기". 최신 상태를 확인하지 못했으면 잠근다 — 지난 할 일에 대해 답하게 된다.
+ * 할 일 상세(`/task`)로 가는 버튼. 최신 상태를 확인하지 못했으면 잠근다 — 지난 할 일을
+ * 지금 할 일처럼 열어 보고 그 결과를 보내게 된다.
  *
- * TODO(4번 PR): 할 일 상세("물어볼 내용 보기")로 바꾼다. 지금은 옛 결과 입력으로 간다.
+ * 이름은 시안의 "물어볼 내용 보기"를 따르되, 물어볼 말이 없는 할 일에서는 거짓말이 되어
+ * "자세히 보기"로 둔다.
  */
-function ResultButton({ locked }: { locked: boolean }) {
+function TaskButton({ hasQuestions, locked }: { hasQuestions: boolean; locked: boolean }) {
+  const navigate = useNavigate()
+  const { search } = useLocation()
+
+  return (
+    <>
+      <Button size="lg" disabled={locked} onClick={() => navigate({ pathname: '/task', search })}>
+        {hasQuestions ? '물어볼 내용 보기' : '자세히 보기'}
+      </Button>
+      {locked && (
+        <p className="text-center text-14 text-fg-neutral-muted">
+          최신 상태를 확인한 뒤에 볼 수 있어요
+        </p>
+      )}
+    </>
+  )
+}
+
+/**
+ * 리본이 되물은 질문에 답하러 가는 버튼. 결과 입력(`/results`)이 질문에 답하는 모양으로 열린다.
+ *
+ * 최신 상태를 확인하지 못했으면 잠근다 — 이미 지난 질문에 답하게 된다.
+ */
+function AnswerButton({ locked }: { locked: boolean }) {
   const navigate = useNavigate()
   const { search } = useLocation()
 
   return (
     <>
       <Button size="lg" disabled={locked} onClick={() => navigate({ pathname: '/results', search })}>
-        결과 알려주기
+        답하러 가기
       </Button>
       {locked && (
         <p className="text-center text-14 text-fg-neutral-muted">
-          최신 상태를 확인한 뒤에 알려주실 수 있어요
+          최신 상태를 확인한 뒤에 답하실 수 있어요
         </p>
       )}
     </>

@@ -127,12 +127,15 @@
   /* 홈의 할 일 카드. 다른 카드보다 한 겹 떠 있게 퍼지되, 시트(`floating`)보다는 옅다 */
   --shadow-raised: 0 2px 10px #00000014;
 
-  /* 움직임. 망치 로더가 빙글 돈다(`animate-hammer-spin`). 처음에 천천히, 가운데서 빠르게 돈다 */
+  /*
+   * 움직임. 망치 로더가 빙글 돈다(`animate-hammer-spin`). 처음에 천천히, 가운데서 빠르게 돈다.
+   * 시안과 달리 시계 반대 방향이다. 망치 머리가 왼쪽 위를 보고 있어서, 머리 쪽으로 넘어가야 자연스럽다
+   */
   --animate-hammer-spin: hammer-spin 1.2s cubic-bezier(0.55, 0, 0.45, 1) infinite;
 
   @keyframes hammer-spin {
     to {
-      transform: rotate(360deg);
+      transform: rotate(-360deg);
     }
   }
 

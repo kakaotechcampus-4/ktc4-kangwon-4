@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest'
 
 import type { CaseResultsEntryResponse, CaseResultsSubmitResponse } from '../types/api'
-import { toChanges, toConflicts, toResultsEntry, toSubmitOutcome, toValueLabel } from './results'
+import {
+  toAnswerInput,
+  toChanges,
+  toConflicts,
+  toResultsEntry,
+  toSubmitOutcome,
+  toValueLabel,
+} from './results'
 
 /**
  * 서버가 값을 파이썬 표기 그대로 보낸다(`"True"`, `"FULL"`). 여기가 틀리면 사장님 화면에
@@ -174,7 +181,15 @@ describe('toResultsEntry', () => {
     expect(toResultsEntry(null)).toEqual({ kind: 'UNRECOGNIZED' })
   })
 
-  it.each(['PENDING', 'NEEDS_MORE_INFO', 'FAILED'] as const)('%s 면 다른 화면으로 보낸다', (status) => {
+  it('되물은 것이 있으면 답을 받을 질문과 판단 번호를 담는다', () => {
+    expect(
+      toResultsEntry(
+        entry({ judgment_status: 'NEEDS_MORE_INFO', case_history_id: 12, questions_for_user: ['직원이 몇 명인가요?'] }),
+      ),
+    ).toEqual({ kind: 'ANSWER', questions: ['직원이 몇 명인가요?'], historyId: 12 })
+  })
+
+  it.each(['PENDING', 'FAILED'] as const)('%s 면 다른 화면으로 보낸다', (status) => {
     expect(toResultsEntry(entry({ judgment_status: status, case_history_id: 12 }))).toEqual({
       kind: 'ELSEWHERE',
     })
@@ -196,6 +211,11 @@ describe('toResultsEntry', () => {
         conflicts: [{ id: 3, field: 'demolition_required', stored_value: 'NOT_REQUIRED', proposed_value: 'REQUIRED' }],
       }),
     ],
+    [
+      '되묻는다면서 판단 번호가 없다',
+      entry({ judgment_status: 'NEEDS_MORE_INFO', questions_for_user: ['직원이 몇 명인가요?'] }),
+    ],
+    ['되묻는다면서 질문이 없다', entry({ judgment_status: 'NEEDS_MORE_INFO', case_history_id: 12 })],
     ['모르는 상태다', entry({ judgment_status: 'ARCHIVED' as never, case_history_id: 12 })],
   ])('%s 면 알 수 없는 응답으로 둔다', (_, body) => {
     expect(toResultsEntry(body)).toEqual({ kind: 'UNRECOGNIZED' })
@@ -306,5 +326,39 @@ describe('toSubmitOutcome', () => {
 
   it('본문이 비어 있어도 알 수 없는 응답으로 둔다', () => {
     expect(toSubmitOutcome(null)).toEqual(UNRECOGNIZED)
+  })
+})
+
+/**
+ * 재판단 때 AI는 직전에 무엇을 물었는지 모른다. 질문이 빠지면 "2명이요"가 무엇의 답인지
+ * 알 수 없어, 사장님이 답했는데도 같은 질문을 또 받게 된다.
+ */
+describe('toAnswerInput', () => {
+  it('질문과 답을 짝으로 적는다', () => {
+    expect(toAnswerInput([{ question: '직원이 몇 명인가요?', answer: '2명이요' }])).toBe(
+      '[리본이 물어본 것] 직원이 몇 명인가요?\n[사장님 답] 2명이요',
+    )
+  })
+
+  it('질문이 여러 개면 빈 줄로 나눈다', () => {
+    expect(
+      toAnswerInput([
+        { question: '직원이 몇 명인가요?', answer: '2명이요' },
+        { question: '프랜차이즈 가게인가요?', answer: '아니요' },
+      ]),
+    ).toBe(
+      '[리본이 물어본 것] 직원이 몇 명인가요?\n[사장님 답] 2명이요\n\n' +
+        '[리본이 물어본 것] 프랜차이즈 가게인가요?\n[사장님 답] 아니요',
+    )
+  })
+
+  /** 답이 없는 질문까지 보내면 AI가 "모른다"는 답으로 읽을 수 있다 */
+  it('답을 적지 않은 질문은 빼고, 앞뒤 빈칸은 지운다', () => {
+    expect(
+      toAnswerInput([
+        { question: '직원이 몇 명인가요?', answer: '  2명이요 ' },
+        { question: '프랜차이즈 가게인가요?', answer: '   ' },
+      ]),
+    ).toBe('[리본이 물어본 것] 직원이 몇 명인가요?\n[사장님 답] 2명이요')
   })
 })

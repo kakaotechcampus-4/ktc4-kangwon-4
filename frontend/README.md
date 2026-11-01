@@ -74,7 +74,8 @@ Mobile-first 반응형, 기준 폭 375px.
 | `/start` | 시작 화면 | Case가 없는 사용자만 본다 |
 | `/cases/new` | Case 생성 | 사장님이 이미 아는 것만 묻는다 |
 | `/case` | 현재 Case (홈) | 하단 탭. 지금 할 일 하나, 또는 리본이 일하는 중인지 |
-| `/results` | 결과 입력 | 실행 결과를 한 줄로 전달 |
+| `/task` | 할 일 상세 | 할 일과 "이렇게 물어보세요" 목록 |
+| `/results` | 결과 입력 | 할 일의 결과를 글로 전달. 리본이 되물었으면 그 질문에 답한다 |
 | `/confirm` | 충돌 확인 | 기존 기록과 어긋날 때만 들른다 |
 | `/replan` | 재계획 결과 | 무엇이 바뀌었고 다음은 무엇인가 |
 | `/docs` | 서류함 | 하단 탭. 아직 API가 없어 빈 상태 |
@@ -86,11 +87,11 @@ Mobile-first 반응형, 기준 폭 375px.
 `/`는 화면이 아니라 분기입니다. 로그인 여부와 Case 유무를 보고 `/login`·`/start`·`/case` 중
 하나로 보냅니다. 판단을 한곳에 모아두면 새 화면이 늘어도 규칙이 갈라지지 않습니다.
 
-`/results`·`/confirm`·`/replan`은 이전 화면에서 라우터 state로 데이터를 받습니다. 주소로 직접 열면
+`/confirm`·`/replan`은 이전 화면에서 라우터 state로 데이터를 받습니다. 주소로 직접 열면
 개발·Preview에서는 Mock으로, 그 외에는 `/`로 이동합니다.
 
-**Case 가 있는지는 서버에 물어봅니다.** `/` · `/start` · `/case` 가 들어올 때마다
-`GET /cases` 를 부릅니다. 앞 화면에서 받은 값을 넘겨받지 않는 것은, 그 값이 히스토리에 남아
+**Case 가 있는지는 서버에 물어봅니다.** `/` · `/start` · `/case` · `/task` 가 들어올 때마다
+`GET /cases` 를, `/results` 는 `GET /cases/results` 를 부릅니다. 앞 화면에서 받은 값을 넘겨받지 않는 것은, 그 값이 히스토리에 남아
 오래된 Case 가 "지금 상황"인 척 다시 뜨기 때문입니다.
 
 로그인 토큰은 `sessionStorage`에 둡니다. 탭을 닫으면 풀립니다 — 가게나 공용 PC에서 쓰는
@@ -154,7 +155,7 @@ PR 브랜치마다 Preview 주소가 달라 등록할 수 없어서, **리뷰어
 /?mock=judgment-conflict    말한 내용이 기록과 달라 확인이 필요한 상태
 /?mock=unrecognized         서버가 모르는 판단 상태를 보냈을 때
 /results?mock=conflict      제출하면 충돌 확인으로
-/results?mock=more-info     추가 질문
+/results?mock=more-info     리본이 되물은 질문에 답하기 (보내면 또 되묻는다)
 /results?mock=failed-retry     판단 실패 — 같은 내용으로 다시 보낼 수 있는 경우
 /results?mock=failed-detail    판단 실패 — 더 적어서 보내야 할 항목을 짚어준 경우
 /results?mock=failed-service   판단 실패 — 서비스가 들여다봐야 하는 경우

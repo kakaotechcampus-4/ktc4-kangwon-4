@@ -193,8 +193,14 @@ export function toResultsEntry(body: CaseResultsEntryResponse | null): ResultsEn
       return view === null ? { kind: 'UNRECOGNIZED' } : { kind: 'CONFIRM', view }
     }
 
+    case 'NEEDS_MORE_INFO': {
+      // 번호가 없으면 답을 보낼 수 없고, 질문이 없으면 무엇에 답하는지 보여줄 수 없다
+      const questions = toQuestionsForUser(body.questions_for_user)
+      if (!Number.isInteger(body.case_history_id) || questions === null) return { kind: 'UNRECOGNIZED' }
+      return { kind: 'ANSWER', questions, historyId: body.case_history_id as number }
+    }
+
     case 'PENDING':
-    case 'NEEDS_MORE_INFO':
     case 'FAILED':
       return { kind: 'ELSEWHERE' }
 
@@ -247,4 +253,29 @@ export function toSubmitOutcome(body: CaseResultsSubmitResponse | null): SubmitO
     default:
       return UNRECOGNIZED
   }
+}
+
+/** 리본이 되물은 질문 하나와 사장님이 적은 답 */
+export interface AnswerPair {
+  question: string
+  answer: string
+}
+
+/**
+ * 되물은 질문에 대한 답을 서버로 보낼 글(`raw_input`) 하나로 만든다.
+ *
+ * **질문을 함께 붙인다.** 재판단 때 AI에 넘어가는 것은 가게 정보와 이 글뿐이고, 직전에 무엇을
+ * 물었는지(`questions_for_user`)는 넘어가지 않는다(BE `run_judgment`). 사장님이 "2명이요"라고만
+ * 적으면 무엇에 대한 답인지 알 수 없어서, 질문과 답을 짝으로 적어 보낸다.
+ *
+ * 답을 적지 않은 질문은 뺀다. 질문만 덩그러니 보내면 AI가 답이 없는 것을 "모른다"로 읽을 수 있다.
+ *
+ * TODO(BE·AI): 재판단 입력에 직전 질문이 들어가게 되면 질문을 붙이지 않고 답만 보낸다.
+ */
+export function toAnswerInput(pairs: AnswerPair[]): string {
+  return pairs
+    .map(({ question, answer }) => ({ question: question.trim(), answer: answer.trim() }))
+    .filter(({ answer }) => answer.length > 0)
+    .map(({ question, answer }) => `[리본이 물어본 것] ${question}\n[사장님 답] ${answer}`)
+    .join('\n\n')
 }
