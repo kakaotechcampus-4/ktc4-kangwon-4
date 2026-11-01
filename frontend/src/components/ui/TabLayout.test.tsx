@@ -8,13 +8,17 @@ import { LogPage } from '../../pages/LogPage'
 import { NotificationsPage } from '../../pages/NotificationsPage'
 import { TabLayout } from './TabLayout'
 
-/** `routes.tsx`와 같은 구조 */
+/**
+ * `routes.tsx`와 같은 구조.
+ * 홈(`/case`)은 서버를 불러오는 화면이라 여기서는 빈 자리로 둔다. 이 파일은 틀만 본다.
+ */
 function renderAt(path: string) {
   const router = createMemoryRouter(
     [
       {
         element: <TabLayout />,
         children: [
+          { path: '/case', element: <div /> },
           { path: '/docs', element: <DocsPage /> },
           { path: '/log', element: <LogPage /> },
         ],
@@ -33,6 +37,13 @@ describe('TabLayout', () => {
 
     expect(screen.getByRole('heading', { level: 1, name: '서류함' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 2 })).toBeInTheDocument()
+  })
+
+  it('홈 머리말은 이름 대신 워드마크를 두고, 제목은 화면에 맡긴다', () => {
+    renderAt('/case')
+
+    expect(screen.getByRole('img', { name: '리본' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { level: 1 })).not.toBeInTheDocument()
   })
 
   it('탭을 누르면 머리말 이름도 그 화면으로 바뀐다', async () => {
