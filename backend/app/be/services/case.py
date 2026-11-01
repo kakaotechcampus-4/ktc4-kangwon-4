@@ -117,7 +117,10 @@ def create_case(session: Session, member_id: int, case_request: CaseCreateReques
         business_type=case_request.business_type,
         franchise_status=case_request.franchise_status,
         employee_count=case_request.employee_count,
+        has_business_loan=case_request.has_business_loan,
+        has_service_contracts=case_request.has_service_contracts,
         lease_status=case_request.lease_status,
+        restoration_clause=case_request.restoration_clause,
         planned_closure_date=case_request.planned_closure_date,
     )
     case = case_crud.create_case(session, case)

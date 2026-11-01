@@ -17,6 +17,8 @@ class Case(TimestampMixin, table=True):
     business_type: str = Field(max_length=50)
     franchise_status: bool = Field(default=False)
     employee_count: int | None = Field(default=None)
+    has_business_loan: bool = Field(default=False)
+    has_service_contracts: bool = Field(default=False)
 
     case_status: str = Field(
         default="IN_PROGRESS",
@@ -25,6 +27,14 @@ class Case(TimestampMixin, table=True):
     lease_status: str = Field(
         sa_column=Column(
             Enum("LEASED_PAID", "LEASED_FREE", "OWNED", name="lease_status_enum"),
+            nullable=False,
+        ),
+    )
+    restoration_clause: str = Field(
+        default="UNKNOWN",
+        sa_column=Column(
+            Enum("EXISTS", "NOT_EXISTS", "UNKNOWN", name="restoration_clause_enum"),
+            server_default="UNKNOWN",
             nullable=False,
         ),
     )
