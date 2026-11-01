@@ -12,6 +12,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@karrotmarket/react-monochrome-icon": "1.30.0",
     "pretendard": "^1.3.9",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
