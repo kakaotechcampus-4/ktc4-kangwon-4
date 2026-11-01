@@ -1,25 +1,32 @@
-import { useEffect, useRef, useState } from 'react'
+import { IconCheckmarkCircleFill } from '@karrotmarket/react-monochrome-icon'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router'
 
-import { AppShell } from '../components/AppShell'
-import { ConflictChoice } from '../components/ConflictChoice'
-import { NoticeCard } from '../components/NoticeCard'
-import { PendingCard } from '../components/PendingCard'
+import { toResultSteps } from '../adapters/results'
+import { Button } from '../components/ui/Button'
+import { HammerLoader } from '../components/ui/HammerLoader'
+import { InfoBox } from '../components/ui/InfoBox'
+import { ProcessSteps } from '../components/ui/ProcessSteps'
+import { TopBar } from '../components/ui/TopBar'
 import { usesMockData } from '../lib/auth'
-import { conflictConfirm, pendingMessages, simulateConfirm } from '../mocks/resultFlow'
-import type { ConfirmView, ConflictSide } from '../types/view'
+import { conflictConfirm, simulateConfirm } from '../mocks/resultFlow'
+import type { ConfirmView, ConflictItem, ConflictSide } from '../types/view'
 
 /**
  * ④ 충돌 확인.
  *
  * 기존 기록과 새 입력이 어긋날 때만 들른다. 정상 경로는 ③에서 ⑤로 바로 간다.
  *
+ * **시안에 이 화면이 없다.** 처리 화면(M05c)의 "이렇게 이해했어요" 상자 — 사장님 글을 인용하고
+ * 항목과 값을 줄로 놓는 모양 — 를 빌려 만들었다.
+ *
  * `rollback` API가 계약에서 빠져, 값을 되돌릴 수 있는 지점은 여기뿐이다.
  * 그래서 한 항목이라도 고르지 않으면 진행할 수 없게 한다.
  *
- * **실서버에서는 아직 고른 것을 보내지 않는다.** 충돌 결정을 받는 API(#108)가 머지 전이라,
- * 실제 충돌을 보여주고 고르게는 하되 보내는 버튼만 잠근다. 보낼 곳이 생기면 버튼만 풀면
- * 되도록 항목마다 서버 번호(`referenceId`)를 이미 들고 있다.
+ * **실서버에서는 아직 고른 것을 보내지 않는다.** 충돌 결정을 받는 API(#108)는 머지됐지만
+ * 판단(AI)에 이어지지 않았다(BE `TODO(AI팀 연동)`). 실제 충돌을 보여주고 고르게는 하되 보내는
+ * 버튼만 잠근다. 보낼 곳이 이어지면 버튼만 풀면 되도록 항목마다 서버 번호(`referenceId`)를
+ * 이미 들고 있다.
  */
 export function ConfirmChangePage() {
   const { search, state } = useLocation()
@@ -76,20 +83,41 @@ export function ConfirmChangePage() {
     navigate({ pathname: '/replan', search }, { state: replan, replace: true })
   }
 
+  // 보내는 동안은 결과 입력과 같은 처리 화면을 보여준다. Mock 은 접수 단계가 없어 둘째 줄부터다
+  if (isPending) {
+    return (
+      <ConfirmFrame>
+        <main className="flex flex-col gap-6 px-4 pt-2 pb-8">
+          <div className="flex flex-col items-center gap-5 pt-2 text-center">
+            <HammerLoader size={72} label="고르신 내용을 반영하는 중" />
+            <div>
+              <h1 className="text-26 font-bold">고르신 내용을 반영하고 있어요</h1>
+              <p className="mt-2 text-17 text-fg-neutral-muted">사장님이 하실 일은 없어요.</p>
+            </div>
+          </div>
+          <ProcessSteps steps={toResultSteps('WAITING')} />
+          <Button disabled>처리 중이에요</Button>
+        </main>
+      </ConfirmFrame>
+    )
+  }
+
   return (
-    <AppShell title="확인이 필요합니다" subtitle="기록과 다른 부분이 있어요">
-      {/* 어느 문장 때문에 이 화면이 떴는지 모르면 무엇을 고르는지도 알 수 없다 */}
-      <section className="rounded-2xl border border-gray-200 bg-white p-5">
-        <h2 className="text-sm font-bold tracking-wide text-gray-500">이번에 하신 말씀</h2>
-        <p className="mt-2 text-base leading-relaxed text-gray-900">{rawInput}</p>
-      </section>
+    <ConfirmFrame>
+      <main className="flex flex-col gap-6 px-4 pt-2 pb-8">
+        <div>
+          <h1 className="text-26 font-bold">어느 쪽이 맞나요?</h1>
+          <p className="mt-2 text-15 text-fg-neutral-muted">
+            기록과 다른 부분이 있어요. 맞는 쪽을 골라 주세요.
+          </p>
+        </div>
 
-      <p className="text-base leading-relaxed text-gray-600">
-        아래 항목이 지금 기록과 달라요. 어느 쪽이 맞는지 골라 주세요.
-      </p>
+        {/* 어느 문장 때문에 이 화면이 떴는지 모르면 무엇을 고르는지도 알 수 없다 */}
+        <figure className="rounded-2xl p-4.5 ring-1 ring-stroke-neutral-muted ring-inset">
+          <figcaption className="sr-only">이번에 하신 말씀</figcaption>
+          <blockquote className="text-15 text-fg-neutral-subtle">“{rawInput}”</blockquote>
+        </figure>
 
-      {/* 보내는 중에는 선택을 잠근다. fieldset이 안쪽 버튼까지 함께 비활성화한다 */}
-      <fieldset disabled={isPending} className="contents">
         {conflicts.map((conflict) => (
           <ConflictChoice
             key={conflict.key}
@@ -99,26 +127,89 @@ export function ConfirmChangePage() {
           />
         ))}
 
-        <button
-          type="button"
-          disabled={!allDecided || !canSend}
-          onClick={handleConfirm}
-          className="min-h-13 w-full rounded-xl bg-gray-900 text-base font-bold text-white disabled:bg-gray-200 disabled:text-gray-400"
-        >
+        {!canSend && (
+          <InfoBox
+            title="선택을 보내는 기능은 준비 중이에요."
+            action={{ label: '지금 상황 보기', onClick: () => navigate({ pathname: '/case', search }) }}
+          >
+            고르신 내용은 아직 저장되지 않아요. 기록은 지금 그대로예요.
+          </InfoBox>
+        )}
+
+        <Button disabled={!allDecided || !canSend} onClick={handleConfirm}>
           이대로 진행하기
-        </button>
-      </fieldset>
+        </Button>
+      </main>
+    </ConfirmFrame>
+  )
+}
 
-      {isPending && <PendingCard messages={pendingMessages} />}
+interface ConflictChoiceProps {
+  item: ConflictItem
+  /** 아직 고르지 않았으면 null. 기본 선택을 두지 않는다 */
+  selected: ConflictSide | null
+  onSelect: (side: ConflictSide) => void
+}
 
-      {!canSend && (
-        <NoticeCard
-          tone="NEUTRAL"
-          title="선택을 보내는 기능은 준비 중이에요."
-          description="고르신 내용은 아직 저장되지 않아요. 기록은 지금 그대로 남아 있습니다."
-          action={{ label: '지금 상황 보기', onClick: () => navigate({ pathname: '/case', search }) }}
-        />
-      )}
-    </AppShell>
+/**
+ * 어긋난 항목 하나를 두 칸으로 놓고 고르게 한다.
+ *
+ * 어느 쪽도 미리 선택해두지 않는다. 기본값이 있으면 사용자가 읽지 않고 넘길 수 있고,
+ * 그러면 서버가 자동으로 고른 것과 다를 바가 없다. 충돌은 항상 사용자 확인을
+ * 거친다는 것이 이 제품의 약속이다.
+ */
+function ConflictChoice({ item, selected, onSelect }: ConflictChoiceProps) {
+  return (
+    <section className="flex flex-col gap-2.5">
+      <h2 className="text-17 font-bold">{item.label}</h2>
+      <ChoiceButton
+        caption="지금 기록"
+        value={item.storedValue}
+        pressed={selected === 'STORED'}
+        onClick={() => onSelect('STORED')}
+      />
+      <ChoiceButton
+        caption="이번에 말씀하신 것"
+        value={item.incomingValue}
+        pressed={selected === 'INCOMING'}
+        onClick={() => onSelect('INCOMING')}
+      />
+    </section>
+  )
+}
+
+interface ChoiceButtonProps {
+  caption: string
+  value: string
+  pressed: boolean
+  onClick: () => void
+}
+
+function ChoiceButton({ caption, value, pressed, onClick }: ChoiceButtonProps) {
+  return (
+    <button
+      type="button"
+      aria-pressed={pressed}
+      onClick={onClick}
+      className={`flex min-h-16 cursor-pointer items-center gap-3 rounded-14 px-4 py-3.5 text-left ring-inset focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stroke-brand-solid ${
+        pressed ? 'bg-bg-brand-weak ring-2 ring-stroke-brand-solid' : 'ring-1 ring-stroke-neutral-weak'
+      }`}
+    >
+      <span className="flex-1">
+        <span className="block text-14 text-fg-neutral-muted">{caption}</span>
+        <span className="mt-0.5 block text-17 font-bold">{value}</span>
+      </span>
+      {pressed && <IconCheckmarkCircleFill aria-hidden="true" className="size-6 shrink-0 text-fg-brand" />}
+    </button>
+  )
+}
+
+/** 탭 없는 화면의 틀. 뒤로 버튼만 두고 제목은 화면 안의 큰 제목이 맡는다 */
+function ConfirmFrame({ children }: { children: ReactNode }) {
+  return (
+    <div className="mx-auto flex min-h-dvh max-w-[402px] flex-col bg-bg-layer-default">
+      <TopBar />
+      {children}
+    </div>
   )
 }
