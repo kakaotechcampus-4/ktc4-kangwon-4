@@ -95,6 +95,8 @@ export function ResultInputPage() {
   const alive = useRef(true)
   /** 판단을 기다리는 중이면 그 기다림을 끊는 손잡이. 화면을 떠날 때 당긴다 */
   const waiting = useRef<AbortController | null>(null)
+  /** 마지막으로 접수된 판단 번호. 반영되면 이 번호를 주소에 실어 `/replan` 으로 간다 */
+  const lastAcceptedId = useRef<number | null>(null)
   useEffect(() => {
     alive.current = true
     return () => {
@@ -210,6 +212,7 @@ export function ResultInputPage() {
     // 방금 접수된 것이 이제 가장 최근 판단이다. 되묻거나 실패해 다시 보낼 때는 이 번호로 보낸다
     setFetched((current) => (current.status === 'READY' ? { ...current, historyId: acceptedId } : current))
     setState({ kind: 'PENDING', accepted: true })
+    lastAcceptedId.current = acceptedId
 
     const controller = new AbortController()
     waiting.current = controller
@@ -250,7 +253,11 @@ export function ResultInputPage() {
 
     switch (outcome.kind) {
       case 'REPLAN':
-        navigate({ pathname: '/replan', search }, { state: outcome.view })
+        // 실서버는 판단 번호만 주소에 싣는다. `/replan` 이 그 번호로 서버에 다시 묻는다 —
+        // 결과를 들고 가면 새로고침·뒤로 가기 때 지난 판단이 지금 것처럼 다시 뜬다.
+        // Mock 은 물을 서버가 없어 결과를 들고 간다
+        if (usesMock) navigate({ pathname: '/replan', search }, { state: outcome.view })
+        else navigate({ pathname: '/replan', search: `?history=${lastAcceptedId.current}` })
         return
       case 'CONFIRM':
         // 뒤로 가면 이 화면이 다시 물어 충돌 화면으로 되돌려 보낸다. 거쳐 갈 이유가 없어 바꿔 낀다

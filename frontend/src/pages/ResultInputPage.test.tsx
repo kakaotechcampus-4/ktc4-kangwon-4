@@ -368,6 +368,9 @@ describe('ResultInputPage — 서버', () => {
 
       await advance(INTERVAL_MS)
       expect(router.state.location.pathname).toBe('/replan')
+      // 결과를 들고 가지 않고 접수 번호만 싣는다. `/replan` 이 그 번호로 다시 묻는다
+      expect(router.state.location.search).toBe('?history=13')
+      expect(router.state.location.state).toBeNull()
     })
 
     /**
