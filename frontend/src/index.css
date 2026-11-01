@@ -1,1 +1,12 @@
 @import "tailwindcss";
+@import "./styles/tokens.css";
+
+@layer base {
+  body {
+    @apply bg-bg-layer-basement text-fg-neutral antialiased;
+    /* 한국어는 단어 중간에서 줄을 바꾸면 읽기 어렵다 */
+    word-break: keep-all;
+    /* 띄어쓰기 없이 긴 글자(주소·링크)는 칸을 넘지 않게 그 안에서 끊는다 */
+    overflow-wrap: break-word;
+  }
+}

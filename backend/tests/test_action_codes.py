@@ -1,7 +1,7 @@
 """Closed action vocabulary and evidence-gated candidates; synthetic data only."""
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 from uuid import UUID
 
@@ -450,6 +450,28 @@ def test_supervisor_blocks_action_not_in_the_selected_candidate():
     assert client.calls == 1
 
 
+@pytest.mark.parametrize("changed", [None, "excerpt", "parents"])
+def test_db_timestamp_tolerance_does_not_allow_changed_evidence_content(changed):
+    request = supervisor_request()
+    duplicate = request.case_snapshot.evidence_records[0].model_copy(deep=True)
+    duplicate.retrieved_at += timedelta(microseconds=123456)
+    if changed == "excerpt":
+        duplicate.excerpt = "내용이 바뀐 근거입니다."
+    elif changed == "parents":
+        duplicate.parent_evidence_refs = ["another-parent"]
+    info = request.source_results[1]
+    info.output.evidence_records = [duplicate]
+    info.output_digest = canonical_digest(info.output)
+    client = StubModel()
+    if changed is None:
+        draft = asyncio.run(SupervisorAgent(client, max_local_attempts=1).draft(request))
+        assert draft.decision.next_action is not None
+    else:
+        with pytest.raises(SupervisorGuardrailError, match="evidence ID collision"):
+            asyncio.run(SupervisorAgent(client, max_local_attempts=1).draft(request))
+        assert client.calls == 0
+
+
 def test_review_blocks_wrong_target_even_when_its_model_returns_pass():
     async def run():
         request = supervisor_request()
@@ -661,8 +683,7 @@ def test_review_preserves_only_the_confirmed_conflict_change(problem):
         client = StubModel()
         tool = ReviewTool(client, max_output_attempts=1, provider_max_retries=0)
         if problem:
-            message = "exactly one confirmed change" if problem == "missing" else "cannot create new facts or procedure progress"
-            with pytest.raises(ReviewIntegrityError, match=message):
+            with pytest.raises(ReviewIntegrityError, match="exactly the accepted changes"):
                 await tool.review(subject)
             assert client.calls == 0
         else:

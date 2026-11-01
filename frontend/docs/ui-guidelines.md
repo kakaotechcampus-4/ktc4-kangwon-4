@@ -2,45 +2,62 @@
 
 RE:BORN 프론트엔드의 시각·상호작용·접근성 기준.
 
-토큰은 **Tailwind 기본 스케일을 그대로 쓴다.** 커스텀 `@theme`을 만들지 않는다.
+토큰은 `src/styles/tokens.css`에 있다. 값은 확정 시안(모바일 v3)에서 실제로 쓰는 것만 옮겼다.
 아래 표는 hex가 아니라 클래스 이름으로 적는다 — 코드에 그대로 옮겨 쓰기 위해서다.
+
+**토큰 규칙**
+
+- 화면 코드는 **의미 이름만** 쓴다(`text-fg-neutral`, `bg-bg-brand-solid`). 색 값(hex)을 직접 쓰지 않는다
+- 팔레트(`--seed-color-palette-*`)는 클래스로 나오지 않는다. 의미 이름이 가리키는 값일 뿐이다
+- 이름은 당근 디자인 시스템(SEED)의 의미 이름을 그대로 쓴다. 새 이름을 만들지 않는다
+- 필요한 값이 없으면 화면에 임시로 쓰지 말고 **토큰부터 추가**한다
+- 옛 화면은 교체 전까지 Tailwind 기본 색(`gray-*`·`emerald-*` 등)을 그대로 쓴다.
+  화면 교체가 끝나면 기본 색을 끈다(`--color-*: initial`). 새 화면에서는 기본 색을 쓰지 않는다
 
 ---
 
 ## 색
 
-### 의미별
+Tailwind가 색을 한 이름공간으로만 받아서 바탕색은 `bg-bg-…`, 테두리는 `border-stroke-…`처럼 앞말이 겹친다.
+어색하지만 SEED 문서의 이름과 1:1로 맞아 찾기 쉽다.
 
-Case의 상태를 나타내는 다섯 가지. 카드·배지·배너에 세트로 쓴다.
+### 글자 (`text-…`)
 
-| 의미 | 텍스트 | 배경 | 테두리 |
-|---|---|---|---|
-| **확인됨 · 해결 · 완료** | `text-emerald-800` | `bg-emerald-50` | `border-emerald-200` |
-| **미확인 · Blocker · 주의** | `text-amber-800` | `bg-amber-50` | `border-amber-200` |
-| **정보 · 후보 · 확인 요청** | `text-blue-800` | `bg-blue-50` | `border-blue-200` |
-| **마감 임박 · 오류** | `text-red-700` | `bg-red-50` | `border-red-200` |
-| **대기 · 중립 · 해당 없음** | `text-gray-600` | `bg-gray-100` | `border-gray-200` |
-
-### 기본
-
-| 역할 | 클래스 |
+| 의미 이름 | 쓰는 곳 |
 |---|---|
-| 화면 배경 | `bg-gray-50` |
-| 카드 배경 | `bg-white` |
-| 제목 · 강조 텍스트 | `text-gray-900` |
-| 본문 | `text-gray-600` |
-| 보조 설명 | `text-gray-500` |
-| 비활성 · 플레이스홀더 | `text-gray-400` |
-| 테두리 | `border-gray-200` |
-| 입력 필드 테두리 | `border-gray-300` |
-| 구분선 | `border-gray-100` |
-| **주요 버튼 · 링크** | `bg-blue-600` / `text-blue-600` |
-| **Next Action 카드** | `bg-gray-900 text-white` |
+| `fg-neutral` | 제목, 본문 |
+| `fg-neutral-muted` | 보조 설명 |
+| `fg-neutral-subtle` | 가장 약한 글자(시각, 각주) |
+| `fg-disabled` | 꺼진 버튼 글자 |
+| `fg-brand` | 진행 강조 |
+| `fg-brand-contrast` | 연한 주황 바탕 위의 글자(배지) |
+| `fg-critical` / `fg-critical-contrast` | 확인 필요 / 연한 빨강 바탕 위의 글자 |
+| `fg-on-brand-solid` | 주 버튼 글자 |
 
-> **파랑이 두 가지인 이유** — `blue-600`은 버튼 배경과 링크처럼 **누르는 것**에 쓴다.
-> `blue-800`은 연한 파랑 배경(`bg-blue-50`) 위에 얹는 **읽는 글씨**다. 역할이 다르다.
+### 바탕 (`bg-…`)
 
-**Next Action 카드가 화면에서 가장 강한 요소다.** 어두운 배경은 여기에만 쓴다.
+| 의미 이름 | 쓰는 곳 |
+|---|---|
+| `bg-layer-basement` | 화면 바탕 |
+| `bg-layer-default` (`-pressed`) | 카드 (눌렸을 때) |
+| `bg-brand-solid` (`-pressed`) | 주 버튼 |
+| `bg-brand-weak` (`-pressed`) | 진행 배지, 연한 주황 카드 |
+| `bg-critical-solid` / `bg-critical-weak` | 확인 필요 |
+| `bg-neutral-weak` (`-pressed`) | 약한 버튼 |
+| `bg-neutral-solid` | 어두운 칩 |
+| `bg-transparent-pressed` | 바탕 없는 버튼이 눌렸을 때 |
+| `bg-overlay` | 시트 뒤를 덮는 어두운 막 |
+
+> **주 버튼이 SEED보다 진한 이유** — SEED의 주 버튼 색(carrot-600)은 흰 글씨 대비가 2.94:1이라
+> 중장년 사용자에게 흐리다. 시안대로 carrot-800을 써서 5.76:1로 올렸다.
+
+### 선 (`border-…`, `ring-…`)
+
+| 의미 이름 | 쓰는 곳 |
+|---|---|
+| `stroke-neutral-weak` | 진한 테두리 |
+| `stroke-neutral-subtle` / `stroke-neutral-muted` | 카드·구분선 (검정 5% / 6%) |
+| `stroke-brand-solid` | 강조 테두리 |
 
 ---
 
@@ -48,57 +65,62 @@ Case의 상태를 나타내는 다섯 가지. 카드·배지·배너에 세트�
 
 ### 폰트
 
-**현재는 시스템 sans-serif를 쓴다.** `src/index.css`에 폰트 로딩이 없고,
-Tailwind 기본 `font-sans` 스택(`-apple-system`, `Segoe UI`, `Roboto` …)이 그대로 적용된다.
+- **본문: Pretendard.** `pretendard` 패키지를 `src/main.tsx`에서 불러온다.
+  한글을 쓰는 글자만큼만 나눠 받는 판(동적 서브셋)이라 첫 화면이 무겁지 않다
+- **워드마크 "리본": 글꼴이 아니라 그림이다.** G마켓 산스 Bold에서 두 글자 윤곽을 뽑은
+  `src/assets/brand/reborn-wordmark.svg`를 쓴다. 두 글자에 글꼴 파일(630KB)을 받지 않기 위해서다
 
-**웹폰트 도입 예정이며 후보는 아직 미정이다.**
-도입할 때 한글 서브셋과 로딩 성능을 함께 검토하고 이 문서를 고친다.
-
-weight는 **`font-normal`과 `font-bold`만** 쓴다.
+굵기는 `font-normal`(400), `font-medium`(500), `font-bold`(700)만 쓴다.
 
 ### 크기
 
-| 클래스 | 크기 | 용도 |
-|---|---|---|
-| `text-xs` | 12px | 배지, 라벨 |
-| `text-sm` | 14px | 보조 설명, 각주 |
-| `text-base` | 16px | **본문**, 카드 제목, 버튼 |
-| `text-lg` | 18px | 화면 제목 |
-| **`text-2xl`** | **24px** | **Next Action 본문** — 화면에서 가장 큰 글씨 |
+이름이 픽셀 그대로다. `text-17` = 17px, 줄높이는 함께 정해져 있다.
 
-`leading-relaxed`(본문) / `leading-snug`(제목).
+| 클래스 | 크기 / 줄높이 |
+|---|---|
+| `text-11` | 11 / 15 |
+| `text-12` | 12 / 16 |
+| `text-13` | 13 / 18 |
+| `text-14` | 14 / 20 |
+| `text-15` | 15 / 21 |
+| `text-16` | 16 / 22 |
+| `text-17` | 17 / 24 |
+| `text-18` | 18 / 24 |
+| `text-20` | 20 / 28 |
+| `text-22` | 22 / 30 |
+| `text-26` | 26 / 36 |
 
-> **본문이 16px인 이유** — 중장년 사용자가 주 타깃이라 14px은 작다.
-> 그리고 iOS Safari는 입력 필드의 폰트가 16px 미만이면 포커스할 때 화면을 자동 확대한다.
-> Case 생성처럼 입력이 있는 화면에서 실제로 거슬린다.
->
-> `text-xl`(20px)을 건너뛴 것은 의도적이다. 화면 제목(18px)과 Next Action(24px) 사이를
-> 벌려서 Next Action이 확실히 도드라지게 한다.
+시안에 있는 크기·줄높이 29쌍에서 1px 차이 나는 줄높이를 합쳐 11단계로 줄였다.
+Tailwind 기본 크기(`text-sm`, `text-base` …)는 새 화면에서 쓰지 않는다.
+
+> **입력 칸은 16px 이상** — iOS Safari는 입력 필드의 글자가 16px 미만이면 포커스할 때 화면을 자동 확대한다.
 
 ---
 
-## 간격과 모서리
+## 모서리와 그림자
 
 | | 클래스 |
 |---|---|
-| 화면 좌우 여백 | `px-4` |
-| 카드 안쪽 여백 | `p-4` |
-| Next Action 카드 안쪽 여백 | `p-5` |
-| 카드 사이 간격 | `gap-3` |
-| 섹션 사이 간격 | `gap-5` |
-| 모서리 — 버튼, 배너, 작은 요소 | `rounded-xl` |
-| 모서리 — 카드 | `rounded-2xl` |
-| 모서리 — 배지 | `rounded-full` |
+| 모서리 4·6·8·12·16px, 둥근 끝 | Tailwind 기본 `rounded-sm` · `rounded-md` · `rounded-lg` · `rounded-xl` · `rounded-2xl` · `rounded-full` |
+| 모서리 14px (시안에서 가장 많이 씀) | `rounded-14` |
+| 카드 그림자 | `shadow-card` |
+| 떠 있는 요소(하단 버튼, 시트) 그림자 | `shadow-floating` |
 
-세 가지 반지름만 쓴다. 값을 늘리지 않는다.
+테두리선은 그림자가 아니라 `ring`으로 그린다(`ring-1 ring-stroke-neutral-subtle`).
 
+간격은 Tailwind 기본 단위(4px)를 그대로 쓴다. 부품별 여백은 공통 부품을 만들 때 정한다.
 ---
 
 ## 모바일 우선
 
 - **기준 폭 375px.** 이 폭에서 먼저 만들고 넓은 화면을 나중에 대응한다
-- **최대 폭 `mx-auto max-w-md` + `border-x`.** 넓은 화면에서 폭을 묶고 가운데 정렬한다.
-  그냥 늘리면 한 줄이 200자가 되어 읽을 수 없고, 좌우 경계선이 없으면 데스크톱에서 어색하다
+- **최대 폭은 시안 기기 폭 402px(`mx-auto max-w-[402px]`).** 넓은 화면에서 폭을 묶고 가운데 정렬한다.
+  그냥 늘리면 한 줄이 200자가 되어 읽을 수 없다. 흰 화면과 회색 바깥 바탕(`bg-layer-basement`)으로 경계가 보인다.
+  옛 화면은 교체 전까지 `AppShell`의 `max-w-md`를 그대로 쓴다
+- **하단 탭 화면은 `components/ui/TabLayout`, 탭 없는 화면은 `components/ui/TopBar`로 시작한다.**
+  머리말과 탭은 제자리에 두고 내용만 스크롤한다
+- **하단 탭은 아래에 안전 영역(`env(safe-area-inset-bottom)`)만큼만 비운다.** 시안의 아래 26px는
+  아이폰 틀 그림의 홈 바 자리라 그대로 옮기지 않는다
 - 세로 스크롤만. 가로 스크롤이 생기면 버그다
 - 터치 영역은 최소 48px
 
@@ -112,7 +134,7 @@ weight는 **`font-normal`과 `font-bold`만** 쓴다.
 중장년 사용자가 주 타깃이라 선택이 아니라 요구사항이다.
 
 - **색상만으로 상태를 구분하지 않는다.** 색에는 반드시 **텍스트 라벨**을 함께 두고,
-  아이콘은 보조 수단으로만 쓴다. `bg-amber-50` 하나로 "미확인"을 전달하면 안 된다
+  아이콘은 보조 수단으로만 쓴다. `bg-bg-critical-weak` 하나로 "미확인"을 전달하면 안 된다
 - **상태 아이콘은 보이는 텍스트 라벨과 함께 쓴다.** `✅`·`❓` 만으로 상태를 전달하지 않는다
 - **텍스트 옆의 장식용 아이콘에는 `aria-hidden="true"` 를 준다.**
   옆에 "미확인"이라는 글자가 이미 있는데 아이콘에도 이름을 붙이면 스크린리더가 같은 뜻을 두 번 읽는다
