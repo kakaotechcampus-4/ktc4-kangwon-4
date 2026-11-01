@@ -87,6 +87,7 @@
   /*
    * 글자 크기. 이름은 픽셀 그대로다(`text-17` = 17px, 줄높이 24px).
    * 시안의 크기·줄높이 29쌍에서 1px 차이 나는 줄높이를 합쳐 11단계로 줄였다.
+   * 19·24px는 홈의 큰 버튼과 머리 문구에만 쓰여 홈을 만들 때 더했다.
    */
   --text-11: 11px;
   --text-11--line-height: 15px;
@@ -104,19 +105,27 @@
   --text-17--line-height: 24px;
   --text-18: 18px;
   --text-18--line-height: 24px;
+  --text-19: 19px;
+  --text-19--line-height: 26px;
   --text-20: 20px;
   --text-20--line-height: 28px;
   --text-22: 22px;
   --text-22--line-height: 30px;
+  --text-24: 24px;
+  --text-24--line-height: 32px;
   --text-26: 26px;
   --text-26--line-height: 36px;
 
   /* 모서리. 4·6·8·12·16px는 Tailwind 기본(`rounded-sm`~`rounded-2xl`)에 있어 시안에 많은 14px만 더한다 */
   --radius-14: 14px;
+  /* 홈의 할 일 카드처럼 화면에서 가장 큰 카드 */
+  --radius-20: 20px;
 
   /* 그림자. 테두리선은 그림자가 아니라 `ring`으로 그린다 */
   --shadow-card: 0 1px 4px #00000014;
   --shadow-floating: 0 2px 10px #0000001a;
+  /* 홈의 할 일 카드. 다른 카드보다 한 겹 떠 있게 퍼지되, 시트(`floating`)보다는 옅다 */
+  --shadow-raised: 0 2px 10px #00000014;
 
   /* 움직임. 망치 로더가 빙글 돈다(`animate-hammer-spin`). 처음에 천천히, 가운데서 빠르게 돈다 */
   --animate-hammer-spin: hammer-spin 1.2s cubic-bezier(0.55, 0, 0.45, 1) infinite;
@@ -124,6 +133,15 @@
   @keyframes hammer-spin {
     to {
       transform: rotate(360deg);
+    }
+  }
+
+  /* 불러오는 중에 내용 자리를 채우는 회색 막대가 천천히 깜빡인다(`animate-skeleton-pulse`) */
+  --animate-skeleton-pulse: skeleton-pulse 1.4s ease-in-out infinite;
+
+  @keyframes skeleton-pulse {
+    50% {
+      opacity: 0.45;
     }
   }
 }
