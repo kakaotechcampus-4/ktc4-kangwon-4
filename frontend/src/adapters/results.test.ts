@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest'
 
 import type { CaseResultsEntryResponse, CaseResultsSubmitResponse } from '../types/api'
-import { toChanges, toConflicts, toResultsEntry, toSubmitOutcome, toValueLabel } from './results'
+import {
+  toAnswerInput,
+  toChanges,
+  toConflicts,
+  toResultsEntry,
+  toSubmitOutcome,
+  toValueLabel,
+} from './results'
 
 /**
  * 서버가 값을 파이썬 표기 그대로 보낸다(`"True"`, `"FULL"`). 여기가 틀리면 사장님 화면에
@@ -306,5 +313,39 @@ describe('toSubmitOutcome', () => {
 
   it('본문이 비어 있어도 알 수 없는 응답으로 둔다', () => {
     expect(toSubmitOutcome(null)).toEqual(UNRECOGNIZED)
+  })
+})
+
+/**
+ * 재판단 때 AI는 직전에 무엇을 물었는지 모른다. 질문이 빠지면 "2명이요"가 무엇의 답인지
+ * 알 수 없어, 사장님이 답했는데도 같은 질문을 또 받게 된다.
+ */
+describe('toAnswerInput', () => {
+  it('질문과 답을 짝으로 적는다', () => {
+    expect(toAnswerInput([{ question: '직원이 몇 명인가요?', answer: '2명이요' }])).toBe(
+      '[리본이 물어본 것] 직원이 몇 명인가요?\n[사장님 답] 2명이요',
+    )
+  })
+
+  it('질문이 여러 개면 빈 줄로 나눈다', () => {
+    expect(
+      toAnswerInput([
+        { question: '직원이 몇 명인가요?', answer: '2명이요' },
+        { question: '프랜차이즈 가게인가요?', answer: '아니요' },
+      ]),
+    ).toBe(
+      '[리본이 물어본 것] 직원이 몇 명인가요?\n[사장님 답] 2명이요\n\n' +
+        '[리본이 물어본 것] 프랜차이즈 가게인가요?\n[사장님 답] 아니요',
+    )
+  })
+
+  /** 답이 없는 질문까지 보내면 AI가 "모른다"는 답으로 읽을 수 있다 */
+  it('답을 적지 않은 질문은 빼고, 앞뒤 빈칸은 지운다', () => {
+    expect(
+      toAnswerInput([
+        { question: '직원이 몇 명인가요?', answer: '  2명이요 ' },
+        { question: '프랜차이즈 가게인가요?', answer: '   ' },
+      ]),
+    ).toBe('[리본이 물어본 것] 직원이 몇 명인가요?\n[사장님 답] 2명이요')
   })
 })
