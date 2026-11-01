@@ -456,6 +456,11 @@ function Processing({ accepted }: { accepted: boolean }) {
         </div>
       </div>
       <ProcessSteps steps={toResultSteps(accepted ? 'WAITING' : 'SENDING')} />
+      {/*
+        판단은 길면 2분 넘게 걸린다. 떠나면 결과가 사라지는 줄 알면 그동안 화면에 묶인다.
+        서버는 뒤에서 판단을 이어가고(#107), 끝난 결과는 홈(`/case`)에서 보인다
+      */}
+      <InfoBox>화면을 떠나셔도 계속 처리돼요. 끝나면 홈에서 보실 수 있어요.</InfoBox>
       {/* 시안대로 꺼진 버튼을 둔다. 누를 것이 없다는 것을 버튼 자리에서도 말한다 */}
       <Button disabled>처리 중이에요</Button>
     </main>

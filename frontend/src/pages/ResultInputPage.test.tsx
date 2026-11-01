@@ -69,6 +69,17 @@ describe('ResultInputPage — Mock', () => {
     expect(screen.getByRole('button', { name: '처리 중이에요' })).toBeDisabled()
   })
 
+  /** 판단은 몇 분이 걸릴 수 있다. 떠나면 결과가 사라지는 줄 알면 그동안 화면에 묶인다 */
+  it('기다리는 동안 화면을 떠나도 된다고 알린다', async () => {
+    vi.useFakeTimers()
+    renderFlow('/results?mock=updated')
+
+    submit('임대인이 철거하래요')
+    await advance()
+
+    expect(screen.getByText('화면을 떠나셔도 계속 처리돼요. 끝나면 홈에서 보실 수 있어요.')).toBeInTheDocument()
+  })
+
   /** 기다린 사람은 결과 화면으로 간다 — 아래 테스트가 이동 자체를 막아버리지 않았는지 함께 본다 */
   it('응답이 오면 재계획 화면으로 이동한다', async () => {
     vi.useFakeTimers()

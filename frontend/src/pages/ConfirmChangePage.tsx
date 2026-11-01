@@ -96,6 +96,8 @@ export function ConfirmChangePage() {
             </div>
           </div>
           <ProcessSteps steps={toResultSteps('WAITING')} />
+          {/* 결과 입력의 처리 화면과 같은 말을 한다 */}
+          <InfoBox>화면을 떠나셔도 계속 처리돼요. 끝나면 홈에서 보실 수 있어요.</InfoBox>
           <Button disabled>처리 중이에요</Button>
         </main>
       </ConfirmFrame>
