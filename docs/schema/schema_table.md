@@ -55,8 +55,11 @@ MEMBERS ──1:N──► CASE ──1:N──► CASE_FIELD_HISTORY
 | business_type | VARCHAR | | NOT NULL | `"카페"` | |
 | franchise_status | BOOLEAN | | NOT NULL, DEFAULT false | `false` | |
 | employee_count | INT | | NULLABLE | `2` | |
+| has_business_loan | BOOLEAN | | NOT NULL, DEFAULT false | `false` | 사업 대출이 남아 있는지. 가입 때 사장님이 입력 |
+| has_service_contracts | BOOLEAN | | NOT NULL, DEFAULT false | `true` | 배달앱·카드단말기 등 해지할 서비스 계약이 있는지. 가입 때 사장님이 입력 |
 | case_status | ENUM | | NOT NULL, DEFAULT `IN_PROGRESS` | `IN_PROGRESS` | `IN_PROGRESS` / `COMPLETED` |
 | lease_status | ENUM | | NOT NULL | `LEASED_PAID` | `LEASED_PAID`/`LEASED_FREE`/`OWNED` |
+| restoration_clause | ENUM | | NOT NULL, DEFAULT `UNKNOWN` | `EXISTS` | `EXISTS`/`NOT_EXISTS`/`UNKNOWN` — 임대차계약서에 원상복구 조항이 있는지. 가입 때 사장님이 입력. AI가 채우는 `restoration_*`(진행·범위)와 다른 값 |
 | restoration_status | ENUM | | NOT NULL, DEFAULT `UNKNOWN` | `UNKNOWN` | `UNKNOWN`/`NOT_STARTED`/`IN_PROGRESS`/`COMPLETED`/`NOT_REQUIRED` — Case 생성 직후 `UNKNOWN`으로 시작, `restoration_scope` 확정 후 나머지 값으로 전환 |
 | restoration_scope | ENUM | | NOT NULL, DEFAULT `UNKNOWN` | `FULL` | `UNKNOWN`/`PARTIAL` / `FULL` / `NOT_REQUIRED` |
 | restoration_scope_detail | VARCHAR | | NULLABLE | `"바닥재·전기배선까지 철거 필요"` | nullable, 구체적인 원상복구 범위 자연어 기록 |
