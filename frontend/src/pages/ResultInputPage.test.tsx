@@ -259,6 +259,35 @@ describe('ResultInputPage — 서버', () => {
       expect(screen.getByLabelText('프랜차이즈 가게인가요?')).toBeEnabled()
     })
 
+    /** 홈의 "다시 알려주기"에서 왔다. 무엇이 더 필요한지 먼저 보이고, 같은 판단 번호로 다시 보낸다 */
+    it('더 알려주셔야 하는 실패면 무엇이 필요한지 보여주고 글을 다시 받는다', async () => {
+      const fetchMock = serve({
+        entry: [
+          json(
+            entryBody({
+              judgment_status: 'FAILED',
+              next_action: null,
+              recovery_action_code: 'RESUBMIT_INPUT',
+              requested_field_paths: ['restoration_scope'],
+            }),
+          ),
+        ],
+        submit: [ACCEPTED],
+        judged: [json(judgedBody({ result: 'PENDING' }))],
+      })
+      renderFlow()
+      await advance()
+
+      expect(screen.getByRole('heading', { name: '이 내용을 알려주세요' })).toBeInTheDocument()
+      expect(screen.getByText(/원상복구 범위/)).toBeInTheDocument()
+
+      fireEvent.change(screen.getByLabelText('이 내용을 알려주세요'), { target: { value: '카운터만 철거해요' } })
+      fireEvent.click(screen.getByRole('button', { name: '보내기' }))
+      await advance()
+
+      expect(sentBodies(fetchMock)).toEqual([{ case_history_id: 12, raw_input: '카운터만 철거해요' }])
+    })
+
     /**
      * 일부만 답해도 보낼 수 있다. 막지 않는 대신, 빠뜨린 것인지 한 번 보게 한다.
      * 하나도 안 적었거나 다 적었으면 알릴 것이 없다.

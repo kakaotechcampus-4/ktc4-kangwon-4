@@ -11,7 +11,7 @@ import { ApiError, UnauthorizedError } from '../lib/api'
 import { usesMockData } from '../lib/auth'
 import { readMockKey } from '../lib/mockSwitch'
 import { fetchResultsEntry, submitResult, waitForResult } from '../lib/resultSubmit'
-import { moreInfoCase } from '../mocks/currentCase'
+import { judgmentNeedsDetailCase, moreInfoCase } from '../mocks/currentCase'
 import { resultInput, simulateSubmit } from '../mocks/resultFlow'
 import type { FailureNotice, NextAction, SubmitOutcome, SubmitState } from '../types/view'
 
@@ -20,10 +20,14 @@ import type { FailureNotice, NextAction, SubmitOutcome, SubmitState } from '../t
  *
  * - `RESULT` 할 일을 하고 온 결과
  * - `ANSWER` 리본이 되물은 질문들의 답
+ * - `RESUBMIT` 판단이 실패해 더 알려주셔야 하는 내용
  *
  * 둘 다 같은 길(`POST /cases/results`)로 보낸다. 다른 것은 화면에 띄울 물음과 보낼 글 모양뿐이다.
  */
-type Ask = { kind: 'RESULT'; nextAction: NextAction } | { kind: 'ANSWER'; questions: string[] }
+type Ask =
+  | { kind: 'RESULT'; nextAction: NextAction }
+  | { kind: 'ANSWER'; questions: string[] }
+  | { kind: 'RESUBMIT'; notice: Extract<FailureNotice, { kind: 'NEEDS_DETAIL' }> }
 
 /** 들어올 때 서버에 물은 결과. 폼은 `READY` 일 때만 연다 */
 type EntryQuery =
@@ -40,10 +44,13 @@ type EntryQuery =
  * 질문에 답하는 모양으로 연다.
  */
 function mockEntry(mockKey: string): EntryQuery {
+  const failed = judgmentNeedsDetailCase.judgment
   const ask: Ask =
     mockKey === 'more-info' && moreInfoCase.judgment.status === 'NEEDS_MORE_INFO'
       ? { kind: 'ANSWER', questions: moreInfoCase.judgment.questions }
-      : { kind: 'RESULT', nextAction: resultInput.nextAction }
+      : mockKey === 'judgment-failed-detail' && failed.status === 'FAILED' && failed.notice.kind === 'NEEDS_DETAIL'
+        ? { kind: 'RESUBMIT', notice: failed.notice }
+        : { kind: 'RESULT', nextAction: resultInput.nextAction }
   return { status: 'READY', ask, historyId: 0 }
 }
 
@@ -129,11 +136,18 @@ export function ResultInputPage() {
               historyId: entry.historyId,
             })
             return
+          case 'RESUBMIT':
+            setFetched({
+              status: 'READY',
+              ask: { kind: 'RESUBMIT', notice: entry.notice },
+              historyId: entry.historyId,
+            })
+            return
           // 확인을 기다리는 충돌부터 풀어야 한다. 뒤로 가기로 이 화면에 돌아오지 않게 바꿔 낀다
           case 'CONFIRM':
             navigate('/confirm', { replace: true, state: entry.view })
             return
-          // 판단 중·판단 실패는 `/case` 가 안내한다
+          // 판단 중·더 적어도 풀리지 않는 실패는 `/case` 가 안내한다
           case 'ELSEWHERE':
             navigate('/case', { replace: true })
             return
@@ -351,6 +365,15 @@ export function ResultInputPage() {
               다음 할 일을 정하려면 알아야 해요. 아시는 만큼만 적어 주세요.
             </p>
           </div>
+        ) : entry.ask.kind === 'RESUBMIT' ? (
+          <div>
+            <h1 id="result-title" className="text-26 font-bold">
+              이 내용을 알려주세요
+            </h1>
+            <p className="mt-2 text-15 text-fg-neutral-muted">
+              다음 할 일을 정하다 멈췄어요. 알려주시면 다시 정해 드려요.
+            </p>
+          </div>
         ) : (
           <div>
             <h1 id="result-title" className="text-26 font-bold">
@@ -364,10 +387,17 @@ export function ResultInputPage() {
         )}
 
         {/* 보낸 뒤 머무는 이유. 글 칸 위에 두어, 고쳐 쓰기 전에 먼저 읽히게 한다 */}
-        {notice && (
+        {notice ? (
           <InfoBox tone={notice.tone} title={notice.title} action={notice.action}>
             {notice.description}
           </InfoBox>
+        ) : (
+          // 홈의 실패 카드에서 왔다. 무엇이 더 필요한지 먼저 보여준다. 보낸 뒤에는 위 안내가 대신한다
+          entry.ask.kind === 'RESUBMIT' && (
+            <InfoBox tone="critical" title="추가 확인이 필요해요.">
+              {detailText(entry.ask.notice)}
+            </InfoBox>
+          )
         )}
 
         <form
@@ -400,7 +430,9 @@ export function ResultInputPage() {
               labelledBy="result-title"
               rows={4}
               // TODO(UX): 시안의 예시라 철거 상황을 가정한다. 다른 할 일 뒤에도 같은 문구가 뜬다
-              placeholder="예: 카운터랑 싱크대만 빼래요"
+              placeholder={
+                entry.ask.kind === 'RESUBMIT' ? '아시는 만큼 적어 주세요' : '예: 카운터랑 싱크대만 빼래요'
+              }
               value={text}
               onChange={setText}
               disabled={formLocked}

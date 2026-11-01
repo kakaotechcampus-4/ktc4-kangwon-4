@@ -172,7 +172,12 @@ export type ResultsEntry =
    */
   | { kind: 'ANSWER'; questions: string[]; historyId: number }
   /**
-   * 지금은 결과를 받을 때가 아니다 — 판단 중이거나 판단이 실패했다.
+   * 판단이 실패했는데, 사장님이 더 알려주시면 풀린다(`NEEDS_DETAIL`). 무엇이 더 필요한지
+   * 보여주고 글을 다시 받는다.
+   */
+  | { kind: 'RESUBMIT'; notice: Extract<FailureNotice, { kind: 'NEEDS_DETAIL' }>; historyId: number }
+  /**
+   * 지금은 결과를 받을 때가 아니다 — 판단 중이거나, 더 적어도 풀리지 않는 실패다.
    *
    * 둘 다 `/case` 가 이미 안내하는 상태라 그쪽으로 보낸다. 여기서 같은 안내를 한 번 더
    * 만들면 두 화면의 문구가 따로 놀게 된다.

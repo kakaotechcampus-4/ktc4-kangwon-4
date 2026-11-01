@@ -260,6 +260,33 @@ describe('CurrentCasePage', () => {
       expect(await screen.findByText(/원상복구 범위 등/)).toBeInTheDocument()
     })
 
+    /** 더 알려주시면 풀리는 실패다. 같은 길로 다시 보내면 서버가 다시 판단한다 */
+    it('다시 알아야 할 것이 있으면 다시 알려주기를 눌러 결과 입력으로 간다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      mockCase(
+        envelope({
+          judgment_status: 'FAILED',
+          recovery_action_code: 'RESUBMIT_INPUT',
+          requested_field_paths: ['restoration_scope'],
+        }),
+      )
+      renderAt('/case')
+
+      fireEvent.click(await screen.findByRole('button', { name: '다시 알려주기' }))
+
+      expect(await screen.findByText('결과 입력 화면')).toBeInTheDocument()
+    })
+
+    /** 더 적어도 같은 실패가 돌아온다(#57). 누르면 되는 것처럼 보이는 버튼을 달지 않는다 */
+    it('사장님이 알려줘서 풀리는 실패가 아니면 다시 알려주기를 달지 않는다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      mockCase(envelope({ judgment_status: 'FAILED', recovery_action_code: 'CONTACT_SUPPORT' }))
+      renderAt('/case')
+
+      await screen.findByRole('heading', { level: 1 })
+      expect(screen.queryByRole('button', { name: '다시 알려주기' })).not.toBeInTheDocument()
+    })
+
     /**
      * 서버가 "할 수 있는 것이 없다" 고 **말한** 경우와 우리가 그 말을 **못 알아들은** 경우는
      * 다르다. 같은 문구로 덮으면 계약이 어긋난 사실이 화면 뒤로 숨는다.

@@ -195,6 +195,30 @@ describe('toResultsEntry', () => {
     })
   })
 
+  it('더 알려주셔야 풀리는 실패면 무엇이 필요한지와 판단 번호를 담는다', () => {
+    expect(
+      toResultsEntry(
+        entry({
+          judgment_status: 'FAILED',
+          case_history_id: 12,
+          recovery_action_code: 'RESUBMIT_INPUT',
+          requested_field_paths: ['restoration_scope'],
+        }),
+      ),
+    ).toEqual({
+      kind: 'RESUBMIT',
+      notice: { kind: 'NEEDS_DETAIL', fields: ['원상복구 범위'], partial: false },
+      historyId: 12,
+    })
+  })
+
+  /** 번호가 없으면 다 적고 보낸 뒤에야 막힌다 */
+  it('더 알려주셔야 하는 실패인데 판단 번호가 없으면 알 수 없는 응답으로 둔다', () => {
+    expect(
+      toResultsEntry(entry({ judgment_status: 'FAILED', recovery_action_code: 'RESUBMIT_INPUT' })),
+    ).toEqual({ kind: 'UNRECOGNIZED' })
+  })
+
   /**
    * 번호 없이 폼을 열면 사장님이 다 적고 보낸 뒤에야 막힌다.
    * 할 일 없이 열면 무엇에 대한 결과를 적는지 모른다.

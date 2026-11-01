@@ -249,10 +249,11 @@ function judgmentCard(judgment: JudgmentView, waitedTooLong: boolean): JudgmentC
       }
 
     /*
-      "잠시 후 다시" 라고 말하지 않는다. 실패한 Case 를 다시 판단하는 수단이 아직 없어서
+      "잠시 후 다시" 라고 말하지 않는다. 실패한 Case 를 다시 판단시키는 수단이 아직 없어서
       (#57) 몇 번을 눌러도 같은 실패가 돌아온다.
 
-      이유마다 문구만 갈리고 **누를 것은 다섯 갈래 모두 재조회 하나다.**
+      **사장님이 더 알려주셔야 풀리는 실패만** 결과 입력으로 보낸다. 같은 길로 다시 보내면
+      서버가 다시 판단한다. 나머지는 더 적어도 풀리지 않아 재조회 하나만 둔다.
     */
     case 'FAILED': {
       const { askOwner, title, description } = failureCard(judgment.notice)
@@ -260,6 +261,7 @@ function judgmentCard(judgment: JudgmentView, waitedTooLong: boolean): JudgmentC
         ? {
             headline: '확인하실 일이 있어요',
             props: { tone: 'critical', icon: CRITICAL_ICON, badge: '확인 필요', title, description },
+            main: (stale) => <AnswerButton locked={stale} label="다시 알려주기" />,
           }
         : {
             headline: '할 일 정리가 멈췄어요',
@@ -317,18 +319,19 @@ function TaskButton({ hasQuestions, locked }: { hasQuestions: boolean; locked: b
 }
 
 /**
- * 리본이 되물은 질문에 답하러 가는 버튼. 결과 입력(`/results`)이 질문에 답하는 모양으로 열린다.
+ * 사장님이 알려주셔야 하는 것에 답하러 가는 버튼. 결과 입력(`/results`)이 지금 판단에 맞는
+ * 모양(되물은 질문에 답하기 · 실패한 판단에 더 알려주기)으로 열린다.
  *
  * 최신 상태를 확인하지 못했으면 잠근다 — 이미 지난 질문에 답하게 된다.
  */
-function AnswerButton({ locked }: { locked: boolean }) {
+function AnswerButton({ locked, label = '답하러 가기' }: { locked: boolean; label?: string }) {
   const navigate = useNavigate()
   const { search } = useLocation()
 
   return (
     <>
       <Button size="lg" disabled={locked} onClick={() => navigate({ pathname: '/results', search })}>
-        답하러 가기
+        {label}
       </Button>
       {locked && (
         <p className="text-center text-14 text-fg-neutral-muted">
@@ -357,8 +360,8 @@ function requestedText({ fields, partial }: { fields: string[]; partial: boolean
  * TODO(#55): 문구는 PM 이 정한다. 지금은 **상황을 사실대로 적기만 한** 초안이다.
  *
  * 아직 지켜야 할 것 둘:
- *   - **못 하는 일을 약속하지 않는다.** 실패한 Case 를 다시 판단시키는 수단이 없고(#57)
- *     결과를 다시 알려주는 입력 경로도 아직 없다
+ *   - **못 하는 일을 약속하지 않는다.** 실패한 Case 를 다시 판단시키는 수단이 없다(#57).
+ *     더 알려주셔야 풀리는 실패(`askOwner`)만 결과 입력으로 다시 보낼 수 있다
  *   - **"상태 다시 확인" 을 재판단으로 읽히게 쓰지 않는다.** 그 버튼은 저장된 상태를 다시
  *     읽을 뿐이다
  *
@@ -389,7 +392,7 @@ function failureCard(notice: FailureNotice): {
       return {
         askOwner: true,
         title: '추가 확인이 필요해요',
-        description: `${requestedText(notice)} 알려주시는 자리는 준비하고 있습니다.`,
+        description: requestedText(notice),
       }
 
     case 'SERVICE_SIDE':
