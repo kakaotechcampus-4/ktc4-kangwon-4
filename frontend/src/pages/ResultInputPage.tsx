@@ -1,17 +1,17 @@
-import { type ComponentProps, useEffect, useRef, useState } from 'react'
+import { type ComponentProps, type ReactNode, useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 
 import { toResultsEntry, toSubmitOutcome } from '../adapters/results'
-import { AppShell } from '../components/AppShell'
 import { FollowUpQuestionCard } from '../components/FollowUpQuestionCard'
 import { NoticeCard } from '../components/NoticeCard'
-import { PendingCard } from '../components/PendingCard'
-import { ResultInputForm } from '../components/ResultInputForm'
+import { Button } from '../components/ui/Button'
+import { HammerLoader } from '../components/ui/HammerLoader'
+import { TopBar } from '../components/ui/TopBar'
 import { ApiError, UnauthorizedError } from '../lib/api'
 import { usesMockData } from '../lib/auth'
 import { readMockKey } from '../lib/mockSwitch'
 import { fetchResultsEntry, submitResult, waitForResult } from '../lib/resultSubmit'
-import { pendingMessages, resultInput, simulateSubmit } from '../mocks/resultFlow'
+import { resultInput, simulateSubmit } from '../mocks/resultFlow'
 import type { FailureNotice, NextAction, SubmitOutcome, SubmitState } from '../types/view'
 
 /** 들어올 때 서버에 물은 결과. 폼은 `READY` 일 때만 연다 */
@@ -218,75 +218,154 @@ export function ResultInputPage() {
 
   if (entry.status === 'LOADING') {
     return (
-      <AppShell title="결과 알려주기">
-        <section className="rounded-2xl bg-white p-5" role="status" aria-live="polite">
-          <p className="text-base leading-relaxed text-gray-600">하시기로 한 일을 불러오고 있어요.</p>
-        </section>
-      </AppShell>
+      <ResultFrame>
+        <div className="flex flex-1 items-center justify-center">
+          <HammerLoader size={48} label="하시기로 한 일을 불러오는 중" />
+        </div>
+      </ResultFrame>
     )
   }
 
   if (entry.status === 'LOAD_FAILED') {
     return (
-      <AppShell title="결과 알려주기">
-        <NoticeCard
-          tone="NEUTRAL"
-          title="하시기로 한 일을 불러오지 못했어요."
-          description="연결 상태를 확인하고 다시 불러와 주세요."
-          action={{
-            label: '다시 불러오기',
-            onClick: () => {
-              setFetched({ status: 'LOADING' })
-              setAttempt((count) => count + 1)
-            },
-          }}
-        />
-      </AppShell>
+      <ResultFrame>
+        <main className="px-4 pt-2 pb-8">
+          <NoticeCard
+            tone="NEUTRAL"
+            title="하시기로 한 일을 불러오지 못했어요."
+            description="연결 상태를 확인하고 다시 불러와 주세요."
+            action={{
+              label: '다시 불러오기',
+              onClick: () => {
+                setFetched({ status: 'LOADING' })
+                setAttempt((count) => count + 1)
+              },
+            }}
+          />
+        </main>
+      </ResultFrame>
     )
   }
 
   // 다시 불러와도 같은 답이 온다. 지금 판단을 보여주는 자리로 보낸다
   if (entry.status === 'UNRECOGNIZED') {
     return (
-      <AppShell title="결과 알려주기">
-        <NoticeCard
-          tone="NEUTRAL"
-          title="지금 상황을 읽지 못했어요."
-          description="지금 상황 화면에서 다시 확인해 주세요."
-          action={goToCase}
-        />
-      </AppShell>
+      <ResultFrame>
+        <main className="px-4 pt-2 pb-8">
+          <NoticeCard
+            tone="NEUTRAL"
+            title="지금 상황을 읽지 못했어요."
+            description="지금 상황 화면에서 다시 확인해 주세요."
+            action={goToCase}
+          />
+        </main>
+      </ResultFrame>
     )
   }
 
   const { nextAction } = entry
+  const canSubmit = !formLocked && text.trim().length > 0
 
   return (
-    // 순번은 서버가 보내지 않는 값이라 없을 수 있다.
-    // 그대로 끼우면 "undefined번째 할 일의 결과" 가 뜬다
-    <AppShell
-      title="결과 알려주기"
-      subtitle={nextAction.seq === undefined ? undefined : `${nextAction.seq}번째 할 일의 결과`}
-    >
-      {/* 며칠 뒤에 들어올 수도 있다. 무엇에 대한 결과인지 먼저 상기시킨다 */}
-      <section className="rounded-2xl border border-gray-200 bg-white p-5">
-        <h2 className="text-sm font-bold tracking-wide text-gray-500">하시기로 한 일</h2>
-        <p className="mt-2 text-base leading-relaxed text-gray-900">{nextAction.title}</p>
-      </section>
+    <ResultFrame>
+      <main className="flex flex-col gap-6 px-4 pt-2 pb-8">
+        <div>
+          <h1 id="result-title" className="text-26 font-bold">
+            어떻게 됐나요?
+          </h1>
+          {/* 며칠 뒤에 들어올 수도 있다. 무엇에 대한 결과인지 먼저 상기시킨다 */}
+          <p className="mt-2 text-15 text-fg-neutral-muted">{nextAction.title}</p>
+        </div>
 
-      <ResultInputForm
-        value={text}
-        onChange={setText}
-        onSubmit={handleSubmit}
-        disabled={formLocked}
-      />
+        {/*
+          보내는 동안은 폼 대신 망치를 둔다. 적은 글은 상태에 남아 있어서, 머무는 결과가 오면
+          폼이 그 글 그대로 돌아온다. 처리 단계를 한 줄씩 보여주는 화면은 5번 PR에서 만든다.
+        */}
+        {isPending ? (
+          <div className="flex flex-col items-center gap-4 py-10">
+            <HammerLoader size={48} label="보내주신 내용을 반영하는 중" />
+            <p className="text-17 text-fg-neutral-muted">보내주신 내용을 반영하고 있어요</p>
+          </div>
+        ) : (
+          <form
+            className="flex flex-col gap-3"
+            onSubmit={(event) => {
+              event.preventDefault()
+              if (canSubmit) void handleSubmit()
+            }}
+          >
+            <AnswerTextarea
+              labelledBy="result-title"
+              value={text}
+              onChange={setText}
+              disabled={formLocked}
+              onSubmitShortcut={() => {
+                if (canSubmit) void handleSubmit()
+              }}
+            />
+            {/*
+              보기 버튼(시안의 "전부 원래대로 해야 한대요" 같은 것)은 서버가 할 일별 보기를
+              주지 않아 두지 않는다. 자리를 비워 두지 않고 글 칸 바로 아래에 보내기를 붙인다.
+              TODO(API): 할 일별 보기가 오면 글 칸 위에 둔다.
+            */}
+            <Button type="submit" disabled={!canSubmit}>
+              보내기
+            </Button>
+          </form>
+        )}
 
-      {isPending && <PendingCard messages={pendingMessages} />}
+        {state.kind === 'NEEDS_MORE_INFO' && <FollowUpQuestionCard questions={state.questions} />}
 
-      {state.kind === 'NEEDS_MORE_INFO' && <FollowUpQuestionCard questions={state.questions} />}
+        {notice && <NoticeCard {...notice} />}
+      </main>
+    </ResultFrame>
+  )
+}
 
-      {notice && <NoticeCard {...notice} />}
-    </AppShell>
+/** 탭 없는 화면의 틀. 뒤로 버튼만 두고 제목은 화면 안의 큰 제목이 맡는다 */
+function ResultFrame({ children }: { children: ReactNode }) {
+  return (
+    <div className="mx-auto flex min-h-dvh max-w-[402px] flex-col bg-bg-layer-default">
+      <TopBar />
+      {children}
+    </div>
+  )
+}
+
+interface AnswerTextareaProps {
+  /** 이 칸이 무엇을 묻는지 말하는 제목의 `id` */
+  labelledBy: string
+  value: string
+  onChange: (value: string) => void
+  /** 보내는 중·보낼 수 없는 상태에는 잠근다. 입력한 내용은 지우지 않는다 */
+  disabled: boolean
+  onSubmitShortcut: () => void
+}
+
+/**
+ * 들은 내용을 그대로 적는 칸. 글자는 17px다 — 16px보다 작으면 iOS Safari가 포커스할 때 화면을 확대한다.
+ */
+function AnswerTextarea({ labelledBy, value, onChange, disabled, onSubmitShortcut }: AnswerTextareaProps) {
+  return (
+    <textarea
+      aria-labelledby={labelledBy}
+      rows={4}
+      value={value}
+      disabled={disabled}
+      onChange={(event) => onChange(event.target.value)}
+      onKeyDown={(event) => {
+        // Enter는 줄바꿈으로 둔다. 되돌리기 수단이 없어서, 문장을 마치기 전에
+        // 전송되면 잘못 해석된 상태를 취소할 방법이 없다.
+        // 데스크톱에서 빠르게 보내고 싶은 경우만 Ctrl/⌘ + Enter로 받는다.
+        if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+          event.preventDefault()
+          onSubmitShortcut()
+        }
+      }}
+      // TODO(UX): 시안의 예시라 철거 상황을 가정한다. 다른 할 일 뒤에도 같은 문구가 뜬다
+      placeholder="예: 카운터랑 싱크대만 빼래요"
+      className="min-h-25 w-full resize-none rounded-14 px-4 py-3.5 text-17 ring-1 ring-stroke-neutral-weak outline-none ring-inset placeholder:text-fg-disabled focus:ring-2 focus:ring-fg-neutral disabled:bg-bg-neutral-weak disabled:text-fg-neutral-muted"
+    />
   )
 }
 

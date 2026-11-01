@@ -28,8 +28,8 @@ function renderFlow(results = '/results') {
 
 /** 입력하고 제출한다. 클릭은 fireEvent로 — userEvent는 가짜 타이머와 맞물리면 멈춘다 */
 function submit(text: string) {
-  fireEvent.change(screen.getByLabelText(/어떻게 되었나요/), { target: { value: text } })
-  fireEvent.click(screen.getByRole('button', { name: /알려주기/ }))
+  fireEvent.change(screen.getByLabelText('어떻게 됐나요?'), { target: { value: text } })
+  fireEvent.click(screen.getByRole('button', { name: '보내기' }))
 }
 
 /** 가짜 시계를 돌리고, 그 사이 끝난 요청과 그에 따른 렌더까지 반영한다 */
@@ -45,6 +45,27 @@ afterEach(() => {
 })
 
 describe('ResultInputPage — Mock', () => {
+  /** 눌러도 아무 일이 없는 버튼은 고장으로 읽힌다. 적기 전에는 꺼 둔다 */
+  it('아무것도 적지 않으면 보내기가 꺼져 있다', async () => {
+    renderFlow('/results?mock=updated')
+
+    expect(await screen.findByRole('button', { name: '보내기' })).toBeDisabled()
+    fireEvent.change(screen.getByLabelText('어떻게 됐나요?'), { target: { value: '   ' } })
+    expect(screen.getByRole('button', { name: '보내기' })).toBeDisabled()
+  })
+
+  /** 판단은 길면 2분 걸린다. 그동안 눌리는 폼이 그대로 있으면 같은 글을 또 보내게 된다 */
+  it('보내는 동안은 폼 대신 기다린다고 알린다', async () => {
+    vi.useFakeTimers()
+    renderFlow('/results?mock=updated')
+
+    submit('임대인이 철거하래요')
+    await advance()
+
+    expect(screen.getByRole('status')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '보내기' })).not.toBeInTheDocument()
+  })
+
   /** 기다린 사람은 결과 화면으로 간다 — 아래 테스트가 이동 자체를 막아버리지 않았는지 함께 본다 */
   it('응답이 오면 재계획 화면으로 이동한다', async () => {
     vi.useFakeTimers()
