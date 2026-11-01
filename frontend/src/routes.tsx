@@ -14,6 +14,7 @@ import { NotificationsPage } from './pages/NotificationsPage'
 import { ReplanPage } from './pages/ReplanPage'
 import { ResultInputPage } from './pages/ResultInputPage'
 import { StartPage } from './pages/StartPage'
+import { TaskPage } from './pages/TaskPage'
 
 /**
  * Hero Loop의 화면 순서가 그대로 경로가 된다.
@@ -24,6 +25,7 @@ import { StartPage } from './pages/StartPage'
  *   /start     시작 화면      Case가 없는 사용자만 본다
  *   /cases/new Case 생성      사장님이 이미 아는 것만 묻는다
  *   /case      현재 Case(홈)  지금 무엇이 막혀 있고 무엇을 할 차례인가
+ *   /task      할 일 상세     무엇을 어떻게 물어보면 되는가
  *   /results   결과 입력      실행한 결과를 한 줄로 말한다
  *   /confirm   충돌 확인      기존 기록과 어긋날 때만 들른다 (CONFLICT)
  *   /replan    재계획 결과    무엇이 바뀌었고 다음은 무엇인가
@@ -53,6 +55,7 @@ export const router = createBrowserRouter([
       { path: '/', element: <EntryPage /> },
       { path: '/start', element: <StartPage /> },
       { path: '/cases/new', element: <CaseCreatePage /> },
+      { path: '/task', element: <TaskPage /> },
       { path: '/results', element: <ResultInputPage /> },
       { path: '/confirm', element: <ConfirmChangePage /> },
       { path: '/replan', element: <ReplanPage /> },
