@@ -193,8 +193,14 @@ export function toResultsEntry(body: CaseResultsEntryResponse | null): ResultsEn
       return view === null ? { kind: 'UNRECOGNIZED' } : { kind: 'CONFIRM', view }
     }
 
+    case 'NEEDS_MORE_INFO': {
+      // 번호가 없으면 답을 보낼 수 없고, 질문이 없으면 무엇에 답하는지 보여줄 수 없다
+      const questions = toQuestionsForUser(body.questions_for_user)
+      if (!Number.isInteger(body.case_history_id) || questions === null) return { kind: 'UNRECOGNIZED' }
+      return { kind: 'ANSWER', questions, historyId: body.case_history_id as number }
+    }
+
     case 'PENDING':
-    case 'NEEDS_MORE_INFO':
     case 'FAILED':
       return { kind: 'ELSEWHERE' }
 

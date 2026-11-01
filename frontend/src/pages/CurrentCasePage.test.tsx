@@ -76,6 +76,7 @@ function renderAt(path: string) {
       },
       { path: '/start', element: <p>시작 화면</p> },
       { path: '/task', element: <p>할 일 상세 화면</p> },
+      { path: '/results', element: <p>결과 입력 화면</p> },
     ],
     { initialEntries: [path] },
   )
@@ -198,18 +199,16 @@ describe('CurrentCasePage', () => {
       expect(await screen.findByText('철거까지 하시나요?')).toBeInTheDocument()
     })
 
-    /**
-     * 답을 보내는 길은 서버에 있지만 연결은 4번 PR에서 한다. 그 전에 눌리면
-     * 아무 데도 못 가는 버튼이 된다.
-     */
-    it('되물을 것이 있으면 답하러 가기는 아직 꺼 둔다', async () => {
+    it('되물을 것이 있으면 답하러 가기를 눌러 답 입력으로 간다', async () => {
       saveTokens('access-1', 'refresh-1')
       mockCase(
         envelope({ judgment_status: 'NEEDS_MORE_INFO', questions_for_user: ['철거까지 하시나요?'] }),
       )
       renderAt('/case')
 
-      expect(await screen.findByRole('button', { name: '답하러 가기' })).toBeDisabled()
+      fireEvent.click(await screen.findByRole('button', { name: '답하러 가기' }))
+
+      expect(await screen.findByText('결과 입력 화면')).toBeInTheDocument()
     })
 
     it('판단에 실패하면 무엇을 못 했는지 알린다', async () => {

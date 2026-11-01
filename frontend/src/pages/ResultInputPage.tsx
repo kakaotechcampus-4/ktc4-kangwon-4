@@ -1,8 +1,7 @@
 import { type ComponentProps, type ReactNode, useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 
-import { toResultsEntry, toSubmitOutcome } from '../adapters/results'
-import { FollowUpQuestionCard } from '../components/FollowUpQuestionCard'
+import { toAnswerInput, toResultsEntry, toSubmitOutcome } from '../adapters/results'
 import { NoticeCard } from '../components/NoticeCard'
 import { Button } from '../components/ui/Button'
 import { HammerLoader } from '../components/ui/HammerLoader'
@@ -11,23 +10,41 @@ import { ApiError, UnauthorizedError } from '../lib/api'
 import { usesMockData } from '../lib/auth'
 import { readMockKey } from '../lib/mockSwitch'
 import { fetchResultsEntry, submitResult, waitForResult } from '../lib/resultSubmit'
+import { moreInfoCase } from '../mocks/currentCase'
 import { resultInput, simulateSubmit } from '../mocks/resultFlow'
 import type { FailureNotice, NextAction, SubmitOutcome, SubmitState } from '../types/view'
+
+/**
+ * 이 화면이 받는 것.
+ *
+ * - `RESULT` 할 일을 하고 온 결과
+ * - `ANSWER` 리본이 되물은 질문들의 답
+ *
+ * 둘 다 같은 길(`POST /cases/results`)로 보낸다. 다른 것은 화면에 띄울 물음과 보낼 글 모양뿐이다.
+ */
+type Ask = { kind: 'RESULT'; nextAction: NextAction } | { kind: 'ANSWER'; questions: string[] }
 
 /** 들어올 때 서버에 물은 결과. 폼은 `READY` 일 때만 연다 */
 type EntryQuery =
   | { status: 'LOADING' }
   /** `historyId` 는 이 결과가 어느 판단에 대한 것인지. 보낼 때마다 새 접수 번호로 바뀐다 */
-  | { status: 'READY'; nextAction: NextAction; historyId: number }
+  | { status: 'READY'; ask: Ask; historyId: number }
   | { status: 'LOAD_FAILED' }
   | { status: 'UNRECOGNIZED' }
 
 /**
  * Mock 으로 볼 때의 진입. 서버를 부르지 않으니 판단 번호도 쓰지 않는다.
  *
- * `/case` Mock 의 할 일과 같은 이야기를 잇도록 `resultInput` 을 쓴다.
+ * `/case` Mock 과 같은 이야기를 잇는다. `?mock=more-info` 는 홈의 "답하러 가기"에서 오므로
+ * 질문에 답하는 모양으로 연다.
  */
-const MOCK_ENTRY: EntryQuery = { status: 'READY', nextAction: resultInput.nextAction, historyId: 0 }
+function mockEntry(mockKey: string): EntryQuery {
+  const ask: Ask =
+    mockKey === 'more-info' && moreInfoCase.judgment.status === 'NEEDS_MORE_INFO'
+      ? { kind: 'ANSWER', questions: moreInfoCase.judgment.questions }
+      : { kind: 'RESULT', nextAction: resultInput.nextAction }
+  return { status: 'READY', ask, historyId: 0 }
+}
 
 const stay = (state: SubmitState): SubmitOutcome => ({ kind: 'STAY', state })
 
@@ -40,6 +57,9 @@ const stay = (state: SubmitState): SubmitOutcome => ({ kind: 'STAY', state })
  *
  * 보낸 뒤에는 응답에 따라 화면을 옮기거나(⑤·④) 이 자리에 머문다. 머무는 경우를
  * `SubmitState` 로 두어, 그 목록이 타입에 드러나게 했다.
+ *
+ * 리본이 되물으면(들어올 때든 보낸 뒤든) 같은 화면이 질문에 답하는 모양으로 바뀐다.
+ * 답은 질문을 붙여 보낸다(`toAnswerInput`) — 재판단 때 AI는 직전 질문을 모른다.
  */
 export function ResultInputPage() {
   const { search } = useLocation()
@@ -51,6 +71,15 @@ export function ResultInputPage() {
   /** 다시 불러오기를 누를 때마다 올려 진입 조회를 다시 돌린다 */
   const [attempt, setAttempt] = useState(0)
   const [text, setText] = useState('')
+  /** 질문마다 적은 답. 질문 문장으로 찾는다 — 같은 질문을 다시 받으면 적었던 답이 그대로 남는다 */
+  const [answers, setAnswers] = useState<Record<string, string>>({})
+  /**
+   * 보낸 뒤 리본이 되물은 질문. 들어올 때의 물음보다 앞선다.
+   *
+   * 상태(`state`)와 따로 둔다. 답을 보내다 실패하면 상태는 "보내지 못함"으로 바뀌는데,
+   * 그때도 질문은 화면에 남아 있어야 같은 답을 다시 보낼 수 있다.
+   */
+  const [askedAgain, setAskedAgain] = useState<string[] | null>(null)
   const [state, setState] = useState<SubmitState>({ kind: 'IDLE' })
 
   /*
@@ -84,13 +113,24 @@ export function ResultInputPage() {
 
         switch (entry.kind) {
           case 'READY':
-            setFetched({ status: 'READY', nextAction: entry.nextAction, historyId: entry.historyId })
+            setFetched({
+              status: 'READY',
+              ask: { kind: 'RESULT', nextAction: entry.nextAction },
+              historyId: entry.historyId,
+            })
+            return
+          case 'ANSWER':
+            setFetched({
+              status: 'READY',
+              ask: { kind: 'ANSWER', questions: entry.questions },
+              historyId: entry.historyId,
+            })
             return
           // 확인을 기다리는 충돌부터 풀어야 한다. 뒤로 가기로 이 화면에 돌아오지 않게 바꿔 낀다
           case 'CONFIRM':
             navigate('/confirm', { replace: true, state: entry.view })
             return
-          // 판단 중·되물을 것 있음·판단 실패는 `/case` 가 안내한다
+          // 판단 중·판단 실패는 `/case` 가 안내한다
           case 'ELSEWHERE':
             navigate('/case', { replace: true })
             return
@@ -113,7 +153,14 @@ export function ResultInputPage() {
     }
   }, [usesMock, attempt, navigate])
 
-  const entry = usesMock ? MOCK_ENTRY : fetched
+  const entry = usesMock ? mockEntry(readMockKey(search)) : fetched
+  /** 지금 답을 받는 질문. 없으면 할 일의 결과를 받는다 */
+  const questions =
+    askedAgain ?? (entry.status === 'READY' && entry.ask.kind === 'ANSWER' ? entry.ask.questions : null)
+  /** 보낼 글. 질문에 답할 때는 질문을 붙이고, 답하지 않은 질문은 뺀다 */
+  const draft = questions
+    ? toAnswerInput(questions.map((question) => ({ question, answer: answers[question] ?? '' })))
+    : text.trim()
   const isPending = state.kind === 'PENDING'
   /*
    * 안내가 `/case` 로 보내는 상태에서는 폼을 잠근다. 안내와 폼이 서로 다른 말을 하면 안 된다.
@@ -128,7 +175,7 @@ export function ResultInputPage() {
     state.kind === 'WAITED_TOO_LONG' ||
     state.kind === 'UNRECOGNIZED' ||
     (state.kind === 'FAILED' && (state.notice.kind === 'SERVICE_SIDE' || state.notice.kind === 'NO_RECOVERY'))
-  const canRetry = text.trim().length > 0
+  const canRetry = draft.length > 0
   const goToCase = { label: '지금 상황 보기', onClick: () => navigate({ pathname: '/case', search }) }
   const notice = stayNotice(state, {
     retry: { label: '다시 보내기', onClick: handleSubmit, disabled: !canRetry },
@@ -188,13 +235,13 @@ export function ResultInputPage() {
 
   async function handleSubmit() {
     // "다시 보내기" 버튼도 이 함수를 부른다. 폼에만 검증을 두면 그 경로로 빈 입력이 나간다
-    if (text.trim().length === 0 || entry.status !== 'READY') return
+    if (draft.length === 0 || entry.status !== 'READY') return
 
     setState({ kind: 'PENDING' })
 
     const outcome = usesMock
-      ? await simulateSubmit(readMockKey(search), text)
-      : await submitToServer(entry.historyId, text)
+      ? await simulateSubmit(readMockKey(search), draft)
+      : await submitToServer(entry.historyId, draft)
     if (!alive.current || outcome === null) return
 
     switch (outcome.kind) {
@@ -206,6 +253,8 @@ export function ResultInputPage() {
         navigate({ pathname: '/confirm', search }, { state: outcome.view, replace: true })
         return
       case 'STAY':
+        // 또 되물었다. 이제부터는 이 질문들의 답을 받는다
+        if (outcome.state.kind === 'NEEDS_MORE_INFO') setAskedAgain(outcome.state.questions)
         setState(outcome.state)
         return
       default: {
@@ -263,19 +312,32 @@ export function ResultInputPage() {
     )
   }
 
-  const { nextAction } = entry
-  const canSubmit = !formLocked && text.trim().length > 0
+  const canSubmit = !formLocked && draft.length > 0
+  const submitIfReady = () => {
+    if (canSubmit) void handleSubmit()
+  }
 
   return (
     <ResultFrame>
       <main className="flex flex-col gap-6 px-4 pt-2 pb-8">
-        <div>
-          <h1 id="result-title" className="text-26 font-bold">
-            어떻게 됐나요?
-          </h1>
-          {/* 며칠 뒤에 들어올 수도 있다. 무엇에 대한 결과인지 먼저 상기시킨다 */}
-          <p className="mt-2 text-15 text-fg-neutral-muted">{nextAction.title}</p>
-        </div>
+        {questions ? (
+          <div>
+            <h1 className="text-26 font-bold">이 내용을 알려주세요</h1>
+            <p className="mt-2 text-15 text-fg-neutral-muted">
+              다음 할 일을 정하려면 알아야 해요. 아시는 만큼만 적어 주세요.
+            </p>
+          </div>
+        ) : (
+          <div>
+            <h1 id="result-title" className="text-26 font-bold">
+              어떻게 됐나요?
+            </h1>
+            {/* 며칠 뒤에 들어올 수도 있다. 무엇에 대한 결과인지 먼저 상기시킨다 */}
+            {entry.ask.kind === 'RESULT' && (
+              <p className="mt-2 text-15 text-fg-neutral-muted">{entry.ask.nextAction.title}</p>
+            )}
+          </div>
+        )}
 
         {/*
           보내는 동안은 폼 대신 망치를 둔다. 적은 글은 상태에 남아 있어서, 머무는 결과가 오면
@@ -291,18 +353,39 @@ export function ResultInputPage() {
             className="flex flex-col gap-3"
             onSubmit={(event) => {
               event.preventDefault()
-              if (canSubmit) void handleSubmit()
+              submitIfReady()
             }}
           >
-            <AnswerTextarea
-              labelledBy="result-title"
-              value={text}
-              onChange={setText}
-              disabled={formLocked}
-              onSubmitShortcut={() => {
-                if (canSubmit) void handleSubmit()
-              }}
-            />
+            {questions ? (
+              // 질문이 여럿이면 하나만 답해도 보낼 수 있다. 모르는 것까지 적게 하면 지어낸 답이 들어간다
+              questions.map((question, index) => (
+                <div key={question} className="flex flex-col gap-2">
+                  <p id={`question-${index}`} className="text-17 font-bold">
+                    {question}
+                  </p>
+                  <AnswerTextarea
+                    labelledBy={`question-${index}`}
+                    rows={2}
+                    placeholder="들으신 대로, 아시는 만큼 적어 주세요"
+                    value={answers[question] ?? ''}
+                    onChange={(value) => setAnswers((current) => ({ ...current, [question]: value }))}
+                    disabled={formLocked}
+                    onSubmitShortcut={submitIfReady}
+                  />
+                </div>
+              ))
+            ) : (
+              <AnswerTextarea
+                labelledBy="result-title"
+                rows={4}
+                // TODO(UX): 시안의 예시라 철거 상황을 가정한다. 다른 할 일 뒤에도 같은 문구가 뜬다
+                placeholder="예: 카운터랑 싱크대만 빼래요"
+                value={text}
+                onChange={setText}
+                disabled={formLocked}
+                onSubmitShortcut={submitIfReady}
+              />
+            )}
             {/*
               보기 버튼(시안의 "전부 원래대로 해야 한대요" 같은 것)은 서버가 할 일별 보기를
               주지 않아 두지 않는다. 자리를 비워 두지 않고 글 칸 바로 아래에 보내기를 붙인다.
@@ -313,8 +396,6 @@ export function ResultInputPage() {
             </Button>
           </form>
         )}
-
-        {state.kind === 'NEEDS_MORE_INFO' && <FollowUpQuestionCard questions={state.questions} />}
 
         {notice && <NoticeCard {...notice} />}
       </main>
@@ -335,6 +416,8 @@ function ResultFrame({ children }: { children: ReactNode }) {
 interface AnswerTextareaProps {
   /** 이 칸이 무엇을 묻는지 말하는 제목의 `id` */
   labelledBy: string
+  rows: number
+  placeholder: string
   value: string
   onChange: (value: string) => void
   /** 보내는 중·보낼 수 없는 상태에는 잠근다. 입력한 내용은 지우지 않는다 */
@@ -345,11 +428,19 @@ interface AnswerTextareaProps {
 /**
  * 들은 내용을 그대로 적는 칸. 글자는 17px다 — 16px보다 작으면 iOS Safari가 포커스할 때 화면을 확대한다.
  */
-function AnswerTextarea({ labelledBy, value, onChange, disabled, onSubmitShortcut }: AnswerTextareaProps) {
+function AnswerTextarea({
+  labelledBy,
+  rows,
+  placeholder,
+  value,
+  onChange,
+  disabled,
+  onSubmitShortcut,
+}: AnswerTextareaProps) {
   return (
     <textarea
       aria-labelledby={labelledBy}
-      rows={4}
+      rows={rows}
       value={value}
       disabled={disabled}
       onChange={(event) => onChange(event.target.value)}
@@ -362,9 +453,8 @@ function AnswerTextarea({ labelledBy, value, onChange, disabled, onSubmitShortcu
           onSubmitShortcut()
         }
       }}
-      // TODO(UX): 시안의 예시라 철거 상황을 가정한다. 다른 할 일 뒤에도 같은 문구가 뜬다
-      placeholder="예: 카운터랑 싱크대만 빼래요"
-      className="min-h-25 w-full resize-none rounded-14 px-4 py-3.5 text-17 ring-1 ring-stroke-neutral-weak outline-none ring-inset placeholder:text-fg-disabled focus:ring-2 focus:ring-fg-neutral disabled:bg-bg-neutral-weak disabled:text-fg-neutral-muted"
+      placeholder={placeholder}
+      className="w-full resize-none rounded-14 px-4 py-3.5 text-17 ring-1 ring-stroke-neutral-weak outline-none ring-inset placeholder:text-fg-disabled focus:ring-2 focus:ring-fg-neutral disabled:bg-bg-neutral-weak disabled:text-fg-neutral-muted"
     />
   )
 }

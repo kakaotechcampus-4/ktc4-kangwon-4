@@ -181,7 +181,15 @@ describe('toResultsEntry', () => {
     expect(toResultsEntry(null)).toEqual({ kind: 'UNRECOGNIZED' })
   })
 
-  it.each(['PENDING', 'NEEDS_MORE_INFO', 'FAILED'] as const)('%s 면 다른 화면으로 보낸다', (status) => {
+  it('되물은 것이 있으면 답을 받을 질문과 판단 번호를 담는다', () => {
+    expect(
+      toResultsEntry(
+        entry({ judgment_status: 'NEEDS_MORE_INFO', case_history_id: 12, questions_for_user: ['직원이 몇 명인가요?'] }),
+      ),
+    ).toEqual({ kind: 'ANSWER', questions: ['직원이 몇 명인가요?'], historyId: 12 })
+  })
+
+  it.each(['PENDING', 'FAILED'] as const)('%s 면 다른 화면으로 보낸다', (status) => {
     expect(toResultsEntry(entry({ judgment_status: status, case_history_id: 12 }))).toEqual({
       kind: 'ELSEWHERE',
     })
@@ -203,6 +211,11 @@ describe('toResultsEntry', () => {
         conflicts: [{ id: 3, field: 'demolition_required', stored_value: 'NOT_REQUIRED', proposed_value: 'REQUIRED' }],
       }),
     ],
+    [
+      '되묻는다면서 판단 번호가 없다',
+      entry({ judgment_status: 'NEEDS_MORE_INFO', questions_for_user: ['직원이 몇 명인가요?'] }),
+    ],
+    ['되묻는다면서 질문이 없다', entry({ judgment_status: 'NEEDS_MORE_INFO', case_history_id: 12 })],
     ['모르는 상태다', entry({ judgment_status: 'ARCHIVED' as never, case_history_id: 12 })],
   ])('%s 면 알 수 없는 응답으로 둔다', (_, body) => {
     expect(toResultsEntry(body)).toEqual({ kind: 'UNRECOGNIZED' })
