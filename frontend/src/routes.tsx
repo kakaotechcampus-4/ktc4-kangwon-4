@@ -1,12 +1,16 @@
 import { createBrowserRouter, Navigate } from 'react-router'
 
 import { RequireAuth } from './components/RequireAuth'
+import { TabLayout } from './components/ui/TabLayout'
 import { CaseCreatePage } from './pages/CaseCreatePage'
 import { ConfirmChangePage } from './pages/ConfirmChangePage'
 import { LoginCallbackPage } from './pages/LoginCallbackPage'
 import { CurrentCasePage } from './pages/CurrentCasePage'
+import { DocsPage } from './pages/DocsPage'
 import { EntryPage } from './pages/EntryPage'
+import { LogPage } from './pages/LogPage'
 import { LoginPage } from './pages/LoginPage'
+import { NotificationsPage } from './pages/NotificationsPage'
 import { ReplanPage } from './pages/ReplanPage'
 import { ResultInputPage } from './pages/ResultInputPage'
 import { StartPage } from './pages/StartPage'
@@ -23,6 +27,12 @@ import { StartPage } from './pages/StartPage'
  *   /results   결과 입력      실행한 결과를 한 줄로 말한다
  *   /confirm   충돌 확인      기존 기록과 어긋날 때만 들른다 (CONFLICT)
  *   /replan    재계획 결과    무엇이 바뀌었고 다음은 무엇인가
+ *
+ * 하단 탭이 있는 화면은 `TabLayout` 아래에 둔다. 홈 탭은 `/`(진입 분기)로 간다.
+ *
+ *   /docs          서류함      아직 API가 없어 빈 상태
+ *   /log           작업 기록   아직 API가 없어 빈 상태
+ *   /notifications 알림        탭 화면의 종 버튼으로 들어온다. 아직 빈 상태
  *
  * `/confirm`은 `/results`와 `/replan` 사이의 단계가 아니라 예외 분기다.
  * 정상 경로는 `/results`에서 `/replan`으로 바로 간다.
@@ -46,6 +56,14 @@ export const router = createBrowserRouter([
       { path: '/results', element: <ResultInputPage /> },
       { path: '/confirm', element: <ConfirmChangePage /> },
       { path: '/replan', element: <ReplanPage /> },
+      {
+        element: <TabLayout />,
+        children: [
+          { path: '/docs', element: <DocsPage /> },
+          { path: '/log', element: <LogPage /> },
+        ],
+      },
+      { path: '/notifications', element: <NotificationsPage /> },
     ],
   },
   { path: '*', element: <Navigate to="/" replace /> },
