@@ -113,10 +113,14 @@ def create_case(session: Session, member_id: int, case_request: CaseCreateReques
 
     case = Case(
         member_id=member_id,
+        store_name=case_request.store_name,
         business_type=case_request.business_type,
         franchise_status=case_request.franchise_status,
         employee_count=case_request.employee_count,
+        has_business_loan=case_request.has_business_loan,
+        has_service_contracts=case_request.has_service_contracts,
         lease_status=case_request.lease_status,
+        restoration_clause=case_request.restoration_clause,
         planned_closure_date=case_request.planned_closure_date,
     )
     case = case_crud.create_case(session, case)
@@ -511,7 +515,8 @@ def _create_case_creation_evidence(
     # case 생성 폼 입력값(business_type/franchise_status/lease_status)을 AI 쪽에서 CONFIRMED로
     # 인정하려면 evidence_refs가 있어야 한다(CaseFact.validate_fact_state). 세 필드가 이 evidence
     # 하나를 같이 참조해도 된다고 AI팀 확인함.
-    submitted = json.dumps(case_request.model_dump(mode="json"), ensure_ascii=False)
+    # 가게 이름은 AI 판단에 쓰지 않으므로 AI에 넘기지 않는다.
+    submitted = json.dumps(case_request.model_dump(mode="json", exclude={"store_name"}), ensure_ascii=False)
     history = case_history_crud.create_case_history(
         session,
         # 판단은 뒤에서 돌기 때문에 지금은 결과가 없다. 화면이 "분석 중"을 보여줄 수 있도록
