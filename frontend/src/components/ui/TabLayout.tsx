@@ -22,12 +22,12 @@ export function TabLayout() {
 
   return (
     <div className="mx-auto flex h-dvh max-w-[402px] flex-col bg-bg-layer-default">
-      <header className="flex h-14 shrink-0 items-center gap-1 pr-1.5 pl-4">
+      <header className="flex h-14 shrink-0 items-center gap-1 pr-1 pl-4">
         <h1 className="flex-1 text-20 font-bold">{TAB_TITLE[pathname]}</h1>
         <Link
           to="/notifications"
           aria-label="알림"
-          className="grid size-11 place-items-center rounded-lg text-fg-neutral active:bg-bg-transparent-pressed"
+          className="grid size-12 place-items-center rounded-lg text-fg-neutral active:bg-bg-transparent-pressed"
         >
           <IconBellLine size={24} aria-hidden="true" />
         </Link>
