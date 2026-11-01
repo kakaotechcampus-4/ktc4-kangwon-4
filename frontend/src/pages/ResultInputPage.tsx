@@ -5,6 +5,7 @@ import { toAnswerInput, toResultsEntry, toSubmitOutcome } from '../adapters/resu
 import { NoticeCard } from '../components/NoticeCard'
 import { Button } from '../components/ui/Button'
 import { HammerLoader } from '../components/ui/HammerLoader'
+import { ProcessSteps } from '../components/ui/ProcessSteps'
 import { TopBar } from '../components/ui/TopBar'
 import { ApiError, UnauthorizedError } from '../lib/api'
 import { usesMockData } from '../lib/auth'
@@ -205,8 +206,10 @@ export function ResultInputPage() {
       return stay({ kind: 'SEND_FAILED' })
     }
 
+    if (!alive.current) return null
     // 방금 접수된 것이 이제 가장 최근 판단이다. 되묻거나 실패해 다시 보낼 때는 이 번호로 보낸다
     setFetched((current) => (current.status === 'READY' ? { ...current, historyId: acceptedId } : current))
+    setState({ kind: 'PENDING', accepted: true })
 
     const controller = new AbortController()
     waiting.current = controller
@@ -237,7 +240,8 @@ export function ResultInputPage() {
     // "다시 보내기" 버튼도 이 함수를 부른다. 폼에만 검증을 두면 그 경로로 빈 입력이 나간다
     if (draft.length === 0 || entry.status !== 'READY') return
 
-    setState({ kind: 'PENDING' })
+    // Mock 은 접수 단계가 없다. 보내는 순간 받은 것으로 둔다
+    setState({ kind: 'PENDING', accepted: usesMock })
 
     const outcome = usesMock
       ? await simulateSubmit(readMockKey(search), draft)
@@ -312,6 +316,18 @@ export function ResultInputPage() {
     )
   }
 
+  /*
+    보내는 동안은 제목과 폼 자리를 통째로 처리 화면으로 바꾼다. 적은 글은 상태에 남아 있어서,
+    머무는 결과가 오면 폼이 그 글 그대로 돌아온다.
+  */
+  if (state.kind === 'PENDING') {
+    return (
+      <ResultFrame>
+        <Processing accepted={state.accepted} />
+      </ResultFrame>
+    )
+  }
+
   const canSubmit = !formLocked && draft.length > 0
   const submitIfReady = () => {
     if (canSubmit) void handleSubmit()
@@ -339,63 +355,52 @@ export function ResultInputPage() {
           </div>
         )}
 
-        {/*
-          보내는 동안은 폼 대신 망치를 둔다. 적은 글은 상태에 남아 있어서, 머무는 결과가 오면
-          폼이 그 글 그대로 돌아온다. 처리 단계를 한 줄씩 보여주는 화면은 5번 PR에서 만든다.
-        */}
-        {isPending ? (
-          <div className="flex flex-col items-center gap-4 py-10">
-            <HammerLoader size={48} label="보내주신 내용을 반영하는 중" />
-            <p className="text-17 text-fg-neutral-muted">보내주신 내용을 반영하고 있어요</p>
-          </div>
-        ) : (
-          <form
-            className="flex flex-col gap-3"
-            onSubmit={(event) => {
-              event.preventDefault()
-              submitIfReady()
-            }}
-          >
-            {questions ? (
-              // 질문이 여럿이면 하나만 답해도 보낼 수 있다. 모르는 것까지 적게 하면 지어낸 답이 들어간다
-              questions.map((question, index) => (
-                <div key={question} className="flex flex-col gap-2">
-                  <p id={`question-${index}`} className="text-17 font-bold">
-                    {question}
-                  </p>
-                  <AnswerTextarea
-                    labelledBy={`question-${index}`}
-                    rows={2}
-                    placeholder="들으신 대로, 아시는 만큼 적어 주세요"
-                    value={answers[question] ?? ''}
-                    onChange={(value) => setAnswers((current) => ({ ...current, [question]: value }))}
-                    disabled={formLocked}
-                    onSubmitShortcut={submitIfReady}
-                  />
-                </div>
-              ))
-            ) : (
-              <AnswerTextarea
-                labelledBy="result-title"
-                rows={4}
-                // TODO(UX): 시안의 예시라 철거 상황을 가정한다. 다른 할 일 뒤에도 같은 문구가 뜬다
-                placeholder="예: 카운터랑 싱크대만 빼래요"
-                value={text}
-                onChange={setText}
-                disabled={formLocked}
-                onSubmitShortcut={submitIfReady}
-              />
-            )}
-            {/*
-              보기 버튼(시안의 "전부 원래대로 해야 한대요" 같은 것)은 서버가 할 일별 보기를
-              주지 않아 두지 않는다. 자리를 비워 두지 않고 글 칸 바로 아래에 보내기를 붙인다.
-              TODO(API): 할 일별 보기가 오면 글 칸 위에 둔다.
-            */}
-            <Button type="submit" disabled={!canSubmit}>
-              보내기
-            </Button>
-          </form>
-        )}
+        <form
+          className="flex flex-col gap-3"
+          onSubmit={(event) => {
+            event.preventDefault()
+            submitIfReady()
+          }}
+        >
+          {questions ? (
+            // 질문이 여럿이면 하나만 답해도 보낼 수 있다. 모르는 것까지 적게 하면 지어낸 답이 들어간다
+            questions.map((question, index) => (
+              <div key={question} className="flex flex-col gap-2">
+                <p id={`question-${index}`} className="text-17 font-bold">
+                  {question}
+                </p>
+                <AnswerTextarea
+                  labelledBy={`question-${index}`}
+                  rows={2}
+                  placeholder="들으신 대로, 아시는 만큼 적어 주세요"
+                  value={answers[question] ?? ''}
+                  onChange={(value) => setAnswers((current) => ({ ...current, [question]: value }))}
+                  disabled={formLocked}
+                  onSubmitShortcut={submitIfReady}
+                />
+              </div>
+            ))
+          ) : (
+            <AnswerTextarea
+              labelledBy="result-title"
+              rows={4}
+              // TODO(UX): 시안의 예시라 철거 상황을 가정한다. 다른 할 일 뒤에도 같은 문구가 뜬다
+              placeholder="예: 카운터랑 싱크대만 빼래요"
+              value={text}
+              onChange={setText}
+              disabled={formLocked}
+              onSubmitShortcut={submitIfReady}
+            />
+          )}
+          {/*
+            보기 버튼(시안의 "전부 원래대로 해야 한대요" 같은 것)은 서버가 할 일별 보기를
+            주지 않아 두지 않는다. 자리를 비워 두지 않고 글 칸 바로 아래에 보내기를 붙인다.
+            TODO(API): 할 일별 보기가 오면 글 칸 위에 둔다.
+          */}
+          <Button type="submit" disabled={!canSubmit}>
+            보내기
+          </Button>
+        </form>
 
         {notice && <NoticeCard {...notice} />}
       </main>
@@ -410,6 +415,38 @@ function ResultFrame({ children }: { children: ReactNode }) {
       <TopBar />
       {children}
     </div>
+  )
+}
+
+/**
+ * 보낸 뒤 판단을 기다리는 화면 (시안 M05c 처리 중).
+ *
+ * 단계 줄은 화면이 실제로 아는 사건에만 맞춘다 — 접수 번호를 받으면 첫 줄이 끝나고, 그다음은
+ * 결과가 올 때까지 둘째 줄에 머문다. 셋째 줄은 결과가 오는 순간 이 화면을 떠나므로 여기서는
+ * 늘 대기다. 서버 안에서 정리와 다시 정하기가 언제 갈리는지는 알 수 없어 나누지 않았다.
+ *
+ * 망치는 위쪽에 둔다. 가운데로 내리면 시선이 아래로 떨어진다(4번 PR에서 확인).
+ */
+function Processing({ accepted }: { accepted: boolean }) {
+  return (
+    <main className="flex flex-col gap-6 px-4 pt-2 pb-8">
+      <div className="flex flex-col items-center gap-5 pt-2 text-center">
+        <HammerLoader size={72} label="보내주신 내용을 정리하는 중" />
+        <div>
+          <h1 className="text-26 font-bold">답변을 정리하고 있어요</h1>
+          <p className="mt-2 text-17 text-fg-neutral-muted">사장님이 하실 일은 없어요.</p>
+        </div>
+      </div>
+      <ProcessSteps
+        steps={[
+          { label: '보냈어요', status: accepted ? 'done' : 'run' },
+          { label: '리본이 내용을 정리하고 있어요', status: accepted ? 'run' : 'wait' },
+          { label: '다음 할 일 다시 정하기', status: 'wait' },
+        ]}
+      />
+      {/* 시안대로 꺼진 버튼을 둔다. 누를 것이 없다는 것을 버튼 자리에서도 말한다 */}
+      <Button disabled>처리 중이에요</Button>
+    </main>
   )
 }
 

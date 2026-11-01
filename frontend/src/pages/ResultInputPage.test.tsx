@@ -55,15 +55,18 @@ describe('ResultInputPage — Mock', () => {
   })
 
   /** 판단은 길면 2분 걸린다. 그동안 눌리는 폼이 그대로 있으면 같은 글을 또 보내게 된다 */
-  it('보내는 동안은 폼 대신 기다린다고 알린다', async () => {
+  it('보내는 동안은 폼 대신 처리 화면을 보여준다', async () => {
     vi.useFakeTimers()
     renderFlow('/results?mock=updated')
 
     submit('임대인이 철거하래요')
     await advance()
 
+    expect(screen.getByRole('heading', { name: '답변을 정리하고 있어요' })).toBeInTheDocument()
     expect(screen.getByRole('status')).toBeInTheDocument()
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '보내기' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '처리 중이에요' })).toBeDisabled()
   })
 
   /** 기다린 사람은 결과 화면으로 간다 — 아래 테스트가 이동 자체를 막아버리지 않았는지 함께 본다 */
@@ -368,6 +371,33 @@ describe('ResultInputPage — 서버', () => {
     })
 
     /**
+     * 서버는 처리 단계를 알려주지 않는다. 첫 줄 "보냈어요"는 접수 번호를 받았을 때만 끝난다 —
+     * 받기 전에 끝났다고 그리면, 보내다 실패했을 때 이미 보낸 것처럼 보인 셈이 된다.
+     */
+    it('접수 번호를 받아야 "보냈어요" 줄이 끝난다', async () => {
+      let accept: (response: Response) => void = () => {}
+      serve({
+        entry: [READY],
+        submit: [() => new Promise<Response>((resolve) => (accept = resolve)) as unknown as Response],
+        judged: [json(judgedBody({ result: 'PENDING' }))],
+      })
+      renderFlow()
+      await advance()
+
+      submit('임대인이 철거하래요')
+      await advance()
+      const [sent, working] = screen.getAllByRole('listitem')
+      expect(sent).toHaveTextContent('처리 중')
+      expect(working).toHaveTextContent('대기')
+
+      accept(ACCEPTED())
+      await advance()
+      const [sentAfter, workingAfter] = screen.getAllByRole('listitem')
+      expect(sentAfter).toHaveTextContent('완료')
+      expect(workingAfter).toHaveTextContent('처리 중')
+    })
+
+    /**
      * 되물은 뒤 다시 보낼 때는 방금 접수된 것이 가장 최근 판단이다.
      * 들어올 때 받은 번호로 또 보내면 서버가 409 로 막고, 사장님은 답하고도 못 보낸다.
      */
@@ -524,6 +554,32 @@ describe('ResultInputPage — 서버', () => {
       await act(async () => {
         await router.navigate(-1)
       })
+      await advance(INTERVAL_MS * 3)
+
+      expect(fetchMock.mock.calls.filter(([url]) => url.includes('/status'))).toHaveLength(0)
+      expect(router.state.location.pathname).toBe('/case')
+    })
+
+    /**
+     * 접수 답이 오기 전에 떠난 경우다. 그때는 아직 끊을 기다림이 없어서, 답이 온 뒤에 막지
+     * 않으면 떠난 화면이 뒤에서 10분 동안 판단을 계속 묻는다.
+     */
+    it('접수 답이 오기 전에 떠나면 답이 와도 판단을 묻지 않는다', async () => {
+      let accept: (response: Response) => void = () => {}
+      const fetchMock = serve({
+        entry: [READY],
+        submit: [() => new Promise<Response>((resolve) => (accept = resolve)) as unknown as Response],
+        judged: [json(judgedBody({ result: 'PENDING' }))],
+      })
+      const router = renderFlow()
+      await advance()
+
+      submit('임대인이 철거하래요')
+      await advance()
+      await act(async () => {
+        await router.navigate(-1)
+      })
+      accept(ACCEPTED())
       await advance(INTERVAL_MS * 3)
 
       expect(fetchMock.mock.calls.filter(([url]) => url.includes('/status'))).toHaveLength(0)

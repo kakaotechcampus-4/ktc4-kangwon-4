@@ -196,8 +196,13 @@ export type ResultsEntry =
 export type SubmitState =
   /** 아직 보내지 않음 */
   | { kind: 'IDLE' }
-  /** 보내고 기다리는 중 */
-  | { kind: 'PENDING' }
+  /**
+   * 보내고 기다리는 중.
+   *
+   * `accepted` 는 서버가 접수 번호를 돌려줬는지다. 처리 단계 줄의 첫 줄("보냈어요")이 이것으로만
+   * 끝난다 — 서버가 처리 단계를 내려주지 않아서, 화면이 확실히 아는 사건은 접수와 결과뿐이다.
+   */
+  | { kind: 'PENDING'; accepted: boolean }
   /** 입력만으로는 상태를 확정할 수 없어 되묻는다 */
   | { kind: 'NEEDS_MORE_INFO'; questions: string[] }
   /**
