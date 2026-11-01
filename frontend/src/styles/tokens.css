@@ -1,0 +1,120 @@
+/*
+ * 리본 디자인 토큰.
+ *
+ * 값은 확정 시안(모바일 v3)에서 실제로 쓰는 것만 옮겼다. 색은 SEED 팔레트 값이고,
+ * 이름도 SEED 의미 이름을 그대로 쓴다. 새 이름을 만들지 않으려는 것이다.
+ *
+ * 두 층으로 나눈다.
+ * - 팔레트(`:root`): 색 값 자체. Tailwind 클래스로 나오지 않아 화면 코드가 직접 쓸 수 없다.
+ * - 의미 이름(`@theme`): "어디에 쓰는 색인가". 화면 코드는 이것만 쓴다
+ *   (`text-fg-neutral`, `bg-bg-brand-solid`, `border-stroke-neutral-weak`).
+ *
+ * Tailwind 기본 색(`gray-*` 등)은 아직 끄지 않는다. 옛 화면이 쓰고 있어서다.
+ * 화면 교체가 끝나면 `--color-*: initial`로 끈다.
+ */
+
+:root {
+  --seed-color-palette-gray-100: #f7f8f9;
+  --seed-color-palette-gray-200: #f3f4f5;
+  --seed-color-palette-gray-300: #eeeff1;
+  --seed-color-palette-gray-400: #dcdee3;
+  --seed-color-palette-gray-600: #b0b3ba;
+  --seed-color-palette-gray-700: #868b94;
+  --seed-color-palette-gray-800: #555d6d;
+  --seed-color-palette-gray-900: #2a3038;
+  --seed-color-palette-gray-1000: #1a1c20;
+
+  --seed-color-palette-carrot-100: #fff2ec;
+  --seed-color-palette-carrot-200: #ffe8db;
+  --seed-color-palette-carrot-600: #ff6600;
+  --seed-color-palette-carrot-700: #e14d00;
+  --seed-color-palette-carrot-800: #b93901;
+  --seed-color-palette-carrot-900: #862b00;
+
+  --seed-color-palette-red-100: #fdf0f0;
+  --seed-color-palette-red-700: #fa342c;
+  --seed-color-palette-red-900: #921708;
+
+  --seed-color-palette-static-white: #ffffff;
+  --seed-color-palette-static-black-alpha-100: #00000007;
+  --seed-color-palette-static-black-alpha-200: #0000000c;
+  --seed-color-palette-static-black-alpha-300: #00000010;
+  --seed-color-palette-static-black-alpha-700: #00000074;
+}
+
+/* `inline`은 클래스에 변수 이름 대신 위 팔레트 값을 바로 넣게 한다 */
+@theme inline {
+  /* 글자 */
+  --color-fg-neutral: var(--seed-color-palette-gray-1000);
+  --color-fg-neutral-muted: var(--seed-color-palette-gray-800);
+  --color-fg-neutral-subtle: var(--seed-color-palette-gray-700);
+  /* SEED는 gray-500이지만 시안의 꺼진 버튼 글자는 gray-600이다 */
+  --color-fg-disabled: var(--seed-color-palette-gray-600);
+  --color-fg-brand: var(--seed-color-palette-carrot-600);
+  --color-fg-brand-contrast: var(--seed-color-palette-carrot-700);
+  --color-fg-critical: var(--seed-color-palette-red-700);
+  --color-fg-critical-contrast: var(--seed-color-palette-red-900);
+  --color-fg-on-brand-solid: var(--seed-color-palette-static-white);
+
+  /* 바탕 */
+  /* 주 버튼은 SEED의 carrot-600이 아니라 800이다. 흰 글씨 대비가 2.94:1 → 5.76:1 */
+  --color-bg-brand-solid: var(--seed-color-palette-carrot-800);
+  --color-bg-brand-solid-pressed: var(--seed-color-palette-carrot-900);
+  --color-bg-brand-weak: var(--seed-color-palette-carrot-100);
+  --color-bg-brand-weak-pressed: var(--seed-color-palette-carrot-200);
+  --color-bg-critical-solid: var(--seed-color-palette-red-700);
+  --color-bg-critical-weak: var(--seed-color-palette-red-100);
+  --color-bg-layer-basement: var(--seed-color-palette-gray-200);
+  --color-bg-layer-default: var(--seed-color-palette-static-white);
+  --color-bg-layer-default-pressed: var(--seed-color-palette-gray-100);
+  --color-bg-neutral-weak: var(--seed-color-palette-gray-200);
+  --color-bg-neutral-weak-pressed: var(--seed-color-palette-gray-300);
+  --color-bg-neutral-solid: var(--seed-color-palette-gray-900);
+  --color-bg-transparent-pressed: var(--seed-color-palette-static-black-alpha-100);
+  --color-bg-overlay: var(--seed-color-palette-static-black-alpha-700);
+
+  /* 선 */
+  --color-stroke-neutral-weak: var(--seed-color-palette-gray-400);
+  --color-stroke-neutral-subtle: var(--seed-color-palette-static-black-alpha-200);
+  --color-stroke-neutral-muted: var(--seed-color-palette-static-black-alpha-300);
+  --color-stroke-brand-solid: var(--seed-color-palette-carrot-700);
+}
+
+@theme {
+  /* 글꼴. 글꼴 파일은 `main.tsx`가 불러온다 */
+  --font-sans: 'Pretendard Variable', Pretendard, -apple-system, 'Apple SD Gothic Neo', sans-serif;
+
+  /*
+   * 글자 크기. 이름은 픽셀 그대로다(`text-17` = 17px, 줄높이 24px).
+   * 시안의 크기·줄높이 29쌍에서 1px 차이 나는 줄높이를 합쳐 11단계로 줄였다.
+   */
+  --text-11: 11px;
+  --text-11--line-height: 15px;
+  --text-12: 12px;
+  --text-12--line-height: 16px;
+  --text-13: 13px;
+  --text-13--line-height: 18px;
+  --text-14: 14px;
+  --text-14--line-height: 20px;
+  --text-15: 15px;
+  --text-15--line-height: 21px;
+  --text-16: 16px;
+  --text-16--line-height: 22px;
+  --text-17: 17px;
+  --text-17--line-height: 24px;
+  --text-18: 18px;
+  --text-18--line-height: 24px;
+  --text-20: 20px;
+  --text-20--line-height: 28px;
+  --text-22: 22px;
+  --text-22--line-height: 30px;
+  --text-26: 26px;
+  --text-26--line-height: 36px;
+
+  /* 모서리. 4·6·8·12·16px는 Tailwind 기본(`rounded-sm`~`rounded-2xl`)에 있어 시안에 많은 14px만 더한다 */
+  --radius-14: 14px;
+
+  /* 그림자. 테두리선은 그림자가 아니라 `ring`으로 그린다 */
+  --shadow-card: 0 1px 4px #00000014;
+  --shadow-floating: 0 2px 10px #0000001a;
+}
