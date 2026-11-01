@@ -249,6 +249,36 @@ describe('ResultInputPage — 서버', () => {
     })
 
     /**
+     * 일부만 답해도 보낼 수 있다. 막지 않는 대신, 빠뜨린 것인지 한 번 보게 한다.
+     * 하나도 안 적었거나 다 적었으면 알릴 것이 없다.
+     */
+    it('질문 일부만 답하면 남은 질문은 다시 묻는다고 알린다', async () => {
+      serve({
+        entry: [
+          json(
+            entryBody({
+              judgment_status: 'NEEDS_MORE_INFO',
+              next_action: null,
+              questions_for_user: ['직원이 몇 명인가요?', '프랜차이즈 가게인가요?'],
+            }),
+          ),
+        ],
+      })
+      renderFlow()
+      await advance()
+      const hint = '답하지 않은 질문은 다음에 다시 여쭤볼게요.'
+
+      expect(screen.queryByText(hint)).not.toBeInTheDocument()
+
+      fireEvent.change(screen.getByLabelText('직원이 몇 명인가요?'), { target: { value: '2명이요' } })
+      expect(screen.getByText(hint)).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '보내기' })).toBeEnabled()
+
+      fireEvent.change(screen.getByLabelText('프랜차이즈 가게인가요?'), { target: { value: '아니요' } })
+      expect(screen.queryByText(hint)).not.toBeInTheDocument()
+    })
+
+    /**
      * 재판단 때 AI는 직전 질문을 모른다. "2명이요"만 가면 무엇의 답인지 알 수 없다.
      * 답하지 않은 질문은 보내지 않는다 — 모르는 것까지 적게 하면 지어낸 답이 들어간다.
      */

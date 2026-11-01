@@ -2,9 +2,9 @@ import { type ComponentProps, type ReactNode, useEffect, useRef, useState } from
 import { useLocation, useNavigate } from 'react-router'
 
 import { toAnswerInput, toResultSteps, toResultsEntry, toSubmitOutcome } from '../adapters/results'
-import { NoticeCard } from '../components/NoticeCard'
 import { Button } from '../components/ui/Button'
 import { HammerLoader } from '../components/ui/HammerLoader'
+import { InfoBox } from '../components/ui/InfoBox'
 import { ProcessSteps } from '../components/ui/ProcessSteps'
 import { TopBar } from '../components/ui/TopBar'
 import { ApiError, UnauthorizedError } from '../lib/api'
@@ -290,10 +290,8 @@ export function ResultInputPage() {
     return (
       <ResultFrame>
         <main className="px-4 pt-2 pb-8">
-          <NoticeCard
-            tone="NEUTRAL"
+          <InfoBox
             title="하시기로 한 일을 불러오지 못했어요."
-            description="연결 상태를 확인하고 다시 불러와 주세요."
             action={{
               label: '다시 불러오기',
               onClick: () => {
@@ -301,7 +299,9 @@ export function ResultInputPage() {
                 setAttempt((count) => count + 1)
               },
             }}
-          />
+          >
+            연결 상태를 확인하고 다시 불러와 주세요.
+          </InfoBox>
         </main>
       </ResultFrame>
     )
@@ -312,12 +312,9 @@ export function ResultInputPage() {
     return (
       <ResultFrame>
         <main className="px-4 pt-2 pb-8">
-          <NoticeCard
-            tone="NEUTRAL"
-            title="지금 상황을 읽지 못했어요."
-            description="지금 상황 화면에서 다시 확인해 주세요."
-            action={goToCase}
-          />
+          <InfoBox title="지금 상황을 읽지 못했어요." action={goToCase}>
+            지금 상황 화면에서 다시 확인해 주세요.
+          </InfoBox>
         </main>
       </ResultFrame>
     )
@@ -336,6 +333,10 @@ export function ResultInputPage() {
   }
 
   const canSubmit = !formLocked && draft.length > 0
+  const answeredCount = questions
+    ? questions.filter((question) => (answers[question] ?? '').trim() !== '').length
+    : 0
+  const partlyAnswered = questions !== null && answeredCount > 0 && answeredCount < questions.length
   const submitIfReady = () => {
     if (canSubmit) void handleSubmit()
   }
@@ -360,6 +361,13 @@ export function ResultInputPage() {
               <p className="mt-2 text-15 text-fg-neutral-muted">{entry.ask.nextAction.title}</p>
             )}
           </div>
+        )}
+
+        {/* 보낸 뒤 머무는 이유. 글 칸 위에 두어, 고쳐 쓰기 전에 먼저 읽히게 한다 */}
+        {notice && (
+          <InfoBox tone={notice.tone} title={notice.title} action={notice.action}>
+            {notice.description}
+          </InfoBox>
         )}
 
         <form
@@ -404,12 +412,15 @@ export function ResultInputPage() {
             주지 않아 두지 않는다. 자리를 비워 두지 않고 글 칸 바로 아래에 보내기를 붙인다.
             TODO(API): 할 일별 보기가 오면 글 칸 위에 둔다.
           */}
+          {/*
+            질문이 여럿인데 일부만 답했다. 막지는 않는다 — 모르는 질문 때문에 아는 답까지 못 보내면 안 된다.
+            대신 빠뜨린 것인지 한 번 보게 하고, 남은 질문은 서버가 다시 묻는다는 것을 알린다
+          */}
+          {partlyAnswered && <InfoBox>답하지 않은 질문은 다음에 다시 여쭤볼게요.</InfoBox>}
           <Button type="submit" disabled={!canSubmit}>
             보내기
           </Button>
         </form>
-
-        {notice && <NoticeCard {...notice} />}
       </main>
     </ResultFrame>
   )
@@ -497,8 +508,20 @@ function AnswerTextarea({
   )
 }
 
-type NoticeProps = ComponentProps<typeof NoticeCard>
-type NoticeAction = NonNullable<NoticeProps['action']>
+type NoticeAction = NonNullable<ComponentProps<typeof InfoBox>['action']>
+
+/**
+ * 머무는 안내 한 장.
+ *
+ * `critical` 은 실패다(판단 실패·보내기 실패). 상황이 바뀌었거나 결과를 아직 못 받은 것은
+ * 실패가 아니라 알려드릴 것이라 `neutral` 로 둔다.
+ */
+interface NoticeProps {
+  tone: 'neutral' | 'critical'
+  title: string
+  description: string
+  action?: NoticeAction
+}
 
 /**
  * 더 적어야 할 항목을 한 문장으로. `/case` 의 `requestedText` 와 같은 모양이다.
@@ -520,7 +543,7 @@ function failureNotice(
   switch (notice.kind) {
     case 'RETRY_AVAILABLE':
       return {
-        tone: 'NEUTRAL',
+        tone: 'critical',
         title: '이번 결과로 다음 할 일을 정하지 못했어요.',
         description: '적어 주신 내용은 그대로 있어요. 같은 내용으로 다시 보내실 수 있어요.',
         action: retry,
@@ -529,11 +552,11 @@ function failureNotice(
     // 더 적어야 하는 실패에 "다시 보내기"를 달면 고치지 않은 글로 같은 실패를 되풀이한다.
     // 아래 폼의 보내기 버튼이 그 자리다
     case 'NEEDS_DETAIL':
-      return { tone: 'WARNING', title: '추가 확인이 필요해요.', description: detailText(notice) }
+      return { tone: 'critical', title: '추가 확인이 필요해요.', description: detailText(notice) }
 
     case 'SERVICE_SIDE':
       return {
-        tone: 'NEUTRAL',
+        tone: 'critical',
         title: '서비스에서 확인이 필요한 문제가 생겼어요.',
         description: '적어 주신 내용은 받았어요. 이 건은 저희 쪽에서 봐야 하는 문제예요.',
         action: goToCase,
@@ -541,7 +564,7 @@ function failureNotice(
 
     case 'NO_RECOVERY':
       return {
-        tone: 'NEUTRAL',
+        tone: 'critical',
         title: '이번 결과로 다음 할 일을 정하지 못했어요.',
         description: '이번 판단에 대해서는 더 해 보실 수 있는 것이 없어요.',
         action: goToCase,
@@ -549,7 +572,7 @@ function failureNotice(
 
     case 'UNKNOWN_CAUSE':
       return {
-        tone: 'NEUTRAL',
+        tone: 'critical',
         title: '이번 결과로 다음 할 일을 정하지 못했어요.',
         description: '자세한 이유는 확인되지 않았어요.',
       }
@@ -580,7 +603,7 @@ function stayNotice(
 
     case 'SEND_FAILED':
       return {
-        tone: 'NEUTRAL',
+        tone: 'critical',
         title: '결과를 보내지 못했어요.',
         description: '연결이 불안정했을 수 있어요. 적어 주신 내용은 그대로 있어요.',
         action: actions.retry,
@@ -588,7 +611,7 @@ function stayNotice(
 
     case 'STALE':
       return {
-        tone: 'NEUTRAL',
+        tone: 'neutral',
         title: '그사이 상황이 바뀌었어요.',
         description: '이미 접수된 결과가 있거나 새 판단이 나왔어요. 지금 상황 화면에서 확인해 주세요.',
         action: actions.goToCase,
@@ -596,7 +619,7 @@ function stayNotice(
 
     case 'WAITED_TOO_LONG':
       return {
-        tone: 'NEUTRAL',
+        tone: 'neutral',
         title: '판단 결과를 아직 받지 못했어요.',
         description: '보내 주신 결과는 접수됐어요. 끝나면 지금 상황 화면에서 보실 수 있어요.',
         action: actions.goToCase,
@@ -604,7 +627,7 @@ function stayNotice(
 
     case 'UNRECOGNIZED':
       return {
-        tone: 'NEUTRAL',
+        tone: 'neutral',
         title: '판단 결과를 읽지 못했어요.',
         description: '보내 주신 결과는 접수됐어요. 지금 상황 화면에서 다시 확인해 주세요.',
         action: actions.goToCase,
