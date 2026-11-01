@@ -14,7 +14,7 @@ function renderAt(path: string) {
   )
   const router = createMemoryRouter(
     [
-      { path: '/', element: page('홈') },
+      { path: '/case', element: page('홈') },
       { path: '/docs', element: page('서류함') },
       { path: '/log', element: page('기록') },
     ],
