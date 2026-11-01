@@ -10,7 +10,7 @@ import { NavLink } from 'react-router'
 
 /** 고른 탭은 채운 아이콘, 나머지는 선 아이콘 (시안) */
 const TABS = [
-  { to: '/', label: '홈', OnIcon: IconHouseFill, OffIcon: IconHouseLine },
+  { to: '/case', label: '홈', OnIcon: IconHouseFill, OffIcon: IconHouseLine },
   { to: '/docs', label: '서류함', OnIcon: IconDocumentTrayFill, OffIcon: IconDocumentTrayLine },
   { to: '/log', label: '기록', OnIcon: IconClockFill, OffIcon: IconClockLine },
 ]

@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { RouterProvider, createMemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { TabLayout } from '../components/ui/TabLayout'
 import { saveTokens } from '../lib/auth'
 import type { CasesEnvelope, CaseResponse } from '../types/api'
 import { CurrentCasePage } from './CurrentCasePage'
@@ -62,11 +63,19 @@ function mockThenFail(body: unknown) {
   )
 }
 
+/** `routes.tsx`처럼 탭 틀 안에 둔다 */
 function renderAt(path: string) {
   const router = createMemoryRouter(
     [
-      { path: '/case', element: <CurrentCasePage /> },
+      {
+        element: <TabLayout />,
+        children: [
+          { path: '/case', element: <CurrentCasePage /> },
+          { path: '/log', element: <p>기록 화면</p> },
+        ],
+      },
       { path: '/start', element: <p>시작 화면</p> },
+      { path: '/results', element: <p>결과 입력 화면</p> },
     ],
     { initialEntries: [path] },
   )
@@ -85,23 +94,32 @@ afterEach(() => {
  * 여기 값이 틀리면 사장님이 자기 가게 상황을 잘못 알고 다음 행동을 한다.
  */
 describe('CurrentCasePage', () => {
-  it('서버가 준 Case를 화면에 보여준다', async () => {
+  /** 홈은 하단 탭이 있는 화면이고, 지금 있는 곳이 홈이라는 것을 탭이 알려야 한다 */
+  it('홈 탭이 고른 상태로 보인다', async () => {
     saveTokens('access-1', 'refresh-1')
     mockCase(DONE)
     renderAt('/case')
 
-    expect(await screen.findByText('분식집')).toBeInTheDocument()
-    expect(screen.getByText('3명')).toBeInTheDocument()
-    expect(screen.getByText('자가')).toBeInTheDocument()
+    expect(await screen.findByRole('link', { name: '홈' })).toHaveAttribute('aria-current', 'page')
   })
 
-  /** 사장님이 직접 적어 넣은 값인데 지금까지 어디에도 보이지 않았다 */
-  it('폐업 예정일을 보여준다', async () => {
+  it('불러오는 동안 기다리라고 알린다', () => {
+    saveTokens('access-1', 'refresh-1')
+    vi.stubGlobal('fetch', vi.fn().mockReturnValue(new Promise(() => {})))
+    renderAt('/case')
+
+    expect(screen.getByRole('status')).toBeInTheDocument()
+  })
+
+  /** 시안처럼 리본이 해둔 일 띠를 누르면 작업 기록으로 간다 */
+  it('리본이 해둔 일 띠를 누르면 기록으로 간다', async () => {
     saveTokens('access-1', 'refresh-1')
     mockCase(DONE)
     renderAt('/case')
 
-    expect(await screen.findByText('2026.11.30')).toBeInTheDocument()
+    fireEvent.click(await screen.findByRole('link', { name: /리본이 해둔 일/ }))
+
+    expect(await screen.findByText('기록 화면')).toBeInTheDocument()
   })
 
   /** 주소로 직접 들어온 경우다. 빈 화면 대신 만들러 보낸다 */
@@ -132,34 +150,33 @@ describe('CurrentCasePage', () => {
       mockCase(envelope({ judgment_status: 'PENDING' }))
       renderAt('/case')
 
-      expect(await screen.findByText('다음 할 일을 정하고 있어요.')).toBeInTheDocument()
-      expect(screen.queryByRole('heading', { name: '지금 할 일' })).not.toBeInTheDocument()
+      expect(
+        await screen.findByRole('heading', { level: 2, name: '다음 할 일을 정하고 있어요' }),
+      ).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: '결과 알려주기' })).not.toBeInTheDocument()
     })
 
-    it('판단이 끝나면 할 일과 막힌 것을 보여준다', async () => {
-      saveTokens('access-1', 'refresh-1')
-      mockCase(DONE)
-      renderAt('/case')
-
-      expect(await screen.findByRole('heading', { name: '지금 할 일' })).toBeInTheDocument()
-      expect(screen.getByText('임대인에게 원상복구 범위를 확인하세요.')).toBeInTheDocument()
-      expect(screen.getByRole('heading', { name: '막혀 있는 것' })).toBeInTheDocument()
-    })
-
-    /**
-     * 사장님이 막히는 지점은 "임대인에게 연락해야지" 가 아니라 "뭐라고 말하지" 다.
-     * 제목만 뜨면 이 화면이 할 일 목록과 구분되지 않는다.
-     */
-    it('할 일과 함께 이유와 물어볼 말을 보여준다', async () => {
+    it('판단이 끝나면 할 일과 이유를 보여준다', async () => {
       saveTokens('access-1', 'refresh-1')
       mockCase(DONE)
       renderAt('/case')
 
       expect(
-        await screen.findByText('철거가 필요한지 판단하려면 원상복구 범위를 먼저 알아야 합니다.'),
+        await screen.findByRole('heading', { level: 2, name: '임대인에게 원상복구 범위를 확인하세요.' }),
       ).toBeInTheDocument()
-      expect(screen.getByText('어디까지 원래대로 돌려놔야 하나요?')).toBeInTheDocument()
-      expect(screen.getByText('철거까지 해야 하나요?')).toBeInTheDocument()
+      expect(
+        screen.getByText('철거가 필요한지 판단하려면 원상복구 범위를 먼저 알아야 합니다.'),
+      ).toBeInTheDocument()
+    })
+
+    it('결과 알려주기를 누르면 결과 입력으로 간다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      mockCase(DONE)
+      renderAt('/case')
+
+      fireEvent.click(await screen.findByRole('button', { name: '결과 알려주기' }))
+
+      expect(await screen.findByText('결과 입력 화면')).toBeInTheDocument()
     })
 
     it('되물을 것이 있으면 질문을 보여준다', async () => {
@@ -172,21 +189,36 @@ describe('CurrentCasePage', () => {
       expect(await screen.findByText('철거까지 하시나요?')).toBeInTheDocument()
     })
 
-    it('판단에 실패하면 가게 정보는 남기고 안내만 바꾼다', async () => {
+    /**
+     * 답을 보내는 길은 서버에 있지만 연결은 4번 PR에서 한다. 그 전에 눌리면
+     * 아무 데도 못 가는 버튼이 된다.
+     */
+    it('되물을 것이 있으면 답하러 가기는 아직 꺼 둔다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      mockCase(
+        envelope({ judgment_status: 'NEEDS_MORE_INFO', questions_for_user: ['철거까지 하시나요?'] }),
+      )
+      renderAt('/case')
+
+      expect(await screen.findByRole('button', { name: '답하러 가기' })).toBeDisabled()
+    })
+
+    it('판단에 실패하면 무엇을 못 했는지 알린다', async () => {
       saveTokens('access-1', 'refresh-1')
       mockCase(envelope({ judgment_status: 'FAILED', recovery_action_code: 'RETRY' }))
       renderAt('/case')
 
-      expect(await screen.findByText('다음 할 일을 정하지 못했어요.')).toBeInTheDocument()
-      expect(screen.getByText('분식집')).toBeInTheDocument()
+      expect(
+        await screen.findByRole('heading', { level: 2, name: '다음 할 일을 정하지 못했어요' }),
+      ).toBeInTheDocument()
     })
 
     /**
      * 사장님이 알려줘야 끝나는 실패다. 이유를 안 밝히면 "저희가 다시 해보겠습니다" 로 읽혀
      * 기다리면 되는 줄 알고 가만히 있게 된다. 어느 칸인지까지 말해야 움직일 수 있다.
      *
-     * 라벨("확인이 필요해요")은 안내 카드가 톤에 따라 붙이는 제목이다. 다섯 갈래 중
-     * 여기만 다른 톤을 쓴다는 것을 이 줄이 고정한다.
+     * 다섯 갈래 중 여기만 사장님이 알려줘야 풀리는 실패라 머리 문구가 다르다.
+     * 이 줄이 그것을 고정한다.
      */
     it('다시 알아야 할 것이 있으면 어느 칸인지까지 알린다', async () => {
       saveTokens('access-1', 'refresh-1')
@@ -199,7 +231,9 @@ describe('CurrentCasePage', () => {
       )
       renderAt('/case')
 
-      expect(await screen.findByRole('heading', { name: '확인이 필요해요' })).toBeInTheDocument()
+      expect(
+        await screen.findByRole('heading', { level: 1, name: '확인하실 일이 있어요' }),
+      ).toBeInTheDocument()
       expect(screen.getByText(/원상복구 범위, 철거 필요 여부/)).toBeInTheDocument()
     })
 
@@ -227,7 +261,7 @@ describe('CurrentCasePage', () => {
       mockCase(envelope({ judgment_status: 'FAILED' }))
       renderAt('/case')
 
-      await screen.findByText('다음 할 일을 정하지 못했어요.')
+      await screen.findByRole('heading', { level: 2, name: '다음 할 일을 정하지 못했어요' })
       expect(screen.queryByText(/더 해 보실 수 있는 것이 없어요/)).not.toBeInTheDocument()
     })
 
@@ -240,7 +274,9 @@ describe('CurrentCasePage', () => {
       mockCase(envelope({ judgment_status: 'CONFLICT' }))
       renderAt('/case')
 
-      expect(await screen.findByText('확인이 필요한 내용이 있어요.')).toBeInTheDocument()
+      expect(
+        await screen.findByRole('heading', { level: 2, name: '확인이 필요한 내용이 있어요' }),
+      ).toBeInTheDocument()
     })
 
     /**
@@ -252,7 +288,7 @@ describe('CurrentCasePage', () => {
       mockCase(envelope({ judgment_status: 'CONFLICT' }))
       renderAt('/case')
 
-      await screen.findByText('확인이 필요한 내용이 있어요.')
+      await screen.findByRole('heading', { level: 2, name: '확인이 필요한 내용이 있어요' })
       expect(screen.queryByRole('link', { name: /확인/ })).not.toBeInTheDocument()
     })
 
@@ -266,7 +302,9 @@ describe('CurrentCasePage', () => {
       mockCase(envelope({ judgment_status: 'SAFE_FAILURE' as never }))
       renderAt('/case')
 
-      expect(await screen.findByText('판단 내용을 불러오지 못했어요.')).toBeInTheDocument()
+      expect(
+        await screen.findByRole('heading', { level: 2, name: '판단 내용을 불러오지 못했어요' }),
+      ).toBeInTheDocument()
     })
 
     /**
@@ -320,19 +358,21 @@ describe('CurrentCasePage', () => {
       renderAt('/case')
 
       fireEvent.click(await recheckButton())
-      return screen.findByText('최신 상태를 확인하지 못했어요.')
+      return screen.findByText(/최신 상태를 확인하지 못했어요/)
     }
 
-    it('마지막으로 받은 가게 정보를 남긴다', async () => {
+    it('마지막으로 받은 할 일을 남긴다', async () => {
       await renderStale()
 
-      expect(screen.getByText('분식집')).toBeInTheDocument()
+      expect(
+        screen.getByRole('heading', { level: 2, name: '임대인에게 원상복구 범위를 확인하세요.' }),
+      ).toBeInTheDocument()
     })
 
     it('결과 알려주기를 잠근다', async () => {
       await renderStale()
 
-      expect(screen.queryByRole('link', { name: '결과 알려주기' })).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '결과 알려주기' })).toBeDisabled()
       expect(screen.getByText('최신 상태를 확인한 뒤에 알려주실 수 있어요')).toBeInTheDocument()
     })
 
@@ -349,22 +389,28 @@ describe('CurrentCasePage', () => {
       saveTokens('access-1', 'refresh-1')
       renderAt('/case?mock=pending')
 
-      expect(await screen.findByText('다음 할 일을 정하고 있어요.')).toBeInTheDocument()
+      expect(
+        await screen.findByRole('heading', { level: 2, name: '다음 할 일을 정하고 있어요' }),
+      ).toBeInTheDocument()
     })
 
     it('judgment-conflict 면 확인이 필요한 화면을 보여준다', async () => {
       saveTokens('access-1', 'refresh-1')
       renderAt('/case?mock=judgment-conflict')
 
-      expect(await screen.findByText('확인이 필요한 내용이 있어요.')).toBeInTheDocument()
+      expect(
+        await screen.findByRole('heading', { level: 2, name: '확인이 필요한 내용이 있어요' }),
+      ).toBeInTheDocument()
     })
 
     it('more-info 면 질문 화면을 보여준다', async () => {
       saveTokens('access-1', 'refresh-1')
       renderAt('/case?mock=more-info')
 
-      expect(await screen.findByRole('heading', { name: '추가 확인 필요' })).toBeInTheDocument()
-      expect(screen.queryByRole('heading', { name: '지금 할 일' })).not.toBeInTheDocument()
+      expect(
+        await screen.findByRole('heading', { level: 2, name: '이 내용을 알려주세요' }),
+      ).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: '결과 알려주기' })).not.toBeInTheDocument()
     })
   })
 })

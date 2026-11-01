@@ -23,12 +23,13 @@ import { StartPage } from './pages/StartPage'
  *   /          진입 분기      보낼 곳만 정하고 화면은 없다
  *   /start     시작 화면      Case가 없는 사용자만 본다
  *   /cases/new Case 생성      사장님이 이미 아는 것만 묻는다
- *   /case      현재 Case      지금 무엇이 막혀 있고 무엇을 할 차례인가
+ *   /case      현재 Case(홈)  지금 무엇이 막혀 있고 무엇을 할 차례인가
  *   /results   결과 입력      실행한 결과를 한 줄로 말한다
  *   /confirm   충돌 확인      기존 기록과 어긋날 때만 들른다 (CONFLICT)
  *   /replan    재계획 결과    무엇이 바뀌었고 다음은 무엇인가
  *
- * 하단 탭이 있는 화면은 `TabLayout` 아래에 둔다. 홈 탭은 `/`(진입 분기)로 간다.
+ * 하단 탭이 있는 화면은 `TabLayout` 아래에 둔다. 홈 탭은 `/case`로 간다.
+ * `/`는 로그인 뒤 보낼 곳만 정하고, 탭에서는 가리키지 않는다.
  *
  *   /docs          서류함      아직 API가 없어 빈 상태
  *   /log           작업 기록   아직 API가 없어 빈 상태
@@ -52,13 +53,13 @@ export const router = createBrowserRouter([
       { path: '/', element: <EntryPage /> },
       { path: '/start', element: <StartPage /> },
       { path: '/cases/new', element: <CaseCreatePage /> },
-      { path: '/case', element: <CurrentCasePage /> },
       { path: '/results', element: <ResultInputPage /> },
       { path: '/confirm', element: <ConfirmChangePage /> },
       { path: '/replan', element: <ReplanPage /> },
       {
         element: <TabLayout />,
         children: [
+          { path: '/case', element: <CurrentCasePage /> },
           { path: '/docs', element: <DocsPage /> },
           { path: '/log', element: <LogPage /> },
         ],
