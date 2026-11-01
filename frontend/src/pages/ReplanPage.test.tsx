@@ -70,6 +70,38 @@ describe('ReplanPage — 서버', () => {
     expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('case_history_id=13'), expect.anything())
   })
 
+  it('바뀐 내용과 다음 할 일을 보여주고, 막힌 것은 그리지 않는다', async () => {
+    serve(json(judged({})))
+    renderAt('/replan?history=13')
+
+    expect(await screen.findByRole('heading', { name: '말씀하신 내용을 반영했어요' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '바뀐 내용' })).toBeInTheDocument()
+    expect(screen.getByText('철거 비용 지원은 신청이 먼저예요.')).toBeInTheDocument()
+    // 홈에서 뺀 것과 같은 기준이다
+    expect(screen.queryByText('철거 전에 지원 조건을 확인해야 합니다.')).not.toBeInTheDocument()
+    // 처리 중 화면에서 이어지게, 같은 단계 줄을 모두 끝난 모양으로 보여준다
+    for (const step of screen.getAllByRole('listitem').slice(0, 3)) expect(step).toHaveTextContent('완료')
+  })
+
+  /** "반영했어요"라고 하고 바뀐 것이 없으면 사장님은 무엇이 반영됐는지 찾게 된다 */
+  it('바뀐 칸이 없으면 그렇다고 말하고 바뀐 내용 상자를 그리지 않는다', async () => {
+    serve(json(judged({ result: 'NO_CHANGE', changes: [] })))
+    renderAt('/replan?history=13')
+
+    expect(await screen.findByRole('heading', { name: '가게 정보에 바뀐 내용은 없어요' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '바뀐 내용' })).not.toBeInTheDocument()
+    expect(screen.getByText('지원 조건 확인하기')).toBeInTheDocument()
+  })
+
+  it('홈으로를 누르면 지금 상황으로 간다', async () => {
+    serve(json(judged({})))
+    renderAt('/replan?history=13')
+
+    await userEvent.click(await screen.findByRole('button', { name: '홈으로' }))
+
+    expect(await screen.findByText('현재 Case')).toBeInTheDocument()
+  })
+
   /**
    * 번호를 숫자 글자로만 받는다. `Number()` 에 맡기면 빈 값은 0, `1e3` 은 1000, `12.0` 은 12 가
    * 되어 엉뚱한 판단을 묻는다.

@@ -1,14 +1,13 @@
-import { useEffect, useState } from 'react'
-import { Link, Navigate, useLocation, useNavigate } from 'react-router'
+import { IconCheckmarkCircleFill } from '@karrotmarket/react-monochrome-icon'
+import { type ReactNode, useEffect, useState } from 'react'
+import { Navigate, useLocation, useNavigate } from 'react-router'
 
-import { toSubmitOutcome } from '../adapters/results'
-import { AppShell } from '../components/AppShell'
-import { BlockerCard } from '../components/BlockerCard'
-import { ChangeList } from '../components/ChangeList'
-import { NextActionCard } from '../components/NextActionCard'
-import { NoBlockerCard } from '../components/NoBlockerCard'
-import { NoticeCard } from '../components/NoticeCard'
+import { toResultSteps, toSubmitOutcome } from '../adapters/results'
+import { Button } from '../components/ui/Button'
 import { HammerLoader } from '../components/ui/HammerLoader'
+import { InfoBox } from '../components/ui/InfoBox'
+import { ProcessSteps } from '../components/ui/ProcessSteps'
+import { TopBar } from '../components/ui/TopBar'
 import { ApiError, UnauthorizedError } from '../lib/api'
 import { usesMockData } from '../lib/auth'
 import { MOCK_SWITCH_ENABLED, readMockKey } from '../lib/mockSwitch'
@@ -111,38 +110,45 @@ function ServerReplan({ historyId }: { historyId: number }) {
   switch (query.status) {
     case 'LOADING':
       return (
-        <AppShell title="다시 계산했습니다">
-          <div className="flex justify-center py-10">
+        <ReplanFrame>
+          <div className="flex flex-1 items-center justify-center">
             <HammerLoader size={48} label="반영 결과를 불러오는 중" />
           </div>
-        </AppShell>
+        </ReplanFrame>
       )
 
     case 'SUPERSEDED':
       return (
-        <AppShell title="다시 계산했습니다">
-          <NoticeCard
-            tone="NEUTRAL"
-            title="이 결과 뒤로 새 판단이 나왔어요."
-            description="지금 상황에서 최신 할 일을 확인해 주세요."
-            action={{ label: '지금 상황 보기', onClick: () => navigate('/case') }}
-          />
-        </AppShell>
+        <ReplanFrame>
+          <main className="px-4 pt-2 pb-8">
+            <InfoBox
+              title="이 결과 뒤로 새 판단이 나왔어요."
+              action={{ label: '지금 상황 보기', onClick: () => navigate('/case') }}
+            >
+              지금 상황에서 최신 할 일을 확인해 주세요.
+            </InfoBox>
+          </main>
+        </ReplanFrame>
       )
 
     case 'LOAD_FAILED':
       return (
-        <AppShell title="다시 계산했습니다">
-          <NoticeCard
-            tone="NEUTRAL"
-            title="반영 결과를 불러오지 못했어요."
-            description="연결 상태를 확인하고 다시 불러와 주세요."
-            action={{ label: '다시 불러오기', onClick: () => {
-                setQuery({ status: 'LOADING' })
-                setAttempt((count) => count + 1)
-              }, }}
-          />
-        </AppShell>
+        <ReplanFrame>
+          <main className="px-4 pt-2 pb-8">
+            <InfoBox
+              title="반영 결과를 불러오지 못했어요."
+              action={{
+                label: '다시 불러오기',
+                onClick: () => {
+                  setQuery({ status: 'LOADING' })
+                  setAttempt((count) => count + 1)
+                },
+              }}
+            >
+              연결 상태를 확인하고 다시 불러와 주세요.
+            </InfoBox>
+          </main>
+        </ReplanFrame>
       )
 
     case 'READY':
@@ -150,41 +156,81 @@ function ServerReplan({ historyId }: { historyId: number }) {
   }
 }
 
-/** 반영된 결과. 모양은 다음 커밋에서 새 시안으로 바꾼다 */
+/**
+ * 반영된 결과 (시안 M05c 완료).
+ *
+ * 처리 중 화면과 같은 단계 줄을 모두 끝난 모양으로 다시 보여준다. 보내고 기다리던 화면에서
+ * 이어지는 것으로 읽히게 하려는 것이다.
+ *
+ * 시안의 "새로 생긴 할 일 3개"는 서버에 없다. 서버는 바뀐 칸과 다음 할 일 하나를 주므로
+ * 그 둘을 같은 회색 상자로 보여준다. 막힌 것(Blocker)은 홈과 같은 기준으로 그리지 않는다.
+ */
 function Replanned({ view, search }: { view: ReplanView; search: string }) {
-  const { changes, blocker, nextAction } = view
+  const navigate = useNavigate()
+  const { changes, nextAction } = view
+  const changed = changes.length > 0
 
   return (
-    <AppShell title="다시 계산했습니다" subtitle="바뀐 내용에 맞춰 다음 할 일을 정했어요">
-      {changes.length > 0 ? (
-        <ChangeList changes={changes} />
-      ) : (
-        <NoticeCard
-          tone="NEUTRAL"
-          title="바뀐 것이 없습니다."
-          description="기록된 내용이 그대로라 다음 할 일도 달라지지 않았어요."
-        />
-      )}
+    <ReplanFrame>
+      <main className="flex flex-col gap-6 px-4 pt-2 pb-8">
+        <div className="flex flex-col items-center pt-2 text-center">
+          <IconCheckmarkCircleFill aria-hidden="true" className="size-16 text-fg-brand" />
+          <h1 className="mt-4 text-26 font-bold">
+            {changed ? '말씀하신 내용을 반영했어요' : '가게 정보에 바뀐 내용은 없어요'}
+          </h1>
+          <p className="mt-2 text-17 text-fg-neutral-muted">
+            {changed ? '다음 할 일을 다시 정했어요.' : '말씀하신 내용을 반영해 다음 할 일을 다시 정했어요.'}
+          </p>
+        </div>
 
-      {nextAction ? (
-        <NextActionCard nextAction={nextAction} />
-      ) : (
-        <NoticeCard
-          tone="NEUTRAL"
-          title="다음 할 일을 정하려면 확인이 더 필요합니다."
-          description="현재 상황에서 어떤 항목이 비어 있는지 확인해 주세요."
-        />
-      )}
+        <ProcessSteps steps={toResultSteps('DONE')} />
 
-      {blocker && <BlockerCard blocker={blocker} />}
-      {nextAction && !blocker && <NoBlockerCard />}
+        {changed && (
+          <section className="flex flex-col gap-3 rounded-2xl bg-bg-layer-default-pressed px-4.5 py-4">
+            <h2 className="text-15 font-bold text-fg-neutral-muted">바뀐 내용</h2>
+            <ul className="flex flex-col gap-3">
+              {changes.map((change) => (
+                <li key={change.key}>
+                  <p className="text-15 text-fg-neutral-muted">{change.label}</p>
+                  <p className="mt-0.5 text-17">
+                    <span className="text-fg-neutral-subtle">{change.previousValue ?? '미확인'}</span>
+                    <span aria-hidden="true" className="mx-1.5 text-fg-neutral-subtle">
+                      →
+                    </span>
+                    <span className="sr-only">에서</span>
+                    <span className="font-bold">{change.newValue ?? '미확인'}</span>
+                    <span className="sr-only">(으)로 바뀜</span>
+                  </p>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
-      <Link
-        to={{ pathname: '/case', search }}
-        className="flex min-h-13 items-center justify-center rounded-xl border border-gray-300 bg-white text-base font-bold text-gray-900"
-      >
-        현재 상황 보기
-      </Link>
-    </AppShell>
+        {nextAction ? (
+          <section className="flex flex-col gap-1 rounded-2xl bg-bg-layer-default-pressed p-4">
+            <h2 className="text-15 font-bold text-fg-neutral-muted">다음 할 일</h2>
+            <p className="text-18 font-bold">{nextAction.title}</p>
+            {nextAction.reason && <p className="text-15 text-fg-neutral-muted">{nextAction.reason}</p>}
+          </section>
+        ) : (
+          <InfoBox title="다음 할 일을 정하려면 확인이 더 필요해요.">
+            지금 상황에서 어떤 항목이 비어 있는지 확인해 주세요.
+          </InfoBox>
+        )}
+
+        <Button onClick={() => navigate({ pathname: '/case', search })}>홈으로</Button>
+      </main>
+    </ReplanFrame>
+  )
+}
+
+/** 탭 없는 화면의 틀. 시안처럼 머리에 제목을 두지 않고 화면 안의 큰 제목이 맡는다 */
+function ReplanFrame({ children }: { children: ReactNode }) {
+  return (
+    <div className="mx-auto flex min-h-dvh max-w-[402px] flex-col bg-bg-layer-default">
+      <TopBar />
+      {children}
+    </div>
   )
 }

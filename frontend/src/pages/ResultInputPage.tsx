@@ -1,7 +1,7 @@
 import { type ComponentProps, type ReactNode, useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 
-import { toAnswerInput, toResultsEntry, toSubmitOutcome } from '../adapters/results'
+import { toAnswerInput, toResultSteps, toResultsEntry, toSubmitOutcome } from '../adapters/results'
 import { NoticeCard } from '../components/NoticeCard'
 import { Button } from '../components/ui/Button'
 import { HammerLoader } from '../components/ui/HammerLoader'
@@ -444,13 +444,7 @@ function Processing({ accepted }: { accepted: boolean }) {
           <p className="mt-2 text-17 text-fg-neutral-muted">사장님이 하실 일은 없어요.</p>
         </div>
       </div>
-      <ProcessSteps
-        steps={[
-          { label: '보냈어요', status: accepted ? 'done' : 'run' },
-          { label: '리본이 내용을 정리하고 있어요', status: accepted ? 'run' : 'wait' },
-          { label: '다음 할 일 다시 정하기', status: 'wait' },
-        ]}
-      />
+      <ProcessSteps steps={toResultSteps(accepted ? 'WAITING' : 'SENDING')} />
       {/* 시안대로 꺼진 버튼을 둔다. 누를 것이 없다는 것을 버튼 자리에서도 말한다 */}
       <Button disabled>처리 중이에요</Button>
     </main>
