@@ -60,6 +60,7 @@ from app.agent.schemas import (
     StrictScalar,
     Uncertainty,
     VerifiedTextSpan,
+    case_field_values_equal as same_fact_value,
     validate_case_field_value,
     validate_restoration_state,
 )
@@ -659,7 +660,7 @@ class InfoAnalysisAgent:
                 current is not None
                 and current.status == FactStatus.CONFIRMED
                 and semantic.operation == FactOperation.SET
-                and self._same_value(current.value, semantic.value)
+                and same_fact_value(semantic.field_path, current.value, semantic.value)
             ):
                 continue
             if (
@@ -1256,10 +1257,6 @@ class InfoAnalysisAgent:
             source_evidence_refs=[evidence_id],
             source_call_id=source_call_id,
         )
-
-    @staticmethod
-    def _same_value(left: StrictScalar, right: StrictScalar) -> bool:
-        return type(left) is type(right) and left == right
 
 
 __all__ = [

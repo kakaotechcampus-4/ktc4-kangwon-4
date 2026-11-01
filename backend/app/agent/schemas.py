@@ -302,6 +302,13 @@ def _is_iso_date(value: str) -> bool:
     return True
 
 
+def case_field_values_equal(field_path: AgentFieldKey, left: StrictScalar, right: StrictScalar) -> bool:
+    """Preserve typed equality while accepting DATE's Python/JSON representations."""
+    if CASE_FIELD_SPECS[field_path][0] == FactValueType.DATE:
+        return str(left) == str(right)
+    return type(left) is type(right) and left == right
+
+
 def validate_restoration_state(statuses: dict[AgentFieldKey, FactStatus]) -> None:
     """A restoration status can be confirmed only after its scope is known."""
 
@@ -423,10 +430,11 @@ class CaseSnapshot(AgentSchema):
     snapshot_id: RuntimeUUID = Field(
         description=(
             "Caller-issued identity of the Case read view used for this planning run "
-            "and its review proof. Conflict confirmation must match the original "
-            "candidate's snapshot ID and current field state/value; a mismatch causes "
-            "STALE_CONFLICT_CONFIRMATION. How the caller stores and reuses this ID "
-            "and the conflict candidate is a separate integration decision."
+            "and its review proof. Conflict confirmation must be built with the stored "
+            "ConflictOutcome.snapshot_id, and a batch confirmation must also match the "
+            "stored conflict_snapshot state (every field except snapshot_id and "
+            "captured_at; list order and fractions of a second are ignored); a mismatch "
+            "causes STALE_CONFLICT_CONFIRMATION. Every other run takes a newly issued ID."
         )
     )
     case_id: PositiveStrictInt
@@ -924,6 +932,7 @@ class InfoAnalysisInput(AgentSchema):
     case_snapshot: CaseSnapshot = Field(
         description="Immutable Case read view used as the analysis baseline."
     )
+    conflict_confirmation: ConflictConfirmedTrigger | None = None
     fact_overlays: list[FactChangeCandidate] = Field(
         default_factory=list,
         description="Uncommitted confirmed changes used to assess procedure relevance.",
@@ -953,14 +962,24 @@ class InfoAnalysisInput(AgentSchema):
 
     @model_validator(mode="after")
     def validate_input(self) -> InfoAnalysisInput:
-        if self.input is None and (
-            not self.fact_overlays
-            or any(
-                item.source_type != FactChangeSourceType.CONFIRMED_CONFLICT
-                for item in self.fact_overlays
+        if self.conflict_confirmation is not None:
+            if self.input is not None:
+                raise ValueError("confirmation must not replay the rejected user text")
+            accepted = {
+                item.conflict_ref for item, selected in self.conflict_confirmation.choices()
+                if selected
+            }
+            if {item.confirmed_conflict_ref for item in self.fact_overlays} != accepted:
+                raise ValueError("Info overlays must equal accepted conflict choices")
+            if any(item.source_type != FactChangeSourceType.CONFIRMED_CONFLICT
+                   for item in self.fact_overlays):
+                raise ValueError("confirmation cannot introduce new Info facts")
+        elif self.input is None and (
+            not self.fact_overlays or any(
+                item.source_type != FactChangeSourceType.CONFIRMED_CONFLICT for item in self.fact_overlays
             )
         ):
-            raise ValueError("Info without input requires confirmed-conflict overlays")
+            raise ValueError("Info without input requires conflict confirmation")
         if self.fact_overlays:
             PlanningContext(
                 case_snapshot=self.case_snapshot, fact_overlays=self.fact_overlays
@@ -974,8 +993,7 @@ class InfoAnalysisInput(AgentSchema):
                 if (
                     current is None
                     or current.status != overlay.before_status
-                    or type(current.value) is not type(overlay.before_value)
-                    or current.value != overlay.before_value
+                    or not case_field_values_equal(overlay.field_path, current.value, overlay.before_value)
                 ):
                     raise ValueError(
                         "Info overlay before state must match its snapshot"
@@ -1814,18 +1832,13 @@ class ResultSubmittedTrigger(AgentSchema):
         return self
 
 
+class ConflictSelection(AgentSchema):
+    conflict_ref: NonEmptyStr
+    accepted: StrictBool
+
+
 class ConflictConfirmedTrigger(AgentSchema):
-    """User chose which of two conflicting values for one Case field holds.
-
-    The confirmed candidate is restored by the caller from its own stored
-    conflict record, not resent by the client.  That is what makes this safe:
-    a client cannot use a confirmation to write an arbitrary field or value,
-    only to accept a proposal the Agent itself produced earlier.
-
-    The confirmed value still goes through Review like any other change. A
-    user saying "yes" settles which value was meant; it does not make the
-    resulting plan correct.
-    """
+    """Accept one legacy proposal or choose new/existing values for a whole batch."""
 
     trigger_type: Literal["CONFLICT_CONFIRMED"]
     input_event_id: NonEmptyStr
@@ -1835,12 +1848,61 @@ class ConflictConfirmedTrigger(AgentSchema):
             "absent; this field does not implement duplicate-request prevention."
         )
     )
-    confirmed_conflict: ConflictCandidate = Field(
-        description="The original conflict candidate the user accepted."
+    confirmed_conflict: ConflictCandidate | None = Field(
+        default=None,
+        description=(
+            "Legacy single acceptance. It checks only the snapshot ID and the conflicted "
+            "field, so once the stored snapshot ID is reused it cannot notice other Case "
+            "changes. Use conflicts, selections and conflict_snapshot even for one conflict."
+        ),
+    )
+    conflicts: list[ConflictCandidate] = Field(
+        default_factory=list,
+        description="Batch only: the stored ConflictOutcome.conflicts, unchanged.",
+    )
+    selections: list[ConflictSelection] = Field(
+        default_factory=list,
+        description=(
+            "Batch only: exactly one choice per conflict; accepted=true uses the new "
+            "value, false keeps the existing one."
+        ),
+    )
+    conflict_snapshot: CaseSnapshot | None = Field(
+        default=None,
+        description=(
+            "Batch only: the stored ConflictOutcome.conflict_snapshot, unchanged. "
+            "The request's case_snapshot must carry its snapshot_id and equal state."
+        ),
     )
     confirmed_at: AwareDatetime = Field(
         description="When the user confirmed; used as the planning as-of date."
     )
+
+    @model_validator(mode="after")
+    def validate_choices(self) -> ConflictConfirmedTrigger:
+        if self.confirmed_conflict is not None:
+            if self.conflicts or self.selections or self.conflict_snapshot is not None:
+                raise ValueError("use either the legacy acceptance or a complete batch")
+            return self
+        if not self.conflicts or not self.selections or self.conflict_snapshot is None:
+            raise ValueError("batch confirmation requires candidates, choices and baseline")
+        _ensure_unique(self.conflicts, lambda item: item.conflict_ref, "conflict_ref")
+        _ensure_unique(self.conflicts, lambda item: item.candidate_id, "conflict candidate_id")
+        _ensure_unique(self.conflicts, lambda item: item.field_path, "conflict field_path")
+        _ensure_unique(self.selections, lambda item: item.conflict_ref, "selection conflict_ref")
+        if {item.conflict_ref for item in self.conflicts} != {item.conflict_ref for item in self.selections}:
+            raise ValueError("every stored conflict needs exactly one choice")
+        for conflict in self.conflicts:
+            conflict.assert_integrity()
+            if conflict.snapshot_id != self.conflict_snapshot.snapshot_id:
+                raise ValueError("conflict batch must share its stored baseline")
+        return self
+
+    def choices(self) -> list[tuple[ConflictCandidate, bool]]:
+        if self.confirmed_conflict is not None:
+            return [(self.confirmed_conflict, True)]
+        selected = {item.conflict_ref: item.accepted for item in self.selections}
+        return [(item, selected[item.conflict_ref]) for item in self.conflicts]
 
 
 RunTrigger: TypeAlias = Annotated[
@@ -2277,7 +2339,19 @@ class ConflictOutcome(AgentSchema):
         ),
     ]
     evidence_records: list[EvidenceRecord] = Field(
-        description="Conflict source evidence and its parents to retain for confirmation."
+        description=(
+            "Conflict source evidence and its parents. BE saves the rows its table lacks "
+            "with every field unchanged (including freshness_status); if a time column "
+            "drops fractions of a second it must truncate, not round. The Case rebuilt "
+            "at confirmation must then equal conflict_snapshot."
+        )
+    )
+    conflict_snapshot: CaseSnapshot = Field(
+        description=(
+            "Case state the conflicts were found against, with the conflict evidence "
+            "already merged in. BE stores it whole and returns it unchanged as "
+            "ConflictConfirmedTrigger.conflict_snapshot."
+        )
     )
     message_code: Literal["CONFIRM_CONFLICT"] = Field(
         description="Caller instruction to request explicit user confirmation."
@@ -2300,9 +2374,21 @@ class ConflictOutcome(AgentSchema):
         }
         if referenced - known_evidence:
             raise ValueError("conflict outcome contains unresolved evidence refs")
+        baseline = self.conflict_snapshot
+        if baseline.case_id != self.case_id or baseline.snapshot_id != self.snapshot_id:
+            raise ValueError("conflict snapshot must match its outcome Case and snapshot ID")
+        stored = {item.evidence_id: item for item in baseline.evidence_records}
+        if any(stored.get(item.evidence_id) != item for item in self.evidence_records):
+            raise ValueError("conflict evidence must be retained unchanged in its snapshot")
         for conflict in self.conflicts:
+            conflict.assert_integrity()
             if conflict.snapshot_id != self.snapshot_id:
                 raise ValueError("conflict does not match outcome snapshot")
+            current = next((item for item in baseline.facts if item.field_path == conflict.field_path), None)
+            if current is None or current.status != conflict.committed_status or not case_field_values_equal(
+                conflict.field_path, current.value, conflict.committed_value,
+            ):
+                raise ValueError("conflict committed value must match its stored snapshot")
         return self
 
 
@@ -2476,6 +2562,7 @@ __all__ = [
     "ConflictCandidate",
     "ConflictConfirmedTrigger",
     "ConflictOutcome",
+    "ConflictSelection",
     "ContentHash",
     "CriterionStatus",
     "DecisionAuthority",
@@ -2568,6 +2655,7 @@ __all__ = [
     "Varchar500",
     "VerifiedTextSpan",
     "canonical_digest",
+    "case_field_values_equal",
     "validate_case_field_value",
     "validate_procedure_registry",
     "validate_restoration_state",

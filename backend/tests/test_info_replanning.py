@@ -3,6 +3,7 @@
 import asyncio
 import json
 from copy import deepcopy
+from datetime import date
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
@@ -21,6 +22,7 @@ from app.agent.review_tool import ReviewIntegrityError, ReviewTool
 from app.agent.schemas import (
     CASE_FIELD_SPECS,
     AgentGraphInput,
+    CaseFact,
     CaseFieldKey,
     CaseSnapshot,
     InfoAnalysisInput,
@@ -96,6 +98,25 @@ def request_for_replanning(status="NOT_REQUIRED", scope="NOT_REQUIRED"):
         procedure_lookup_result=lookup,
         review_feedback=[],
     )
+
+
+def test_same_date_report_after_json_storage_does_not_create_a_new_conflict():
+    request = request_for_replanning()
+    request.case_snapshot.facts.append(CaseFact.model_validate({
+        "field_path": "planned_closure_date", "value_type": "DATE", "value": date(2026, 11, 2),
+        "status": "CONFIRMED", "evidence_refs": ["synthetic-document"], "updated_at": NOW,
+    }))
+    request = InfoAnalysisInput.model_validate_json(request.model_dump_json())
+    request.input.redacted_text = "폐업 예정일은 2026-11-02입니다."
+    response = output([finding(TAX, "doc1"), finding(FOOD, "doc2")])
+    response["facts"] = [{
+        "operation": "SET", "field_path": "planned_closure_date", "value_type": "DATE",
+        "value": "2026-11-02", "source_text": request.input.redacted_text,
+        "confidence_bps": 10000, "requires_confirmation": False, "reason_summary": "기존과 같은 날짜 보고",
+    }]
+    result = asyncio.run(InfoAnalysisAgent(Responses(response), max_local_attempts=1).analyze(request))
+    assert result.fact_candidates == []
+    assert result.conflicts == []
 
 
 def finding(code, alias):
