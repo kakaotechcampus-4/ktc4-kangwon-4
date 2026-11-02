@@ -1,0 +1,231 @@
+{
+  "scope": "Completed results.json files in the local evaluation directory only; not an invoice or all historical API activity. Provider probes and incomplete interrupted runs may be outside this subtotal.",
+  "reports": [
+    {
+      "path": "document-comparison/results.json",
+      "passed": true,
+      "recorded_http_attempts": 164,
+      "trials": 18,
+      "sha256": "62e73e7656188e462b4f2d78fe7696a8da3d85372f0b587be02bfeaef8046bb4"
+    },
+    {
+      "path": "existing-components/results.json",
+      "passed": false,
+      "recorded_http_attempts": 2,
+      "trials": 2,
+      "sha256": "7a087a6f436cf11d7845246c7bf0afb5c93d84049a60768285cc3bb49e0b38b0"
+    },
+    {
+      "path": "existing-components-v2/results.json",
+      "passed": true,
+      "recorded_http_attempts": 2,
+      "trials": 2,
+      "sha256": "be178100b33a3e8053ebc58f92714941689af7fa30a21972e6fdcb6b694ec37f"
+    },
+    {
+      "path": "existing-graph-runtime/results.json",
+      "passed": false,
+      "recorded_http_attempts": 0,
+      "trials": 1,
+      "sha256": "32a88980e1b108cb5948110ac535fe43663f51b2c9fcf140ea76ef18f3105960"
+    },
+    {
+      "path": "existing-graph-runtime-final/results.json",
+      "passed": true,
+      "recorded_http_attempts": 3,
+      "trials": 1,
+      "sha256": "2a349e6e0a34bf7326dfb3191087bf84fa098d718aee8cc4b63635fe47f637f5"
+    },
+    {
+      "path": "existing-graph-runtime-info-high/results.json",
+      "passed": false,
+      "recorded_http_attempts": 7,
+      "trials": 1,
+      "sha256": "203d20039321b8e42598d61bf1f00c02984b21b1c159e6925a63596194843875"
+    },
+    {
+      "path": "existing-graph-runtime-sol-diagnostic/results.json",
+      "passed": false,
+      "recorded_http_attempts": 7,
+      "trials": 1,
+      "sha256": "107f0eda29e82d069f7c965bb0faa38a3f512f9f2961da18d62a3fae25c6c2ee"
+    },
+    {
+      "path": "existing-graph-runtime-v2/results.json",
+      "passed": false,
+      "recorded_http_attempts": 0,
+      "trials": 1,
+      "sha256": "b5cd4e3950377ca983a21a1d3328d13997e9930944d2729acb6111bcf7669b77"
+    },
+    {
+      "path": "existing-graph-runtime-v3/results.json",
+      "passed": false,
+      "recorded_http_attempts": 0,
+      "trials": 1,
+      "sha256": "ad955da185e44116cab473e266dcd51f18371a648b9d114d937a6b3a2fab41b7"
+    },
+    {
+      "path": "existing-graph-runtime-v4/results.json",
+      "passed": false,
+      "recorded_http_attempts": 1,
+      "trials": 1,
+      "sha256": "1da4e8c3e68f3b2fa1417be105e492e4db7f06af0c053973f1c49a1d76a3e98f"
+    },
+    {
+      "path": "existing-graph-runtime-v5/results.json",
+      "passed": false,
+      "recorded_http_attempts": 7,
+      "trials": 1,
+      "sha256": "9d4f3cae4e6825a3243deb808ab5cce4f68eae4b46a2a211b6b5797eaae56a7e"
+    },
+    {
+      "path": "existing-info-high/results.json",
+      "passed": true,
+      "recorded_http_attempts": 1,
+      "trials": 1,
+      "sha256": "1165cac6ea1985f9aca81cc0149443c4e57980cf5dba3f7c0174782b62c14e8e"
+    },
+    {
+      "path": "final-full-flow/results.json",
+      "passed": true,
+      "recorded_http_attempts": 50,
+      "trials": 1,
+      "sha256": "1cef3c26940a35517571c1bd1ba505d18e50a77179f8287b13e91fe887e497c0"
+    },
+    {
+      "path": "graph-review-contract/results.json",
+      "passed": true,
+      "recorded_http_attempts": 1,
+      "trials": 1,
+      "sha256": "6d79fad620a96af4e6ca299eacbe2d8fc635219be8a14e537ce53121ae8b6943"
+    },
+    {
+      "path": "landlord-reports/results.json",
+      "passed": true,
+      "recorded_http_attempts": 37,
+      "trials": 13,
+      "sha256": "5382ffa1a22430cd9cec0fc39a66f98452d7003c75d4e2207d6c57069bb814cc"
+    },
+    {
+      "path": "landlord-reports-info-high/results.json",
+      "passed": true,
+      "recorded_http_attempts": 37,
+      "trials": 13,
+      "sha256": "d87510da1074c9a1b8845bfcd16ef9e807810a73677b1a958bf3f7bc088310ff"
+    },
+    {
+      "path": "latest-document-comparison/results.json",
+      "passed": true,
+      "recorded_http_attempts": 162,
+      "trials": 18,
+      "sha256": "694b875ba48d5f5255899769cfdae06dcea5936da8ae367d03fbc49668778e77"
+    },
+    {
+      "path": "latest-full-flow-luna6/results.json",
+      "passed": false,
+      "recorded_http_attempts": 25,
+      "trials": 1,
+      "sha256": "452a6d8fbbd8ba69e4bb5c9c686bd25ea4e2f86c2e1aa00a93e025f184aae608"
+    },
+    {
+      "path": "latest-full-flow-luna6-v2/results.json",
+      "passed": true,
+      "recorded_http_attempts": 48,
+      "trials": 1,
+      "sha256": "e960e1d376694602d6deba02b7a561ceb4e45f849f8a8811b290e1b91c92dc4a"
+    },
+    {
+      "path": "luna6-comparison/results.json",
+      "passed": true,
+      "recorded_http_attempts": 81,
+      "trials": 9,
+      "sha256": "afe0665b6e2a4815b2446751c0f1d1b93c789efd3d02eba21036e124638e9e75"
+    },
+    {
+      "path": "mobile-full-smoke/results.json",
+      "passed": false,
+      "recorded_http_attempts": 3,
+      "trials": 1,
+      "sha256": "92568be962a903ca19b70104e69f68a3930047f1a779b570aac5915ec9da3b00"
+    },
+    {
+      "path": "mobile-full-smoke-v2/results.json",
+      "passed": true,
+      "recorded_http_attempts": 44,
+      "trials": 1,
+      "sha256": "0dcf919357b0a9ef1a3361f434aa7e8c538c9597c2237a3b74247c0704998ffa"
+    },
+    {
+      "path": "supervisor-comparison/results.json",
+      "passed": null,
+      "recorded_http_attempts": 24,
+      "trials": 12,
+      "sha256": "960d168a7b6b7f4cfbffc2dd658b1fc72fe05b24fbf1b354e2e8d271402d14be"
+    },
+    {
+      "path": "supervisor-comparison-v2/results.json",
+      "passed": true,
+      "recorded_http_attempts": 42,
+      "trials": 30,
+      "sha256": "fea68eb6ebda4a1e1962db249bdaab458aeb6e1f37e98fb18f434ddba343c367"
+    },
+    {
+      "path": "supervisor-pilot/results.json",
+      "passed": true,
+      "recorded_http_attempts": 2,
+      "trials": 1,
+      "sha256": "2ba19fcff74a92eea24073940ed7d495bcfeae3ee9a62b69529487abed05a658"
+    }
+  ],
+  "attempt_summary": {
+    "recorded_http_attempts": 750,
+    "historical_reused_rows_excluded": 9,
+    "attempts_without_usage_record": 0,
+    "attempts_with_reported_tokens": 749,
+    "reported_tokens_subtotal": 1496620,
+    "priced_cost_subtotal_krw": 4853.888952999998,
+    "attempts_with_unknown_cost": 19,
+    "unpriced_models": {
+      "gpt-5.6-luna": 18
+    },
+    "normalized_request_response_model_mismatches": []
+  },
+  "structure": {
+    "new_directory": "backend/app/agent/mobile",
+    "python_files": 8,
+    "max_docstring_lines": 4,
+    "direct_database_or_be_imports": []
+  },
+  "findings": [
+    {
+      "priority": "P2",
+      "file": "backend/scripts/evaluation_metrics.py",
+      "issue": "Cost selects requested_model before response model. Reject mismatched model versions before applying quoted price; current normalized measurements have no version mismatch.",
+      "action": "TODO; no new implementation after user stop instruction."
+    },
+    {
+      "priority": "P2",
+      "file": "backend/app/agent/mobile/documents.py",
+      "issue": "Document cache identity includes extraction code/model and reviewer config but not the safety policy version; a cache hit skips safety evaluation.",
+      "action": "TODO: define invalidation when safety policy changes."
+    },
+    {
+      "priority": "P1",
+      "file": "Agent integration",
+      "issue": "Synthetic cases and direct Python entrypoints verified; FE/BE/DB/mobile HTTP loop and real customer document distribution are unverified.",
+      "action": "TODO with responsible FE/BE team; protected files unchanged."
+    },
+    {
+      "priority": "P2",
+      "file": "backend/app/agent/prompts.py",
+      "issue": "Review instructions disagreed with existing optional-date/distinct-candidate contract. Fixed with five sentences; same captured subject passed real independent Review.",
+      "action": "Fixed; broader official-source repeated regression remains TODO."
+    },
+    {
+      "priority": "P2",
+      "file": "backend/scripts/evaluate_planning.py",
+      "issue": "8 legacy lint findings remain; baseline also had those rules and an additional import-order issue.",
+      "action": "Existing findings documented, new files pass lint."
+    }
+  ]
+}
