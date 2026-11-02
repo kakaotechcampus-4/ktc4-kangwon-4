@@ -10,12 +10,15 @@ import type {
   CaseResponse,
   CasesEnvelope,
   DemolitionRequired,
+  LeaseStatus,
   NextActionResponse,
   RestorationScope,
 } from '../types/api'
 import type {
   CaseDraft,
   CurrentCaseView,
+  DiagnosisAnswers,
+  DiagnosisBusiness,
   Fact,
   FailureNotice,
   JudgmentView,
@@ -324,5 +327,67 @@ export function toCaseCreateRequest(draft: CaseDraft): CaseCreateRequest | null 
     employee_count: parsedEmployeeCount,
     lease_status: draft.leaseStatus,
     planned_closure_date: draft.plannedClosureDate || null,
+  }
+}
+
+/**
+ * 직원 수 상한. 서버가 0~1000명만 받는다(#119 입력 검사).
+ *
+ * 업무 판단에 쓰는 숫자가 아니라 서버가 거절하는 경계라 여기 둔다(FE 규칙 7과 다르다).
+ * 진단 화면의 더하기 버튼도 이 값에서 잠근다.
+ */
+export const MAX_EMPLOYEE_COUNT = 1000
+
+/** 업종 보기 → 서버 업종 코드와 프랜차이즈 여부. 카페는 보기에서 이미 둘 다 정해진다 */
+const BUSINESS_REQUEST: Record<DiagnosisBusiness, { business_type: string; franchise_status: boolean | null }> = {
+  PERSONAL_CAFE: { business_type: 'CAFE', franchise_status: false },
+  FRANCHISE_CAFE: { business_type: 'CAFE', franchise_status: true },
+  // 다른 음식점은 프랜차이즈 여부를 따로 묻는다
+  RESTAURANT: { business_type: 'RESTAURANT', franchise_status: null },
+}
+
+/**
+ * 상황 진단 답을 가입 요청 모양으로 바꾼다.
+ *
+ * 시안의 답과 서버 칸이 1:1이 아니라서 여기서 한 번에 옮긴다. 옮기는 규칙은
+ * 인계 문서 "상황 진단 임시 변환" 표와 같다.
+ *
+ * - 업종: 개인 카페 `CAFE`+`false`, 프랜차이즈 카페 `CAFE`+`true`, 다른 음식점 `RESTAURANT`+따로 받은 답
+ * - 점포: 빌린 가게면 월세 답으로 `LEASED_PAID`/`LEASED_FREE`, 안 골랐으면 `OWNED`
+ *   ("해당하는 것 모두"에서 안 고른 것은 해당 없음이다)
+ * - 직원 수: 직원을 골랐으면 정직원 + 아르바이트, 안 골랐으면 0
+ * - 폐업 예정일: 시기("이번 달" 등)에서 날짜를 지어내지 않고 비워 보낸다
+ *
+ * 서버가 꼭 받아야 하는 값(업종·프랜차이즈·점포)을 정할 수 없으면 `null`이다. 화면이
+ * 이미 순서로 막고 있지만, 보내는 쪽에서 한 번 더 걸러 빈 값이 서버까지 가지 않게 한다.
+ *
+ * 앞 답을 바꿔 빠진 질문의 답(빌린 가게를 해제한 뒤의 월세 답 등)은 여기서 버린다.
+ * 저장소에는 남겨 두어, 다시 켜면 고른 것이 그대로 보인다.
+ *
+ * TODO(#119·#133): 머지되면 대출·배달앱·원상복구 조항·예전 직원·보험 네 칸을 같이 보낸다.
+ */
+export function toDiagnosisCaseRequest(answers: DiagnosisAnswers): CaseCreateRequest | null {
+  if (answers.business === null || answers.situations === null) return null
+
+  const business = BUSINESS_REQUEST[answers.business]
+  const franchiseStatus = business.franchise_status ?? answers.franchise
+  if (franchiseStatus === null) return null
+
+  const leased = answers.situations.includes('LEASE')
+  if (leased && answers.paysRent === null) return null
+  const leaseStatus: LeaseStatus = !leased ? 'OWNED' : answers.paysRent ? 'LEASED_PAID' : 'LEASED_FREE'
+
+  const employeeCount = answers.situations.includes('STAFF')
+    ? answers.fullTimeCount + answers.partTimeCount
+    : 0
+  // 직원이 있다고 골랐는데 0명이거나, 서버가 받지 않는 수면 보내지 않는다
+  if (answers.situations.includes('STAFF') && (employeeCount < 1 || employeeCount > MAX_EMPLOYEE_COUNT)) return null
+
+  return {
+    business_type: business.business_type,
+    franchise_status: franchiseStatus,
+    employee_count: employeeCount,
+    lease_status: leaseStatus,
+    planned_closure_date: null,
   }
 }
