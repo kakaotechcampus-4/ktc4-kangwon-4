@@ -18,10 +18,10 @@ import { TaskPage } from './pages/TaskPage'
 /**
  * Hero Loop의 화면 순서가 그대로 경로가 된다.
  *
- *   /login          로그인      인증 가드 밖에 있다
+ *   /login          로그인      소개 4장 + 카카오. 인증 가드 밖에 있다
  *   /login/callback 로그인 처리  카카오가 돌려보내는 자리. 역시 가드 밖이다
  *   /          진입 분기      보낼 곳만 정하고 화면은 없다
- *   /cases/new Case 생성      사장님이 이미 아는 것만 묻는다
+ *   /cases/new 상황 진단      Case가 없는 사용자만 본다. 질문 한 장씩(?step=), 마지막에 Case를 만든다
  *   /case      현재 Case(홈)  지금 무엇이 막혀 있고 무엇을 할 차례인가
  *   /task      할 일 상세     무엇을 어떻게 물어보면 되는가
  *   /results   결과 입력      실행한 결과를 한 줄로 말한다
