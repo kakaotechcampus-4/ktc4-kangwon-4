@@ -1,7 +1,7 @@
 import { Navigate, useLocation, useNavigate } from 'react-router'
 
 import kakaoSymbolUrl from '../assets/brand/kakao-symbol.svg'
-import { IntroCarousel } from '../components/IntroCarousel'
+import { IntroCarousel } from '../components/ui/IntroCarousel'
 import { Button } from '../components/ui/Button'
 import { loginFormUrl } from '../lib/api'
 import { createOAuthState, isLoggedIn, logInWithMock } from '../lib/auth'

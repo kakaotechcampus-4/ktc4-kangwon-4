@@ -1,7 +1,7 @@
 import { IconCheckmarkFatFill, IconChevronLeftLine, IconPlusLine } from '@karrotmarket/react-monochrome-icon'
 import { useId, type ReactNode } from 'react'
 
-import { Button } from './ui/Button'
+import { Button } from './Button'
 
 /** 보기 하나. `emoji`는 `assets/emoji/`에서 가져온 그림 주소다 */
 interface ChoiceOption {
