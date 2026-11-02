@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest'
 
 import type { CasesEnvelope, CaseResponse } from '../types/api'
 import { EMPTY_DIAGNOSIS } from '../stores/useDiagnosisStore'
-import type { CaseDraft, DiagnosisAnswers } from '../types/view'
-import { toCaseCreateRequest, toCurrentCaseView, toDiagnosisCaseRequest, toFacts } from './case'
+import type { DiagnosisAnswers } from '../types/view'
+import { toCaseCreateRequest, toCurrentCaseView, toFacts } from './case'
 
 /** `GET /cases` 가 주는 Case 한 건. 필요한 칸만 바꿔 가며 쓴다 */
 const SERVER_CASE: CaseResponse = {
@@ -477,60 +477,6 @@ describe('toCurrentCaseView', () => {
   })
 })
 
-const FILLED_DRAFT: CaseDraft = {
-  businessType: '카페',
-  franchiseStatus: false,
-  leaseStatus: 'LEASED_PAID',
-  employeeCount: '',
-  plannedClosureDate: '',
-}
-
-/**
- * 폼이 들고 있는 값과 서버가 받는 모양이 다르다. 여기서 잘못 바꾸면 서버가 422로 막거나,
- * 더 나쁘게는 "모른다"가 "없다"로 저장된다.
- */
-describe('toCaseCreateRequest', () => {
-  it('폼 값을 서버 필드 이름으로 바꾼다', () => {
-    expect(toCaseCreateRequest({ ...FILLED_DRAFT, employeeCount: '2' })).toMatchObject({
-      business_type: '카페',
-      franchise_status: false,
-      lease_status: 'LEASED_PAID',
-      employee_count: 2,
-    })
-  })
-
-  /** 빈 문자열을 그대로 보내면 서버에서 "모른다"와 "없다"가 같아진다 */
-  it('비워둔 선택 항목은 null 로 보낸다', () => {
-    expect(toCaseCreateRequest(FILLED_DRAFT)).toMatchObject({
-      employee_count: null,
-      planned_closure_date: null,
-    })
-  })
-
-  it('업종 앞뒤 공백은 떼고 보낸다', () => {
-    expect(toCaseCreateRequest({ ...FILLED_DRAFT, businessType: '  카페  ' })).toMatchObject({
-      business_type: '카페',
-    })
-  })
-
-  /**
-   * `Number()` 가 `NaN` 을 내면 JSON 으로 바뀌며 `null` 이 된다. 잘못 적은 값이 조용히
-   * "모른다"로 저장되는데, 사장님은 자기가 적은 숫자가 사라진 것을 모른다.
-   */
-  it('직원 수가 숫자가 아니면 보내지 않는다', () => {
-    expect(toCaseCreateRequest({ ...FILLED_DRAFT, employeeCount: '두 명' })).toBeNull()
-    expect(toCaseCreateRequest({ ...FILLED_DRAFT, employeeCount: '1.5' })).toBeNull()
-    expect(toCaseCreateRequest({ ...FILLED_DRAFT, employeeCount: '-3' })).toBeNull()
-  })
-
-  /** 폼이 이미 막고 있지만, 보내는 쪽에서 한 번 더 걸러야 잘못된 요청이 서버까지 안 간다 */
-  it('필수 항목이 비어 있으면 보내지 않는다', () => {
-    expect(toCaseCreateRequest({ ...FILLED_DRAFT, businessType: '   ' })).toBeNull()
-    expect(toCaseCreateRequest({ ...FILLED_DRAFT, franchiseStatus: null })).toBeNull()
-    expect(toCaseCreateRequest({ ...FILLED_DRAFT, leaseStatus: null })).toBeNull()
-  })
-})
-
 const diagnosis = (patch: Partial<DiagnosisAnswers>): DiagnosisAnswers => ({
   ...EMPTY_DIAGNOSIS,
   business: 'PERSONAL_CAFE',
@@ -542,18 +488,18 @@ const diagnosis = (patch: Partial<DiagnosisAnswers>): DiagnosisAnswers => ({
  * 시안의 답은 서버 칸과 1:1이 아니다. 여기서 잘못 옮기면 서버가 422로 막거나,
  * 더 나쁘게는 고르지 않은 사실(프랜차이즈·월세·직원)이 그대로 저장되어 다른 할 일이 나온다.
  */
-describe('toDiagnosisCaseRequest', () => {
+describe('toCaseCreateRequest', () => {
   /** 글자("개인 카페")를 보내면 로드맵이 전부 해당 없음이 된다(#119 현종님 실측) */
   it('업종 보기를 업종 코드와 프랜차이즈 여부로 바꾼다', () => {
-    expect(toDiagnosisCaseRequest(diagnosis({ business: 'PERSONAL_CAFE' }))).toMatchObject({
+    expect(toCaseCreateRequest(diagnosis({ business: 'PERSONAL_CAFE' }))).toMatchObject({
       business_type: 'CAFE',
       franchise_status: false,
     })
-    expect(toDiagnosisCaseRequest(diagnosis({ business: 'FRANCHISE_CAFE' }))).toMatchObject({
+    expect(toCaseCreateRequest(diagnosis({ business: 'FRANCHISE_CAFE' }))).toMatchObject({
       business_type: 'CAFE',
       franchise_status: true,
     })
-    expect(toDiagnosisCaseRequest(diagnosis({ business: 'RESTAURANT', franchise: true }))).toMatchObject({
+    expect(toCaseCreateRequest(diagnosis({ business: 'RESTAURANT', franchise: true }))).toMatchObject({
       business_type: 'RESTAURANT',
       franchise_status: true,
     })
@@ -561,48 +507,48 @@ describe('toDiagnosisCaseRequest', () => {
 
   /** 서버가 프랜차이즈 여부를 확정값으로만 받는다. 모르는 채로 보내면 판단이 시작되지 않는다 */
   it('다른 음식점인데 프랜차이즈 여부를 모르면 보내지 않는다', () => {
-    expect(toDiagnosisCaseRequest(diagnosis({ business: 'RESTAURANT' }))).toBeNull()
+    expect(toCaseCreateRequest(diagnosis({ business: 'RESTAURANT' }))).toBeNull()
   })
 
   it('빌린 가게면 월세 답으로, 안 골랐으면 자가로 보낸다', () => {
-    expect(toDiagnosisCaseRequest(diagnosis({ situations: ['LEASE'], paysRent: true }))?.lease_status).toBe(
+    expect(toCaseCreateRequest(diagnosis({ situations: ['LEASE'], paysRent: true }))?.lease_status).toBe(
       'LEASED_PAID',
     )
-    expect(toDiagnosisCaseRequest(diagnosis({ situations: ['LEASE'], paysRent: false }))?.lease_status).toBe(
+    expect(toCaseCreateRequest(diagnosis({ situations: ['LEASE'], paysRent: false }))?.lease_status).toBe(
       'LEASED_FREE',
     )
-    expect(toDiagnosisCaseRequest(diagnosis({ situations: [] }))?.lease_status).toBe('OWNED')
-    expect(toDiagnosisCaseRequest(diagnosis({ situations: ['LEASE'] }))).toBeNull()
+    expect(toCaseCreateRequest(diagnosis({ situations: [] }))?.lease_status).toBe('OWNED')
+    expect(toCaseCreateRequest(diagnosis({ situations: ['LEASE'] }))).toBeNull()
   })
 
   /** 빌린 가게를 해제하면 월세 질문이 빠진다. 남아 있던 월세 답으로 "빌린 가게"가 되면 안 된다 */
   it('앞 답을 바꿔 빠진 질문의 답은 보내지 않는다', () => {
-    expect(toDiagnosisCaseRequest(diagnosis({ situations: [], paysRent: true }))?.lease_status).toBe('OWNED')
+    expect(toCaseCreateRequest(diagnosis({ situations: [], paysRent: true }))?.lease_status).toBe('OWNED')
     expect(
-      toDiagnosisCaseRequest(diagnosis({ situations: [], fullTimeCount: 3, partTimeCount: 1 }))?.employee_count,
+      toCaseCreateRequest(diagnosis({ situations: [], fullTimeCount: 3, partTimeCount: 1 }))?.employee_count,
     ).toBe(0)
   })
 
   it('직원을 골랐으면 정직원과 아르바이트를 더해 보낸다', () => {
     expect(
-      toDiagnosisCaseRequest(diagnosis({ situations: ['STAFF'], fullTimeCount: 2, partTimeCount: 1 }))
+      toCaseCreateRequest(diagnosis({ situations: ['STAFF'], fullTimeCount: 2, partTimeCount: 1 }))
         ?.employee_count,
     ).toBe(3)
   })
 
   /** 서버는 0~1000명만 받는다. 직원이 있다고 했는데 0명이면 앞 답과 어긋난다 */
   it('직원을 골랐는데 0명이거나 상한을 넘으면 보내지 않는다', () => {
-    expect(toDiagnosisCaseRequest(diagnosis({ situations: ['STAFF'] }))).toBeNull()
-    expect(toDiagnosisCaseRequest(diagnosis({ situations: ['STAFF'], fullTimeCount: 1001 }))).toBeNull()
+    expect(toCaseCreateRequest(diagnosis({ situations: ['STAFF'] }))).toBeNull()
+    expect(toCaseCreateRequest(diagnosis({ situations: ['STAFF'], fullTimeCount: 1001 }))).toBeNull()
   })
 
   /** "이번 달"에서 날짜를 지어내면 서버가 그 날짜로 기한을 계산한다(FE 규칙 7) */
   it('폐업 시기를 골라도 날짜는 비워 보낸다', () => {
-    expect(toDiagnosisCaseRequest(diagnosis({ closure: 'THIS_MONTH' }))?.planned_closure_date).toBeNull()
+    expect(toCaseCreateRequest(diagnosis({ closure: 'THIS_MONTH' }))?.planned_closure_date).toBeNull()
   })
 
   it('업종이나 해당 항목에 답하지 않았으면 보내지 않는다', () => {
-    expect(toDiagnosisCaseRequest(diagnosis({ business: null }))).toBeNull()
-    expect(toDiagnosisCaseRequest(diagnosis({ situations: null }))).toBeNull()
+    expect(toCaseCreateRequest(diagnosis({ business: null }))).toBeNull()
+    expect(toCaseCreateRequest(diagnosis({ situations: null }))).toBeNull()
   })
 })

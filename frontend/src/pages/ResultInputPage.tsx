@@ -159,7 +159,7 @@ export function ResultInputPage() {
       (error: unknown) => {
         if (!current) return
         if (error instanceof UnauthorizedError) return navigate('/login', { replace: true })
-        // Case 가 없다. 진입 분기가 시작 화면으로 보낸다
+        // Case 가 없다. 진입 분기가 상황 진단으로 보낸다
         if (error instanceof ApiError && error.status === 404) return navigate('/', { replace: true })
         setFetched({ status: 'LOAD_FAILED' })
       },

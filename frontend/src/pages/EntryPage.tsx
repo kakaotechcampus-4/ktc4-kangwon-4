@@ -26,7 +26,7 @@ export function EntryPage() {
    * 서버를 못 불렀으면 Case 가 있는지 알 수 없다. 그래도 현재 Case 로 보낸다 —
    * 실패 안내를 두 화면에 만들지 않고 한 곳에서만 한다.
    */
-  const next = query.status === 'EMPTY' ? '/start' : '/case'
+  const next = query.status === 'EMPTY' ? '/cases/new' : '/case'
 
   return <Navigate to={{ pathname: next, search }} replace />
 }

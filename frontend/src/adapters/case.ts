@@ -15,7 +15,6 @@ import type {
   RestorationScope,
 } from '../types/api'
 import type {
-  CaseDraft,
   CurrentCaseView,
   DiagnosisAnswers,
   DiagnosisBusiness,
@@ -298,39 +297,6 @@ export function toCurrentCaseView(envelope: CasesEnvelope, serverCase: CaseRespo
 }
 
 /**
- * 생성 폼의 값을 요청 모양으로 바꾼다.
- *
- * 필수 항목이 비어 있으면 `null`을 돌려준다. 폼이 이미 막고 있지만, 보내는 쪽에서 한 번 더
- * 걸러야 잘못된 요청이 서버까지 가지 않는다. 예외를 던지지 않는 것은 화면이 멈추는 것보다
- * 조용히 막고 버튼을 잠그는 편이 낫기 때문이다.
- *
- * 선택 항목은 빈 문자열이 아니라 `null`로 보낸다. 빈 문자열을 보내면 "모른다"와 "없다"가
- * 서버에서 같아진다.
- */
-export function toCaseCreateRequest(draft: CaseDraft): CaseCreateRequest | null {
-  const businessType = draft.businessType.trim()
-  const employeeCount = draft.employeeCount.trim()
-
-  if (businessType.length === 0) return null
-  if (draft.franchiseStatus === null) return null
-  if (draft.leaseStatus === null) return null
-
-  // 비운 것은 "모른다"라 그대로 보내지만, 숫자가 아닌 값은 보내지 않는다.
-  // `Number()`가 `NaN`을 내면 JSON으로 바뀌며 `null`이 되어, 잘못 적은 값이 "모른다"로 저장된다
-  const parsedEmployeeCount = employeeCount.length === 0 ? null : Number(employeeCount)
-  if (parsedEmployeeCount !== null && (!Number.isInteger(parsedEmployeeCount) || parsedEmployeeCount < 0))
-    return null
-
-  return {
-    business_type: businessType,
-    franchise_status: draft.franchiseStatus,
-    employee_count: parsedEmployeeCount,
-    lease_status: draft.leaseStatus,
-    planned_closure_date: draft.plannedClosureDate || null,
-  }
-}
-
-/**
  * 직원 수 상한. 서버가 0~1000명만 받는다(#119 입력 검사).
  *
  * 업무 판단에 쓰는 숫자가 아니라 서버가 거절하는 경계라 여기 둔다(FE 규칙 7과 다르다).
@@ -366,7 +332,7 @@ const BUSINESS_REQUEST: Record<DiagnosisBusiness, { business_type: string; franc
  *
  * TODO(#119·#133): 머지되면 대출·배달앱·원상복구 조항·예전 직원·보험 네 칸을 같이 보낸다.
  */
-export function toDiagnosisCaseRequest(answers: DiagnosisAnswers): CaseCreateRequest | null {
+export function toCaseCreateRequest(answers: DiagnosisAnswers): CaseCreateRequest | null {
   if (answers.business === null || answers.situations === null) return null
 
   const business = BUSINESS_REQUEST[answers.business]
