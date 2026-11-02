@@ -63,6 +63,7 @@ from app.agent.tracing import (
     TraceEvent,
     TraceSink,
     UsageAccumulator,
+    traced_component,
 )
 
 
@@ -138,6 +139,7 @@ class AgentGraph:
         self._usage = usage
         self.compiled = self._compile()
 
+    @traced_component("RUN")
     async def run(self, request: AgentGraphInput) -> AgentGraphOutput:
         if self._usage is not None:
             # Usage a previous run recorded but never drained would otherwise be
@@ -309,6 +311,7 @@ class AgentGraph:
         if counters is not None and meta.attempt > 1:
             counters.started_rework_rounds.add(meta.attempt - 1)
 
+    @traced_component("INFO_AGENT")
     async def _info_node(self, state: AgentGraphState) -> dict[str, Any]:
         request = state["request"]
         trigger_input = getattr(request.trigger, "input", None)
@@ -495,6 +498,7 @@ class AgentGraph:
         self._emit(meta, started, "SUCCESS")
         return {"phase": "INFO_ANALYSIS", "fact_overlays": overlays}
 
+    @traced_component("PROCEDURE_TOOL")
     async def _procedure_node(self, state: AgentGraphState) -> dict[str, Any]:
         request = state["request"]
         meta = self._meta(
@@ -540,6 +544,7 @@ class AgentGraph:
             "source_results": [*state.get("source_results", []), source],
         }
 
+    @traced_component("SUPPORT_AGENT")
     async def _support_node(self, state: AgentGraphState) -> dict[str, Any]:
         request = state["request"]
         meta = self._meta(
@@ -575,6 +580,7 @@ class AgentGraph:
             "source_results": [*state.get("source_results", []), source],
         }
 
+    @traced_component("SUPERVISOR")
     async def _supervisor_node(self, state: AgentGraphState) -> dict[str, Any]:
         meta = self._meta(
             state,
@@ -609,6 +615,7 @@ class AgentGraph:
         self._emit(meta, started, "SUCCESS")
         return {"phase": "DRAFTING", "current_draft": draft}
 
+    @traced_component("REVIEW_TOOL")
     async def _review_node(self, state: AgentGraphState) -> dict[str, Any]:
         attempt = state.get("revision_count", 0) + 1
         started = time.monotonic()
