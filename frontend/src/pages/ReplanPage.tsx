@@ -178,8 +178,9 @@ function Replanned({ view, search }: { view: ReplanView; search: string }) {
           <h1 className="mt-4 text-26 font-bold">
             {changed ? '말씀하신 내용을 반영했어요' : '가게 정보에 바뀐 내용은 없어요'}
           </h1>
+          {/* 바뀐 것이 없으면 다음 할 일도 그대로일 수 있어서 "정했어요" 대신 "확인했어요"라고 쓴다 */}
           <p className="mt-2 text-17 text-fg-neutral-muted">
-            {changed ? '다음 할 일을 다시 정했어요.' : '말씀하신 내용을 반영해 다음 할 일을 다시 정했어요.'}
+            {changed ? '다음 할 일을 다시 정했어요.' : '다음 할 일을 다시 확인했어요.'}
           </p>
         </div>
 
@@ -207,17 +208,11 @@ function Replanned({ view, search }: { view: ReplanView; search: string }) {
           </section>
         )}
 
-        {nextAction ? (
-          <section className="flex flex-col gap-1 rounded-2xl bg-bg-layer-default-pressed p-4">
-            <h2 className="text-15 font-bold text-fg-neutral-muted">다음 할 일</h2>
-            <p className="text-18 font-bold">{nextAction.title}</p>
-            {nextAction.reason && <p className="text-15 text-fg-neutral-muted">{nextAction.reason}</p>}
-          </section>
-        ) : (
-          <InfoBox title="다음 할 일을 정하려면 확인이 더 필요해요.">
-            지금 상황에서 어떤 항목이 비어 있는지 확인해 주세요.
-          </InfoBox>
-        )}
+        <section className="flex flex-col gap-1 rounded-2xl bg-bg-layer-default-pressed p-4">
+          <h2 className="text-15 font-bold text-fg-neutral-muted">다음 할 일</h2>
+          <p className="text-18 font-bold">{nextAction.title}</p>
+          {nextAction.reason && <p className="text-15 text-fg-neutral-muted">{nextAction.reason}</p>}
+        </section>
 
         <Button onClick={() => navigate({ pathname: '/case', search })}>홈으로</Button>
       </main>

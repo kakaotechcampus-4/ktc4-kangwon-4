@@ -285,12 +285,16 @@ export interface FactChange {
  *
  * `changes`가 빈 배열이면 "바뀐 것이 없음"이다. 별도 플래그를 두지 않는다 —
  * 서버가 상태 이름을 정하고 프론트가 그 이름을 해석하는 층을 만들지 않기 위해서다.
- * `blocker`·`nextAction`의 `null` 의미는 `CurrentCaseView`와 같다.
+ * `blocker`의 `null` 의미는 `CurrentCaseView`와 같다.
+ *
+ * `nextAction`은 꼭 있다. 다음 할 일이 없는 반영 응답은 어댑터가 읽지 못한 응답으로 돌려서
+ * 이 화면까지 오지 않는다(`toSubmitOutcome`). 폐업을 다 마쳐 할 일이 없어지는 날이 오면
+ * 그때는 이 화면이 아니라 완료 화면으로 보낸다.
  */
 export interface ReplanView {
   changes: FactChange[]
   blocker: Blocker | null
-  nextAction: NextAction | null
+  nextAction: NextAction
 }
 
 /**

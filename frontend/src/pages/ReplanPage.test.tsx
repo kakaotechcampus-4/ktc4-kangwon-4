@@ -93,6 +93,23 @@ describe('ReplanPage — 서버', () => {
     expect(screen.getByText('지원 조건 확인하기')).toBeInTheDocument()
   })
 
+  /** 바뀐 것이 없는데 "반영했어요"라고 하면 제목과 엇갈린다 */
+  it.each([
+    ['바뀐 것이 있으면 다시 정했다고 한다', {}, '다음 할 일을 다시 정했어요.', '다음 할 일을 다시 확인했어요.'],
+    [
+      '바뀐 것이 없으면 다시 확인했다고 한다',
+      { result: 'NO_CHANGE', changes: [] },
+      '다음 할 일을 다시 확인했어요.',
+      '다음 할 일을 다시 정했어요.',
+    ],
+  ] as const)('%s', async (_, overrides, shown, hidden) => {
+    serve(json(judged(overrides as Partial<CaseResultsSubmitResponse>)))
+    renderAt('/replan?history=13')
+
+    expect(await screen.findByText(shown)).toBeInTheDocument()
+    expect(screen.queryByText(hidden)).not.toBeInTheDocument()
+  })
+
   it('홈으로를 누르면 지금 상황으로 간다', async () => {
     serve(json(judged({})))
     renderAt('/replan?history=13')
