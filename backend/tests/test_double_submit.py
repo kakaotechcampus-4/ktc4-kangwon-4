@@ -18,8 +18,13 @@ from app.be.crud import case_history as case_history_crud
 from app.be.crud.case_history import get_case_created_history
 from app.be.crud.member import create_member
 from app.be.models.case_history import CaseHistory
-from app.be.schemas.case import CaseCreateRequest, CaseResultsSubmitRequest
-from app.be.services.case import create_case, submit_case_results
+from app.be.models.evidence import ConflictReference
+from app.be.schemas.case import (
+    CaseConflictsDecisionRequest,
+    CaseCreateRequest,
+    CaseResultsSubmitRequest,
+)
+from app.be.services.case import create_case, submit_case_conflicts_decision, submit_case_results
 
 
 @pytest.fixture(scope="module")
@@ -112,6 +117,72 @@ def test_two_submissions_at_the_same_time_accept_only_one(
         pending = session.exec(
             select(CaseHistory).where(
                 CaseHistory.case_id == case_id, CaseHistory.judgment_status == "PENDING"
+            )
+        ).all()
+
+    assert len(pending) == 1
+
+
+@pytest.fixture
+def case_waiting_for_a_decision(mysql_engine):
+    """결과 제출이 충돌로 끝나 사장님 결정을 기다리는 Case 하나."""
+
+    with Session(mysql_engine) as session:
+        member = create_member(session, oauth_id=str(uuid4()), nickname="합성 사용자")
+        case, _ = create_case(session, member.id, CaseCreateRequest(
+            business_type="카페", franchise_status=False, employee_count=2,
+            lease_status="LEASED_PAID",
+        ))
+        get_case_created_history(session, case.id).judgment_status = "DONE"
+        submitted = case_history_crud.create_case_history(session, CaseHistory(
+            case_id=case.id, raw_input="전체 철거래요", source="USER_INPUT",
+            judgment_status="CONFLICT",
+        ))
+        conflict = ConflictReference(
+            conflict_ref=str(uuid4()), case_id=case.id, case_history_id=submitted.id,
+            canonical_field="restoration_scope", committed_value="PARTIAL", proposed_value="FULL",
+        )
+        session.add(conflict)
+        session.commit()
+        return member.id, conflict.id, case.id
+
+
+def decide(engine, member_id: int, conflict_reference_id: int) -> str:
+    with Session(engine) as session:
+        try:
+            submit_case_conflicts_decision(
+                session, member_id,
+                CaseConflictsDecisionRequest(
+                    decisions=[{"conflict_reference_id": conflict_reference_id, "side": "PROPOSED"}]
+                ),
+            )
+            return "접수됨"
+        except HTTPException as error:
+            return f"거절됨 {error.status_code}"
+
+
+def test_two_decisions_at_the_same_time_accept_only_one(
+    mysql_engine, case_waiting_for_a_decision, both_threads_pass_the_checks_first
+):
+    """결정도 둘 다 접수되면 판단이 두 번 돌아 서로의 결과를 덮는다."""
+
+    member_id, conflict_reference_id, case_id = case_waiting_for_a_decision
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = sorted(
+            future.result()
+            for future in [
+                pool.submit(decide, mysql_engine, member_id, conflict_reference_id) for _ in range(2)
+            ]
+        )
+
+    assert results == ["거절됨 409", "접수됨"]
+
+    with Session(mysql_engine) as session:
+        pending = session.exec(
+            select(CaseHistory).where(
+                CaseHistory.case_id == case_id, CaseHistory.source == "CONFLICT_DECISION",
+                CaseHistory.judgment_status == "PENDING",
             )
         ).all()
 

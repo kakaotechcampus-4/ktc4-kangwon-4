@@ -379,9 +379,12 @@ def submit_case_conflicts_decision(
 
     결과 제출 접수(submit_case_results)처럼 접수만 하고 PENDING 이력을 남긴 뒤 끝난다.
     결과는 GET /cases/results/status로 조회한다.
+
+    결과 제출 접수와 같은 이유로 Case를 잠그고 확인한다. 결정이 동시에 두 번 오면 PENDING이
+    둘 생겨 판단이 두 번 돌고 서로의 결과를 덮는다.
     """
 
-    case = case_crud.get_case_by_member_id(session, member_id)
+    case = case_crud.lock_case_by_member_id(session, member_id)
     if case is None:
         raise HTTPException(status_code=404, detail="Case를 찾을 수 없습니다.")
 
