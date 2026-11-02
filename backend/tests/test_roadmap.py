@@ -8,6 +8,7 @@ from app.agent.document_tool.models import DocumentKind
 from app.agent.document_tool.tool import DocumentTool
 from app.agent.llm import StructuredLLMClient
 from app.agent.procedure_tool.cafe import build_cafe_procedure_steps
+from app.agent.procedure_tool.rules import procedure_applicability
 from app.agent.roadmap import RoadmapInput, build_roadmap, record_checklist
 from app.agent.schemas import CASE_FIELD_SPECS, CaseSnapshot, ProcedureProgress
 from document_fixtures import DocumentClient, document_pdf
@@ -50,6 +51,7 @@ def test_five_stages_preserve_unknown_values_without_calls_or_input_mutation(mon
     value = request()
     original = value.model_dump_json()
     view = build_roadmap(value)
+    assert view.supported is True and view.unsupported_reason is None
     assert [s.stage for s in view.stages] == [1, 2, 3, 4, 5]
     assert sum(len(s.tasks) for s in view.stages) == 26
     assert tasks(value)["intake"].status == "COMPLETED"
@@ -145,13 +147,61 @@ def test_reported_agency_decision_controls_settlement_not_submission(approved, s
     assert view["support_approval"].status == ("NEEDS_CONFIRMATION" if approved is None else "COMPLETED")
 
 
-def test_missing_registry_and_unsupported_business_do_not_make_empty_success():
+def test_missing_registry_does_not_mark_official_procedures_inapplicable():
     value = request()
     value.known_procedure_steps = []
     assert tasks(value)["closure_submission"].status == "NEEDS_CONFIRMATION"
-    for change in [{"business_type": "RESTAURANT"}, {"franchise_status": True}, {"business_type": "개인 카페"}]:
-        with pytest.raises(ValueError, match="개인 카페"):
-            build_roadmap(request(**change))
+
+
+@pytest.mark.parametrize("facts", [
+    {"business_type": "RESTAURANT"}, {"franchise_status": True}, {"business_type": "개인 카페"},
+])
+def test_unsupported_business_returns_explicit_result_and_cannot_record_checklists(facts):
+    value = request(**facts)
+    original = value.model_dump_json()
+    view = build_roadmap(value)
+    assert view.supported is False and "개인 카페" in view.unsupported_reason
+    assert (view.case_id, view.snapshot_id) == (value.case_snapshot.case_id, value.case_snapshot.snapshot_id)
+    assert view.stages == view.questions_for_user == []
+    assert view.next_action is None and view.next_task_id is None
+    assert type(view).model_validate_json(view.model_dump_json()) == view
+    with pytest.raises(ValueError, match="개인 카페"):
+        record_checklist(value, "dispose_stock", completed=True)
+    assert value.model_dump_json() == original
+
+
+@pytest.mark.parametrize("field", ["business_type", "franchise_status", "lease_status"])
+def test_unsupported_result_does_not_relax_required_onboarding_facts(field):
+    with pytest.raises(ValidationError):
+        request(**{field: None})
+
+
+@pytest.mark.parametrize("count,insured,history,expected", [
+    (2, None, None, (5, 0, 3)), (0, None, None, (4, 0, 4)),
+    (0, False, None, (4, 2, 2)), (0, False, False, (4, 3, 1)),
+    (2, True, None, (7, 0, 1)),
+])
+def test_pr119_onboarding_history_reproduces_all_five_agreed_applicability_rows(count, insured, history, expected):
+    value = request(
+        employee_count=count, had_employees=history, restoration_scope=None, demolition_required=None,
+        pension_enrolled=insured, health_insurance_enrolled=insured,
+        employment_insurance_enrolled=insured, industrial_accident_insurance_enrolled=insured,
+    )
+    states = [procedure_applicability(step, value.case_snapshot, []) for step in value.known_procedure_steps]
+    assert tuple(states.count(state) for state in (True, False, None)) == expected
+    view = tasks(value)
+    assert view["employee_insurance"].status == (
+        "NOT_APPLICABLE" if insured is False else "NEEDS_CONFIRMATION" if insured is None else "NOT_STARTED"
+    )
+
+
+def test_partial_insurance_answer_stays_unknown_even_without_current_staff():
+    view = tasks(request(
+        employee_count=0, had_employees=None, pension_enrolled=False,
+        health_insurance_enrolled=None, employment_insurance_enrolled=None,
+        industrial_accident_insurance_enrolled=None,
+    ))
+    assert view["employee_insurance"].status == view["employee_payments"].status == "NEEDS_CONFIRMATION"
 
 
 def test_caller_procedure_bindings_use_db_references_without_name_guessing():

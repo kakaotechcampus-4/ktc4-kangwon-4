@@ -106,6 +106,8 @@ class RoadmapStage(AgentSchema):
 class Roadmap(AgentSchema):
     case_id: int
     snapshot_id: UUID
+    supported: StrictBool = True
+    unsupported_reason: str | None = None
     stages: list[RoadmapStage]
     next_action: NextAction | None
     next_task_id: str | None
@@ -161,7 +163,11 @@ def build_roadmap(request: RoadmapInput, *, procedure_bindings: ProcedureBinding
     for change in mutations.fact_changes:
         facts[change.field_path] = change.proposed_value
     if business_type_code(facts.get("business_type")) != "CAFE" or facts.get("franchise_status") is not False:
-        raise ValueError("현재 로드맵은 업종 코드 CAFE인 개인 카페만 지원합니다")
+        return Roadmap(
+            case_id=snapshot.case_id, snapshot_id=snapshot.snapshot_id, supported=False,
+            unsupported_reason="현재 로드맵은 업종 코드 CAFE인 개인 카페만 지원합니다. 프랜차이즈 카페와 일반 음식점은 지원 준비 중입니다.",
+            stages=[], next_action=None, next_task_id=None, questions_for_user=[],
+        )
     lease = facts.get("lease_status") in {"LEASED_PAID", "LEASED_FREE"}
     staff = None if facts.get("employee_count") is None else facts["employee_count"] > 0
     demolition = _all_conditions(lease, {"REQUIRED": True, "NOT_REQUIRED": False}.get(facts.get("demolition_required")))
@@ -208,6 +214,8 @@ def record_checklist(request: RoadmapInput, task_id: str, *, completed: bool) ->
     if type(completed) is not bool or task_id not in CHECKLIST_IDS:
         raise ValueError("select a checklist and an explicit boolean completion")
     view = build_roadmap(request)
+    if not view.supported:
+        raise ValueError(view.unsupported_reason)
     task = next(t for s in view.stages for t in s.tasks if t.task_id == task_id)
     if completed and task.status in {"NOT_APPLICABLE", "NEEDS_CONFIRMATION"}:
         raise ValueError("confirm checklist applicability before checking it")
