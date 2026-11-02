@@ -48,6 +48,21 @@ JSON·CSV는 실제 고객 제출 서류 원본이 아니라 합성 평가 입�
 
 [실제 요청별 사용량·실패·필드별 결과·코드 지문 원본](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/blob/feature/agent-evaluation-artifacts/docs/agent/evaluations/2026-11-02-document-quality.json)은 #130, 문서 구현과 상세 결과는 #128에서 확인한다. 아래 이전 측정은 당시의 결과로 보존한다.
 
+## 현재 Agent·Tool별 정확도 검증 범위
+
+실제 호출 성공과 정확도 검증 완료는 구분한다. 모든 구성요소를 같은 깊이로 검증한 상태는 아니다.
+
+| 대상 | 확인한 실제 호출/자동 검증 | 아직 부족한 범위 |
+| --- | --- | --- |
+| Supervisor Luna6 high + 독립 Review |4상황×3회, 다음 행동/확인 질문 기대값과 Review12/12|실제 고객의 전체 절차·모든 분기|
+| 기존 Info Sol high |기존 사실 충돌1건, PR120 질문/답변 입력3건, 전체 그래프/자료 통합 사례|여러 통합 입력을 같은 코드·자료로 각각3회 반복한 정확도/비용 검증|
+| 기존 Review Sol xhigh |Supervisor 결과의 실제 독립 검수, 재작업/실패 이력과 코드 차단 회귀|잘못된 초안/근거의 다양한 부정 사례에 대한 실제 차단율|
+| Support Sol xhigh |합성 catalog1건에서 NEEDS_CONFIRMATION 기대값 확인|실제 검수 완료된 지원사업별 자격·기한·금액 판정 정확도|
+| 문서 Tool Sol xhigh |합성 스캔3회 필수 값14개씩 일치·값 수정0건, PDF/누락/재점검/ZIP|실제 고객/촬영 자료·다른 서식 전반|
+| Procedure·입력/상태 Guardrail·대조/가림/ZIP |LLM이 아닌 코드의 조회·근거/상태 검증 및 MySQL 통합/회귀|주입 자료의 최신성·팀의 내용 검수·화면 연동|
+
+Info의13/13 원본은 미게시 모바일 초안의 `reborn_mobile_facts`/`reborn_mobile_review` 호출이다. 기존 Info의 `reborn_info_analysis` 호출과 혼동하지 않는다. 자동 테스트622개 통과는 실제 LLM 정확도 측정 횟수가 아니며, Support의1건 확인을 전체 지원 자격 검증으로 일반화하지 않는다. 이 범위 대조에서는 새 LLM을 호출하지 않았다.
+
 ## 현재 담당 범위와 구현
 
 사용자의 최신 지시 **“일단 구현하고 pr올리자 구현해”**, **“Agent 기능과 호출 계약을 완성해 PR (기존 범위 유지)”**에 따라 문서 Tool를 구현했다. 이전 PM 대기 지시는 이 요청으로 변경됐다. FE 서류함은 빈 화면이고 BE 업로드·목록 API는 아직 없으므로 앱 연결 완료를 주장하지 않는다. 아래 Python 계약을 BE에서 호출하고 반환된 상태를 저장하는 부분이 다음 연동 작업이다.
@@ -256,9 +271,9 @@ Luna 6 high의 선별 비용은 13.5466원, medium은 13.7076원, low는 15.0599
 
 [환경설정 실제 로딩 검사](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/blob/feature/agent-evaluation-artifacts/docs/agent/evaluations/2026-11-01-final-config.json)에서 factory가 만든 각 client의 모델과 effort를 확인했다. 공용 설정은 `xhigh`를 유지한다. 초기 문서 기본값 high는 위 정확도 재검증 뒤 Sol xhigh로 승격했고 `.env`와 `.env.example`에 반영했다. 과거 `low` 기록은 이전 비교 이력으로만 보존한다. 모든 평가 키와 Langfuse 키는 `.env`에만 남긴다.
 
-## 사실 추출과 충돌 확인
+## 과거 모바일 사실 추출과 기존 Info 충돌 확인
 
-임대인 답변 9종을 13회 실행했다. 부분 철거와 전체 철거 문장은 각각 3회 반복했다. 복구 불필요, 답변 대기, 부정문, 모순된 답변, 다시 연락하라는 답변, 기존 사실과의 충돌, 지시 우회 문장을 포함했다. 기존 Info `xhigh`와 최종 `high` 모두 각각 13/13 기대한 처리를 통과했고, 이 문장 평가의 Review 재작업과 HTTP 재시도는 0회였다.
+현재 PR에 포함하지 않는 모바일 초안의 사실 추출(`reborn_mobile_facts`)로 임대인 답변 9종을 13회 실행했다. 이13/13을 기존 Info Agent(`reborn_info_analysis`)의 정확도 검증 횟수로 사용하지 않는다. 부분 철거와 전체 철거 문장은 각각 3회 반복했다. 복구 불필요, 답변 대기, 부정문, 모순된 답변, 다시 연락하라는 답변, 기존 사실과의 충돌, 지시 우회 문장을 포함했다. 기존 Info `xhigh`와 최종 `high` 모두 각각 13/13 기대한 처리를 통과했고, 이 문장 평가의 Review 재작업과 HTTP 재시도는 0회였다.
 
 확인 전 사실 유지, 변경 거절, 변경 확인을 모두 검사한다. 현재 판단할 수 없는 답변에는 확인 질문을 남긴다. 지시 우회 요청은 안전 검사에서 차단한다.
 
@@ -267,7 +282,7 @@ Luna 6 high의 선별 비용은 13.5466원, medium은 13.7076원, low는 15.0599
 - [최종 Info high의 같은 문장 검증](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/blob/feature/agent-evaluation-artifacts/docs/agent/evaluations/2026-11-01-landlord-info-high.json)
 - [기존 Info 계약의 충돌 검증: high](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/blob/feature/agent-evaluation-artifacts/docs/agent/evaluations/2026-11-01-existing-info-high.json)
 
-Info `high`의 문장 평가는 실제 37회 호출·26,052토큰·추정 142.8500원이었다. 기존 Info 계약에서도 원상복구 범위·철거 필요 여부를 자동 변경하지 않고 충돌 후보로 보류하는 것을 실제 호출로 확인했다. 현재 설정은 품질 검증을 통과했지만, Info의 최적 effort를 확정하는 같은 버전의 반복 성능 비교는 후속 TODO다.
+모바일 초안에서 Info용 high 설정을 쓴 문장 평가는 실제37회 호출·26,052토큰·추정142.8500원이었다. 기존 Info Agent의 직접 검증과는 구분한다. 기존 Info 계약에서도 원상복구 범위·철거 필요 여부를 자동 변경하지 않고 충돌 후보로 보류하는 것을 실제 호출로 확인했다. 현재 설정은 품질 검증을 통과했지만, Info의 최적 effort를 확정하는 같은 버전의 반복 성능 비교는 후속 TODO다.
 
 ## 과거 모바일 초안·기존 그래프 동작과 자동 테스트
 
