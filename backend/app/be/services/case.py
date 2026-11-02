@@ -21,6 +21,8 @@ from app.be.schemas.case import (
     CaseCreateRequest,
     CaseGetDetailResponse,
     CaseGetResponse,
+    CaseLogItem,
+    CaseLogResponse,
     CaseResultsEntryResponse,
     CaseResultsSubmitAcceptedResponse,
     CaseResultsSubmitRequest,
@@ -506,6 +508,44 @@ def get_case_results_submit_status(
             questions_to_ask=latest_history.next_action_questions_to_ask or [],
         ),
     )
+
+
+_LOG_OWNER_EVENTS = {
+    "CASE_CREATED": "CASE_CREATED",
+    "USER_INPUT": "RESULT_SUBMITTED",
+    "CONFLICT_DECISION": "CONFLICT_DECIDED",
+}
+_LOG_RIBBON_EVENTS = {
+    "DONE": "NEXT_ACTION_DECIDED",
+    "NEEDS_MORE_INFO": "MORE_INFO_REQUESTED",
+    "CONFLICT": "CONFLICT_FOUND",
+    "FAILED": "JUDGMENT_FAILED",
+}
+
+
+def get_case_logs(session: Session, member_id: int) -> CaseLogResponse:
+    """기록 탭(M08 Log)과 홈의 "리본이 해둔 일" 띠. 문구는 FE가 event 코드로 만든다."""
+
+    case = case_crud.get_case_by_member_id(session, member_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case를 찾을 수 없습니다.")
+
+    logs = []
+    for history in case_history_crud.get_case_histories_by_case_id(session, case.id):
+        owner_event = _LOG_OWNER_EVENTS.get(history.source)
+        if owner_event is None:
+            continue
+        logs.append(CaseLogItem(actor="OWNER", event=owner_event, occurred_at=history.created_at))
+        if history.judged_at is not None and history.judgment_status in _LOG_RIBBON_EVENTS:
+            logs.append(CaseLogItem(
+                actor="RIBBON",
+                event=_LOG_RIBBON_EVENTS[history.judgment_status],
+                occurred_at=history.judged_at,
+            ))
+
+    # 최근 것부터. 시각이 같으면 사장님이 보낸 뒤 리본이 판단한 것이라 리본 기록을 위로 둔다.
+    logs.sort(key=lambda log: (log.occurred_at, log.actor == "RIBBON"), reverse=True)
+    return CaseLogResponse(logs=logs)
 
 
 def _create_case_creation_evidence(

@@ -12,6 +12,18 @@ JudgmentStatus = Literal["PENDING", "DONE", "NEEDS_MORE_INFO", "CONFLICT", "FAIL
 RecoveryActionCode = Literal["RETRY", "RESUBMIT_INPUT", "CONTACT_SUPPORT", "NONE"]
 ResultsSubmitResult = Literal["PENDING", "UPDATED", "NO_CHANGE", "NEEDS_MORE_INFO", "CONFLICT", "FAILED"]
 ConflictSide = Literal["PROPOSED", "STORED"]
+CaseLogActor = Literal["OWNER", "RIBBON"]
+CaseLogEvent = Literal[
+    # 사장님이 한 일
+    "CASE_CREATED",
+    "RESULT_SUBMITTED",
+    "CONFLICT_DECIDED",
+    # 리본이 한 일
+    "NEXT_ACTION_DECIDED",
+    "MORE_INFO_REQUESTED",
+    "CONFLICT_FOUND",
+    "JUDGMENT_FAILED",
+]
 
 
 class CaseCreateRequest(BaseModel):
@@ -131,3 +143,13 @@ class CaseResultsSubmitResponse(BaseModel):
     recovery_action_code: RecoveryActionCode | None = None
     retryable: bool | None = None
     requested_field_paths: list[str] | None = None
+
+
+class CaseLogItem(BaseModel):
+    actor: CaseLogActor
+    event: CaseLogEvent
+    occurred_at: datetime
+
+
+class CaseLogResponse(BaseModel):
+    logs: list[CaseLogItem]

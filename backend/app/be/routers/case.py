@@ -8,6 +8,7 @@ from app.be.schemas.case import (
     CaseCreateRequest,
     CaseCreateResponse,
     CaseGetResponse,
+    CaseLogResponse,
     CaseResultsEntryResponse,
     CaseResultsSubmitAcceptedResponse,
     CaseResultsSubmitRequest,
@@ -43,6 +44,14 @@ def get_case(
     session: Session = Depends(get_db),
 ):
     return case_service.get_case(session, member_id)
+
+
+@router.get("/cases/logs", response_model=CaseLogResponse)
+def get_case_logs(
+    member_id: int = Depends(get_current_member_id),
+    session: Session = Depends(get_db),
+):
+    return case_service.get_case_logs(session, member_id)
 
 
 @router.get("/cases/results", response_model=CaseResultsEntryResponse)
