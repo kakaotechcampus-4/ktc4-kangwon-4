@@ -65,7 +65,7 @@ def baseline_row(checkpoint, dataset, case, repeat, config):
     return None
 
 
-async def trial(dataset, case, config, prices):
+async def trial(dataset, case, config, prices, expected=None):
     clients = [StructuredLLMClient(value, call_budget=ScopedCallBudget())
                for value in (config, LLMConfig.from_env())]
     primary, reviewer = clients
@@ -83,25 +83,56 @@ async def trial(dataset, case, config, prices):
                         result = await InfoAnalysisAgent(primary).analyze(request)
                     values = {f.field_path.value: f.value for f in result.fact_candidates}
                     conflicts = {f.field_path.value: f.proposed_value for f in result.conflicts}
-                    row.update(fact_fields=sorted(values), conflict_fields=sorted(conflicts))
-                    assert "restoration_scope" not in values and "restoration_scope" in conflicts
-                    values.update(conflicts)
-                    assert values.get("restoration_scope") == "PARTIAL"
-                    assert values.get("demolition_required") == "REQUIRED"
-                    assert request.model_dump_json() == original
+                    row.update(fact_fields=sorted(values), conflict_fields=sorted(conflicts),
+                               result=result.model_dump(mode="json"))
+                    if expected is None:
+                        assert "restoration_scope" not in values and "restoration_scope" in conflicts
+                        values.update(conflicts)
+                        assert values.get("restoration_scope") == "PARTIAL"
+                        assert values.get("demolition_required") == "REQUIRED"
+                    else:
+                        row["checks"] = {"facts_exact": values == expected["facts"],
+                                         "conflicts_exact": conflicts == expected["conflicts"]}
+                    row.setdefault("checks", {})["input_unchanged"] = request.model_dump_json() == original
+                    assert all(row["checks"].values())
                 elif case == "support":
                     request = DiscoverSupportInput.model_validate(dataset["support_input"])
                     catalog = ReviewedSupportCatalog.model_validate(dataset["support_catalog"])
+                    original = request.model_dump_json(), catalog.model_dump_json()
                     with observation_scope("SUPPORT_AGENT", as_type="span"):
                         result = await SupportAgent(primary, catalog).analyze(request)
-                    assert len(result.support_checks) == 1
-                    assert result.support_checks[0].match_status == "NEEDS_CONFIRMATION"
-                    row["support_match_status"] = result.support_checks[0].match_status.value
+                    row["result"] = result.model_dump(mode="json")
+                    if expected is None:
+                        assert len(result.support_checks) == 1
+                        assert result.support_checks[0].match_status == "NEEDS_CONFIRMATION"
+                        row["support_match_status"] = result.support_checks[0].match_status.value
+                    else:
+                        row["checks"] = {
+                            "match_statuses": [c.match_status.value for c in result.support_checks]
+                            in expected["match_statuses"],
+                            "criteria_exact": [[c.status.value for c in check.criteria]
+                                               for check in result.support_checks] == expected["criteria"],
+                            "completion": result.completion_status.value in expected["completion"],
+                            "input_unchanged": original == (request.model_dump_json(), catalog.model_dump_json()),
+                        }
+                        assert all(row["checks"].values())
+                elif case == "review":
+                    subject = ReviewSubject.model_validate(dataset["review_subject"])
+                    original = subject.model_dump_json()
+                    with observation_scope("REVIEW_TOOL", as_type="span"):
+                        result = await ReviewTool(reviewer).review(subject)
+                    row["result"] = result.model_dump(mode="json")
+                    row["review_results"].append({"verdict": result.verdict.value})
+                    row["checks"] = {"verdict": result.verdict.value == expected["verdict"],
+                                     "blocking_issue": any(i.severity == "BLOCKING" for i in result.issues),
+                                     "input_unchanged": subject.model_dump_json() == original}
+                    assert all(row["checks"].values())
                 else:
                     request = SupervisorAgentInput.model_validate(dataset["supervisor_cases"][case])
                     original = request.model_dump_json()
                     with observation_scope("SUPERVISOR", as_type="span"):
                         draft = await SupervisorAgent(primary).draft(request)
+                    row["supervisor_draft"] = draft.model_dump(mode="json")
                     meta = request.source_results[0].meta
                     subject = ReviewSubject.create(
                         schema_version="agent-io/2.0", review_subject_id=uuid4(), review_attempt=1,
@@ -126,6 +157,8 @@ async def trial(dataset, case, config, prices):
                 row["passed"] = True
         except Exception as exc:  # noqa: BLE001 - never save provider bodies or generated prose
             row.update(passed=False, error_type=type(exc).__name__, error_code=getattr(exc, "code", None))
+            if hasattr(exc, "fact_errors"):
+                row["fact_errors"] = list(exc.fact_errors)
         finally:
             await asyncio.gather(*(client.aclose() for client in clients))
             if sink is not None:
@@ -137,11 +170,79 @@ async def trial(dataset, case, config, prices):
     return row
 
 
+async def accuracy_suite(args, dataset):
+    """Run fixed synthetic oracles at current settings, without effort tuning."""
+    prices = load_prices()
+    report = {"synthetic_data": True, "scope": "Current Info/Support/Supervisor/Review contracts",
+              "agent_code_digest": agent_code_digest(), "code_digest": evaluation_code_digest(),
+              "input_sha256": hashlib.sha256(args.inputs.read_bytes()).hexdigest(),
+              "prices_krw_per_million": prices, "trials": []}
+    cases = dataset["accuracy_cases"]
+    # Validate all fixtures before the first paid call.
+    for case in cases:
+        if case["role"] == "info":
+            InfoAnalysisInput.model_validate(case["request"])
+        elif case["role"] == "support":
+            DiscoverSupportInput.model_validate(case["request"])
+            ReviewedSupportCatalog.model_validate(case["catalog"])
+        elif case["role"] != "review":
+            SupervisorAgentInput.model_validate(dataset["supervisor_cases"][case["role"]])
+    if args.validate_only:
+        print(json.dumps({"validated_cases": len(cases), "model_calls": 0}))
+        return
+    for repeat in range(1, args.repeats + 1):
+        seed = None
+        for case in cases:
+            role, data = case["role"], dict(dataset)
+            if role in {"info", "support"}:
+                data[role + "_input"] = case["request"]
+            if role == "support":
+                data["support_catalog"] = case["catalog"]
+            if role == "review":
+                if seed is None:
+                    raise ValueError("Review cases require a preceding Supervisor trial")
+                request = SupervisorAgentInput.model_validate(data["supervisor_cases"]["scope_unknown"])
+                draft = deepcopy(seed)
+                for field, value in case["changes"].items():
+                    draft["decision"]["next_action"][field] = value
+                    for claim in draft["grounded_claims"]:
+                        if claim["target_path"] == "/supervisor_draft/decision/next_action/" + field:
+                            claim["text"] = value
+                meta = request.source_results[0].meta
+                data["review_subject"] = ReviewSubject.create(
+                    schema_version="agent-io/2.0", review_subject_id=uuid4(), review_attempt=1,
+                    run_id=meta.run_id, case_id=meta.case_id, trigger=request.trigger,
+                    snapshot=request.case_snapshot, known_procedure_steps=request.known_procedure_steps,
+                    source_results=request.source_results, supervisor_draft=draft,
+                ).model_dump(mode="json")
+            prefix = "INFO_" if role == "info" else "SUPERVISOR_" if role in data["supervisor_cases"] else ""
+            config = LLMConfig.from_env(env_prefix=prefix)
+            row = await trial(data, role, config, prices, case.get("expected"))
+            if role == "scope_unknown" and row.get("supervisor_draft"):
+                seed = row["supervisor_draft"]
+            row.update(case_id=case["name"], repeat=repeat)
+            report["trials"].append(row)
+            report["metrics"] = summarize_metrics(report["trials"], prices)
+            report["passed"] = all(r["passed"] for r in report["trials"])
+            report["code_unchanged"] = evaluation_code_digest() == report["code_digest"]
+            write_metadata(args.output / "results.json", report)
+            print(json.dumps({k: row.get(k) for k in ("case_id", "repeat", "passed", "checks", "error_type")}), flush=True)
+            if any(u.get("status_code") in {401, 403} for u in row["provider_usage"]):
+                raise SystemExit("Provider rejected credentials; remaining trials stopped")
+    if not report["passed"] or not report["code_unchanged"]:
+        raise SystemExit(1)
+
+
 async def run(args):
+    if args.validate_only and not args.accuracy:
+        raise SystemExit("--validate-only requires --accuracy")
     args.output.mkdir(parents=True, exist_ok=False)
     raw = args.inputs.read_bytes()
     dataset = json.loads(raw)
     assert dataset["synthetic_data"] is True
+    if args.accuracy:
+        await accuracy_suite(args, dataset)
+        return
     prices, digest = load_prices(), evaluation_code_digest()
     baseline_config = LLMConfig.from_env()
     checkpoint = json.loads(args.baseline_checkpoint.read_bytes()) if args.baseline_checkpoint else None
@@ -249,4 +350,7 @@ if __name__ == "__main__":
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--pilot", action="store_true")
     mode.add_argument("--compare-supervisor", action="store_true")
+    mode.add_argument("--accuracy", action="store_true")
+    parser.add_argument("--repeats", type=int, choices=range(1, 4), default=1)
+    parser.add_argument("--validate-only", action="store_true")
     asyncio.run(run(parser.parse_args()))
