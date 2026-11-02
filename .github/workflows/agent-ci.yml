@@ -2,7 +2,6 @@ name: Agent CI
 
 on:
   pull_request:
-    branches: [develop, "feature/agent-*", "feature/document-*"]
     paths:
       - "backend/app/agent/**"
       - "backend/app/common/**"
