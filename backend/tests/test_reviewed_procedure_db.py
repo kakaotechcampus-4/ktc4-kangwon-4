@@ -19,13 +19,21 @@ from sqlmodel import Session, SQLModel, create_engine
 from testcontainers.community.mysql import MySqlContainer
 
 from app.agent import runtime as runtime_module
+from app.agent.action_catalog import PROCEDURE_LABELS
 from app.agent.procedure_tool.store import ProcedureStoreError
 from app.agent.procedure_tool.stored_tool import StoredProcedureLookupTool
 from app.agent.schemas import ProcedureLookupInput, ProcedureStepRef, RedactedInput
 from app.be.crud import evidence as evidence_crud
 from app.be.crud.case_history import get_case_created_history
 from app.be.crud.member import create_member
-from app.be.crud.procedure_step import get_all_procedure_steps
+from app.agent.procedure_tool.cafe import build_cafe_procedure_steps
+from app.be.crud.procedure_step import (
+    get_all_procedure_steps,
+    get_all_step_dependencies,
+    get_all_step_eligibilities,
+    get_case_procedure_steps_by_case_id,
+)
+from app.be.services import agent_runtime as agent_runtime_service
 from app.be.models.mixins import KST
 from app.be.schemas.case import CaseCreateRequest
 from app.be.services import case as case_service
@@ -155,9 +163,11 @@ def test_case_creation_imports_four_approved_documents_and_reuses_their_ids(mysq
         assert result.completion_status == "COMPLETE"
         assert len(result.documents) == 4
         assert {item.evidence_id for item in result.evidence_records} == set(baseline)
-        assert {item.procedure_step.step_code for item in snapshot.procedure_progress} == {
-            code for record in store.records() for code in record.step_codes
-        }
+        # 로드맵에는 카페 폐업 절차 8개가 모두 올라가고, 검수 문서는 그중 일부만 가리킨다.
+        # 문서가 가리키는 절차가 로드맵에 없으면 조회 결과를 절차에 맺을 수 없다.
+        roadmap = {item.procedure_step.step_code for item in snapshot.procedure_progress}
+        assert roadmap == set(PROCEDURE_LABELS)
+        assert {code for record in store.records() for code in record.step_codes} <= roadmap
 
 
 def test_committed_rows_reach_tool_without_new_evidence_ids(mysql_engine, approved_store):
@@ -420,3 +430,54 @@ def test_cli_reimport_and_new_source_version_preserve_existing_evidence(
         assert result.completion_status == "COMPLETE"
         assert len(result.documents) == 4
         assert {item.evidence_id for item in result.evidence_records} == new_ids
+
+
+def test_case_creation_puts_all_eight_cafe_procedures_on_the_roadmap(mysql_engine):
+    case_id = create_test_case(mysql_engine)
+    with Session(mysql_engine) as session:
+        steps = {step.id: step for step in get_all_procedure_steps(session)}
+        assert {step.step_code for step in steps.values()} == set(PROCEDURE_LABELS)
+        roadmap = get_case_procedure_steps_by_case_id(session, case_id)
+        assert {steps[row.procedure_step_id].step_code for row in roadmap} == set(PROCEDURE_LABELS)
+
+
+def test_stored_registry_round_trips_to_what_the_agent_expects(mysql_engine):
+    """DB에 넣었다 꺼낸 절차 목록이 AI팀 정의와 글자 하나까지 같아야 한다.
+
+    AI는 cafe.py가 아니라 이 표를 읽는다. 적재하면서 별칭·의존·조건 하나라도 흘리면
+    절차가 조용히 빠지거나 조건이 안 걸린 채로 판단이 돌아간다.
+    """
+    create_test_case(mysql_engine)
+    with Session(mysql_engine) as session:
+        stored = {
+            step.procedure_step.step_code: step
+            for step in agent_runtime_service.build_known_procedure_steps(session)
+        }
+        step_ids = {code: step.procedure_step.procedure_step_id for code, step in stored.items()}
+        assert stored == {
+            step.procedure_step.step_code: step
+            for step in build_cafe_procedure_steps(step_ids)
+        }
+
+
+def test_a_second_case_reuses_the_registry_instead_of_stacking_it(mysql_engine):
+    """절차는 Case마다 새로 만드는 것이 아니라 한 벌을 함께 쓴다.
+
+    의존·조건은 절차에 딸린 별도 표라, 다시 적재하면 같은 줄이 한 벌 더 쌓인다.
+    그러면 AI가 받는 절차 하나에 같은 조건이 두 번 달린다.
+    """
+    create_test_case(mysql_engine)
+    with Session(mysql_engine) as session:
+        before = (
+            len(get_all_procedure_steps(session)),
+            len(get_all_step_dependencies(session)),
+            len(get_all_step_eligibilities(session)),
+        )
+    create_test_case(mysql_engine)
+    with Session(mysql_engine) as session:
+        after = (
+            len(get_all_procedure_steps(session)),
+            len(get_all_step_dependencies(session)),
+            len(get_all_step_eligibilities(session)),
+        )
+    assert before == after
