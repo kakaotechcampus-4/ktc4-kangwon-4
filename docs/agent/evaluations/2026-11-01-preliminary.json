@@ -1,0 +1,5019 @@
+{
+  "status": "PRELIMINARY_OLD_BASE",
+  "base_commit": "b544ae48f92ce18ebe0a962acee9a331f26ee594",
+  "notice": "PR115 통합 검증 수치로 사용하지 않습니다. 최신 develop 측정은 별도 기록합니다.",
+  "comparison": {
+    "synthetic_documents": true,
+    "code_digest": "sha256:a149ac9472bd85af5ea5d08abb5704b7ed066453443846eef657fea918125a0c",
+    "input_digests": {
+      "LEASE": "107ee3fc0844eb3290c8f8df0e84b0d8c4b4d05eda50d5fe0b306c89d0486481",
+      "BUSINESS_REGISTRATION": "b09eaccd03db76553f7390ab77ba2ffe30d640be1133c0c1d027b5dd15e27d5b",
+      "CONSTRUCTION_STATEMENT": "8b2792d0f2da5d9cd0217d3ee0b4f06b4878568cc59438ddeb8055e7092ae0f6",
+      "TAX_INVOICE": "5c28521bb8b522ad02023003a3eff306b43b9dcccc62ff2e33c006ec24208b13",
+      "BEFORE_PHOTO": "e139fbcfe5869a2825f246a2cd1cf6e39d27a1f543a64dfe0a60e29f51918a0d",
+      "AFTER_PHOTO": "407e33af93b28d3b0ef25f6b0611e72511fa419aac693b48a84e27fae0d136ca",
+      "TRANSFER": "898abf034d7d857095cd09918be195b7d7d75f397a034569db0f08ae2a4c4e35",
+      "CLOSURE_CERTIFICATE": "416ad5a77a6f199c6dffce72fe3c52a6bf4c6b6338d5471a64f15a2c09fa65a2",
+      "BANK_COPY": "5569e8645d54de80af02350aee013e16eb7434a6351250281c82a00e0dc2449a",
+      "CLOSURE_RECEIPT": "03cc5a296876448521968e64c54cb2d571aeff3491f4bc632cc3622763414b86",
+      "CARD_SALES": "e23ff6ad54dfea14893a9fe767b13fb8a84f960e8bd35c35ab5d03e10c02494a",
+      "CASH_SALES": "152ebddb81da7af0419e6d239257225dff261edbe98449f412032730dfb99076",
+      "PURCHASE_INVOICE": "3ffa587db6f7b7fd7a495f665b7945fa9e0a2f2fce3133b5661d886a430456de"
+    },
+    "scope": "Agent only; synthetic documents; no FE/BE integration",
+    "trials": [
+      {
+        "configuration": "baseline",
+        "repeat": 1,
+        "model": "gpt-6.1-sol",
+        "effort": "xhigh",
+        "review_results": [
+          {
+            "verdict": "PASS"
+          },
+          {
+            "verdict": "PASS"
+          },
+          {
+            "verdict": "PASS"
+          }
+        ],
+        "passed": true,
+        "documents": 3,
+        "cached_reupload_provider_calls": 0,
+        "elapsed_ms": 29207,
+        "provider_usage": [
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 888,
+            "completion_tokens": 42,
+            "reasoning_tokens": 23,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2389,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 578,
+            "completion_tokens": 390,
+            "reasoning_tokens": 203,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 5397,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 384,
+            "completion_tokens": 153,
+            "reasoning_tokens": 129,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 3495,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 898,
+            "completion_tokens": 39,
+            "reasoning_tokens": 20,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 1783,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 588,
+            "completion_tokens": 434,
+            "reasoning_tokens": 113,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 5354,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 504,
+            "completion_tokens": 64,
+            "reasoning_tokens": 40,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 1985,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 891,
+            "completion_tokens": 52,
+            "reasoning_tokens": 33,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2113,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 581,
+            "completion_tokens": 305,
+            "reasoning_tokens": 89,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 4116,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 408,
+            "completion_tokens": 81,
+            "reasoning_tokens": 57,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2138,
+            "requested_model": "gpt-6.1-sol"
+          }
+        ],
+        "calls_by_role": {
+          "all": 9
+        },
+        "status": "REVIEWED_PLAN",
+        "actual_extraction_models_match": true,
+        "metrics": {
+          "runs": 1,
+          "successful_runs": 1,
+          "success_rate": 1.0,
+          "http_attempts": 9,
+          "usage_complete": true,
+          "attempts_with_reported_usage": 9,
+          "reported_tokens": {
+            "prompt_tokens": 5720,
+            "completion_tokens": 1560
+          },
+          "total_tokens": 7280,
+          "tokens_per_success": 7280.0,
+          "estimated_cost_usd": null,
+          "cost_per_success_usd": null,
+          "cost_basis": "Configured Elice input/output rates, before cache discounts",
+          "mean_latency_ms": 29207,
+          "median_latency_ms": 29207,
+          "max_latency_ms": 29207,
+          "transport_retries": 0,
+          "review_revise_count": 0
+        }
+      },
+      {
+        "configuration": "baseline",
+        "repeat": 2,
+        "model": "gpt-6.1-sol",
+        "effort": "xhigh",
+        "review_results": [
+          {
+            "verdict": "PASS"
+          },
+          {
+            "verdict": "PASS"
+          },
+          {
+            "verdict": "PASS"
+          }
+        ],
+        "passed": true,
+        "documents": 3,
+        "cached_reupload_provider_calls": 0,
+        "elapsed_ms": 27988,
+        "provider_usage": [
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 888,
+            "completion_tokens": 52,
+            "reasoning_tokens": 33,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2413,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 578,
+            "completion_tokens": 336,
+            "reasoning_tokens": 149,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 4330,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 384,
+            "completion_tokens": 178,
+            "reasoning_tokens": 154,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 3166,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 898,
+            "completion_tokens": 49,
+            "reasoning_tokens": 30,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2285,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 588,
+            "completion_tokens": 445,
+            "reasoning_tokens": 124,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 4778,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 504,
+            "completion_tokens": 77,
+            "reasoning_tokens": 53,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2194,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 891,
+            "completion_tokens": 70,
+            "reasoning_tokens": 51,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2571,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 581,
+            "completion_tokens": 301,
+            "reasoning_tokens": 85,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 3692,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 408,
+            "completion_tokens": 84,
+            "reasoning_tokens": 60,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2126,
+            "requested_model": "gpt-6.1-sol"
+          }
+        ],
+        "calls_by_role": {
+          "all": 9
+        },
+        "status": "REVIEWED_PLAN",
+        "actual_extraction_models_match": true,
+        "metrics": {
+          "runs": 1,
+          "successful_runs": 1,
+          "success_rate": 1.0,
+          "http_attempts": 9,
+          "usage_complete": true,
+          "attempts_with_reported_usage": 9,
+          "reported_tokens": {
+            "prompt_tokens": 5720,
+            "completion_tokens": 1592
+          },
+          "total_tokens": 7312,
+          "tokens_per_success": 7312.0,
+          "estimated_cost_usd": null,
+          "cost_per_success_usd": null,
+          "cost_basis": "Configured Elice input/output rates, before cache discounts",
+          "mean_latency_ms": 27988,
+          "median_latency_ms": 27988,
+          "max_latency_ms": 27988,
+          "transport_retries": 0,
+          "review_revise_count": 0
+        }
+      },
+      {
+        "configuration": "baseline",
+        "repeat": 3,
+        "model": "gpt-6.1-sol",
+        "effort": "xhigh",
+        "review_results": [
+          {
+            "verdict": "PASS"
+          },
+          {
+            "verdict": "PASS"
+          },
+          {
+            "verdict": "PASS"
+          }
+        ],
+        "passed": true,
+        "documents": 3,
+        "cached_reupload_provider_calls": 0,
+        "elapsed_ms": 30342,
+        "provider_usage": [
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 888,
+            "completion_tokens": 49,
+            "reasoning_tokens": 30,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 1998,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 578,
+            "completion_tokens": 334,
+            "reasoning_tokens": 147,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 4691,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 384,
+            "completion_tokens": 155,
+            "reasoning_tokens": 131,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 4067,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 898,
+            "completion_tokens": 63,
+            "reasoning_tokens": 44,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2220,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 588,
+            "completion_tokens": 475,
+            "reasoning_tokens": 154,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 5482,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 504,
+            "completion_tokens": 71,
+            "reasoning_tokens": 47,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2438,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 891,
+            "completion_tokens": 57,
+            "reasoning_tokens": 38,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2330,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 581,
+            "completion_tokens": 293,
+            "reasoning_tokens": 77,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 3788,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 408,
+            "completion_tokens": 85,
+            "reasoning_tokens": 61,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2840,
+            "requested_model": "gpt-6.1-sol"
+          }
+        ],
+        "calls_by_role": {
+          "all": 9
+        },
+        "status": "REVIEWED_PLAN",
+        "actual_extraction_models_match": true,
+        "metrics": {
+          "runs": 1,
+          "successful_runs": 1,
+          "success_rate": 1.0,
+          "http_attempts": 9,
+          "usage_complete": true,
+          "attempts_with_reported_usage": 9,
+          "reported_tokens": {
+            "prompt_tokens": 5720,
+            "completion_tokens": 1582
+          },
+          "total_tokens": 7302,
+          "tokens_per_success": 7302.0,
+          "estimated_cost_usd": null,
+          "cost_per_success_usd": null,
+          "cost_basis": "Configured Elice input/output rates, before cache discounts",
+          "mean_latency_ms": 30342,
+          "median_latency_ms": 30342,
+          "max_latency_ms": 30342,
+          "transport_retries": 0,
+          "review_revise_count": 0
+        }
+      },
+      {
+        "configuration": "info-high",
+        "repeat": 1,
+        "model": "gpt-6.1-sol",
+        "effort": "high",
+        "review_results": [
+          {
+            "verdict": "PASS"
+          },
+          {
+            "verdict": "PASS"
+          },
+          {
+            "verdict": "PASS"
+          }
+        ],
+        "passed": true,
+        "documents": 3,
+        "cached_reupload_provider_calls": 0,
+        "elapsed_ms": 25890,
+        "provider_usage": [
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 888,
+            "completion_tokens": 61,
+            "reasoning_tokens": 42,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2559,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 578,
+            "completion_tokens": 255,
+            "reasoning_tokens": 68,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "high",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 3332,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 384,
+            "completion_tokens": 126,
+            "reasoning_tokens": 102,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 3328,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 898,
+            "completion_tokens": 37,
+            "reasoning_tokens": 18,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 1658,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 588,
+            "completion_tokens": 210,
+            "reasoning_tokens": 0,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "high",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2459,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 504,
+            "completion_tokens": 83,
+            "reasoning_tokens": 59,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2512,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 891,
+            "completion_tokens": 69,
+            "reasoning_tokens": 50,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2597,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 581,
+            "completion_tokens": 265,
+            "reasoning_tokens": 49,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "high",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 4151,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 408,
+            "completion_tokens": 96,
+            "reasoning_tokens": 72,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2723,
+            "requested_model": "gpt-6.1-sol"
+          }
+        ],
+        "calls_by_role": {
+          "all": 9
+        },
+        "status": "REVIEWED_PLAN",
+        "actual_extraction_models_match": true,
+        "metrics": {
+          "runs": 1,
+          "successful_runs": 1,
+          "success_rate": 1.0,
+          "http_attempts": 9,
+          "usage_complete": true,
+          "attempts_with_reported_usage": 9,
+          "reported_tokens": {
+            "prompt_tokens": 5720,
+            "completion_tokens": 1202
+          },
+          "total_tokens": 6922,
+          "tokens_per_success": 6922.0,
+          "estimated_cost_usd": null,
+          "cost_per_success_usd": null,
+          "cost_basis": "Configured Elice input/output rates, before cache discounts",
+          "mean_latency_ms": 25890,
+          "median_latency_ms": 25890,
+          "max_latency_ms": 25890,
+          "transport_retries": 0,
+          "review_revise_count": 0
+        }
+      },
+      {
+        "configuration": "info-medium",
+        "repeat": 1,
+        "model": "gpt-6.1-sol",
+        "effort": "medium",
+        "review_results": [
+          {
+            "verdict": "PASS"
+          },
+          {
+            "verdict": "PASS"
+          },
+          {
+            "verdict": "PASS"
+          }
+        ],
+        "passed": true,
+        "documents": 3,
+        "cached_reupload_provider_calls": 0,
+        "elapsed_ms": 24290,
+        "provider_usage": [
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 888,
+            "completion_tokens": 75,
+            "reasoning_tokens": 56,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2410,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 578,
+            "completion_tokens": 124,
+            "reasoning_tokens": 0,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "medium",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2267,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 384,
+            "completion_tokens": 156,
+            "reasoning_tokens": 132,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 4150,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 898,
+            "completion_tokens": 45,
+            "reasoning_tokens": 26,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2102,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 588,
+            "completion_tokens": 210,
+            "reasoning_tokens": 0,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "medium",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2525,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 504,
+            "completion_tokens": 102,
+            "reasoning_tokens": 78,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 3206,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 891,
+            "completion_tokens": 52,
+            "reasoning_tokens": 33,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2176,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 581,
+            "completion_tokens": 137,
+            "reasoning_tokens": 0,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "medium",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2267,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 408,
+            "completion_tokens": 87,
+            "reasoning_tokens": 63,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2605,
+            "requested_model": "gpt-6.1-sol"
+          }
+        ],
+        "calls_by_role": {
+          "all": 9
+        },
+        "status": "REVIEWED_PLAN",
+        "actual_extraction_models_match": true,
+        "metrics": {
+          "runs": 1,
+          "successful_runs": 1,
+          "success_rate": 1.0,
+          "http_attempts": 9,
+          "usage_complete": true,
+          "attempts_with_reported_usage": 9,
+          "reported_tokens": {
+            "prompt_tokens": 5720,
+            "completion_tokens": 988
+          },
+          "total_tokens": 6708,
+          "tokens_per_success": 6708.0,
+          "estimated_cost_usd": null,
+          "cost_per_success_usd": null,
+          "cost_basis": "Configured Elice input/output rates, before cache discounts",
+          "mean_latency_ms": 24290,
+          "median_latency_ms": 24290,
+          "max_latency_ms": 24290,
+          "transport_retries": 0,
+          "review_revise_count": 0
+        }
+      },
+      {
+        "configuration": "info-low",
+        "repeat": 1,
+        "model": "gpt-6.1-sol",
+        "effort": "low",
+        "review_results": [
+          {
+            "verdict": "PASS"
+          },
+          {
+            "verdict": "PASS"
+          },
+          {
+            "verdict": "PASS"
+          }
+        ],
+        "passed": true,
+        "documents": 3,
+        "cached_reupload_provider_calls": 0,
+        "elapsed_ms": 22259,
+        "provider_usage": [
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 888,
+            "completion_tokens": 44,
+            "reasoning_tokens": 25,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2308,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 578,
+            "completion_tokens": 124,
+            "reasoning_tokens": 0,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "low",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2007,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 384,
+            "completion_tokens": 117,
+            "reasoning_tokens": 93,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 3204,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 898,
+            "completion_tokens": 41,
+            "reasoning_tokens": 22,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 1949,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 588,
+            "completion_tokens": 210,
+            "reasoning_tokens": 0,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "low",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2562,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 504,
+            "completion_tokens": 71,
+            "reasoning_tokens": 47,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2069,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 891,
+            "completion_tokens": 62,
+            "reasoning_tokens": 43,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2508,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 581,
+            "completion_tokens": 137,
+            "reasoning_tokens": 0,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "low",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2007,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 408,
+            "completion_tokens": 122,
+            "reasoning_tokens": 98,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 3027,
+            "requested_model": "gpt-6.1-sol"
+          }
+        ],
+        "calls_by_role": {
+          "all": 9
+        },
+        "status": "REVIEWED_PLAN",
+        "actual_extraction_models_match": true,
+        "metrics": {
+          "runs": 1,
+          "successful_runs": 1,
+          "success_rate": 1.0,
+          "http_attempts": 9,
+          "usage_complete": true,
+          "attempts_with_reported_usage": 9,
+          "reported_tokens": {
+            "prompt_tokens": 5720,
+            "completion_tokens": 928
+          },
+          "total_tokens": 6648,
+          "tokens_per_success": 6648.0,
+          "estimated_cost_usd": null,
+          "cost_per_success_usd": null,
+          "cost_basis": "Configured Elice input/output rates, before cache discounts",
+          "mean_latency_ms": 22259,
+          "median_latency_ms": 22259,
+          "max_latency_ms": 22259,
+          "transport_retries": 0,
+          "review_revise_count": 0
+        }
+      },
+      {
+        "configuration": "luna-high",
+        "repeat": 1,
+        "model": "gpt-5.6-luna",
+        "effort": "high",
+        "review_results": [
+          {
+            "verdict": "PASS"
+          },
+          {
+            "verdict": "PASS"
+          },
+          {
+            "verdict": "PASS"
+          }
+        ],
+        "passed": true,
+        "documents": 3,
+        "cached_reupload_provider_calls": 0,
+        "elapsed_ms": 26838,
+        "provider_usage": [
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 888,
+            "completion_tokens": 61,
+            "reasoning_tokens": 42,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2518,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "prompt_tokens": 578,
+            "completion_tokens": 253,
+            "reasoning_tokens": 123,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "high",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 3060,
+            "requested_model": "gpt-5.6-luna"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 384,
+            "completion_tokens": 123,
+            "reasoning_tokens": 99,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 3295,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 898,
+            "completion_tokens": 43,
+            "reasoning_tokens": 24,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2259,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "prompt_tokens": 588,
+            "completion_tokens": 323,
+            "reasoning_tokens": 107,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "high",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 3888,
+            "requested_model": "gpt-5.6-luna"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 504,
+            "completion_tokens": 78,
+            "reasoning_tokens": 54,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2226,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 891,
+            "completion_tokens": 65,
+            "reasoning_tokens": 46,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2411,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "prompt_tokens": 581,
+            "completion_tokens": 242,
+            "reasoning_tokens": 99,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "high",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2827,
+            "requested_model": "gpt-5.6-luna"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 408,
+            "completion_tokens": 100,
+            "reasoning_tokens": 76,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 3726,
+            "requested_model": "gpt-6.1-sol"
+          }
+        ],
+        "calls_by_role": {
+          "all": 9
+        },
+        "status": "REVIEWED_PLAN",
+        "actual_extraction_models_match": true,
+        "metrics": {
+          "runs": 1,
+          "successful_runs": 1,
+          "success_rate": 1.0,
+          "http_attempts": 9,
+          "usage_complete": true,
+          "attempts_with_reported_usage": 9,
+          "reported_tokens": {
+            "prompt_tokens": 5720,
+            "completion_tokens": 1288
+          },
+          "total_tokens": 7008,
+          "tokens_per_success": 7008.0,
+          "estimated_cost_usd": null,
+          "cost_per_success_usd": null,
+          "cost_basis": "Configured Elice input/output rates, before cache discounts",
+          "mean_latency_ms": 26838,
+          "median_latency_ms": 26838,
+          "max_latency_ms": 26838,
+          "transport_retries": 0,
+          "review_revise_count": 0
+        }
+      },
+      {
+        "configuration": "luna-medium",
+        "repeat": 1,
+        "model": "gpt-5.6-luna",
+        "effort": "medium",
+        "review_results": [
+          {
+            "verdict": "PASS"
+          },
+          {
+            "verdict": "PASS"
+          },
+          {
+            "verdict": "PASS"
+          }
+        ],
+        "passed": true,
+        "documents": 3,
+        "cached_reupload_provider_calls": 0,
+        "elapsed_ms": 23390,
+        "provider_usage": [
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 888,
+            "completion_tokens": 39,
+            "reasoning_tokens": 20,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 1968,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "prompt_tokens": 578,
+            "completion_tokens": 211,
+            "reasoning_tokens": 81,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "medium",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2943,
+            "requested_model": "gpt-5.6-luna"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 384,
+            "completion_tokens": 108,
+            "reasoning_tokens": 84,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2959,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 898,
+            "completion_tokens": 35,
+            "reasoning_tokens": 16,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 1704,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "prompt_tokens": 588,
+            "completion_tokens": 270,
+            "reasoning_tokens": 54,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "medium",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2937,
+            "requested_model": "gpt-5.6-luna"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 504,
+            "completion_tokens": 104,
+            "reasoning_tokens": 80,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2691,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 891,
+            "completion_tokens": 62,
+            "reasoning_tokens": 43,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2261,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "prompt_tokens": 581,
+            "completion_tokens": 204,
+            "reasoning_tokens": 61,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "medium",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2682,
+            "requested_model": "gpt-5.6-luna"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 408,
+            "completion_tokens": 99,
+            "reasoning_tokens": 75,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2645,
+            "requested_model": "gpt-6.1-sol"
+          }
+        ],
+        "calls_by_role": {
+          "all": 9
+        },
+        "status": "REVIEWED_PLAN",
+        "actual_extraction_models_match": true,
+        "metrics": {
+          "runs": 1,
+          "successful_runs": 1,
+          "success_rate": 1.0,
+          "http_attempts": 9,
+          "usage_complete": true,
+          "attempts_with_reported_usage": 9,
+          "reported_tokens": {
+            "prompt_tokens": 5720,
+            "completion_tokens": 1132
+          },
+          "total_tokens": 6852,
+          "tokens_per_success": 6852.0,
+          "estimated_cost_usd": null,
+          "cost_per_success_usd": null,
+          "cost_basis": "Configured Elice input/output rates, before cache discounts",
+          "mean_latency_ms": 23390,
+          "median_latency_ms": 23390,
+          "max_latency_ms": 23390,
+          "transport_retries": 0,
+          "review_revise_count": 0
+        }
+      },
+      {
+        "configuration": "luna-low",
+        "repeat": 1,
+        "model": "gpt-5.6-luna",
+        "effort": "low",
+        "review_results": [
+          {
+            "verdict": "PASS"
+          },
+          {
+            "verdict": "PASS"
+          },
+          {
+            "verdict": "PASS"
+          }
+        ],
+        "passed": true,
+        "documents": 3,
+        "cached_reupload_provider_calls": 0,
+        "elapsed_ms": 22651,
+        "provider_usage": [
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 888,
+            "completion_tokens": 65,
+            "reasoning_tokens": 46,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2520,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "prompt_tokens": 578,
+            "completion_tokens": 174,
+            "reasoning_tokens": 44,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "low",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2521,
+            "requested_model": "gpt-5.6-luna"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 384,
+            "completion_tokens": 115,
+            "reasoning_tokens": 91,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 3084,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 898,
+            "completion_tokens": 58,
+            "reasoning_tokens": 39,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2260,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "prompt_tokens": 588,
+            "completion_tokens": 251,
+            "reasoning_tokens": 35,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "low",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2879,
+            "requested_model": "gpt-5.6-luna"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 504,
+            "completion_tokens": 65,
+            "reasoning_tokens": 41,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2137,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 891,
+            "completion_tokens": 57,
+            "reasoning_tokens": 38,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 1924,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "prompt_tokens": 581,
+            "completion_tokens": 172,
+            "reasoning_tokens": 29,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "low",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2281,
+            "requested_model": "gpt-5.6-luna"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 408,
+            "completion_tokens": 94,
+            "reasoning_tokens": 70,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2435,
+            "requested_model": "gpt-6.1-sol"
+          }
+        ],
+        "calls_by_role": {
+          "all": 9
+        },
+        "status": "REVIEWED_PLAN",
+        "actual_extraction_models_match": true,
+        "metrics": {
+          "runs": 1,
+          "successful_runs": 1,
+          "success_rate": 1.0,
+          "http_attempts": 9,
+          "usage_complete": true,
+          "attempts_with_reported_usage": 9,
+          "reported_tokens": {
+            "prompt_tokens": 5720,
+            "completion_tokens": 1051
+          },
+          "total_tokens": 6771,
+          "tokens_per_success": 6771.0,
+          "estimated_cost_usd": null,
+          "cost_per_success_usd": null,
+          "cost_basis": "Configured Elice input/output rates, before cache discounts",
+          "mean_latency_ms": 22651,
+          "median_latency_ms": 22651,
+          "max_latency_ms": 22651,
+          "transport_retries": 0,
+          "review_revise_count": 0
+        }
+      },
+      {
+        "configuration": "haiku-high",
+        "repeat": 1,
+        "model": "claude-haiku-5-5",
+        "effort": "high",
+        "review_results": [
+          {
+            "verdict": "PASS"
+          },
+          {
+            "verdict": "PASS"
+          },
+          {
+            "verdict": "REVISE"
+          }
+        ],
+        "passed": false,
+        "error_type": "DocumentError",
+        "error_code": null,
+        "elapsed_ms": 23231,
+        "provider_usage": [
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 888,
+            "completion_tokens": 52,
+            "reasoning_tokens": 33,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2225,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "claude-haiku-5-5",
+            "prompt_tokens": 2005,
+            "completion_tokens": 240,
+            "reasoning_tokens": null,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "high",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2057,
+            "requested_model": "claude-haiku-5-5"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 384,
+            "completion_tokens": 86,
+            "reasoning_tokens": 62,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2936,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 898,
+            "completion_tokens": 65,
+            "reasoning_tokens": 46,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2382,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "claude-haiku-5-5",
+            "prompt_tokens": 1691,
+            "completion_tokens": 359,
+            "reasoning_tokens": null,
+            "cached_prompt_tokens": 1291,
+            "reasoning_effort": "high",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 1788,
+            "requested_model": "claude-haiku-5-5"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 504,
+            "completion_tokens": 68,
+            "reasoning_tokens": 44,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2079,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 891,
+            "completion_tokens": 56,
+            "reasoning_tokens": 37,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2129,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "claude-haiku-5-5",
+            "prompt_tokens": 1693,
+            "completion_tokens": 260,
+            "reasoning_tokens": null,
+            "cached_prompt_tokens": 1291,
+            "reasoning_effort": "high",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 1343,
+            "requested_model": "claude-haiku-5-5"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 409,
+            "completion_tokens": 325,
+            "reasoning_tokens": 234,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 5729,
+            "requested_model": "gpt-6.1-sol"
+          }
+        ],
+        "calls_by_role": {
+          "all": 9
+        },
+        "status": "ERROR",
+        "actual_extraction_models_match": true,
+        "metrics": {
+          "runs": 1,
+          "successful_runs": 0,
+          "success_rate": 0.0,
+          "http_attempts": 9,
+          "usage_complete": true,
+          "attempts_with_reported_usage": 9,
+          "reported_tokens": {
+            "prompt_tokens": 9363,
+            "completion_tokens": 1511
+          },
+          "total_tokens": 10874,
+          "tokens_per_success": null,
+          "estimated_cost_usd": null,
+          "cost_per_success_usd": null,
+          "cost_basis": "Configured Elice input/output rates, before cache discounts",
+          "mean_latency_ms": 23231,
+          "median_latency_ms": 23231,
+          "max_latency_ms": 23231,
+          "transport_retries": 0,
+          "review_revise_count": 1
+        }
+      },
+      {
+        "configuration": "haiku-medium",
+        "repeat": 1,
+        "model": "claude-haiku-5-5",
+        "effort": "medium",
+        "review_results": [
+          {
+            "verdict": "PASS"
+          },
+          {
+            "verdict": "PASS"
+          },
+          {
+            "verdict": "REVISE"
+          }
+        ],
+        "passed": false,
+        "error_type": "DocumentError",
+        "error_code": null,
+        "elapsed_ms": 28978,
+        "provider_usage": [
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 888,
+            "completion_tokens": 58,
+            "reasoning_tokens": 39,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2482,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "claude-haiku-5-5",
+            "prompt_tokens": 1609,
+            "completion_tokens": 240,
+            "reasoning_tokens": null,
+            "cached_prompt_tokens": 1584,
+            "reasoning_effort": "medium",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 1592,
+            "requested_model": "claude-haiku-5-5"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 384,
+            "completion_tokens": 82,
+            "reasoning_tokens": 58,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2391,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 898,
+            "completion_tokens": 48,
+            "reasoning_tokens": 29,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 1821,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "claude-haiku-5-5",
+            "prompt_tokens": 1616,
+            "completion_tokens": 361,
+            "reasoning_tokens": null,
+            "cached_prompt_tokens": 1591,
+            "reasoning_effort": "medium",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "ERROR",
+            "status_code": 200,
+            "error_code": "SCHEMA_VALIDATION_FAILED",
+            "latency_ms": 1815,
+            "requested_model": "claude-haiku-5-5"
+          },
+          {
+            "model": "claude-haiku-5-5",
+            "prompt_tokens": 1616,
+            "completion_tokens": 361,
+            "reasoning_tokens": null,
+            "cached_prompt_tokens": 1591,
+            "reasoning_effort": "medium",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 2,
+            "status": "ERROR",
+            "status_code": 200,
+            "error_code": "SCHEMA_VALIDATION_FAILED",
+            "latency_ms": 2119,
+            "requested_model": "claude-haiku-5-5"
+          },
+          {
+            "model": "claude-haiku-5-5",
+            "prompt_tokens": 1616,
+            "completion_tokens": 359,
+            "reasoning_tokens": null,
+            "cached_prompt_tokens": 1591,
+            "reasoning_effort": "medium",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 3,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2261,
+            "requested_model": "claude-haiku-5-5"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 504,
+            "completion_tokens": 68,
+            "reasoning_tokens": 44,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2163,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 891,
+            "completion_tokens": 52,
+            "reasoning_tokens": 33,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2440,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "claude-haiku-5-5",
+            "prompt_tokens": 1617,
+            "completion_tokens": 260,
+            "reasoning_tokens": null,
+            "cached_prompt_tokens": 1592,
+            "reasoning_effort": "medium",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 1613,
+            "requested_model": "claude-haiku-5-5"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 409,
+            "completion_tokens": 371,
+            "reasoning_tokens": 281,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 6983,
+            "requested_model": "gpt-6.1-sol"
+          }
+        ],
+        "calls_by_role": {
+          "all": 11
+        },
+        "status": "ERROR",
+        "actual_extraction_models_match": true,
+        "metrics": {
+          "runs": 1,
+          "successful_runs": 0,
+          "success_rate": 0.0,
+          "http_attempts": 11,
+          "usage_complete": true,
+          "attempts_with_reported_usage": 11,
+          "reported_tokens": {
+            "prompt_tokens": 12048,
+            "completion_tokens": 2260
+          },
+          "total_tokens": 14308,
+          "tokens_per_success": null,
+          "estimated_cost_usd": null,
+          "cost_per_success_usd": null,
+          "cost_basis": "Configured Elice input/output rates, before cache discounts",
+          "mean_latency_ms": 28978,
+          "median_latency_ms": 28978,
+          "max_latency_ms": 28978,
+          "transport_retries": 2,
+          "review_revise_count": 1
+        }
+      },
+      {
+        "configuration": "haiku-low",
+        "repeat": 1,
+        "model": "claude-haiku-5-5",
+        "effort": "low",
+        "review_results": [
+          {
+            "verdict": "PASS"
+          },
+          {
+            "verdict": "PASS"
+          },
+          {
+            "verdict": "REVISE"
+          }
+        ],
+        "passed": false,
+        "error_type": "DocumentError",
+        "error_code": null,
+        "elapsed_ms": 25607,
+        "provider_usage": [
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 888,
+            "completion_tokens": 41,
+            "reasoning_tokens": 22,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 1911,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "claude-haiku-5-5",
+            "prompt_tokens": 1609,
+            "completion_tokens": 240,
+            "reasoning_tokens": null,
+            "cached_prompt_tokens": 1584,
+            "reasoning_effort": "low",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 1815,
+            "requested_model": "claude-haiku-5-5"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 384,
+            "completion_tokens": 97,
+            "reasoning_tokens": 73,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 3036,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 898,
+            "completion_tokens": 40,
+            "reasoning_tokens": 21,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2039,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "claude-haiku-5-5",
+            "prompt_tokens": 1616,
+            "completion_tokens": 336,
+            "reasoning_tokens": null,
+            "cached_prompt_tokens": 1591,
+            "reasoning_effort": "low",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 3311,
+            "requested_model": "claude-haiku-5-5"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 504,
+            "completion_tokens": 87,
+            "reasoning_tokens": 63,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2810,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 891,
+            "completion_tokens": 49,
+            "reasoning_tokens": 30,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 1978,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "claude-haiku-5-5",
+            "prompt_tokens": 1617,
+            "completion_tokens": 260,
+            "reasoning_tokens": null,
+            "cached_prompt_tokens": 1592,
+            "reasoning_effort": "low",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 1328,
+            "requested_model": "claude-haiku-5-5"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 409,
+            "completion_tokens": 377,
+            "reasoning_tokens": 285,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 6910,
+            "requested_model": "gpt-6.1-sol"
+          }
+        ],
+        "calls_by_role": {
+          "all": 9
+        },
+        "status": "ERROR",
+        "actual_extraction_models_match": true,
+        "metrics": {
+          "runs": 1,
+          "successful_runs": 0,
+          "success_rate": 0.0,
+          "http_attempts": 9,
+          "usage_complete": true,
+          "attempts_with_reported_usage": 9,
+          "reported_tokens": {
+            "prompt_tokens": 8816,
+            "completion_tokens": 1527
+          },
+          "total_tokens": 10343,
+          "tokens_per_success": null,
+          "estimated_cost_usd": null,
+          "cost_per_success_usd": null,
+          "cost_basis": "Configured Elice input/output rates, before cache discounts",
+          "mean_latency_ms": 25607,
+          "median_latency_ms": 25607,
+          "max_latency_ms": 25607,
+          "transport_retries": 0,
+          "review_revise_count": 1
+        }
+      },
+      {
+        "configuration": "gemini-high",
+        "repeat": 1,
+        "model": "gemini-3.1-flash-lite",
+        "effort": "high",
+        "review_results": [
+          {
+            "verdict": "PASS"
+          },
+          {
+            "verdict": "PASS"
+          },
+          {
+            "verdict": "PASS"
+          }
+        ],
+        "passed": true,
+        "documents": 3,
+        "cached_reupload_provider_calls": 0,
+        "elapsed_ms": 28524,
+        "provider_usage": [
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 888,
+            "completion_tokens": 60,
+            "reasoning_tokens": 41,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2344,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gemini-3.1-flash-lite",
+            "prompt_tokens": 306,
+            "completion_tokens": 1598,
+            "reasoning_tokens": 1474,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "high",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 4493,
+            "requested_model": "gemini-3.1-flash-lite"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 363,
+            "completion_tokens": 129,
+            "reasoning_tokens": 105,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 3479,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 898,
+            "completion_tokens": 42,
+            "reasoning_tokens": 23,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 1979,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gemini-3.1-flash-lite",
+            "prompt_tokens": 332,
+            "completion_tokens": 1404,
+            "reasoning_tokens": 1058,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "high",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 3917,
+            "requested_model": "gemini-3.1-flash-lite"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 474,
+            "completion_tokens": 129,
+            "reasoning_tokens": 105,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2862,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 891,
+            "completion_tokens": 65,
+            "reasoning_tokens": 46,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2799,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gemini-3.1-flash-lite",
+            "prompt_tokens": 316,
+            "completion_tokens": 1118,
+            "reasoning_tokens": 959,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "high",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 3580,
+            "requested_model": "gemini-3.1-flash-lite"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 389,
+            "completion_tokens": 85,
+            "reasoning_tokens": 61,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2551,
+            "requested_model": "gpt-6.1-sol"
+          }
+        ],
+        "calls_by_role": {
+          "all": 9
+        },
+        "status": "REVIEWED_PLAN",
+        "actual_extraction_models_match": true,
+        "metrics": {
+          "runs": 1,
+          "successful_runs": 1,
+          "success_rate": 1.0,
+          "http_attempts": 9,
+          "usage_complete": true,
+          "attempts_with_reported_usage": 9,
+          "reported_tokens": {
+            "prompt_tokens": 4857,
+            "completion_tokens": 4630
+          },
+          "total_tokens": 9487,
+          "tokens_per_success": 9487.0,
+          "estimated_cost_usd": null,
+          "cost_per_success_usd": null,
+          "cost_basis": "Configured Elice input/output rates, before cache discounts",
+          "mean_latency_ms": 28524,
+          "median_latency_ms": 28524,
+          "max_latency_ms": 28524,
+          "transport_retries": 0,
+          "review_revise_count": 0
+        }
+      },
+      {
+        "configuration": "gemini-medium",
+        "repeat": 1,
+        "model": "gemini-3.1-flash-lite",
+        "effort": "medium",
+        "review_results": [
+          {
+            "verdict": "PASS"
+          },
+          {
+            "verdict": "PASS"
+          },
+          {
+            "verdict": "PASS"
+          }
+        ],
+        "passed": true,
+        "documents": 3,
+        "cached_reupload_provider_calls": 0,
+        "elapsed_ms": 28365,
+        "provider_usage": [
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 888,
+            "completion_tokens": 46,
+            "reasoning_tokens": 27,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2103,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gemini-3.1-flash-lite",
+            "prompt_tokens": 306,
+            "completion_tokens": 739,
+            "reasoning_tokens": 642,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "medium",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2936,
+            "requested_model": "gemini-3.1-flash-lite"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 363,
+            "completion_tokens": 110,
+            "reasoning_tokens": 86,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 3559,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 898,
+            "completion_tokens": 41,
+            "reasoning_tokens": 22,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2190,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gemini-3.1-flash-lite",
+            "prompt_tokens": 332,
+            "completion_tokens": 1095,
+            "reasoning_tokens": 749,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "medium",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 3815,
+            "requested_model": "gemini-3.1-flash-lite"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 474,
+            "completion_tokens": 118,
+            "reasoning_tokens": 94,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 3188,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 891,
+            "completion_tokens": 72,
+            "reasoning_tokens": 53,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2797,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gemini-3.1-flash-lite",
+            "prompt_tokens": 316,
+            "completion_tokens": 651,
+            "reasoning_tokens": 528,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "medium",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2785,
+            "requested_model": "gemini-3.1-flash-lite"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 389,
+            "completion_tokens": 155,
+            "reasoning_tokens": 131,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 4127,
+            "requested_model": "gpt-6.1-sol"
+          }
+        ],
+        "calls_by_role": {
+          "all": 9
+        },
+        "status": "REVIEWED_PLAN",
+        "actual_extraction_models_match": true,
+        "metrics": {
+          "runs": 1,
+          "successful_runs": 1,
+          "success_rate": 1.0,
+          "http_attempts": 9,
+          "usage_complete": true,
+          "attempts_with_reported_usage": 9,
+          "reported_tokens": {
+            "prompt_tokens": 4857,
+            "completion_tokens": 3027
+          },
+          "total_tokens": 7884,
+          "tokens_per_success": 7884.0,
+          "estimated_cost_usd": null,
+          "cost_per_success_usd": null,
+          "cost_basis": "Configured Elice input/output rates, before cache discounts",
+          "mean_latency_ms": 28365,
+          "median_latency_ms": 28365,
+          "max_latency_ms": 28365,
+          "transport_retries": 0,
+          "review_revise_count": 0
+        }
+      },
+      {
+        "configuration": "gemini-low",
+        "repeat": 1,
+        "model": "gemini-3.1-flash-lite",
+        "effort": "low",
+        "review_results": [
+          {
+            "verdict": "PASS"
+          },
+          {
+            "verdict": "PASS"
+          },
+          {
+            "verdict": "PASS"
+          }
+        ],
+        "passed": true,
+        "documents": 3,
+        "cached_reupload_provider_calls": 0,
+        "elapsed_ms": 22088,
+        "provider_usage": [
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 888,
+            "completion_tokens": 44,
+            "reasoning_tokens": 25,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2279,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gemini-3.1-flash-lite",
+            "prompt_tokens": 306,
+            "completion_tokens": 320,
+            "reasoning_tokens": 124,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "low",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2089,
+            "requested_model": "gemini-3.1-flash-lite"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 384,
+            "completion_tokens": 127,
+            "reasoning_tokens": 103,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 3910,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 898,
+            "completion_tokens": 38,
+            "reasoning_tokens": 19,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 1830,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gemini-3.1-flash-lite",
+            "prompt_tokens": 332,
+            "completion_tokens": 525,
+            "reasoning_tokens": 149,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "low",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 1944,
+            "requested_model": "gemini-3.1-flash-lite"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 504,
+            "completion_tokens": 93,
+            "reasoning_tokens": 69,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2644,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 891,
+            "completion_tokens": 56,
+            "reasoning_tokens": 37,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2130,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gemini-3.1-flash-lite",
+            "prompt_tokens": 316,
+            "completion_tokens": 332,
+            "reasoning_tokens": 106,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "low",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 1690,
+            "requested_model": "gemini-3.1-flash-lite"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 389,
+            "completion_tokens": 182,
+            "reasoning_tokens": 158,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 3030,
+            "requested_model": "gpt-6.1-sol"
+          }
+        ],
+        "calls_by_role": {
+          "all": 9
+        },
+        "status": "REVIEWED_PLAN",
+        "actual_extraction_models_match": true,
+        "metrics": {
+          "runs": 1,
+          "successful_runs": 1,
+          "success_rate": 1.0,
+          "http_attempts": 9,
+          "usage_complete": true,
+          "attempts_with_reported_usage": 9,
+          "reported_tokens": {
+            "prompt_tokens": 4908,
+            "completion_tokens": 1717
+          },
+          "total_tokens": 6625,
+          "tokens_per_success": 6625.0,
+          "estimated_cost_usd": null,
+          "cost_per_success_usd": null,
+          "cost_basis": "Configured Elice input/output rates, before cache discounts",
+          "mean_latency_ms": 22088,
+          "median_latency_ms": 22088,
+          "max_latency_ms": 22088,
+          "transport_retries": 0,
+          "review_revise_count": 0
+        }
+      },
+      {
+        "configuration": "final-gemini-low",
+        "repeat": 1,
+        "model": "gemini-3.1-flash-lite",
+        "effort": "low",
+        "review_results": [
+          {
+            "verdict": "PASS"
+          },
+          {
+            "verdict": "PASS"
+          },
+          {
+            "verdict": "PASS"
+          }
+        ],
+        "passed": true,
+        "documents": 3,
+        "cached_reupload_provider_calls": 0,
+        "elapsed_ms": 22881,
+        "provider_usage": [
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 888,
+            "completion_tokens": 61,
+            "reasoning_tokens": 42,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2710,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gemini-3.1-flash-lite",
+            "prompt_tokens": 306,
+            "completion_tokens": 314,
+            "reasoning_tokens": 137,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "low",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 1806,
+            "requested_model": "gemini-3.1-flash-lite"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 363,
+            "completion_tokens": 98,
+            "reasoning_tokens": 74,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 3009,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 898,
+            "completion_tokens": 43,
+            "reasoning_tokens": 24,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 1867,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gemini-3.1-flash-lite",
+            "prompt_tokens": 332,
+            "completion_tokens": 543,
+            "reasoning_tokens": 167,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "low",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2166,
+            "requested_model": "gemini-3.1-flash-lite"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 504,
+            "completion_tokens": 86,
+            "reasoning_tokens": 62,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2661,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 891,
+            "completion_tokens": 66,
+            "reasoning_tokens": 47,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2521,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gemini-3.1-flash-lite",
+            "prompt_tokens": 316,
+            "completion_tokens": 308,
+            "reasoning_tokens": 132,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "low",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2084,
+            "requested_model": "gemini-3.1-flash-lite"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 407,
+            "completion_tokens": 120,
+            "reasoning_tokens": 96,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 3314,
+            "requested_model": "gpt-6.1-sol"
+          }
+        ],
+        "calls_by_role": {
+          "all": 9
+        },
+        "status": "REVIEWED_PLAN",
+        "actual_extraction_models_match": true,
+        "metrics": {
+          "runs": 1,
+          "successful_runs": 1,
+          "success_rate": 1.0,
+          "http_attempts": 9,
+          "usage_complete": true,
+          "attempts_with_reported_usage": 9,
+          "reported_tokens": {
+            "prompt_tokens": 4905,
+            "completion_tokens": 1639
+          },
+          "total_tokens": 6544,
+          "tokens_per_success": 6544.0,
+          "estimated_cost_usd": null,
+          "cost_per_success_usd": null,
+          "cost_basis": "Configured Elice input/output rates, before cache discounts",
+          "mean_latency_ms": 22881,
+          "median_latency_ms": 22881,
+          "max_latency_ms": 22881,
+          "transport_retries": 0,
+          "review_revise_count": 0
+        }
+      },
+      {
+        "configuration": "final-gemini-low",
+        "repeat": 2,
+        "model": "gemini-3.1-flash-lite",
+        "effort": "low",
+        "review_results": [
+          {
+            "verdict": "PASS"
+          },
+          {
+            "verdict": "PASS"
+          },
+          {
+            "verdict": "PASS"
+          }
+        ],
+        "passed": true,
+        "documents": 3,
+        "cached_reupload_provider_calls": 0,
+        "elapsed_ms": 22352,
+        "provider_usage": [
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 888,
+            "completion_tokens": 76,
+            "reasoning_tokens": 57,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2592,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gemini-3.1-flash-lite",
+            "prompt_tokens": 306,
+            "completion_tokens": 239,
+            "reasoning_tokens": 115,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "low",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 1836,
+            "requested_model": "gemini-3.1-flash-lite"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 363,
+            "completion_tokens": 114,
+            "reasoning_tokens": 90,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 3381,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 898,
+            "completion_tokens": 39,
+            "reasoning_tokens": 20,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 1783,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gemini-3.1-flash-lite",
+            "prompt_tokens": 332,
+            "completion_tokens": 484,
+            "reasoning_tokens": 108,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "low",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2395,
+            "requested_model": "gemini-3.1-flash-lite"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 504,
+            "completion_tokens": 57,
+            "reasoning_tokens": 33,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2067,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 891,
+            "completion_tokens": 57,
+            "reasoning_tokens": 38,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2650,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gemini-3.1-flash-lite",
+            "prompt_tokens": 316,
+            "completion_tokens": 383,
+            "reasoning_tokens": 139,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "low",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 1856,
+            "requested_model": "gemini-3.1-flash-lite"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 408,
+            "completion_tokens": 106,
+            "reasoning_tokens": 82,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 3064,
+            "requested_model": "gpt-6.1-sol"
+          }
+        ],
+        "calls_by_role": {
+          "all": 9
+        },
+        "status": "REVIEWED_PLAN",
+        "actual_extraction_models_match": true,
+        "metrics": {
+          "runs": 1,
+          "successful_runs": 1,
+          "success_rate": 1.0,
+          "http_attempts": 9,
+          "usage_complete": true,
+          "attempts_with_reported_usage": 9,
+          "reported_tokens": {
+            "prompt_tokens": 4906,
+            "completion_tokens": 1555
+          },
+          "total_tokens": 6461,
+          "tokens_per_success": 6461.0,
+          "estimated_cost_usd": null,
+          "cost_per_success_usd": null,
+          "cost_basis": "Configured Elice input/output rates, before cache discounts",
+          "mean_latency_ms": 22352,
+          "median_latency_ms": 22352,
+          "max_latency_ms": 22352,
+          "transport_retries": 0,
+          "review_revise_count": 0
+        }
+      },
+      {
+        "configuration": "final-gemini-low",
+        "repeat": 3,
+        "model": "gemini-3.1-flash-lite",
+        "effort": "low",
+        "review_results": [
+          {
+            "verdict": "PASS"
+          },
+          {
+            "verdict": "PASS"
+          },
+          {
+            "verdict": "PASS"
+          }
+        ],
+        "passed": true,
+        "documents": 3,
+        "cached_reupload_provider_calls": 0,
+        "elapsed_ms": 20405,
+        "provider_usage": [
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 888,
+            "completion_tokens": 57,
+            "reasoning_tokens": 38,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2234,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gemini-3.1-flash-lite",
+            "prompt_tokens": 306,
+            "completion_tokens": 293,
+            "reasoning_tokens": 116,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "low",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 1642,
+            "requested_model": "gemini-3.1-flash-lite"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 363,
+            "completion_tokens": 93,
+            "reasoning_tokens": 69,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2937,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 898,
+            "completion_tokens": 44,
+            "reasoning_tokens": 25,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 1946,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gemini-3.1-flash-lite",
+            "prompt_tokens": 332,
+            "completion_tokens": 516,
+            "reasoning_tokens": 140,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "low",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 1932,
+            "requested_model": "gemini-3.1-flash-lite"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 504,
+            "completion_tokens": 72,
+            "reasoning_tokens": 48,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2288,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 891,
+            "completion_tokens": 64,
+            "reasoning_tokens": 45,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2598,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gemini-3.1-flash-lite",
+            "prompt_tokens": 316,
+            "completion_tokens": 374,
+            "reasoning_tokens": 130,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "low",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 1686,
+            "requested_model": "gemini-3.1-flash-lite"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 408,
+            "completion_tokens": 97,
+            "reasoning_tokens": 73,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2606,
+            "requested_model": "gpt-6.1-sol"
+          }
+        ],
+        "calls_by_role": {
+          "all": 9
+        },
+        "status": "REVIEWED_PLAN",
+        "actual_extraction_models_match": true,
+        "metrics": {
+          "runs": 1,
+          "successful_runs": 1,
+          "success_rate": 1.0,
+          "http_attempts": 9,
+          "usage_complete": true,
+          "attempts_with_reported_usage": 9,
+          "reported_tokens": {
+            "prompt_tokens": 4906,
+            "completion_tokens": 1610
+          },
+          "total_tokens": 6516,
+          "tokens_per_success": 6516.0,
+          "estimated_cost_usd": null,
+          "cost_per_success_usd": null,
+          "cost_basis": "Configured Elice input/output rates, before cache discounts",
+          "mean_latency_ms": 20405,
+          "median_latency_ms": 20405,
+          "max_latency_ms": 20405,
+          "transport_retries": 0,
+          "review_revise_count": 0
+        }
+      }
+    ],
+    "groups": {
+      "baseline": {
+        "passed": true,
+        "metrics": {
+          "runs": 3,
+          "successful_runs": 3,
+          "success_rate": 1.0,
+          "http_attempts": 27,
+          "usage_complete": true,
+          "attempts_with_reported_usage": 27,
+          "reported_tokens": {
+            "prompt_tokens": 17160,
+            "completion_tokens": 4734
+          },
+          "total_tokens": 21894,
+          "tokens_per_success": 7298.0,
+          "estimated_cost_usd": null,
+          "cost_per_success_usd": null,
+          "cost_basis": "Configured Elice input/output rates, before cache discounts",
+          "mean_latency_ms": 29179,
+          "median_latency_ms": 29207,
+          "max_latency_ms": 30342,
+          "transport_retries": 0,
+          "review_revise_count": 0
+        }
+      },
+      "info-high": {
+        "passed": true,
+        "metrics": {
+          "runs": 1,
+          "successful_runs": 1,
+          "success_rate": 1.0,
+          "http_attempts": 9,
+          "usage_complete": true,
+          "attempts_with_reported_usage": 9,
+          "reported_tokens": {
+            "prompt_tokens": 5720,
+            "completion_tokens": 1202
+          },
+          "total_tokens": 6922,
+          "tokens_per_success": 6922.0,
+          "estimated_cost_usd": null,
+          "cost_per_success_usd": null,
+          "cost_basis": "Configured Elice input/output rates, before cache discounts",
+          "mean_latency_ms": 25890,
+          "median_latency_ms": 25890,
+          "max_latency_ms": 25890,
+          "transport_retries": 0,
+          "review_revise_count": 0
+        }
+      },
+      "info-medium": {
+        "passed": true,
+        "metrics": {
+          "runs": 1,
+          "successful_runs": 1,
+          "success_rate": 1.0,
+          "http_attempts": 9,
+          "usage_complete": true,
+          "attempts_with_reported_usage": 9,
+          "reported_tokens": {
+            "prompt_tokens": 5720,
+            "completion_tokens": 988
+          },
+          "total_tokens": 6708,
+          "tokens_per_success": 6708.0,
+          "estimated_cost_usd": null,
+          "cost_per_success_usd": null,
+          "cost_basis": "Configured Elice input/output rates, before cache discounts",
+          "mean_latency_ms": 24290,
+          "median_latency_ms": 24290,
+          "max_latency_ms": 24290,
+          "transport_retries": 0,
+          "review_revise_count": 0
+        }
+      },
+      "info-low": {
+        "passed": true,
+        "metrics": {
+          "runs": 1,
+          "successful_runs": 1,
+          "success_rate": 1.0,
+          "http_attempts": 9,
+          "usage_complete": true,
+          "attempts_with_reported_usage": 9,
+          "reported_tokens": {
+            "prompt_tokens": 5720,
+            "completion_tokens": 928
+          },
+          "total_tokens": 6648,
+          "tokens_per_success": 6648.0,
+          "estimated_cost_usd": null,
+          "cost_per_success_usd": null,
+          "cost_basis": "Configured Elice input/output rates, before cache discounts",
+          "mean_latency_ms": 22259,
+          "median_latency_ms": 22259,
+          "max_latency_ms": 22259,
+          "transport_retries": 0,
+          "review_revise_count": 0
+        }
+      },
+      "luna-high": {
+        "passed": true,
+        "metrics": {
+          "runs": 1,
+          "successful_runs": 1,
+          "success_rate": 1.0,
+          "http_attempts": 9,
+          "usage_complete": true,
+          "attempts_with_reported_usage": 9,
+          "reported_tokens": {
+            "prompt_tokens": 5720,
+            "completion_tokens": 1288
+          },
+          "total_tokens": 7008,
+          "tokens_per_success": 7008.0,
+          "estimated_cost_usd": null,
+          "cost_per_success_usd": null,
+          "cost_basis": "Configured Elice input/output rates, before cache discounts",
+          "mean_latency_ms": 26838,
+          "median_latency_ms": 26838,
+          "max_latency_ms": 26838,
+          "transport_retries": 0,
+          "review_revise_count": 0
+        }
+      },
+      "luna-medium": {
+        "passed": true,
+        "metrics": {
+          "runs": 1,
+          "successful_runs": 1,
+          "success_rate": 1.0,
+          "http_attempts": 9,
+          "usage_complete": true,
+          "attempts_with_reported_usage": 9,
+          "reported_tokens": {
+            "prompt_tokens": 5720,
+            "completion_tokens": 1132
+          },
+          "total_tokens": 6852,
+          "tokens_per_success": 6852.0,
+          "estimated_cost_usd": null,
+          "cost_per_success_usd": null,
+          "cost_basis": "Configured Elice input/output rates, before cache discounts",
+          "mean_latency_ms": 23390,
+          "median_latency_ms": 23390,
+          "max_latency_ms": 23390,
+          "transport_retries": 0,
+          "review_revise_count": 0
+        }
+      },
+      "luna-low": {
+        "passed": true,
+        "metrics": {
+          "runs": 1,
+          "successful_runs": 1,
+          "success_rate": 1.0,
+          "http_attempts": 9,
+          "usage_complete": true,
+          "attempts_with_reported_usage": 9,
+          "reported_tokens": {
+            "prompt_tokens": 5720,
+            "completion_tokens": 1051
+          },
+          "total_tokens": 6771,
+          "tokens_per_success": 6771.0,
+          "estimated_cost_usd": null,
+          "cost_per_success_usd": null,
+          "cost_basis": "Configured Elice input/output rates, before cache discounts",
+          "mean_latency_ms": 22651,
+          "median_latency_ms": 22651,
+          "max_latency_ms": 22651,
+          "transport_retries": 0,
+          "review_revise_count": 0
+        }
+      },
+      "haiku-high": {
+        "passed": false,
+        "metrics": {
+          "runs": 1,
+          "successful_runs": 0,
+          "success_rate": 0.0,
+          "http_attempts": 9,
+          "usage_complete": true,
+          "attempts_with_reported_usage": 9,
+          "reported_tokens": {
+            "prompt_tokens": 9363,
+            "completion_tokens": 1511
+          },
+          "total_tokens": 10874,
+          "tokens_per_success": null,
+          "estimated_cost_usd": null,
+          "cost_per_success_usd": null,
+          "cost_basis": "Configured Elice input/output rates, before cache discounts",
+          "mean_latency_ms": 23231,
+          "median_latency_ms": 23231,
+          "max_latency_ms": 23231,
+          "transport_retries": 0,
+          "review_revise_count": 1
+        }
+      },
+      "haiku-medium": {
+        "passed": false,
+        "metrics": {
+          "runs": 1,
+          "successful_runs": 0,
+          "success_rate": 0.0,
+          "http_attempts": 11,
+          "usage_complete": true,
+          "attempts_with_reported_usage": 11,
+          "reported_tokens": {
+            "prompt_tokens": 12048,
+            "completion_tokens": 2260
+          },
+          "total_tokens": 14308,
+          "tokens_per_success": null,
+          "estimated_cost_usd": null,
+          "cost_per_success_usd": null,
+          "cost_basis": "Configured Elice input/output rates, before cache discounts",
+          "mean_latency_ms": 28978,
+          "median_latency_ms": 28978,
+          "max_latency_ms": 28978,
+          "transport_retries": 2,
+          "review_revise_count": 1
+        }
+      },
+      "haiku-low": {
+        "passed": false,
+        "metrics": {
+          "runs": 1,
+          "successful_runs": 0,
+          "success_rate": 0.0,
+          "http_attempts": 9,
+          "usage_complete": true,
+          "attempts_with_reported_usage": 9,
+          "reported_tokens": {
+            "prompt_tokens": 8816,
+            "completion_tokens": 1527
+          },
+          "total_tokens": 10343,
+          "tokens_per_success": null,
+          "estimated_cost_usd": null,
+          "cost_per_success_usd": null,
+          "cost_basis": "Configured Elice input/output rates, before cache discounts",
+          "mean_latency_ms": 25607,
+          "median_latency_ms": 25607,
+          "max_latency_ms": 25607,
+          "transport_retries": 0,
+          "review_revise_count": 1
+        }
+      },
+      "gemini-high": {
+        "passed": true,
+        "metrics": {
+          "runs": 1,
+          "successful_runs": 1,
+          "success_rate": 1.0,
+          "http_attempts": 9,
+          "usage_complete": true,
+          "attempts_with_reported_usage": 9,
+          "reported_tokens": {
+            "prompt_tokens": 4857,
+            "completion_tokens": 4630
+          },
+          "total_tokens": 9487,
+          "tokens_per_success": 9487.0,
+          "estimated_cost_usd": null,
+          "cost_per_success_usd": null,
+          "cost_basis": "Configured Elice input/output rates, before cache discounts",
+          "mean_latency_ms": 28524,
+          "median_latency_ms": 28524,
+          "max_latency_ms": 28524,
+          "transport_retries": 0,
+          "review_revise_count": 0
+        }
+      },
+      "gemini-medium": {
+        "passed": true,
+        "metrics": {
+          "runs": 1,
+          "successful_runs": 1,
+          "success_rate": 1.0,
+          "http_attempts": 9,
+          "usage_complete": true,
+          "attempts_with_reported_usage": 9,
+          "reported_tokens": {
+            "prompt_tokens": 4857,
+            "completion_tokens": 3027
+          },
+          "total_tokens": 7884,
+          "tokens_per_success": 7884.0,
+          "estimated_cost_usd": null,
+          "cost_per_success_usd": null,
+          "cost_basis": "Configured Elice input/output rates, before cache discounts",
+          "mean_latency_ms": 28365,
+          "median_latency_ms": 28365,
+          "max_latency_ms": 28365,
+          "transport_retries": 0,
+          "review_revise_count": 0
+        }
+      },
+      "gemini-low": {
+        "passed": true,
+        "metrics": {
+          "runs": 1,
+          "successful_runs": 1,
+          "success_rate": 1.0,
+          "http_attempts": 9,
+          "usage_complete": true,
+          "attempts_with_reported_usage": 9,
+          "reported_tokens": {
+            "prompt_tokens": 4908,
+            "completion_tokens": 1717
+          },
+          "total_tokens": 6625,
+          "tokens_per_success": 6625.0,
+          "estimated_cost_usd": null,
+          "cost_per_success_usd": null,
+          "cost_basis": "Configured Elice input/output rates, before cache discounts",
+          "mean_latency_ms": 22088,
+          "median_latency_ms": 22088,
+          "max_latency_ms": 22088,
+          "transport_retries": 0,
+          "review_revise_count": 0
+        }
+      },
+      "final-gemini-low": {
+        "passed": true,
+        "metrics": {
+          "runs": 3,
+          "successful_runs": 3,
+          "success_rate": 1.0,
+          "http_attempts": 27,
+          "usage_complete": true,
+          "attempts_with_reported_usage": 27,
+          "reported_tokens": {
+            "prompt_tokens": 14717,
+            "completion_tokens": 4804
+          },
+          "total_tokens": 19521,
+          "tokens_per_success": 6507.0,
+          "estimated_cost_usd": null,
+          "cost_per_success_usd": null,
+          "cost_basis": "Configured Elice input/output rates, before cache discounts",
+          "mean_latency_ms": 21879.333333333332,
+          "median_latency_ms": 22352,
+          "max_latency_ms": 22881,
+          "transport_retries": 0,
+          "review_revise_count": 0
+        }
+      }
+    },
+    "selected_document_config": {
+      "prefix": "GEMINI_",
+      "model": "gemini-3.1-flash-lite",
+      "effort": "low"
+    },
+    "code_unchanged": true,
+    "passed": true
+  },
+  "full_flow_initial_failure": {
+    "synthetic_documents": true,
+    "code_digest": "sha256:9e35eec0d6cb26145571213fa67fb8d5bd85b46faac32ffd7000df0d6798f8b3",
+    "input_digests": {
+      "LEASE": "107ee3fc0844eb3290c8f8df0e84b0d8c4b4d05eda50d5fe0b306c89d0486481",
+      "BUSINESS_REGISTRATION": "b09eaccd03db76553f7390ab77ba2ffe30d640be1133c0c1d027b5dd15e27d5b",
+      "CONSTRUCTION_STATEMENT": "8b2792d0f2da5d9cd0217d3ee0b4f06b4878568cc59438ddeb8055e7092ae0f6",
+      "TAX_INVOICE": "5c28521bb8b522ad02023003a3eff306b43b9dcccc62ff2e33c006ec24208b13",
+      "BEFORE_PHOTO": "e139fbcfe5869a2825f246a2cd1cf6e39d27a1f543a64dfe0a60e29f51918a0d",
+      "AFTER_PHOTO": "407e33af93b28d3b0ef25f6b0611e72511fa419aac693b48a84e27fae0d136ca",
+      "TRANSFER": "898abf034d7d857095cd09918be195b7d7d75f397a034569db0f08ae2a4c4e35",
+      "CLOSURE_CERTIFICATE": "416ad5a77a6f199c6dffce72fe3c52a6bf4c6b6338d5471a64f15a2c09fa65a2",
+      "BANK_COPY": "5569e8645d54de80af02350aee013e16eb7434a6351250281c82a00e0dc2449a",
+      "CLOSURE_RECEIPT": "03cc5a296876448521968e64c54cb2d571aeff3491f4bc632cc3622763414b86",
+      "CARD_SALES": "e23ff6ad54dfea14893a9fe767b13fb8a84f960e8bd35c35ab5d03e10c02494a",
+      "CASH_SALES": "152ebddb81da7af0419e6d239257225dff261edbe98449f412032730dfb99076",
+      "PURCHASE_INVOICE": "3ffa587db6f7b7fd7a495f665b7945fa9e0a2f2fce3133b5661d886a430456de"
+    },
+    "trials": [
+      {
+        "configuration": "baseline",
+        "model": "gpt-6.1-sol",
+        "effort": "xhigh",
+        "passed": false,
+        "error_type": "WorkflowError",
+        "error_code": null,
+        "elapsed_ms": 26772,
+        "provider_usage": [
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 249,
+            "completion_tokens": 434,
+            "reasoning_tokens": 347,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_mobile_next_task",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 7947,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 263,
+            "completion_tokens": 617,
+            "reasoning_tokens": 509,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_mobile_next_task",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 9094,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 263,
+            "completion_tokens": 743,
+            "reasoning_tokens": 607,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_mobile_next_task",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 9454,
+            "requested_model": "gpt-6.1-sol"
+          }
+        ],
+        "calls_by_role": {
+          "all": 3
+        },
+        "status": "ERROR",
+        "metrics": {
+          "runs": 1,
+          "successful_runs": 0,
+          "success_rate": 0.0,
+          "http_attempts": 3,
+          "usage_complete": true,
+          "attempts_with_reported_usage": 3,
+          "reported_tokens": {
+            "prompt_tokens": 775,
+            "completion_tokens": 1794
+          },
+          "total_tokens": 2569,
+          "tokens_per_success": null,
+          "estimated_cost_usd": null,
+          "cost_per_success_usd": null,
+          "cost_basis": "Configured Elice input/output rates, before cache discounts",
+          "mean_latency_ms": 26772,
+          "median_latency_ms": 26772,
+          "max_latency_ms": 26772,
+          "transport_retries": 0,
+          "review_revise_count": 0
+        }
+      }
+    ],
+    "code_unchanged": true,
+    "passed": false
+  },
+  "full_flow_after_fix": {
+    "synthetic_documents": true,
+    "code_digest": "sha256:be8ea414b4983581703eba790edd36901e5f4194fddb6c7fb75e1bee5d58aff7",
+    "input_digests": {
+      "LEASE": "107ee3fc0844eb3290c8f8df0e84b0d8c4b4d05eda50d5fe0b306c89d0486481",
+      "BUSINESS_REGISTRATION": "b09eaccd03db76553f7390ab77ba2ffe30d640be1133c0c1d027b5dd15e27d5b",
+      "CONSTRUCTION_STATEMENT": "8b2792d0f2da5d9cd0217d3ee0b4f06b4878568cc59438ddeb8055e7092ae0f6",
+      "TAX_INVOICE": "5c28521bb8b522ad02023003a3eff306b43b9dcccc62ff2e33c006ec24208b13",
+      "BEFORE_PHOTO": "e139fbcfe5869a2825f246a2cd1cf6e39d27a1f543a64dfe0a60e29f51918a0d",
+      "AFTER_PHOTO": "407e33af93b28d3b0ef25f6b0611e72511fa419aac693b48a84e27fae0d136ca",
+      "TRANSFER": "898abf034d7d857095cd09918be195b7d7d75f397a034569db0f08ae2a4c4e35",
+      "CLOSURE_CERTIFICATE": "416ad5a77a6f199c6dffce72fe3c52a6bf4c6b6338d5471a64f15a2c09fa65a2",
+      "BANK_COPY": "5569e8645d54de80af02350aee013e16eb7434a6351250281c82a00e0dc2449a",
+      "CLOSURE_RECEIPT": "03cc5a296876448521968e64c54cb2d571aeff3491f4bc632cc3622763414b86",
+      "CARD_SALES": "e23ff6ad54dfea14893a9fe767b13fb8a84f960e8bd35c35ab5d03e10c02494a",
+      "CASH_SALES": "152ebddb81da7af0419e6d239257225dff261edbe98449f412032730dfb99076",
+      "PURCHASE_INVOICE": "3ffa587db6f7b7fd7a495f665b7945fa9e0a2f2fce3133b5661d886a430456de"
+    },
+    "trials": [
+      {
+        "configuration": "baseline",
+        "model": "gpt-6.1-sol",
+        "effort": "xhigh",
+        "phases": [
+          "prep",
+          "restoration",
+          "apply",
+          "approval",
+          "support",
+          "closing",
+          "cert",
+          "review",
+          "returning",
+          "tax",
+          "finished",
+          "closed"
+        ],
+        "documents": 13,
+        "passed": true,
+        "elapsed_ms": 151417,
+        "provider_usage": [
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 388,
+            "completion_tokens": 411,
+            "reasoning_tokens": 319,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_mobile_next_task",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 6506,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 433,
+            "completion_tokens": 110,
+            "reasoning_tokens": 86,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_mobile_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 3073,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 868,
+            "completion_tokens": 47,
+            "reasoning_tokens": 28,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2075,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 559,
+            "completion_tokens": 241,
+            "reasoning_tokens": 128,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 3712,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 338,
+            "completion_tokens": 100,
+            "reasoning_tokens": 76,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 3029,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 856,
+            "completion_tokens": 74,
+            "reasoning_tokens": 55,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2732,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 550,
+            "completion_tokens": 171,
+            "reasoning_tokens": 106,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2965,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 271,
+            "completion_tokens": 244,
+            "reasoning_tokens": 220,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 4195,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 849,
+            "completion_tokens": 45,
+            "reasoning_tokens": 26,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2024,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 383,
+            "completion_tokens": 632,
+            "reasoning_tokens": 394,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_mobile_facts",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 7035,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 473,
+            "completion_tokens": 167,
+            "reasoning_tokens": 143,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_mobile_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 3630,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 845,
+            "completion_tokens": 50,
+            "reasoning_tokens": 31,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2075,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 539,
+            "completion_tokens": 275,
+            "reasoning_tokens": 243,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 5299,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 220,
+            "completion_tokens": 415,
+            "reasoning_tokens": 391,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 7151,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 898,
+            "completion_tokens": 40,
+            "reasoning_tokens": 21,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 1939,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 592,
+            "completion_tokens": 468,
+            "reasoning_tokens": 147,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 5128,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 504,
+            "completion_tokens": 108,
+            "reasoning_tokens": 84,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2657,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 888,
+            "completion_tokens": 66,
+            "reasoning_tokens": 47,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2913,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 582,
+            "completion_tokens": 297,
+            "reasoning_tokens": 110,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 4040,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 384,
+            "completion_tokens": 121,
+            "reasoning_tokens": 97,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 3077,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 846,
+            "completion_tokens": 53,
+            "reasoning_tokens": 34,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2094,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 540,
+            "completion_tokens": 327,
+            "reasoning_tokens": 295,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 4982,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 221,
+            "completion_tokens": 311,
+            "reasoning_tokens": 287,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 4563,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 871,
+            "completion_tokens": 54,
+            "reasoning_tokens": 35,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2486,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 567,
+            "completion_tokens": 306,
+            "reasoning_tokens": 119,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 4355,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 367,
+            "completion_tokens": 228,
+            "reasoning_tokens": 204,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 4886,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 863,
+            "completion_tokens": 53,
+            "reasoning_tokens": 34,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2419,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 558,
+            "completion_tokens": 272,
+            "reasoning_tokens": 127,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 3464,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 325,
+            "completion_tokens": 254,
+            "reasoning_tokens": 230,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 5240,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 851,
+            "completion_tokens": 52,
+            "reasoning_tokens": 33,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2035,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 543,
+            "completion_tokens": 109,
+            "reasoning_tokens": 53,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2700,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 257,
+            "completion_tokens": 75,
+            "reasoning_tokens": 51,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2550,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 891,
+            "completion_tokens": 65,
+            "reasoning_tokens": 46,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2323,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 582,
+            "completion_tokens": 327,
+            "reasoning_tokens": 111,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 4011,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 408,
+            "completion_tokens": 110,
+            "reasoning_tokens": 86,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2520,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 882,
+            "completion_tokens": 36,
+            "reasoning_tokens": 17,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 1781,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 576,
+            "completion_tokens": 419,
+            "reasoning_tokens": 154,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 4754,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 440,
+            "completion_tokens": 80,
+            "reasoning_tokens": 56,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2063,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 853,
+            "completion_tokens": 52,
+            "reasoning_tokens": 33,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2132,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 546,
+            "completion_tokens": 244,
+            "reasoning_tokens": 148,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 3387,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 307,
+            "completion_tokens": 123,
+            "reasoning_tokens": 99,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2520,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 854,
+            "completion_tokens": 45,
+            "reasoning_tokens": 26,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "ContentSafetyDecision",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 1917,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 548,
+            "completion_tokens": 217,
+            "reasoning_tokens": 83,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_extraction",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 3318,
+            "requested_model": "gpt-6.1-sol"
+          },
+          {
+            "model": "gpt-6.1-sol",
+            "prompt_tokens": 305,
+            "completion_tokens": 131,
+            "reasoning_tokens": 107,
+            "cached_prompt_tokens": 0,
+            "reasoning_effort": "xhigh",
+            "schema_name": "reborn_document_review",
+            "attempt": 1,
+            "status": "SUCCESS",
+            "status_code": 200,
+            "error_code": null,
+            "latency_ms": 2699,
+            "requested_model": "gpt-6.1-sol"
+          }
+        ],
+        "calls_by_role": {
+          "all": 44
+        },
+        "status": "REVIEWED_PLAN",
+        "metrics": {
+          "runs": 1,
+          "successful_runs": 1,
+          "success_rate": 1.0,
+          "http_attempts": 44,
+          "usage_complete": true,
+          "attempts_with_reported_usage": 44,
+          "reported_tokens": {
+            "prompt_tokens": 25421,
+            "completion_tokens": 8025
+          },
+          "total_tokens": 33446,
+          "tokens_per_success": 33446.0,
+          "estimated_cost_usd": null,
+          "cost_per_success_usd": null,
+          "cost_basis": "Configured Elice input/output rates, before cache discounts",
+          "mean_latency_ms": 151417,
+          "median_latency_ms": 151417,
+          "max_latency_ms": 151417,
+          "transport_retries": 0,
+          "review_revise_count": 0
+        }
+      }
+    ],
+    "code_unchanged": true,
+    "passed": true
+  },
+  "provider_probes_initial": [
+    {
+      "prefix": "HAIKU_",
+      "model": "claude-haiku-5-5",
+      "effort": "high",
+      "passed": false,
+      "error_code": "INVALID_PROVIDER_STREAM",
+      "status_code": 200,
+      "usage": [
+        {
+          "model": "claude-haiku-5-5",
+          "prompt_tokens": null,
+          "completion_tokens": null,
+          "reasoning_tokens": null,
+          "cached_prompt_tokens": null,
+          "reasoning_effort": "high",
+          "schema_name": "Extraction",
+          "attempt": 1,
+          "status": "ERROR",
+          "status_code": 200,
+          "error_code": "INVALID_PROVIDER_STREAM",
+          "latency_ms": 1458,
+          "requested_model": "claude-haiku-5-5"
+        }
+      ]
+    },
+    {
+      "prefix": "HAIKU_",
+      "model": "claude-haiku-5-5",
+      "effort": "medium",
+      "passed": false,
+      "error_code": "INVALID_PROVIDER_STREAM",
+      "status_code": 200,
+      "usage": [
+        {
+          "model": "claude-haiku-5-5",
+          "prompt_tokens": null,
+          "completion_tokens": null,
+          "reasoning_tokens": null,
+          "cached_prompt_tokens": null,
+          "reasoning_effort": "medium",
+          "schema_name": "Extraction",
+          "attempt": 1,
+          "status": "ERROR",
+          "status_code": 200,
+          "error_code": "INVALID_PROVIDER_STREAM",
+          "latency_ms": 1284,
+          "requested_model": "claude-haiku-5-5"
+        }
+      ]
+    },
+    {
+      "prefix": "HAIKU_",
+      "model": "claude-haiku-5-5",
+      "effort": "low",
+      "passed": false,
+      "error_code": "INVALID_PROVIDER_STREAM",
+      "status_code": 200,
+      "usage": [
+        {
+          "model": "claude-haiku-5-5",
+          "prompt_tokens": null,
+          "completion_tokens": null,
+          "reasoning_tokens": null,
+          "cached_prompt_tokens": null,
+          "reasoning_effort": "low",
+          "schema_name": "Extraction",
+          "attempt": 1,
+          "status": "ERROR",
+          "status_code": 200,
+          "error_code": "INVALID_PROVIDER_STREAM",
+          "latency_ms": 1269,
+          "requested_model": "claude-haiku-5-5"
+        }
+      ]
+    },
+    {
+      "prefix": "GEMINI_",
+      "model": "gemini-3.1-flash-lite",
+      "effort": "high",
+      "passed": true,
+      "usage": [
+        {
+          "model": "gemini-3.1-flash-lite",
+          "prompt_tokens": 43,
+          "completion_tokens": 297,
+          "reasoning_tokens": 279,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "high",
+          "schema_name": "Extraction",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 2412,
+          "requested_model": "gemini-3.1-flash-lite"
+        }
+      ]
+    },
+    {
+      "prefix": "GEMINI_",
+      "model": "gemini-3.1-flash-lite",
+      "effort": "medium",
+      "passed": true,
+      "usage": [
+        {
+          "model": "gemini-3.1-flash-lite",
+          "prompt_tokens": 43,
+          "completion_tokens": 213,
+          "reasoning_tokens": 192,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "medium",
+          "schema_name": "Extraction",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 1734,
+          "requested_model": "gemini-3.1-flash-lite"
+        }
+      ]
+    },
+    {
+      "prefix": "GEMINI_",
+      "model": "gemini-3.1-flash-lite",
+      "effort": "low",
+      "passed": true,
+      "usage": [
+        {
+          "model": "gemini-3.1-flash-lite",
+          "prompt_tokens": 43,
+          "completion_tokens": 143,
+          "reasoning_tokens": 122,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "low",
+          "schema_name": "Extraction",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 1558,
+          "requested_model": "gemini-3.1-flash-lite"
+        }
+      ]
+    }
+  ],
+  "provider_probes_after_stream_fix": [
+    {
+      "prefix": "HAIKU_",
+      "model": "claude-haiku-5-5",
+      "effort": "high",
+      "passed": true,
+      "usage": [
+        {
+          "model": "claude-haiku-5-5",
+          "prompt_tokens": 607,
+          "completion_tokens": 61,
+          "reasoning_tokens": null,
+          "cached_prompt_tokens": 587,
+          "reasoning_effort": "high",
+          "schema_name": "Extraction",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 1579,
+          "requested_model": "claude-haiku-5-5"
+        }
+      ]
+    },
+    {
+      "prefix": "HAIKU_",
+      "model": "claude-haiku-5-5",
+      "effort": "medium",
+      "passed": true,
+      "usage": [
+        {
+          "model": "claude-haiku-5-5",
+          "prompt_tokens": 607,
+          "completion_tokens": 61,
+          "reasoning_tokens": null,
+          "cached_prompt_tokens": 587,
+          "reasoning_effort": "medium",
+          "schema_name": "Extraction",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 1173,
+          "requested_model": "claude-haiku-5-5"
+        }
+      ]
+    },
+    {
+      "prefix": "HAIKU_",
+      "model": "claude-haiku-5-5",
+      "effort": "low",
+      "passed": true,
+      "usage": [
+        {
+          "model": "claude-haiku-5-5",
+          "prompt_tokens": 607,
+          "completion_tokens": 61,
+          "reasoning_tokens": null,
+          "cached_prompt_tokens": 587,
+          "reasoning_effort": "low",
+          "schema_name": "Extraction",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 1033,
+          "requested_model": "claude-haiku-5-5"
+        }
+      ]
+    }
+  ],
+  "input_data": "synthetic documents only",
+  "interrupted_planning_comparison": {
+    "completed": false,
+    "reason": "사용자의 전체 Agent 구현 범위 확장 시 중단",
+    "location": "eval-runs/agent-optimization-20261101/comparison",
+    "included_in_savings": false,
+    "manifest": {
+      "code_digest": "sha256:ccbe65b8791f69c9feea98ad213b0ba89709d264a3bd17eb979a16d3cb7d25b0",
+      "scope": "Agent only; no FE, HTTP API or DB persistence",
+      "sources": {
+        "procedure_snapshot_version": "cafe-official-sources/2026-10-18",
+        "procedure_file_sha256": "sha256:b0c79b927df47415cd9d6bea813eb26412ec3bb96128776393abc12441fec683",
+        "procedure_records": [
+          {
+            "record_id": "TAX_BUSINESS_CLOSURE",
+            "reviewed_by": "agent research: official source comparison",
+            "reviewed_at": "2026-10-18T06:25:35.432144+00:00",
+            "freshness": "CURRENT",
+            "step_codes": [
+              "FILE_TAX_BUSINESS_CLOSURE"
+            ]
+          },
+          {
+            "record_id": "CAFE_CLOSURE_AND_TAX_FOLLOWUP",
+            "reviewed_by": "agent research: official source comparison",
+            "reviewed_at": "2026-10-18T06:25:35.432144+00:00",
+            "freshness": "CURRENT",
+            "step_codes": [
+              "FILE_FOOD_SERVICE_CLOSURE",
+              "FILE_TAX_BUSINESS_CLOSURE"
+            ]
+          },
+          {
+            "record_id": "LEASE_RESTORATION_AND_RETURN",
+            "reviewed_by": "agent research: official source comparison",
+            "reviewed_at": "2026-10-18T06:25:35.432144+00:00",
+            "freshness": "CURRENT",
+            "step_codes": [
+              "CONFIRM_RESTORATION_SCOPE",
+              "PERFORM_RESTORATION",
+              "RETURN_PREMISES"
+            ]
+          },
+          {
+            "record_id": "EMPLOYEE_FINAL_SETTLEMENT",
+            "reviewed_by": "agent research: official source comparison",
+            "reviewed_at": "2026-10-18T06:25:35.432144+00:00",
+            "freshness": "CURRENT",
+            "step_codes": [
+              "SETTLE_EMPLOYEE_PAYMENTS"
+            ]
+          },
+          {
+            "record_id": "EMPLOYEE_RETIREMENT_BENEFITS",
+            "reviewed_by": "agent research: official source comparison",
+            "reviewed_at": "2026-10-18T06:25:35.432144+00:00",
+            "freshness": "CURRENT",
+            "step_codes": [
+              "SETTLE_EMPLOYEE_PAYMENTS"
+            ]
+          },
+          {
+            "record_id": "SOCIAL_INSURANCE_COMMON_CLOSURE_AND_LOSS",
+            "reviewed_by": "agent research: official source comparison",
+            "reviewed_at": "2026-10-18T06:25:35.432144+00:00",
+            "freshness": "CURRENT",
+            "step_codes": [
+              "REPORT_WORKPLACE_INSURANCE_CLOSURE",
+              "REPORT_EMPLOYEE_INSURANCE_LOSS"
+            ]
+          },
+          {
+            "record_id": "WORKPLACE_INSURANCE_CLOSURE_FORM",
+            "reviewed_by": "agent research: official source comparison",
+            "reviewed_at": "2026-10-18T06:25:35.432144+00:00",
+            "freshness": "CURRENT",
+            "step_codes": [
+              "REPORT_WORKPLACE_INSURANCE_CLOSURE"
+            ]
+          },
+          {
+            "record_id": "EMPLOYEE_INSURANCE_LOSS_FORM",
+            "reviewed_by": "agent research: official source comparison",
+            "reviewed_at": "2026-10-18T06:25:35.432144+00:00",
+            "freshness": "CURRENT",
+            "step_codes": [
+              "REPORT_EMPLOYEE_INSURANCE_LOSS"
+            ]
+          }
+        ],
+        "procedure_registry_count": 8,
+        "support_catalog_version": "evaluate-planning/no-reviewed-support-data",
+        "support_catalog_file": null,
+        "support_program_count": 0,
+        "support_freshness": []
+      },
+      "input_digests": {
+        "intake": "sha256:d97714983c2bc00ce8a5c56f20f115227454f600ed1f12f80563520232f0f22c",
+        "scope_and_demolition": "sha256:255003289b03cdd84abdac08224ff9f6d4cb3ba8ba4b842f7c354e17739aa607",
+        "conflict_mixed": "sha256:8bc8d0397764c3f08a4feecd21811b44b7e52d7639d1326275bd5d6404fb6be1",
+        "completed_scope": "sha256:dead65e284735363c6256129055b76b39278d898a59c2422f244318a8499a4d9"
+      },
+      "baseline": {
+        "shared": {
+          "model": "gpt-6.1-sol",
+          "reasoning_effort": "xhigh"
+        },
+        "supervisor": {
+          "model": "gpt-6.1-sol",
+          "reasoning_effort": "xhigh"
+        },
+        "info": {
+          "model": "gpt-6.1-sol",
+          "reasoning_effort": "xhigh"
+        }
+      },
+      "candidates": {
+        "sol-high": {
+          "model": "gpt-6.1-sol",
+          "reasoning_effort": "high"
+        },
+        "sol-medium": {
+          "model": "gpt-6.1-sol",
+          "reasoning_effort": "medium"
+        },
+        "sol-low": {
+          "model": "gpt-6.1-sol",
+          "reasoning_effort": "low"
+        },
+        "luna": {
+          "model": "gpt-5.6-luna",
+          "reasoning_effort": "low"
+        }
+      },
+      "skipped_unconfigured": [
+        "HAIKU_",
+        "GEMINI_"
+      ],
+      "maximum_runs": 36,
+      "prices_usd_per_million": {}
+    },
+    "partial_calls": {
+      "case": "intake",
+      "calls": [
+        {
+          "role": "shared",
+          "model": "gpt-6.1-sol",
+          "schema_name": "ContentSafetyDecision",
+          "reasoning_effort": "xhigh",
+          "max_completion_tokens": 16000,
+          "stream": true,
+          "request_without_model_digest": "2161ca3aa7958ca2a0cc162189edfa55b60333bf9c289414eee0631efa418da5",
+          "safety_stage": "INPUT",
+          "http_status": 200,
+          "headers_latency_ms": 1884
+        },
+        {
+          "role": "shared",
+          "model": "gpt-6.1-sol",
+          "schema_name": "ContentSafetyDecision",
+          "reasoning_effort": "xhigh",
+          "max_completion_tokens": 16000,
+          "stream": true,
+          "request_without_model_digest": "cf8dcad12156a8086dd06030cc92de6772c0bb18dfb8af00e4e2a75d162394c3",
+          "safety_stage": "SOURCES",
+          "http_status": 200,
+          "headers_latency_ms": 2407
+        },
+        {
+          "role": "info",
+          "model": "gpt-6.1-sol",
+          "schema_name": "reborn_info_analysis",
+          "reasoning_effort": "xhigh",
+          "max_completion_tokens": 16000,
+          "stream": true,
+          "request_without_model_digest": "55fe00359a868843a7082bb6a53c07e0397c98b188f706357cd43db6cdb2c7aa",
+          "http_status": 200,
+          "headers_latency_ms": 20195
+        },
+        {
+          "role": "info",
+          "model": "gpt-6.1-sol",
+          "schema_name": "reborn_info_analysis",
+          "reasoning_effort": "xhigh",
+          "max_completion_tokens": 16000,
+          "stream": true,
+          "request_without_model_digest": "c4342242dad1308d0bf1e1c0e91029ba737f32fdb5e9977d84be8eedcac589e8",
+          "http_status": 200,
+          "headers_latency_ms": 20126
+        },
+        {
+          "role": "info",
+          "model": "gpt-6.1-sol",
+          "schema_name": "reborn_info_analysis",
+          "reasoning_effort": "xhigh",
+          "max_completion_tokens": 16000,
+          "stream": true,
+          "request_without_model_digest": "f4aaadfa7162da9ba3bd5fc096ac5f522867f9118266bd1b42baff8facb25760",
+          "http_status": 200,
+          "headers_latency_ms": 20204
+        },
+        {
+          "role": "info",
+          "model": "gpt-6.1-sol",
+          "schema_name": "reborn_info_analysis",
+          "reasoning_effort": "xhigh",
+          "max_completion_tokens": 16000,
+          "stream": true,
+          "request_without_model_digest": "5b262626df1ed7f68ea74917325f6f7f084262abf337cf3cc2f2f1cd723b1836",
+          "transport_error_type": "CancelledError",
+          "headers_latency_ms": 5278
+        }
+      ],
+      "review_results": []
+    },
+    "usage_complete": false,
+    "tokens_and_cost": null
+  }
+}

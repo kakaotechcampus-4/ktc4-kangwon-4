@@ -1,0 +1,211 @@
+{
+  "successful_real_call_schemas": 10,
+  "coverage": {
+    "ContentSafetyDecision": [
+      {
+        "report": "2026-11-01-model-comparison.json",
+        "model": "gpt-6.1-sol",
+        "effort": "xhigh"
+      },
+      {
+        "report": "2026-11-01-luna6-comparison.json",
+        "model": "gpt-6.1-sol",
+        "effort": "xhigh"
+      },
+      {
+        "report": "2026-11-01-landlord-results.json",
+        "model": "gpt-6.1-sol",
+        "effort": "xhigh"
+      },
+      {
+        "report": "2026-11-01-full-flow.json",
+        "model": "gpt-6.1-sol",
+        "effort": "xhigh"
+      }
+    ],
+    "reborn_document_extraction": [
+      {
+        "report": "2026-11-01-model-comparison.json",
+        "model": "gpt-6.1-sol",
+        "effort": "xhigh"
+      },
+      {
+        "report": "2026-11-01-model-comparison.json",
+        "model": "gpt-6.1-sol",
+        "effort": "high"
+      },
+      {
+        "report": "2026-11-01-model-comparison.json",
+        "model": "gpt-6.1-sol",
+        "effort": "medium"
+      },
+      {
+        "report": "2026-11-01-model-comparison.json",
+        "model": "gpt-6.1-sol",
+        "effort": "low"
+      },
+      {
+        "report": "2026-11-01-model-comparison.json",
+        "model": "gpt-5.6-luna",
+        "effort": "high"
+      },
+      {
+        "report": "2026-11-01-model-comparison.json",
+        "model": "gpt-5.6-luna",
+        "effort": "medium"
+      },
+      {
+        "report": "2026-11-01-model-comparison.json",
+        "model": "gpt-5.6-luna",
+        "effort": "low"
+      },
+      {
+        "report": "2026-11-01-model-comparison.json",
+        "model": "gemini-3.1-flash-lite",
+        "effort": "high"
+      },
+      {
+        "report": "2026-11-01-model-comparison.json",
+        "model": "gemini-3.1-flash-lite",
+        "effort": "medium"
+      },
+      {
+        "report": "2026-11-01-model-comparison.json",
+        "model": "gemini-3.1-flash-lite",
+        "effort": "low"
+      },
+      {
+        "report": "2026-11-01-luna6-comparison.json",
+        "model": "gpt-6.1-sol",
+        "effort": "xhigh"
+      },
+      {
+        "report": "2026-11-01-luna6-comparison.json",
+        "model": "gpt-6-luna",
+        "effort": "high"
+      },
+      {
+        "report": "2026-11-01-luna6-comparison.json",
+        "model": "gpt-6-luna",
+        "effort": "medium"
+      },
+      {
+        "report": "2026-11-01-luna6-comparison.json",
+        "model": "gpt-6-luna",
+        "effort": "low"
+      },
+      {
+        "report": "2026-11-01-full-flow.json",
+        "model": "gpt-6-luna",
+        "effort": "low"
+      }
+    ],
+    "reborn_document_review": [
+      {
+        "report": "2026-11-01-model-comparison.json",
+        "model": "gpt-6.1-sol",
+        "effort": "xhigh"
+      },
+      {
+        "report": "2026-11-01-luna6-comparison.json",
+        "model": "gpt-6.1-sol",
+        "effort": "xhigh"
+      },
+      {
+        "report": "2026-11-01-full-flow.json",
+        "model": "gpt-6.1-sol",
+        "effort": "xhigh"
+      }
+    ],
+    "reborn_info_analysis": [
+      {
+        "report": "2026-11-01-existing-components.json",
+        "model": "gpt-6.1-sol",
+        "effort": "xhigh"
+      }
+    ],
+    "reborn_mobile_facts": [
+      {
+        "report": "2026-11-01-landlord-results.json",
+        "model": "gpt-6.1-sol",
+        "effort": "xhigh"
+      },
+      {
+        "report": "2026-11-01-full-flow.json",
+        "model": "gpt-6.1-sol",
+        "effort": "xhigh"
+      }
+    ],
+    "reborn_mobile_next_task": [
+      {
+        "report": "2026-11-01-full-flow.json",
+        "model": "gpt-6-luna",
+        "effort": "high"
+      }
+    ],
+    "reborn_mobile_review": [
+      {
+        "report": "2026-11-01-landlord-results.json",
+        "model": "gpt-6.1-sol",
+        "effort": "xhigh"
+      },
+      {
+        "report": "2026-11-01-full-flow.json",
+        "model": "gpt-6.1-sol",
+        "effort": "xhigh"
+      }
+    ],
+    "reborn_review_output": [
+      {
+        "report": "2026-11-01-supervisor-comparison.json",
+        "model": "gpt-6.1-sol",
+        "effort": "xhigh"
+      }
+    ],
+    "reborn_supervisor_draft": [
+      {
+        "report": "2026-11-01-supervisor-comparison.json",
+        "model": "gpt-6.1-sol",
+        "effort": "xhigh"
+      },
+      {
+        "report": "2026-11-01-supervisor-comparison.json",
+        "model": "gpt-6.1-sol",
+        "effort": "high"
+      },
+      {
+        "report": "2026-11-01-supervisor-comparison.json",
+        "model": "gpt-6.1-sol",
+        "effort": "medium"
+      },
+      {
+        "report": "2026-11-01-supervisor-comparison.json",
+        "model": "gpt-6.1-sol",
+        "effort": "low"
+      },
+      {
+        "report": "2026-11-01-supervisor-comparison.json",
+        "model": "gpt-6-luna",
+        "effort": "high"
+      },
+      {
+        "report": "2026-11-01-supervisor-comparison.json",
+        "model": "gpt-6-luna",
+        "effort": "medium"
+      },
+      {
+        "report": "2026-11-01-supervisor-comparison.json",
+        "model": "gpt-6-luna",
+        "effort": "low"
+      }
+    ],
+    "support_analysis": [
+      {
+        "report": "2026-11-01-existing-components.json",
+        "model": "gpt-6.1-sol",
+        "effort": "xhigh"
+      }
+    ]
+  },
+  "non_llm_tools": "Procedure lookup, field validation, state transitions, document consistency, redaction and packaging use deterministic code. SupportAgent is outside the MVP graph and is separately called with synthetic catalog data."
+}

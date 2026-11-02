@@ -1,0 +1,11 @@
+{
+  "original_preexisting_files_checked": 46,
+  "original_unrelated_files_changed": [],
+  "protected_paths_changed": [],
+  "prototype_zip": {
+    "name": "RE_BORN 대시보드 프로토타입 최최초치ㅗ치ㅗ치최최초종.zip",
+    "sha256": "7273236a4ac6a678adf0d35358edc0ba806d0a1056dcfab45ac466cf756f3d5f"
+  },
+  "git_base": "d63025521204b1e90cb9fff91159a6f37cf3b694",
+  "pr115_head_is_ancestor": true
+}

@@ -1,0 +1,1324 @@
+{
+  "date": "2026-11-02",
+  "scope": "Standalone document Agent and Python contract; no FE/BE API changes",
+  "synthetic_only": true,
+  "final_default": {
+    "model": "gpt-6-luna",
+    "effort": "high",
+    "ocr_owner_confirmation_required": true
+  },
+  "lower_efforts": {
+    "medium": "SKIPPED_HIGH_AUTOMATIC_ACCURACY_FAILED",
+    "low": "SKIPPED_HIGH_AUTOMATIC_ACCURACY_FAILED"
+  },
+  "requests": 50,
+  "known_tokens": 39867,
+  "estimated_cost_krw": 145.132341,
+  "reports": {
+    "sol-xhigh-pilot": {
+      "synthetic_data": true,
+      "scope": "Standalone document Agent; explicit synthetic owner confirmations; no app APIs",
+      "layout": "simple",
+      "pilot": true,
+      "code_digest": "sha256:69dad5dba433424db7b2a589c174882974f10ca421da41709f46e7e1a82918ca",
+      "code_unchanged": true,
+      "trials": [
+        {
+          "model": "gpt-6.1-sol",
+          "effort": "xhigh",
+          "automatic_fields_correct": true,
+          "owner_confirmations": [],
+          "owner_corrections": [],
+          "workflow_passed": true,
+          "passed": true,
+          "status": "REVIEWED_PLAN",
+          "behavior_passed": true,
+          "elapsed_ms": 12363,
+          "provider_usage": [
+            {
+              "model": "gpt-6.1-sol",
+              "prompt_tokens": 911,
+              "completion_tokens": 56,
+              "reasoning_tokens": 37,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "ContentSafetyDecision",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 3487,
+              "requested_model": "gpt-6.1-sol"
+            },
+            {
+              "model": "gpt-6.1-sol",
+              "prompt_tokens": 643,
+              "completion_tokens": 377,
+              "reasoning_tokens": 97,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "reborn_document_extraction",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 4101,
+              "requested_model": "gpt-6.1-sol"
+            },
+            {
+              "model": "gpt-6.1-sol",
+              "prompt_tokens": 483,
+              "completion_tokens": 142,
+              "reasoning_tokens": 118,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "reborn_document_review",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 4411,
+              "requested_model": "gpt-6.1-sol"
+            }
+          ],
+          "calls_by_role": {
+            "all": 3
+          },
+          "metrics": {
+            "runs": 1,
+            "successful_runs": 1,
+            "success_rate": 1.0,
+            "http_attempts": 3,
+            "usage_complete": true,
+            "attempts_with_reported_usage": 3,
+            "reported_tokens": {
+              "prompt_tokens": 2037,
+              "completion_tokens": 575
+            },
+            "total_tokens": 2612,
+            "tokens_per_success": 2612.0,
+            "estimated_cost_krw": 13.925519999999999,
+            "cost_per_success_krw": 13.925519999999999,
+            "uncached_cost_krw": 13.925519999999999,
+            "cache_usage_complete": true,
+            "unpriced_models": [],
+            "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+            "mean_latency_ms": 12363,
+            "median_latency_ms": 12363,
+            "max_latency_ms": 12363,
+            "transport_retries": 0,
+            "review_revise_count": null
+          }
+        }
+      ],
+      "passed": true
+    },
+    "luna6-high-simple": {
+      "synthetic_data": true,
+      "scope": "Standalone document Agent; explicit synthetic owner confirmations; no app APIs",
+      "layout": "simple",
+      "pilot": false,
+      "code_digest": "sha256:00d5440722ed66b84d83c501f2414ef905a9aeb80a96f46512d2f8f5c01e6fea",
+      "code_unchanged": true,
+      "trials": [
+        {
+          "model": "gpt-6-luna",
+          "effort": "high",
+          "automatic_fields_correct": true,
+          "owner_confirmations": [
+            "BEFORE_PHOTO",
+            "AFTER_PHOTO"
+          ],
+          "owner_corrections": [],
+          "workflow_passed": true,
+          "missing_transfer_detected": true,
+          "new_document_provider_calls": 3,
+          "same_file_reupload_provider_calls": 0,
+          "redaction_count": 1,
+          "documents": 7,
+          "zip_entries": 9,
+          "passed": true,
+          "status": "REVIEWED_PLAN",
+          "behavior_passed": true,
+          "elapsed_ms": 58390,
+          "provider_usage": [
+            {
+              "model": "gpt-6.1-sol",
+              "prompt_tokens": 884,
+              "completion_tokens": 53,
+              "reasoning_tokens": 34,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "ContentSafetyDecision",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 2353,
+              "requested_model": "gpt-6.1-sol"
+            },
+            {
+              "model": "gpt-6-luna",
+              "prompt_tokens": 616,
+              "completion_tokens": 264,
+              "reasoning_tokens": 134,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "high",
+              "schema_name": "reborn_document_extraction",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 3098,
+              "requested_model": "gpt-6-luna"
+            },
+            {
+              "model": "gpt-6.1-sol",
+              "prompt_tokens": 379,
+              "completion_tokens": 172,
+              "reasoning_tokens": 148,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "reborn_document_review",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 4356,
+              "requested_model": "gpt-6.1-sol"
+            },
+            {
+              "model": "gpt-6.1-sol",
+              "prompt_tokens": 911,
+              "completion_tokens": 53,
+              "reasoning_tokens": 34,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "ContentSafetyDecision",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 2144,
+              "requested_model": "gpt-6.1-sol"
+            },
+            {
+              "model": "gpt-6-luna",
+              "prompt_tokens": 643,
+              "completion_tokens": 316,
+              "reasoning_tokens": 125,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "high",
+              "schema_name": "reborn_document_extraction",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 3525,
+              "requested_model": "gpt-6-luna"
+            },
+            {
+              "model": "gpt-6.1-sol",
+              "prompt_tokens": 483,
+              "completion_tokens": 191,
+              "reasoning_tokens": 167,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "reborn_document_review",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 5656,
+              "requested_model": "gpt-6.1-sol"
+            },
+            {
+              "model": "gpt-6.1-sol",
+              "prompt_tokens": 866,
+              "completion_tokens": 52,
+              "reasoning_tokens": 33,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "ContentSafetyDecision",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 1901,
+              "requested_model": "gpt-6.1-sol"
+            },
+            {
+              "model": "gpt-6-luna",
+              "prompt_tokens": 599,
+              "completion_tokens": 245,
+              "reasoning_tokens": 141,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "high",
+              "schema_name": "reborn_document_extraction",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 3056,
+              "requested_model": "gpt-6-luna"
+            },
+            {
+              "model": "gpt-6.1-sol",
+              "prompt_tokens": 327,
+              "completion_tokens": 811,
+              "reasoning_tokens": 781,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "reborn_document_review",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 12844,
+              "requested_model": "gpt-6.1-sol"
+            },
+            {
+              "model": "gpt-6.1-sol",
+              "prompt_tokens": 842,
+              "completion_tokens": 84,
+              "reasoning_tokens": 65,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "ContentSafetyDecision",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 2218,
+              "requested_model": "gpt-6.1-sol"
+            },
+            {
+              "model": "gpt-6-luna",
+              "prompt_tokens": 572,
+              "completion_tokens": 122,
+              "reasoning_tokens": 66,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "high",
+              "schema_name": "reborn_document_extraction",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 1861,
+              "requested_model": "gpt-6-luna"
+            },
+            {
+              "model": "gpt-6.1-sol",
+              "prompt_tokens": 247,
+              "completion_tokens": 146,
+              "reasoning_tokens": 122,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "reborn_document_review",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 3644,
+              "requested_model": "gpt-6.1-sol"
+            },
+            {
+              "model": "gpt-6.1-sol",
+              "prompt_tokens": 893,
+              "completion_tokens": 64,
+              "reasoning_tokens": 45,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "ContentSafetyDecision",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 1991,
+              "requested_model": "gpt-6.1-sol"
+            },
+            {
+              "model": "gpt-6-luna",
+              "prompt_tokens": 622,
+              "completion_tokens": 236,
+              "reasoning_tokens": 119,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "high",
+              "schema_name": "reborn_document_extraction",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 2618,
+              "requested_model": "gpt-6-luna"
+            },
+            {
+              "model": "gpt-6.1-sol",
+              "prompt_tokens": 375,
+              "completion_tokens": 263,
+              "reasoning_tokens": 239,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "reborn_document_review",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 6192,
+              "requested_model": "gpt-6.1-sol"
+            }
+          ],
+          "calls_by_role": {
+            "all": 15
+          },
+          "metrics": {
+            "runs": 1,
+            "successful_runs": 1,
+            "success_rate": 1.0,
+            "http_attempts": 15,
+            "usage_complete": true,
+            "attempts_with_reported_usage": 15,
+            "reported_tokens": {
+              "prompt_tokens": 9259,
+              "completion_tokens": 3072
+            },
+            "total_tokens": 12331,
+            "tokens_per_success": 12331.0,
+            "estimated_cost_krw": 45.641316,
+            "cost_per_success_krw": 45.641316,
+            "uncached_cost_krw": 45.641316,
+            "cache_usage_complete": true,
+            "unpriced_models": [],
+            "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+            "mean_latency_ms": 58390,
+            "median_latency_ms": 58390,
+            "max_latency_ms": 58390,
+            "transport_retries": 0,
+            "review_revise_count": null
+          }
+        }
+      ],
+      "passed": true
+    },
+    "luna6-high-final-simple": {
+      "synthetic_data": true,
+      "scope": "Standalone document Agent; explicit synthetic owner confirmations; no app APIs",
+      "layout": "simple",
+      "pilot": false,
+      "code_digest": "sha256:2c8fe418db9e0427779833847cae0ef168e5dece582bccae273dec24dea75291",
+      "code_unchanged": true,
+      "trials": [
+        {
+          "model": "gpt-6-luna",
+          "effort": "high",
+          "automatic_fields_correct": true,
+          "owner_confirmations": [
+            "BEFORE_PHOTO",
+            "AFTER_PHOTO"
+          ],
+          "owner_corrections": [],
+          "workflow_passed": true,
+          "missing_transfer_detected": true,
+          "new_document_provider_calls": 3,
+          "same_file_reupload_provider_calls": 0,
+          "redaction_count": 1,
+          "documents": 7,
+          "zip_entries": 9,
+          "passed": true,
+          "status": "REVIEWED_PLAN",
+          "behavior_passed": true,
+          "elapsed_ms": 59335,
+          "provider_usage": [
+            {
+              "model": "gpt-6.1-sol",
+              "prompt_tokens": 884,
+              "completion_tokens": 55,
+              "reasoning_tokens": 36,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "ContentSafetyDecision",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 2118,
+              "requested_model": "gpt-6.1-sol"
+            },
+            {
+              "model": "gpt-6-luna",
+              "prompt_tokens": 616,
+              "completion_tokens": 324,
+              "reasoning_tokens": 194,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "high",
+              "schema_name": "reborn_document_extraction",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 4556,
+              "requested_model": "gpt-6-luna"
+            },
+            {
+              "model": "gpt-6.1-sol",
+              "prompt_tokens": 379,
+              "completion_tokens": 189,
+              "reasoning_tokens": 165,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "reborn_document_review",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 3990,
+              "requested_model": "gpt-6.1-sol"
+            },
+            {
+              "model": "gpt-6.1-sol",
+              "prompt_tokens": 911,
+              "completion_tokens": 61,
+              "reasoning_tokens": 42,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "ContentSafetyDecision",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 2717,
+              "requested_model": "gpt-6.1-sol"
+            },
+            {
+              "model": "gpt-6-luna",
+              "prompt_tokens": 643,
+              "completion_tokens": 593,
+              "reasoning_tokens": 402,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "high",
+              "schema_name": "reborn_document_extraction",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 6214,
+              "requested_model": "gpt-6-luna"
+            },
+            {
+              "model": "gpt-6.1-sol",
+              "prompt_tokens": 483,
+              "completion_tokens": 224,
+              "reasoning_tokens": 200,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "reborn_document_review",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 6060,
+              "requested_model": "gpt-6.1-sol"
+            },
+            {
+              "model": "gpt-6.1-sol",
+              "prompt_tokens": 866,
+              "completion_tokens": 44,
+              "reasoning_tokens": 25,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "ContentSafetyDecision",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 2170,
+              "requested_model": "gpt-6.1-sol"
+            },
+            {
+              "model": "gpt-6-luna",
+              "prompt_tokens": 599,
+              "completion_tokens": 197,
+              "reasoning_tokens": 93,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "high",
+              "schema_name": "reborn_document_extraction",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 2749,
+              "requested_model": "gpt-6-luna"
+            },
+            {
+              "model": "gpt-6.1-sol",
+              "prompt_tokens": 327,
+              "completion_tokens": 494,
+              "reasoning_tokens": 470,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "reborn_document_review",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 8467,
+              "requested_model": "gpt-6.1-sol"
+            },
+            {
+              "model": "gpt-6.1-sol",
+              "prompt_tokens": 842,
+              "completion_tokens": 88,
+              "reasoning_tokens": 69,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "ContentSafetyDecision",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 2422,
+              "requested_model": "gpt-6.1-sol"
+            },
+            {
+              "model": "gpt-6-luna",
+              "prompt_tokens": 572,
+              "completion_tokens": 105,
+              "reasoning_tokens": 49,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "high",
+              "schema_name": "reborn_document_extraction",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 2029,
+              "requested_model": "gpt-6-luna"
+            },
+            {
+              "model": "gpt-6.1-sol",
+              "prompt_tokens": 247,
+              "completion_tokens": 110,
+              "reasoning_tokens": 86,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "reborn_document_review",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 3173,
+              "requested_model": "gpt-6.1-sol"
+            },
+            {
+              "model": "gpt-6.1-sol",
+              "prompt_tokens": 893,
+              "completion_tokens": 89,
+              "reasoning_tokens": 70,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "ContentSafetyDecision",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 2558,
+              "requested_model": "gpt-6.1-sol"
+            },
+            {
+              "model": "gpt-6-luna",
+              "prompt_tokens": 622,
+              "completion_tokens": 233,
+              "reasoning_tokens": 116,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "high",
+              "schema_name": "reborn_document_extraction",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 3042,
+              "requested_model": "gpt-6-luna"
+            },
+            {
+              "model": "gpt-6.1-sol",
+              "prompt_tokens": 375,
+              "completion_tokens": 328,
+              "reasoning_tokens": 304,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "reborn_document_review",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 5878,
+              "requested_model": "gpt-6.1-sol"
+            }
+          ],
+          "calls_by_role": {
+            "all": 15
+          },
+          "metrics": {
+            "runs": 1,
+            "successful_runs": 1,
+            "success_rate": 1.0,
+            "http_attempts": 15,
+            "usage_complete": true,
+            "attempts_with_reported_usage": 15,
+            "reported_tokens": {
+              "prompt_tokens": 9259,
+              "completion_tokens": 3134
+            },
+            "total_tokens": 12393,
+            "tokens_per_success": 12393.0,
+            "estimated_cost_krw": 42.897543,
+            "cost_per_success_krw": 42.897543,
+            "uncached_cost_krw": 42.897543,
+            "cache_usage_complete": true,
+            "unpriced_models": [],
+            "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+            "mean_latency_ms": 59335,
+            "median_latency_ms": 59335,
+            "max_latency_ms": 59335,
+            "transport_retries": 0,
+            "review_revise_count": null
+          }
+        }
+      ],
+      "passed": true
+    },
+    "luna6-high-scan": {
+      "synthetic_data": true,
+      "scope": "Standalone document Agent; explicit synthetic owner confirmations; no app APIs",
+      "layout": "scan",
+      "pilot": false,
+      "code_digest": "sha256:2c8fe418db9e0427779833847cae0ef168e5dece582bccae273dec24dea75291",
+      "code_unchanged": true,
+      "trials": [
+        {
+          "model": "gpt-6-luna",
+          "effort": "high",
+          "automatic_fields_correct": false,
+          "owner_confirmations": [
+            "CONSTRUCTION_STATEMENT",
+            "TAX_INVOICE",
+            "CLOSURE_CERTIFICATE",
+            "BANK_COPY",
+            "BEFORE_PHOTO",
+            "AFTER_PHOTO",
+            "TRANSFER"
+          ],
+          "owner_corrections": [
+            "CONSTRUCTION_STATEMENT",
+            "TAX_INVOICE",
+            "CLOSURE_CERTIFICATE",
+            "BANK_COPY",
+            "TRANSFER"
+          ],
+          "workflow_passed": true,
+          "missing_transfer_detected": true,
+          "new_document_provider_calls": 3,
+          "same_file_reupload_provider_calls": 0,
+          "redaction_count": 1,
+          "documents": 7,
+          "zip_entries": 9,
+          "passed": false,
+          "status": "REVIEWED_PLAN",
+          "behavior_passed": false,
+          "elapsed_ms": 65856,
+          "provider_usage": [
+            {
+              "model": "gpt-6.1-sol",
+              "prompt_tokens": 865,
+              "completion_tokens": 73,
+              "reasoning_tokens": 54,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "ContentSafetyDecision",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 1964,
+              "requested_model": "gpt-6.1-sol"
+            },
+            {
+              "model": "gpt-6-luna",
+              "prompt_tokens": 597,
+              "completion_tokens": 261,
+              "reasoning_tokens": 190,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "high",
+              "schema_name": "reborn_document_extraction",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 3759,
+              "requested_model": "gpt-6-luna"
+            },
+            {
+              "model": "gpt-6.1-sol",
+              "prompt_tokens": 285,
+              "completion_tokens": 116,
+              "reasoning_tokens": 92,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "reborn_document_review",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 2902,
+              "requested_model": "gpt-6.1-sol"
+            },
+            {
+              "model": "gpt-6.1-sol",
+              "prompt_tokens": 868,
+              "completion_tokens": 53,
+              "reasoning_tokens": 34,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "ContentSafetyDecision",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 2511,
+              "requested_model": "gpt-6.1-sol"
+            },
+            {
+              "model": "gpt-6-luna",
+              "prompt_tokens": 600,
+              "completion_tokens": 444,
+              "reasoning_tokens": 371,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "high",
+              "schema_name": "reborn_document_extraction",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 5760,
+              "requested_model": "gpt-6-luna"
+            },
+            {
+              "model": "gpt-6.1-sol",
+              "prompt_tokens": 290,
+              "completion_tokens": 211,
+              "reasoning_tokens": 187,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "reborn_document_review",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 5003,
+              "requested_model": "gpt-6.1-sol"
+            },
+            {
+              "model": "gpt-6.1-sol",
+              "prompt_tokens": 841,
+              "completion_tokens": 69,
+              "reasoning_tokens": 50,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "ContentSafetyDecision",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 2397,
+              "requested_model": "gpt-6.1-sol"
+            },
+            {
+              "model": "gpt-6-luna",
+              "prompt_tokens": 574,
+              "completion_tokens": 214,
+              "reasoning_tokens": 181,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "high",
+              "schema_name": "reborn_document_extraction",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 3389,
+              "requested_model": "gpt-6-luna"
+            },
+            {
+              "model": "gpt-6.1-sol",
+              "prompt_tokens": 216,
+              "completion_tokens": 538,
+              "reasoning_tokens": 454,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "reborn_document_review",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 9517,
+              "requested_model": "gpt-6.1-sol"
+            },
+            {
+              "model": "gpt-6-luna",
+              "prompt_tokens": 632,
+              "completion_tokens": 121,
+              "reasoning_tokens": 88,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "high",
+              "schema_name": "reborn_document_extraction",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 2085,
+              "requested_model": "gpt-6-luna"
+            },
+            {
+              "model": "gpt-6.1-sol",
+              "prompt_tokens": 216,
+              "completion_tokens": 167,
+              "reasoning_tokens": 143,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "reborn_document_review",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 3586,
+              "requested_model": "gpt-6.1-sol"
+            },
+            {
+              "model": "gpt-6.1-sol",
+              "prompt_tokens": 831,
+              "completion_tokens": 71,
+              "reasoning_tokens": 52,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "ContentSafetyDecision",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 2324,
+              "requested_model": "gpt-6.1-sol"
+            },
+            {
+              "model": "gpt-6-luna",
+              "prompt_tokens": 561,
+              "completion_tokens": 139,
+              "reasoning_tokens": 109,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "high",
+              "schema_name": "reborn_document_extraction",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 2461,
+              "requested_model": "gpt-6-luna"
+            },
+            {
+              "model": "gpt-6.1-sol",
+              "prompt_tokens": 203,
+              "completion_tokens": 227,
+              "reasoning_tokens": 203,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "reborn_document_review",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 4916,
+              "requested_model": "gpt-6.1-sol"
+            },
+            {
+              "model": "gpt-6.1-sol",
+              "prompt_tokens": 877,
+              "completion_tokens": 67,
+              "reasoning_tokens": 48,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "ContentSafetyDecision",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 2671,
+              "requested_model": "gpt-6.1-sol"
+            },
+            {
+              "model": "gpt-6-luna",
+              "prompt_tokens": 606,
+              "completion_tokens": 250,
+              "reasoning_tokens": 182,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "high",
+              "schema_name": "reborn_document_extraction",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 3574,
+              "requested_model": "gpt-6-luna"
+            },
+            {
+              "model": "gpt-6.1-sol",
+              "prompt_tokens": 294,
+              "completion_tokens": 154,
+              "reasoning_tokens": 130,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "reborn_document_review",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 4057,
+              "requested_model": "gpt-6.1-sol"
+            }
+          ],
+          "calls_by_role": {
+            "all": 17
+          },
+          "metrics": {
+            "runs": 1,
+            "successful_runs": 0,
+            "success_rate": 0.0,
+            "http_attempts": 17,
+            "usage_complete": true,
+            "attempts_with_reported_usage": 17,
+            "reported_tokens": {
+              "prompt_tokens": 9356,
+              "completion_tokens": 3175
+            },
+            "total_tokens": 12531,
+            "tokens_per_success": null,
+            "estimated_cost_krw": 42.667961999999996,
+            "cost_per_success_krw": null,
+            "uncached_cost_krw": 42.667961999999996,
+            "cache_usage_complete": true,
+            "unpriced_models": [],
+            "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+            "mean_latency_ms": 65856,
+            "median_latency_ms": 65856,
+            "max_latency_ms": 65856,
+            "transport_retries": 0,
+            "review_revise_count": null
+          }
+        }
+      ],
+      "passed": false
+    }
+  },
+  "artifacts": {
+    "luna6-high-final-simple": {
+      "zip_entries": 9,
+      "all_pdfs_open": true,
+      "transfer_rrn_back_not_readable": true,
+      "all_six_checks_done": true,
+      "zip_sha256": "d27486e73e497937742aae3177c0905e7205cf66cd32dfba57166369f1d05dda"
+    },
+    "luna6-high-scan": {
+      "zip_entries": 9,
+      "all_pdfs_open": true,
+      "transfer_rrn_back_not_readable": true,
+      "all_six_checks_done": true,
+      "zip_sha256": "b40be59cd09b1068747dddf60f4ab632b8411d27c162b873e3b3b906d915391f"
+    }
+  },
+  "ocr_pilot": {
+    "pilot_setup_correction": "Keep page alive while using OCR TextPage; first setup error made zero provider calls",
+    "trials": [
+      {
+        "name": "construction_statement.png",
+        "dpi": 240,
+        "elapsed_seconds": 0.788,
+        "text": " 컴증용가삼문서/  ABS 아님\n\n절거공사내역서\n\n\n00000  이\nae           그린철거                         |\n    | 공급받는자       봄날개인카페                                                                                                                                                                                                                                                                                                                                                                                                                                    |\n포라공사금맥(부가세     3,300,000 원                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |\n\n34 내용       카문터ㆍ심크대ㆍ간판철거\nee 으00000"
+      },
+      {
+        "name": "construction_statement.png",
+        "dpi": 300,
+        "elapsed_seconds": 0.995,
+        "text": " ass 카상문서   /  ABS 아님\n\n철거공사내역서\n\n\n2” me\npe           그린철거                    |\n     : 공급받는자       봄날개인카페\n\n\n공사금맥\n 포함)   |              ( 부가세     3,300,0002\n\n                  심크대ㆍ간판 철거| 내용          카운터ㆍ\n\nes"
+      },
+      {
+        "name": "tax_invoice.png",
+        "dpi": 240,
+        "elapsed_seconds": 0.699,
+        "text": " ass 가상문서    /  ABS 아님\n\n전자세금계산서\n\nOO SE\nFe           그린철거                    |\n      | 33받는자       봄날개인카페\n\n\n 공급가맥           3,000, 0008\n\n     | am              300, 0002\n\n 합계금맥          3,300,000 원                                                                                                                                                                                                                                                                                                                                            |\n\npres           2026-10-28"
+      },
+      {
+        "name": "tax_invoice.png",
+        "dpi": 300,
+        "elapsed_seconds": 0.954,
+        "text": " ASS 가상문서/  ABS 아님\n\n전자세금계산서\n\n\n~ ee\n 공급자          그린철거                    |\n\n\n               봄날개인카페        | 공급받는자\n\n\n\n 공급가맥          3,000,00028\n\n   | am              300, 000 원\n\n 합계금맥           3,300, 0002                                                                                                                                                                                                                                                                                                                                                                                                                              |\n\neae           2026-10-28\n\n\nee"
+      }
+    ]
+  },
+  "verification": {
+    "tested_runtime_commit": "10558522c0b8b222b42c21ca94fc6431256d253e",
+    "worktree": "isolated tracked Git tree, no .env, mock BE credentials",
+    "pytest": {
+      "exit_code": 0,
+      "passed": 619,
+      "elapsed_seconds": 35.98,
+      "stdout": "........................................................................ [ 11%]\n........................................................................ [ 23%]\n........................................................................ [ 34%]\n........................................................................ [ 46%]\n........................................................................ [ 58%]\n........................................................................ [ 69%]\n........................................................................ [ 81%]\n........................................................................ [ 93%]\n...........................................                              [100%]\n619 passed in 35.98s\n",
+      "stdout_sha256": "308121478c8da766b5a042c2aadb8da472bf33f42caf6606d89b6bb59aa155b8",
+      "includes_mysql_integration": true,
+      "real_llm_calls": 0
+    },
+    "targeted_regression": {
+      "passed": 44,
+      "elapsed_seconds": 5.32
+    },
+    "ruff": "all changed Python files passed; unrelated preexisting lint findings excluded",
+    "scope_check": {
+      "forbidden_changes": [],
+      "changed_tracked_files": 82
+    },
+    "secret_check": "No current .env KEY/TOKEN/SECRET values of length>=12 in selected publication files",
+    "source_sha256": {
+      "backend/app/agent/document_agent/__init__.py": "4973a5129e55c51aae0f4dd5fe3248247a47c96c0a6ce500b812f2dd3122c94d",
+      "backend/app/agent/document_agent/agent.py": "e0cd90ee2aafde84e7db589fbb1461f75d8fb1cf8d747d183ed6d50be8a305f6",
+      "backend/app/agent/document_agent/checks.py": "d12c3c9d8ddef24994e35fa50f52c925c36f4f017f2b958a4f36b4a3ff4ee09c",
+      "backend/app/agent/document_agent/documents.py": "d9de6beedb4a647888ad87aa90c29faeef1038772c42b7e339f126f66312124d",
+      "backend/app/agent/document_agent/models.py": "f8c0fcc08340b9343e501ad0ab5361ef259cfdbadc538b3699c252586f048a4c",
+      "backend/app/agent/document_agent/safety.py": "a802e5d84eb3ed9c0d5c803d3cc870f7556901ecb8e037dfa862f225e33ad70a"
+    }
+  },
+  "publication": {
+    "pull_requests": [
+      {
+        "number": 121,
+        "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/121",
+        "head": "feature/agent-observability",
+        "base": "develop",
+        "commit_at_verification": "e01c60620f619f7065671807653608dfd341978f",
+        "commits": [
+          "[AI] feat: 역할별 Langfuse 추적과 실제 호출 사용량 기록",
+          "[AI] feat: 모델과 effort 설정 및 원화 비용 계산",
+          "[AI] feat: Langfuse 기간별 모니터링 집계",
+          "[AI] fix: 결과 입력의 질문을 사실 근거에서 제외",
+          "[AI] test: 역할별 모델 평가와 원본 기록 없는 회귀 검사"
+        ],
+        "files": 18,
+        "reviewers": []
+      },
+      {
+        "number": 128,
+        "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/128",
+        "head": "feature/document-agent-runtime",
+        "base": "feature/agent-observability",
+        "commit_at_verification": "07b32790cb3416f48d2f2f2bd6c8af750801b2a2",
+        "commits": [
+          "[AI] feat: 문서 Tool 계약과 안전 검사",
+          "[AI] feat: 문서 추출과 사용자 확인",
+          "[AI] feat: 정산 서류 대조와 제출 ZIP",
+          "[AI] feat: 문서 Tool 일괄 호출과 부분 성공 보존"
+        ],
+        "files": 14,
+        "reviewers": []
+      },
+      {
+        "number": 130,
+        "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/130",
+        "head": "feature/agent-evaluation-artifacts",
+        "base": "develop",
+        "commit_at_verification": "765fd75d340e60265aa38aa16718a32f5f8880f2",
+        "commits": [
+          "[AI] docs: 평가 입력과 실제 호출 원본 기록 보존",
+          "[AI] docs: 모델 선택 근거와 검증 결과 정리"
+        ],
+        "files": 50,
+        "reviewers": []
+      }
+    ],
+    "previous_publication": {
+      "pull_requests": [
+        {
+          "number": 121,
+          "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/121",
+          "head": "feature/agent-observability",
+          "base": "develop",
+          "scope": "monitoring, model/effort optimization and evaluation records",
+          "reviewers": []
+        },
+        {
+          "number": 128,
+          "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/128",
+          "head": "feature/document-agent-runtime",
+          "base": "feature/agent-observability",
+          "scope": "standalone document Agent and Python contracts",
+          "reviewers": []
+        }
+      ],
+      "superseded_pull_requests": [
+        122,
+        123,
+        124,
+        125,
+        126,
+        127,
+        129
+      ],
+      "reviewer_requests": "Removed all assistant-added requests from PRs121-129 at user correction; no new requests",
+      "previous_publication": {
+        "pull_requests": [
+          {
+            "number": 121,
+            "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/121",
+            "head": "feature/agent-observability",
+            "base": "develop",
+            "commit": "e654fa0be5d8648bed04e34d04edf36d1f2e928c",
+            "reviewers": [
+              "leehyunjong12",
+              "Louie-03"
+            ]
+          },
+          {
+            "number": 122,
+            "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/122",
+            "head": "feature/agent-model-config",
+            "base": "feature/agent-observability",
+            "commit": "721a0794f01f07721e530e86d65f08b50ef80e6d",
+            "reviewers": [
+              "leehyunjong12",
+              "Louie-03"
+            ]
+          },
+          {
+            "number": 123,
+            "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/123",
+            "head": "feature/agent-usage-report",
+            "base": "feature/agent-model-config",
+            "commit": "28455dcf5c89f52e10aa034a3d0155143c9a6880",
+            "reviewers": [
+              "leehyunjong12",
+              "Louie-03"
+            ]
+          },
+          {
+            "number": 124,
+            "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/124",
+            "head": "feature/agent-input-answers",
+            "base": "feature/agent-usage-report",
+            "commit": "d8af1d97c001a5fb8aa8e83d535ebab9eb5abe4a",
+            "reviewers": [
+              "leehyunjong12",
+              "Louie-03"
+            ]
+          },
+          {
+            "number": 125,
+            "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/125",
+            "head": "feature/document-agent-contracts",
+            "base": "feature/agent-input-answers",
+            "commit": "d822575eb4a6611b671a00cc49b03e162a3c6a09",
+            "reviewers": [
+              "leehyunjong12",
+              "Louie-03"
+            ]
+          },
+          {
+            "number": 126,
+            "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/126",
+            "head": "feature/document-agent-extraction",
+            "base": "feature/document-agent-contracts",
+            "commit": "90391f7da22194c633088124498da62e9505cd9f",
+            "reviewers": [
+              "leehyunjong12",
+              "Louie-03"
+            ]
+          },
+          {
+            "number": 127,
+            "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/127",
+            "head": "feature/document-agent-checks",
+            "base": "feature/document-agent-extraction",
+            "commit": "d29790ecc7952df2a420130924588a8ba3f6fdf3",
+            "reviewers": [
+              "leehyunjong12",
+              "Louie-03"
+            ]
+          },
+          {
+            "number": 128,
+            "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/128",
+            "head": "feature/document-agent-runtime",
+            "base": "feature/document-agent-checks",
+            "commit": "97f6da357635ab2ff3cdc85970101c60639a35cd",
+            "reviewers": [
+              "leehyunjong12",
+              "Louie-03"
+            ]
+          },
+          {
+            "number": 129,
+            "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/129",
+            "head": "feature/agent-evaluation-records",
+            "base": "feature/document-agent-runtime",
+            "commit": "3587491a00b176fe564a8464137f807f574cec48",
+            "reviewers": [
+              "leehyunjong12",
+              "Louie-03"
+            ]
+          }
+        ],
+        "merged": false,
+        "original_workspace_preserved": true,
+        "local_mobile_draft_excluded": true
+      },
+      "merged": false,
+      "original_workspace_preserved": true,
+      "local_mobile_draft_excluded": true
+    },
+    "reviewer_requests": "No new review requests; previous assistant-added requests remain removed",
+    "history_backups": "local preserve/pr-121-before-three-prs-20261102 and preserve/pr-128-before-three-prs-20261102",
+    "separation": "Monitoring functionality and result analysis in PR121; document Tool and document test results in PR128; raw evaluation JSON/CSV/TXT only in PR130",
+    "original_workspace_preserved": true,
+    "local_mobile_draft_excluded": true
+  },
+  "three_pr_verification": {
+    "monitoring": {
+      "passed": 581,
+      "elapsed_seconds": 17.45,
+      "archive_directory_present": false,
+      "stdout": "........................................................................ [ 12%]\n........................................................................ [ 24%]\n........................................................................ [ 37%]\n........................................................................ [ 49%]\n........................................................................ [ 61%]\n........................................................................ [ 74%]\n........................................................................ [ 86%]\n........................................................................ [ 99%]\n.....                                                                    [100%]\n581 passed in 17.45s\n"
+    },
+    "document_tool": {
+      "passed": 619,
+      "elapsed_seconds": 34.0,
+      "mysql_integration": true,
+      "archive_directory_present": false,
+      "stdout": "........................................................................ [ 11%]\n........................................................................ [ 23%]\n........................................................................ [ 34%]\n........................................................................ [ 46%]\n........................................................................ [ 58%]\n........................................................................ [ 69%]\n........................................................................ [ 81%]\n........................................................................ [ 93%]\n...........................................                              [100%]\n619 passed in 34.00s\n"
+    },
+    "focused": {
+      "passed": 34,
+      "elapsed_seconds": 4.57
+    },
+    "real_llm_calls": 0,
+    "source_change": "Rename document_agent/DocumentAgent/build_document_agent to document_tool/DocumentTool/build_document_tool; original measurement fingerprints preserved",
+    "test_change": "Reuse existing synthetic Supervisor input builder instead of reading archived JSON",
+    "scope_check": "FE/BE/common/CLAUDE/AGENTS/.env unchanged",
+    "secret_check": "No current .env KEY/TOKEN/SECRET strings of length>=12 in publication files",
+    "ruff": "changed Python files passed"
+  },
+  "result_ownership": {
+    "monitoring_results_pr": 121,
+    "document_results_pr": 128,
+    "raw_artifacts_pr": 130,
+    "markdown_result_file": "docs/agent/monitoring-results.md in PR121",
+    "raw_artifact_formats": {
+      "json": 46,
+      "csv": 2,
+      "txt": 2
+    },
+    "additional_llm_calls": 0
+  }
+}
