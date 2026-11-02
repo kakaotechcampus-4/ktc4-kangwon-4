@@ -1,6 +1,7 @@
+from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import JSON, BigInteger, Boolean, Column, Enum, ForeignKey, String, Text
+from sqlalchemy import JSON, BigInteger, Boolean, Column, DateTime, Enum, ForeignKey, String, Text
 from sqlmodel import Field, Relationship
 
 from app.be.models.mixins import CreatedAtMixin
@@ -79,6 +80,11 @@ class CaseHistory(CreatedAtMixin, table=True):
         default=None,
         sa_column=Column(Boolean, nullable=True),
         description="재시도하면 성공할 가능성이 있는지. 실패가 아니면 NULL",
+    )
+    judged_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime, nullable=True),
+        description="판단이 끝난 시각. 판단 중(PENDING)이면 NULL",
     )
     priority_blocker_id: int | None = Field(
         default=None, sa_column=Column(BigInteger, ForeignKey("blocker.id", use_alter=True, name="fk_case_history_priority_blocker"), nullable=True)
