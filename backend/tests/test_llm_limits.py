@@ -6,23 +6,115 @@ from dataclasses import replace
 
 import httpx
 import pytest
-from pydantic import BaseModel
-
 from app.agent.llm import (
     LLMConfig,
     LLMConfigurationError,
     LLMRequestError,
     LLMResponseError,
     StructuredLLMClient,
+    candidate_config,
     restrict_string_enums,
     sanitize_json_schema,
 )
 from app.agent.runtime import resolve_run_deadline_seconds
 from app.agent.supervisor.agent import SupervisorModelOutput
+from app.agent.tracing import capture_usage
+from pydantic import BaseModel
 
 
 class Answer(BaseModel):
     ok: bool
+
+
+def test_supervisor_model_selector_preserves_strong_review_and_requires_own_key(tmp_path):
+    env = tmp_path / ".env"
+    text = (
+        "CHAT_PROXY_URL=https://proxy.example.org/shared/v1\nPROXY_TOKEN=shared-synthetic-key\n"
+        "OPENAI_MODEL=gpt-6.1-sol\nOPENAI_REASONING_EFFORT=xhigh\n"
+        "AGENT_SUPERVISOR_MODEL_PREFIX=LUNA6_\n"
+        "LUNA6_CHAT_PROXY_URL=https://proxy.example.org/luna6/v1\n"
+        "LUNA6_PROXY_TOKEN=luna6-synthetic-key\nLUNA6_MODEL=gpt-6-luna\n"
+        "LUNA6_REASONING_EFFORT=low\n"
+    )
+    env.write_text(text)
+    supervisor = LLMConfig.from_env(env_file=env, environ={}, env_prefix="SUPERVISOR_")
+    review = LLMConfig.from_env(env_file=env, environ={})
+    assert supervisor.model == "gpt-6-luna" and supervisor.reasoning_effort == "low"
+    assert supervisor.api_token == "luna6-synthetic-key"
+    assert review.model == "gpt-6.1-sol" and review.reasoning_effort == "xhigh"
+    env.write_text(text.replace("LUNA6_PROXY_TOKEN=luna6-synthetic-key", "LUNA6_PROXY_TOKEN="))
+    with pytest.raises(LLMConfigurationError):
+        LLMConfig.from_env(env_file=env, environ={}, env_prefix="SUPERVISOR_")
+
+
+def test_failed_schema_attempt_is_counted_with_its_tokens_before_retry():
+    attempts = []
+
+    def handler(request):
+        attempts.append(request)
+        return httpx.Response(200, json={
+            "model": "actual-model",
+            "choices": [{"message": {"content": '{"wrong":true}' if len(attempts) == 1 else '{"ok":true}'}}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 7,
+                      "completion_tokens_details": {"reasoning_tokens": 3},
+                      "prompt_tokens_details": {"cached_tokens": 4}},
+        })
+
+    with capture_usage() as calls:
+        assert generate(config(reasoning_effort="low"), handler).ok
+    assert len(calls) == 2
+    assert sum(call.prompt_tokens for call in calls) == 20
+    assert calls[0].status == "ERROR" and calls[0].error_code == "SCHEMA_VALIDATION_FAILED"
+    assert calls[1].status == "SUCCESS" and calls[1].attempt == 2
+    assert all(call.model == "actual-model" and call.requested_model == "gpt-5.6-sol" for call in calls)
+    assert calls[0].reasoning_tokens == 3 and calls[0].cached_prompt_tokens == 4
+    assert "synthetic-test-token" not in repr(calls) and "example.org" not in repr(calls)
+
+
+def test_http_retry_and_refusal_record_unknown_and_known_usage_once_each():
+    count = 0
+
+    def handler(_):
+        nonlocal count
+        count += 1
+        if count == 1:
+            return httpx.Response(503, json={"error": "private provider message"})
+        return httpx.Response(200, json={
+            "choices": [{"finish_reason": "length", "message": {"content": ""}}],
+            "usage": {"prompt_tokens": 20, "completion_tokens": 30},
+        })
+
+    with capture_usage() as calls, pytest.raises(LLMResponseError):
+        generate(config(), handler)
+    assert len(calls) == 2
+    assert calls[0].prompt_tokens is None and calls[0].status_code == 503
+    assert calls[1].completion_tokens == 30 and calls[1].error_code == "OUTPUT_TOKEN_LIMIT"
+    assert "private provider message" not in repr(calls)
+
+
+def test_candidate_does_not_inherit_shared_credentials_model_or_effort(tmp_path):
+    env = {"CHAT_PROXY_URL": "https://shared.example", "PROXY_TOKEN": "shared-secret",
+           "OPENAI_MODEL": "shared", "OPENAI_REASONING_EFFORT": "xhigh"}
+    options = {"env_file": tmp_path / "absent", "environ": env}
+    assert candidate_config("HAIKU_", **options) is None
+    env["HAIKU_MODEL"] = "haiku"
+    with pytest.raises(LLMConfigurationError):
+        candidate_config("HAIKU_", **options)
+    env.update(HAIKU_CHAT_PROXY_URL="https://haiku.example", HAIKU_PROXY_TOKEN="own-secret")
+    candidate = candidate_config("HAIKU_", **options)
+    assert candidate.api_token == "own-secret" and candidate.reasoning_effort is None
+    env["AGENT_INFO_MODEL_PREFIX"] = "HAIKU_"
+    assert LLMConfig.from_env(env_prefix="INFO_", **options) == candidate
+
+
+def test_capture_of_cancelled_attempt_is_error_with_unknown_usage():
+    async def handler(_):
+        raise asyncio.CancelledError
+
+    with capture_usage() as calls, pytest.raises(asyncio.CancelledError):
+        generate(config(), handler)
+    assert len(calls) == 1 and calls[0].status == "ERROR"
+    assert calls[0].error_code == "CALL_INTERRUPTED" and calls[0].prompt_tokens is None
 
 
 def config(**changes):
@@ -154,6 +246,21 @@ def event(delta=None, finish=None):
         )
         + "\n\n"
     )
+
+
+@pytest.mark.parametrize("extra_content", [False, True])
+def test_elice_haiku_usage_tail_allows_only_an_empty_choice(extra_content):
+    tail = {"choices": [{"index": 0, "delta": {"content": "injected"} if extra_content else {},
+                          "finish_reason": None}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 3}}
+    body = event({"content": '{"ok":true}'}, "stop") + "data: " + json.dumps(tail) + "\n\ndata: [DONE]\n\n"
+    with capture_usage() as calls:
+        if extra_content:
+            with pytest.raises(LLMResponseError):
+                generate(config(stream=True, max_retries=0), lambda _: httpx.Response(200, text=body))
+        else:
+            assert generate(config(stream=True), lambda _: httpx.Response(200, text=body)).ok
+            assert len(calls) == 1 and calls[0].completion_tokens == 3
 
 
 class ChunkedBody(httpx.AsyncByteStream):
