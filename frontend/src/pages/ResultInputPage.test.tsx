@@ -320,7 +320,7 @@ describe('ResultInputPage — 서버', () => {
      * 일부만 답해도 보낼 수 있다. 막지 않는 대신, 빠뜨린 것인지 한 번 보게 한다.
      * 하나도 안 적었거나 다 적었으면 알릴 것이 없다.
      */
-    it('질문 일부만 답하면 남은 질문은 다시 묻는다고 알린다', async () => {
+    it('질문 일부만 답하면 남은 질문은 비워 둬도 된다고 알린다', async () => {
       serve({
         entry: [
           json(
@@ -334,7 +334,7 @@ describe('ResultInputPage — 서버', () => {
       })
       renderFlow()
       await advance()
-      const hint = '답하지 않은 질문은 다음에 다시 여쭤볼게요.'
+      const hint = '답하지 않은 질문은 비워 두셔도 돼요. 필요하면 다시 여쭤볼게요.'
 
       expect(screen.queryByText(hint)).not.toBeInTheDocument()
 

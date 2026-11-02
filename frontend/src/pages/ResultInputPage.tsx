@@ -455,7 +455,7 @@ export function ResultInputPage() {
             질문이 여럿인데 일부만 답했다. 막지는 않는다 — 모르는 질문 때문에 아는 답까지 못 보내면 안 된다.
             대신 빠뜨린 것인지 한 번 보게 하고, 남은 질문은 서버가 다시 묻는다는 것을 알린다
           */}
-          {partlyAnswered && <InfoBox>답하지 않은 질문은 다음에 다시 여쭤볼게요.</InfoBox>}
+          {partlyAnswered && <InfoBox>답하지 않은 질문은 비워 두셔도 돼요. 필요하면 다시 여쭤볼게요.</InfoBox>}
           <Button type="submit" disabled={!canSubmit}>
             보내기
           </Button>
