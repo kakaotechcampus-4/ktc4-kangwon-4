@@ -6,6 +6,36 @@ from sqlmodel import Field, Relationship
 from app.be.models.mixins import CreatedAtMixin
 
 
+class OfficialDocument(CreatedAtMixin, table=True):
+    """공식 자료 본문. 문서 한 건의 한 버전마다 한 줄이고, 한 번 적으면 고치지 않는다.
+
+    전에는 이 본문을 Case마다 evidence에 복사했다. 사장님이 늘수록 같은 국세청 안내문이
+    그만큼 쌓였고, 문서를 고치려면 Case 수만큼 다시 써야 했다. 그 수단이 Case를 하나씩
+    지정하는 수동 스크립트(scripts/import_reviewed_procedures.py)라, 빠뜨려도 에러가 아니라
+    조용히 "자료 없음"이 됐다.
+
+    버전을 올릴 때는 이 줄을 고치는 것이 아니라 새 줄을 넣는다. 그래야 예전 Case가 예전
+    줄을 계속 가리켜서, 그 Case가 무엇을 보고 판단했는지가 나중에도 그대로 남는다.
+    """
+
+    __tablename__ = "official_document"
+    __table_args__ = (
+        # 같은 문서의 같은 버전을 두 번 적재하지 않는다. 두 줄이 되면 Case마다 다른 줄을
+        # 가리키게 되어, 본문을 한곳에 둔 뜻이 사라진다.
+        UniqueConstraint("source_ref", "source_version", name="uq_official_document_source_version"),
+    )
+
+    id: int | None = Field(default=None, sa_column=Column(BigInteger, primary_key=True, autoincrement=True))
+    source_ref: str = Field(max_length=500, description="출처 참조(원문 URL)")
+    source_version: str = Field(max_length=100, description="출처 버전")
+    excerpt: str = Field(sa_column=Column(Text, nullable=False), description="본문")
+    content_hash: str = Field(max_length=64, description="본문 해시. Case 쪽 값과 대조한다")
+    published_at: datetime | None = Field(
+        default=None, sa_column=Column(DateTime, nullable=True), description="원본 게시 시각"
+    )
+    retrieved_at: datetime = Field(sa_column=Column(DateTime, nullable=False), description="수집 시각")
+
+
 class Evidence(CreatedAtMixin, table=True):
     __tablename__ = "evidence"
 
@@ -33,7 +63,14 @@ class Evidence(CreatedAtMixin, table=True):
     source_ref: str = Field(max_length=500, description="출처 참조")
     source_version: str | None = Field(default=None, max_length=100, description="출처 버전")
     locator: str | None = Field(default=None, max_length=255, description="출처 내 위치")
+    # 사장님이 쓴 글은 Case마다 진짜로 다르므로 여기에 그대로 둔다.
+    # 공식 자료는 본문을 official_document 한 줄에 두고 아래 official_document_id로 가리킨다.
     excerpt: str | None = Field(default=None, sa_column=Column(Text, nullable=True), description="발췌 내용")
+    official_document_id: int | None = Field(
+        default=None,
+        sa_column=Column(BigInteger, ForeignKey("official_document.id"), nullable=True),
+        description="공식 자료일 때 본문이 있는 줄. 이 값이 있으면 excerpt는 비어 있다",
+    )
     published_at: datetime | None = Field(
         default=None, sa_column=Column(DateTime, nullable=True), description="원본 게시 시각"
     )
