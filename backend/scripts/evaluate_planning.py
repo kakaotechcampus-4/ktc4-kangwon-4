@@ -1,13 +1,8 @@
-"""Repeat planning from a frontend intake payload or AgentGraphInput and compare answers.
+"""Repeat actual planning with caller-supplied reviewed sources.
 
-Run from the repository root with PYTHONPATH=backend. Every trial builds a fresh
-runtime with the decision cache off, so a repeat really calls the provider again
-instead of replaying an earlier answer. --validate-only never calls the provider.
-Reports record model names, timings and digests -- never tokens, URLs, prompts or
-user text.
-
-Reviewed procedure and support data are supplied by the caller, the same way
-``build_runtime`` expects. Nothing is fetched from the internet during a run.
+Run with PYTHONPATH=backend. --validate-only makes no provider calls.
+Reports retain usage, model settings, timings and review verdicts, not secrets
+or prompts. --as-of selects the evaluation date without bypassing freshness.
 """
 
 from __future__ import annotations
@@ -19,16 +14,15 @@ import json
 import subprocess
 from collections import Counter
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from enum import Enum
 from pathlib import Path
 from time import perf_counter
 from unittest.mock import patch
 from uuid import UUID, uuid5
 
-import httpx
-
 import app.agent.runtime as runtime_module
+import httpx
 from app.agent.llm import LLMConfig, StructuredLLMClient
 from app.agent.procedure_tool.store import ReviewedProcedureSnapshot
 from app.agent.schemas import (
@@ -40,7 +34,9 @@ from app.agent.schemas import (
     canonical_digest,
 )
 from app.agent.support_agent import ReviewedSupportCatalog
+from app.agent.tracing import capture_usage
 from app.be.schemas.case import CaseCreateRequest
+from scripts.evaluation_metrics import load_prices, summarize_metrics
 
 # A fixed clock keeps two runs of the same payload comparable. Reviewed sources
 # carry their own review dates, so this does not make stale data look current.
@@ -50,22 +46,22 @@ NAMESPACE = UUID("358ab427-27f2-4d58-98a9-5656d63904ca")
 # The four intake answers every earlier recorded run used, so new numbers stay
 # comparable with the ones in docs/agent/handoof.md.
 CASES = {
-    "benchmark_case1": dict(
-        business_type="카페", franchise_status=False, employee_count=2,
-        lease_status="LEASED_PAID", planned_closure_date=None,
-    ),
-    "free_lease": dict(
-        business_type="카페", franchise_status=False, employee_count=2,
-        lease_status="LEASED_FREE", planned_closure_date=None,
-    ),
-    "optional_missing": dict(
-        business_type="카페", franchise_status=False, employee_count=None,
-        lease_status="LEASED_PAID", planned_closure_date=None,
-    ),
-    "solo_dated": dict(
-        business_type="카페", franchise_status=False, employee_count=0,
-        lease_status="LEASED_PAID", planned_closure_date="2026-10-31",
-    ),
+    "benchmark_case1": {
+        "business_type": "카페", "franchise_status": False, "employee_count": 2,
+        "lease_status": "LEASED_PAID", "planned_closure_date": None,
+    },
+    "free_lease": {
+        "business_type": "카페", "franchise_status": False, "employee_count": 2,
+        "lease_status": "LEASED_FREE", "planned_closure_date": None,
+    },
+    "optional_missing": {
+        "business_type": "카페", "franchise_status": False, "employee_count": None,
+        "lease_status": "LEASED_PAID", "planned_closure_date": None,
+    },
+    "solo_dated": {
+        "business_type": "카페", "franchise_status": False, "employee_count": 0,
+        "lease_status": "LEASED_PAID", "planned_closure_date": "2026-10-31",
+    },
 }
 
 # What the user types on the 결과 알려주기 screen after doing a next action.
@@ -200,19 +196,19 @@ def build_graph_input(
     trigger_type = "CASE_CREATED" if result_text is None else "RESULT_SUBMITTED"
     event_id = f"synthetic-fe:{trigger_type}:" + digest(text).split(":")[1][:16]
     return AgentGraphInput(
-        trigger=dict(
-            trigger_type=trigger_type,
-            input_event_id=event_id,
-            client_event_id=None,
-            submitted_at=FIXED_TIME,
-            input=dict(
-                input_event_id=event_id,
-                source_type="USER_INPUT",
-                redacted_text=text,
-                redactions=[],
-                submitted_at=FIXED_TIME,
-            ),
-        ),
+        trigger={
+            "trigger_type": trigger_type,
+            "input_event_id": event_id,
+            "client_event_id": None,
+            "submitted_at": FIXED_TIME,
+            "input": {
+                "input_event_id": event_id,
+                "source_type": "USER_INPUT",
+                "redacted_text": text,
+                "redactions": [],
+                "submitted_at": FIXED_TIME,
+            },
+        },
         case_snapshot=snapshot,
         trace_id="evaluate-planning",
     )
@@ -298,6 +294,10 @@ _STEP_NAMES = {
     "FILE_TAX_BUSINESS_CLOSURE": ("사업자 폐업신고", ["폐업신고", "사업자"]),
     "FILE_FOOD_SERVICE_CLOSURE": ("식품영업 폐업신고", ["식품영업", "영업신고"]),
     "REPORT_WORKPLACE_INSURANCE_CLOSURE": ("사업장 탈퇴 신고", ["사업장", "4대보험"]),
+    "PERFORM_RESTORATION": ("원상복구 공사", []),
+    "RETURN_PREMISES": ("점포 반환", []),
+    "SETTLE_EMPLOYEE_PAYMENTS": ("직원 금품 청산", ["금품 청산", "퇴직금"]),
+    "REPORT_EMPLOYEE_INSURANCE_LOSS": ("직원 보험 자격 상실 신고", ["자격 상실"]),
 }
 
 
@@ -309,14 +309,18 @@ def build_registry(store: SnapshotStore) -> list[KnownProcedureStep]:
     """
 
     steps: list[KnownProcedureStep] = []
+    seen_codes: set[str] = set()
     for record in store.records():
         for code in record.step_codes:
+            if code in seen_codes:
+                continue
+            seen_codes.add(code)
             name, aliases = _STEP_NAMES.get(code, (record.title, []))
             steps.append(
                 KnownProcedureStep(
-                    procedure_step=dict(
-                        procedure_step_id=len(steps) + 1, step_code=code
-                    ),
+                    procedure_step={
+                        "procedure_step_id": len(steps) + 1, "step_code": code
+                    },
                     step_name=name,
                     utterance_aliases=list(aliases),
                     registry_version="LOCAL_TEST_IDS_NOT_PERSISTED",
@@ -344,7 +348,7 @@ def code_version() -> dict:
 
     def git(*args):
         done = subprocess.run(
-            ["git", *args], cwd=Path(__file__).parent, capture_output=True, text=True
+            ["git", *args], cwd=Path(__file__).parent, capture_output=True, text=True, check=False
         )
         return done.stdout.strip() if done.returncode == 0 else None
 
@@ -508,8 +512,10 @@ async def trial(case: str, request: AgentGraphInput, store, registry, catalog) -
         "graph_input_digest": canonical_digest(request),
         "status": "ERROR",
         "calls": calls,
+        "review_results": [],
     }
     runtime = None
+    usage = []
     started = perf_counter()
     try:
         with patch.object(
@@ -521,7 +527,18 @@ async def trial(case: str, request: AgentGraphInput, store, registry, catalog) -
                 support_catalog=catalog,
             )
         result["limits"] = asdict(runtime.limits)
-        outcome = await runtime.run_planning(request)
+        review = runtime._graph._review_tool.review
+
+        async def record_review(subject):
+            reviewed = await review(subject)
+            result["review_results"].append({
+                "verdict": reviewed.verdict.value,
+                "issue_codes": [item.issue_code.value for item in reviewed.issues],
+            })
+            return reviewed
+
+        with capture_usage() as usage, patch.object(runtime._graph._review_tool, "review", record_review):
+            outcome = await runtime.run_planning(request)
         result["status"] = as_text(outcome.outcome_type)
         result.update(decision_summary(outcome))
     except Exception as exc:  # noqa: BLE001 - provider messages may carry bodies
@@ -536,6 +553,8 @@ async def trial(case: str, request: AgentGraphInput, store, registry, catalog) -
             await runtime.aclose()
         result["elapsed_ms"] = round((perf_counter() - started) * 1000)
         result["calls_by_role"] = dict(Counter(call["role"] for call in calls))
+        result["provider_usage"] = [asdict(item) for item in usage]
+        result["metrics"] = summarize_metrics([result], load_prices())
     return result
 
 
@@ -845,4 +864,8 @@ if __name__ == "__main__":
     parser.add_argument("--expect", action="append", default=[])
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--validate-only", action="store_true")
-    asyncio.run(run(parser.parse_args()))
+    parser.add_argument("--as-of", type=date.fromisoformat, help="Evaluation date; keeps source freshness checks intact")
+    arguments = parser.parse_args()
+    if arguments.as_of is not None:
+        FIXED_TIME = datetime.combine(arguments.as_of, datetime.min.time(), tzinfo=timezone.utc)
+    asyncio.run(run(arguments))

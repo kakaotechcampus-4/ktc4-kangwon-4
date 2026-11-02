@@ -17,11 +17,29 @@ from scripts.evaluate_planning import (
     attach_fixture_sources,
     build_case_snapshot,
     build_graph_input,
+    build_registry,
     decision_summary,
     overall_verdict,
     score,
     verdict,
 )
+
+
+def test_shared_official_documents_create_one_registry_entry_per_procedure():
+    records = [
+        SimpleNamespace(step_codes=["FILE_TAX_BUSINESS_CLOSURE"], title="합성 자료 1"),
+        SimpleNamespace(step_codes=["FILE_TAX_BUSINESS_CLOSURE", "FILE_FOOD_SERVICE_CLOSURE"], title="합성 자료 2"),
+        SimpleNamespace(step_codes=["PERFORM_RESTORATION", "RETURN_PREMISES"], title="합성 자료 3"),
+    ]
+    registry = build_registry(SimpleNamespace(records=lambda: records))
+    assert [step.procedure_step.step_code for step in registry] == [
+        "FILE_TAX_BUSINESS_CLOSURE", "FILE_FOOD_SERVICE_CLOSURE",
+        "PERFORM_RESTORATION", "RETURN_PREMISES",
+    ]
+    assert len({step.procedure_step.procedure_step_id for step in registry}) == 4
+    assert len({step.step_name for step in registry}) == 4
+    names = [name for step in registry for name in (step.step_name, *step.utterance_aliases)]
+    assert len(set(names)) == len(names)
 
 
 def summary(blocker):
