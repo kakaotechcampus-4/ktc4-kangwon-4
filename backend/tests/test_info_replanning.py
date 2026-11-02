@@ -8,12 +8,8 @@ from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
-from test_action_codes import NOW, StubModel, result_fixes_xfail, supervisor_request
-from test_blocker_candidates import ChoiceModel, request_with_state
-from test_procedure_only_graph import graph_run_inputs
-
-from app.agent.graph import AgentGraph
 from app.agent.enrichment import build_fact_overlays
+from app.agent.graph import AgentGraph
 from app.agent.info_agent.agent import (
     InfoAnalysisAgent,
     InfoAnalysisGuardrailError,
@@ -35,6 +31,9 @@ from app.agent.schemas import (
 from app.agent.supervisor.agent import SupervisorAgent
 from app.common.agent_dto import ProcedureCompletionConfirmation
 from app.common.agent_service import build_planning_input
+from test_action_codes import NOW, StubModel, result_fixes_xfail, supervisor_request
+from test_blocker_candidates import ChoiceModel, request_with_state
+from test_procedure_only_graph import graph_run_inputs
 
 TAX = "FILE_TAX_BUSINESS_CLOSURE"
 FOOD = "FILE_FOOD_SERVICE_CLOSURE"
@@ -427,6 +426,60 @@ def test_new_fact_still_requires_a_literal_user_source_span():
                 request_for_replanning()
             )
         )
+
+
+@pytest.mark.parametrize("rejected_quote", [
+    "직원은 9명인가요?",
+    "[사장님 답] 2명이요",
+    "2명이요\n\n[리본이 물어본 것] 프랜차이즈인가요?",
+])
+def test_followup_questions_cannot_be_fact_evidence_and_retry_uses_only_answer(rejected_quote):
+    request = request_for_replanning()
+    request.input.redacted_text = (
+        "[리본이 물어본 것] 직원은 9명인가요?\n[사장님 답] 2명이요\n\n"
+        "[리본이 물어본 것] 프랜차이즈인가요?\n[사장님 답] 아니요"
+    )
+    before = request.model_dump_json()
+    corrected = output([finding(TAX, "doc1"), finding(FOOD, "doc2")])
+    corrected["facts"] = [{
+        "operation": "SET", "field_path": "employee_count", "value_type": "INTEGER",
+        "value": 2, "source_text": "2명이요", "confidence_bps": 9500,
+        "requires_confirmation": False, "reason_summary": "직원 수 답변",
+    }]
+    rejected = deepcopy(corrected)
+    rejected["facts"][0].update(value=9, source_text=rejected_quote)
+    client = Responses(rejected, corrected)
+    result = asyncio.run(InfoAnalysisAgent(client).analyze(request))
+    fact, = result.fact_candidates
+    assert (fact.field_path, fact.value, fact.source_span.text) == ("employee_count", 2, "2명이요")
+    assert "questions and labels are context" in client.messages[1][-2]["content"]
+    assert len(client.messages) == 2
+    assert request.model_dump_json() == before
+
+
+@pytest.mark.parametrize("answer", ["2명이요", "직원은\n2명입니다."])
+def test_followup_repeated_text_is_grounded_in_answer_not_earlier_question(answer):
+    text = f"[리본이 물어본 것] {answer}라고 하셨나요?\n[사장님 답] {answer}"
+    result = analyze_facts([("employee_count", 2, answer)], text)
+    fact, = result.fact_candidates
+    expected_start = text.index("[사장님 답] ") + len("[사장님 답] ")
+    assert fact.source_span.start_offset == expected_start
+    assert fact.source_span.end_offset == expected_start + len(answer)
+    assert result.evidence_records[0].excerpt == answer
+
+
+@pytest.mark.parametrize("suffix", ["", "\n[사장님 답] "])
+def test_followup_without_answer_cannot_create_procedure_completion(suffix):
+    request = request_for_replanning()
+    question = "세무 폐업 처리가 완료되었나요?"
+    request.input.redacted_text = f"[리본이 물어본 것] {question}{suffix}"
+    raw = output([finding(TAX, "doc1"), finding(FOOD, "doc2")])
+    raw["procedure_observations"] = [{
+        "step_code": TAX, "observed_status": "COMPLETED", "source_text": question,
+        "requires_confirmation": True, "reason_summary": "질문을 완료 보고로 오해한 모델",
+    }]
+    with pytest.raises(InfoAnalysisGuardrailError):
+        asyncio.run(InfoAnalysisAgent(Responses(raw), max_local_attempts=1).analyze(request))
 
 
 @pytest.mark.parametrize("already_completed", [True, False])
