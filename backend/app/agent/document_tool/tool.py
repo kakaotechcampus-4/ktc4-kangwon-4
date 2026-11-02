@@ -148,11 +148,10 @@ async def build_document_tool(
     if prefix not in {"INFO_", "LUNA_", "LUNA6_", "HAIKU_", "GEMINI_"}:
         raise DocumentError("지원하는 문서 모델 설정을 선택해 주세요.")
     config = LLMConfig.from_env(env_file=path, env_prefix=prefix, inherit_shared=prefix == "INFO_")
-    effort = (values.get("AGENT_DOCUMENT_REASONING_EFFORT") or "").strip()
-    if effort:
-        if effort not in {"none", "minimal", "low", "medium", "high", "xhigh"}:
-            raise DocumentError("문서 모델의 effort 설정을 확인해 주세요.")
-        config = replace(config, reasoning_effort=effort)
+    effort = (values.get("AGENT_DOCUMENT_REASONING_EFFORT") or "").strip() or "xhigh"
+    if effort not in {"none", "minimal", "low", "medium", "high", "xhigh"}:
+        raise DocumentError("문서 모델의 effort 설정을 확인해 주세요.")
+    config = replace(config, reasoning_effort=effort)
     budget = ScopedCallBudget()
     clients = []
     try:
