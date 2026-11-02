@@ -1,3 +1,4 @@
+import type { Step, StepStatus } from '../components/ui/ProcessSteps'
 import { factLabelOf, fieldLabelOf, FRANCHISE_OPTIONS, LEASE_OPTIONS } from '../lib/caseOptions'
 import type {
   CaseResultsEntryResponse,
@@ -200,8 +201,18 @@ export function toResultsEntry(body: CaseResultsEntryResponse | null): ResultsEn
       return { kind: 'ANSWER', questions, historyId: body.case_history_id as number }
     }
 
+    /*
+      사장님이 더 알려주셔야 풀리는 실패만 여기서 받는다. 같은 길(`POST /cases/results`)로 다시
+      보내면 서버가 다시 판단한다. 그 밖의 실패는 더 적어도 풀리지 않아(#57) `/case` 가 안내한다
+    */
+    case 'FAILED': {
+      const notice = toFailureNotice(body)
+      if (notice.kind !== 'NEEDS_DETAIL') return { kind: 'ELSEWHERE' }
+      if (!Number.isInteger(body.case_history_id)) return { kind: 'UNRECOGNIZED' }
+      return { kind: 'RESUBMIT', notice, historyId: body.case_history_id as number }
+    }
+
     case 'PENDING':
-    case 'FAILED':
       return { kind: 'ELSEWHERE' }
 
     default:
@@ -278,4 +289,26 @@ export function toAnswerInput(pairs: AnswerPair[]): string {
     .filter(({ answer }) => answer.length > 0)
     .map(({ question, answer }) => `[리본이 물어본 것] ${question}\n[사장님 답] ${answer}`)
     .join('\n\n')
+}
+
+/**
+ * 결과를 보낸 뒤 처리 단계 줄. 결과 입력의 처리 중 화면과 반영 결과 화면이 같은 줄을 쓴다.
+ *
+ * 서버는 처리 단계를 내려주지 않는다. 그래서 화면이 확실히 아는 사건에만 맞춘다.
+ *
+ *   SENDING  보냈지만 접수 번호를 아직 못 받았다
+ *   WAITING  접수됐고 판단을 기다린다
+ *   DONE     반영된 결과가 왔다
+ *
+ * 둘째·셋째 줄이 서버 안에서 언제 갈리는지는 알 수 없어, 결과가 오면 함께 끝난다.
+ */
+export function toResultSteps(stage: 'SENDING' | 'WAITING' | 'DONE'): Step[] {
+  const status = (sending: StepStatus, waiting: StepStatus): StepStatus =>
+    stage === 'DONE' ? 'done' : stage === 'WAITING' ? waiting : sending
+
+  return [
+    { label: '보냈어요', status: status('run', 'done') },
+    { label: '리본이 내용을 정리하고 있어요', status: status('wait', 'run') },
+    { label: '다음 할 일 다시 정하기', status: status('wait', 'wait') },
+  ]
 }

@@ -172,7 +172,12 @@ export type ResultsEntry =
    */
   | { kind: 'ANSWER'; questions: string[]; historyId: number }
   /**
-   * 지금은 결과를 받을 때가 아니다 — 판단 중이거나 판단이 실패했다.
+   * 판단이 실패했는데, 사장님이 더 알려주시면 풀린다(`NEEDS_DETAIL`). 무엇이 더 필요한지
+   * 보여주고 글을 다시 받는다.
+   */
+  | { kind: 'RESUBMIT'; notice: Extract<FailureNotice, { kind: 'NEEDS_DETAIL' }>; historyId: number }
+  /**
+   * 지금은 결과를 받을 때가 아니다 — 판단 중이거나, 더 적어도 풀리지 않는 실패다.
    *
    * 둘 다 `/case` 가 이미 안내하는 상태라 그쪽으로 보낸다. 여기서 같은 안내를 한 번 더
    * 만들면 두 화면의 문구가 따로 놀게 된다.
@@ -196,8 +201,13 @@ export type ResultsEntry =
 export type SubmitState =
   /** 아직 보내지 않음 */
   | { kind: 'IDLE' }
-  /** 보내고 기다리는 중 */
-  | { kind: 'PENDING' }
+  /**
+   * 보내고 기다리는 중.
+   *
+   * `accepted` 는 서버가 접수 번호를 돌려줬는지다. 처리 단계 줄의 첫 줄("보냈어요")이 이것으로만
+   * 끝난다 — 서버가 처리 단계를 내려주지 않아서, 화면이 확실히 아는 사건은 접수와 결과뿐이다.
+   */
+  | { kind: 'PENDING'; accepted: boolean }
   /** 입력만으로는 상태를 확정할 수 없어 되묻는다 */
   | { kind: 'NEEDS_MORE_INFO'; questions: string[] }
   /**
@@ -275,12 +285,16 @@ export interface FactChange {
  *
  * `changes`가 빈 배열이면 "바뀐 것이 없음"이다. 별도 플래그를 두지 않는다 —
  * 서버가 상태 이름을 정하고 프론트가 그 이름을 해석하는 층을 만들지 않기 위해서다.
- * `blocker`·`nextAction`의 `null` 의미는 `CurrentCaseView`와 같다.
+ * `blocker`의 `null` 의미는 `CurrentCaseView`와 같다.
+ *
+ * `nextAction`은 꼭 있다. 다음 할 일이 없는 반영 응답은 어댑터가 읽지 못한 응답으로 돌려서
+ * 이 화면까지 오지 않는다(`toSubmitOutcome`). 폐업을 다 마쳐 할 일이 없어지는 날이 오면
+ * 그때는 이 화면이 아니라 완료 화면으로 보낸다.
  */
 export interface ReplanView {
   changes: FactChange[]
   blocker: Blocker | null
-  nextAction: NextAction | null
+  nextAction: NextAction
 }
 
 /**
