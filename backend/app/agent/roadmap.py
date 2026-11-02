@@ -114,7 +114,11 @@ class Roadmap(AgentSchema):
 
 
 def _all_conditions(*values: bool | None) -> bool | None:
-    return False if False in values else None if None in values else True
+    if False in values:
+        return False
+    if None in values:
+        return None
+    return True
 
 
 def _procedure_status(codes, steps, bindings, snapshot, mutations, progress):
@@ -126,14 +130,23 @@ def _procedure_status(codes, steps, bindings, snapshot, mutations, progress):
             continue
         refs.append(ref)
         applies = procedure_applicability(steps[ref.step_code], snapshot, mutations.fact_changes)
-        states.append(
-            "NOT_APPLICABLE" if applies is False else "NEEDS_CONFIRMATION" if applies is None
-            else progress.get((ref.procedure_step_id, ref.step_code), "NOT_STARTED")
-        )
+        if applies is False:
+            states.append("NOT_APPLICABLE")
+        elif applies is None:
+            states.append("NEEDS_CONFIRMATION")
+        else:
+            states.append(progress.get((ref.procedure_step_id, ref.step_code), "NOT_STARTED"))
     active = [s for s in states if s != "NOT_APPLICABLE"]
-    status = ("NOT_APPLICABLE" if not active else "NEEDS_CONFIRMATION" if "NEEDS_CONFIRMATION" in active
-              else "COMPLETED" if all(s == "COMPLETED" for s in active)
-              else "IN_PROGRESS" if any(s in {"COMPLETED", "IN_PROGRESS"} for s in active) else "NOT_STARTED")
+    if not active:
+        status = "NOT_APPLICABLE"
+    elif "NEEDS_CONFIRMATION" in active:
+        status = "NEEDS_CONFIRMATION"
+    elif all(s == "COMPLETED" for s in active):
+        status = "COMPLETED"
+    elif any(s in {"COMPLETED", "IN_PROGRESS"} for s in active):
+        status = "IN_PROGRESS"
+    else:
+        status = "NOT_STARTED"
     return status, refs
 
 
@@ -178,18 +191,36 @@ def build_roadmap(request: RoadmapInput, *, procedure_bindings: ProcedureBinding
         applicable = conditions[condition]
         # No service contract still leaves rental and utility cleanup on the roadmap.
         if key == "terminate_contracts":
-            title = ("카드단말기·배달앱·렌탈·공과금 해지" if applicable is True else
-                     "배달앱·카드단말기 계약 여부 확인 및 렌탈·공과금 해지" if applicable is None else title)
+            if applicable is True:
+                title = "카드단말기·배달앱·렌탈·공과금 해지"
+            elif applicable is None:
+                title = "배달앱·카드단말기 계약 여부 확인 및 렌탈·공과금 해지"
             applicable = None if applicable is None else True
-        kind = ("PROCEDURE" if codes else "DOCUMENT_CHECK" if key == "document_check"
-                else "CASE_FACT" if key in {"intake", "closure_date", "support_approval"} else "CHECKLIST")
+        if codes:
+            kind = "PROCEDURE"
+        elif key == "document_check":
+            kind = "DOCUMENT_CHECK"
+        elif key in {"intake", "closure_date", "support_approval"}:
+            kind = "CASE_FACT"
+        else:
+            kind = "CHECKLIST"
         refs = []
-        status = "NOT_APPLICABLE" if applicable is False else "NEEDS_CONFIRMATION" if applicable is None else "NOT_STARTED"
+        if applicable is False:
+            status = "NOT_APPLICABLE"
+        elif applicable is None:
+            status = "NEEDS_CONFIRMATION"
+        else:
+            status = "NOT_STARTED"
         if applicable is True:
             if codes:
                 status, refs = _procedure_status(codes, steps, bindings, snapshot, mutations, progress)
             elif key in {"intake", "closure_date", "support_approval"}:
-                value = True if key == "intake" else facts.get("planned_closure_date") if key == "closure_date" else request.support_approved
+                if key == "intake":
+                    value = True
+                elif key == "closure_date":
+                    value = facts.get("planned_closure_date")
+                else:
+                    value = request.support_approved
                 status = "COMPLETED" if value is not None else "NEEDS_CONFIRMATION"
             elif key == "document_check":
                 documents = request.documents
