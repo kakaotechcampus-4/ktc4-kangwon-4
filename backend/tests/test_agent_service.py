@@ -11,13 +11,19 @@ import sys
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
-from uuid import UUID
+from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
 import pytest
 from pydantic import ValidationError
 
 from app.agent.action_catalog import resolve_procedure_bindings
+from app.agent.document_tool.models import (
+    DocumentAnalysis,
+    DocumentKind,
+    DocumentRecord,
+    ExtractedField,
+)
 from app.agent.guardrails import GuardrailViolation
 from app.agent.procedure_tool.store import ProcedureStoreError
 from app.agent.schemas import ProcedureStepRef
@@ -27,7 +33,7 @@ from app.common.agent_data import (
     InMemoryReviewedProcedureStore,
     build_known_procedure_steps,
 )
-from app.common.agent_dto import CaseSnapshot, RedactedInput
+from app.common.agent_dto import CaseSnapshot, DocumentContext, RedactedInput, document_input_text
 from app.common.agent_service import (
     build_conflict_input,
     build_planning_input,
@@ -213,12 +219,82 @@ def test_planning_input_rejects_an_unredacted_phone_number():
 
 
 def test_planning_input_rejects_an_unknown_trigger():
-    with pytest.raises(ValueError, match="CASE_CREATED or RESULT_SUBMITTED"):
+    with pytest.raises(ValueError, match="RESULT_SUBMITTED or DOCUMENT_SUBMITTED"):
         build_planning_input(
             trigger_type="CASE_CLOSED",
             case_snapshot=case_snapshot(),
             user_input=redacted_input(),
         )
+
+
+def test_planning_input_accepts_a_document_upload_as_owner_input():
+    request = build_planning_input(
+        trigger_type="DOCUMENT_SUBMITTED",
+        case_snapshot=case_snapshot(),
+        user_input=redacted_input(redacted_text="사장님이 올린 서류에서 꺼낸 내용입니다.\n이체확인증: 3,300,000원"),
+    )
+
+    assert request.trigger.trigger_type == "DOCUMENT_SUBMITTED"
+    assert request.trigger.input.source_type == "USER_INPUT"
+
+
+def test_a_document_upload_is_not_recorded_as_an_official_document():
+    with pytest.raises(ValidationError, match="USER_INPUT"):
+        build_planning_input(
+            trigger_type="DOCUMENT_SUBMITTED",
+            case_snapshot=case_snapshot(),
+            user_input=redacted_input(source_type="EXPERT_CONFIRMATION"),
+        )
+
+
+def document_record(kind, fields, *, needs_confirmation=False, confirmed_fields=None):
+    return DocumentRecord(
+        document_id=uuid4(), filename="doc.pdf", content_hash="h", redaction_count=0,
+        cache_key="c", artifact_hash="a", confirmed_fields=confirmed_fields,
+        analysis=DocumentAnalysis(
+            kind=kind, needs_confirmation=needs_confirmation,
+            fields=[ExtractedField(name=n, value=v, page=1, quote=q) for n, v, q in fields],
+        ),
+    )
+
+
+def test_document_text_quotes_values_but_leaves_out_names():
+    context = DocumentContext(documents=[document_record(DocumentKind.TAX_INVOICE, [
+        ("supplier", "가나철거", "공급자 상호 가나철거"),
+        ("amount", "3300000", "합계금액 3,300,000원"),
+    ])])
+
+    text = document_input_text(context)
+
+    assert text == "사장님이 올린 서류에서 꺼낸 내용입니다.\n전자세금계산서 금액: 합계금액 3,300,000원"
+    assert "가나철거" not in text
+
+
+def test_document_text_prefers_owner_corrections_and_skips_unconfirmed_documents():
+    context = DocumentContext(documents=[
+        document_record(DocumentKind.CLOSURE_CERTIFICATE, [("closure_date", "2026-11-30", "폐업일 2026.11.30")],
+                        needs_confirmation=True, confirmed_fields={"closure_date": "2026-12-01"}),
+        document_record(DocumentKind.TRANSFER, [("amount", "100", "이체금액 100원")], needs_confirmation=True),
+    ])
+
+    assert document_input_text(context) == (
+        "사장님이 올린 서류에서 꺼낸 내용입니다.\n폐업사실증명원 폐업일(사장님 확인): 2026-12-01"
+    )
+    assert document_input_text(DocumentContext()) is None
+
+
+def test_document_text_becomes_a_document_submitted_planning_input():
+    text = document_input_text(DocumentContext(documents=[
+        document_record(DocumentKind.TRANSFER, [("amount", "3300000", "이체금액 3,300,000원")]),
+    ]))
+
+    request = build_planning_input(
+        trigger_type="DOCUMENT_SUBMITTED",
+        case_snapshot=case_snapshot(),
+        user_input=redacted_input(redacted_text=text),
+    )
+
+    assert request.trigger.input.redacted_text == text
 
 
 @pytest.mark.parametrize("legacy", [True, False])

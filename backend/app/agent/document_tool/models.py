@@ -105,3 +105,37 @@ class DocumentContext(Model):
 class ReviewDecision(Model):
     verdict: Literal["PASS", "REVISE"]
     issues: list[str]
+
+
+# 상호·거래 상대·예금주 같은 이름은 판단에 필요하지 않아 다시 판단하는 글에 넣지 않는다.
+REPLAN_FIELD_LABELS: dict[DocumentFieldName, str] = {
+    "amount": "금액", "supply_amount": "공급가액", "tax_amount": "세액",
+    "date": "날짜", "closure_date": "폐업일", "restoration_clause": "원상복구 조항",
+}
+
+
+def document_input_text(context: DocumentContext) -> str | None:
+    """서류를 올린 뒤 기존 판단 흐름(DOCUMENT_SUBMITTED)에 넘길 글. 값마다 한 줄이다.
+
+    사장님이 고친 값이 있으면 그 값을, 없으면 서류에서 꺼낸 원문(quote)을 쓴다.
+    확인이 필요한데 아직 확인하지 않은 서류는 넣지 않는다. 정보분석 Agent는 이 글을
+    사장님 입력(USER_INPUT)으로 읽고 한 줄을 그대로 인용하므로, 서류 값이 기존 사실을
+    바로 덮지 않고 기존의 변경 후보·충돌 확인 흐름을 탄다.
+    pymupdf 없이 BE가 import할 수 있게 checks.py가 아니라 이 파일에 둔다.
+    """
+
+    lines: list[str] = []
+    for record in context.documents:
+        analysis, confirmed = record.analysis, record.confirmed_fields or {}
+        if analysis.needs_confirmation and not confirmed:
+            continue
+        label = DOCUMENT_LABELS[analysis.kind]
+        for name, field_label in REPLAN_FIELD_LABELS.items():
+            if name in confirmed:
+                lines.append(f"{label} {field_label}(사장님 확인): {confirmed[name]}")
+            else:
+                quotes = [f.quote for f in analysis.fields if f.name == name]
+                lines.extend(f"{label} {field_label}: {quote}" for quote in dict.fromkeys(quotes))
+    if not lines:
+        return None
+    return "\n".join(["사장님이 올린 서류에서 꺼낸 내용입니다.", *lines])
