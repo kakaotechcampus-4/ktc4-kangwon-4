@@ -9,8 +9,24 @@
 - [PR 115](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/115)의 실제 변경 커밋 `c958b2201431bc81714100fd9076cb1f06a12708`과 [PR 114](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/114)를 포함한다.
 - [PR 118](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/118)과 [PR 120](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/120)의 head가 현재 HEAD의 조상임을 확인했다. 원격 변경은 FE 40개 파일뿐이며 fast-forward로 반영했고, 기존 수정 파일 73개는 바이트가 모두 유지됐다. FE를 별도로 수정하지 않았다.
 - 기존 `preserve/readme-and-procedure-store-test` 작업 폴더는 수정 중이던 내용을 보존했다. 최신 기준 작업은 옆의 `ktc4-kangwon-4-agent-monitoring` 폴더에 있다.
-- 모니터링·모델 선택·입력 보호·서류 Agent·평가 기록을 의존 순서대로 나눈 PR로 게시한다. 병합은 팀 리뷰 후 진행한다.
+- 모니터링·모델 선택·입력 보호·서류 Agent·평가 기록을 의존 순서대로 나눈 PR 9개를 게시했다. 각 PR에 리뷰어 `Louie-03`, `leehyunjong12`를 요청했으며 병합하지 않았다.
 - FE, `app/be`, `app/common`, DB 스키마와 `CLAUDE.md`는 수정하지 않는다. Agent, 관련 평가·테스트, 환경설정과 이 기록을 변경한다.
+
+## 게시한 PR
+
+앞 PR을 base로 삼는 순서다. 앞 단계부터 리뷰·병합하고 필요하면 다음 PR의 base를 develop으로 재지정한다.
+
+| 순서 | PR | 내용 |
+| --- | --- | --- |
+| 1 | [#121](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/121) | 역할별 Langfuse 실제 토큰 추적 |
+| 2 | [#122](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/122) | 역할별 모델 선택과 원화 비용 계산 |
+| 3 | [#123](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/123) | Langfuse 기간별 사용량 집계 |
+| 4 | [#124](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/124) | 결과 입력의 질문을 사실 근거에서 제외 |
+| 5 | [#125](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/125) | 서류 Agent 호출 계약과 안전 검사 |
+| 6 | [#126](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/126) | 서류 추출과 소유자 확인 |
+| 7 | [#127](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/127) | 정산 서류 대조와 제출 ZIP |
+| 8 | [#128](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/128) | 서류 Agent 실행과 일괄 처리 |
+| 9 | [#129](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/129) | 모델별 실제 호출 결과와 최적화 기록 |
 
 ## 현재 담당 범위와 구현
 

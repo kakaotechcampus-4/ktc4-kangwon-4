@@ -1091,5 +1091,111 @@
       "backend/app/agent/document_agent/models.py": "f8c0fcc08340b9343e501ad0ab5361ef259cfdbadc538b3699c252586f048a4c",
       "backend/app/agent/document_agent/safety.py": "a802e5d84eb3ed9c0d5c803d3cc870f7556901ecb8e037dfa862f225e33ad70a"
     }
+  },
+  "publication": {
+    "pull_requests": [
+      {
+        "number": 121,
+        "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/121",
+        "head": "feature/agent-observability",
+        "base": "develop",
+        "commit": "e654fa0be5d8648bed04e34d04edf36d1f2e928c",
+        "reviewers": [
+          "leehyunjong12",
+          "Louie-03"
+        ]
+      },
+      {
+        "number": 122,
+        "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/122",
+        "head": "feature/agent-model-config",
+        "base": "feature/agent-observability",
+        "commit": "721a0794f01f07721e530e86d65f08b50ef80e6d",
+        "reviewers": [
+          "leehyunjong12",
+          "Louie-03"
+        ]
+      },
+      {
+        "number": 123,
+        "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/123",
+        "head": "feature/agent-usage-report",
+        "base": "feature/agent-model-config",
+        "commit": "28455dcf5c89f52e10aa034a3d0155143c9a6880",
+        "reviewers": [
+          "leehyunjong12",
+          "Louie-03"
+        ]
+      },
+      {
+        "number": 124,
+        "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/124",
+        "head": "feature/agent-input-answers",
+        "base": "feature/agent-usage-report",
+        "commit": "d8af1d97c001a5fb8aa8e83d535ebab9eb5abe4a",
+        "reviewers": [
+          "leehyunjong12",
+          "Louie-03"
+        ]
+      },
+      {
+        "number": 125,
+        "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/125",
+        "head": "feature/document-agent-contracts",
+        "base": "feature/agent-input-answers",
+        "commit": "d822575eb4a6611b671a00cc49b03e162a3c6a09",
+        "reviewers": [
+          "leehyunjong12",
+          "Louie-03"
+        ]
+      },
+      {
+        "number": 126,
+        "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/126",
+        "head": "feature/document-agent-extraction",
+        "base": "feature/document-agent-contracts",
+        "commit": "90391f7da22194c633088124498da62e9505cd9f",
+        "reviewers": [
+          "leehyunjong12",
+          "Louie-03"
+        ]
+      },
+      {
+        "number": 127,
+        "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/127",
+        "head": "feature/document-agent-checks",
+        "base": "feature/document-agent-extraction",
+        "commit": "d29790ecc7952df2a420130924588a8ba3f6fdf3",
+        "reviewers": [
+          "leehyunjong12",
+          "Louie-03"
+        ]
+      },
+      {
+        "number": 128,
+        "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/128",
+        "head": "feature/document-agent-runtime",
+        "base": "feature/document-agent-checks",
+        "commit": "97f6da357635ab2ff3cdc85970101c60639a35cd",
+        "reviewers": [
+          "leehyunjong12",
+          "Louie-03"
+        ]
+      },
+      {
+        "number": 129,
+        "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/129",
+        "head": "feature/agent-evaluation-records",
+        "base": "feature/document-agent-runtime",
+        "commit": "3587491a00b176fe564a8464137f807f574cec48",
+        "reviewers": [
+          "leehyunjong12",
+          "Louie-03"
+        ]
+      }
+    ],
+    "merged": false,
+    "original_workspace_preserved": true,
+    "local_mobile_draft_excluded": true
   }
 }
