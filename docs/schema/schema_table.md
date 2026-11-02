@@ -55,6 +55,11 @@ MEMBERS ──1:N──► CASE ──1:N──► CASE_FIELD_HISTORY
 | business_type | VARCHAR | | NOT NULL | `"CAFE"` | 가입 때는 업종 코드 `CAFE`(개인·프랜차이즈 카페)/`RESTAURANT`(다른 음식점)만 받음. 가입 뒤 AI가 바꾸면 다른 글자일 수 있음 |
 | franchise_status | BOOLEAN | | NOT NULL, DEFAULT false | `false` | |
 | employee_count | INT | | NULLABLE | `2` | |
+| had_employees | BOOLEAN | | NULLABLE | `true` | 직원을 고용한 적이 있는지. "지금"이 아니라 "있었던 적"이다 — 지금 0명이어도 퇴직금 정산이 남아 있을 수 있다. `NULL`은 "안 물어봄"이고 AI에 모름으로 넘어간다 |
+| pension_enrolled | BOOLEAN | | NULLABLE | `true` | 이 사업장의 국민연금 가입 이력. 이미 탈퇴했어도 `true` |
+| health_insurance_enrolled | BOOLEAN | | NULLABLE | `true` | 이 사업장의 건강보험 가입 이력. 이미 탈퇴했어도 `true` |
+| employment_insurance_enrolled | BOOLEAN | | NULLABLE | `true` | 이 사업장의 고용보험 가입 이력. 이미 종료했어도 `true` |
+| industrial_accident_insurance_enrolled | BOOLEAN | | NULLABLE | `true` | 이 사업장의 산재보험 가입 이력. 이미 종료했어도 `true`. 보험 네 칸은 같이 받아야 한다 — 넷 중 하나라도 `true`면 보험 신고 절차가 "해당", 넷 다 `false`여야 "해당 없음", 섞이면 "모름"이다 |
 | has_business_loan | BOOLEAN | | NULLABLE | `false` | 사업 대출이 남아 있는지. 가입 때 사장님이 입력. `null`이면 안 물어봄 |
 | has_service_contracts | BOOLEAN | | NULLABLE | `true` | 배달앱·카드단말기 등 해지할 서비스 계약이 있는지. 가입 때 사장님이 입력. `null`이면 안 물어봄 |
 | case_status | ENUM | | NOT NULL, DEFAULT `IN_PROGRESS` | `IN_PROGRESS` | `IN_PROGRESS` / `COMPLETED` |

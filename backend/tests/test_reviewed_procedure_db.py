@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 from testcontainers.community.mysql import MySqlContainer
 
 from app.agent import runtime as runtime_module
@@ -27,6 +27,8 @@ from app.be.crud import evidence as evidence_crud
 from app.be.crud.case_history import get_case_created_history
 from app.be.crud.member import create_member
 from app.agent.procedure_tool.cafe import build_cafe_procedure_steps
+from app.agent.schemas import FactStatus
+from app.agent.procedure_tool.rules import procedure_applicability
 from app.be.crud.procedure_step import (
     get_all_procedure_steps,
     get_all_step_dependencies,
@@ -50,6 +52,12 @@ from app.common.agent_data import (
     load_reviewed_procedure_store,
 )
 from app.common.agent_service import build_planning_input
+from app.be.crud import procedure_step as procedure_step_crud
+from app.be.services import procedure_registry
+from app.be.services.procedure_registry import (
+    ProcedureRegistryMissingError,
+    load_cafe_procedure_step_ids,
+)
 
 AS_OF = date(2026, 10, 4)
 RETRIEVED = datetime(2026, 10, 4, 1, 2, 3, 456789, tzinfo=timezone.utc)
@@ -71,6 +79,11 @@ def mysql_engine():
         engine = create_engine(container.get_connection_url() + "?charset=utf8mb4")
         try:
             SQLModel.metadata.create_all(engine)
+            # 앱이 뜰 때 하는 적재를 그대로 한다(main.lifespan). 요청 경로는 읽기만 하므로
+            # 이게 없으면 Case 생성이 ProcedureRegistryMissingError로 멈춘다.
+            with Session(engine) as session:
+                procedure_registry.ensure_cafe_procedure_registry(session)
+                session.commit()
             yield engine
         finally:
             engine.dispose()
@@ -481,3 +494,100 @@ def test_a_second_case_reuses_the_registry_instead_of_stacking_it(mysql_engine):
             len(get_all_step_eligibilities(session)),
         )
     assert before == after
+
+
+def test_case_creation_never_loads_the_registry_itself(monkeypatch, mysql_engine):
+    """적재는 앱이 뜰 때 하고, 가입 요청은 읽기만 한다.
+
+    가입 요청 안에서 적재하면 두 사람이 동시에 가입할 때 step_code가 unique라 한쪽이
+    IntegrityError로 떨어지고, 아무도 가입하지 않으면 절차 표가 빈 채로 남는다.
+    적재 함수를 터지게 해두고도 가입이 끝나야 요청 경로에 적재가 없는 것이다.
+    """
+    def must_not_run(session):
+        raise AssertionError("가입 요청이 절차 마스터 표를 적재하려 했다")
+
+    monkeypatch.setattr(procedure_registry, "ensure_cafe_procedure_registry", must_not_run)
+    case_id = create_test_case(mysql_engine)
+    with Session(mysql_engine) as session:
+        roadmap = procedure_step_crud.get_case_procedure_steps_by_case_id(session, case_id)
+    assert len(roadmap) == len(PROCEDURE_LABELS)
+
+
+def test_case_creation_stops_instead_of_building_an_empty_roadmap(monkeypatch, mysql_engine):
+    """적재가 안 돈 상태에서 가입하면 멈춘다. 빈 로드맵으로 조용히 끝내지 않는다."""
+    monkeypatch.setattr(
+        procedure_step_crud, "get_procedure_step_by_code", lambda session, code: None
+    )
+    with Session(mysql_engine) as session, pytest.raises(ProcedureRegistryMissingError) as error:
+        load_cafe_procedure_step_ids(session)
+    # 어느 절차가 비었는지 그대로 적는다. "절차가 없다"만으로는 적재가 안 돈 것인지
+    # 일부만 들어간 것인지 구분할 수 없다.
+    assert "CONFIRM_RESTORATION_SCOPE" in str(error.value)
+
+
+def create_case_with(engine, *, employee_count=2, **answers):
+    """가입 폼에 답을 더 받은 Case 하나."""
+    with Session(engine) as session:
+        member = create_member(session, oauth_id=str(uuid4()), nickname="합성 사용자")
+        case, _ = create_case(session, member.id, CaseCreateRequest(
+            business_type="CAFE", franchise_status=False, employee_count=employee_count,
+            lease_status="LEASED_PAID", **answers,
+        ))
+        session.commit()
+        return case.id
+
+
+def applicability_of(engine, case_id):
+    """이 Case에서 절차 8개가 각각 해당함/해당없음/모름 중 무엇인지."""
+    with Session(engine) as session:
+        snapshot = build_case_snapshot(session, case_id)
+        steps = agent_runtime_service.build_known_procedure_steps(session)
+    return [procedure_applicability(step, snapshot) for step in steps]
+
+
+def test_insurance_answers_reach_the_agent_and_settle_two_procedures(mysql_engine):
+    """4대보험 가입 이력을 받으면 보험 절차 2개가 "모름"에서 벗어난다.
+
+    AI는 네 값에서 has_workplace_insurance를 계산한다. 넷 중 하나라도 가입이면 해당,
+    넷 다 미가입이어야 해당 없음이다(rules.py:129-136). 그래서 네 칸을 같이 받아야 한다.
+    """
+    insured = dict(
+        pension_enrolled=True, health_insurance_enrolled=True,
+        employment_insurance_enrolled=True, industrial_accident_insurance_enrolled=True,
+    )
+    uninsured = {field: False for field in insured}
+
+    nothing_asked = applicability_of(mysql_engine, create_case_with(mysql_engine))
+    all_insured = applicability_of(mysql_engine, create_case_with(mysql_engine, **insured))
+    # 직원을 둔 적 없는 1인 사장님. 지금 2명인데 과거엔 없었다고 하면 AI는 모순으로 보고
+    # 판단을 멈춘다(rules.employment_history_conflicts).
+    none_insured = applicability_of(
+        mysql_engine,
+        create_case_with(mysql_engine, employee_count=0, had_employees=False, **uninsured),
+    )
+
+    # 안 물어보면 모름 3개(원상복구 + 보험 2개)가 남는다.
+    assert nothing_asked.count(None) == 3
+    # 가입했다고 답하면 보험 2개가 해당함으로 바뀌고, 계약서를 봐야 아는 원상복구만 남는다.
+    assert all_insured.count(None) == 1 and all_insured.count(True) == 7
+    # 전부 미가입이면 보험 2개와 직원 정산이 해당 없음이 된다.
+    assert none_insured.count(False) == 3
+
+
+def test_an_unanswered_insurance_question_stays_unknown_instead_of_becoming_no(mysql_engine):
+    """안 물어본 칸은 "아니오"가 아니라 "모름"으로 넘어간다.
+
+    안 물어본 것을 false로 채우면 AI가 그 절차를 "해당 없음"으로 보고 로드맵에서 빼버린다.
+    사장님은 해야 할 신고를 안내받지 못한다.
+    """
+    case_id = create_case_with(mysql_engine, pension_enrolled=True)
+    with Session(mysql_engine) as session:
+        facts = {fact.field_path: fact for fact in build_case_snapshot(session, case_id).facts}
+
+    assert facts["pension_enrolled"].status == FactStatus.CONFIRMED
+    assert facts["pension_enrolled"].value is True
+    # 안 보낸 세 칸도 스냅샷에는 실린다. 빠지는 것과 모름은 다르다.
+    assert facts["health_insurance_enrolled"].status == FactStatus.UNKNOWN
+    assert facts["health_insurance_enrolled"].value is None
+    # 하나만 가입으로 와도 나머지가 모름이면 보험 조건은 "해당함"이다(하나라도 가입이므로).
+    assert applicability_of(mysql_engine, case_id).count(None) == 1

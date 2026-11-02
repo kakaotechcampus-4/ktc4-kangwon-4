@@ -6,6 +6,8 @@
 """
 
 
+import logging
+
 from sqlmodel import Session
 
 from datetime import datetime
@@ -37,6 +39,8 @@ from app.be.models.mixins import KST
 from app.be.models.procedure_step import CaseProcedureStepHistory
 from app.be.models.support_item import SupportMatch
 from app.be.services.case_snapshot import UNKNOWN_SENTINEL_FIELDS
+
+logger = logging.getLogger(__name__)
 
 
 def save_reviewed_plan(
@@ -283,6 +287,17 @@ def _apply_fact_changes(
         raise ValueError(f"case {history.case_id} not found")
 
     for change in fact_changes:
+        # AI가 바꿀 수 있는 필드(AgentFieldKey)가 Case 컬럼보다 앞서 늘어날 수 있다. 그때
+        # setattr은 조용히 무시하지 않고 ValueError를 내서 판단 전체를 FAILED로 끝낸다.
+        # 한 필드 때문에 나머지 변경까지 버리지 않도록 건너뛰되, 반드시 흔적을 남긴다 —
+        # 검수를 통과한 변경을 말없이 버리는 것이기 때문이다(AI팀 제안, PR #119).
+        if not hasattr(case, change.field_path.value):
+            logger.warning(
+                "case %s의 %s는 저장할 컬럼이 없어 건너뛴다. Case 컬럼을 늘려야 한다",
+                case.id,
+                change.field_path.value,
+            )
+            continue
         # 컬럼에 글자 "UNKNOWN"이 들어 있는 필드가 있다. 그대로 적으면 "모름"이 이력에
         # 두 모양(NULL과 "UNKNOWN")으로 남는다. AI가 보는 표현으로 맞춰서 적는다.
         before = _comparable_case_value(case, change.field_path)

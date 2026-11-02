@@ -123,6 +123,11 @@ def create_case(session: Session, member_id: int, case_request: CaseCreateReques
         lease_status=case_request.lease_status,
         restoration_clause=case_request.restoration_clause,
         planned_closure_date=case_request.planned_closure_date,
+        had_employees=case_request.had_employees,
+        pension_enrolled=case_request.pension_enrolled,
+        health_insurance_enrolled=case_request.health_insurance_enrolled,
+        employment_insurance_enrolled=case_request.employment_insurance_enrolled,
+        industrial_accident_insurance_enrolled=case_request.industrial_accident_insurance_enrolled,
     )
     case = case_crud.create_case(session, case)
     _fill_case_procedure_steps(session, case.id)
@@ -516,9 +521,9 @@ def get_case_results_submit_status(
 def _create_case_creation_evidence(
     session: Session, case: Case, case_request: CaseCreateRequest
 ) -> CaseHistory:
-    # case 생성 폼 입력값(business_type/franchise_status/lease_status)을 AI 쪽에서 CONFIRMED로
-    # 인정하려면 evidence_refs가 있어야 한다(CaseFact.validate_fact_state). 세 필드가 이 evidence
-    # 하나를 같이 참조해도 된다고 AI팀 확인함.
+    # 가입 폼으로 받은 값을 AI 쪽에서 CONFIRMED로 인정하려면 evidence_refs가 있어야 한다
+    # (CaseFact.validate_fact_state). 폼 값들이 이 evidence 하나를 같이 참조해도 된다고
+    # AI팀 확인함. 폼 전체를 그대로 남기므로 칸이 늘어도 같이 덮인다.
     # 가게 이름은 AI 판단에 쓰지 않으므로 AI에 넘기지 않는다.
     submitted = json.dumps(case_request.model_dump(mode="json", exclude={"store_name"}), ensure_ascii=False)
     history = case_history_crud.create_case_history(
@@ -551,9 +556,13 @@ def _fill_case_procedure_steps(session: Session, case_id: int) -> None:
     해당하지 않는 절차도 함께 올린다. 어떤 절차가 이 가게에 해당하는지는 AI가
     가게 정보를 보고 판단하므로(procedure_tool/rules.py), BE가 여기서 미리 걸러내면
     같은 규칙이 두 벌이 된다. 화면에 "해당 없음"으로 보여주려면 목록에 있어야 하기도 하다.
+
+    절차 자체는 앱이 뜰 때 이미 적재돼 있다(main.lifespan). 여기서는 읽어서 이 Case에
+    걸기만 한다. Case별 줄이 미리 있어야 AI가 돌려준 진행 상태를 저장할 수 있다
+    (decision_record._apply_procedure_progress_changes는 없는 줄을 만들지 않는다).
     """
 
-    for step_id in procedure_registry.ensure_cafe_procedure_registry(session).values():
+    for step_id in procedure_registry.load_cafe_procedure_step_ids(session).values():
         procedure_step_crud.create_case_procedure_step(
             session, CaseProcedureStep(case_id=case_id, procedure_step_id=step_id)
         )

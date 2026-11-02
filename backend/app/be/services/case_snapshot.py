@@ -6,6 +6,7 @@ from sqlmodel import Session
 from app.agent.schemas import (
     CASE_FIELD_SPECS,
     CaseFact,
+    AgentFieldKey,
     CaseFieldKey,
     CaseSnapshot,
     CaseStatus,
@@ -119,7 +120,9 @@ def _build_facts(session: Session, case: Case, evidences: list[Evidence]) -> lis
     # — 추정이 아니라 실제 입력 시각이고, 같은 시각을 그 근거의 retrieved_at에도 적어뒀다.
     submitted_at = creation_history.created_at.replace(tzinfo=KST) if creation_history else None
     facts = []
-    for field_key in CaseFieldKey:
+    # AgentFieldKey를 돈다. CaseFieldKey(9개)만 돌면 직원 고용 이력·4대보험 가입 이력 5개가
+    # 스냅샷에 아예 안 실려서, AI가 저장된 답을 못 보고 같은 것을 다시 묻는다.
+    for field_key in AgentFieldKey:
         change = last_change.get(field_key.value)
         # 폼 근거는 "한 번도 안 바뀐 값"에만 쓴다. 바뀐 적이 있는데 그 판단의 근거가 비었다고
         # 폼 근거로 되돌리면, 판단이 바꿔 넣은 값을 "가입할 때 받은 값"이라고 AI에게 틀리게
@@ -134,7 +137,7 @@ def _build_facts(session: Session, case: Case, evidences: list[Evidence]) -> lis
 
 def _build_fact(
     case: Case,
-    field_key: CaseFieldKey,
+    field_key: AgentFieldKey,
     evidence_refs: list[str],
     confirmed_at: datetime | None,
     *,

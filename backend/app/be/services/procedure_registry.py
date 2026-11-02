@@ -7,6 +7,12 @@ build_cafe_procedure_steps가 돌려주는 것을 그대로 세 표에 옮긴다
 AI는 이 표를 읽어서 절차 목록을 받는다(agent_runtime.build_known_procedure_steps).
 step_code를 AI 논리 코드와 똑같이 두는 것이 중요하다 — 이름이 정확히 같을 때만
 절차 대응표가 자동으로 맺히고, 대응표가 비면 Supervisor가 판단을 멈춘다.
+
+적재는 앱이 뜰 때 한 번 한다(main.lifespan). 가입 요청 안에서 적재하면 세 가지가
+어긋난다. 첫 가입자만 적재 비용을 내고, 두 사람이 동시에 가입하면 step_code가
+unique라 한쪽이 IntegrityError로 떨어지며, 아무도 가입하지 않으면 절차 표가 빈 채로
+남아 절차 목록을 읽는 쪽이 아무것도 못 받는다. 요청 쪽은 읽기만 한다
+(load_cafe_procedure_step_ids).
 """
 
 from sqlmodel import Session
@@ -17,7 +23,15 @@ from app.agent.schemas import KnownProcedureStep
 from app.be.crud import procedure_step as procedure_step_crud
 from app.be.models.procedure_step import ProcedureStep, StepDependency, StepEligibility
 
-__all__ = ["ensure_cafe_procedure_registry"]
+__all__ = ["ensure_cafe_procedure_registry", "load_cafe_procedure_step_ids"]
+
+
+class ProcedureRegistryMissingError(RuntimeError):
+    """절차 마스터 표가 비어 있어 Case 로드맵을 만들 수 없는 상태.
+
+    사용자가 보낸 값이 아니라 적재가 안 돈 것이 원인이라, 같은 요청을 다시 보내도
+    풀리지 않는다. 가입을 조용히 빈 로드맵으로 끝내지 않고 여기서 멈춘다.
+    """
 
 
 def ensure_cafe_procedure_registry(session: Session) -> dict[str, int]:
@@ -49,6 +63,21 @@ def ensure_cafe_procedure_registry(session: Session) -> dict[str, int]:
     for known in build_cafe_procedure_steps(step_ids):
         _store(session, steps[known.procedure_step.step_code], known)
     return step_ids
+
+
+def load_cafe_procedure_step_ids(session: Session) -> dict[str, int]:
+    """적재된 절차 8개의 step_code → DB id를 읽는다. 쓰지 않는다."""
+
+    stored = {
+        code: procedure_step_crud.get_procedure_step_by_code(session, code)
+        for code in PROCEDURE_LABELS
+    }
+    missing = sorted(code for code, step in stored.items() if step is None)
+    if missing:
+        raise ProcedureRegistryMissingError(
+            f"절차 마스터 표에 {', '.join(missing)}가 없다. 앱 시작 때 적재가 돌았는지 확인해야 한다"
+        )
+    return {code: step.id for code, step in stored.items()}
 
 
 def _store(session: Session, step: ProcedureStep, known: KnownProcedureStep) -> None:
