@@ -60,6 +60,7 @@ MEMBERS ──1:N──► CASE ──1:N──► CASE_FIELD_HISTORY
 | restoration_scope | ENUM | | NOT NULL, DEFAULT `UNKNOWN` | `FULL` | `UNKNOWN`/`PARTIAL` / `FULL` / `NOT_REQUIRED` |
 | restoration_scope_detail | VARCHAR | | NULLABLE | `"바닥재·전기배선까지 철거 필요"` | nullable, 구체적인 원상복구 범위 자연어 기록 |
 | demolition_required | ENUM | | NOT NULL, DEFAULT `UNKNOWN` | `REQUIRED` | `UNKNOWN`/`REQUIRED` / `NOT_REQUIRED` |
+| support_approved | BOOLEAN | | NULLABLE | `true` | 사장님이 알려 준 철거비 지원 승인 결과. `true` 승인 / `false` 거절 / `null` 아직 모름. AI가 판단한 지원 자격이 아님 |
 | planned_closure_date | DATE | | NULLABLE | `2026-12-31` | nullable |
 | completed_at | DATETIME | | NULLABLE | `NULL` | nullable |
 | created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-09-01 10:24:00` | |
@@ -83,6 +84,17 @@ CASE의 필드 단위 변경 이력 (감사 추적용). `CASE_HISTORY`(발화·�
 | created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP ⚠️ 추정 | `2026-09-10 09:11:00` | |
 
 ---
+
+### CASE_CHECKLIST
+
+사장님이 직접 체크한 로드맵 항목. 줄이 있으면 체크됨, 체크를 풀면 줄을 지운다. 체크할 수 있는 항목은 AI 로드맵(`app/agent/roadmap.py`)의 `CHECKLIST_IDS`다. 공식 절차 진행 상태는 `CASE_PROCEDURE_STEP`이 따로 갖는다.
+
+| 컬럼 | 타입 | 키 | 제약조건 | 예시 값 | 설명 |
+|---|---|---|---|---|---|
+| id | BIGINT | PK | NOT NULL, AUTO_INCREMENT | 1 | |
+| case_id | BIGINT | FK | NOT NULL, UNIQUE(case_id, task_id) | 1 | |
+| task_id | VARCHAR(50) | | NOT NULL | `"dispose_stock"` | 체크한 항목 |
+| created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-10-30 10:00:00` | 체크한 시각 |
 
 ## 2. 판단 로그 & 블로커
 
