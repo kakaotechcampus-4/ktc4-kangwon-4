@@ -338,3 +338,49 @@ export interface CaseDraft {
   /** 선택 항목. `YYYY-MM-DD` */
   plannedClosureDate: string
 }
+
+/** 상황 진단 첫 질문 "어떤 가게를 정리하시나요?"의 보기 */
+export type DiagnosisBusiness = 'PERSONAL_CAFE' | 'FRANCHISE_CAFE' | 'RESTAURANT'
+
+/** "가게에 해당하는 것을 모두 골라주세요"의 보기 */
+export type DiagnosisSituation = 'LEASE' | 'STAFF' | 'LOAN' | 'CONTRACT'
+
+/** "가입했던 적이 있는 보험을 모두 골라주세요"의 보기 (4대보험) */
+export type DiagnosisInsurance = 'PENSION' | 'HEALTH' | 'EMPLOYMENT' | 'INDUSTRIAL_ACCIDENT'
+
+/** "원상복구 조항이 있나요?"의 보기. 서버 `restoration_clause`와 같은 세 값이다 */
+export type DiagnosisRestorationClause = 'EXISTS' | 'NOT_EXISTS' | 'UNKNOWN'
+
+/** "언제 문을 닫으실 생각이세요?"의 보기 */
+export type DiagnosisClosure = 'THIS_MONTH' | 'NEXT_MONTH' | 'UNDECIDED'
+
+/**
+ * 상황 진단에서 사장님이 고른 답. 보낼 값이 아니라 **고른 보기 그대로**다.
+ *
+ * 서버 칸으로 바꾸는 일은 보낼 때 어댑터가 한 번만 한다. 여기서 미리 바꿔 두면
+ * "개인 카페"와 "프랜차이즈 카페"가 같은 `CAFE`가 되어, 뒤로 돌아왔을 때 무엇을
+ * 골랐는지 화면에 다시 표시할 수 없다.
+ *
+ * 아직 답하지 않은 질문은 `null`이다. 여럿 고르는 질문도 마찬가지로, 빈 배열은
+ * "해당하는 게 없어요"를 고른 것이고 `null`은 아직 그 질문에 오지 않은 것이다.
+ *
+ * 조건에 따라 나오는 질문(월세·원상복구·직원 수 등)의 답은, 앞 답을 바꿔 그 질문이
+ * 빠져도 지우지 않는다. 다시 켜면 그대로 남아 있게 하고, 보낼 때 조건을 다시 본다.
+ */
+export interface DiagnosisAnswers {
+  business: DiagnosisBusiness | null
+  /** 다른 음식점일 때만 묻는다. 카페는 첫 질문에서 이미 정해진다 */
+  franchise: boolean | null
+  situations: DiagnosisSituation[] | null
+  /** 빌린 가게일 때만 묻는다. `true`면 월세를 낸다 */
+  paysRent: boolean | null
+  /** 빌린 가게일 때만 묻는다 */
+  restorationClause: DiagnosisRestorationClause | null
+  /** 직원이 있을 때만 묻는다. 정직원 + 아르바이트가 보낼 직원 수가 된다 */
+  fullTimeCount: number
+  partTimeCount: number
+  /** 지금 직원이 없을 때만 묻는다 */
+  hadEmployees: boolean | null
+  insurances: DiagnosisInsurance[] | null
+  closure: DiagnosisClosure | null
+}
