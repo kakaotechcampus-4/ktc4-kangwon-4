@@ -214,6 +214,24 @@ describe('ResultInputPage — 서버', () => {
       expect(screen.getByRole('textbox')).toBeEnabled()
     })
 
+    /** 반영 결과에서 "다르게 이해했어요"로 왔다. 보내는 길은 같고, 무엇을 적을지만 먼저 알린다 */
+    it('바로잡으러 왔으면 그 안내를 보여준다', async () => {
+      serve({ entry: [READY] })
+      renderFlow('/results?fix=1')
+      await advance()
+
+      expect(screen.getByText('앞서 알려주신 내용을 바로잡아 적어 주세요.')).toBeInTheDocument()
+      expect(screen.getByRole('textbox')).toBeEnabled()
+    })
+
+    it('그냥 들어오면 바로잡기 안내를 보여주지 않는다', async () => {
+      serve({ entry: [READY] })
+      renderFlow()
+      await advance()
+
+      expect(screen.queryByText('앞서 알려주신 내용을 바로잡아 적어 주세요.')).not.toBeInTheDocument()
+    })
+
     /** 충돌부터 풀어야 한다. 뒤로 가기로 이 화면에 돌아오면 같은 곳으로 또 튕긴다 */
     it('확인을 기다리는 충돌이 있으면 충돌 확인으로 바꿔 낀다', async () => {
       serve({

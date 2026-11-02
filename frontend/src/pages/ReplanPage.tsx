@@ -164,6 +164,11 @@ function ServerReplan({ historyId }: { historyId: number }) {
  *
  * 시안의 "새로 생긴 할 일 3개"는 서버에 없다. 서버는 바뀐 칸과 다음 할 일 하나를 주므로
  * 그 둘을 같은 회색 상자로 보여준다. 막힌 것(Blocker)은 홈과 같은 기준으로 그리지 않는다.
+ *
+ * 바뀐 칸이 있으면 시안의 "이렇게 이해했어요"처럼 AI가 이해한 내용으로 보여주고 맞는지 묻는다.
+ * `UPDATED` 는 서버가 이미 반영한 결과라 "반영하기 전 확인"이 아니다 — 제목도 반영했다고 쓴다.
+ * 다르게 이해했으면 결과 입력으로 보내 바로잡아 적게 한다. 이미 반영한 값과 다르면
+ * 서버가 충돌(`CONFLICT`)로 돌려주고, 사장님이 어느 쪽이 맞는지 고른다.
  */
 function Replanned({ view, search }: { view: ReplanView; search: string }) {
   const navigate = useNavigate()
@@ -176,7 +181,7 @@ function Replanned({ view, search }: { view: ReplanView; search: string }) {
         <div className="flex flex-col items-center pt-2 text-center">
           <IconCheckmarkCircleFill aria-hidden="true" className="size-16 text-fg-brand" />
           <h1 className="mt-4 text-26 font-bold">
-            {changed ? '말씀하신 내용을 반영했어요' : '가게 정보에 바뀐 내용은 없어요'}
+            {changed ? '이렇게 이해하고 반영했어요' : '가게 정보에 바뀐 내용은 없어요'}
           </h1>
           {/* 바뀐 것이 없으면 다음 할 일도 그대로일 수 있어서 "정했어요" 대신 "확인했어요"라고 쓴다 */}
           <p className="mt-2 text-17 text-fg-neutral-muted">
@@ -188,7 +193,7 @@ function Replanned({ view, search }: { view: ReplanView; search: string }) {
 
         {changed && (
           <section className="flex flex-col gap-3 rounded-2xl bg-bg-layer-default-pressed px-4.5 py-4">
-            <h2 className="text-15 font-bold text-fg-neutral-muted">바뀐 내용</h2>
+            <h2 className="text-15 font-bold text-fg-neutral-muted">이해한 내용</h2>
             <ul className="flex flex-col gap-3">
               {changes.map((change) => (
                 <li key={change.key}>
@@ -214,10 +219,26 @@ function Replanned({ view, search }: { view: ReplanView; search: string }) {
           {nextAction.reason && <p className="text-15 text-fg-neutral-muted">{nextAction.reason}</p>}
         </section>
 
-        <Button onClick={() => navigate({ pathname: '/case', search })}>홈으로</Button>
+        {changed ? (
+          <div className="flex flex-col gap-3">
+            <Button onClick={() => navigate({ pathname: '/case', search })}>맞아요</Button>
+            <Button variant="outline" onClick={() => navigate({ pathname: '/results', search: withFix(search) })}>
+              다르게 이해했어요
+            </Button>
+          </div>
+        ) : (
+          <Button onClick={() => navigate({ pathname: '/case', search })}>홈으로</Button>
+        )}
       </main>
     </ReplanFrame>
   )
+}
+
+/** 결과 입력을 "바로잡기" 모양으로 열라는 표시를 붙인다. Mock 표시(`?mock=`)는 그대로 둔다 */
+function withFix(search: string): string {
+  const params = new URLSearchParams(search)
+  params.set('fix', '1')
+  return `?${params.toString()}`
 }
 
 /** 탭 없는 화면의 틀. 시안처럼 머리에 제목을 두지 않고 화면 안의 큰 제목이 맡는다 */

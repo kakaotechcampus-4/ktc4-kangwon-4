@@ -13,6 +13,7 @@ function renderAt(entry: string | { pathname: string; search: string; state: unk
       { path: '/', element: <p>진입 분기</p> },
       { path: '/login', element: <p>로그인</p> },
       { path: '/case', element: <p>현재 Case</p> },
+      { path: '/results', element: <p>결과 입력</p> },
       { path: '/replan', element: <ReplanPage /> },
     ],
     { initialEntries: ['/case', entry], initialIndex: 1 },
@@ -74,8 +75,8 @@ describe('ReplanPage — 서버', () => {
     serve(json(judged({})))
     renderAt('/replan?history=13')
 
-    expect(await screen.findByRole('heading', { name: '말씀하신 내용을 반영했어요' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '바뀐 내용' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '이렇게 이해하고 반영했어요' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '이해한 내용' })).toBeInTheDocument()
     expect(screen.getByText('철거 비용 지원은 신청이 먼저예요.')).toBeInTheDocument()
     // 홈에서 뺀 것과 같은 기준이다
     expect(screen.queryByText('철거 전에 지원 조건을 확인해야 합니다.')).not.toBeInTheDocument()
@@ -89,7 +90,7 @@ describe('ReplanPage — 서버', () => {
     renderAt('/replan?history=13')
 
     expect(await screen.findByRole('heading', { name: '가게 정보에 바뀐 내용은 없어요' })).toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: '바뀐 내용' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '이해한 내용' })).not.toBeInTheDocument()
     expect(screen.getByText('지원 조건 확인하기')).toBeInTheDocument()
   })
 
@@ -110,13 +111,34 @@ describe('ReplanPage — 서버', () => {
     expect(screen.queryByText(hidden)).not.toBeInTheDocument()
   })
 
-  it('홈으로를 누르면 지금 상황으로 간다', async () => {
+  it('맞아요를 누르면 지금 상황으로 간다', async () => {
     serve(json(judged({})))
+    renderAt('/replan?history=13')
+
+    await userEvent.click(await screen.findByRole('button', { name: '맞아요' }))
+
+    expect(await screen.findByText('현재 Case')).toBeInTheDocument()
+  })
+
+  /** 이미 반영된 결과라 되돌리지 않는다. 바로잡아 다시 적게 하고, 다르면 서버가 충돌로 묻는다 */
+  it('다르게 이해했어요를 누르면 바로잡는 결과 입력으로 간다', async () => {
+    serve(json(judged({})))
+    const router = renderAt('/replan?history=13')
+
+    await userEvent.click(await screen.findByRole('button', { name: '다르게 이해했어요' }))
+
+    expect(await screen.findByText('결과 입력')).toBeInTheDocument()
+    expect(new URLSearchParams(router.state.location.search).get('fix')).toBe('1')
+  })
+
+  it('바뀐 것이 없으면 맞는지 묻지 않고 홈으로만 보낸다', async () => {
+    serve(json(judged({ result: 'NO_CHANGE', changes: [] })))
     renderAt('/replan?history=13')
 
     await userEvent.click(await screen.findByRole('button', { name: '홈으로' }))
 
     expect(await screen.findByText('현재 Case')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '다르게 이해했어요' })).not.toBeInTheDocument()
   })
 
   /**
