@@ -53,6 +53,11 @@ from app.common.agent_data import (
 )
 from app.common.agent_service import build_planning_input
 from app.be.crud import procedure_step as procedure_step_crud
+import logging
+from unittest.mock import patch
+from app.agent.schemas import AgentFieldKey, FactOperation
+from app.be.crud import case as case_crud
+from app.be.crud import case_field_history as case_field_history_crud
 from app.be.services import procedure_registry
 from app.be.services.procedure_registry import (
     ProcedureRegistryMissingError,
@@ -591,3 +596,35 @@ def test_an_unanswered_insurance_question_stays_unknown_instead_of_becoming_no(m
     assert facts["health_insurance_enrolled"].value is None
     # 하나만 가입으로 와도 나머지가 모름이면 보험 조건은 "해당함"이다(하나라도 가입이므로).
     assert applicability_of(mysql_engine, case_id).count(None) == 1
+
+
+def test_onboarding_only_fields_are_not_written_by_an_agent_conversation(caplog):
+    """AI 대화가 보낸 변경 중 가입 폼 전용 5칸은 저장하지 않는다.
+
+    사장님이 가입할 때 직접 답한 값을, AI가 대화 중에 추정한 값으로 덮으면 안 된다
+    (승준님 #132 연동 요청). 컬럼이 있느냐로 가르면 5칸도 컬럼이 생겨서 다 통과해 버린다.
+    """
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+    from app.be.services.decision_record import _apply_fact_changes
+
+    def change(field_path):
+        return SimpleNamespace(
+            field_path=AgentFieldKey(field_path), operation=FactOperation.SET,
+            proposed_value=True, source_type=SimpleNamespace(value="INFO_ANALYSIS"),
+            source_evidence_refs=["ev-1"], reason_summary="합성",
+        )
+
+    case = SimpleNamespace(id=1, pension_enrolled=None, had_employees=None)
+    with patch.object(case_crud, "get_case_by_id", return_value=case), \
+         patch.object(case_field_history_crud, "create_case_field_history") as writer, \
+         caplog.at_level(logging.WARNING):
+        _apply_fact_changes(
+            MagicMock(spec=Session), SimpleNamespace(id=9, case_id=1),
+            [change("pension_enrolled"), change("had_employees")],
+        )
+
+    # 건너뛰되 흔적은 남는다. 조용히 버리면 왜 안 저장됐는지 아무도 모른다.
+    writer.assert_not_called()
+    assert case.pension_enrolled is None and case.had_employees is None
+    assert len(caplog.records) == 2

@@ -287,15 +287,17 @@ def _apply_fact_changes(
         raise ValueError(f"case {history.case_id} not found")
 
     for change in fact_changes:
-        # AI가 바꿀 수 있는 필드(AgentFieldKey)가 Case 컬럼보다 앞서 늘어날 수 있다. 그때
-        # setattr은 조용히 무시하지 않고 ValueError를 내서 판단 전체를 FAILED로 끝낸다.
+        # AI가 대화 중에 바꾸겠다고 보낼 수 있는 필드는 14개(AgentFieldKey)지만, 저장하는
+        # 것은 9개(CaseFieldKey)뿐이다. 나머지 5개(직원 고용 이력·4대보험 가입 이력)는
+        # 가입 폼으로만 채우기로 했다 — 사장님이 직접 답한 값을 AI가 대화 중에 추정한
+        # 값으로 덮으면 안 되기 때문이다(승준님 #132 연동 요청).
+        #
+        # 컬럼이 있느냐로 가르면 안 된다. 그 5개도 컬럼은 있어서 전부 통과해 버린다.
         # 한 필드 때문에 나머지 변경까지 버리지 않도록 건너뛰되, 반드시 흔적을 남긴다 —
-        # 검수를 통과한 변경을 말없이 버리는 것이기 때문이다(AI팀 제안, PR #119).
-        if not hasattr(case, change.field_path.value):
+        # 검수를 통과한 변경을 말없이 버리는 것이기 때문이다.
+        if change.field_path not in CaseFieldKey:
             logger.warning(
-                "case %s의 %s는 저장할 컬럼이 없어 건너뛴다. Case 컬럼을 늘려야 한다",
-                case.id,
-                change.field_path.value,
+                "case %s의 %s는 AI 대화로 저장하는 값이 아니라 건너뛴다", case.id, change.field_path.value
             )
             continue
         # 컬럼에 글자 "UNKNOWN"이 들어 있는 필드가 있다. 그대로 적으면 "모름"이 이력에
