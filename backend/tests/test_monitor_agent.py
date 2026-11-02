@@ -71,6 +71,15 @@ def test_unrelated_observations_are_excluded_and_unknown_review_is_not_zero():
     assert report["review_revise_count"] is None
 
 
+def test_support_schema_is_charged_with_its_original_name():
+    row = generation(schema_name="support_analysis", component="SUPPORT_AGENT")
+    report = summarize([row, deepcopy(row)], RATES)
+    assert report["totals"]["http_attempts"] == 1
+    assert report["totals"]["total_tokens"] == 120
+    assert report["totals"]["estimated_cost_krw"] == pytest.approx(0.02318)
+    assert report["by_component_model_effort"][0]["component"] == "SUPPORT_AGENT"
+
+
 @pytest.mark.parametrize("maximum,truncated,requests", [(1, True, 1), (2, False, 2)])
 def test_pagination_fetches_no_io_and_marks_partial_reports(maximum, truncated, requests):
     api = SimpleNamespace(get_many=Mock(side_effect=[

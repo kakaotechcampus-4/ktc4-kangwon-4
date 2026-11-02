@@ -4,6 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 from app.agent.schemas import canonical_digest
+from pydantic import ValidationError
+from scripts import evaluate_agent_roles
 from scripts.evaluate_agent_roles import baseline_row, decision_digest
 from scripts.evaluation_metrics import evaluate_efforts
 from test_action_codes import supervisor_request
@@ -59,3 +61,24 @@ def test_baseline_reuse_requires_identical_input_model_effort_and_pass():
     config.reasoning_effort = "xhigh"
     row["passed"] = False
     assert baseline_row(checkpoint, dataset, "scope_unknown", 1, config) is None
+
+
+def test_accuracy_validates_every_fixture_before_any_paid_call(tmp_path, monkeypatch):
+    async def paid_call(*args, **kwargs):
+        pytest.fail("invalid later fixture must stop the suite before its first call")
+
+    monkeypatch.setattr(evaluate_agent_roles, "trial", paid_call)
+    inputs = tmp_path / "inputs.json"
+    inputs.write_text("{}")
+    dataset = {
+        "supervisor_cases": {"scope_unknown": supervisor_request().model_dump(mode="json")},
+        "accuracy_cases": [{"role": "scope_unknown"}, {"role": "info", "request": {}}],
+    }
+    args = SimpleNamespace(inputs=inputs, output=tmp_path, validate_only=False, repeats=1)
+    with pytest.raises(ValidationError):
+        asyncio.run(evaluate_agent_roles.accuracy_suite(args, dataset))
+
+
+def test_validate_only_cannot_fall_through_to_a_paid_mode():
+    with pytest.raises(SystemExit, match="--validate-only requires --accuracy"):
+        asyncio.run(evaluate_agent_roles.run(SimpleNamespace(validate_only=True, accuracy=False)))

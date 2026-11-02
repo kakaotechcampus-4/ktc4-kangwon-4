@@ -65,7 +65,7 @@ def summarize(observations, prices):
             })
         schema = metadata.get("schema_name") or ""
         if row.get("type") != "GENERATION" or not (
-            schema.startswith("reborn_") or schema == "ContentSafetyDecision"
+            schema.startswith("reborn_") or schema in {"ContentSafetyDecision", "support_analysis"}
         ):
             continue
         parent = by_id.get(row.get("parentObservationId"), {})
