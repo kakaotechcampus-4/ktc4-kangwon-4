@@ -21,6 +21,15 @@ from app.be.services import conflict_decision
 from app.be.services import decision_record as decision_record_service
 from app.be.services import reviewed_procedure as reviewed_procedure_service
 
+from uuid import uuid4
+
+from sqlmodel import SQLModel, create_engine
+from testcontainers.community.mysql import MySqlContainer
+
+from app.be.crud.member import create_member
+from app.be.schemas.case import CaseCreateRequest
+from app.be.services.case import create_case
+
 HISTORY_ID = 9
 SNAPSHOT_ID = "11111111-1111-1111-1111-111111111111"
 
@@ -184,3 +193,86 @@ def test_closing_nothing_is_allowed(monkeypatch):
 
     decision_record_service._resolve_conflicts(MagicMock(spec=Session), None)
     decision_record_service._resolve_conflicts(MagicMock(spec=Session), {})
+
+
+def test_the_stored_snapshot_survives_a_round_trip_through_mysql(mysql_engine):
+    """보관한 Case 상태가 DB를 거쳐도 한 글자도 안 바뀌어야 한다.
+
+    사장님이 고른 뒤 AI에 그대로 돌려주는데, AI는 받은 것이 자기가 준 것과 같은지 대조하고
+    다르면 STALE_CONFLICT_CONFIRMATION으로 거절한다. JSON으로 적었다 읽으면서 시각이나
+    UUID가 모양만 바뀌어도 그 Case의 결정은 전부 실패한다.
+    """
+    from datetime import datetime, timezone
+    from uuid import UUID
+    from app.agent.schemas import CaseSnapshot
+    from app.be.models.case_history import CaseHistory
+
+    moment = datetime(2026, 1, 1, 12, 30, 45, 123456, tzinfo=timezone.utc)
+    original = CaseSnapshot.model_validate({
+        "snapshot_id": UUID(int=7), "case_id": 1, "case_status": "IN_PROGRESS",
+        "facts": [
+            {"field_path": field, "value_type": kind, "value": value,
+             "status": "CONFIRMED", "evidence_refs": ["ev-1"], "updated_at": moment}
+            for field, kind, value in (
+                ("business_type", "STRING", "카페"),
+                ("franchise_status", "BOOLEAN", False),
+                ("lease_status", "ENUM", "LEASED_PAID"),
+            )
+        ],
+        "procedure_progress": [],
+        "evidence_records": [{
+            "evidence_id": "ev-1", "source_type": "USER_INPUT", "source_ref": "case_history:1",
+            "source_version": None, "locator": None, "excerpt": "전체 철거래요",
+            "parent_evidence_refs": [], "published_at": None, "retrieved_at": moment,
+            "freshness_status": "CURRENT", "content_hash": "0" * 64,
+        }],
+        "captured_at": moment,
+    })
+
+    with Session(mysql_engine) as session:
+        case_id = new_case_id(session)
+        history = CaseHistory(
+            case_id=case_id, raw_input="전체 철거래요", source="USER_INPUT",
+            judgment_status="PENDING",
+        )
+        session.add(history)
+        session.commit()
+        history_id = history.id
+        # 실제 저장 경로를 그대로 탄다. 여기서 모양을 잘못 적으면 DB가 받아주지 않거나
+        # 받아줘도 읽을 때 달라진다.
+        decision_record_service.save_conflict(
+            session, history,
+            SimpleNamespace(evidence_records=[], conflicts=[], conflict_snapshot=original),
+        )
+
+    # 다른 세션으로 읽어야 ORM이 들고 있던 객체가 아니라 진짜 DB 값을 본다.
+    with Session(mysql_engine) as session:
+        stored = session.get(CaseHistory, history_id)
+        restored = CaseSnapshot.model_validate(stored.conflict_snapshot)
+
+    assert restored == original
+
+
+@pytest.fixture(scope="module")
+def mysql_engine():
+    container = MySqlContainer(
+        "mysql:8.0", dialect="pymysql", username="test", password="test",
+        root_password="test", dbname="conflict_decision_test",
+    ).with_env("TZ", "Asia/Seoul")
+    with container:
+        engine = create_engine(container.get_connection_url() + "?charset=utf8mb4")
+        try:
+            SQLModel.metadata.create_all(engine)
+            yield engine
+        finally:
+            engine.dispose()
+
+
+def new_case_id(session) -> int:
+    member = create_member(session, oauth_id=str(uuid4()), nickname="합성 사용자")
+    case, _ = create_case(session, member.id, CaseCreateRequest(
+        business_type="카페", franchise_status=False, employee_count=2,
+        lease_status="LEASED_PAID",
+    ))
+    session.commit()
+    return case.id
