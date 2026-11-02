@@ -285,6 +285,34 @@ describe('ResultInputPage — 서버', () => {
       fireEvent.click(screen.getByRole('button', { name: '보내기' }))
       await advance()
 
+      expect(sentBodies(fetchMock)).toEqual([
+        { case_history_id: 12, raw_input: '[리본이 물어본 것] 원상복구 범위\n[사장님 답] 카운터만 철거해요' },
+      ])
+    })
+
+    /** 무엇이 더 필요한지 서버가 말하지 않았으면 물은 것이 없다. 없는 질문을 만들어 붙이지 않는다 */
+    it('요청한 항목이 없는 실패에서는 적은 글만 보낸다', async () => {
+      const fetchMock = serve({
+        entry: [
+          json(
+            entryBody({
+              judgment_status: 'FAILED',
+              next_action: null,
+              recovery_action_code: 'RESUBMIT_INPUT',
+              requested_field_paths: [],
+            }),
+          ),
+        ],
+        submit: [ACCEPTED],
+        judged: [json(judgedBody({ result: 'PENDING' }))],
+      })
+      renderFlow()
+      await advance()
+
+      fireEvent.change(screen.getByLabelText('이 내용을 알려주세요'), { target: { value: '카운터만 철거해요' } })
+      fireEvent.click(screen.getByRole('button', { name: '보내기' }))
+      await advance()
+
       expect(sentBodies(fetchMock)).toEqual([{ case_history_id: 12, raw_input: '카운터만 철거해요' }])
     })
 

@@ -174,10 +174,17 @@ export function ResultInputPage() {
   /** 지금 답을 받는 질문. 없으면 할 일의 결과를 받는다 */
   const questions =
     askedAgain ?? (entry.status === 'READY' && entry.ask.kind === 'ANSWER' ? entry.ask.questions : null)
-  /** 보낼 글. 질문에 답할 때는 질문을 붙이고, 답하지 않은 질문은 뺀다 */
+  /**
+   * 보낼 글. 질문에 답할 때는 질문을 붙이고, 답하지 않은 질문은 뺀다.
+   * 다시 알려주실 때도 요청한 항목을 질문 자리에 붙인다 — AI 는 무엇을 물었는지 모른다.
+   * 요청한 항목이 비어 있으면 물은 것이 없어서 글만 보낸다.
+   */
+  const resubmitNotice = entry.status === 'READY' && entry.ask.kind === 'RESUBMIT' ? entry.ask.notice : null
   const draft = questions
     ? toAnswerInput(questions.map((question) => ({ question, answer: answers[question] ?? '' })))
-    : text.trim()
+    : resubmitNotice && resubmitNotice.fields.length > 0
+      ? toAnswerInput([{ question: requestedFieldsText(resubmitNotice), answer: text }])
+      : text.trim()
   const isPending = state.kind === 'PENDING'
   /*
    * 안내가 `/case` 로 보내는 상태에서는 폼을 잠근다. 안내와 폼이 서로 다른 말을 하면 안 된다.
@@ -565,11 +572,16 @@ interface NoticeProps {
  *
  * 항목을 문장 끝에 떼어 둔다. 앞에 두면 "범위를"·"업종을" 처럼 받침에 따라 조사가 갈린다.
  */
-function detailText({ fields, partial }: { fields: string[]; partial: boolean }): string {
-  if (fields.length === 0) {
+function detailText(requested: { fields: string[]; partial: boolean }): string {
+  if (requested.fields.length === 0) {
     return '어떤 내용이 더 필요한지는 아직 확인되지 않았어요. 조금 더 자세히 적어서 다시 보내 주세요.'
   }
-  return `이 내용을 조금 더 적어서 다시 보내 주세요 — ${fields.join(', ')}${partial ? ' 등' : ''}.`
+  return `이 내용을 조금 더 적어서 다시 보내 주세요 — ${requestedFieldsText(requested)}.`
+}
+
+/** 더 적어야 할 항목 목록. 화면 안내와 다시 보내는 글의 질문 자리가 같은 말을 쓴다 */
+function requestedFieldsText({ fields, partial }: { fields: string[]; partial: boolean }): string {
+  return `${fields.join(', ')}${partial ? ' 등' : ''}`
 }
 
 /** 판단 실패 이유마다의 안내. "다시 보내기"는 같은 글을 그대로 보내도 될 때만 단다 */
