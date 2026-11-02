@@ -6904,5 +6904,17 @@
       "locator"
     ],
     "provider_calls": 0
+  },
+  "pr119_alignment": {
+    "provider_calls": 0,
+    "checks": {
+      "employee_count_0_does_not_infer_insurance": true,
+      "employee_count_2_does_not_infer_insurance": true,
+      "aggregate_not_a_roadmap_input": true,
+      "aggregate_not_an_agent_fact": true,
+      "all_four_individual_fields_supported": true,
+      "all_four_false": true,
+      "one_true_rest_unknown": true
+    }
   }
 }
