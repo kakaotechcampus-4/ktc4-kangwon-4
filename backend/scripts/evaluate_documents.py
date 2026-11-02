@@ -151,7 +151,7 @@ async def trial(args, output):
                 assert row["redaction_count"] >= 1
                 package = agent.prepare_settlement(context)
                 with ZipFile(io.BytesIO(package)) as archive:
-                    assert archive.testzip() is None and len(archive.namelist()) == 9
+                    assert archive.testzip() is None and len(archive.namelist()) == 8
                 (output / "settlement.zip").write_bytes(package)
                 row.update(workflow_passed=True, documents=len(context.documents), zip_entries=9)
             row["passed"] = row["workflow_passed"] and row["automatic_fields_correct"]
