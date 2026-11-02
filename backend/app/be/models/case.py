@@ -80,6 +80,8 @@ class Case(TimestampMixin, table=True):
     )
 
     planned_closure_date: date | None = Field(default=None, sa_column=Column(Date, nullable=True))
+    # 정확한 날짜 대신 예상 달만 정했을 때 "YYYY-MM". 날짜가 있으면 비워 둔다
+    planned_closure_month: str | None = Field(default=None, sa_column=Column(String(7), nullable=True))
     completed_at: datetime | None = Field(default=None, sa_column=Column(DateTime, nullable=True))
 
     member: "Member" = Relationship()

@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 BusinessType = Literal["CAFE", "RESTAURANT"]
 LeaseStatus = Literal["LEASED_PAID", "LEASED_FREE", "OWNED"]
@@ -26,6 +26,8 @@ class CaseCreateRequest(BaseModel):
     lease_status: LeaseStatus
     restoration_clause: RestorationClause = "UNKNOWN"
     planned_closure_date: date | None = None
+    # 날짜를 못 정했으면 예상 달만 "YYYY-MM"으로 받는다. 둘 다 오면 정확한 날짜를 쓴다
+    planned_closure_month: str | None = Field(default=None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
 
     # 직원 고용 이력과 사업장 4대보험 가입 이력. 넷 다 "지금"이 아니라 "있었던 적"을 묻는다.
     # 안 보내면 None(=안 물어봄)이고 AI에는 모름으로 넘어간다. 안 물어본 것을 false로
@@ -38,6 +40,12 @@ class CaseCreateRequest(BaseModel):
     health_insurance_enrolled: bool | None = None
     employment_insurance_enrolled: bool | None = None
     industrial_accident_insurance_enrolled: bool | None = None
+
+    @model_validator(mode="after")
+    def prefer_exact_closure_date(self) -> "CaseCreateRequest":
+        if self.planned_closure_date is not None:
+            self.planned_closure_month = None
+        return self
 
 
 class CaseCreateResponse(BaseModel):
@@ -59,6 +67,7 @@ class CaseCreateResponse(BaseModel):
     restoration_scope_detail: str | None
     demolition_required: DemolitionRequired
     planned_closure_date: date | None
+    planned_closure_month: str | None = None
     completed_at: datetime | None
     created_at: datetime
     updated_at: datetime
@@ -82,6 +91,7 @@ class CaseGetDetailResponse(BaseModel):
     restoration_scope_detail: str | None
     demolition_required: DemolitionRequired
     planned_closure_date: date | None
+    planned_closure_month: str | None = None
 
 
 class NextActionResponse(BaseModel):

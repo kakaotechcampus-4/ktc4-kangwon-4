@@ -146,6 +146,8 @@ class AgentFieldKey(StrEnum):
     RESTORATION_SCOPE_DETAIL = "restoration_scope_detail"
     DEMOLITION_REQUIRED = "demolition_required"
     PLANNED_CLOSURE_DATE = "planned_closure_date"
+    # 정확한 날짜를 아직 못 정했을 때의 예상 달("YYYY-MM"). 가게 등록 때만 받고 AI 대화로는 저장하지 않는다.
+    PLANNED_CLOSURE_MONTH = "planned_closure_month"
 
 
 class FactValueType(StrEnum):
@@ -226,6 +228,7 @@ CASE_FIELD_SPECS: dict[AgentFieldKey, tuple[FactValueType, frozenset[str] | None
         frozenset({"REQUIRED", "NOT_REQUIRED"}),
     ),
     AgentFieldKey.PLANNED_CLOSURE_DATE: (FactValueType.DATE, None),
+    AgentFieldKey.PLANNED_CLOSURE_MONTH: (FactValueType.STRING, None),
 }
 
 REQUIRED_CASE_FIELDS = frozenset(
@@ -279,6 +282,8 @@ def validate_case_field_value(
             and re.fullmatch(r"\d{4}-\d{2}-\d{2}", value) is not None
             and _is_iso_date(value)
         )
+    elif field_path == AgentFieldKey.PLANNED_CLOSURE_MONTH:
+        valid = type(value) is str and re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", value) is not None
     else:
         valid = type(value) is str and bool(value.strip())
 
