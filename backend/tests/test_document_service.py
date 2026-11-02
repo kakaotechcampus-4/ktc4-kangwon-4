@@ -84,7 +84,7 @@ def test_unreadable_photo_hint_still_requires_owner_confirmation(tmp_path, monke
     async def run():
         client = DocumentClient()
         service = DocumentService(tmp_path, client, submission_policy="RRN_BACK_ONLY")
-        monkeypatch.setattr(service, "_prepare", lambda *_: ([""], b"synthetic-artifact", 0, True))
+        monkeypatch.setattr(service, "_prepare_async", AsyncMock(return_value=([""], b"synthetic-artifact", 0, True)))
         record = await service.ingest(uuid4(), "photo.png", b"synthetic-image", kind_hint=DocumentKind.BEFORE_PHOTO)
         assert record.analysis.kind == DocumentKind.BEFORE_PHOTO
         assert record.analysis.needs_confirmation and not client.calls
@@ -95,9 +95,9 @@ def test_ocr_values_require_owner_confirmation_even_when_model_is_confident(tmp_
     async def run():
         client = DocumentClient()
         service = DocumentService(tmp_path, client, reviewer=client, submission_policy="RRN_BACK_ONLY")
-        monkeypatch.setattr(service, "_prepare", lambda *_, **_kwargs: (
+        monkeypatch.setattr(service, "_prepare_async", AsyncMock(return_value=(
             ["kind=TRANSFER\namount=3,300,000원"], document_pdf(DocumentKind.TRANSFER, amount="3,300,000원"), 0, True,
-        ))
+        )))
         monkeypatch.setattr(service, "_read_image_text", AsyncMock(return_value=["kind=TRANSFER\namount=3,300,000원"]))
         case_id = uuid4()
         record = await service.ingest(case_id, "scan.png", b"synthetic-image")
