@@ -6079,5 +6079,33 @@
     },
     "mysql_included": true,
     "model_calls": 0
-  }
+  },
+  "remote_ci": [
+    {
+      "id": 41385731293,
+      "name": "Agent CI",
+      "status": "completed",
+      "conclusion": "success",
+      "head_sha": "7caa0499c094c057e3747856dff586f63fc74c49",
+      "html_url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/actions/runs/41385731293",
+      "pr": 121,
+      "tests_passed": 584,
+      "seconds": 30.52,
+      "mysql_included": false,
+      "real_model_calls": 0
+    },
+    {
+      "id": 41385730879,
+      "name": "Agent CI",
+      "status": "completed",
+      "conclusion": "success",
+      "head_sha": "bb50fcf59209868f93887845d6c2fa951d42f215",
+      "html_url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/actions/runs/41385730879",
+      "pr": 128,
+      "tests_passed": 615,
+      "seconds": 38.19,
+      "mysql_included": false,
+      "real_model_calls": 0
+    }
+  ]
 }
