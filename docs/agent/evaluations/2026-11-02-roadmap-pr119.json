@@ -368,5 +368,16 @@
     "app_e2e_claimed": false,
     "models_effort_changed": false,
     "human_source_review_claimed": false
+  },
+  "ci": {
+    "run_id": 41404991364,
+    "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/actions/runs/41404991364",
+    "head_sha": "d2d90d440e175aa3414397f8abb28ddd93bc9883",
+    "conclusion": "success",
+    "stdout_tail": "653 passed in 40.37s",
+    "excluded": [
+      "backend/tests/test_reviewed_procedure_db.py"
+    ],
+    "job_log_sha256": "d1f3e5be49aa8e97afc5e5e688a1e240a8ec06b5e6263d56ac966e2462798351"
   }
 }
