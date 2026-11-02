@@ -2,7 +2,7 @@ name: Agent CI
 
 on:
   pull_request:
-    branches: [develop]
+    branches: [develop, "feature/agent-*", "feature/document-*"]
     paths:
       - "backend/app/agent/**"
       - "backend/app/common/**"
@@ -43,8 +43,11 @@ jobs:
           cache-dependency-path: |
             backend/requirements.txt
             backend/requirements-dev.txt
+            backend/app/agent/document_agent/requirements.txt
       - name: Install pinned dependencies
-        run: python -m pip install -r requirements.txt -r requirements-dev.txt
+        run: python -m pip install -r requirements.txt -r requirements-dev.txt -r app/agent/document_agent/requirements.txt
+      - name: Prepare local document OCR
+        run: python scripts/setup_agent_ocr.py
       - name: Run mocked Agent regression tests
         # 실제 MySQL 통합 검사와 LLM 평가 스크립트는 실행하지 않는다.
         run: python -m pytest tests --ignore=tests/test_reviewed_procedure_db.py -q
