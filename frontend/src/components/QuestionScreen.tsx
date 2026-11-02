@@ -52,6 +52,8 @@ interface QuestionScreenProps {
   action: { label: string; onClick: () => void; disabled?: boolean; variant?: 'brand' | 'neutral' }
   /** 아래쪽 [이전] 버튼. 시안은 마지막 질문에만 둔다 */
   onPrevious?: () => void
+  /** 제목 위에 놓는 안내 하나 (보내기에 실패했을 때) */
+  notice?: ReactNode
 }
 
 /** 고른 것과 안 고른 것의 테두리. 고르면 2px 진한 선, 아니면 1px 옅은 선 */
@@ -213,6 +215,7 @@ export function QuestionScreen({
   illustration,
   action,
   onPrevious,
+  notice,
 }: QuestionScreenProps) {
   const titleId = useId()
   const optionsFirst = input.type === 'list' || input.type === 'grid'
@@ -257,6 +260,7 @@ export function QuestionScreen({
       </header>
 
       <main className="flex min-h-0 flex-1 flex-col gap-8 overflow-y-auto px-5 pt-4 pb-4">
+        {notice}
         <div>
           <h1 id={titleId} className="text-26 font-bold whitespace-pre-line">
             {title.pre}
