@@ -90,15 +90,19 @@ def test_confirmation_is_bound_to_current_case_and_explicit_owner_values(tmp_pat
     asyncio.run(run())
 
 
-def test_factory_uses_document_role_and_shared_review_without_mobile_models(tmp_path, monkeypatch):
+@pytest.mark.parametrize("effort,expected", [(None, "xhigh"), ("", "xhigh"), ("   ", "xhigh"), ("medium", "medium")])
+def test_factory_uses_document_role_and_shared_review_without_mobile_models(tmp_path, monkeypatch, effort, expected):
     from app.agent.document_tool import tool as module
 
     env = tmp_path / "settings.env"
     env.write_text("CHAT_PROXY_URL=https://example.invalid/v1\nPROXY_TOKEN=test-only\n"
                    "OPENAI_MODEL=strong-review\nOPENAI_REASONING_EFFORT=xhigh\n"
-                   "AGENT_DOCUMENT_MODEL_PREFIX=LUNA6_\nAGENT_DOCUMENT_REASONING_EFFORT=medium\n"
+                   "AGENT_DOCUMENT_MODEL_PREFIX=LUNA6_\n"
                    "LUNA6_CHAT_PROXY_URL=https://example.invalid/v1\nLUNA6_PROXY_TOKEN=test-only\n"
                    "LUNA6_MODEL=small-document\nLUNA6_REASONING_EFFORT=high\n")
+    if effort is not None:
+        with env.open("a") as stream:
+            stream.write(f"AGENT_DOCUMENT_REASONING_EFFORT={effort}\n")
     clients = []
 
     def client(config, **_):
@@ -112,7 +116,7 @@ def test_factory_uses_document_role_and_shared_review_without_mobile_models(tmp_
     async def run():
         agent = await build_document_tool(tmp_path / "vault", submission_policy="RRN_BACK_ONLY", env_file=env)
         assert agent.documents.llm.config.model == "small-document"
-        assert agent.documents.llm.config.reasoning_effort == "medium"
+        assert agent.documents.llm.config.reasoning_effort == expected
         assert agent.documents.reviewer.config.model == "strong-review"
         assert agent.documents.reviewer.config.reasoning_effort == "xhigh"
         await agent.aclose()
