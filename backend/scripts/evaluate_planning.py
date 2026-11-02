@@ -51,19 +51,19 @@ NAMESPACE = UUID("358ab427-27f2-4d58-98a9-5656d63904ca")
 # comparable with the ones in docs/agent/handoof.md.
 CASES = {
     "benchmark_case1": dict(
-        business_type="CAFE", franchise_status=False, employee_count=2,
+        business_type="카페", franchise_status=False, employee_count=2,
         lease_status="LEASED_PAID", planned_closure_date=None,
     ),
     "free_lease": dict(
-        business_type="CAFE", franchise_status=False, employee_count=2,
+        business_type="카페", franchise_status=False, employee_count=2,
         lease_status="LEASED_FREE", planned_closure_date=None,
     ),
     "optional_missing": dict(
-        business_type="CAFE", franchise_status=False, employee_count=None,
+        business_type="카페", franchise_status=False, employee_count=None,
         lease_status="LEASED_PAID", planned_closure_date=None,
     ),
     "solo_dated": dict(
-        business_type="CAFE", franchise_status=False, employee_count=0,
+        business_type="카페", franchise_status=False, employee_count=0,
         lease_status="LEASED_PAID", planned_closure_date="2026-10-31",
     ),
 }

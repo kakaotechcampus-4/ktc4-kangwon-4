@@ -101,7 +101,7 @@ def create_test_case(engine):
     with Session(engine) as session:
         member = create_member(session, oauth_id=str(uuid4()), nickname="합성 사용자")
         case, _ = create_case(session, member.id, CaseCreateRequest(
-            business_type="CAFE", franchise_status=False, employee_count=2,
+            business_type="카페", franchise_status=False, employee_count=2,
             lease_status="LEASED_PAID",
         ))
         history = get_case_created_history(session, case.id)
