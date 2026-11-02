@@ -8,6 +8,7 @@ from app.agent.document_tool.models import (
     DocumentAnalysis,
     DocumentKind,
     ExtractedField,
+    OCRTranscript,
     ReviewDecision,
 )
 from app.agent.document_tool.safety import SafetyDecision
@@ -26,9 +27,12 @@ class DocumentClient:
         self.config = SimpleNamespace(model="synthetic", reasoning_effort="high")
         self.calls = []
         self.needs_confirmation = False
+        self.vision_text = ""
 
     async def generate(self, model, messages, **_):
         self.calls.append(model.__name__)
+        if model is OCRTranscript:
+            return OCRTranscript(text=self.vision_text)
         if model is SafetyDecision:
             return SafetyDecision(decision="ALLOW")
         if model is ReviewDecision:

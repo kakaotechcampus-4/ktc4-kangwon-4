@@ -1,4 +1,4 @@
-"""Real document Agent evaluation with labelled synthetic files and explicit owner input."""
+"""Real document Tool evaluation with labelled synthetic files and explicit owner input."""
 
 import argparse
 import asyncio
@@ -101,14 +101,16 @@ async def trial(args, output):
         inputs.append((filename, data, kind))
         originals[hashlib.sha256(data).hexdigest()] = kind
     row = {"model": agent.documents.llm.config.model, "effort": args.effort,
-           "automatic_fields_correct": True, "owner_confirmations": [], "owner_corrections": [],
+           "automatic_fields_correct": True, "automatic_document_results": [], "owner_confirmations": [], "owner_corrections": [],
            "workflow_passed": False}
     started = perf_counter()
     with capture_usage() as usage:
         try:
             if args.pilot:
                 context = await agent.add_documents(context, inputs)
-                row["automatic_fields_correct"] = fields_correct(context.documents[0], kinds[0])
+                record = context.documents[0]
+                row["automatic_fields_correct"] = fields_correct(record, kinds[0])
+                row["automatic_document_results"].append({"expected_kind": kinds[0], "analysis": record.analysis.model_dump(mode="json"), "correct": row["automatic_fields_correct"]})
                 row["workflow_passed"] = True
             else:
                 initial = [item for item in inputs if item[2] != DocumentKind.TRANSFER]
@@ -121,6 +123,7 @@ async def trial(args, output):
                         kind = originals[record.content_hash]
                         correct = fields_correct(record, kind)
                         row["automatic_fields_correct"] &= correct
+                        row["automatic_document_results"].append({"expected_kind": kind, "analysis": record.analysis.model_dump(mode="json"), "ocr_used": record.ocr_used, "correct": correct})
                         if record.analysis.needs_confirmation or not correct:
                             row["owner_confirmations"].append(str(kind))
                             if not correct:
@@ -167,7 +170,7 @@ async def main(args):
     args.output.mkdir(parents=True, exist_ok=False)
     digest = evaluation_code_digest()
     row = await trial(args, args.output)
-    report = {"synthetic_data": True, "scope": "Standalone document Agent; explicit synthetic owner confirmations; no app APIs",
+    report = {"synthetic_data": True, "scope": "Standalone document Tool; explicit synthetic owner confirmations; no app APIs",
               "layout": args.layout, "pilot": args.pilot, "code_digest": digest,
               "code_unchanged": evaluation_code_digest() == digest, "trials": [row], "passed": row["passed"]}
     write_metadata(args.output / "results.json", report)

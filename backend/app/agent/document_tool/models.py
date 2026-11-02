@@ -58,6 +58,10 @@ class DocumentAnalysis(Model):
     needs_confirmation: bool = False
 
 
+class OCRTranscript(Model):
+    text: str = Field(max_length=60_000)
+
+
 class DocumentRecord(Model):
     document_id: UUID
     filename: str
