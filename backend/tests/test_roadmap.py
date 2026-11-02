@@ -1,4 +1,7 @@
 import asyncio
+import subprocess
+import sys
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -202,6 +205,33 @@ def test_partial_insurance_answer_stays_unknown_even_without_current_staff():
         industrial_accident_insurance_enrolled=None,
     ))
     assert view["employee_insurance"].status == view["employee_payments"].status == "NEEDS_CONFIRMATION"
+
+
+def test_roadmap_import_and_checklists_work_without_optional_pdf_dependency():
+    script = """
+import importlib.abc
+import sys
+
+class NoPDF(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split('.')[0] in {'pymupdf', 'fitz'}:
+            raise ModuleNotFoundError('optional PDF dependency deliberately unavailable')
+
+sys.meta_path.insert(0, NoPDF())
+sys.path.insert(0, '.')
+from app.agent.roadmap import RoadmapInput, build_roadmap, record_checklist
+
+context = RoadmapInput.model_validate_json(sys.stdin.read())
+assert build_roadmap(context).supported
+context = record_checklist(context, 'dispose_stock', completed=True)
+assert 'dispose_stock' in context.completed_checklists
+assert 'app.agent.document_tool.checks' not in sys.modules
+assert 'app.agent.document_tool.documents' not in sys.modules
+"""
+    subprocess.run(
+        [sys.executable, "-c", script], input=request().model_dump_json(), text=True,
+        cwd=Path(__file__).resolve().parents[1], capture_output=True, check=True,
+    )
 
 
 def test_caller_procedure_bindings_use_db_references_without_name_guessing():

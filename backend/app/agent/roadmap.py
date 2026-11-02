@@ -14,7 +14,6 @@ from app.agent.action_catalog import (
     effective_procedure_progress,
     resolve_procedure_bindings,
 )
-from app.agent.document_tool.checks import document_digest
 from app.agent.document_tool.models import DocumentContext
 from app.agent.procedure_tool.rules import business_type_code, procedure_applicability
 from app.agent.schemas import (
@@ -195,10 +194,11 @@ def build_roadmap(request: RoadmapInput, *, procedure_bindings: ProcedureBinding
             elif key == "document_check":
                 documents = request.documents
                 check = documents.document_check if documents else None
-                if check is not None and check.document_digest == document_digest(documents):
-                    status = "COMPLETED" if check.status == "COMPLETE" else "NEEDS_CONFIRMATION"
-                elif check is not None:
-                    status = "NEEDS_CONFIRMATION"
+                if check is not None:
+                    from app.agent.document_tool.checks import document_digest
+
+                    status = ("COMPLETED" if check.document_digest == document_digest(documents)
+                              and check.status == "COMPLETE" else "NEEDS_CONFIRMATION")
             elif key in request.completed_checklists:
                 status = "COMPLETED"
         stages[stage - 1].tasks.append(RoadmapTask(task_id=key, title=title, kind=kind, status=status, procedure_steps=refs))
