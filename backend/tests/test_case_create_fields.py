@@ -58,7 +58,7 @@ def test_fields_left_out_get_their_defaults(mysql_engine):
     case, _ = sign_up(mysql_engine)
 
     assert case.store_name is None
-    assert (case.has_business_loan, case.has_service_contracts, case.restoration_clause) == (False, False, "UNKNOWN")
+    assert (case.has_business_loan, case.has_service_contracts, case.restoration_clause) == (None, None, "UNKNOWN")
 
 
 def test_store_name_is_kept_out_of_the_ai_evidence_but_diagnosis_fields_are_in(mysql_engine):
@@ -71,11 +71,23 @@ def test_store_name_is_kept_out_of_the_ai_evidence_but_diagnosis_fields_are_in(m
     assert '"restoration_clause": "NOT_EXISTS"' in raw_input
 
 
-@pytest.mark.parametrize("field", ["store_name", "business_type"])
-def test_text_longer_than_the_column_is_rejected(field):
-    CaseCreateRequest(**{**BASE, field: "가" * 50})
+def test_store_name_longer_than_the_column_is_rejected():
+    CaseCreateRequest(**BASE, store_name="가" * 50)
     with pytest.raises(ValidationError):
-        CaseCreateRequest(**{**BASE, field: "가" * 51})
+        CaseCreateRequest(**BASE, store_name="가" * 51)
+
+
+@pytest.mark.parametrize("business_type", ["카페", "음식점"])
+def test_business_type_the_ai_recognizes_is_accepted(business_type):
+    assert CaseCreateRequest(**{**BASE, "business_type": business_type}).business_type == business_type
+
+
+@pytest.mark.parametrize("business_type", ["개인 카페", "다른 음식점"])
+def test_business_type_the_ai_would_miss_is_rejected(business_type):
+    """AI는 업종 글자가 정확히 맞아야 절차를 고른다. 시안 선택지 글자를 그대로 받으면 로드맵이 빈다."""
+
+    with pytest.raises(ValidationError):
+        CaseCreateRequest(**{**BASE, "business_type": business_type})
 
 
 @pytest.mark.parametrize("count", [0, 1000])

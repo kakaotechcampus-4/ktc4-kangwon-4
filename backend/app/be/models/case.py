@@ -17,8 +17,8 @@ class Case(TimestampMixin, table=True):
     business_type: str = Field(max_length=50)
     franchise_status: bool = Field(default=False)
     employee_count: int | None = Field(default=None)
-    has_business_loan: bool = Field(default=False)
-    has_service_contracts: bool = Field(default=False)
+    has_business_loan: bool | None = Field(default=None)
+    has_service_contracts: bool | None = Field(default=None)
 
     case_status: str = Field(
         default="IN_PROGRESS",

@@ -52,11 +52,11 @@ MEMBERS ──1:N──► CASE ──1:N──► CASE_FIELD_HISTORY
 | id | BIGINT | PK | NOT NULL, AUTO_INCREMENT | 1 | |
 | member_id | BIGINT | FK | NOT NULL | 1 | |
 | store_name | VARCHAR(50) | | NULLABLE | `"강원 커피"` | 화면 표시용 가게 이름. AI 판단에 쓰지 않음 |
-| business_type | VARCHAR | | NOT NULL | `"카페"` | |
+| business_type | VARCHAR | | NOT NULL | `"카페"` | 가입 때는 `카페`/`음식점`만 받음(AI 절차 변환표 기준). 가입 뒤 AI가 바꾸면 다른 글자일 수 있음 |
 | franchise_status | BOOLEAN | | NOT NULL, DEFAULT false | `false` | |
 | employee_count | INT | | NULLABLE | `2` | |
-| has_business_loan | BOOLEAN | | NOT NULL, DEFAULT false | `false` | 사업 대출이 남아 있는지. 가입 때 사장님이 입력 |
-| has_service_contracts | BOOLEAN | | NOT NULL, DEFAULT false | `true` | 배달앱·카드단말기 등 해지할 서비스 계약이 있는지. 가입 때 사장님이 입력 |
+| has_business_loan | BOOLEAN | | NULLABLE | `false` | 사업 대출이 남아 있는지. 가입 때 사장님이 입력. `null`이면 안 물어봄 |
+| has_service_contracts | BOOLEAN | | NULLABLE | `true` | 배달앱·카드단말기 등 해지할 서비스 계약이 있는지. 가입 때 사장님이 입력. `null`이면 안 물어봄 |
 | case_status | ENUM | | NOT NULL, DEFAULT `IN_PROGRESS` | `IN_PROGRESS` | `IN_PROGRESS` / `COMPLETED` |
 | lease_status | ENUM | | NOT NULL | `LEASED_PAID` | `LEASED_PAID`/`LEASED_FREE`/`OWNED` |
 | restoration_clause | ENUM | | NOT NULL, DEFAULT `UNKNOWN` | `EXISTS` | `EXISTS`/`NOT_EXISTS`/`UNKNOWN` — 임대차계약서에 원상복구 조항이 있는지. 가입 때 사장님이 입력. AI가 채우는 `restoration_*`(진행·범위)와 다른 값 |

@@ -3,6 +3,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+BusinessType = Literal["카페", "음식점"]
 LeaseStatus = Literal["LEASED_PAID", "LEASED_FREE", "OWNED"]
 CaseStatus = Literal["IN_PROGRESS", "COMPLETED"]
 RestorationStatus = Literal["UNKNOWN", "NOT_STARTED", "IN_PROGRESS", "COMPLETED", "NOT_REQUIRED"]
@@ -17,11 +18,11 @@ ConflictSide = Literal["PROPOSED", "STORED"]
 
 class CaseCreateRequest(BaseModel):
     store_name: str | None = Field(default=None, max_length=50)
-    business_type: str = Field(max_length=50)
+    business_type: BusinessType
     franchise_status: bool
     employee_count: int | None = Field(default=None, ge=0, le=1000)
-    has_business_loan: bool = False
-    has_service_contracts: bool = False
+    has_business_loan: bool | None = None
+    has_service_contracts: bool | None = None
     lease_status: LeaseStatus
     restoration_clause: RestorationClause = "UNKNOWN"
     planned_closure_date: date | None = None
@@ -36,8 +37,8 @@ class CaseCreateResponse(BaseModel):
     business_type: str
     franchise_status: bool
     employee_count: int | None
-    has_business_loan: bool
-    has_service_contracts: bool
+    has_business_loan: bool | None
+    has_service_contracts: bool | None
     case_status: CaseStatus
     lease_status: LeaseStatus
     restoration_clause: RestorationClause
@@ -60,8 +61,8 @@ class CaseGetDetailResponse(BaseModel):
     business_type: str
     franchise_status: bool
     employee_count: int | None
-    has_business_loan: bool
-    has_service_contracts: bool
+    has_business_loan: bool | None
+    has_service_contracts: bool | None
     lease_status: LeaseStatus
     restoration_clause: RestorationClause
     restoration_status: RestorationStatus
