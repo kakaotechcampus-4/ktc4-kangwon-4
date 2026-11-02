@@ -16,7 +16,7 @@ from app.be.crud.member import create_member
 from app.be.schemas.case import CaseCreateRequest
 from app.be.services.case import create_case, get_case
 
-BASE = dict(business_type="카페", franchise_status=False, lease_status="LEASED_PAID")
+BASE = dict(business_type="CAFE", franchise_status=False, lease_status="LEASED_PAID")
 
 
 @pytest.fixture(scope="module")
@@ -77,14 +77,14 @@ def test_store_name_longer_than_the_column_is_rejected():
         CaseCreateRequest(**BASE, store_name="가" * 51)
 
 
-@pytest.mark.parametrize("business_type", ["카페", "음식점"])
+@pytest.mark.parametrize("business_type", ["CAFE", "RESTAURANT"])
 def test_business_type_the_ai_recognizes_is_accepted(business_type):
     assert CaseCreateRequest(**{**BASE, "business_type": business_type}).business_type == business_type
 
 
-@pytest.mark.parametrize("business_type", ["개인 카페", "다른 음식점"])
+@pytest.mark.parametrize("business_type", ["카페", "개인 카페", "다른 음식점"])
 def test_business_type_the_ai_would_miss_is_rejected(business_type):
-    """AI는 업종 글자가 정확히 맞아야 절차를 고른다. 시안 선택지 글자를 그대로 받으면 로드맵이 빈다."""
+    """업종은 코드로만 받는다. 시안 선택지 글자를 그대로 받으면 AI가 절차를 못 골라 로드맵이 빈다."""
 
     with pytest.raises(ValidationError):
         CaseCreateRequest(**{**BASE, "business_type": business_type})

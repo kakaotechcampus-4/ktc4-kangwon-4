@@ -3,7 +3,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-BusinessType = Literal["카페", "음식점"]
+BusinessType = Literal["CAFE", "RESTAURANT"]
 LeaseStatus = Literal["LEASED_PAID", "LEASED_FREE", "OWNED"]
 CaseStatus = Literal["IN_PROGRESS", "COMPLETED"]
 RestorationStatus = Literal["UNKNOWN", "NOT_STARTED", "IN_PROGRESS", "COMPLETED", "NOT_REQUIRED"]
