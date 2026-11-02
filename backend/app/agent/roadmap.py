@@ -177,7 +177,7 @@ def build_roadmap(request: RoadmapInput, *, procedure_bindings: ProcedureBinding
     if business_type_code(facts.get("business_type")) != "CAFE" or facts.get("franchise_status") is not False:
         return Roadmap(
             case_id=snapshot.case_id, snapshot_id=snapshot.snapshot_id, supported=False,
-            unsupported_reason="현재 로드맵은 업종 코드 CAFE인 개인 카페만 지원합니다. 프랜차이즈 카페와 일반 음식점은 지원 준비 중입니다.",
+            unsupported_reason="지금은 개인 카페만 폐업 순서를 안내해요. 프랜차이즈 카페와 일반 음식점은 준비 중이에요.",
             stages=[], next_action=None, next_task_id=None, questions_for_user=[],
         )
     lease = facts.get("lease_status") in {"LEASED_PAID", "LEASED_FREE"}
