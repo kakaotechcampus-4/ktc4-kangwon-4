@@ -1105,7 +1105,8 @@
           "[AI] feat: 모델과 effort 설정 및 원화 비용 계산",
           "[AI] feat: Langfuse 기간별 모니터링 집계",
           "[AI] fix: 결과 입력의 질문을 사실 근거에서 제외",
-          "[AI] test: 역할별 모델 평가와 원본 기록 없는 회귀 검사"
+          "[AI] test: 역할별 모델 평가와 원본 기록 없는 회귀 검사",
+          "[AI] docs: 모니터링 측정 결과와 모델 선택 근거"
         ],
         "files": 18,
         "reviewers": []
@@ -1132,8 +1133,8 @@
         "base": "develop",
         "commit_at_verification": "765fd75d340e60265aa38aa16718a32f5f8880f2",
         "commits": [
-          "[AI] docs: 평가 입력과 실제 호출 원본 기록 보존",
-          "[AI] docs: 모델 선택 근거와 검증 결과 정리"
+          "[AI] docs: 합성 평가 입력과 실제 호출 원본 기록",
+          "[AI] docs: 분리된 PR의 최종 범위 기록"
         ],
         "files": 50,
         "reviewers": []
@@ -1282,7 +1283,30 @@
     "history_backups": "local preserve/pr-121-before-three-prs-20261102 and preserve/pr-128-before-three-prs-20261102",
     "separation": "Monitoring functionality and result analysis in PR121; document Tool and document test results in PR128; raw evaluation JSON/CSV/TXT only in PR130",
     "original_workspace_preserved": true,
-    "local_mobile_draft_excluded": true
+    "local_mobile_draft_excluded": true,
+    "current_scope": {
+      "monitoring": {
+        "pr": 121,
+        "files": 18,
+        "commits": 6,
+        "includes_result_markdown": true
+      },
+      "documents": {
+        "pr": 128,
+        "files": 14,
+        "commits": 4
+      },
+      "raw_artifacts": {
+        "pr": 130,
+        "files": 50,
+        "formats": {
+          "json": 46,
+          "csv": 2,
+          "txt": 2
+        },
+        "includes_result_markdown": false
+      }
+    }
   },
   "three_pr_verification": {
     "monitoring": {
