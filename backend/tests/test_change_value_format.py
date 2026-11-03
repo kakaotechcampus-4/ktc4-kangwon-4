@@ -102,8 +102,13 @@ def saved_conflict(monkeypatch):
             model_dump=lambda **_: {"conflict_ref": "cr_1"},
         )
         decision_record.save_conflict(
-            MagicMock(spec=Session), SimpleNamespace(id=9, case_id=1),
-            SimpleNamespace(conflicts=[conflict], evidence_records=[]),
+            MagicMock(spec=Session), SimpleNamespace(id=9, case_id=1, conflict_snapshot=None),
+            # 충돌 난 시점의 Case 상태도 이력에 보관한다. 이 검사는 값을 글자로 바꾸는
+            # 규칙만 보므로 비워 둔다.
+            SimpleNamespace(
+                conflicts=[conflict], evidence_records=[],
+                conflict_snapshot=SimpleNamespace(model_dump=lambda **_: {}),
+            ),
         )
         return saved[0]
 

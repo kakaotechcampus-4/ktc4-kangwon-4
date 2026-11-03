@@ -1,0 +1,455 @@
+{
+  "recorded_at": "2026-11-02T13:15:42.482588+00:00",
+  "scope": "Open PR review follow-up: Agent fixes, actual Docker/OCR/process execution, public replies and TODOs",
+  "new_model_usage": {
+    "provider_requests": 0,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "estimated_cost_krw": 0,
+    "note": "pytest, local OCR, saved-output replay and synthetic DTO checks; not a new LLM quality evaluation"
+  },
+  "user_decisions": {
+    "raw_artifacts": "keep in team repository",
+    "official_source_human_reviewer": "user; review not complete",
+    "ocr_execution": "separate process inside Agent",
+    "pr137_review": "post verified comment",
+    "pr138": "excluded; accidental feature expansion deferred",
+    "reviewer_requests": "no changes",
+    "frontend_backend_sources": "no changes"
+  },
+  "code": {
+    "128": {
+      "before": "2e35e1deef40cb912373d0e821919f58e937d104",
+      "after": "b9dc0c9db62738420e6093904b2d0ced751e1d91",
+      "commits": [
+        "d72c202",
+        "b9dc0c9"
+      ],
+      "changes": [
+        "Default document effort xhigh for missing/empty/whitespace; explicit efforts preserved",
+        "Pin tessdata revision and kor/eng SHA-256; validate downloaded and cached files",
+        "One spawn ProcessPoolExecutor worker for OCR, PDF conversion, redaction and image rendering",
+        "Safe DocumentError for PDF open/render/redact/save and worker failure; preserve failure before model calls",
+        "Cache digest includes split preparation source and OCR manifest"
+      ]
+    },
+    "132": {
+      "before": "8a31584500f559a1eca3bd7ab5bf1d57abe91950",
+      "after": "44da3af1b682d12856555bb7edc3c036ffe9456f",
+      "commits": [
+        "93517e2",
+        "44da3af"
+      ],
+      "changes": [
+        "Expand nested ternaries into if/elif; preserve DTO and output",
+        "Receive current #128 fixes through normal branch merge"
+      ]
+    },
+    "137": {
+      "public_head": "d9ffa4f23cac0a86a4d7e4ac2cf0d27af663ae84",
+      "pushed_by_this_work": false,
+      "local_proposed_patch": "pr137-confirmed-fields-proposed.patch",
+      "local_proposed_patch_sha256": "10fdc578cb2b04bc9c0206f2ceaea707ca117b07fd081d09287a831d83bb317b"
+    }
+  },
+  "local_tests": {
+    "128": {
+      "passed": 634,
+      "seconds": 31.08,
+      "mysql_included": true,
+      "log_sha256": "41e122e4a88ce4abdd9ff9b24b7957bb9a75e84191a6921446b8c4ab41ffe85e"
+    },
+    "132": {
+      "passed": 673,
+      "seconds": 31.68,
+      "mysql_included": true,
+      "roadmap_tests_included": 39,
+      "log_sha256": "c0adf9a4cb7a8c71c4ebe7db248335446ff93f95f7ab99a3ad29cdc3f4b35f4d"
+    },
+    "ruff": "128 changed Python files and 132 roadmap passed",
+    "diff_check": "passed"
+  },
+  "remote_ci": {
+    "128": {
+      "run": 41450356107,
+      "head": "b9dc0c9db62738420e6093904b2d0ced751e1d91",
+      "conclusion": "success",
+      "passed": 624,
+      "seconds": 46.63,
+      "excluded_file": "test_reviewed_procedure_db.py",
+      "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/actions/runs/41450356107"
+    },
+    "132": {
+      "run": 41450582223,
+      "head": "44da3af1b682d12856555bb7edc3c036ffe9456f",
+      "conclusion": "success",
+      "passed": 663,
+      "seconds": 43.14,
+      "excluded_file": "test_reviewed_procedure_db.py",
+      "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/actions/runs/41450582223"
+    }
+  },
+  "docker_base": {
+    "code_commit": "8a31584500f559a1eca3bd7ab5bf1d57abe91950",
+    "image_id": "sha256:27ad53bb63f9fe958928e12b870a7733a45505c5ef81110c5d80cf3d9c8a08f1",
+    "results": {
+      "checks": {
+        "pymupdf_not_installed": true,
+        "no_dotenv_copied": true,
+        "roadmap_import": true,
+        "graph_five_stages_and_existing_output": true,
+        "graph_check_uncheck_and_original_unchanged": true,
+        "graph_empty_document_context": true,
+        "replan_five_stages_and_existing_output": true,
+        "replan_check_uncheck_and_original_unchanged": true,
+        "replan_empty_document_context": true,
+        "unsupported_business_type": true,
+        "unsupported_franchise_status": true,
+        "unknown_franchise_rejected_before_unsupported_response": true,
+        "no_pdf_processing_module_loaded_for_basic_roadmap": true,
+        "existing_document_check_requires_document_dependency": true,
+        "ocr_setup_script_absent_in_current_image": true
+      },
+      "passed_checks": 15,
+      "new_llm_calls": 0,
+      "network": "none"
+    },
+    "health": {
+      "health_status": 200,
+      "body": {
+        "status": "ok"
+      },
+      "attempt": 5
+    },
+    "health_environment": "synthetic settings; prod lifespan; sqlite URL; no DB calls; network none",
+    "pip_check": "No broken requirements found.",
+    "dockerfile_changed": false,
+    "hashes": {
+      "build.log": "32b120ee516a59ce304b91cf494326aca0cf5d6ce4762ecbb95e704c9e1bcd88",
+      "verify.py": "4fd735152640646442255c72526b42e3a3405a55cc414bc91e95a63ca7fd6994",
+      "result.json": "570d17603e5b7550c9802d3409e3839995607f4ee07ee4a13dd1ed71a0e36f55"
+    },
+    "new_llm_calls": 0
+  },
+  "docker_ocr": {
+    "setup_verification": {
+      "pymupdf": "1.28.2",
+      "tesseract_executable_present": false,
+      "apt_install_used": false,
+      "ocr_languages": "kor+eng",
+      "tessdata": "/opt/reborn/tessdata",
+      "ocr_passed": true,
+      "korean_text_recognized": true,
+      "new_llm_calls": 0,
+      "network": "none"
+    },
+    "new_process_verification": {
+      "pymupdf": "1.28.2",
+      "separate_process": true,
+      "event_loop_ticks_during_ocr": 66,
+      "ocr_languages": "kor+eng",
+      "korean_text_recognized": true,
+      "tesseract_executable_present": false,
+      "corrupt_pdf_safe_error": true,
+      "rendering_in_worker": true,
+      "new_llm_calls": 0,
+      "network": "none"
+    },
+    "execution": "Test image reborn-agent-ocr-check:20261102 derived from actual original-Dockerfile build; candidate Agent app mounted read-only for new process check",
+    "new_code_commit": "b9dc0c9db62738420e6093904b2d0ced751e1d91",
+    "pinned_official_files": {
+      "kor": {
+        "sha256": "6b85e11d9bbf07863b97b3523b1b112844c43e713df8b66418a081fd1060b3b2",
+        "bytes": 1677415,
+        "url": "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/87416418657359cb625c412a48b6e1d6d41c29bd/kor.traineddata"
+      },
+      "eng": {
+        "sha256": "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2",
+        "bytes": 4113088,
+        "url": "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/87416418657359cb625c412a48b6e1d6d41c29bd/eng.traineddata"
+      }
+    },
+    "scope_limit": "No live provider, upload API, DB or FE E2E. Version/platform statement limited to Python 3.12-slim with Linux PyMuPDF 1.28.2 wheel."
+  },
+  "saved_model_output_replay": {
+    "input_artifact": "docs/agent/evaluations/2026-11-02-roadmap-live.json",
+    "input_artifact_sha256": "2b1f166d0746fe9cf8453fc74e6a9214e8accb82bb50199afee27e59eff19f50",
+    "original_model_run_commit": "f5d1b2e01a9a773bd397854f83e1258baa9f0d2a",
+    "checks": [
+      {
+        "case": "graph",
+        "existing_fields_unchanged": true,
+        "supported": true
+      },
+      {
+        "case": "replan",
+        "existing_fields_unchanged": true,
+        "supported": true
+      },
+      {
+        "case": "documents_missing",
+        "existing_fields_unchanged": true,
+        "supported": true
+      },
+      {
+        "case": "documents_complete",
+        "existing_fields_unchanged": true,
+        "supported": true
+      }
+    ],
+    "new_provider_requests": 0,
+    "new_tokens": 0,
+    "new_estimated_cost_krw": 0
+  },
+  "pr137_reproduction": {
+    "partial_and_empty_confirmed_fields": {
+      "before": {
+        "failed": 3,
+        "passed": 1,
+        "existing_tests_deselected": 26
+      },
+      "after_local_proposal": {
+        "service_tests_passed": 30,
+        "seconds": 0.79
+      },
+      "rule": "If confirmed_fields is not None, use only its keys; do not fall back to raw extraction for omitted keys"
+    },
+    "name_in_allowed_field_quote": {
+      "field": "amount",
+      "synthetic_quote": "가나철거 합계금액 3,300,000원",
+      "name_still_present": true
+    },
+    "dates": "Actual closure_date and generic date can be confused with planned_closure_date; exclusion proposed, user policy answer pending",
+    "actual_document_submitted_llm_quality": "not verified; no claim of improved next-action accuracy"
+  },
+  "pr134_actual_tool_check": {
+    "same_version_status": "ProcedureCompletionStatus.COMPLETE",
+    "same_version_documents": 1,
+    "old_case_version_status": "ProcedureCompletionStatus.NO_RESULTS",
+    "old_case_version_documents": 0,
+    "new_llm_calls": 0,
+    "database_calls": 0,
+    "test": "actual StoredProcedureLookupTool with synthetic store and EvidenceRecord"
+  },
+  "public_comments": [
+    {
+      "pr": 119,
+      "id": 6577790476,
+      "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/119#issuecomment-6577790476",
+      "body_sha256": "b03c9bcee9865c60db2a02c58dc25eb3a20c2f2f4f018d8fe0f4be7fccfe416c"
+    },
+    {
+      "pr": 121,
+      "id": 6576674878,
+      "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/121#issuecomment-6576674878",
+      "body_sha256": "563801b689c5caea1fc3f8add08508199a1b2af6a2f064702125dd9876ea7f94"
+    },
+    {
+      "pr": 128,
+      "id": 6576675903,
+      "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/128#issuecomment-6576675903",
+      "body_sha256": "7bbc80d135513931bb31ace4188c0e48e73d5059e9f0f55fb8183ee0cbf8162e"
+    },
+    {
+      "pr": 128,
+      "id": 6576676747,
+      "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/128#issuecomment-6576676747",
+      "body_sha256": "fdb87abf654419286107902a66664cae47e9da40ef06148ed13dc13b190e39cf"
+    },
+    {
+      "pr": 128,
+      "id": 6577974547,
+      "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/128#issuecomment-6577974547",
+      "body_sha256": "458c06d2bbef11960697e9932c63844c710fade21c81f2031222ff0d79bd0a17"
+    },
+    {
+      "pr": 128,
+      "id": 6577975088,
+      "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/128#issuecomment-6577975088",
+      "body_sha256": "3dfaefb3409109161e91cac7ead7a59c18816842aff143e5ead65a46cd5096ff"
+    },
+    {
+      "pr": 130,
+      "id": 6577789304,
+      "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/130#issuecomment-6577789304",
+      "body_sha256": "c058e6b15847475372b6eb756c600ad553754fd63f0fbc2ee7c5b987c30d47e1"
+    },
+    {
+      "pr": 132,
+      "id": 6576677424,
+      "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/132#issuecomment-6576677424",
+      "body_sha256": "28583b3c66faff04ca4411d0f5aa9d45b95702b14a86f01c5200bfb2ee79fe9d"
+    },
+    {
+      "pr": 132,
+      "id": 6577048822,
+      "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/132#issuecomment-6577048822",
+      "body_sha256": "1d6cc8d6998bcced4e68faab8d6e58e6af93ded64869a21dd7d5da96b8bd01b9"
+    },
+    {
+      "pr": 132,
+      "id": 6577987710,
+      "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/132#issuecomment-6577987710",
+      "body_sha256": "7b275fcc91024ef47446a9bbb28222161210c0336317041e671b73c6bcef33c8"
+    },
+    {
+      "pr": 133,
+      "id": 6577789911,
+      "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/133#issuecomment-6577789911",
+      "body_sha256": "38f7b420b10d6556d1bb8d2ca4d306c99af46d7a7b1798fbd10517f21c313da7"
+    },
+    {
+      "pr": 134,
+      "id": 6577791628,
+      "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/134#issuecomment-6577791628",
+      "body_sha256": "5b5256b98edc37df8f909509ca0b9ac69cab16f2ab1a5e5e9e61174d77327d0d"
+    },
+    {
+      "pr": 135,
+      "id": 6577791041,
+      "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/135#issuecomment-6577791041",
+      "body_sha256": "39f66174afd2f65f3b3c31c5fa37aa3708910f3bb671d6208195a0de907d5ba2"
+    },
+    {
+      "pr": 136,
+      "id": 6577788748,
+      "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/136#issuecomment-6577788748",
+      "body_sha256": "fb2ffb707498117f6f3f38b5dbfec2d9de0502e5b1152cb2efdda5f698c4b0e1"
+    },
+    {
+      "pr": 137,
+      "id": 6577953921,
+      "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/137#issuecomment-6577953921",
+      "body_sha256": "0cea7d7b80b5d4a49b6e9590e3f2b799a39bad619bfd127284d2938a5f435f53"
+    }
+  ],
+  "todos": [
+    {
+      "pr": 128,
+      "owner": "BE",
+      "task": "Install document requirements and pinned OCR data when connecting APIs; build with --directory /opt/reborn/tessdata and set AGENT_OCR_TESSDATA_DIR to it",
+      "state": "BE accepted ownership; Agent instructions posted"
+    },
+    {
+      "pr": 128,
+      "owner": "BE/FE",
+      "task": "Authenticated upload/list/Context persistence, ownership checks, API and UI connection, app E2E",
+      "state": "outside Agent-only edits"
+    },
+    {
+      "pr": 137,
+      "owner": "PM",
+      "task": "Apply partial/empty confirmed_fields fix; prevent unconfirmed values being forwarded",
+      "state": "reproduced, local minimal fix and 30-test result shared in posted review; author branch untouched"
+    },
+    {
+      "pr": 137,
+      "owner": "user/PM/AI",
+      "task": "Decide whether to exclude actual closure_date and generic date from replanning text, preserving document date checks",
+      "state": "user question pending; no dependent edit"
+    },
+    {
+      "pr": 137,
+      "owner": "PM/AI/BE",
+      "task": "Agree on quote privacy and changed-value trigger; verify real-model DOCUMENT_SUBMITTED behavior before claiming fact/next-action accuracy",
+      "state": "review posted; live-model cost estimate/pilot required before paid run"
+    },
+    {
+      "pr": 133,
+      "owner": "user",
+      "task": "Review eight official source records and explicitly supply approved scope/reviewer/time",
+      "state": "not completed; reviewed_by/reviewed_at remain None",
+      "local_review_material": "official-sources-for-user-review.json"
+    },
+    {
+      "pr": 134,
+      "owner": "BE",
+      "task": "Verify real DB before/after EvidenceRecord equivalence and old Case source_version behavior after source store version changes; retain CLI until addressed",
+      "state": "Tool version mismatch reproduced; no BE source edits"
+    },
+    {
+      "pr": 135,
+      "owner": "FE",
+      "task": "RESUBMIT must include request questions with answers; fix unsupported promises and mismatched no-action text",
+      "state": "Agent contract response posted; no FE source edits"
+    },
+    {
+      "pr": 136,
+      "owner": "BE",
+      "task": "Use real persistence transaction test with injected failure; verify CONFLICT defensive branch does not close old conflicts while discarding chosen values",
+      "state": "review response posted; no BE source edits"
+    },
+    {
+      "pr": 136,
+      "owner": "AI/BE",
+      "task": "Agree typed preservation of already-validated non-conflicting candidates from same input; do not re-extract original text during conflict confirmation",
+      "state": "not in current open AI PRs; keep as explicit follow-up contract"
+    },
+    {
+      "pr": 119,
+      "owner": "BE/FE",
+      "task": "Preserve CAFE code and five onboarding history fields across rebase; distinguish unsupported roadmap from successful home judgment",
+      "state": "response posted"
+    }
+  ],
+  "artifact_provenance": {
+    "local_archive": "eval-runs/review-followup-todo-20261102",
+    "note": "Prior failed LLM evaluations and their fingerprints remain unchanged in #130; this file is an incremental 0-call verification record",
+    "sha256": {
+      "pr132-body.json": "fb13f6c4fa6359b5d377c4e76ba60bf8a675af67d8880b5df60832f208503047",
+      "roadmap-replay.json": "c098046079cc057bd269f6b15eaa4109419b8f0040d9d006eeee2218052204d7",
+      "pr137-after.log": "eecf901e332a0f40b92f4f307a3ccb90a1d042b05bd94d55666625e4cdffa6e4",
+      "pinned-files.json": "c14b0d56e399733ccbf3eb29d4c9c7c6ebdf7a3fa5e80aae9e47baf624dd0907",
+      "full-pr128.log": "41e122e4a88ce4abdd9ff9b24b7957bb9a75e84191a6921446b8c4ab41ffe85e",
+      "worker-docker.json": "104e5ef094b574723bcac80c5bc5f9fffce9d441ef7ee7a647ab61ce0817323d",
+      "pr137-regression-before.log": "46178bbe1699a0bf90a1aa9ffdc5363910fffb33afebe7480fc70d4dda2770e6",
+      "result.json": "e3cc455eaba7edf1e3534d3aa96f38c5acd263625eb8cfcc1c3e428827fcda20",
+      "pr132-before.json": "1baeedf36348a68a79081ba7121af4aae326c7fd053170d97f10122de4e2f0eb",
+      "pr134-lookup-version-check.json": "56b7b7087c8be0c8b7b5873995b8b4ae0fb9d53f7ddbc8c2b9456594dab9f850",
+      "ci-pr132.log": "6cf35907fe5a8a8da70ff9214f716f60f80dc0467b629a63f2a05d3bd73e77d6",
+      "ci-pr128.log": "f644ba17ff16e706527b96f88219567d9e892b902691aa4ff84f557a2ec161a7",
+      "pr128-posted.json": "0b00a25ae7d274fe7a4567401a4fa8097de0fe84a3bb5c1bd916cb4f25178fa8",
+      "worker-docker.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "verify.py": "b54ce33e37b7e7f113f2d72edeb10e42bf0f77d96b62248b3dbe9a1d444c8a31",
+      "full-pr132.log": "c0adf9a4cb7a8c71c4ebe7db248335446ff93f95f7ab99a3ad29cdc3f4b35f4d",
+      "pr128-body.json": "d31607e209cfd9cf813ff811bfe0bddd5a4bf0e528175e3df862f1181350bb44",
+      "doc-tests.log": "e6e7bd73ba8aa714230e359953c6cf141cdb91c82d2c25c8930a544559d67904",
+      "pr137-posted.json": "44d308d5827d2b259e40180f9ee143f6b12ab9223b7a274528a0bcaf1e199f45",
+      "pr132-posted.json": "90c12fd43529c38027267a7c7c7c4b836cdd8a4294742b23cd5730c7338263f7",
+      "pr128-before.json": "82b32105eef2954222552267441ae984260a12e4906bca27f13689b2dd63d2ea",
+      "build.log": "f3704331435480dbc40e0548f4fb9255c22eeda7d676f0915252add142b14b37",
+      "verify_worker.py": "6e0c86e010968cc92e485f51800775aa96355ffbb10839346007b2a84090d2bf"
+    }
+  },
+  "reviewers_at_final_audit": {
+    "119": [],
+    "121": [
+      "leehyunjong12",
+      "healthy27"
+    ],
+    "128": [
+      "healthy27"
+    ],
+    "130": [
+      "leehyunjong12",
+      "healthy27"
+    ],
+    "132": [],
+    "133": [
+      "tokengeoji"
+    ],
+    "134": [
+      "tokengeoji"
+    ],
+    "135": [
+      "Louie-03"
+    ],
+    "136": [
+      "tokengeoji"
+    ],
+    "137": [
+      "tokengeoji"
+    ]
+  },
+  "no_pr_merges": true
+}

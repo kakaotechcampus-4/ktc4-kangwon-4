@@ -1,0 +1,176 @@
+{
+  "evaluation_only": true,
+  "synthetic_case": true,
+  "human_review_claimed": false,
+  "source_snapshot_sha256": "b0c79b927df47415cd9d6bea813eb26412ec3bb96128776393abc12441fec683",
+  "code_digest": "sha256:38ba4eaaba28d3a716b97ad5ef129eeeaa6cc6248e86227b7a5b08ce58e31f3a",
+  "code_unchanged": true,
+  "trials": [
+    {
+      "case": "benchmark_case1",
+      "trigger": "CASE_CREATED",
+      "graph_input_digest": "sha256:8139c94d109822497d7e7f50b5794ea3e20214a8990320bcb32399e8574d7f95",
+      "status": "REVIEWED_PLAN",
+      "calls": [
+        {
+          "role": "info",
+          "model": "gpt-6.1-sol",
+          "schema_name": "reborn_info_analysis",
+          "reasoning_effort": "high",
+          "max_completion_tokens": 16000,
+          "stream": true,
+          "request_without_model_digest": "5f199152f0b8219bf293ac31f9a2a5e9ee3be90a1cb0144b93678a412de36eb0",
+          "http_status": 200,
+          "headers_latency_ms": 20262
+        },
+        {
+          "role": "supervisor",
+          "model": "gpt-6-luna",
+          "schema_name": "reborn_supervisor_draft",
+          "reasoning_effort": "high",
+          "max_completion_tokens": 16000,
+          "stream": true,
+          "request_without_model_digest": "8048c48877e14d9013682d1e73ba21de0c2ac32e1e8a3fbeb01bf56660807654",
+          "http_status": 200,
+          "headers_latency_ms": 2393
+        },
+        {
+          "role": "shared",
+          "model": "gpt-6.1-sol",
+          "schema_name": "reborn_review_output",
+          "reasoning_effort": "xhigh",
+          "max_completion_tokens": 16000,
+          "stream": true,
+          "request_without_model_digest": "0540aac8e22bdcfcb5fcfdfb124732724b77d08804dcfab22cc6fc9dfa65aa3d",
+          "http_status": 200,
+          "headers_latency_ms": 17259
+        }
+      ],
+      "limits": {
+        "max_llm_calls_per_run": 40,
+        "run_deadline_seconds": 420.0
+      },
+      "decision_type": "ACTION",
+      "blocker_digest": "sha256:a9316954d24eeba43987c1090bc4e9685dc0d2c5bb287db300174fefa5d4f0a6",
+      "next_action_digest": "sha256:abd1018e09f7e734f2159dd4bb1e12905fa246a6a73854a937f256388c2da1c5",
+      "blocker": "원상복구 범위와 철거 필요 여부가 아직 확인되지 않았습니다.",
+      "action_code": "CONFIRM_RESTORATION_SCOPE",
+      "next_action": {
+        "action_code": "CONFIRM_RESTORATION_SCOPE",
+        "sequence": 1,
+        "title": "임대인에게 원상복구 범위와 철거 필요 여부를 확인하세요.",
+        "reason": "현재 원상복구 범위와 철거 필요 여부가 확인되지 않아 임대인에게 확인할 필요가 있습니다.",
+        "questions_to_ask": [
+          "원상복구해야 할 범위는 어디까지인가요?",
+          "철거가 필요한가요?"
+        ],
+        "target": {
+          "target_kind": "PROCEDURE",
+          "procedure_step": {
+            "procedure_step_id": 3,
+            "step_code": "CONFIRM_RESTORATION_SCOPE"
+          }
+        },
+        "evidence_refs": [
+          "synthetic-reviewed:b9cba3335c4b06f47d617d4cb2c242e36e18de79"
+        ]
+      },
+      "questions_for_user": [],
+      "fact_changes": [],
+      "procedure_progress_changes": [],
+      "review_attempt": 1,
+      "draft_version": 1,
+      "elapsed_ms": 83033,
+      "calls_by_role": {
+        "info": 1,
+        "supervisor": 1,
+        "shared": 1
+      },
+      "provider_usage": [
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 11690,
+          "completion_tokens": 6059,
+          "reasoning_tokens": 2431,
+          "cached_prompt_tokens": 3082,
+          "reasoning_effort": "high",
+          "schema_name": "reborn_info_analysis",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 61952,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6-luna",
+          "prompt_tokens": 17905,
+          "completion_tokens": 116,
+          "reasoning_tokens": 73,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "high",
+          "schema_name": "reborn_supervisor_draft",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 2747,
+          "requested_model": "gpt-6-luna"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 31794,
+          "completion_tokens": 904,
+          "reasoning_tokens": 812,
+          "cached_prompt_tokens": 3118,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_review_output",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 18090,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "review_results": [
+        {
+          "reviewed_subject_id": "8ac20945-cd3f-4c3e-bb07-5ecd55fc5ed0",
+          "reviewed_subject_digest": "sha256:cb279049c0cdf9e17c3600e546e9b2d260806d49b75aa76e76efd8392c56a275",
+          "verdict": "PASS",
+          "issues": [],
+          "missing_evidence": [],
+          "recommended_rework_targets": [],
+          "resolution_reason": "전체 blockers와 우선 blocker가 Case의 미확인 상태에 부합합니다. 선택된 확인 행동은 실행 가능하며, 단일 절차 target·행동 코드·Info finding의 근거가 일치합니다."
+        }
+      ],
+      "passed": true,
+      "metrics": {
+        "runs": 1,
+        "successful_runs": 1,
+        "success_rate": 1.0,
+        "http_attempts": 3,
+        "usage_complete": true,
+        "attempts_with_reported_usage": 3,
+        "reported_tokens": {
+          "prompt_tokens": 61389,
+          "completion_tokens": 7079
+        },
+        "total_tokens": 68468,
+        "tokens_per_success": 68468.0,
+        "estimated_cost_krw": 207.881598,
+        "cost_per_success_krw": 207.881598,
+        "uncached_cost_krw": 224.58439800000002,
+        "cache_usage_complete": true,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 83033,
+        "median_latency_ms": 83033,
+        "max_latency_ms": 83033,
+        "transport_retries": 0,
+        "review_revise_count": 0
+      }
+    }
+  ],
+  "passed": true
+}

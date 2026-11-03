@@ -15,17 +15,27 @@ from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 from testcontainers.community.mysql import MySqlContainer
 
 from app.agent import runtime as runtime_module
+from app.agent.action_catalog import PROCEDURE_LABELS
 from app.agent.procedure_tool.store import ProcedureStoreError
 from app.agent.procedure_tool.stored_tool import StoredProcedureLookupTool
 from app.agent.schemas import ProcedureLookupInput, ProcedureStepRef, RedactedInput
 from app.be.crud import evidence as evidence_crud
 from app.be.crud.case_history import get_case_created_history
 from app.be.crud.member import create_member
-from app.be.crud.procedure_step import get_all_procedure_steps
+from app.agent.procedure_tool.cafe import build_cafe_procedure_steps
+from app.agent.schemas import FactStatus
+from app.agent.procedure_tool.rules import procedure_applicability
+from app.be.crud.procedure_step import (
+    get_all_procedure_steps,
+    get_all_step_dependencies,
+    get_all_step_eligibilities,
+    get_case_procedure_steps_by_case_id,
+)
+from app.be.services import agent_runtime as agent_runtime_service
 from app.be.models.mixins import KST
 from app.be.schemas.case import CaseCreateRequest
 from app.be.services import case as case_service
@@ -42,6 +52,17 @@ from app.common.agent_data import (
     load_reviewed_procedure_store,
 )
 from app.common.agent_service import build_planning_input
+from app.be.crud import procedure_step as procedure_step_crud
+import logging
+from unittest.mock import patch
+from app.agent.schemas import AgentFieldKey, FactOperation
+from app.be.crud import case as case_crud
+from app.be.crud import case_field_history as case_field_history_crud
+from app.be.services import procedure_registry
+from app.be.services.procedure_registry import (
+    ProcedureRegistryMissingError,
+    load_cafe_procedure_step_ids,
+)
 
 AS_OF = date(2026, 10, 4)
 RETRIEVED = datetime(2026, 10, 4, 1, 2, 3, 456789, tzinfo=timezone.utc)
@@ -63,6 +84,11 @@ def mysql_engine():
         engine = create_engine(container.get_connection_url() + "?charset=utf8mb4")
         try:
             SQLModel.metadata.create_all(engine)
+            # 앱이 뜰 때 하는 적재를 그대로 한다(main.lifespan). 요청 경로는 읽기만 하므로
+            # 이게 없으면 Case 생성이 ProcedureRegistryMissingError로 멈춘다.
+            with Session(engine) as session:
+                procedure_registry.ensure_cafe_procedure_registry(session)
+                session.commit()
             yield engine
         finally:
             engine.dispose()
@@ -97,6 +123,46 @@ def approved_store():
     })
 
 
+def test_one_query_finds_every_record_however_many_are_approved():
+    """검수 자료가 상한(4건)을 넘어도 질의는 하나로 유지돼야 한다.
+
+    자료마다 질의를 하나씩 만들던 때는 5건째가 들어오는 순간 search_queries 상한에 걸려
+    조회가 시작도 못 했다(#141에서 공고 1건이 늘자 검사 4개가 그렇게 깨졌다). 자료가
+    늘어도 이 검사가 먼저 걸리도록 상한보다 많은 수로 고정한다.
+    """
+    store = load_reviewed_procedure_store({
+        "snapshot_version": "synthetic/1",
+        "generated_at": RETRIEVED,
+        "locale": "ko-KR",
+        "records": [
+            {
+                "record_id": f"SYNTHETIC_{index}",
+                "title": f"합성 문서 {index}",
+                "authority_name": "합성 기관",
+                "canonical_url": f"https://example.org/synthetic-{index}",
+                "source_domain": "example.org",
+                "excerpt": "합성 원문 " + "가" * 1200,
+                "content_hash": "sha256:" + hashlib.sha256(str(index).encode()).hexdigest(),
+                "published_at": RETRIEVED,
+                "retrieved_at": RETRIEVED,
+                "reviewed_by": "synthetic-reviewer",
+                "reviewed_at": RETRIEVED,
+                "review_valid_days": 90,
+                "step_codes": ["FILE_TAX_BUSINESS_CLOSURE"],
+                "required_terms": [f"합성{index}"],
+                "any_terms": [f"보조{index}"],
+            }
+            for index in range(6)
+        ],
+    })
+
+    query = all_terms_query(store)
+
+    assert len(store.records()) == 6
+    assert len(query) <= 200
+    assert all(record.matches(query) for record in store.records())
+
+
 def create_test_case(engine):
     with Session(engine) as session:
         member = create_member(session, oauth_id=str(uuid4()), nickname="합성 사용자")
@@ -122,11 +188,35 @@ def official_payloads(session, case_id):
     return {row.evidence_id: row.model_dump() for row in official_rows(session, case_id)}
 
 
+def body_of(session, row):
+    """근거 한 줄의 본문. 공식 자료는 Case가 아니라 공용 줄이 들고 있다."""
+
+    return evidence_crud.get_official_document_bodies(session, [row.official_document_id])[
+        row.official_document_id
+    ]
+
+
+def all_terms_query(store) -> str:
+    """검수 자료 전체를 한 질의로 고르게 하는 검색어.
+
+    절차조회는 질의에 그 자료의 required_terms가 전부 들어 있고 any_terms 중 하나가 있을
+    때만 고른다(store.py:141-144). 자료마다 질의를 하나씩 만들면 자료가 5건이 되는 순간
+    search_queries 상한 4개에 걸려 조회를 시작하기도 전에 거절된다. 단어를 한 줄로 합치면
+    자료가 늘어도 질의는 하나로 유지된다(질의 길이 상한 200자).
+    """
+
+    terms: list[str] = []
+    for record in store.records():
+        terms += [*record.required_terms, *record.any_terms[:1]]
+    return " ".join(dict.fromkeys(terms))
+
+
 def lookup_request(snapshot):
     return ProcedureLookupInput(
         lookup_goal="BUSINESS_CLOSURE", search_queries=["합성 절차"],
         as_of=AS_OF, locale="ko-KR", source_policy="OFFICIAL_ONLY",
-        max_results_per_query=4, based_on_snapshot_id=snapshot.snapshot_id,
+        # 질의 하나로 자료를 다 고르므로 질의당 결과 상한도 자료 수만큼 열어둔다(상한 10).
+        max_results_per_query=10, based_on_snapshot_id=snapshot.snapshot_id,
         evidence_records=snapshot.evidence_records, review_feedback=[],
     )
 
@@ -138,7 +228,9 @@ def test_case_creation_imports_four_approved_documents_and_reuses_their_ids(mysq
         baseline = official_payloads(session, case_id)
         assert len(baseline) == len(store.records()) == 4
         assert {row["source_version"] for row in baseline.values()} == {store.snapshot_version}
-        assert {row["excerpt"] for row in baseline.values()} == {
+        # 본문은 Case마다 복사되지 않는다. 공용 줄에서 읽어야 자료와 같다.
+        assert {row["excerpt"] for row in baseline.values()} == {None}
+        assert {body_of(session, row) for row in official_rows(session, case_id)} == {
             record.excerpt for record in store.records()
         }
         repeated = import_reviewed_procedures(session, case_id, store, as_of=AS_OF)
@@ -148,16 +240,16 @@ def test_case_creation_imports_four_approved_documents_and_reuses_their_ids(mysq
         assert official_payloads(session, case_id) == baseline
         snapshot = build_case_snapshot(session, case_id)
         request = lookup_request(snapshot)
-        request.search_queries = [
-            " ".join([*item.required_terms, *item.any_terms[:1]]) for item in store.records()
-        ]
+        request.search_queries = [all_terms_query(store)]
         result = asyncio.run(StoredProcedureLookupTool(store).lookup(request))
         assert result.completion_status == "COMPLETE"
-        assert len(result.documents) == 4
+        assert len(result.documents) == len(store.records())
         assert {item.evidence_id for item in result.evidence_records} == set(baseline)
-        assert {item.procedure_step.step_code for item in snapshot.procedure_progress} == {
-            code for record in store.records() for code in record.step_codes
-        }
+        # 로드맵에는 카페 폐업 절차 8개가 모두 올라가고, 검수 문서는 그중 일부만 가리킨다.
+        # 문서가 가리키는 절차가 로드맵에 없으면 조회 결과를 절차에 맺을 수 없다.
+        roadmap = {item.procedure_step.step_code for item in snapshot.procedure_progress}
+        assert roadmap == set(PROCEDURE_LABELS)
+        assert {code for record in store.records() for code in record.step_codes} <= roadmap
 
 
 def test_committed_rows_reach_tool_without_new_evidence_ids(mysql_engine, approved_store):
@@ -184,7 +276,8 @@ def test_committed_rows_reach_tool_without_new_evidence_ids(mysql_engine, approv
             assert len(rows) == 2
             for row in rows:
                 source = records[row.source_ref]
-                assert row.excerpt == source.excerpt
+                assert row.excerpt is None
+                assert body_of(session, row) == source.excerpt
                 assert row.content_hash == source.content_hash.removeprefix("sha256:")
                 assert row.source_version == approved_store.snapshot_version
                 assert row.locator == source.canonical_url
@@ -254,11 +347,10 @@ def test_same_id_changed_payload_is_rejected(mysql_engine, approved_store):
             import_reviewed_procedures(session, case_id, changed, as_of=AS_OF)
         session.rollback()
     with Session(mysql_engine) as session:
-        assert {row.excerpt for row in official_rows(
-            session, case_id, version=approved_store.snapshot_version,
-        )} == {
-            record.excerpt for record in approved_store.records()
-        }
+        assert {
+            body_of(session, row)
+            for row in official_rows(session, case_id, version=approved_store.snapshot_version)
+        } == {record.excerpt for record in approved_store.records()}
 
 
 def test_caller_rolls_back_partial_import(mysql_engine, approved_store, monkeypatch):
@@ -413,10 +505,188 @@ def test_cli_reimport_and_new_source_version_preserve_existing_evidence(
         snapshot = build_case_snapshot(session, case_id)
         request = lookup_request(snapshot)
         store = load_reviewed_procedure_store(source)
-        request.search_queries = [
-            " ".join([*item.required_terms, *item.any_terms[:1]]) for item in store.records()
-        ]
+        request.search_queries = [all_terms_query(store)]
         result = asyncio.run(StoredProcedureLookupTool(store).lookup(request))
         assert result.completion_status == "COMPLETE"
-        assert len(result.documents) == 4
+        assert len(result.documents) == len(store.records())
         assert {item.evidence_id for item in result.evidence_records} == new_ids
+
+
+def test_case_creation_puts_all_eight_cafe_procedures_on_the_roadmap(mysql_engine):
+    case_id = create_test_case(mysql_engine)
+    with Session(mysql_engine) as session:
+        steps = {step.id: step for step in get_all_procedure_steps(session)}
+        assert {step.step_code for step in steps.values()} == set(PROCEDURE_LABELS)
+        roadmap = get_case_procedure_steps_by_case_id(session, case_id)
+        assert {steps[row.procedure_step_id].step_code for row in roadmap} == set(PROCEDURE_LABELS)
+
+
+def test_stored_registry_round_trips_to_what_the_agent_expects(mysql_engine):
+    """DB에 넣었다 꺼낸 절차 목록이 AI팀 정의와 글자 하나까지 같아야 한다.
+
+    AI는 cafe.py가 아니라 이 표를 읽는다. 적재하면서 별칭·의존·조건 하나라도 흘리면
+    절차가 조용히 빠지거나 조건이 안 걸린 채로 판단이 돌아간다.
+    """
+    create_test_case(mysql_engine)
+    with Session(mysql_engine) as session:
+        stored = {
+            step.procedure_step.step_code: step
+            for step in agent_runtime_service.build_known_procedure_steps(session)
+        }
+        step_ids = {code: step.procedure_step.procedure_step_id for code, step in stored.items()}
+        assert stored == {
+            step.procedure_step.step_code: step
+            for step in build_cafe_procedure_steps(step_ids)
+        }
+
+
+def test_a_second_case_reuses_the_registry_instead_of_stacking_it(mysql_engine):
+    """절차는 Case마다 새로 만드는 것이 아니라 한 벌을 함께 쓴다.
+
+    의존·조건은 절차에 딸린 별도 표라, 다시 적재하면 같은 줄이 한 벌 더 쌓인다.
+    그러면 AI가 받는 절차 하나에 같은 조건이 두 번 달린다.
+    """
+    create_test_case(mysql_engine)
+    with Session(mysql_engine) as session:
+        before = (
+            len(get_all_procedure_steps(session)),
+            len(get_all_step_dependencies(session)),
+            len(get_all_step_eligibilities(session)),
+        )
+    create_test_case(mysql_engine)
+    with Session(mysql_engine) as session:
+        after = (
+            len(get_all_procedure_steps(session)),
+            len(get_all_step_dependencies(session)),
+            len(get_all_step_eligibilities(session)),
+        )
+    assert before == after
+
+
+def test_case_creation_never_loads_the_registry_itself(monkeypatch, mysql_engine):
+    """적재는 앱이 뜰 때 하고, 가입 요청은 읽기만 한다.
+
+    가입 요청 안에서 적재하면 두 사람이 동시에 가입할 때 step_code가 unique라 한쪽이
+    IntegrityError로 떨어지고, 아무도 가입하지 않으면 절차 표가 빈 채로 남는다.
+    적재 함수를 터지게 해두고도 가입이 끝나야 요청 경로에 적재가 없는 것이다.
+    """
+    def must_not_run(session):
+        raise AssertionError("가입 요청이 절차 마스터 표를 적재하려 했다")
+
+    monkeypatch.setattr(procedure_registry, "ensure_cafe_procedure_registry", must_not_run)
+    case_id = create_test_case(mysql_engine)
+    with Session(mysql_engine) as session:
+        roadmap = procedure_step_crud.get_case_procedure_steps_by_case_id(session, case_id)
+    assert len(roadmap) == len(PROCEDURE_LABELS)
+
+
+def test_case_creation_stops_instead_of_building_an_empty_roadmap(monkeypatch, mysql_engine):
+    """적재가 안 돈 상태에서 가입하면 멈춘다. 빈 로드맵으로 조용히 끝내지 않는다."""
+    monkeypatch.setattr(
+        procedure_step_crud, "get_procedure_step_by_code", lambda session, code: None
+    )
+    with Session(mysql_engine) as session, pytest.raises(ProcedureRegistryMissingError) as error:
+        load_cafe_procedure_step_ids(session)
+    # 어느 절차가 비었는지 그대로 적는다. "절차가 없다"만으로는 적재가 안 돈 것인지
+    # 일부만 들어간 것인지 구분할 수 없다.
+    assert "CONFIRM_RESTORATION_SCOPE" in str(error.value)
+
+
+def create_case_with(engine, *, employee_count=2, **answers):
+    """가입 폼에 답을 더 받은 Case 하나."""
+    with Session(engine) as session:
+        member = create_member(session, oauth_id=str(uuid4()), nickname="합성 사용자")
+        case, _ = create_case(session, member.id, CaseCreateRequest(
+            business_type="CAFE", franchise_status=False, employee_count=employee_count,
+            lease_status="LEASED_PAID", **answers,
+        ))
+        session.commit()
+        return case.id
+
+
+def applicability_of(engine, case_id):
+    """이 Case에서 절차 8개가 각각 해당함/해당없음/모름 중 무엇인지."""
+    with Session(engine) as session:
+        snapshot = build_case_snapshot(session, case_id)
+        steps = agent_runtime_service.build_known_procedure_steps(session)
+    return [procedure_applicability(step, snapshot) for step in steps]
+
+
+def test_insurance_answers_reach_the_agent_and_settle_two_procedures(mysql_engine):
+    """4대보험 가입 이력을 받으면 보험 절차 2개가 "모름"에서 벗어난다.
+
+    AI는 네 값에서 has_workplace_insurance를 계산한다. 넷 중 하나라도 가입이면 해당,
+    넷 다 미가입이어야 해당 없음이다(rules.py:129-136). 그래서 네 칸을 같이 받아야 한다.
+    """
+    insured = dict(
+        pension_enrolled=True, health_insurance_enrolled=True,
+        employment_insurance_enrolled=True, industrial_accident_insurance_enrolled=True,
+    )
+    uninsured = {field: False for field in insured}
+
+    nothing_asked = applicability_of(mysql_engine, create_case_with(mysql_engine))
+    all_insured = applicability_of(mysql_engine, create_case_with(mysql_engine, **insured))
+    # 직원을 둔 적 없는 1인 사장님. 지금 2명인데 과거엔 없었다고 하면 AI는 모순으로 보고
+    # 판단을 멈춘다(rules.employment_history_conflicts).
+    none_insured = applicability_of(
+        mysql_engine,
+        create_case_with(mysql_engine, employee_count=0, had_employees=False, **uninsured),
+    )
+
+    # 안 물어보면 모름 3개(원상복구 + 보험 2개)가 남는다.
+    assert nothing_asked.count(None) == 3
+    # 가입했다고 답하면 보험 2개가 해당함으로 바뀌고, 계약서를 봐야 아는 원상복구만 남는다.
+    assert all_insured.count(None) == 1 and all_insured.count(True) == 7
+    # 전부 미가입이면 보험 2개와 직원 정산이 해당 없음이 된다.
+    assert none_insured.count(False) == 3
+
+
+def test_an_unanswered_insurance_question_stays_unknown_instead_of_becoming_no(mysql_engine):
+    """안 물어본 칸은 "아니오"가 아니라 "모름"으로 넘어간다.
+
+    안 물어본 것을 false로 채우면 AI가 그 절차를 "해당 없음"으로 보고 로드맵에서 빼버린다.
+    사장님은 해야 할 신고를 안내받지 못한다.
+    """
+    case_id = create_case_with(mysql_engine, pension_enrolled=True)
+    with Session(mysql_engine) as session:
+        facts = {fact.field_path: fact for fact in build_case_snapshot(session, case_id).facts}
+
+    assert facts["pension_enrolled"].status == FactStatus.CONFIRMED
+    assert facts["pension_enrolled"].value is True
+    # 안 보낸 세 칸도 스냅샷에는 실린다. 빠지는 것과 모름은 다르다.
+    assert facts["health_insurance_enrolled"].status == FactStatus.UNKNOWN
+    assert facts["health_insurance_enrolled"].value is None
+    # 하나만 가입으로 와도 나머지가 모름이면 보험 조건은 "해당함"이다(하나라도 가입이므로).
+    assert applicability_of(mysql_engine, case_id).count(None) == 1
+
+
+def test_onboarding_only_fields_are_not_written_by_an_agent_conversation(caplog):
+    """AI 대화가 보낸 변경 중 가입 폼 전용 5칸은 저장하지 않는다.
+
+    사장님이 가입할 때 직접 답한 값을, AI가 대화 중에 추정한 값으로 덮으면 안 된다
+    (승준님 #132 연동 요청). 컬럼이 있느냐로 가르면 5칸도 컬럼이 생겨서 다 통과해 버린다.
+    """
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+    from app.be.services.decision_record import _apply_fact_changes
+
+    def change(field_path):
+        return SimpleNamespace(
+            field_path=AgentFieldKey(field_path), operation=FactOperation.SET,
+            proposed_value=True, source_type=SimpleNamespace(value="INFO_ANALYSIS"),
+            source_evidence_refs=["ev-1"], reason_summary="합성",
+        )
+
+    case = SimpleNamespace(id=1, pension_enrolled=None, had_employees=None)
+    with patch.object(case_crud, "get_case_by_id", return_value=case), \
+         patch.object(case_field_history_crud, "create_case_field_history") as writer, \
+         caplog.at_level(logging.WARNING):
+        _apply_fact_changes(
+            MagicMock(spec=Session), SimpleNamespace(id=9, case_id=1),
+            [change("pension_enrolled"), change("had_employees")],
+        )
+
+    # 건너뛰되 흔적은 남는다. 조용히 버리면 왜 안 저장됐는지 아무도 모른다.
+    writer.assert_not_called()
+    assert case.pension_enrolled is None and case.had_employees is None
+    assert len(caplog.records) == 2

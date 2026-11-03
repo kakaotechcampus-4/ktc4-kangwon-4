@@ -159,7 +159,7 @@ export function ResultInputPage() {
       (error: unknown) => {
         if (!current) return
         if (error instanceof UnauthorizedError) return navigate('/login', { replace: true })
-        // Case 가 없다. 진입 분기가 시작 화면으로 보낸다
+        // Case 가 없다. 진입 분기가 상황 진단으로 보낸다
         if (error instanceof ApiError && error.status === 404) return navigate('/', { replace: true })
         setFetched({ status: 'LOAD_FAILED' })
       },
@@ -171,6 +171,8 @@ export function ResultInputPage() {
   }, [usesMock, attempt, navigate])
 
   const entry = usesMock ? mockEntry(readMockKey(search)) : fetched
+  /** 반영 결과에서 "다르게 이해했어요"로 왔는지. 보내는 길과 글은 같고 안내만 다르다 */
+  const correcting = new URLSearchParams(search).get('fix') === '1'
   /** 지금 답을 받는 질문. 없으면 할 일의 결과를 받는다 */
   const questions =
     askedAgain ?? (entry.status === 'READY' && entry.ask.kind === 'ANSWER' ? entry.ask.questions : null)
@@ -400,10 +402,18 @@ export function ResultInputPage() {
           </InfoBox>
         ) : (
           // 홈의 실패 카드에서 왔다. 무엇이 더 필요한지 먼저 보여준다. 보낸 뒤에는 위 안내가 대신한다
-          entry.ask.kind === 'RESUBMIT' && (
+          entry.ask.kind === 'RESUBMIT' ? (
             <InfoBox tone="critical" title="추가 확인이 필요해요.">
               {detailText(entry.ask.notice)}
             </InfoBox>
+          ) : (
+            // 반영 결과에서 "다르게 이해했어요"를 누르고 왔다. 무엇을 적으면 되는지 먼저 알린다
+            entry.ask.kind === 'RESULT' &&
+            correcting && (
+              <InfoBox title="앞서 알려주신 내용을 바로잡아 적어 주세요.">
+                이미 반영한 내용과 다르면, 필요할 때 어느 쪽이 맞는지 여쭤볼게요.
+              </InfoBox>
+            )
           )
         )}
 

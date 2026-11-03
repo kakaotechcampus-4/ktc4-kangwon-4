@@ -14,6 +14,7 @@ from testcontainers.community.mysql import MySqlContainer
 from app.be.crud.case_history import get_case_created_history
 from app.be.crud.member import create_member
 from app.be.schemas.case import CaseCreateRequest
+from app.be.services import procedure_registry
 from app.be.services.case import create_case, get_case
 
 BASE = dict(business_type="CAFE", franchise_status=False, lease_status="LEASED_PAID")
@@ -29,6 +30,11 @@ def mysql_engine():
         engine = create_engine(container.get_connection_url() + "?charset=utf8mb4")
         try:
             SQLModel.metadata.create_all(engine)
+            # 절차 마스터 표는 앱이 뜰 때 적재된다(main.lifespan). 가입 요청은 읽기만 하므로
+            # 여기서도 같이 깔아야 Case를 만들 수 있다.
+            with Session(engine) as session:
+                procedure_registry.ensure_cafe_procedure_registry(session)
+                session.commit()
             yield engine
         finally:
             engine.dispose()

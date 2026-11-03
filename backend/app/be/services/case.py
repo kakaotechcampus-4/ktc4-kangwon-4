@@ -6,17 +6,21 @@ from fastapi import HTTPException
 from sqlmodel import Session
 
 from app.be.crud import case as case_crud
+from app.be.crud import case_checklist as case_checklist_crud
 from app.be.crud import case_field_history as case_field_history_crud
 from app.be.crud import case_history as case_history_crud
 from app.be.crud import conflict_reference as conflict_reference_crud
 from app.be.crud import evidence as evidence_crud
 from app.be.crud import procedure_step as procedure_step_crud
 from app.be.models.case import Case
+from app.be.models.case_checklist import CaseChecklist, CaseChecklistHistory
 from app.be.models.case_history import CaseHistory
 from app.be.models.evidence import ConflictReference, Evidence
 from app.be.models.mixins import kst_now
-from app.be.models.procedure_step import CaseProcedureStep, ProcedureStep
+from app.be.models.procedure_step import CaseProcedureStep
 from app.be.schemas.case import (
+    CaseChecklistResponse,
+    CaseSupportApprovalResponse,
     CaseConflictsDecisionRequest,
     CaseCreateRequest,
     CaseGetDetailResponse,
@@ -30,6 +34,7 @@ from app.be.schemas.case import (
     NextActionResponse,
 )
 from app.agent.procedure_tool.store import ReviewedProcedureStore
+from app.be.services import procedure_registry
 from app.be.services import reviewed_procedure as reviewed_procedure_service
 from app.be.services.unmasking import build_restorer
 
@@ -122,9 +127,15 @@ def create_case(session: Session, member_id: int, case_request: CaseCreateReques
         lease_status=case_request.lease_status,
         restoration_clause=case_request.restoration_clause,
         planned_closure_date=case_request.planned_closure_date,
+        planned_closure_month=case_request.planned_closure_month,
+        had_employees=case_request.had_employees,
+        pension_enrolled=case_request.pension_enrolled,
+        health_insurance_enrolled=case_request.health_insurance_enrolled,
+        employment_insurance_enrolled=case_request.employment_insurance_enrolled,
+        industrial_accident_insurance_enrolled=case_request.industrial_accident_insurance_enrolled,
     )
     case = case_crud.create_case(session, case)
-    _fill_temp_case_procedure_steps(session, case.id)
+    _fill_case_procedure_steps(session, case.id)
     history = _create_case_creation_evidence(session, case, case_request)
     # 문서 적재보다 먼저 확정한다. 적재가 터져도 가입은 남아야 하기 때문이다.
     session.commit()
@@ -512,12 +523,58 @@ def get_case_results_submit_status(
     )
 
 
+def update_case_checklist(
+    session: Session, member_id: int, task_id: str, completed: bool
+) -> CaseChecklistResponse:
+    """로드맵 항목을 사장님이 체크하거나 푼다. 같은 요청을 두 번 보내도 결과가 같다.
+
+    "이 가게에 해당하는 항목인지"는 여기서 보지 않는다. AI 로드맵(record_checklist)이 Case
+    스냅샷과 절차 목록으로 판단하는 일이라, 로드맵 조회 API를 만들 때 함께 붙인다.
+    """
+
+    # 같은 항목 체크가 동시에 두 번 오면 둘 다 "없음"을 보고 만들려다 unique에 걸린다. 줄을 세운다.
+    case = case_crud.lock_case_by_member_id(session, member_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case를 찾을 수 없습니다.")
+
+    checklist = case_checklist_crud.get_case_checklist(session, case.id, task_id)
+    if completed == (checklist is not None):
+        # 이미 그 상태다. 같은 요청을 두 번 보내도 이력이 쌓이지 않게 아무것도 하지 않는다.
+        return CaseChecklistResponse(task_id=task_id, completed=completed)
+
+    if completed:
+        case_checklist_crud.create_case_checklist(session, CaseChecklist(case_id=case.id, task_id=task_id))
+    else:
+        case_checklist_crud.delete_case_checklist(session, checklist)
+    # 지금 상태(case_checklist)는 풀면 지우지만, 기록 탭에는 체크했다가 푼 것까지 남아야 한다.
+    case_checklist_crud.create_case_checklist_history(
+        session, CaseChecklistHistory(case_id=case.id, task_id=task_id, completed=completed)
+    )
+    session.commit()
+    return CaseChecklistResponse(task_id=task_id, completed=completed)
+
+
+def update_case_support_approval(
+    session: Session, member_id: int, approved: bool | None
+) -> CaseSupportApprovalResponse:
+    """사장님이 알려 준 점포철거비 1차 적격심사 결과를 저장한다. null은 "아직 모름"으로 되돌린다."""
+
+    case = case_crud.get_case_by_member_id(session, member_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case를 찾을 수 없습니다.")
+
+    case.support_approved = approved
+    case.support_approved_at = kst_now()
+    session.commit()
+    return CaseSupportApprovalResponse(approved=approved)
+
+
 def _create_case_creation_evidence(
     session: Session, case: Case, case_request: CaseCreateRequest
 ) -> CaseHistory:
-    # case 생성 폼 입력값(business_type/franchise_status/lease_status)을 AI 쪽에서 CONFIRMED로
-    # 인정하려면 evidence_refs가 있어야 한다(CaseFact.validate_fact_state). 세 필드가 이 evidence
-    # 하나를 같이 참조해도 된다고 AI팀 확인함.
+    # 가입 폼으로 받은 값을 AI 쪽에서 CONFIRMED로 인정하려면 evidence_refs가 있어야 한다
+    # (CaseFact.validate_fact_state). 폼 값들이 이 evidence 하나를 같이 참조해도 된다고
+    # AI팀 확인함. 폼 전체를 그대로 남기므로 칸이 늘어도 같이 덮인다.
     # 가게 이름은 AI 판단에 쓰지 않으므로 AI에 넘기지 않는다.
     submitted = json.dumps(case_request.model_dump(mode="json", exclude={"store_name"}), ensure_ascii=False)
     history = case_history_crud.create_case_history(
@@ -544,30 +601,19 @@ def _create_case_creation_evidence(
     return history
 
 
-def _fill_temp_case_procedure_steps(session: Session, case_id: int) -> None:
-    # TODO: 실제 폐업절차 마스터 데이터/조건(step_eligibility)로 교체 필요. 폐업절차 DB 구조가 아직
-    # 확정되지 않아, 지금은 case_procedure_step 채우는 흐름 검증용 임시 더미 절차 4개만 사용한다.
-    #
-    # step_code를 AI가 아는 논리 코드와 똑같이 둔다. 이름이 정확히 같을 때만 절차 대응표
-    # (procedure_bindings)가 자동으로 맺어지고(app/agent/action_catalog.py의
-    # resolve_procedure_bindings), 대응표가 비면 공식 문서를 찾아도 Supervisor가
-    # AGENT_PROCEDURE_BINDINGS_MISSING으로 판단을 멈춘다.
-    #
-    # TODO: 실제 폐업절차는 이보다 많고 이름도 다를 것이다. 그때는 이 4개를 어느 실제 절차에
-    # 맺을지 정해 procedure_bindings를 직접 넘겨야 한다(judgment.py).
-    temp_procedure_steps = [
-        ("CONFIRM_RESTORATION_SCOPE", "원상복구 범위 확인"),
-        ("FILE_TAX_BUSINESS_CLOSURE", "세무서 폐업 신고"),
-        ("FILE_FOOD_SERVICE_CLOSURE", "영업신고증 폐업 신고"),
-        ("REPORT_WORKPLACE_INSURANCE_CLOSURE", "4대보험 상실 신고"),
-    ]
-    for step_code, step_name in temp_procedure_steps:
-        step = procedure_step_crud.get_procedure_step_by_code(session, step_code)
-        if step is None:
-            step = procedure_step_crud.create_procedure_step(
-                session,
-                ProcedureStep(step_code=step_code, step_name=step_name, registry_version="temp"),
-            )
+def _fill_case_procedure_steps(session: Session, case_id: int) -> None:
+    """이 Case의 로드맵에 카페 폐업 절차 8개를 모두 올린다.
+
+    해당하지 않는 절차도 함께 올린다. 어떤 절차가 이 가게에 해당하는지는 AI가
+    가게 정보를 보고 판단하므로(procedure_tool/rules.py), BE가 여기서 미리 걸러내면
+    같은 규칙이 두 벌이 된다. 화면에 "해당 없음"으로 보여주려면 목록에 있어야 하기도 하다.
+
+    절차 자체는 앱이 뜰 때 이미 적재돼 있다(main.lifespan). 여기서는 읽어서 이 Case에
+    걸기만 한다. Case별 줄이 미리 있어야 AI가 돌려준 진행 상태를 저장할 수 있다
+    (decision_record._apply_procedure_progress_changes는 없는 줄을 만들지 않는다).
+    """
+
+    for step_id in procedure_registry.load_cafe_procedure_step_ids(session).values():
         procedure_step_crud.create_case_procedure_step(
-            session, CaseProcedureStep(case_id=case_id, procedure_step_id=step.id)
+            session, CaseProcedureStep(case_id=case_id, procedure_step_id=step_id)
         )

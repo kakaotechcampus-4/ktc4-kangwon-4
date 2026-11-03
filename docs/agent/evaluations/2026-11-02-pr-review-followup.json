@@ -1,0 +1,134 @@
+{
+  "review_items": {
+    "121": [
+      {
+        "id": 6576258265,
+        "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/121#issuecomment-6576258265",
+        "user": "healthy27",
+        "updated_at": "2026-11-02T11:42:23Z",
+        "path": null,
+        "review": null
+      }
+    ],
+    "128": [
+      {
+        "id": 5733977315,
+        "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/128#pullrequestreview-5733977315",
+        "user": "leehyunjong12",
+        "updated_at": null,
+        "path": null,
+        "review": "APPROVED"
+      },
+      {
+        "id": 6576141320,
+        "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/128#issuecomment-6576141320",
+        "user": "healthy27",
+        "updated_at": "2026-11-02T11:35:57Z",
+        "path": null,
+        "review": null
+      }
+    ],
+    "130": [],
+    "132": [
+      {
+        "id": 6572797113,
+        "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/132#issuecomment-6572797113",
+        "user": "leehyunjong12",
+        "updated_at": "2026-11-02T08:41:45Z",
+        "path": null,
+        "review": null
+      }
+    ]
+  },
+  "user_selected": {
+    "1A": "LAZY_PDF_IMPORT",
+    "2A": "PM_SEPARATE_FOLLOWUP_PR",
+    "3A": "CI_ALL_BASE_BRANCHES"
+  },
+  "heads": {
+    "121": "235ad738b25d673d95dc972cc9a68ebcd9a14c26",
+    "128": "2e35e1deef40cb912373d0e821919f58e937d104",
+    "132": "8a31584500f559a1eca3bd7ab5bf1d57abe91950"
+  },
+  "ci": {
+    "121": {
+      "run_id": 41440403119,
+      "head_sha": "235ad738b25d673d95dc972cc9a68ebcd9a14c26",
+      "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/actions/runs/41440403119",
+      "conclusion": "success",
+      "summary": "585 passed in 32.96s"
+    },
+    "128": {
+      "run_id": 41440421142,
+      "head_sha": "2e35e1deef40cb912373d0e821919f58e937d104",
+      "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/actions/runs/41440421142",
+      "conclusion": "success",
+      "summary": "615 passed in 41.81s"
+    },
+    "132": {
+      "run_id": 41440590280,
+      "head_sha": "8a31584500f559a1eca3bd7ab5bf1d57abe91950",
+      "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/actions/runs/41440590280",
+      "conclusion": "success",
+      "summary": "654 passed in 42.48s"
+    }
+  },
+  "tests": {
+    "model_configuration_and_runtime": "53 passed in 0.55s",
+    "roadmap": "39 passed in 1.30s",
+    "full_including_mysql": "664 passed in 29.95s"
+  },
+  "optional_pdf_import": {
+    "original_failure_reproduced": true,
+    "isolated_process_blocks_pymupdf_and_fitz": true,
+    "import_read_checklist_passed": true
+  },
+  "actual_response_replay": {
+    "input_artifact": "docs/agent/evaluations/2026-11-02-roadmap-live.json",
+    "input_artifact_sha256": "2b1f166d0746fe9cf8453fc74e6a9214e8accb82bb50199afee27e59eff19f50",
+    "original_model_run_commit": "f5d1b2e01a9a773bd397854f83e1258baa9f0d2a",
+    "checks": [
+      {
+        "case": "graph",
+        "existing_fields_unchanged": true,
+        "supported": true
+      },
+      {
+        "case": "replan",
+        "existing_fields_unchanged": true,
+        "supported": true
+      },
+      {
+        "case": "documents_missing",
+        "existing_fields_unchanged": true,
+        "supported": true
+      },
+      {
+        "case": "documents_complete",
+        "existing_fields_unchanged": true,
+        "supported": true
+      }
+    ],
+    "new_provider_requests": 0,
+    "new_tokens": 0,
+    "new_estimated_cost_krw": 0
+  },
+  "ci_base_filter_removed": true,
+  "ci_path_filter_preserved": true,
+  "document_replanning_implemented_here": false,
+  "deployment_credentials_verified": false,
+  "current_local_document_prefix": "INFO_",
+  "current_local_document_effort": "xhigh",
+  "new_provider_calls": 0,
+  "new_tokens": 0,
+  "new_estimated_cost_krw": 0,
+  "replies_posted": false,
+  "reviewers_requested": false,
+  "log_sha256": {
+    "pr121-tests.log": "33a6c47f28ecddbb51e47738f9620b117cc0f0dbf3f3c9ba3c7e752fc4ef8d8c",
+    "full-tests.log": "277fc34773af810e01d86e4ebdda0bff8ed1d10ae448bef2a434efb615625463",
+    "pr121-ci.log": "c35fb1c5ce3fc3da1eaaa6eb8d8dbd02107175645b303cf9a97cb6e66c861875",
+    "pr128-ci.log": "04633031ef89fbbb8ef7a4971dfa3bc7400f9562973a3ece5fa27b54de275581",
+    "pr132-ci.log": "105b8f80722aeae3949b1fc5a8a9c1783fb8cf1b32fc7a935a564bb08c0937bc"
+  }
+}
