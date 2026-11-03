@@ -1,5 +1,6 @@
 import {
   IconCameraLine,
+  IconChevronDownLine,
   IconDocumentLine,
   IconDocumentTrayLine,
   IconPictureLine,
@@ -258,21 +259,32 @@ export function ConfirmSheet({
           <label htmlFor={kindId} className="text-15 font-medium text-fg-neutral-muted">
             서류 종류
           </label>
-          <select
-            id={kindId}
-            value={kind}
-            onChange={(event) => setKind(event.target.value)}
-            className="h-13 rounded-xl bg-bg-layer-default px-3 text-17 ring-1 ring-stroke-neutral-weak ring-inset"
-          >
-            <option value="" disabled>
-              종류를 골라 주세요
-            </option>
-            {DOCUMENT_KINDS.map((option) => (
-              <option key={option.kind} value={option.kind}>
-                {option.label}
+          {/*
+            브라우저가 그리는 화살표는 칸 끝에 붙어 여백으로 옮길 수 없다. 그것을 숨기고(`appearance-none`)
+            로드맵 단계와 같은 화살표를 안쪽에 둔다
+          */}
+          <div className="relative">
+            <select
+              id={kindId}
+              value={kind}
+              onChange={(event) => setKind(event.target.value)}
+              className="h-13 w-full cursor-pointer appearance-none rounded-xl bg-bg-layer-default pr-11 pl-3 text-17 ring-1 ring-stroke-neutral-weak ring-inset"
+            >
+              <option value="" disabled>
+                종류를 골라 주세요
               </option>
-            ))}
-          </select>
+              {DOCUMENT_KINDS.map((option) => (
+                <option key={option.kind} value={option.kind}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <IconChevronDownLine
+              size={20}
+              aria-hidden="true"
+              className="pointer-events-none absolute top-1/2 right-4 -translate-y-1/2 text-fg-neutral-subtle"
+            />
+          </div>
         </div>
 
         {/* 이름을 모르는 칸은 보여주지 않지만 `values` 에는 남아 원래 값 그대로 같이 보낸다 */}
