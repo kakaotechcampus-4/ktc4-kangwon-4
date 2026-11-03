@@ -24,7 +24,7 @@ class DocumentConfirmRequest(BaseModel):
 class DocumentCheckRequest(BaseModel):
     # 정산 서류를 내는 사람(사장님) 이름. 이체확인증의 보낸 사람과 맞춰 본다
     applicant_name: str = Field(min_length=1, max_length=50)
-    # 실제 폐업일. 비우면 가입 때 정한 폐업 날짜(planned_closure_date)로 폐업사실증명원과 맞춰 본다
+    # 사장님이 확인한 실제 폐업일. 폐업 예정일로 대신하지 않으며, 비우면 점검에서 CLOSURE_DATE_UNCONFIRMED가 된다
     closure_date: date | None = None
 
 

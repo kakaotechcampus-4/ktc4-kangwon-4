@@ -29,8 +29,8 @@ SETTLEMENT = {
     DocumentKind.CLOSURE_CERTIFICATE: {"closure_date": "2026년 10월 31일"},
 }
 TRANSFER = {"amount": "3,300,000원", "sender": "김리본", "recipient": "그린철거"}
-# 가입 때 폐업 날짜를 정한 Case라 실제 폐업일은 비워 보낸다(가입 때 날짜로 맞춰 본다)
-OWNER = {"applicant_name": "김리본"}
+# 점검 직전에 사장님이 확인한 이름과 실제 폐업일
+OWNER = {"applicant_name": "김리본", "closure_date": "2026-10-31"}
 
 
 @pytest.fixture
@@ -140,16 +140,19 @@ def test_case_is_required_and_empty_upload_is_rejected(api):
     assert client.get("/cases/documents").status_code == 404
 
 
-def test_closure_date_from_owner_is_used_when_case_has_no_exact_date(api):
+# 1: 가입 때 폐업 예정일(2026-10-31)을 정한 Case, 2: "예상 달·아직"을 골라 예정일이 없는 Case
+@pytest.mark.parametrize("case_id", [1, 2])
+def test_only_owner_confirmed_closure_date_is_checked(api, case_id):
     client, member, _ = api
-    member["id"] = 2  # 가입 때 "예상 달·아직"을 골라 폐업 날짜가 없는 Case
+    member["id"] = case_id
     upload(client, DocumentKind.CLOSURE_CERTIFICATE, {"closure_date": "2026년 10월 31일"})
 
     def codes(body):
         return {issue["code"] for issue in client.post("/cases/documents/check", json=body).json()["check"]["issues"]}
 
-    assert "CLOSURE_DATE_UNCONFIRMED" in codes(OWNER)
-    told = codes({**OWNER, "closure_date": "2026-10-31"})
+    # 예정일이 증명원 날짜와 같아도 실제 폐업일을 확인하지 않았으면 막는다
+    assert "CLOSURE_DATE_UNCONFIRMED" in codes({"applicant_name": "김리본"})
+    told = codes(OWNER)
     assert not {"CLOSURE_DATE_UNCONFIRMED", "CLOSURE_DATE_MISMATCH"} & told
     assert "CLOSURE_DATE_MISMATCH" in codes({**OWNER, "closure_date": "2026-11-30"})
     assert client.post("/cases/documents/check", json={"applicant_name": ""}).status_code == 422

@@ -103,10 +103,12 @@ def check_documents(
 ) -> DocumentContext:
     context = load_context(directory, case)
     # 이체확인증의 보낸 사람과 맞춰 볼 신청인 이름은 서비스가 받는 칸이 없어 점검 직전에 사장님께 묻는다.
-    # 폐업사실증명원과 맞춰 볼 폐업일은 사장님이 알려 준 실제 날짜, 없으면 가입 때 정한 날짜를 쓴다.
+    # 폐업사실증명원과 맞춰 볼 폐업일은 사장님이 실제 날짜라고 확인한 값만 쓴다.
+    # 가입 때 정한 폐업 예정일(planned_closure_date)은 실제 폐업일과 다른 사실이라 대신 쓰지 않는다.
+    # 비우면 점검이 CLOSURE_DATE_UNCONFIRMED로 막는다.
     # 둘 다 서류 JSON에만 남기고 Case·AI 판단에는 넣지 않는다.
     context.applicant_name = applicant_name
-    context.closure_date = closure_date or case.planned_closure_date
+    context.closure_date = closure_date
     try:
         updated = tool.check_documents(context)
     except DocumentError as error:
