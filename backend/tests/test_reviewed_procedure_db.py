@@ -123,6 +123,46 @@ def approved_store():
     })
 
 
+def test_one_query_finds_every_record_however_many_are_approved():
+    """검수 자료가 상한(4건)을 넘어도 질의는 하나로 유지돼야 한다.
+
+    자료마다 질의를 하나씩 만들던 때는 5건째가 들어오는 순간 search_queries 상한에 걸려
+    조회가 시작도 못 했다(#141에서 공고 1건이 늘자 검사 4개가 그렇게 깨졌다). 자료가
+    늘어도 이 검사가 먼저 걸리도록 상한보다 많은 수로 고정한다.
+    """
+    store = load_reviewed_procedure_store({
+        "snapshot_version": "synthetic/1",
+        "generated_at": RETRIEVED,
+        "locale": "ko-KR",
+        "records": [
+            {
+                "record_id": f"SYNTHETIC_{index}",
+                "title": f"합성 문서 {index}",
+                "authority_name": "합성 기관",
+                "canonical_url": f"https://example.org/synthetic-{index}",
+                "source_domain": "example.org",
+                "excerpt": "합성 원문 " + "가" * 1200,
+                "content_hash": "sha256:" + hashlib.sha256(str(index).encode()).hexdigest(),
+                "published_at": RETRIEVED,
+                "retrieved_at": RETRIEVED,
+                "reviewed_by": "synthetic-reviewer",
+                "reviewed_at": RETRIEVED,
+                "review_valid_days": 90,
+                "step_codes": ["FILE_TAX_BUSINESS_CLOSURE"],
+                "required_terms": [f"합성{index}"],
+                "any_terms": [f"보조{index}"],
+            }
+            for index in range(6)
+        ],
+    })
+
+    query = all_terms_query(store)
+
+    assert len(store.records()) == 6
+    assert len(query) <= 200
+    assert all(record.matches(query) for record in store.records())
+
+
 def create_test_case(engine):
     with Session(engine) as session:
         member = create_member(session, oauth_id=str(uuid4()), nickname="합성 사용자")
@@ -148,11 +188,35 @@ def official_payloads(session, case_id):
     return {row.evidence_id: row.model_dump() for row in official_rows(session, case_id)}
 
 
+def body_of(session, row):
+    """근거 한 줄의 본문. 공식 자료는 Case가 아니라 공용 줄이 들고 있다."""
+
+    return evidence_crud.get_official_document_bodies(session, [row.official_document_id])[
+        row.official_document_id
+    ]
+
+
+def all_terms_query(store) -> str:
+    """검수 자료 전체를 한 질의로 고르게 하는 검색어.
+
+    절차조회는 질의에 그 자료의 required_terms가 전부 들어 있고 any_terms 중 하나가 있을
+    때만 고른다(store.py:141-144). 자료마다 질의를 하나씩 만들면 자료가 5건이 되는 순간
+    search_queries 상한 4개에 걸려 조회를 시작하기도 전에 거절된다. 단어를 한 줄로 합치면
+    자료가 늘어도 질의는 하나로 유지된다(질의 길이 상한 200자).
+    """
+
+    terms: list[str] = []
+    for record in store.records():
+        terms += [*record.required_terms, *record.any_terms[:1]]
+    return " ".join(dict.fromkeys(terms))
+
+
 def lookup_request(snapshot):
     return ProcedureLookupInput(
         lookup_goal="BUSINESS_CLOSURE", search_queries=["합성 절차"],
         as_of=AS_OF, locale="ko-KR", source_policy="OFFICIAL_ONLY",
-        max_results_per_query=4, based_on_snapshot_id=snapshot.snapshot_id,
+        # 질의 하나로 자료를 다 고르므로 질의당 결과 상한도 자료 수만큼 열어둔다(상한 10).
+        max_results_per_query=10, based_on_snapshot_id=snapshot.snapshot_id,
         evidence_records=snapshot.evidence_records, review_feedback=[],
     )
 
@@ -164,7 +228,9 @@ def test_case_creation_imports_four_approved_documents_and_reuses_their_ids(mysq
         baseline = official_payloads(session, case_id)
         assert len(baseline) == len(store.records()) == 4
         assert {row["source_version"] for row in baseline.values()} == {store.snapshot_version}
-        assert {row["excerpt"] for row in baseline.values()} == {
+        # 본문은 Case마다 복사되지 않는다. 공용 줄에서 읽어야 자료와 같다.
+        assert {row["excerpt"] for row in baseline.values()} == {None}
+        assert {body_of(session, row) for row in official_rows(session, case_id)} == {
             record.excerpt for record in store.records()
         }
         repeated = import_reviewed_procedures(session, case_id, store, as_of=AS_OF)
@@ -174,12 +240,10 @@ def test_case_creation_imports_four_approved_documents_and_reuses_their_ids(mysq
         assert official_payloads(session, case_id) == baseline
         snapshot = build_case_snapshot(session, case_id)
         request = lookup_request(snapshot)
-        request.search_queries = [
-            " ".join([*item.required_terms, *item.any_terms[:1]]) for item in store.records()
-        ]
+        request.search_queries = [all_terms_query(store)]
         result = asyncio.run(StoredProcedureLookupTool(store).lookup(request))
         assert result.completion_status == "COMPLETE"
-        assert len(result.documents) == 4
+        assert len(result.documents) == len(store.records())
         assert {item.evidence_id for item in result.evidence_records} == set(baseline)
         # 로드맵에는 카페 폐업 절차 8개가 모두 올라가고, 검수 문서는 그중 일부만 가리킨다.
         # 문서가 가리키는 절차가 로드맵에 없으면 조회 결과를 절차에 맺을 수 없다.
@@ -212,7 +276,8 @@ def test_committed_rows_reach_tool_without_new_evidence_ids(mysql_engine, approv
             assert len(rows) == 2
             for row in rows:
                 source = records[row.source_ref]
-                assert row.excerpt == source.excerpt
+                assert row.excerpt is None
+                assert body_of(session, row) == source.excerpt
                 assert row.content_hash == source.content_hash.removeprefix("sha256:")
                 assert row.source_version == approved_store.snapshot_version
                 assert row.locator == source.canonical_url
@@ -282,11 +347,10 @@ def test_same_id_changed_payload_is_rejected(mysql_engine, approved_store):
             import_reviewed_procedures(session, case_id, changed, as_of=AS_OF)
         session.rollback()
     with Session(mysql_engine) as session:
-        assert {row.excerpt for row in official_rows(
-            session, case_id, version=approved_store.snapshot_version,
-        )} == {
-            record.excerpt for record in approved_store.records()
-        }
+        assert {
+            body_of(session, row)
+            for row in official_rows(session, case_id, version=approved_store.snapshot_version)
+        } == {record.excerpt for record in approved_store.records()}
 
 
 def test_caller_rolls_back_partial_import(mysql_engine, approved_store, monkeypatch):
@@ -441,12 +505,10 @@ def test_cli_reimport_and_new_source_version_preserve_existing_evidence(
         snapshot = build_case_snapshot(session, case_id)
         request = lookup_request(snapshot)
         store = load_reviewed_procedure_store(source)
-        request.search_queries = [
-            " ".join([*item.required_terms, *item.any_terms[:1]]) for item in store.records()
-        ]
+        request.search_queries = [all_terms_query(store)]
         result = asyncio.run(StoredProcedureLookupTool(store).lookup(request))
         assert result.completion_status == "COMPLETE"
-        assert len(result.documents) == 4
+        assert len(result.documents) == len(store.records())
         assert {item.evidence_id for item in result.evidence_records} == new_ids
 
 

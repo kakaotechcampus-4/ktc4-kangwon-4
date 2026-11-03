@@ -10,15 +10,16 @@ from app.agent.document_tool.models import DocumentContext, DocumentKind
 from document_fixtures import DocumentClient, document_pdf
 
 
-async def settlement_context(service, *, transfer=True):
+async def settlement_context(service, *, transfer=True, bank_copy=True):
     context = DocumentContext(applicant_name="김리본", business_name="봄날개인카페", closure_date=date(2026, 10, 31))
     documents = {
         DocumentKind.CONSTRUCTION_STATEMENT: {"amount": "3,300,000원", "supplier": "그린철거", "buyer": "봄날개인카페"},
         DocumentKind.TAX_INVOICE: {"supply_amount": "3,000,000원", "tax_amount": "300,000원", "supplier": "그린철거", "buyer": "봄날개인카페"},
         DocumentKind.BEFORE_PHOTO: {}, DocumentKind.AFTER_PHOTO: {},
         DocumentKind.CLOSURE_CERTIFICATE: {"closure_date": "2026년 10월 31일"},
-        DocumentKind.BANK_COPY: {"account_holder": "김리본"},
     }
+    if bank_copy:
+        documents[DocumentKind.BANK_COPY] = {"account_holder": "김리본"}
     if transfer:
         documents[DocumentKind.TRANSFER] = {"amount": "3,300,000원", "sender": "김리본", "recipient": "그린철거"}
     for kind, fields in documents.items():
@@ -29,7 +30,7 @@ async def settlement_context(service, *, transfer=True):
     return context
 
 
-def test_missing_transfer_then_new_document_only_recheck_and_nine_file_zip(tmp_path):
+def test_missing_transfer_then_new_document_only_recheck_and_eight_file_zip(tmp_path):
     async def run():
         client = DocumentClient()
         service = DocumentService(tmp_path, client, reviewer=client, submission_policy="RRN_BACK_ONLY")
@@ -47,7 +48,7 @@ def test_missing_transfer_then_new_document_only_recheck_and_nine_file_zip(tmp_p
         assert context.document_check.status == "COMPLETE"
         assert len(context.document_check.steps) == 6
         with ZipFile(io.BytesIO(settlement_zip(context, service))) as archive:
-            assert archive.testzip() is None and len(archive.namelist()) == 9
+            assert archive.testzip() is None and len(archive.namelist()) == 8
     asyncio.run(run())
 
 
@@ -82,6 +83,18 @@ def test_checked_zip_is_blocked_after_processing_policy_changes(tmp_path):
         client.config.reasoning_effort = "medium"
         with pytest.raises(DocumentError, match="설정"):
             settlement_zip(context, service)
+    asyncio.run(run())
+
+
+def test_bank_copy_is_not_a_required_settlement_document(tmp_path):
+    # 2026 점포철거비 공고의 정산 서류 목록에 통장 사본이 없다.
+    async def run():
+        client = DocumentClient()
+        service = DocumentService(tmp_path, client, reviewer=client, submission_policy="RRN_BACK_ONLY")
+        context = await settlement_context(service, bank_copy=False)
+        context.document_check = check_settlement(context, service)
+        assert context.document_check.status == "COMPLETE"
+        assert context.document_check.issues == []
     asyncio.run(run())
 
 

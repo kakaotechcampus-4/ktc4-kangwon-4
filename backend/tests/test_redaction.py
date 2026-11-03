@@ -85,6 +85,9 @@ def evidence(excerpt: str, source_type: str) -> SimpleNamespace:
         id=1, evidence_id="ev_1", source_type=source_type, source_ref="case_history",
         source_version=None, locator=None, excerpt=excerpt, published_at=None,
         retrieved_at=SUBMITTED_AT, freshness_status="CURRENT", content_hash=None,
+        # 공식 자료 본문은 official_document 한 줄에 두고 가리키지만, 이 검사는 본문을
+        # 직접 넘겨 가림 규칙만 본다.
+        official_document_id=None,
     )
 
 

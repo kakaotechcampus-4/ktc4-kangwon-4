@@ -22,7 +22,11 @@ Case 생성 → Blocker 1개 판정 → Next Action 1개 제시
   `@tailwindcss/vite` 플러그인과 `src/index.css`의 `@import "tailwindcss";` 로 동작한다.
   3버전 방식(`tailwind.config.js`, `@tailwind base;`)을 쓰지 않는다
 - 통신 **Fetch API** — axios 등 HTTP 클라이언트를 추가하지 않는다
-- 상태관리는 **React 내장**(`useState` / `useContext`). 외부 상태 라이브러리를 도입하지 않는다
+- 상태관리는 **React 내장**(`useState` / `useContext`)이 기본이다. 서버 데이터(Case, 판단 결과)는
+  서버에 다시 묻고 전역에 들고 있지 않는다. **화면 여러 장에 걸쳐 이어지는 사용자의 답·선택만**
+  **Zustand**(`src/stores/`)에 둔다 — 지금은 상황 진단 답(`useDiagnosisStore`) 하나다.
+  처음엔 전역 상태가 없어 넣지 않았는데, 진단이 `?step=` 여러 장으로 나뉘고 새로고침에도 답이
+  남아야 해서 넣었다(상황 진단 온보딩, 11/03). 새로 넣을 때도 "여러 화면이 같은 사용자 입력을 보는가"를 먼저 묻는다
 - **Mobile-first** 반응형. 좁은 쪽 기준은 375px, 기본 컨테이너는 `max-w-md`(약 448px)다.
   넓은 화면에서 2단으로 나눌 내용이 있는 화면만 `AppShell` 의 `width="wide"` 를 쓴다
   (지금은 `/case`). 폼처럼 한 줄로 읽는 화면은 넓혀도 읽기 어려워지기만 한다

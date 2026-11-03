@@ -74,7 +74,7 @@ function renderAt(path: string) {
           { path: '/log', element: <p>기록 화면</p> },
         ],
       },
-      { path: '/start', element: <p>시작 화면</p> },
+      { path: '/cases/new', element: <p>상황 진단</p> },
       { path: '/task', element: <p>할 일 상세 화면</p> },
       { path: '/results', element: <p>결과 입력 화면</p> },
     ],
@@ -124,12 +124,12 @@ describe('CurrentCasePage', () => {
   })
 
   /** 주소로 직접 들어온 경우다. 빈 화면 대신 만들러 보낸다 */
-  it('Case가 없으면 시작 화면으로 보낸다', async () => {
+  it('Case가 없으면 상황 진단으로 보낸다', async () => {
     saveTokens('access-1', 'refresh-1')
     mockCase(envelope({ case: null }))
     renderAt('/case')
 
-    expect(await screen.findByText('시작 화면')).toBeInTheDocument()
+    expect(await screen.findByText('상황 진단')).toBeInTheDocument()
   })
 
   /** 빈 화면을 두면 사용자는 Case가 사라진 줄 안다 */

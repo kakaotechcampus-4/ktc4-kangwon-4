@@ -22,7 +22,7 @@ import type { CurrentCaseView } from '../types/view'
 /**
  * 지금 Case 를 서버에 물어본다.
  *
- * 진입 분기(`/`)·시작 화면(`/start`)·현재 Case(`/case`) 가 같은 것을 알아야 해서
+ * 진입 분기(`/`)·상황 진단(`/cases/new`)·현재 Case(`/case`) 가 같은 것을 알아야 해서
  * 한곳에 모았다. 각 화면이 각자 부르되, 부르는 방법은 하나다 — 인증 실패 처리나
  * Mock 전환을 화면마다 적으면 한 곳쯤 달라진다.
  *
@@ -159,7 +159,7 @@ export function useCase(): CaseQueryResult {
       if (mine !== generation.current) return
 
       // Case 가 없다는 뜻은 **`case: null`** 하나다. 칸이 통째로 빠진 응답을 "없음" 으로
-      // 읽으면, Case 를 가진 사장님이 갱신 한 번에 시작 화면으로 끌려가 **자기 정보가
+      // 읽으면, Case 를 가진 사장님이 갱신 한 번에 상황 진단으로 끌려가 **자기 정보가
       // 사라진 줄 안다.** 그건 조회가 잘못된 것이니 받아둔 것을 지키고 실패로 둔다.
       if (body.case === undefined) throw new MalformedResponseError()
 

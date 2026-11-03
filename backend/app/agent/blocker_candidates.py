@@ -49,6 +49,7 @@ _QUESTIONS = {
     "restoration_scope_detail": "확인한 원상복구 범위의 구체적인 내용을 알려주세요.",
     "demolition_required": "철거가 필요한지 확인한 내용이 있으면 알려주세요.",
     "restoration_status": "원상복구 작업이 어디까지 진행됐는지 알려주세요.",
+    "planned_closure_month": "폐업하실 예상 달이 있으면 알려주세요.",
 }
 
 _FIELD_LABELS = {
@@ -65,6 +66,7 @@ _FIELD_LABELS = {
     "restoration_scope_detail": "원상복구 범위의 구체적인 내용",
     "demolition_required": "철거 필요 여부",
     "restoration_status": "원상복구 진행 상태",
+    "planned_closure_month": "폐업 예상 달",
 }
 
 
