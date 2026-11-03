@@ -19,6 +19,7 @@ from app.be.services import agent_runtime as agent_runtime_service
 from app.be.services import case_snapshot as case_snapshot_service
 from app.be.services import conflict_decision
 from app.be.services import decision_record as decision_record_service
+from app.be.services import procedure_registry
 from app.be.services import reviewed_procedure as reviewed_procedure_service
 
 from uuid import UUID, uuid4
@@ -446,6 +447,11 @@ def mysql_engine():
         engine = create_engine(container.get_connection_url() + "?charset=utf8mb4")
         try:
             SQLModel.metadata.create_all(engine)
+            # 앱이 뜰 때 하는 적재를 그대로 한다(main.lifespan). 요청 경로는 읽기만 하므로
+            # 이게 없으면 Case 생성이 ProcedureRegistryMissingError로 멈춘다.
+            with Session(engine) as session:
+                procedure_registry.ensure_cafe_procedure_registry(session)
+                session.commit()
             yield engine
         finally:
             engine.dispose()
@@ -454,7 +460,7 @@ def mysql_engine():
 def new_case_id(session) -> int:
     member = create_member(session, oauth_id=str(uuid4()), nickname="합성 사용자")
     case, _ = create_case(session, member.id, CaseCreateRequest(
-        business_type="카페", franchise_status=False, employee_count=2,
+        business_type="CAFE", franchise_status=False, employee_count=2,
         lease_status="LEASED_PAID",
     ))
     session.commit()
