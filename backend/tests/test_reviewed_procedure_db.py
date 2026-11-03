@@ -221,12 +221,12 @@ def lookup_request(snapshot):
     )
 
 
-def test_case_creation_imports_four_approved_documents_and_reuses_their_ids(mysql_engine):
+def test_case_creation_imports_approved_documents_and_reuses_their_ids(mysql_engine):
     store = load_reviewed_procedures()
     case_id = create_test_case(mysql_engine)
     with Session(mysql_engine) as session:
         baseline = official_payloads(session, case_id)
-        assert len(baseline) == len(store.records()) == 4
+        assert len(baseline) == len(store.records())
         assert {row["source_version"] for row in baseline.values()} == {store.snapshot_version}
         # 본문은 Case마다 복사되지 않는다. 공용 줄에서 읽어야 자료와 같다.
         assert {row["excerpt"] for row in baseline.values()} == {None}
@@ -495,7 +495,7 @@ def test_cli_reimport_and_new_source_version_preserve_existing_evidence(
     import_cli.main()
     with Session(mysql_engine) as session:
         updated = official_payloads(session, case_id)
-        assert len(updated) == 8
+        assert len(updated) == 2 * len(baseline)
         assert {key: updated[key] for key in baseline} == baseline
         new_ids = set(updated) - set(baseline)
         assert {updated[key]["source_version"] for key in new_ids} == {source["snapshot_version"]}

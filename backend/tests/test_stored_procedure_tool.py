@@ -6,10 +6,9 @@ from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
-from test_action_codes import StubModel, source, supervisor_request
-from test_info_replanning import Responses, finding, output
-
+from app.agent.action_catalog import PROCEDURE_LABELS
 from app.agent.info_agent.agent import InfoAnalysisAgent
+from app.agent.procedure_tool.cafe import build_cafe_reviewed_snapshot
 from app.agent.procedure_tool.store import ReviewedProcedureRecord
 from app.agent.procedure_tool.stored_tool import (
     ProcedureLookupInputError,
@@ -25,8 +24,23 @@ from app.agent.schemas import (
     ReviewSubject,
 )
 from app.agent.supervisor import SupervisorAgent
+from app.common.agent_data import load_reviewed_procedures
+from test_action_codes import StubModel, source, supervisor_request
+from test_info_replanning import Responses, finding, output
 
 NOW = datetime(2026, 10, 4, tzinfo=timezone.utc)
+
+
+def test_bundled_cafe_sources_include_the_eight_reviewed_records():
+    snapshot = build_cafe_reviewed_snapshot()
+    store = load_reviewed_procedures()
+    assert store.snapshot_version == snapshot.snapshot_version
+    assert list(store.records()) == snapshot.records
+    assert len(store.records()) == 8
+    assert {code for record in store.records() for code in record.step_codes} == set(PROCEDURE_LABELS)
+    assert {record.reviewed_by for record in store.records()} == {"tokengeoji"}
+    assert all(record.reviewed_at == snapshot.generated_at for record in store.records())
+    assert {record.freshness(date(2026, 11, 3)) for record in store.records()} == {"CURRENT"}
 
 
 def lookup(*, evidence_changes=None, record_changes=None, missing=False, as_of=None,
