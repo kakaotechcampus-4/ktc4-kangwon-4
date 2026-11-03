@@ -24,6 +24,9 @@ export type RestorationScope = 'UNKNOWN' | 'PARTIAL' | 'FULL' | 'NOT_REQUIRED'
 /** 철거 필요 여부 */
 export type DemolitionRequired = 'UNKNOWN' | 'REQUIRED' | 'NOT_REQUIRED'
 
+/** 임대차계약서에 원상복구 조항이 있는지. 가입 때 사장님이 답한다 */
+export type RestorationClause = 'EXISTS' | 'NOT_EXISTS' | 'UNKNOWN'
+
 /**
  * `POST /cases` 로 보내는 것.
  *
@@ -31,12 +34,26 @@ export type DemolitionRequired = 'UNKNOWN' | 'REQUIRED' | 'NOT_REQUIRED'
  * "아직 모른다"와 "없다"가 서버에서 같아진다.
  */
 export interface CaseCreateRequest {
+  /** 화면 표시용. 진단에서 묻지 않아 지금은 늘 `null` */
+  store_name: string | null
   business_type: string
   franchise_status: boolean
   employee_count: number | null
+  has_business_loan: boolean | null
+  /** 배달앱·카드단말기 등 해지할 계약 */
+  has_service_contracts: boolean | null
   lease_status: LeaseStatus
+  /** 계약서의 원상복구 조항. 서버가 `null`을 받지 않아 모르면 `UNKNOWN` */
+  restoration_clause: RestorationClause
   /** `YYYY-MM-DD` */
   planned_closure_date: string | null
+  /** 지금이 아니라 "있었던 적". 지금 직원이 있으면 서버가 직원 수로 안다 */
+  had_employees: boolean | null
+  /** 이 사업장의 4대보험 가입 이력. 넷을 같이 보내야 "해당 없음"이 된다 */
+  pension_enrolled: boolean | null
+  health_insurance_enrolled: boolean | null
+  employment_insurance_enrolled: boolean | null
+  industrial_accident_insurance_enrolled: boolean | null
 }
 
 /**

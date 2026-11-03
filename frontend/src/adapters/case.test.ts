@@ -477,10 +477,14 @@ describe('toCurrentCaseView', () => {
   })
 })
 
+/** 꼭 답해야 넘어가는 질문은 미리 채워 둔다. 각 테스트는 보려는 답만 바꾼다 */
 const diagnosis = (patch: Partial<DiagnosisAnswers>): DiagnosisAnswers => ({
   ...EMPTY_DIAGNOSIS,
   business: 'PERSONAL_CAFE',
   situations: [],
+  restorationClause: 'UNKNOWN',
+  hadEmployees: false,
+  insurances: [],
   ...patch,
 })
 
@@ -540,6 +544,62 @@ describe('toCaseCreateRequest', () => {
   it('직원을 골랐는데 0명이거나 상한을 넘으면 보내지 않는다', () => {
     expect(toCaseCreateRequest(diagnosis({ situations: ['STAFF'] }))).toBeNull()
     expect(toCaseCreateRequest(diagnosis({ situations: ['STAFF'], fullTimeCount: 1001 }))).toBeNull()
+  })
+
+  /** 고르지 않은 것은 "모름"이 아니라 "없음"이다. 비워 보내면 서버는 "안 물어봄"으로 저장한다 */
+  it('대출·배달앱은 골랐는지로 보낸다', () => {
+    expect(toCaseCreateRequest(diagnosis({ situations: ['LOAN', 'CONTRACT'] }))).toMatchObject({
+      has_business_loan: true,
+      has_service_contracts: true,
+    })
+    expect(toCaseCreateRequest(diagnosis({ situations: [] }))).toMatchObject({
+      has_business_loan: false,
+      has_service_contracts: false,
+    })
+  })
+
+  /** 서버가 이 칸에 `null`을 받지 않는다(422). 자가면 원상복구 할 일이 빠져 값이 쓰이지 않는다 */
+  it('원상복구 조항은 빌린 가게면 고른 답, 자가면 모름으로 보낸다', () => {
+    expect(
+      toCaseCreateRequest(diagnosis({ situations: ['LEASE'], paysRent: true, restorationClause: 'EXISTS' }))
+        ?.restoration_clause,
+    ).toBe('EXISTS')
+    expect(
+      toCaseCreateRequest(diagnosis({ situations: [], restorationClause: 'NOT_EXISTS' }))?.restoration_clause,
+    ).toBe('UNKNOWN')
+    expect(
+      toCaseCreateRequest(diagnosis({ situations: ['LEASE'], paysRent: true, restorationClause: null })),
+    ).toBeNull()
+  })
+
+  /**
+   * 지금 직원이 있는데 "둔 적 없음"이 가면 서버가 두 값이 어긋났다고 보고 다시 묻는다.
+   * 지금 있으면 비워 두고 서버가 직원 수로 알게 한다
+   */
+  it('예전 직원 답은 지금 직원이 없을 때만 보낸다', () => {
+    expect(toCaseCreateRequest(diagnosis({ hadEmployees: true }))?.had_employees).toBe(true)
+    expect(
+      toCaseCreateRequest(diagnosis({ situations: ['STAFF'], fullTimeCount: 1, hadEmployees: false }))
+        ?.had_employees,
+    ).toBeNull()
+    expect(toCaseCreateRequest(diagnosis({ hadEmployees: null }))).toBeNull()
+  })
+
+  /** 하나라도 비면 서버가 넷을 다 "모름"으로 본다. "가입한 적 없어요"가 "해당 없음"이 되려면 넷 다 false여야 한다 */
+  it('보험 네 칸을 늘 같이 채워 보낸다', () => {
+    expect(toCaseCreateRequest(diagnosis({ insurances: ['PENSION', 'EMPLOYMENT'] }))).toMatchObject({
+      pension_enrolled: true,
+      health_insurance_enrolled: false,
+      employment_insurance_enrolled: true,
+      industrial_accident_insurance_enrolled: false,
+    })
+    expect(toCaseCreateRequest(diagnosis({ insurances: [] }))).toMatchObject({
+      pension_enrolled: false,
+      health_insurance_enrolled: false,
+      employment_insurance_enrolled: false,
+      industrial_accident_insurance_enrolled: false,
+    })
+    expect(toCaseCreateRequest(diagnosis({ insurances: null }))).toBeNull()
   })
 
   /** "이번 달"에서 날짜를 지어내면 서버가 그 날짜로 기한을 계산한다(FE 규칙 7) */

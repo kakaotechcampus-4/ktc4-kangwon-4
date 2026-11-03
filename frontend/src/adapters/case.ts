@@ -321,16 +321,22 @@ const BUSINESS_REQUEST: Record<DiagnosisBusiness, { business_type: string; franc
  * - 업종: 개인 카페 `CAFE`+`false`, 프랜차이즈 카페 `CAFE`+`true`, 다른 음식점 `RESTAURANT`+따로 받은 답
  * - 점포: 빌린 가게면 월세 답으로 `LEASED_PAID`/`LEASED_FREE`, 안 골랐으면 `OWNED`
  *   ("해당하는 것 모두"에서 안 고른 것은 해당 없음이다)
+ * - 원상복구 조항: 빌린 가게면 고른 답, 자가면 `UNKNOWN`(서버 기본값이다. 자가면 원상복구
+ *   할 일이 통째로 빠져서 서버가 이 값을 보지 않는다)
  * - 직원 수: 직원을 골랐으면 정직원 + 아르바이트, 안 골랐으면 0
+ * - 예전 직원: 직원을 안 골랐을 때만 답을 보낸다. 지금 직원이 있으면 `null`이다 —
+ *   서버가 직원 수로 "둔 적 있음"을 안다
+ * - 대출·배달앱: 골랐으면 `true`, 안 골랐으면 `false`
+ * - 보험: 네 칸을 늘 같이 `true`/`false`로 보낸다. 하나라도 `null`이면 서버는 "해당 없음"이
+ *   아니라 "모름"으로 본다
  * - 폐업 예정일: 시기("이번 달" 등)에서 날짜를 지어내지 않고 비워 보낸다
+ * - 가게 이름: 진단에서 묻지 않아 비워 보낸다
  *
- * 서버가 꼭 받아야 하는 값(업종·프랜차이즈·점포)을 정할 수 없으면 `null`이다. 화면이
- * 이미 순서로 막고 있지만, 보내는 쪽에서 한 번 더 걸러 빈 값이 서버까지 가지 않게 한다.
+ * 화면에서 답해야 넘어가는 질문에 답이 없으면 `null`이다. 화면이 이미 순서로 막고 있지만,
+ * 보내는 쪽에서 한 번 더 걸러 빈 값이 서버까지 가지 않게 한다.
  *
  * 앞 답을 바꿔 빠진 질문의 답(빌린 가게를 해제한 뒤의 월세 답 등)은 여기서 버린다.
  * 저장소에는 남겨 두어, 다시 켜면 고른 것이 그대로 보인다.
- *
- * TODO(#119·#133): 머지되면 대출·배달앱·원상복구 조항·예전 직원·보험 네 칸을 같이 보낸다.
  */
 export function toCaseCreateRequest(answers: DiagnosisAnswers): CaseCreateRequest | null {
   if (answers.business === null || answers.situations === null) return null
@@ -343,17 +349,32 @@ export function toCaseCreateRequest(answers: DiagnosisAnswers): CaseCreateReques
   if (leased && answers.paysRent === null) return null
   const leaseStatus: LeaseStatus = !leased ? 'OWNED' : answers.paysRent ? 'LEASED_PAID' : 'LEASED_FREE'
 
-  const employeeCount = answers.situations.includes('STAFF')
-    ? answers.fullTimeCount + answers.partTimeCount
-    : 0
+  const restorationClause = leased ? answers.restorationClause : 'UNKNOWN'
+  if (restorationClause === null) return null
+
+  const staffed = answers.situations.includes('STAFF')
+  const employeeCount = staffed ? answers.fullTimeCount + answers.partTimeCount : 0
   // 직원이 있다고 골랐는데 0명이거나, 서버가 받지 않는 수면 보내지 않는다
-  if (answers.situations.includes('STAFF') && (employeeCount < 1 || employeeCount > MAX_EMPLOYEE_COUNT)) return null
+  if (staffed && (employeeCount < 1 || employeeCount > MAX_EMPLOYEE_COUNT)) return null
+  if (!staffed && answers.hadEmployees === null) return null
+
+  const { insurances } = answers
+  if (insurances === null) return null
 
   return {
+    store_name: null,
     business_type: business.business_type,
     franchise_status: franchiseStatus,
     employee_count: employeeCount,
+    has_business_loan: answers.situations.includes('LOAN'),
+    has_service_contracts: answers.situations.includes('CONTRACT'),
     lease_status: leaseStatus,
+    restoration_clause: restorationClause,
     planned_closure_date: null,
+    had_employees: staffed ? null : answers.hadEmployees,
+    pension_enrolled: insurances.includes('PENSION'),
+    health_insurance_enrolled: insurances.includes('HEALTH'),
+    employment_insurance_enrolled: insurances.includes('EMPLOYMENT'),
+    industrial_accident_insurance_enrolled: insurances.includes('INDUSTRIAL_ACCIDENT'),
   }
 }

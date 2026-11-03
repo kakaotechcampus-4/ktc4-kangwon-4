@@ -75,11 +75,20 @@ describe('CaseCreatePage', () => {
     fireEvent.click(sendButton())
 
     expect(postBody(fetchMock)).toEqual({
+      store_name: null,
       business_type: 'CAFE',
       franchise_status: false,
-      lease_status: 'OWNED',
       employee_count: 0,
+      has_business_loan: false,
+      has_service_contracts: false,
+      lease_status: 'OWNED',
+      restoration_clause: 'UNKNOWN',
       planned_closure_date: null,
+      had_employees: false,
+      pension_enrolled: false,
+      health_insurance_enrolled: false,
+      employment_insurance_enrolled: false,
+      industrial_accident_insurance_enrolled: false,
     })
   })
 
