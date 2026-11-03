@@ -78,6 +78,11 @@ class Case(TimestampMixin, table=True):
             nullable=False,
         ),
     )
+    # 사장님이 알려 준 점포철거비 1차 적격심사 결과. null이면 아직 모름. AI가 판단한 지원 자격이 아니고,
+    # 뒤의 정산 검토·비용 지급과도 다르다(AI 로드맵 RoadmapInput.support_approved와 같은 뜻).
+    support_approved: bool | None = Field(default=None)
+    # 심사 결과를 마지막으로 알려 준 시각. 기록 탭에 "승인 결과를 알려주셨어요"로 보인다
+    support_approved_at: datetime | None = Field(default=None, sa_column=Column(DateTime, nullable=True))
 
     planned_closure_date: date | None = Field(default=None, sa_column=Column(Date, nullable=True))
     # 정확한 날짜 대신 예상 달만 정했을 때 "YYYY-MM". 날짜가 있으면 비워 둔다

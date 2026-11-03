@@ -3,6 +3,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from app.agent.roadmap import CHECKLIST_IDS
+
 BusinessType = Literal["CAFE", "RESTAURANT"]
 LeaseStatus = Literal["LEASED_PAID", "LEASED_FREE", "OWNED"]
 CaseStatus = Literal["IN_PROGRESS", "COMPLETED"]
@@ -14,6 +16,8 @@ JudgmentStatus = Literal["PENDING", "DONE", "NEEDS_MORE_INFO", "CONFLICT", "FAIL
 RecoveryActionCode = Literal["RETRY", "RESUBMIT_INPUT", "CONTACT_SUPPORT", "NONE"]
 ResultsSubmitResult = Literal["PENDING", "UPDATED", "NO_CHANGE", "NEEDS_MORE_INFO", "CONFLICT", "FAILED"]
 ConflictSide = Literal["PROPOSED", "STORED"]
+# 사장님이 직접 체크하는 로드맵 항목. AI 로드맵(#132)의 목록을 그대로 쓴다.
+ChecklistTaskId = Literal[tuple(sorted(CHECKLIST_IDS))]
 
 
 class CaseCreateRequest(BaseModel):
@@ -168,3 +172,21 @@ class CaseResultsSubmitResponse(BaseModel):
     recovery_action_code: RecoveryActionCode | None = None
     retryable: bool | None = None
     requested_field_paths: list[str] | None = None
+
+
+class CaseChecklistUpdateRequest(BaseModel):
+    completed: bool
+
+
+class CaseChecklistResponse(BaseModel):
+    task_id: ChecklistTaskId
+    completed: bool
+
+
+class CaseSupportApprovalRequest(BaseModel):
+    # 키는 꼭 보내야 하고 값은 null(아직 모름)도 된다. 빠뜨린 요청을 "모름"으로 저장하지 않으려고 기본값을 두지 않는다.
+    approved: bool | None
+
+
+class CaseSupportApprovalResponse(BaseModel):
+    approved: bool | None

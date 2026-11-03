@@ -4,6 +4,8 @@ from sqlmodel import Session
 from app.be.db import get_db
 from app.be.dependencies.auth import get_current_member_id
 from app.be.schemas.case import (
+    CaseChecklistResponse,
+    CaseChecklistUpdateRequest,
     CaseConflictsDecisionRequest,
     CaseCreateRequest,
     CaseCreateResponse,
@@ -12,6 +14,9 @@ from app.be.schemas.case import (
     CaseResultsSubmitAcceptedResponse,
     CaseResultsSubmitRequest,
     CaseResultsSubmitResponse,
+    CaseSupportApprovalRequest,
+    CaseSupportApprovalResponse,
+    ChecklistTaskId,
 )
 from app.be.services import case as case_service
 from app.be.services import conflict_decision as conflict_decision_service
@@ -101,3 +106,22 @@ def get_case_results_submit_status(
     session: Session = Depends(get_db),
 ):
     return case_service.get_case_results_submit_status(session, member_id, case_history_id)
+
+
+@router.put("/cases/checklists/{task_id}", response_model=CaseChecklistResponse)
+def update_case_checklist(
+    task_id: ChecklistTaskId,
+    checklist_request: CaseChecklistUpdateRequest,
+    member_id: int = Depends(get_current_member_id),
+    session: Session = Depends(get_db),
+):
+    return case_service.update_case_checklist(session, member_id, task_id, checklist_request.completed)
+
+
+@router.put("/cases/support-approval", response_model=CaseSupportApprovalResponse)
+def update_case_support_approval(
+    approval_request: CaseSupportApprovalRequest,
+    member_id: int = Depends(get_current_member_id),
+    session: Session = Depends(get_db),
+):
+    return case_service.update_case_support_approval(session, member_id, approval_request.approved)

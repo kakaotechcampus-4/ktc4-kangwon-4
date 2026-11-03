@@ -6,17 +6,21 @@ from fastapi import HTTPException
 from sqlmodel import Session
 
 from app.be.crud import case as case_crud
+from app.be.crud import case_checklist as case_checklist_crud
 from app.be.crud import case_field_history as case_field_history_crud
 from app.be.crud import case_history as case_history_crud
 from app.be.crud import conflict_reference as conflict_reference_crud
 from app.be.crud import evidence as evidence_crud
 from app.be.crud import procedure_step as procedure_step_crud
 from app.be.models.case import Case
+from app.be.models.case_checklist import CaseChecklist, CaseChecklistHistory
 from app.be.models.case_history import CaseHistory
 from app.be.models.evidence import ConflictReference, Evidence
 from app.be.models.mixins import kst_now
 from app.be.models.procedure_step import CaseProcedureStep
 from app.be.schemas.case import (
+    CaseChecklistResponse,
+    CaseSupportApprovalResponse,
     CaseConflictsDecisionRequest,
     CaseCreateRequest,
     CaseGetDetailResponse,
@@ -517,6 +521,52 @@ def get_case_results_submit_status(
             questions_to_ask=latest_history.next_action_questions_to_ask or [],
         ),
     )
+
+
+def update_case_checklist(
+    session: Session, member_id: int, task_id: str, completed: bool
+) -> CaseChecklistResponse:
+    """로드맵 항목을 사장님이 체크하거나 푼다. 같은 요청을 두 번 보내도 결과가 같다.
+
+    "이 가게에 해당하는 항목인지"는 여기서 보지 않는다. AI 로드맵(record_checklist)이 Case
+    스냅샷과 절차 목록으로 판단하는 일이라, 로드맵 조회 API를 만들 때 함께 붙인다.
+    """
+
+    # 같은 항목 체크가 동시에 두 번 오면 둘 다 "없음"을 보고 만들려다 unique에 걸린다. 줄을 세운다.
+    case = case_crud.lock_case_by_member_id(session, member_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case를 찾을 수 없습니다.")
+
+    checklist = case_checklist_crud.get_case_checklist(session, case.id, task_id)
+    if completed == (checklist is not None):
+        # 이미 그 상태다. 같은 요청을 두 번 보내도 이력이 쌓이지 않게 아무것도 하지 않는다.
+        return CaseChecklistResponse(task_id=task_id, completed=completed)
+
+    if completed:
+        case_checklist_crud.create_case_checklist(session, CaseChecklist(case_id=case.id, task_id=task_id))
+    else:
+        case_checklist_crud.delete_case_checklist(session, checklist)
+    # 지금 상태(case_checklist)는 풀면 지우지만, 기록 탭에는 체크했다가 푼 것까지 남아야 한다.
+    case_checklist_crud.create_case_checklist_history(
+        session, CaseChecklistHistory(case_id=case.id, task_id=task_id, completed=completed)
+    )
+    session.commit()
+    return CaseChecklistResponse(task_id=task_id, completed=completed)
+
+
+def update_case_support_approval(
+    session: Session, member_id: int, approved: bool | None
+) -> CaseSupportApprovalResponse:
+    """사장님이 알려 준 점포철거비 1차 적격심사 결과를 저장한다. null은 "아직 모름"으로 되돌린다."""
+
+    case = case_crud.get_case_by_member_id(session, member_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case를 찾을 수 없습니다.")
+
+    case.support_approved = approved
+    case.support_approved_at = kst_now()
+    session.commit()
+    return CaseSupportApprovalResponse(approved=approved)
 
 
 def _create_case_creation_evidence(
