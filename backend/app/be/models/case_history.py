@@ -15,6 +15,15 @@ class CaseHistory(CreatedAtMixin, table=True):
     # 입력 원문. USER_INPUT·CASE_CREATED는 사장님이 쓴 문장이 항상 들어가고, SYSTEM_BATCH는 배치 지시문이
     # 들어갈 수 있다. 문장 없이 고른 값만 있는 CONFLICT_DECISION만 NULL이다.
     raw_input: str | None = Field(default=None, sa_column=Column(Text, nullable=True), description="입력 원문")
+    conflict_snapshot: dict | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+        description=(
+            "충돌이 났을 때의 Case 상태 전체. 사용자가 고른 뒤 AI에 그대로 돌려줘야 한다"
+            " — AI가 받은 것이 자기가 준 것과 같은지 대조하고, 다르면 STALE로 거절한다."
+            " 충돌을 낸 판단에만 값이 있다."
+        ),
+    )
     source: str = Field(
         sa_column=Column(
             Enum("USER_INPUT", "SYSTEM_BATCH", "CASE_CREATED", "CONFLICT_DECISION", name="case_history_source_enum"),
