@@ -105,13 +105,13 @@ def test_no_clause_does_not_establish_no_restoration_or_demolition():
     (None, "2026-12-20", "COMPLETED"),
     (None, None, "NEEDS_CONFIRMATION"),
 ])
-@pytest.mark.skipif("planned_closure_month" not in CASE_FIELD_SPECS, reason="Requires #145 snapshot field")
 def test_closure_month_preserves_precision_and_only_marks_date_task_in_progress(month, day, status):
     value = request(planned_closure_month=month, planned_closure_date=day)
     before = value.model_dump_json()
     view = tasks(value)
     assert view["closure_date"].status == status
     assert view["intake"].status == "COMPLETED"
+    assert view["support_approval"].status == "NEEDS_CONFIRMATION"
     assert value.model_dump_json() == before
     date_fact = next(f for f in value.case_snapshot.facts if f.field_path == "planned_closure_date")
     assert date_fact.model_dump(mode="json")["value"] == day
