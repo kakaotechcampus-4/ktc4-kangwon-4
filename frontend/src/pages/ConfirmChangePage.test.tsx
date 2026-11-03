@@ -114,6 +114,20 @@ describe('ConfirmChangePage', () => {
     expect(await screen.findByText('진입 분기')).toBeInTheDocument()
   })
 
+  /** 고른 것을 보내는 동안 다시 누르면 같은 결정이 두 번 간다. 고르는 칸과 버튼을 함께 걷는다 */
+  it('보내는 동안은 고르기 대신 처리 화면을 보여준다', () => {
+    vi.useFakeTimers()
+    renderWith(TWO_CONFLICTS)
+
+    chooseIncoming('필요함')
+    chooseIncoming('전체')
+    fireEvent.click(proceedButton())
+
+    expect(screen.getByRole('heading', { name: '고르신 내용을 반영하고 있어요' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /이대로 진행하기/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /필요함/ })).not.toBeInTheDocument()
+  })
+
   /**
    * 확인을 마친 화면이 히스토리에 남아 있으면, 뒤로 가서 같은 결정을 다시 제출할 수 있다.
    * 표시만 어긋나는 다른 화면과 달리 이쪽은 서버 상태를 바꾸는 요청이라 피해가 다르다.
