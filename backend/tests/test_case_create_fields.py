@@ -110,3 +110,31 @@ def test_employee_count_out_of_range_is_rejected(count):
 def test_unknown_restoration_clause_is_rejected():
     with pytest.raises(ValidationError):
         CaseCreateRequest(**BASE, restoration_clause="MAYBE")
+
+
+def test_signing_up_schedules_the_first_judgment(monkeypatch):
+    """가입만 하고 첫 판단을 등록하지 않으면 그 Case는 "분석 중"에서 안 바뀐다.
+
+    실제 판단 대신 뒤에서 돌 작업이 등록되는지만 본다(#107·#136의 라우터 검사와 같은 방식).
+    """
+
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from fastapi import BackgroundTasks
+    from sqlmodel import Session as DbSession
+
+    from app.be.routers import case as case_router
+    from app.be.services import case as case_service
+    from app.be.services import judgment
+
+    monkeypatch.setattr(case_service, "create_case", lambda *_a: (SimpleNamespace(id=1), 42))
+    background_tasks = BackgroundTasks()
+
+    case_router.create_case(
+        CaseCreateRequest(**BASE), background_tasks, member_id=1, session=MagicMock(spec=DbSession),
+    )
+
+    assert [(task.func, task.args) for task in background_tasks.tasks] == [
+        (judgment.run_judgment_in_background, (42,))
+    ]

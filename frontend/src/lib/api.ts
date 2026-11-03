@@ -68,8 +68,17 @@ export class TimeoutError extends Error {
 }
 
 interface RequestOptions {
-  method?: 'GET' | 'POST'
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE'
+  /**
+   * 보낼 것. 보통은 JSON으로 바꿔 보낸다. `FormData`(파일 올리기)는 그대로 보낸다 —
+   * 경계 문자열이 든 `Content-Type`은 브라우저가 직접 붙여야 해서 여기서 적지 않는다
+   */
   body?: unknown
+  /**
+   * 이 요청만의 제한 시간. 서류 올리기처럼 서버가 끝날 때까지 붙잡고 있는 요청에 쓴다.
+   * 비우면 `REQUEST_TIMEOUT_MS`다
+   */
+  timeoutMs?: number
 }
 
 /**
@@ -81,21 +90,25 @@ interface RequestOptions {
  * **헤더만 오고 본문이 멈추는 경우**를 못 막는다. 이미 끝난 요청을 취소하는 것은 아무 일도
  * 하지 않으므로, 정상 응답 뒤 하는 일 없는 타이머가 잠시 남는 대신 본문까지 보호한다.
  */
-export async function request(path: string, { method = 'GET', body }: RequestOptions = {}) {
+export async function request(
+  path: string,
+  { method = 'GET', body, timeoutMs = REQUEST_TIMEOUT_MS }: RequestOptions = {},
+) {
   const token = getAccessToken()
+  const isForm = body instanceof FormData
 
   const controller = new AbortController()
-  setTimeout(() => controller.abort(new TimeoutError()), REQUEST_TIMEOUT_MS)
+  setTimeout(() => controller.abort(new TimeoutError()), timeoutMs)
 
   const response = await fetch(`${API_BASE}${path}`, {
     method,
     signal: controller.signal,
     headers: {
-      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+      ...(body === undefined || isForm ? {} : { 'Content-Type': 'application/json' }),
       // BE가 표준 Authorization 대신 커스텀 헤더를 쓴다
       ...(token === null ? {} : { 'Access-Token': token }),
     },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    body: body === undefined ? undefined : isForm ? body : JSON.stringify(body),
   })
 
   if (response.status === 401) {

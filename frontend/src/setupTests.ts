@@ -12,6 +12,24 @@ import { afterEach } from 'vitest'
 import { useDiagnosisStore } from './stores/useDiagnosisStore'
 
 /**
+ * jsdom 에는 `<dialog>` 의 `showModal()`·`close()` 가 없다(시트 `BottomSheet` 가 쓴다).
+ *
+ * 브라우저가 하는 것 중 화면이 기대는 두 가지만 흉내 낸다 — 열면 `open` 이 서고, 닫으면
+ * `open` 이 내려가며 `close` 를 알린다. 포커스 가두기·뒤 화면 막기는 흉내 내지 않아서,
+ * 그 동작은 브라우저에서 눈으로 확인한다.
+ */
+if (typeof HTMLDialogElement !== 'undefined' && !HTMLDialogElement.prototype.showModal) {
+  HTMLDialogElement.prototype.showModal = function showModal(this: HTMLDialogElement) {
+    this.open = true
+  }
+  HTMLDialogElement.prototype.close = function close(this: HTMLDialogElement) {
+    if (!this.open) return
+    this.open = false
+    this.dispatchEvent(new Event('close'))
+  }
+}
+
+/**
  * 렌더한 화면을 테스트마다 걷어낸다.
  *
  * Testing Library는 `afterEach`가 전역에 있을 때만 이 정리를 스스로 건다.

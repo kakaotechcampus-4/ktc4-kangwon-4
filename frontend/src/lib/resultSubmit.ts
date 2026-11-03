@@ -1,4 +1,5 @@
 import type {
+  CaseConflictsDecisionRequest,
   CaseResultsEntryResponse,
   CaseResultsSubmitAcceptedResponse,
   CaseResultsSubmitRequest,
@@ -11,6 +12,7 @@ import { ApiError, request, UnauthorizedError } from './api'
  *
  *   들어올 때   GET  /cases/results          지금 판단 상태와 결과를 보낼 판단 번호
  *   보낼 때     POST /cases/results          접수 번호만 돌려준다
+ *               POST /cases/results/decision 충돌 확인에서는 글 대신 고른 쪽을 보낸다
  *   기다릴 때   GET  /cases/results/status   판단이 끝날 때까지 다시 묻는다
  *
  * 응답을 화면 모양으로 바꾸지 않고 서버 모양 그대로 돌려준다. 바꾸는 것은 어댑터
@@ -46,11 +48,28 @@ export async function fetchResultsEntry(): Promise<CaseResultsEntryResponse | nu
  */
 export async function submitResult(historyId: number, rawInput: string): Promise<number> {
   const body: CaseResultsSubmitRequest = { raw_input: rawInput, case_history_id: historyId }
-  const response = await request('/cases/results', { method: 'POST', body })
-  const accepted = (await response.json()) as Partial<CaseResultsSubmitAcceptedResponse>
+  return readAcceptedId(await request('/cases/results', { method: 'POST', body }))
+}
 
-  // 접수는 됐는데 번호가 없으면 결과를 물어볼 수 없다. 받았다고 넘기면 화면이
-  // 끝나지 않는 대기에 들어간다
+/**
+ * 충돌마다 고른 쪽을 보내고 접수 번호를 받는다. 결과는 결과 제출과 같은 길로 기다린다.
+ *
+ * 409 는 결정을 받을 수 없다는 뜻이다 — 남은 충돌이 없거나, 직전 결정이 아직 판단 중이거나,
+ * 그사이 이미 해결됐다. 422 는 화면이 요청을 잘못 만든 것이다(덜 고름·중복). 어느 쪽인지
+ * 가르는 것은 화면 몫이라 `ApiError` 그대로 올린다.
+ */
+export async function submitDecision(body: CaseConflictsDecisionRequest): Promise<number> {
+  return readAcceptedId(await request('/cases/results/decision', { method: 'POST', body }))
+}
+
+/**
+ * 접수 응답에서 번호를 꺼낸다.
+ *
+ * 접수는 됐는데 번호가 없으면 결과를 물어볼 수 없다. 받았다고 넘기면 화면이 끝나지 않는
+ * 대기에 들어간다.
+ */
+async function readAcceptedId(response: Response): Promise<number> {
+  const accepted = (await response.json()) as Partial<CaseResultsSubmitAcceptedResponse>
   if (!Number.isInteger(accepted.case_history_id)) {
     throw new ApiError(response.status, '접수 번호를 읽지 못했습니다.')
   }

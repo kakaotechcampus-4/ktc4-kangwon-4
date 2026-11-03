@@ -5,7 +5,7 @@ import { toAnswerInput, toResultSteps, toResultsEntry, toSubmitOutcome } from '.
 import { Button } from '../components/ui/Button'
 import { HammerLoader } from '../components/ui/HammerLoader'
 import { InfoBox } from '../components/ui/InfoBox'
-import { ProcessSteps } from '../components/ui/ProcessSteps'
+import { ProcessingScreen } from '../components/ui/ProcessingScreen'
 import { TopBar } from '../components/ui/TopBar'
 import { ApiError, UnauthorizedError } from '../lib/api'
 import { usesMockData } from '../lib/auth'
@@ -350,7 +350,15 @@ export function ResultInputPage() {
   if (state.kind === 'PENDING') {
     return (
       <ResultFrame>
-        <Processing accepted={state.accepted} />
+        {/*
+          단계 줄은 화면이 실제로 아는 사건에만 맞춘다 — 접수 번호를 받으면 첫 줄이 끝나고, 그다음은
+          결과가 올 때까지 둘째 줄에 머문다. 셋째 줄은 결과가 오는 순간 이 화면을 떠나므로 늘 대기다
+        */}
+        <ProcessingScreen
+          title="답변을 정리하고 있어요"
+          loaderLabel="보내주신 내용을 정리하는 중"
+          steps={toResultSteps(state.accepted ? 'WAITING' : 'SENDING')}
+        />
       </ResultFrame>
     )
   }
@@ -482,37 +490,6 @@ function ResultFrame({ children }: { children: ReactNode }) {
       <TopBar />
       {children}
     </div>
-  )
-}
-
-/**
- * 보낸 뒤 판단을 기다리는 화면 (시안 M05c 처리 중).
- *
- * 단계 줄은 화면이 실제로 아는 사건에만 맞춘다 — 접수 번호를 받으면 첫 줄이 끝나고, 그다음은
- * 결과가 올 때까지 둘째 줄에 머문다. 셋째 줄은 결과가 오는 순간 이 화면을 떠나므로 여기서는
- * 늘 대기다. 서버 안에서 정리와 다시 정하기가 언제 갈리는지는 알 수 없어 나누지 않았다.
- *
- * 망치는 위쪽에 둔다. 가운데로 내리면 시선이 아래로 떨어진다(4번 PR에서 확인).
- */
-function Processing({ accepted }: { accepted: boolean }) {
-  return (
-    <main className="flex flex-col gap-6 px-4 pt-2 pb-8">
-      <div className="flex flex-col items-center gap-5 pt-2 text-center">
-        <HammerLoader size={72} label="보내주신 내용을 정리하는 중" />
-        <div>
-          <h1 className="text-26 font-bold">답변을 정리하고 있어요</h1>
-          <p className="mt-2 text-17 text-fg-neutral-muted">사장님이 하실 일은 없어요.</p>
-        </div>
-      </div>
-      <ProcessSteps steps={toResultSteps(accepted ? 'WAITING' : 'SENDING')} />
-      {/*
-        판단은 길면 2분 넘게 걸린다. 떠나면 결과가 사라지는 줄 알면 그동안 화면에 묶인다.
-        서버는 뒤에서 판단을 이어가고(#107), 끝난 결과는 홈(`/case`)에서 보인다
-      */}
-      <InfoBox>화면을 떠나셔도 계속 처리돼요. 끝나면 홈에서 보실 수 있어요.</InfoBox>
-      {/* 시안대로 꺼진 버튼을 둔다. 누를 것이 없다는 것을 버튼 자리에서도 말한다 */}
-      <Button disabled>처리 중이에요</Button>
-    </main>
   )
 }
 

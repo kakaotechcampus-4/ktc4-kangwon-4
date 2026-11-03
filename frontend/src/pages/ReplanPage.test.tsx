@@ -131,6 +131,21 @@ describe('ReplanPage — 서버', () => {
     expect(new URLSearchParams(router.state.location.search).get('fix')).toBe('1')
   })
 
+  /**
+   * 충돌 확인에서 사장님이 직접 고른 것을 반영했다. AI가 "이해한" 것이 아니라 바로잡을 것도 없다 —
+   * [다르게 이해했어요]를 두면 방금 고른 것을 글로 다시 적게 된다
+   */
+  it('충돌 확인에서 왔으면 고른 것을 반영했다고 하고, 맞는지 묻지 않는다', async () => {
+    serve(json(judged({})))
+    renderAt('/replan?history=13&from=confirm')
+
+    expect(await screen.findByRole('heading', { name: '고르신 내용을 반영했어요' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '바뀐 내용' })).toBeInTheDocument()
+    expect(screen.getByText('고르신 내용을 반영하고 있어요')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '홈으로' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '다르게 이해했어요' })).not.toBeInTheDocument()
+  })
+
   it('바뀐 것이 없으면 맞는지 묻지 않고 홈으로만 보낸다', async () => {
     serve(json(judged({ result: 'NO_CHANGE', changes: [] })))
     renderAt('/replan?history=13')

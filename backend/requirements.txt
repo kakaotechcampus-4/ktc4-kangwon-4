@@ -12,6 +12,8 @@ pymysql==1.2.0
 alembic==1.19.2
 pyjwt==2.13.0
 httpx==0.28.1
+# 서류 올리기(multipart/form-data)를 FastAPI가 받으려면 필요하다
+python-multipart==0.0.20
 
 # 설정 로더 — backend/app/config.py가 사용 (루트 config.py와 동일 패턴)
 pydantic-settings==2.15.0
@@ -27,3 +29,6 @@ openai==3.8.0
 # 벡터스토어 — Chroma (2026-09 확정, 셀프호스팅. docs/architecture.md §6 참고)
 langchain-chroma==1.1.0
 chromadb==1.5.9
+
+# 문서 Tool(#128) — PDF·사진을 읽고 가린 PDF를 만들고 OCR한다. 이전에는 app/agent/document_tool/requirements.txt에만 있어 배포 이미지에 없었다
+PyMuPDF==1.28.2

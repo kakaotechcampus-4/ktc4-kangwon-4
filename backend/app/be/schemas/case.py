@@ -3,6 +3,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from app.agent.roadmap import CHECKLIST_IDS
+
 BusinessType = Literal["CAFE", "RESTAURANT"]
 LeaseStatus = Literal["LEASED_PAID", "LEASED_FREE", "OWNED"]
 CaseStatus = Literal["IN_PROGRESS", "COMPLETED"]
@@ -14,6 +16,25 @@ JudgmentStatus = Literal["PENDING", "DONE", "NEEDS_MORE_INFO", "CONFLICT", "FAIL
 RecoveryActionCode = Literal["RETRY", "RESUBMIT_INPUT", "CONTACT_SUPPORT", "NONE"]
 ResultsSubmitResult = Literal["PENDING", "UPDATED", "NO_CHANGE", "NEEDS_MORE_INFO", "CONFLICT", "FAILED"]
 ConflictSide = Literal["PROPOSED", "STORED"]
+ClosureReason = Literal["BUSINESS_SLUMP", "PERSONAL", "OTHER"]
+DepositReturnResult = Literal["FULL", "PARTIAL", "NONE"]
+# 사장님이 직접 체크하는 로드맵 항목. AI 로드맵(#132)의 목록을 그대로 쓴다.
+ChecklistTaskId = Literal[tuple(sorted(CHECKLIST_IDS))]
+CaseLogActor = Literal["OWNER", "RIBBON"]
+CaseLogEvent = Literal[
+    # 사장님이 한 일
+    "CASE_CREATED",
+    "RESULT_SUBMITTED",
+    "CONFLICT_DECIDED",
+    "CHECKLIST_COMPLETED",
+    "CHECKLIST_UNCHECKED",
+    "SUPPORT_RESULT_REPORTED",
+    # 리본이 한 일
+    "NEXT_ACTION_DECIDED",
+    "MORE_INFO_REQUESTED",
+    "CONFLICT_FOUND",
+    "JUDGMENT_FAILED",
+]
 
 
 class CaseCreateRequest(BaseModel):
@@ -93,7 +114,15 @@ class CaseGetDetailResponse(BaseModel):
     demolition_required: DemolitionRequired
     planned_closure_date: date | None
     planned_closure_month: str | None
+    # COMPLETED면 폐업 정리를 마친 것. 사장님이 부가세 폐업 확정신고(vat_submission)를 마쳤다고 체크하면 바뀐다
+    case_status: CaseStatus
+    completed_at: datetime | None
 
+    closure_date: date | None
+    closure_reason: ClosureReason | None
+    road_address: str | None
+    address_detail: str | None
+    deposit_return_result: DepositReturnResult | None
 
 class NextActionResponse(BaseModel):
     title: str
@@ -168,3 +197,58 @@ class CaseResultsSubmitResponse(BaseModel):
     recovery_action_code: RecoveryActionCode | None = None
     retryable: bool | None = None
     requested_field_paths: list[str] | None = None
+
+
+class CaseChecklistUpdateRequest(BaseModel):
+    completed: bool
+
+
+class CaseChecklistResponse(BaseModel):
+    task_id: ChecklistTaskId
+    completed: bool
+
+
+class CaseSupportApprovalRequest(BaseModel):
+    # 키는 꼭 보내야 하고 값은 null(아직 모름)도 된다. 빠뜨린 요청을 "모름"으로 저장하지 않으려고 기본값을 두지 않는다.
+    approved: bool | None
+
+
+class CaseSupportApprovalResponse(BaseModel):
+    approved: bool | None
+class CaseLogItem(BaseModel):
+    actor: CaseLogActor
+    event: CaseLogEvent
+    # 한국 시각(+09:00)을 붙여 내려준다. 시간대 없이 주면 브라우저가 자기 시간대로 읽어 시각이 밀린다.
+    occurred_at: datetime
+    # 체크 기록(CHECKLIST_*)일 때 어떤 항목인지. 그 밖에는 null
+    task_id: ChecklistTaskId | None
+    # 문구를 만들 때 쓸 값. NEXT_ACTION_DECIDED는 정한 할 일 제목,
+    # SUPPORT_RESULT_REPORTED는 APPROVED/REJECTED/UNKNOWN. 그 밖에는 null
+    detail: str | None
+
+
+class CaseLogResponse(BaseModel):
+    logs: list[CaseLogItem]
+
+
+class CaseClosureReportRequest(BaseModel):
+    closure_date: date
+    closure_reason: ClosureReason
+    road_address: str = Field(min_length=1, max_length=200)
+    # 단독 건물처럼 상세 주소가 없을 수도 있다
+    address_detail: str | None = Field(default=None, max_length=100)
+
+
+class CaseClosureReportResponse(BaseModel):
+    closure_date: date
+    closure_reason: ClosureReason
+    road_address: str
+    address_detail: str | None
+
+
+class CaseDepositReturnRequest(BaseModel):
+    result: DepositReturnResult
+
+
+class CaseDepositReturnResponse(BaseModel):
+    result: DepositReturnResult

@@ -47,7 +47,7 @@ def conflict_row(reference_id: int, conflict_ref: str):
 def flow(monkeypatch):
     """충돌 하나가 보관된 Case에서 결정을 넣고, 무엇이 저장됐는지 돌려준다."""
 
-    def run(outcome_type, choices, *, rows=None, stored_snapshot=SNAPSHOT_ID):
+    def run(outcome_type, choices, *, rows=None, stored_snapshot=SNAPSHOT_ID, retained=None):
         rows = rows if rows is not None else [conflict_row(1, "cr_1")]
         captured = {}
 
@@ -61,6 +61,7 @@ def flow(monkeypatch):
                 id=HISTORY_ID, case_id=1,
                 created_at=SimpleNamespace(replace=lambda **_: "CONFIRMED_AT"),
                 conflict_snapshot={"snapshot_id": stored_snapshot},
+                retained_info_result=retained,
             ),
         )
         monkeypatch.setattr(
@@ -72,6 +73,10 @@ def flow(monkeypatch):
         )
         monkeypatch.setattr(
             conflict_decision, "CaseSnapshot",
+            SimpleNamespace(model_validate=lambda payload: SimpleNamespace(**payload)),
+        )
+        monkeypatch.setattr(
+            conflict_decision, "RetainedInfoResult",
             SimpleNamespace(model_validate=lambda payload: SimpleNamespace(**payload)),
         )
         monkeypatch.setattr(
@@ -243,7 +248,10 @@ def test_the_stored_snapshot_survives_a_round_trip_through_mysql(mysql_engine):
         # 받아줘도 읽을 때 달라진다.
         decision_record_service.save_conflict(
             session, history,
-            SimpleNamespace(evidence_records=[], conflicts=[], conflict_snapshot=original),
+            SimpleNamespace(
+                evidence_records=[], conflicts=[], conflict_snapshot=original,
+                retained_info_result=None,
+            ),
         )
 
     # 다른 세션으로 읽어야 ORM이 들고 있던 객체가 아니라 진짜 DB 값을 본다.
@@ -388,6 +396,7 @@ def test_a_new_conflict_closes_the_decided_one_without_saving_the_chosen_value(m
                     model_dump=lambda **_: {"conflict_ref": "cr_new"},
                 )],
                 conflict_snapshot=SimpleNamespace(model_dump=lambda **_: {"snapshot_id": SNAPSHOT_ID}),
+                retained_info_result=None,
             ),
             resolved_conflicts={decided_id: "PROPOSED"},
         )
@@ -465,3 +474,68 @@ def new_case_id(session) -> int:
     ))
     session.commit()
     return case.id
+
+
+def test_the_facts_that_were_not_conflicts_go_back_to_the_agent(flow):
+    """충돌이 아니었던 사실·진행 보고를 보관해 둔 그대로 돌려줘야 한다.
+
+    사장님이 "자가입니다. 폐업은 12월 20일이고, 폐업신고 서류는 냈어요"라고 한 번에 말하면
+    충돌은 임차 형태 하나뿐이다. 이걸 안 돌려주면 AI는 확인 뒤에 원문을 다시 읽지 않으므로
+    (ConflictConfirmedTrigger에 입력 글이 없다) 날짜와 신고 보고가 그대로 사라진다.
+    """
+    captured = flow("REVIEWED_PLAN", {1: "PROPOSED"}, retained={"kept": "폐업신고 제출"})
+
+    assert captured["request"].retained_info_result.kept == "폐업신고 제출"
+
+
+def test_a_conflict_from_before_this_feature_sends_nothing(flow):
+    """이 기능 전에 난 충돌은 보관값이 NULL이라 None으로 넘어간다.
+
+    그 Case도 결정은 되어야 한다. 없는 값을 지어내지 않고 예전처럼 충돌만 다룬다.
+    """
+    captured = flow("REVIEWED_PLAN", {1: "PROPOSED"}, retained=None)
+
+    assert captured["request"].retained_info_result is None
+
+
+def test_the_retained_facts_survive_a_round_trip_through_mysql(mysql_engine):
+    """보관한 사실·진행 보고가 DB를 거쳐도 한 글자도 안 바뀌어야 한다.
+
+    AI가 비식별 입력·Info 결과·meta·다이제스트를 다시 대조한다. JSON으로 적었다 읽으면서
+    시각이나 UUID가 모양만 바뀌어도 그 Case의 결정이 전부 실패한다(conflict_snapshot과 같은
+    이유). 실제 저장 함수를 그대로 탄다.
+    """
+    from app.agent.schemas import RetainedInfoResult
+    from app.be.models.case_history import CaseHistory
+    from test_action_codes import supervisor_request
+
+    request = supervisor_request()
+    original = RetainedInfoResult.model_validate(
+        request.source_results[1].model_dump(mode="python")
+        | {"input": request.trigger.input.model_dump(mode="python")}
+    )
+
+    with Session(mysql_engine) as session:
+        case_id = new_case_id(session)
+        history = CaseHistory(
+            case_id=case_id, raw_input="자가예요. 폐업신고 서류는 냈어요",
+            source="USER_INPUT", judgment_status="PENDING",
+        )
+        session.add(history)
+        session.commit()
+        history_id = history.id
+        decision_record_service.save_conflict(
+            session, history,
+            SimpleNamespace(
+                evidence_records=[], conflicts=[],
+                conflict_snapshot=request.case_snapshot,
+                retained_info_result=original,
+            ),
+        )
+
+    # 다른 세션으로 읽어야 ORM이 들고 있던 객체가 아니라 진짜 DB 값을 본다.
+    with Session(mysql_engine) as session:
+        stored = session.get(CaseHistory, history_id)
+        restored = RetainedInfoResult.model_validate(stored.retained_info_result)
+
+    assert restored == original

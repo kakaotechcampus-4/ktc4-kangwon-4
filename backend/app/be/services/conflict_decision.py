@@ -14,7 +14,12 @@ from uuid import UUID
 
 from sqlmodel import Session
 
-from app.agent.schemas import CaseSnapshot, ConflictCandidate, ConflictSelection
+from app.agent.schemas import (
+    CaseSnapshot,
+    ConflictCandidate,
+    ConflictSelection,
+    RetainedInfoResult,
+)
 from app.be.models.evidence import DecisionRecord
 from app.common.agent_dto import AgentGraphOutput
 from app.be.crud import case_history as case_history_crud
@@ -77,7 +82,9 @@ async def run_conflict_decision(
     if history is None:
         raise ValueError(f"case_history {case_history_id} not found")
 
-    conflicts, selections, conflict_snapshot = _restore_batch(session, history.case_id, choices)
+    conflicts, selections, conflict_snapshot, retained = _restore_batch(
+        session, history.case_id, choices
+    )
 
     outcome = await run_case_planning(
         build_conflict_input(
@@ -88,6 +95,8 @@ async def run_conflict_decision(
             conflicts=conflicts,
             selections=selections,
             conflict_snapshot=conflict_snapshot,
+            # 충돌이 아니었던 사실·진행 보고. 없으면 None이고, 그때는 예전처럼 충돌만 다룬다.
+            retained_info_result=retained,
             input_event_id=str(history.id),
             confirmed_at=history.created_at.replace(tzinfo=KST),
             # TODO: 프론트가 자기 쪽 이벤트 식별자를 보내주기로 하면 그 값을 넣는다. 아직 미협의.
@@ -136,8 +145,10 @@ async def run_conflict_decision(
 
 def _restore_batch(
     session: Session, case_id: int, choices: dict[int, str]
-) -> tuple[list[ConflictCandidate], list[ConflictSelection], CaseSnapshot]:
-    """보관해 둔 충돌 원본·그때의 Case 상태를 되살리고, 고른 값을 AI 모양으로 바꾼다.
+) -> tuple[
+    list[ConflictCandidate], list[ConflictSelection], CaseSnapshot, RetainedInfoResult | None
+]:
+    """보관해 둔 충돌 원본·그때의 Case 상태·충돌 아닌 사실을 되살리고, 고른 값을 AI 모양으로 바꾼다.
 
     AI는 받은 충돌이 자기가 준 것과 같은지 다이제스트로 대조한다. 그래서 화면에 보여주려고
     글자로 바꾼 committed_value·proposed_value가 아니라, 통째로 보관해 둔 candidate_payload를
@@ -172,4 +183,11 @@ def _restore_batch(
         raise ConflictDecisionInputError(
             f"충돌 {pending[0].id}을 낸 판단에 보관된 Case 상태가 없다"
         )
-    return conflicts, selections, CaseSnapshot.model_validate(origin.conflict_snapshot)
+    # 충돌이 아니었던 사실·진행 보고는 보관해 둔 것을 그대로 쓴다. 화면이 보낸 값을 믿지
+    # 않는다(승준님 #154). 이 기능 전에 난 충돌은 NULL이라 그때는 None으로 넘어간다.
+    retained = (
+        RetainedInfoResult.model_validate(origin.retained_info_result)
+        if origin.retained_info_result is not None
+        else None
+    )
+    return conflicts, selections, CaseSnapshot.model_validate(origin.conflict_snapshot), retained

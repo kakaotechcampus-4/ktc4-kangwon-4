@@ -46,8 +46,17 @@ function response(body: unknown, status = 200) {
   return new Response(status === 200 ? JSON.stringify(body) : null, { status })
 }
 
+/**
+ * 홈은 Case 와 기록(띠)을 함께 부른다. 기록은 이 파일이 보는 것이 아니라 늘 빈 목록으로 답한다.
+ * 띠가 채워지는 것은 `HomeBanner`·`LogPage` 테스트가 본다
+ */
+const isLogs = (url: string) => url.includes('/cases/logs')
+
 function mockCase(body: unknown, status = 200) {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response(body, status)))
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string) => (isLogs(url) ? response({ logs: [] }) : response(body, status))),
+  )
 }
 
 /** 처음엔 받아오고 그 뒤로는 실패한다. 갱신만 실패한 상태를 만들 때 쓴다 */
@@ -55,10 +64,11 @@ function mockThenFail(body: unknown) {
   let called = false
   vi.stubGlobal(
     'fetch',
-    vi.fn().mockImplementation(() => {
+    vi.fn(async (url: string) => {
+      if (isLogs(url)) return response({ logs: [] })
       const first = !called
       called = true
-      return Promise.resolve(first ? response(body) : response(null, 500))
+      return first ? response(body) : response(null, 500)
     }),
   )
 }

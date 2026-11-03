@@ -22,6 +22,7 @@ from app.common.agent_dto import (
     CaseSnapshot,
     ConflictCandidate,
     ConflictConfirmedTrigger,
+    DocumentSubmittedTrigger,
     ProcedureCompletionConfirmation,
     RedactedInput,
     ResultSubmittedTrigger,
@@ -34,9 +35,17 @@ __all__ = [
 ]
 
 
+# 서류를 올렸을 때는 document_tool.models.document_input_text로 만든 글을 user_input에 담는다.
+_INPUT_TRIGGERS = {
+    "CASE_CREATED": CaseCreatedTrigger,
+    "RESULT_SUBMITTED": ResultSubmittedTrigger,
+    "DOCUMENT_SUBMITTED": DocumentSubmittedTrigger,
+}
+
+
 def build_planning_input(
     *,
-    trigger_type: Literal["CASE_CREATED", "RESULT_SUBMITTED"],
+    trigger_type: Literal["CASE_CREATED", "RESULT_SUBMITTED", "DOCUMENT_SUBMITTED"],
     case_snapshot: CaseSnapshot,
     user_input: RedactedInput,
     client_event_id: str | None = None,
@@ -51,8 +60,8 @@ def build_planning_input(
     string.  Email, address, name and bank account are not checked, so BE must
     still redact them before calling.
     """
-    if trigger_type not in {"CASE_CREATED", "RESULT_SUBMITTED"}:
-        raise ValueError("input trigger must be CASE_CREATED or RESULT_SUBMITTED")
+    if trigger_type not in _INPUT_TRIGGERS:
+        raise ValueError("input trigger must be CASE_CREATED, RESULT_SUBMITTED or DOCUMENT_SUBMITTED")
     ensure_no_sensitive_text([user_input.redacted_text])
     confirmation_fields = {}
     if procedure_completion_confirmation is not None:
@@ -60,9 +69,7 @@ def build_planning_input(
             raise ValueError("completion confirmation requires RESULT_SUBMITTED")
         ensure_no_sensitive_text([procedure_completion_confirmation.input.redacted_text])
         confirmation_fields["procedure_completion_confirmation"] = procedure_completion_confirmation
-    trigger_model = (
-        CaseCreatedTrigger if trigger_type == "CASE_CREATED" else ResultSubmittedTrigger
-    )
+    trigger_model = _INPUT_TRIGGERS[trigger_type]
     return AgentGraphInput.model_validate({
         "trigger": trigger_model(
             trigger_type=trigger_type,

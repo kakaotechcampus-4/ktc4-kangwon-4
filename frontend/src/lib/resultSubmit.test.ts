@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { CaseResultsSubmitResponse } from '../types/api'
 import { ApiError, UnauthorizedError } from './api'
-import { fetchResultsEntry, submitResult, waitForResult } from './resultSubmit'
+import { fetchResultsEntry, submitDecision, submitResult, waitForResult } from './resultSubmit'
 
 const INTERVAL_MS = 10_000
 const TIMEOUT_MS = 10 * 60 * 1000
@@ -97,6 +97,35 @@ describe('submitResult', () => {
     mockFetchSequence(status(409))
 
     await expect(submitResult(12, '철거래요')).rejects.toMatchObject({ status: 409 })
+  })
+})
+
+const DECISION = { decisions: [{ conflict_reference_id: 4, side: 'PROPOSED' as const }] }
+
+describe('submitDecision', () => {
+  it('고른 쪽을 결정 주소로 보내고 접수 번호를 받는다', async () => {
+    const fetchMock = mockFetchSequence(json({ case_history_id: 21 }))
+
+    await expect(submitDecision(DECISION)).resolves.toBe(21)
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toMatch(/\/cases\/results\/decision$/)
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual(DECISION)
+  })
+
+  /** 결과 제출과 같다. 번호 없이 넘기면 물어볼 것이 없는 대기에 들어간다 */
+  it('접수 번호가 없으면 실패로 끊는다', async () => {
+    mockFetchSequence(json({}))
+
+    await expect(submitDecision(DECISION)).rejects.toBeInstanceOf(ApiError)
+  })
+
+  /** 409(받을 수 없음)와 422(잘못 만든 요청)는 화면이 할 일이 달라 상태 코드째 넘긴다 */
+  it('받을 수 없다는 답은 상태 코드째 올린다', async () => {
+    mockFetchSequence(status(422))
+
+    await expect(submitDecision(DECISION)).rejects.toMatchObject({ status: 422 })
   })
 })
 
