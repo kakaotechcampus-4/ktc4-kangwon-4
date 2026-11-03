@@ -16,6 +16,8 @@ JudgmentStatus = Literal["PENDING", "DONE", "NEEDS_MORE_INFO", "CONFLICT", "FAIL
 RecoveryActionCode = Literal["RETRY", "RESUBMIT_INPUT", "CONTACT_SUPPORT", "NONE"]
 ResultsSubmitResult = Literal["PENDING", "UPDATED", "NO_CHANGE", "NEEDS_MORE_INFO", "CONFLICT", "FAILED"]
 ConflictSide = Literal["PROPOSED", "STORED"]
+ClosureReason = Literal["BUSINESS_SLUMP", "PERSONAL", "OTHER"]
+DepositReturnResult = Literal["FULL", "PARTIAL", "NONE"]
 # 사장님이 직접 체크하는 로드맵 항목. AI 로드맵(#132)의 목록을 그대로 쓴다.
 ChecklistTaskId = Literal[tuple(sorted(CHECKLIST_IDS))]
 CaseLogActor = Literal["OWNER", "RIBBON"]
@@ -116,6 +118,11 @@ class CaseGetDetailResponse(BaseModel):
     case_status: CaseStatus
     completed_at: datetime | None
 
+    closure_date: date | None
+    closure_reason: ClosureReason | None
+    road_address: str | None
+    address_detail: str | None
+    deposit_return_result: DepositReturnResult | None
 
 class NextActionResponse(BaseModel):
     title: str
@@ -222,3 +229,26 @@ class CaseLogItem(BaseModel):
 
 class CaseLogResponse(BaseModel):
     logs: list[CaseLogItem]
+
+
+class CaseClosureReportRequest(BaseModel):
+    closure_date: date
+    closure_reason: ClosureReason
+    road_address: str = Field(min_length=1, max_length=200)
+    # 단독 건물처럼 상세 주소가 없을 수도 있다
+    address_detail: str | None = Field(default=None, max_length=100)
+
+
+class CaseClosureReportResponse(BaseModel):
+    closure_date: date
+    closure_reason: ClosureReason
+    road_address: str
+    address_detail: str | None
+
+
+class CaseDepositReturnRequest(BaseModel):
+    result: DepositReturnResult
+
+
+class CaseDepositReturnResponse(BaseModel):
+    result: DepositReturnResult

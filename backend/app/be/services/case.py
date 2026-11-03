@@ -19,6 +19,9 @@ from app.be.models.evidence import ConflictReference, Evidence
 from app.be.models.mixins import KST, kst_now
 from app.be.models.procedure_step import CaseProcedureStep
 from app.be.schemas.case import (
+    CaseClosureReportRequest,
+    CaseClosureReportResponse,
+    CaseDepositReturnResponse,
     CaseChecklistResponse,
     CaseSupportApprovalResponse,
     CaseConflictsDecisionRequest,
@@ -57,8 +60,10 @@ def _field_changes(session: Session, case_id: int, case_history_id: int) -> list
     return [
         FieldChangeResponse(
             field=row.canonical_field,
-            stored_value=restorer.restore(row.before_value, restorer.source_of_previous(row.id)),
-            new_value=restorer.restore(row.after_value, row.case_history_id),
+            stored_value=restorer.restore(
+                row.before_value, restorer.source_of_previous(row.id), row.canonical_field
+            ),
+            new_value=restorer.restore(row.after_value, row.case_history_id, row.canonical_field),
         )
         for row in rows
     ]
@@ -83,9 +88,13 @@ def _conflict_items(
             id=conflict.id,
             field=conflict.canonical_field,
             stored_value=restorer.restore(
-                conflict.committed_value, restorer.source_of_current(conflict.canonical_field)
+                conflict.committed_value,
+                restorer.source_of_current(conflict.canonical_field),
+                conflict.canonical_field,
             ),
-            proposed_value=restorer.restore(conflict.proposed_value, conflict.case_history_id),
+            proposed_value=restorer.restore(
+                conflict.proposed_value, conflict.case_history_id, conflict.canonical_field
+            ),
         )
         for conflict in conflicts
     ]
@@ -100,7 +109,7 @@ def _case_detail(session: Session, case: Case) -> CaseGetDetailResponse:
     )
     return detail.model_copy(
         update={
-            field: restorer.restore(getattr(detail, field), restorer.source_of_current(field))
+            field: restorer.restore(getattr(detail, field), restorer.source_of_current(field), field)
             for field in ("business_type", "restoration_scope_detail")
         }
     )
@@ -206,6 +215,25 @@ def get_case(session: Session, member_id: int) -> CaseGetResponse:
         raise HTTPException(status_code=500, detail="Case에 대한 최초 판단 기록이 없습니다.")
 
     _assert_judgment_is_showable(latest_history)
+
+    # 충돌 결정이 실패하면 충돌은 미결로 남지만 마지막 이력은 FAILED다. 그대로 내보내면 홈이
+    # 실패 카드를 그려서 충돌 확인으로 돌아갈 길이 없다. 진입 조회(get_case_results_entry)처럼
+    # 처리 중이 아니고 미결 충돌이 있으면 CONFLICT로 본다.
+    if latest_history.judgment_status != "PENDING" and conflict_reference_crud.get_pending_conflicts_by_case_id(
+        session, case.id
+    ):
+        return CaseGetResponse(
+            case=_case_detail(session, case),
+            blocker=None,
+            next_action=None,
+            judgment_status="CONFLICT",
+            case_history_id=None,
+            questions_for_user=None,
+            recovery_action_code=None,
+            requested_field_paths=None,
+            retryable=None,
+            changes=None,
+        )
 
     next_action = (
         NextActionResponse(
@@ -587,6 +615,35 @@ def update_case_support_approval(
     case.support_approved_at = kst_now()
     session.commit()
     return CaseSupportApprovalResponse(approved=approved)
+
+
+def update_case_closure_report(
+    session: Session, member_id: int, report: CaseClosureReportRequest
+) -> CaseClosureReportResponse:
+    """통합 폐업 신고 화면에서 확인한 폐업일·폐업 사유·가게 주소를 저장한다. 다시 보내면 덮어쓴다."""
+
+    case = case_crud.get_case_by_member_id(session, member_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case를 찾을 수 없습니다.")
+
+    case.closure_date = report.closure_date
+    case.closure_reason = report.closure_reason
+    case.road_address = report.road_address
+    case.address_detail = report.address_detail
+    session.commit()
+    return CaseClosureReportResponse(**report.model_dump())
+
+
+def update_case_deposit_return(session: Session, member_id: int, result: str) -> CaseDepositReturnResponse:
+    """가게 반환 화면에서 사장님이 알려 준 보증금 반환 결과를 저장한다. 다시 보내면 덮어쓴다."""
+
+    case = case_crud.get_case_by_member_id(session, member_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case를 찾을 수 없습니다.")
+
+    case.deposit_return_result = result
+    session.commit()
+    return CaseDepositReturnResponse(result=result)
 
 
 _LOG_OWNER_EVENTS = {

@@ -74,6 +74,11 @@ MEMBERS ──1:N──► CASE ──1:N──► CASE_FIELD_HISTORY
 | planned_closure_date | DATE | | NULLABLE | `2026-12-31` | nullable |
 | planned_closure_month | VARCHAR(7) | | NULLABLE | `2026-12` | 날짜를 못 정했을 때의 예상 달. `planned_closure_date`와 같이 오면 422로 거절한다. 가게 등록 때만 받고 AI 대화로는 저장하지 않는다 |
 | completed_at | DATETIME | | NULLABLE | `NULL` | 폐업 정리를 마친 시각(KST). 진행 중이면 NULL |
+| closure_date | DATE | | NULLABLE | `2026-10-31` | 통합 폐업 신고 화면에서 확인한 **실제 폐업일**. 가입 때 예상일(`planned_closure_date`)과 별개. AI 판단에 쓰지 않음 |
+| closure_reason | ENUM | | NULLABLE | `BUSINESS_SLUMP` | 폐업 사유. `BUSINESS_SLUMP`(사업 부진) / `PERSONAL`(개인 사정) / `OTHER`(기타) |
+| road_address | VARCHAR(200) | | NULLABLE | `"서울 마포구 망원로 52 (망원동)"` | 가게 도로명 주소(주소 찾기로 고름). AI에 넘기지 않음 |
+| address_detail | VARCHAR(100) | | NULLABLE | `"1층"` | 상세 주소. 없을 수 있음 |
+| deposit_return_result | ENUM | | NULLABLE | `PARTIAL` | 보증금 반환 결과. `FULL`(다 받음) / `PARTIAL`(일부 빼고 받음) / `NONE`(아직 못 받음). 리본은 기록만 하고 판단하지 않음 |
 | created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-09-01 10:24:00` | |
 | updated_at | DATETIME | | NOT NULL, ON UPDATE CURRENT_TIMESTAMP | `2026-09-10 09:11:00` | |
 
@@ -145,6 +150,7 @@ CASE에 대한 발화·이벤트 원본 이력.
 | case_id | BIGINT | FK | NOT NULL | 1 | |
 | raw_input | TEXT | | NULLABLE | `"임대인이랑 얘기 끝났어요, 다음 달까지 나가기로 했어요"` | 입력 원문. `USER_INPUT`·`CASE_CREATED`는 사장님이 쓴 문장이 항상 들어가고, `SYSTEM_BATCH`는 배치가 에이전트에 전달한 지시문이 들어갈 수 있다. 문장 없이 고른 값만 있는 `CONFLICT_DECISION`만 NULL |
 | conflict_snapshot | JSON | | NULLABLE | `{"snapshot_id": "…", "facts": […]}` | 충돌이 났을 때의 Case 상태 전체. 사장님이 고른 뒤 Agent에 **그대로** 돌려줘야 한다 — Agent가 받은 것이 자기가 준 것과 같은지 대조하고 다르면 거절한다. 다시 만들어 넘기면 안 된다. 충돌을 낸 판단에만 값이 있다 |
+| retained_info_result | JSON | | NULLABLE | `{"meta": {…}, "output": {…}, "input": {…}}` | 같은 글에서 충돌이 **아니었던** 사실·진행 보고. 확인 뒤 재판단에 그대로 돌려줘야 반영된다 — Agent는 원문을 다시 읽지 않으므로 빠뜨리면 사장님이 함께 말한 내용이 사라진다. 충돌을 낸 판단에만 값이 있다 |
 | source | ENUM | | NOT NULL | `USER_INPUT` | `USER_INPUT` / `SYSTEM_BATCH` / `CASE_CREATED` / `CONFLICT_DECISION` — `CASE_CREATED`는 Case 생성 직후 첫 Blocker/Next Action 판단, `CONFLICT_DECISION`은 충돌 확인(`POST /cases/results/decision`)에서 고른 결정에 대한 판단 |
 | judgment_status | ENUM | | NOT NULL | `PENDING` | 판단 진행 상태. 입력을 받으면 `PENDING`으로 시작해 판단이 끝나면 갱신된다 — `PENDING` / `DONE` / `NEEDS_MORE_INFO` / `CONFLICT` / `FAILED` |
 | next_action | TEXT | | NULLABLE | `"부가가치세 확정신고를 진행하세요"` | 다음 액션 제안, 판단이 발생한 경우에만 채워짐 (AI 문장은 길이 제한이 없어 TEXT) |
