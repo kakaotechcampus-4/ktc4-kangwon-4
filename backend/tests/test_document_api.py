@@ -6,6 +6,7 @@ DB와 모델은 부르지 않는다. Case는 가짜 객체로, 모델은 documen
 import io
 from datetime import date, datetime
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 from zipfile import ZipFile
 
 import pytest
@@ -15,9 +16,12 @@ from app.agent.document_tool.documents import DocumentService
 from app.agent.document_tool.models import DocumentKind
 from app.agent.document_tool.tool import DocumentTool
 from app.be.crud import case as case_crud
+from app.be.crud import case_history as case_history_crud
+from app.be.crud import conflict_reference as conflict_reference_crud
 from app.be.db import get_db
 from app.be.dependencies.auth import get_current_member_id
 from app.be.routers import document as document_router
+from app.be.services import judgment as judgment_service
 from app.main import app
 from document_fixtures import DocumentClient, document_pdf
 
@@ -156,3 +160,78 @@ def test_only_owner_confirmed_closure_date_is_checked(api, case_id):
     assert not {"CLOSURE_DATE_UNCONFIRMED", "CLOSURE_DATE_MISMATCH"} & told
     assert "CLOSURE_DATE_MISMATCH" in codes({**OWNER, "closure_date": "2026-11-30"})
     assert client.post("/cases/documents/check", json={"applicant_name": ""}).status_code == 422
+
+
+# ── 서류로 다시 판단하기(#137 연결): 원상복구 조항이 새로 생기거나 바뀔 때만 판단 이력을 남기고 판단을 건다 ──
+
+LEASE_CLAUSE = {"restoration_clause": "임차인은 계약 종료 시 원상복구한다"}
+
+
+@pytest.fixture
+def judged(api, monkeypatch):
+    """판단 이력 저장과 판단 실행을 가로채, 무엇이 남고 무엇이 불렸는지 돌려준다."""
+
+    histories, runs = [], []
+    state = {"latest_status": "DONE", "case_status": "IN_PROGRESS", "conflicts": []}
+
+    def create_case_history(_session, history):
+        history.id = 100 + len(histories)
+        histories.append(history)
+        return history
+
+    monkeypatch.setattr(case_crud, "lock_case_by_member_id", lambda _session, member_id: SimpleNamespace(
+        id=member_id, case_status=state["case_status"]))
+    monkeypatch.setattr(conflict_reference_crud, "get_pending_conflicts_by_case_id",
+                        lambda _session, _case_id: state["conflicts"])
+    monkeypatch.setattr(case_history_crud, "get_latest_user_driven_case_history",
+                        lambda _session, _case_id: SimpleNamespace(judgment_status=state["latest_status"]))
+    monkeypatch.setattr(case_history_crud, "create_case_history", create_case_history)
+
+    async def fake_run(case_history_id):
+        runs.append(case_history_id)
+
+    monkeypatch.setattr(judgment_service, "run_judgment_in_background", fake_run)
+    app.dependency_overrides[get_db] = lambda: MagicMock()
+    client, _, client_model = api
+    return SimpleNamespace(client=client, model=client_model, histories=histories, runs=runs, state=state)
+
+
+def test_new_restoration_clause_starts_document_judgment(judged):
+    assert upload(judged.client, DocumentKind.LEASE, LEASE_CLAUSE).status_code == 200
+
+    [history] = judged.histories
+    assert history.source == "DOCUMENT_SUBMITTED" and history.judgment_status == "PENDING"
+    assert "원상복구 조항: 임차인은 계약 종료 시 원상복구한다" in history.raw_input
+    assert judged.runs == [history.id]
+
+
+def test_same_clause_or_amount_only_document_does_not_judge_again(judged):
+    upload(judged.client, DocumentKind.LEASE, LEASE_CLAUSE)
+    upload(judged.client, DocumentKind.LEASE, LEASE_CLAUSE)
+    upload(judged.client, DocumentKind.TRANSFER, TRANSFER)
+    assert len(judged.histories) == 1 and len(judged.runs) == 1
+
+
+def test_owner_confirmed_clause_change_judges_after_confirm(judged):
+    # 확인이 필요한 서류는 올릴 때 판단 글에 들어가지 않고, 사장님이 확인한 뒤에 판단한다
+    judged.model.needs_confirmation = True
+    record = upload(judged.client, DocumentKind.LEASE, LEASE_CLAUSE).json()["documents"][0]
+    assert judged.runs == []
+
+    confirmed = judged.client.post(f"/cases/documents/{record['document_id']}/confirm", json={
+        "kind": "LEASE", "confirmed_fields": {"restoration_clause": "카운터·싱크대만 철거한다"},
+    })
+    assert confirmed.status_code == 200
+    [history] = judged.histories
+    assert "원상복구 조항(사장님 확인): 카운터·싱크대만 철거한다" in history.raw_input
+    assert judged.runs == [history.id]
+
+
+@pytest.mark.parametrize("blocked", [
+    {"latest_status": "PENDING"}, {"case_status": "COMPLETED"}, {"conflicts": [object()]},
+])
+def test_document_is_saved_but_judgment_is_skipped_when_case_cannot_be_judged(judged, blocked):
+    judged.state.update(blocked)
+    response = upload(judged.client, DocumentKind.LEASE, LEASE_CLAUSE)
+    assert response.status_code == 200 and len(response.json()["documents"]) == 1
+    assert judged.histories == [] and judged.runs == []

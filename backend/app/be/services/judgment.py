@@ -57,7 +57,7 @@ class UnknownJudgmentTriggerError(ValueError):
     retryable = False
 
 
-def _trigger_type_of(history: CaseHistory) -> Literal["CASE_CREATED", "RESULT_SUBMITTED"]:
+def _trigger_type_of(history: CaseHistory) -> Literal["CASE_CREATED", "RESULT_SUBMITTED", "DOCUMENT_SUBMITTED"]:
     """이 입력이 "가입하면서 받은 것"인지 "사장님이 결과를 알려준 것"인지 고른다.
 
     AI는 둘을 다르게 읽는다. 가입 입력은 처음 보는 Case를 세우는 것이고, 결과 보고는
@@ -72,6 +72,10 @@ def _trigger_type_of(history: CaseHistory) -> Literal["CASE_CREATED", "RESULT_SU
         return "CASE_CREATED"
     if history.source == "USER_INPUT":
         return "RESULT_SUBMITTED"
+    if history.source == "DOCUMENT_SUBMITTED":
+        # 서류 글(document_replan_text)도 근거는 사장님 입력(USER_INPUT)으로 남지만, AI는
+        # "사장님이 말한 결과"가 아니라 "서류에서 꺼낸 값"으로 읽어야 해서 트리거를 나눈다(#137).
+        return "DOCUMENT_SUBMITTED"
     raise UnknownJudgmentTriggerError(
         f"case_history {history.id}의 source {history.source}는 판단 트리거가 없다"
     )

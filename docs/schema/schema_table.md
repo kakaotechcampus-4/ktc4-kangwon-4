@@ -148,10 +148,10 @@ CASE에 대한 발화·이벤트 원본 이력.
 |---|---|---|---|---|---|
 | id | BIGINT | PK | NOT NULL, AUTO_INCREMENT | 1 | |
 | case_id | BIGINT | FK | NOT NULL | 1 | |
-| raw_input | TEXT | | NULLABLE | `"임대인이랑 얘기 끝났어요, 다음 달까지 나가기로 했어요"` | 입력 원문. `USER_INPUT`·`CASE_CREATED`는 사장님이 쓴 문장이 항상 들어가고, `SYSTEM_BATCH`는 배치가 에이전트에 전달한 지시문이 들어갈 수 있다. 문장 없이 고른 값만 있는 `CONFLICT_DECISION`만 NULL |
+| raw_input | TEXT | | NULLABLE | `"임대인이랑 얘기 끝났어요, 다음 달까지 나가기로 했어요"` | 입력 원문. `USER_INPUT`·`CASE_CREATED`는 사장님이 쓴 문장이 항상 들어가고, `SYSTEM_BATCH`는 배치가 에이전트에 전달한 지시문이 들어갈 수 있다. `DOCUMENT_SUBMITTED`는 서류에서 꺼낸 값을 한 줄씩 적은 글(이름·날짜는 넣지 않음)이 들어간다. 문장 없이 고른 값만 있는 `CONFLICT_DECISION`만 NULL |
 | conflict_snapshot | JSON | | NULLABLE | `{"snapshot_id": "…", "facts": […]}` | 충돌이 났을 때의 Case 상태 전체. 사장님이 고른 뒤 Agent에 **그대로** 돌려줘야 한다 — Agent가 받은 것이 자기가 준 것과 같은지 대조하고 다르면 거절한다. 다시 만들어 넘기면 안 된다. 충돌을 낸 판단에만 값이 있다 |
 | retained_info_result | JSON | | NULLABLE | `{"meta": {…}, "output": {…}, "input": {…}}` | 같은 글에서 충돌이 **아니었던** 사실·진행 보고. 확인 뒤 재판단에 그대로 돌려줘야 반영된다 — Agent는 원문을 다시 읽지 않으므로 빠뜨리면 사장님이 함께 말한 내용이 사라진다. 충돌을 낸 판단에만 값이 있다 |
-| source | ENUM | | NOT NULL | `USER_INPUT` | `USER_INPUT` / `SYSTEM_BATCH` / `CASE_CREATED` / `CONFLICT_DECISION` — `CASE_CREATED`는 Case 생성 직후 첫 Blocker/Next Action 판단, `CONFLICT_DECISION`은 충돌 확인(`POST /cases/results/decision`)에서 고른 결정에 대한 판단 |
+| source | ENUM | | NOT NULL | `USER_INPUT` | `USER_INPUT` / `SYSTEM_BATCH` / `CASE_CREATED` / `CONFLICT_DECISION` / `DOCUMENT_SUBMITTED` — `CASE_CREATED`는 Case 생성 직후 첫 Blocker/Next Action 판단, `CONFLICT_DECISION`은 충돌 확인(`POST /cases/results/decision`)에서 고른 결정에 대한 판단, `DOCUMENT_SUBMITTED`는 서류를 올리거나 확인해 원상복구 조항이 새로 생기거나 바뀌었을 때의 판단 |
 | judgment_status | ENUM | | NOT NULL | `PENDING` | 판단 진행 상태. 입력을 받으면 `PENDING`으로 시작해 판단이 끝나면 갱신된다 — `PENDING` / `DONE` / `NEEDS_MORE_INFO` / `CONFLICT` / `FAILED` |
 | next_action | TEXT | | NULLABLE | `"부가가치세 확정신고를 진행하세요"` | 다음 액션 제안, 판단이 발생한 경우에만 채워짐 (AI 문장은 길이 제한이 없어 TEXT) |
 | next_action_reason | TEXT | | NULLABLE | `"신고 기한이 폐업일로부터 25일이기 때문입니다"` | 다음 행동을 해야 하는 이유 |

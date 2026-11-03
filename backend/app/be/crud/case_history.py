@@ -5,7 +5,7 @@ from app.be.models.case_history import CaseHistory
 
 # 배치(SYSTEM_BATCH)가 만든 이력에는 next_action·priority_blocker가 없을 수 있어서
 # 화면에 보여줄 최신 판단을 찾을 때는 사용자 입력에서 비롯된 것만 본다.
-_USER_DRIVEN_SOURCES = ("CASE_CREATED", "USER_INPUT", "CONFLICT_DECISION")
+_USER_DRIVEN_SOURCES = ("CASE_CREATED", "USER_INPUT", "CONFLICT_DECISION", "DOCUMENT_SUBMITTED")
 
 
 def create_case_history(session: Session, case_history: CaseHistory) -> CaseHistory:
@@ -33,7 +33,8 @@ def get_case_created_history(session: Session, case_id: int) -> CaseHistory | No
 def get_latest_user_driven_case_history(session: Session, case_id: int) -> CaseHistory | None:
     """화면에 보여줄 가장 최근 판단 이력. 없으면 None.
 
-    Case 생성 판단(CASE_CREATED), 결과 입력 판단(USER_INPUT), 충돌 결정 판단(CONFLICT_DECISION)을
+    Case 생성 판단(CASE_CREATED), 결과 입력 판단(USER_INPUT), 충돌 결정 판단(CONFLICT_DECISION),
+    서류 판단(DOCUMENT_SUBMITTED)을
     모두 보고 그중 최신을 고른다. 배치가 생기더라도 이 조회에는 섞이지 않는다.
     """
 

@@ -36,7 +36,11 @@ class CaseHistory(CreatedAtMixin, table=True):
     )
     source: str = Field(
         sa_column=Column(
-            Enum("USER_INPUT", "SYSTEM_BATCH", "CASE_CREATED", "CONFLICT_DECISION", name="case_history_source_enum"),
+            # DOCUMENT_SUBMITTED: 사장님이 올리거나 확인한 서류로 원상복구 조항이 새로 생기거나 바뀌어 다시 판단한 입력
+            Enum(
+                "USER_INPUT", "SYSTEM_BATCH", "CASE_CREATED", "CONFLICT_DECISION", "DOCUMENT_SUBMITTED",
+                name="case_history_source_enum",
+            ),
             nullable=False,
         )
     )

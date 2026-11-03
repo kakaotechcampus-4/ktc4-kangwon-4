@@ -124,3 +124,8 @@ def test_submitting_a_result_schedules_the_judgment(monkeypatch):
     ]
     # 사장님이 보고 있던 직전 이력(5)이 아니라 방금 접수한 이력을 판단해야 한다.
     assert [task.args for task in background_tasks.tasks] == [(HISTORY_ID,)]
+
+
+def test_document_input_is_judged_as_document(trigger_of):
+    # 서류 글을 결과 보고로 넘기면 AI가 서류에서 꺼낸 값을 사장님이 직접 말한 진행 상황으로 읽는다(#137).
+    assert trigger_of("DOCUMENT_SUBMITTED") == "DOCUMENT_SUBMITTED"

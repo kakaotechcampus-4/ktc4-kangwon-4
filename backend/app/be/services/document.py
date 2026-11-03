@@ -12,11 +12,17 @@ from pathlib import Path
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from fastapi import HTTPException
+from sqlmodel import Session
 
 from app.agent.document_tool.documents import DocumentError
 from app.agent.document_tool.models import DocumentContext, DocumentFieldName, DocumentKind
 from app.agent.document_tool.tool import DocumentTool
+from app.be.crud import case as case_crud
+from app.be.crud import case_history as case_history_crud
+from app.be.crud import conflict_reference as conflict_reference_crud
 from app.be.models.case import Case
+from app.be.models.case_history import CaseHistory
+from app.common.agent_dto import document_replan_text
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +121,53 @@ def check_documents(
         raise _rejected(error) from None
     save_context(directory, updated)
     return updated
+
+
+def queue_document_judgment(
+    session: Session, member_id: int, before: DocumentContext, after: DocumentContext,
+) -> int | None:
+    """서류가 바뀌어 다시 판단해야 하면 판단 이력을 PENDING으로 남기고 그 번호를 돌려준다.
+
+    원상복구 조항이 새로 생기거나 바뀐 때만 판단한다(document_replan_text). 같은 조항의
+    재업로드·금액 서류 추가·서류 빼기는 None이라 판단하지 않는다.
+    판단을 부르는 일은 라우터가 응답 뒤에 한다. 결과는 홈(GET /cases)이 PENDING을 보고 다시 묻는다.
+    """
+
+    text = document_replan_text(before, after)
+    if text is None:
+        return None
+
+    # 결과 제출(case.submit_case_results)과 같은 이유로 Case를 잠그고 확인한다.
+    # 같은 Case에 PENDING이 둘 생기면 판단이 서로의 결과를 덮는다.
+    case = case_crud.lock_case_by_member_id(session, member_id)
+    blocked = _judgment_blocked_reason(session, case)
+    if blocked is not None:
+        # 서류 저장은 이미 끝났으므로 요청을 실패시키지 않고 판단만 건너뛴다.
+        # TODO: 건너뛴 사실을 사장님께 알릴 방법(응답 칸·기록)은 발표 뒤 팀과 정한다.
+        logger.warning("Case %s 서류 재판단 건너뜀: %s", case.id if case else None, blocked)
+        return None
+
+    history = case_history_crud.create_case_history(
+        session,
+        CaseHistory(case_id=case.id, raw_input=text, source="DOCUMENT_SUBMITTED", judgment_status="PENDING"),
+    )
+    session.commit()
+    return history.id
+
+
+def _judgment_blocked_reason(session: Session, case: Case | None) -> str | None:
+    """지금 판단을 새로 돌릴 수 없으면 그 이유. 결과 제출이 409로 막는 경우와 같다."""
+
+    if case is None:
+        return "Case 없음"
+    if case.case_status == "COMPLETED":
+        return "폐업 정리를 마친 Case"
+    if conflict_reference_crud.get_pending_conflicts_by_case_id(session, case.id):
+        return "확인 대기 중인 충돌"
+    latest = case_history_crud.get_latest_user_driven_case_history(session, case.id)
+    if latest is not None and latest.judgment_status == "PENDING":
+        return "직전 판단 처리 중"
+    return None
 
 
 def settlement_zip(tool: DocumentTool, directory: Path, case: Case) -> bytes:
