@@ -93,7 +93,8 @@ def test_the_case_itself_shows_the_restored_free_text(case_with_two_submissions)
             lease_status="LEASED_PAID", restoration_clause="UNKNOWN", restoration_status="IN_PROGRESS",
             restoration_scope="PARTIAL", restoration_scope_detail="서울특별시 강남구 [주소]만",
             demolition_required="NOT_REQUIRED", planned_closure_date=None,
-            planned_closure_month=None, closure_date=None, closure_reason=None,
+            planned_closure_month=None, case_status="IN_PROGRESS", completed_at=None,
+            closure_date=None, closure_reason=None,
             road_address=None, address_detail=None, deposit_return_result=None,
         ),
     )

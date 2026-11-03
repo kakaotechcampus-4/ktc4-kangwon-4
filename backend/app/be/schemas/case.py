@@ -114,6 +114,9 @@ class CaseGetDetailResponse(BaseModel):
     demolition_required: DemolitionRequired
     planned_closure_date: date | None
     planned_closure_month: str | None
+    # COMPLETED면 폐업 정리를 마친 것. 사장님이 부가세 폐업 확정신고(vat_submission)를 마쳤다고 체크하면 바뀐다
+    case_status: CaseStatus
+    completed_at: datetime | None
 
     closure_date: date | None
     closure_reason: ClosureReason | None

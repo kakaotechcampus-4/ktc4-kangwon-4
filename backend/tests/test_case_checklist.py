@@ -17,9 +17,21 @@ from app.agent.roadmap import CHECKLIST_IDS
 from app.be.crud.case import get_case_by_member_id
 from app.be.crud.member import create_member
 from app.be.models.case_checklist import CaseChecklist, CaseChecklistHistory
-from app.be.schemas.case import CaseCreateRequest, ChecklistTaskId
+from app.be.schemas.case import (
+    CaseConflictsDecisionRequest,
+    CaseCreateRequest,
+    CaseResultsSubmitRequest,
+    ChecklistTaskId,
+)
 from app.be.services import procedure_registry
-from app.be.services.case import create_case, update_case_checklist, update_case_support_approval
+from app.be.services.case import (
+    create_case,
+    get_case,
+    submit_case_conflicts_decision,
+    submit_case_results,
+    update_case_checklist,
+    update_case_support_approval,
+)
 
 
 @pytest.fixture(scope="module")
@@ -175,3 +187,56 @@ def test_browsers_may_send_put_to_the_checklist_api():
 
     assert response.status_code == 200
     assert "PUT" in response.headers["access-control-allow-methods"]
+
+
+def test_reporting_the_vat_filing_closes_the_case(mysql_engine, member_id):
+    """시안: [신고했어요] → "폐업 정리를 모두 마쳤어요". FE는 case_status만 보고 완료 화면을 그린다."""
+
+    check(mysql_engine, member_id, "vat_submission", True)
+
+    with Session(mysql_engine) as session:
+        case = get_case_by_member_id(session, member_id)
+        assert case.case_status == "COMPLETED" and case.completed_at is not None
+        assert get_case(session, member_id).case.case_status == "COMPLETED"
+
+
+def test_unchecking_the_vat_filing_reopens_the_case(mysql_engine, member_id):
+    """실수로 눌렀다가 풀면 다시 진행 중이다."""
+
+    check(mysql_engine, member_id, "vat_submission", True)
+    check(mysql_engine, member_id, "vat_submission", False)
+
+    with Session(mysql_engine) as session:
+        case = get_case_by_member_id(session, member_id)
+        assert (case.case_status, case.completed_at) == ("IN_PROGRESS", None)
+
+
+def test_other_tasks_do_not_close_the_case(mysql_engine, member_id):
+    check(mysql_engine, member_id, "income_tax", True)
+
+    with Session(mysql_engine) as session:
+        assert get_case_by_member_id(session, member_id).case_status == "IN_PROGRESS"
+
+
+def test_a_closed_case_takes_no_more_results_or_decisions(mysql_engine, member_id):
+    """AI는 진행 중인 Case만 판단한다. 완료 뒤 판단을 돌리면 AI 입력 검사에서 거절된다."""
+
+    check(mysql_engine, member_id, "vat_submission", True)
+
+    with Session(mysql_engine) as session:
+        latest = get_case(session, member_id).case_history_id
+        for call in (
+            lambda: submit_case_results(
+                session, member_id, CaseResultsSubmitRequest(raw_input="결과 글", case_history_id=latest)
+            ),
+            lambda: submit_case_conflicts_decision(
+                session, member_id, CaseConflictsDecisionRequest(
+                    decisions=[{"conflict_reference_id": 1, "side": "PROPOSED"}]
+                ),
+            ),
+        ):
+            with pytest.raises(HTTPException) as error:
+                call()
+            assert error.value.status_code == 409
+            assert error.value.detail == "폐업 정리를 마친 Case입니다."
+            session.rollback()

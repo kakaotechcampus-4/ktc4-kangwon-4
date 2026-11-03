@@ -62,7 +62,7 @@ MEMBERS ──1:N──► CASE ──1:N──► CASE_FIELD_HISTORY
 | industrial_accident_insurance_enrolled | BOOLEAN | | NULLABLE | `true` | 이 사업장의 산재보험 가입 이력. 이미 종료했어도 `true`. 보험 네 칸은 같이 받아야 한다 — 넷 중 하나라도 `true`면 보험 신고 절차가 "해당", 넷 다 `false`여야 "해당 없음", 섞이면 "모름"이다 |
 | has_business_loan | BOOLEAN | | NULLABLE | `false` | 사업 대출이 남아 있는지. 가입 때 사장님이 입력. `null`이면 안 물어봄 |
 | has_service_contracts | BOOLEAN | | NULLABLE | `true` | 배달앱·카드단말기 등 해지할 서비스 계약이 있는지. 가입 때 사장님이 입력. `null`이면 안 물어봄 |
-| case_status | ENUM | | NOT NULL, DEFAULT `IN_PROGRESS` | `IN_PROGRESS` | `IN_PROGRESS` / `COMPLETED` |
+| case_status | ENUM | | NOT NULL, DEFAULT `IN_PROGRESS` | `IN_PROGRESS` | `IN_PROGRESS` / `COMPLETED`. 사장님이 부가세 폐업 확정신고(체크 항목 `vat_submission`)를 체크하면 `COMPLETED`, 풀면 `IN_PROGRESS`. `COMPLETED`면 결과 제출·충돌 결정을 받지 않는다(409) |
 | lease_status | ENUM | | NOT NULL | `LEASED_PAID` | `LEASED_PAID`/`LEASED_FREE`/`OWNED` |
 | restoration_clause | ENUM | | NOT NULL, DEFAULT `UNKNOWN` | `EXISTS` | `EXISTS`/`NOT_EXISTS`/`UNKNOWN` — 임대차계약서에 원상복구 조항이 있는지. 가입 때 사장님이 입력. AI가 채우는 `restoration_*`(진행·범위)와 다른 값 |
 | restoration_status | ENUM | | NOT NULL, DEFAULT `UNKNOWN` | `UNKNOWN` | `UNKNOWN`/`NOT_STARTED`/`IN_PROGRESS`/`COMPLETED`/`NOT_REQUIRED` — Case 생성 직후 `UNKNOWN`으로 시작, `restoration_scope` 확정 후 나머지 값으로 전환 |
@@ -73,7 +73,7 @@ MEMBERS ──1:N──► CASE ──1:N──► CASE_FIELD_HISTORY
 | support_approved_at | DATETIME | | NULLABLE | `2026-10-22 15:00:00` | 심사 결과를 마지막으로 알려 준 시각(KST). 기록 탭의 "승인 결과를 알려주셨어요" 시각 |
 | planned_closure_date | DATE | | NULLABLE | `2026-12-31` | nullable |
 | planned_closure_month | VARCHAR(7) | | NULLABLE | `2026-12` | 날짜를 못 정했을 때의 예상 달. `planned_closure_date`와 같이 오면 422로 거절한다. 가게 등록 때만 받고 AI 대화로는 저장하지 않는다 |
-| completed_at | DATETIME | | NULLABLE | `NULL` | nullable |
+| completed_at | DATETIME | | NULLABLE | `NULL` | 폐업 정리를 마친 시각(KST). 진행 중이면 NULL |
 | closure_date | DATE | | NULLABLE | `2026-10-31` | 통합 폐업 신고 화면에서 확인한 **실제 폐업일**. 가입 때 예상일(`planned_closure_date`)과 별개. AI 판단에 쓰지 않음 |
 | closure_reason | ENUM | | NULLABLE | `BUSINESS_SLUMP` | 폐업 사유. `BUSINESS_SLUMP`(사업 부진) / `PERSONAL`(개인 사정) / `OTHER`(기타) |
 | road_address | VARCHAR(200) | | NULLABLE | `"서울 마포구 망원로 52 (망원동)"` | 가게 도로명 주소(주소 찾기로 고름). AI에 넘기지 않음 |
