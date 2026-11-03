@@ -48,17 +48,14 @@ Case 생성 → Blocker 1개 판정 → Next Action 1개 제시
    2단계로 갈지는 BE 계약 확인이 필요하다 — `docs/be-agent-integration-requirements.md`
    §4의 P0 결정 목록에 미확정으로 올라 있다.)*
 
-4. **`result` 7종을 전부 분기한다. 미처리 분기를 남기지 않는다.**
-   `UPDATED` / `NO_CHANGE` / `NEEDS_MORE_INFO` / `CONFLICT` /
-   `INVALID_TRANSITION` / `REPLAN_FAILED` / `CASE_NOT_FOUND`
-   응답 타입은 discriminated union으로 정의해 컴파일 단계에서 누락이 잡히게 한다.
+4. **판단 결과 `result` 6종을 전부 분기한다. 미처리 분기를 남기지 않는다.**
+   `PENDING` / `UPDATED` / `NO_CHANGE` / `NEEDS_MORE_INFO` / `CONFLICT` / `FAILED`
+   (`types/api.ts`의 `ResultsSubmitResult`). 응답 타입은 discriminated union으로 정의해
+   컴파일 단계에서 누락이 잡히게 한다. `FAILED`는 `recovery_action_code`로 한 번 더 가른다.
 
-   **이 목록은 확정 전이다.** `docs/be-agent-integration-requirements.md` §6.3이
-   `CONFLICT`를 200 또는 409로 두고 `VERSION_CONFLICT`·`SAFE_FAILURE`를 후보로
-   추가했다. 409가 확정되면 아래 "본문으로 분기한다"도 함께 다시 본다.
-
-   **`res.ok`가 아니라 본문의 `result`로 분기한다.** 검증 실패도 HTTP 200으로
-   오고, 404는 `CASE_NOT_FOUND`뿐이다.
+   **판단 결과는 본문의 `result`로, 요청이 받아들여졌는지는 HTTP 상태로 가른다.**
+   401은 로그인 만료, 404는 Case나 그 판단 번호가 없다는 것, 409는 화면이 아는 판단이
+   낡았다는 것(더 새로운 판단·처리 중인 제출·미결 충돌)이다.
 
 5. **한 화면에서 강하게 강조하는 것은 Next Action 하나다.**
    Blocker는 그 이유를 설명하는 보조 정보로 둔다. 주요 버튼도 화면당 하나다.

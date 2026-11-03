@@ -1,13 +1,15 @@
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+BusinessType = Literal["CAFE", "RESTAURANT"]
 LeaseStatus = Literal["LEASED_PAID", "LEASED_FREE", "OWNED"]
 CaseStatus = Literal["IN_PROGRESS", "COMPLETED"]
 RestorationStatus = Literal["UNKNOWN", "NOT_STARTED", "IN_PROGRESS", "COMPLETED", "NOT_REQUIRED"]
 RestorationScope = Literal["UNKNOWN", "PARTIAL", "FULL", "NOT_REQUIRED"]
 DemolitionRequired = Literal["UNKNOWN", "REQUIRED", "NOT_REQUIRED"]
+RestorationClause = Literal["EXISTS", "NOT_EXISTS", "UNKNOWN"]
 JudgmentStatus = Literal["PENDING", "DONE", "NEEDS_MORE_INFO", "CONFLICT", "FAILED"]
 RecoveryActionCode = Literal["RETRY", "RESUBMIT_INPUT", "CONTACT_SUPPORT", "NONE"]
 ResultsSubmitResult = Literal["PENDING", "UPDATED", "NO_CHANGE", "NEEDS_MORE_INFO", "CONFLICT", "FAILED"]
@@ -15,10 +17,14 @@ ConflictSide = Literal["PROPOSED", "STORED"]
 
 
 class CaseCreateRequest(BaseModel):
-    business_type: str
+    store_name: str | None = Field(default=None, max_length=50)
+    business_type: BusinessType
     franchise_status: bool
-    employee_count: int | None = None
+    employee_count: int | None = Field(default=None, ge=0, le=1000)
+    has_business_loan: bool | None = None
+    has_service_contracts: bool | None = None
     lease_status: LeaseStatus
+    restoration_clause: RestorationClause = "UNKNOWN"
     planned_closure_date: date | None = None
 
 
@@ -27,11 +33,15 @@ class CaseCreateResponse(BaseModel):
 
     id: int
     member_id: int
+    store_name: str | None
     business_type: str
     franchise_status: bool
     employee_count: int | None
+    has_business_loan: bool | None
+    has_service_contracts: bool | None
     case_status: CaseStatus
     lease_status: LeaseStatus
+    restoration_clause: RestorationClause
     restoration_status: RestorationStatus
     restoration_scope: RestorationScope
     restoration_scope_detail: str | None
@@ -47,10 +57,14 @@ class CaseGetDetailResponse(BaseModel):
 
     id: int
     member_id: int
+    store_name: str | None
     business_type: str
     franchise_status: bool
     employee_count: int | None
+    has_business_loan: bool | None
+    has_service_contracts: bool | None
     lease_status: LeaseStatus
+    restoration_clause: RestorationClause
     restoration_status: RestorationStatus
     restoration_scope: RestorationScope
     restoration_scope_detail: str | None

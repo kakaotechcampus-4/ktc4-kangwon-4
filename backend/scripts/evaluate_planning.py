@@ -43,23 +43,23 @@ from scripts.evaluation_metrics import load_prices, summarize_metrics
 FIXED_TIME = datetime(2026, 9, 25, 0, 0, tzinfo=timezone.utc)
 NAMESPACE = UUID("358ab427-27f2-4d58-98a9-5656d63904ca")
 
-# The four intake answers every earlier recorded run used, so new numbers stay
-# comparable with the ones in docs/agent/handoof.md.
+# Canonical CAFE intake code. Earlier records used 카페, so their input
+# fingerprints must remain separate from new evaluations.
 CASES = {
     "benchmark_case1": {
-        "business_type": "카페", "franchise_status": False, "employee_count": 2,
+        "business_type": "CAFE", "franchise_status": False, "employee_count": 2,
         "lease_status": "LEASED_PAID", "planned_closure_date": None,
     },
     "free_lease": {
-        "business_type": "카페", "franchise_status": False, "employee_count": 2,
+        "business_type": "CAFE", "franchise_status": False, "employee_count": 2,
         "lease_status": "LEASED_FREE", "planned_closure_date": None,
     },
     "optional_missing": {
-        "business_type": "카페", "franchise_status": False, "employee_count": None,
+        "business_type": "CAFE", "franchise_status": False, "employee_count": None,
         "lease_status": "LEASED_PAID", "planned_closure_date": None,
     },
     "solo_dated": {
-        "business_type": "카페", "franchise_status": False, "employee_count": 0,
+        "business_type": "CAFE", "franchise_status": False, "employee_count": 0,
         "lease_status": "LEASED_PAID", "planned_closure_date": "2026-10-31",
     },
 }
