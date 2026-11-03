@@ -21,12 +21,15 @@ import { ApiError, request } from './api'
 /**
  * 올리기 제한 시간. 서버가 서류를 다 읽을 때까지 답을 붙잡고 있어 수십 초가 걸린다(#159).
  *
- * 모델 호출 한 번의 상한(180초, #159 승준님)에 맞췄다. 확정된 "한 장 최대 몇 초"는 아직 없다.
- * 이보다 오래 걸려 끊겨도 서버는 읽기를 마치고 저장해 두어, 같은 파일을 다시 올리면 그 결과를 쓴다.
+ * **Vercel이 끊기 전에 FE가 먼저 끊는다.** 배포 화면은 Vercel(`/api`)을 거치는데, Vercel은 120초 안에
+ * 첫 응답이 없으면 502(`ROUTER_EXTERNAL_TARGET_ERROR`)로 끊는다(#170 현석님). 그 502는 서버의
+ * "서류를 읽지 못함"(502)과 구별되지 않아, 아직 읽는 중인 서류에 "다시 찍어 주세요"가 뜬다.
+ * 그래서 120초보다 조금 짧게 두어 "다시 올려 주세요" 안내가 나오게 한다. 10초는 응답이 오가는 여유다.
  *
- * TODO(배포 확인): 앞단 프록시(Vercel 경유)가 이보다 먼저 끊는지 실서버에서 재 본다.
+ * 끊겨도 서버는 읽기를 마치고 저장해 두어, 같은 파일을 다시 올리면 그 결과를 쓴다(#159).
+ * 확정된 "한 장 최대 몇 초"는 아직 없다 — 머지 뒤 배포 화면에서 한 장 올려 재 본다.
  */
-export const UPLOAD_TIMEOUT_MS = 180_000
+export const UPLOAD_TIMEOUT_MS = 110_000
 
 async function readList(response: Response): Promise<DocumentsView> {
   const view = toDocumentsView((await response.json()) as DocumentListResponse | null)
