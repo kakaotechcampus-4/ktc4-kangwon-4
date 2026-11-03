@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
 from types import MappingProxyType
@@ -19,6 +20,7 @@ from pydantic import (
 )
 
 from app.agent.action_catalog import ProcedureBindings, resolve_procedure_bindings
+from app.agent.claim_safety import demolition_preparation_only
 from app.agent.guardrails import (
     GuardrailViolation,
     ensure_no_sensitive_text,
@@ -60,9 +62,11 @@ from app.agent.schemas import (
     StrictScalar,
     Uncertainty,
     VerifiedTextSpan,
-    case_field_values_equal as same_fact_value,
     validate_case_field_value,
     validate_restoration_state,
+)
+from app.agent.schemas import (
+    case_field_values_equal as same_fact_value,
 )
 
 
@@ -1028,6 +1032,9 @@ class InfoAnalysisAgent:
                 )
             semantic = self._retain_exact_procedure_details(semantic, evidence_by_id)
             self._validate_procedure_details(semantic, evidence_by_id)
+            preparation_only = demolition_preparation_only(
+                semantic.step_code, [evidence_by_id[ref] for ref in refs],
+            )
             findings.append(
                 ProcedureFinding(
                     finding_id=self._uuid(),
@@ -1038,18 +1045,20 @@ class InfoAnalysisAgent:
                         if item.procedure_step == known
                     ),
                     summary=semantic.summary,
-                    relevance=semantic.relevance,
+                    relevance=(ProcedureRelevance.POSSIBLY_RELEVANT
+                               if preparation_only and semantic.relevance == ProcedureRelevance.RELEVANT
+                               else semantic.relevance),
                     current_status=progress_by_step.get(
                         (known.procedure_step_id, known.step_code),
                         ProcedureProgressStatus.NOT_STARTED,
                     ),
                     decision_authority=semantic.decision_authority,
-                    requires_confirmation=(known.procedure_step_id, known.step_code) not in ready_steps,
+                    requires_confirmation=preparation_only or (known.procedure_step_id, known.step_code) not in ready_steps,
                     required_actions=semantic.required_actions,
                     required_documents=semantic.required_documents,
-                    application_channel=semantic.application_channel,
-                    application_url=semantic.application_url,
-                    deadline=semantic.deadline,
+                    application_channel=None if preparation_only else semantic.application_channel,
+                    application_url=None if preparation_only else semantic.application_url,
+                    deadline=None if preparation_only else semantic.deadline,
                     evidence_refs=semantic.evidence_refs,
                 )
             )
@@ -1205,7 +1214,29 @@ class InfoAnalysisAgent:
     ) -> tuple[VerifiedTextSpan, EvidenceRecord]:
         if request.input is None:
             raise InfoAnalysisGuardrailError("source text requires redacted input")
-        start, end = exact_span(request.input.redacted_text, source_text)
+        text = request.input.redacted_text
+        if text.startswith("[리본이 물어본 것] "):
+            markers = list(re.finditer(r"(?m)^\[(리본이 물어본 것|사장님 답)\] ", text))
+            for index, marker in enumerate(markers):
+                if marker[1] != "사장님 답":
+                    continue
+                boundary = markers[index + 1].start() if index + 1 < len(markers) else len(text)
+                try:
+                    start, end = exact_span(text[marker.end():boundary], source_text)
+                except GuardrailViolation:
+                    continue
+                start, end = start + marker.end(), end + marker.end()
+                break
+            else:
+                raise InfoAnalysisGuardrailError(
+                    "source text must be inside an owner's answer",
+                    fact_errors=((
+                        "For labeled question-answer input, quote only the owner's answer; "
+                        "questions and labels are context, not reported facts."
+                    ),),
+                )
+        else:
+            start, end = exact_span(text, source_text)
         span = VerifiedTextSpan(
             input_event_id=request.input.input_event_id,
             text=source_text,

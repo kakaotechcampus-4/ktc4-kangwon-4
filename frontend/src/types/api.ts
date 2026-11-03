@@ -24,6 +24,9 @@ export type RestorationScope = 'UNKNOWN' | 'PARTIAL' | 'FULL' | 'NOT_REQUIRED'
 /** 철거 필요 여부 */
 export type DemolitionRequired = 'UNKNOWN' | 'REQUIRED' | 'NOT_REQUIRED'
 
+/** 임대차계약서에 원상복구 조항이 있는지. 가입 때 사장님이 답한다 */
+export type RestorationClause = 'EXISTS' | 'NOT_EXISTS' | 'UNKNOWN'
+
 /**
  * `POST /cases` 로 보내는 것.
  *
@@ -31,12 +34,28 @@ export type DemolitionRequired = 'UNKNOWN' | 'REQUIRED' | 'NOT_REQUIRED'
  * "아직 모른다"와 "없다"가 서버에서 같아진다.
  */
 export interface CaseCreateRequest {
+  /** 화면 표시용. 진단에서 묻지 않아 지금은 늘 `null` */
+  store_name: string | null
   business_type: string
   franchise_status: boolean
   employee_count: number | null
+  has_business_loan: boolean | null
+  /** 배달앱·카드단말기 등 해지할 계약 */
+  has_service_contracts: boolean | null
   lease_status: LeaseStatus
+  /** 계약서의 원상복구 조항. 서버가 `null`을 받지 않아 모르면 `UNKNOWN` */
+  restoration_clause: RestorationClause
   /** `YYYY-MM-DD` */
   planned_closure_date: string | null
+  /** 날짜를 못 정했을 때의 예상 달 `YYYY-MM`. 날짜와 같이 보내면 422 */
+  planned_closure_month: string | null
+  /** 지금이 아니라 "있었던 적". 지금 직원이 있으면 서버가 직원 수로 안다 */
+  had_employees: boolean | null
+  /** 이 사업장의 4대보험 가입 이력. 넷을 같이 보내야 "해당 없음"이 된다 */
+  pension_enrolled: boolean | null
+  health_insurance_enrolled: boolean | null
+  employment_insurance_enrolled: boolean | null
+  industrial_accident_insurance_enrolled: boolean | null
 }
 
 /**
@@ -225,6 +244,23 @@ export interface CaseResultsSubmitRequest {
   raw_input: string
   /** 이 결과가 어느 판단에 대한 것인지. `GET /cases/results` 에서 받은 번호다 */
   case_history_id: number
+}
+
+/**
+ * 충돌 하나에 고른 쪽. 서버 말로 `PROPOSED` 는 이번에 말씀하신 것, `STORED` 는 지금 기록이다.
+ * 화면은 `INCOMING` 이라 부른다(`types/view.ts` `ConflictSide`) — 바꾸는 것은 어댑터가 한다
+ */
+export type ConflictDecisionSide = 'PROPOSED' | 'STORED'
+
+/**
+ * `POST /cases/results/decision` 으로 보내는 것.
+ *
+ * 남은 충돌을 **전부** 한 번에 보낸다. 하나라도 빠지거나 같은 충돌이 두 번 있으면 422 다.
+ * 응답은 결과 제출과 같은 접수 번호(`CaseResultsSubmitAcceptedResponse`)이고, 결과도 같은
+ * `GET /cases/results/status` 로 받는다.
+ */
+export interface CaseConflictsDecisionRequest {
+  decisions: { conflict_reference_id: number; side: ConflictDecisionSide }[]
 }
 
 /**

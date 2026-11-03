@@ -6,9 +6,11 @@
 """
 
 
-from sqlmodel import Session
-
+import logging
+from collections.abc import Mapping
 from datetime import datetime
+
+from sqlmodel import Session
 
 from app.agent.schemas import (
     CaseFieldKey,
@@ -26,6 +28,7 @@ from app.be.crud import blocker as blocker_crud
 from app.be.crud import case as case_crud
 from app.be.crud import case_field_history as case_field_history_crud
 from app.be.crud import case_history as case_history_crud
+from app.be.crud import conflict_reference as conflict_reference_crud
 from app.be.crud import evidence as evidence_crud
 from app.be.crud import procedure_step as procedure_step_crud
 from app.be.crud import support_item as support_item_crud
@@ -38,9 +41,16 @@ from app.be.models.procedure_step import CaseProcedureStepHistory
 from app.be.models.support_item import SupportMatch
 from app.be.services.case_snapshot import UNKNOWN_SENTINEL_FIELDS
 
+logger = logging.getLogger(__name__)
+
 
 def save_reviewed_plan(
-    session: Session, history: CaseHistory, outcome: ReviewedPlanOutcome, *, trace_id: str | None = None
+    session: Session,
+    history: CaseHistory,
+    outcome: ReviewedPlanOutcome,
+    *,
+    trace_id: str | None = None,
+    resolved_conflicts: Mapping[int, str] | None = None,
 ) -> DecisionRecord:
     """판단 이력·Blocker·검수 기록을 한 트랜잭션으로 저장한다.
 
@@ -120,6 +130,11 @@ def save_reviewed_plan(
         ),
     )
 
+    # 사장님이 고른 값이 위에서 Case에 반영됐으니 그 충돌도 같이 닫는다. 한 트랜잭션이어야
+    # 한다 — 값만 들어가고 충돌이 남으면 같은 것을 또 묻고, 충돌만 닫히고 값이 빠지면 고른
+    # 내용이 사라진다.
+    _resolve_conflicts(session, resolved_conflicts)
+
     # TODO: grounded_claims(확인이 필요한 문장 표시)와 snapshot/known_procedure_steps(판단 당시
     # 입력)는 아직 담을 화면·테이블이 없어 저장하지 않는다.
     session.commit()
@@ -127,7 +142,13 @@ def save_reviewed_plan(
     return record
 
 
-def save_conflict(session: Session, history: CaseHistory, outcome: ConflictOutcome) -> None:
+def save_conflict(
+    session: Session,
+    history: CaseHistory,
+    outcome: ConflictOutcome,
+    *,
+    resolved_conflicts: Mapping[int, str] | None = None,
+) -> None:
     """사용자에게 되물을 충돌을 보관한다. Case 값은 건드리지 않는다.
 
     AI는 확인받기 전에는 아무것도 바꾸지 말라고 충돌만 돌려준다. 그래서 여기서는 어떤 필드가
@@ -137,6 +158,17 @@ def save_conflict(session: Session, history: CaseHistory, outcome: ConflictOutco
     # 충돌에 딸려 온 근거 본문도 남긴다. 되묻는 화면과 확인 뒤 판단이 이 번호로 조회하는데,
     # 저장해 두지 않으면 우리 테이블에 행이 없다.
     _save_evidence_records(session, history, outcome.evidence_records)
+
+    # 충돌이 난 시점의 Case 상태를 통째로 보관한다. 사용자가 고른 뒤 AI에 그대로 돌려줘야
+    # 하는데(ConflictConfirmedTrigger.conflict_snapshot), 다시 만들어서 넘기면 안 된다 —
+    # AI가 받은 것이 자기가 준 것과 같은지 대조하고 한 글자라도 다르면 STALE로 거절한다.
+    #
+    # 충돌 묶음 하나당 한 벌이라 이 이력 행에 둔다. 충돌마다 한 줄인 conflict_reference에
+    # 두면 충돌이 셋이면 같은 상태가 세 벌 쌓인다.
+    #
+    # TODO: 판단 당시 입력(snapshot·known_procedure_steps)을 담을 자리가 아직 없다
+    # (save_reviewed_plan의 TODO). 그 자리가 생기면 이 칸도 거기로 옮기는 것이 맞다.
+    history.conflict_snapshot = outcome.conflict_snapshot.model_dump(mode="json")
 
     # 같은 충돌이 두 번 저장되는 것을 따로 막지 않는다. 전에 두었던 "이미 있으면 건너뛰기"는
     # conflict_ref로 비교했는데, AI가 판단할 때마다 새 UUID로 만들어서(info_agent/agent.py의
@@ -160,9 +192,33 @@ def save_conflict(session: Session, history: CaseHistory, outcome: ConflictOutco
                 candidate_payload=conflict.model_dump(mode="json"),
             ),
         )
+    # 결정 뒤 재판단에서 또 다른 충돌이 나올 수 있다. 그때도 방금 고른 것은 닫아야 한다 —
+    # 안 닫으면 다음 확인 화면이 이미 답한 충돌을 다시 묻고, 그 Case는 영영 안 풀린다.
+    _resolve_conflicts(session, resolved_conflicts)
+
     history.judgment_status = "CONFLICT"
     history.judged_at = kst_now()
     session.commit()
+
+
+def _resolve_conflicts(session: Session, choices: Mapping[int, str] | None) -> None:
+    """사장님이 결정한 충돌을 닫는다. 고른 쪽을 그대로 남긴다.
+
+    "새 값"은 채택(CONFIRMED), "기존 값 유지"는 거절(REJECTED)이다. 둘 다 결정이므로 어느
+    쪽이든 더는 되묻지 않는다. 결정 접수 시점이 아니라 판단이 성공해서 값을 저장할 때
+    닫는다 — 접수 때 닫으면 판단이 실패했을 때 값은 그대로인데 충돌만 사라져서, 사장님이
+    다시 결정할 길이 없어진다(현석님 #108).
+    """
+
+    for conflict_reference_id, side in (choices or {}).items():
+        reference = conflict_reference_crud.get_conflict_reference_by_id(
+            session, conflict_reference_id
+        )
+        if reference is None:
+            raise ValueError(f"conflict_reference {conflict_reference_id} not found")
+        reference.status = "CONFIRMED" if side == "PROPOSED" else "REJECTED"
+        reference.decided_at = kst_now()
+        session.add(reference)
 
 
 def save_safe_failure(session: Session, history: CaseHistory, outcome: SafeFailureOutcome) -> None:
@@ -287,6 +343,19 @@ def _apply_fact_changes(
         raise ValueError(f"case {history.case_id} not found")
 
     for change in fact_changes:
+        # AI가 대화 중에 바꾸겠다고 보낼 수 있는 필드는 14개(AgentFieldKey)지만, 저장하는
+        # 것은 9개(CaseFieldKey)뿐이다. 나머지 5개(직원 고용 이력·4대보험 가입 이력)는
+        # 가입 폼으로만 채우기로 했다 — 사장님이 직접 답한 값을 AI가 대화 중에 추정한
+        # 값으로 덮으면 안 되기 때문이다(승준님 #132 연동 요청).
+        #
+        # 컬럼이 있느냐로 가르면 안 된다. 그 5개도 컬럼은 있어서 전부 통과해 버린다.
+        # 한 필드 때문에 나머지 변경까지 버리지 않도록 건너뛰되, 반드시 흔적을 남긴다 —
+        # 검수를 통과한 변경을 말없이 버리는 것이기 때문이다.
+        if change.field_path not in CaseFieldKey:
+            logger.warning(
+                "case %s의 %s는 AI 대화로 저장하는 값이 아니라 건너뛴다", case.id, change.field_path.value
+            )
+            continue
         # 컬럼에 글자 "UNKNOWN"이 들어 있는 필드가 있다. 그대로 적으면 "모름"이 이력에
         # 두 모양(NULL과 "UNKNOWN")으로 남는다. AI가 보는 표현으로 맞춰서 적는다.
         before = _comparable_case_value(case, change.field_path)

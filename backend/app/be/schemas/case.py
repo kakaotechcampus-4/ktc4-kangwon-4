@@ -1,17 +1,23 @@
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 
+from app.agent.roadmap import CHECKLIST_IDS
+
+BusinessType = Literal["CAFE", "RESTAURANT"]
 LeaseStatus = Literal["LEASED_PAID", "LEASED_FREE", "OWNED"]
 CaseStatus = Literal["IN_PROGRESS", "COMPLETED"]
 RestorationStatus = Literal["UNKNOWN", "NOT_STARTED", "IN_PROGRESS", "COMPLETED", "NOT_REQUIRED"]
 RestorationScope = Literal["UNKNOWN", "PARTIAL", "FULL", "NOT_REQUIRED"]
 DemolitionRequired = Literal["UNKNOWN", "REQUIRED", "NOT_REQUIRED"]
+RestorationClause = Literal["EXISTS", "NOT_EXISTS", "UNKNOWN"]
 JudgmentStatus = Literal["PENDING", "DONE", "NEEDS_MORE_INFO", "CONFLICT", "FAILED"]
 RecoveryActionCode = Literal["RETRY", "RESUBMIT_INPUT", "CONTACT_SUPPORT", "NONE"]
 ResultsSubmitResult = Literal["PENDING", "UPDATED", "NO_CHANGE", "NEEDS_MORE_INFO", "CONFLICT", "FAILED"]
 ConflictSide = Literal["PROPOSED", "STORED"]
+# 사장님이 직접 체크하는 로드맵 항목. AI 로드맵(#132)의 목록을 그대로 쓴다.
+ChecklistTaskId = Literal[tuple(sorted(CHECKLIST_IDS))]
 CaseLogActor = Literal["OWNER", "RIBBON"]
 CaseLogEvent = Literal[
     # 사장님이 한 일
@@ -27,11 +33,36 @@ CaseLogEvent = Literal[
 
 
 class CaseCreateRequest(BaseModel):
-    business_type: str
+    store_name: str | None = Field(default=None, max_length=50)
+    business_type: BusinessType
     franchise_status: bool
-    employee_count: int | None = None
+    employee_count: int | None = Field(default=None, ge=0, le=1000)
+    has_business_loan: bool | None = None
+    has_service_contracts: bool | None = None
     lease_status: LeaseStatus
+    restoration_clause: RestorationClause = "UNKNOWN"
     planned_closure_date: date | None = None
+    # 날짜를 못 정했으면 예상 달만 "YYYY-MM"으로 받는다. 화면에서 셋 중 하나만 고르므로
+    # 둘 다 오는 건 FE 실수다. 조용히 하나를 버리면 실수가 묻혀서 422로 거절한다(#145 리뷰)
+    planned_closure_month: str | None = Field(default=None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
+
+    # 직원 고용 이력과 사업장 4대보험 가입 이력. 넷 다 "지금"이 아니라 "있었던 적"을 묻는다.
+    # 안 보내면 None(=안 물어봄)이고 AI에는 모름으로 넘어간다. 안 물어본 것을 false로
+    # 채우면 AI가 해당 절차를 "해당 없음"으로 보고 로드맵에서 빼버린다.
+    #
+    # 보험 네 칸은 같이 보내야 뜻이 산다. 하나만 false로 오고 나머지가 None이면
+    # "해당 없음"이 아니라 "모름"으로 남는다(rules.py:129-136).
+    had_employees: bool | None = None
+    pension_enrolled: bool | None = None
+    health_insurance_enrolled: bool | None = None
+    employment_insurance_enrolled: bool | None = None
+    industrial_accident_insurance_enrolled: bool | None = None
+
+    @model_validator(mode="after")
+    def reject_both_closure_date_and_month(self) -> "CaseCreateRequest":
+        if self.planned_closure_date is not None and self.planned_closure_month is not None:
+            raise ValueError("planned_closure_date와 planned_closure_month는 하나만 보낸다")
+        return self
 
 
 class CaseCreateResponse(BaseModel):
@@ -39,16 +70,21 @@ class CaseCreateResponse(BaseModel):
 
     id: int
     member_id: int
+    store_name: str | None
     business_type: str
     franchise_status: bool
     employee_count: int | None
+    has_business_loan: bool | None
+    has_service_contracts: bool | None
     case_status: CaseStatus
     lease_status: LeaseStatus
+    restoration_clause: RestorationClause
     restoration_status: RestorationStatus
     restoration_scope: RestorationScope
     restoration_scope_detail: str | None
     demolition_required: DemolitionRequired
     planned_closure_date: date | None
+    planned_closure_month: str | None
     completed_at: datetime | None
     created_at: datetime
     updated_at: datetime
@@ -59,15 +95,20 @@ class CaseGetDetailResponse(BaseModel):
 
     id: int
     member_id: int
+    store_name: str | None
     business_type: str
     franchise_status: bool
     employee_count: int | None
+    has_business_loan: bool | None
+    has_service_contracts: bool | None
     lease_status: LeaseStatus
+    restoration_clause: RestorationClause
     restoration_status: RestorationStatus
     restoration_scope: RestorationScope
     restoration_scope_detail: str | None
     demolition_required: DemolitionRequired
     planned_closure_date: date | None
+    planned_closure_month: str | None
 
 
 class NextActionResponse(BaseModel):
@@ -145,6 +186,22 @@ class CaseResultsSubmitResponse(BaseModel):
     requested_field_paths: list[str] | None = None
 
 
+class CaseChecklistUpdateRequest(BaseModel):
+    completed: bool
+
+
+class CaseChecklistResponse(BaseModel):
+    task_id: ChecklistTaskId
+    completed: bool
+
+
+class CaseSupportApprovalRequest(BaseModel):
+    # 키는 꼭 보내야 하고 값은 null(아직 모름)도 된다. 빠뜨린 요청을 "모름"으로 저장하지 않으려고 기본값을 두지 않는다.
+    approved: bool | None
+
+
+class CaseSupportApprovalResponse(BaseModel):
+    approved: bool | None
 class CaseLogItem(BaseModel):
     actor: CaseLogActor
     event: CaseLogEvent

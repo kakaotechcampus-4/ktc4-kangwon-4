@@ -13,7 +13,7 @@ from app.agent.action_catalog import ProcedureBindings
 from app.agent.guardrails import ensure_no_sensitive_text
 from app.agent.procedure_tool.store import ReviewedProcedureStore
 from app.agent.runtime import RuntimeLimits, build_runtime
-from app.agent.schemas import ConflictSelection, KnownProcedureStep
+from app.agent.schemas import ConflictSelection, KnownProcedureStep, RetainedInfoResult
 from app.agent.support_agent import ReviewedSupportCatalog
 from app.common.agent_dto import (
     AgentGraphInput,
@@ -84,12 +84,15 @@ def build_conflict_input(
     conflicts: Sequence[ConflictCandidate] = (),
     selections: Sequence[ConflictSelection] = (),
     conflict_snapshot: CaseSnapshot | None = None,
+    retained_info_result: RetainedInfoResult | None = None,
     input_event_id: str,
     confirmed_at: datetime,
     client_event_id: str | None = None,
     trace_id: str | None = None,
 ) -> AgentGraphInput:
     """Build a single acceptance or complete batch of new/existing value choices."""
+    if retained_info_result is not None:
+        ensure_no_sensitive_text([retained_info_result.input.redacted_text])
     return AgentGraphInput.model_validate({
         "trigger": ConflictConfirmedTrigger(
             trigger_type="CONFLICT_CONFIRMED",
@@ -99,6 +102,7 @@ def build_conflict_input(
             conflicts=list(conflicts),
             selections=list(selections),
             conflict_snapshot=conflict_snapshot,
+            retained_info_result=retained_info_result,
             confirmed_at=confirmed_at,
         ).model_dump(mode="python"),
         "case_snapshot": case_snapshot.model_dump(mode="python"),
@@ -127,6 +131,9 @@ async def run_case_planning(
     returning this result does not report database persistence.
     """
     owned_request = AgentGraphInput.model_validate(request.model_dump(mode="python"))
+    retained = getattr(owned_request.trigger, "retained_info_result", None)
+    if retained is not None:
+        ensure_no_sensitive_text([retained.input.redacted_text])
     if isinstance(owned_request.trigger, (CaseCreatedTrigger, ResultSubmittedTrigger)):
         ensure_no_sensitive_text([owned_request.trigger.input.redacted_text])
     confirmation = getattr(owned_request.trigger, "procedure_completion_confirmation", None)

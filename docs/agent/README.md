@@ -25,6 +25,7 @@ MVP 단순화를 이유로 제약을 완화하지 않는다.
 
 | 구성요소 | 문서 | 코드 |
 |---|---|---|
+| 5단계 로드맵·체크 기록 | [호출 계약](#5단계-로드맵-조회와-체크-기록) | `roadmap.py` |
 | 최종 판단(Blocker·Next Action) | [supervisor.md](./supervisor.md) | `supervisor/agent.py` |
 | 사실 추출·충돌 감지 | [info-agent.md](./info-agent.md) | `info_agent/agent.py` |
 | 절차 조회·실행 가능 판정 | [procedure-tool.md](./procedure-tool.md) | `procedure_tool/` |
@@ -39,6 +40,54 @@ MVP 단순화를 이유로 제약을 완화하지 않는다.
 Agent는 SQL·ORM으로 DB를 직접 읽거나 쓰지 않는다 — 저장·재조회는 이 저장소의 Agent 범위 밖이다.
 판단 방향은 [팀 원칙](../../CLAUDE.md), 사용자 흐름은 [Hero Scenario](../hero-scenario.md),
 호출 구조는 [architecture.md](./architecture.md)를 따른다.
+
+## 5단계 로드맵 조회와 체크 기록
+
+[`roadmap.py`](../../backend/app/agent/roadmap.py)의 일반 함수는 LLM·DB를 호출하지 않는다.
+개인 카페의 확정 사실, 기존 공식 절차 진행, 사용자 체크, 문서 점검을 5단계로 표시한다.
+`CHECKLIST` 완료는 사용자 보고이며 기관 처리 완료나 지원 자격 승인이 아니다.
+철거 작업/서류 수령과 가게 반환/보증금 정산은 서로 다른 완료 상태로 기록한다.
+기한·금액·지원 자격은 계산하지 않는다. 개인 카페는 `supported=true`, `unsupported_reason=null`이다.
+근거가 필요한 설명은 할 일의 `guidance`에 두고, 사람이 원문과 대조해 검수한 근거를 `guidance_source`(기관·제목·주소·원문 발췌·지문·검수자·검수 시각)에 함께 둔다. 지금은 "직원에게 폐업 알리기"의 해고예고(근로기준법 제26조) 하나이며, 해당 없는 할 일에는 붙이지 않는다.
+프랜차이즈 카페·일반 음식점 조회는 예외 대신 `supported=false`와 `unsupported_reason`을 반환한다.
+이때 단계·다음 행동은 비어 있다. 호출자는 지원 여부를 먼저 확인해 안내 화면을 선택한다.
+미지원 로드맵의 체크 기록은 거절한다. 필수 사실 누락·검수 변조 등 잘못된 입력 검증은 유지한다.
+서류 점검 결과가 없는 조회·체크는 PyMuPDF 없이 실행된다. 현재 서류의 점검 결과를 대조하는 경우에는
+`document_tool/requirements.txt`의 의존성이 필요하다. 실제 문서 추출·점검·ZIP과 OCR 배포 준비는 #128 범위다.
+완료 Case도 조회할 수 있으며, 기존 Agent의 진행 중 Case만 판단하는 입력 검증은 유지한다.
+
+```python
+from app.agent.roadmap import RoadmapInput, build_roadmap, record_checklist
+
+context = RoadmapInput(
+    case_snapshot=snapshot, known_procedure_steps=registry,
+    has_business_loan=None, has_service_contracts=None, restoration_clause="UNKNOWN",
+)
+context = record_checklist(context, "dispose_stock", completed=True)
+roadmap = build_roadmap(context)
+# 같은 snapshot의 Review PASS 결과만 전달한다. 저장 후 새 snapshot에는 다시 판단한다.
+context.reviewed_plan = reviewed_outcome
+roadmap = build_roadmap(context)
+```
+
+`null`은 미확인으로 남는다. 두 bool의 과거 기본값 false가 실제 답변인지 BE가 구분해 전달해야 한다.
+`restoration_clause`는 `EXISTS/NOT_EXISTS/UNKNOWN`을 보존하며 복구 범위·철거 필요 여부를 추정하지 않는다.
+업종은 기존 `business_type`에 `CAFE/RESTAURANT`, 프랜차이즈 여부는 별도 값으로 전달한다.
+업종·프랜차이즈·임차 형태는 FE 추가 질문으로 확정한다. Agent의 필수 입력 검증은 유지한다.
+[#119 최종 합의](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/119#issuecomment-6570403720)에 따라
+BE는 온보딩의 `had_employees`와 보험 4개(`pension_enrolled`, `health_insurance_enrolled`,
+`employment_insurance_enrolled`, `industrial_accident_insurance_enrolled`)를 저장해 `case_snapshot.facts`로 전달한다.
+안 물어본 값은 `value=null`, `status=UNKNOWN`으로 전달한다. 보험은 현재 가입 여부가 아니라 종료·탈퇴를 포함한 가입 이력이다.
+네 값을 함께 받고, 하나라도 true면 해당, 모두 false여야 해당 없음, 나머지는 미확인이다. 직원 수로 보험을 추정하지 않는다.
+직원 0명일 때 과거 고용 여부를 별도로 확인한다. 직원이 있으면 판단 중 고용 이력을 추론한다.
+AI 대화에서 받은 이 다섯 값은 해당 판단에만 사용하며 `fact_changes`로 반환하지 않는다.
+온보딩 저장으로 반복 질문이 줄어드는 것과 대화 답변을 저장하는 것은 구분한다. BE 저장·snapshot 연결은 담당 파트 작업이다.
+`support_approved`는 사장님이 확인한 기관 결과다. 미확인일 때 정산은 확인 필요, 거절이면 해당 없음이다.
+`documents`에는 #128의 `DocumentContext`를 전달한다. 점검 digest가 현재 서류와 일치할 때만 완료 표시한다.
+문서 Context의 UUID와 Case의 정수 ID는 다른 식별자이므로 BE가 소유권·연결을 확인한 뒤 전달한다.
+`next_action`·사용자 질문은 같은 Case/snapshot/절차 목록의 `ReviewedPlanOutcome`에서만 복사한다.
+`procedure_bindings`가 필요한 registry는 runtime에 사용한 동일 mapping을 전달한다.
+저장·API·화면 연결은 FE/BE 담당 작업이다. 기존 `run_case_planning`이 이 함수를 자동 호출하지는 않는다.
 
 ## 실행 경계
 

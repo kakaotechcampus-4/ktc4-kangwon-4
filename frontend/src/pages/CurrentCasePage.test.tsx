@@ -74,7 +74,7 @@ function renderAt(path: string) {
           { path: '/log', element: <p>기록 화면</p> },
         ],
       },
-      { path: '/start', element: <p>시작 화면</p> },
+      { path: '/cases/new', element: <p>상황 진단</p> },
       { path: '/task', element: <p>할 일 상세 화면</p> },
       { path: '/results', element: <p>결과 입력 화면</p> },
     ],
@@ -124,12 +124,12 @@ describe('CurrentCasePage', () => {
   })
 
   /** 주소로 직접 들어온 경우다. 빈 화면 대신 만들러 보낸다 */
-  it('Case가 없으면 시작 화면으로 보낸다', async () => {
+  it('Case가 없으면 상황 진단으로 보낸다', async () => {
     saveTokens('access-1', 'refresh-1')
     mockCase(envelope({ case: null }))
     renderAt('/case')
 
-    expect(await screen.findByText('시작 화면')).toBeInTheDocument()
+    expect(await screen.findByText('상황 진단')).toBeInTheDocument()
   })
 
   /** 빈 화면을 두면 사용자는 Case가 사라진 줄 안다 */
@@ -258,6 +258,33 @@ describe('CurrentCasePage', () => {
       renderAt('/case')
 
       expect(await screen.findByText(/원상복구 범위 등/)).toBeInTheDocument()
+    })
+
+    /** 더 알려주시면 풀리는 실패다. 같은 길로 다시 보내면 서버가 다시 판단한다 */
+    it('다시 알아야 할 것이 있으면 다시 알려주기를 눌러 결과 입력으로 간다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      mockCase(
+        envelope({
+          judgment_status: 'FAILED',
+          recovery_action_code: 'RESUBMIT_INPUT',
+          requested_field_paths: ['restoration_scope'],
+        }),
+      )
+      renderAt('/case')
+
+      fireEvent.click(await screen.findByRole('button', { name: '다시 알려주기' }))
+
+      expect(await screen.findByText('결과 입력 화면')).toBeInTheDocument()
+    })
+
+    /** 더 적어도 같은 실패가 돌아온다(#57). 누르면 되는 것처럼 보이는 버튼을 달지 않는다 */
+    it('사장님이 알려줘서 풀리는 실패가 아니면 다시 알려주기를 달지 않는다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      mockCase(envelope({ judgment_status: 'FAILED', recovery_action_code: 'CONTACT_SUPPORT' }))
+      renderAt('/case')
+
+      await screen.findByRole('heading', { level: 1 })
+      expect(screen.queryByRole('button', { name: '다시 알려주기' })).not.toBeInTheDocument()
     })
 
     /**

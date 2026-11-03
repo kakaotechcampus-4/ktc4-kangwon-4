@@ -4,6 +4,8 @@ from sqlmodel import Session
 from app.be.db import get_db
 from app.be.dependencies.auth import get_current_member_id
 from app.be.schemas.case import (
+    CaseChecklistResponse,
+    CaseChecklistUpdateRequest,
     CaseConflictsDecisionRequest,
     CaseCreateRequest,
     CaseCreateResponse,
@@ -13,8 +15,12 @@ from app.be.schemas.case import (
     CaseResultsSubmitAcceptedResponse,
     CaseResultsSubmitRequest,
     CaseResultsSubmitResponse,
+    CaseSupportApprovalRequest,
+    CaseSupportApprovalResponse,
+    ChecklistTaskId,
 )
 from app.be.services import case as case_service
+from app.be.services import conflict_decision as conflict_decision_service
 from app.be.services import judgment as judgment_service
 
 router = APIRouter()
@@ -84,13 +90,20 @@ def submit_case_results(
 @router.post("/cases/results/decision", response_model=CaseResultsSubmitAcceptedResponse)
 def submit_case_conflicts_decision(
     decision_request: CaseConflictsDecisionRequest,
+    background_tasks: BackgroundTasks,
     member_id: int = Depends(get_current_member_id),
     session: Session = Depends(get_db),
 ):
     response = case_service.submit_case_conflicts_decision(session, member_id, decision_request)
 
-    # TODO(AI팀 연동): 여기서 충돌 결정 판단을 백그라운드로 실행하는 부분이 이어져야 한다.
-    # 사용자 선택(decision_request.decisions)은 DB에 저장하지 않으므로 이 호출에 인자로 넘긴다.
+    # 사용자 선택은 DB에 남기지 않기로 해서(현석님 #108) 인자로 넘긴다. 접수 응답을 먼저
+    # 보내고 판단은 뒤에서 돈다 — 결과 제출(/results)과 같은 방식이고, 화면은
+    # GET /cases/results/status로 받아 간다.
+    background_tasks.add_task(
+        conflict_decision_service.run_conflict_decision_in_background,
+        response.case_history_id,
+        {item.conflict_reference_id: item.side for item in decision_request.decisions},
+    )
 
     return response
 
@@ -102,3 +115,22 @@ def get_case_results_submit_status(
     session: Session = Depends(get_db),
 ):
     return case_service.get_case_results_submit_status(session, member_id, case_history_id)
+
+
+@router.put("/cases/checklists/{task_id}", response_model=CaseChecklistResponse)
+def update_case_checklist(
+    task_id: ChecklistTaskId,
+    checklist_request: CaseChecklistUpdateRequest,
+    member_id: int = Depends(get_current_member_id),
+    session: Session = Depends(get_db),
+):
+    return case_service.update_case_checklist(session, member_id, task_id, checklist_request.completed)
+
+
+@router.put("/cases/support-approval", response_model=CaseSupportApprovalResponse)
+def update_case_support_approval(
+    approval_request: CaseSupportApprovalRequest,
+    member_id: int = Depends(get_current_member_id),
+    session: Session = Depends(get_db),
+):
+    return case_service.update_case_support_approval(session, member_id, approval_request.approved)
