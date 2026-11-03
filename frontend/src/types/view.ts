@@ -362,6 +362,10 @@ export interface DiagnosisAnswers {
   partTimeCount: number
   /** 지금 직원이 없을 때만 묻는다 */
   hadEmployees: boolean | null
-  insurances: DiagnosisInsurance[] | null
+  /**
+   * 고른 보험. 빈 목록은 "가입한 적 없어요", `UNKNOWN`은 "잘 모르겠어요"다.
+   * 둘을 나누는 것은 서버에서 뜻이 달라서다 — 없음은 보험 할 일을 빼고, 모름은 확인 필요로 남긴다
+   */
+  insurances: DiagnosisInsurance[] | 'UNKNOWN' | null
   closure: DiagnosisClosure | null
 }

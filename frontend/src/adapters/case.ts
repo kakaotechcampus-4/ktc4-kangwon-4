@@ -18,6 +18,7 @@ import type {
   CurrentCaseView,
   DiagnosisAnswers,
   DiagnosisBusiness,
+  DiagnosisInsurance,
   Fact,
   FailureNotice,
   JudgmentView,
@@ -328,7 +329,7 @@ const BUSINESS_REQUEST: Record<DiagnosisBusiness, { business_type: string; franc
  *   서버가 직원 수로 "둔 적 있음"을 안다
  * - 대출·배달앱: 골랐으면 `true`, 안 골랐으면 `false`
  * - 보험: 네 칸을 늘 같이 `true`/`false`로 보낸다. 하나라도 `null`이면 서버는 "해당 없음"이
- *   아니라 "모름"으로 본다
+ *   아니라 "모름"으로 본다. "잘 모르겠어요"면 네 칸 모두 `null`
  * - 폐업 예정일: 시기("이번 달" 등)에서 날짜를 지어내지 않고 비워 보낸다
  * - 가게 이름: 진단에서 묻지 않아 비워 보낸다
  *
@@ -360,6 +361,8 @@ export function toCaseCreateRequest(answers: DiagnosisAnswers): CaseCreateReques
 
   const { insurances } = answers
   if (insurances === null) return null
+  const enrolled = (insurance: DiagnosisInsurance) =>
+    insurances === 'UNKNOWN' ? null : insurances.includes(insurance)
 
   return {
     store_name: null,
@@ -372,9 +375,9 @@ export function toCaseCreateRequest(answers: DiagnosisAnswers): CaseCreateReques
     restoration_clause: restorationClause,
     planned_closure_date: null,
     had_employees: staffed ? null : answers.hadEmployees,
-    pension_enrolled: insurances.includes('PENSION'),
-    health_insurance_enrolled: insurances.includes('HEALTH'),
-    employment_insurance_enrolled: insurances.includes('EMPLOYMENT'),
-    industrial_accident_insurance_enrolled: insurances.includes('INDUSTRIAL_ACCIDENT'),
+    pension_enrolled: enrolled('PENSION'),
+    health_insurance_enrolled: enrolled('HEALTH'),
+    employment_insurance_enrolled: enrolled('EMPLOYMENT'),
+    industrial_accident_insurance_enrolled: enrolled('INDUSTRIAL_ACCIDENT'),
   }
 }

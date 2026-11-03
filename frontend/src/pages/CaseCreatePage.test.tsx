@@ -92,6 +92,29 @@ describe('CaseCreatePage', () => {
     })
   })
 
+  /** [가입한 적 없어요]와 다르다. 없음으로 보내면 보험 신고 할 일이 빠지고, 모름이면 확인 필요로 남는다 */
+  it('보험을 잘 모르겠다고 하면 네 칸을 비워 보낸다', async () => {
+    saveTokens('access-1', 'refresh-1')
+    const fetchMock = mockServer(200)
+    renderPage()
+
+    await press('radio', /개인 카페/)
+    await press('button', '다음')
+    await press('button', '해당하는 게 없어요')
+    await press('radio', '아니요, 없어요')
+    await press('button', '다음')
+    await press('button', '잘 모르겠어요')
+    await press('radio', '아직 안 정했어요')
+    fireEvent.click(sendButton())
+
+    expect(postBody(fetchMock)).toMatchObject({
+      pension_enrolled: null,
+      health_insurance_enrolled: null,
+      employment_insurance_enrolled: null,
+      industrial_accident_insurance_enrolled: null,
+    })
+  })
+
   /** 서버가 월세 여부를 꼭 받아야 한다. 건너뛰면 점포 형태를 정할 수 없어 보내지 못한다 */
   it('빌린 가게를 고르면 다음은 월세 질문이다', async () => {
     saveTokens('access-1', 'refresh-1')

@@ -218,7 +218,8 @@ function questionOf(
       }
 
     case 'insurance': {
-      const insurances = answers.insurances ?? []
+      // "잘 모르겠어요"를 골랐다가 돌아오면 아무것도 안 고른 모양에서 다시 고른다
+      const insurances = Array.isArray(answers.insurances) ? answers.insurances : []
       return {
         // "가게 이름으로"를 강조한다. 혼자 하는 사장님도 개인으로는 국민연금·건강보험에 들어 있어,
         // 그냥 "가입했던 보험"이라고 물으면 사업장 보험이 아닌 것을 고르게 된다
@@ -234,9 +235,11 @@ function questionOf(
           ],
           selected: insurances,
           onToggle: (value) =>
-            setAnswers({ insurances: toggle(answers.insurances, value as (typeof insurances)[number]) }),
+            setAnswers({ insurances: toggle(insurances, value as (typeof insurances)[number]) }),
         },
         action: multiAction(insurances.length, '가입한 적 없어요', () => next({ insurances })),
+        // 모르는 사장님이 [가입한 적 없어요]를 누르면 보험 신고 할 일이 "해당 없음"으로 빠진다(#156 다물님)
+        secondary: { label: '잘 모르겠어요', onClick: () => next({ insurances: 'UNKNOWN' }) },
       }
     }
 

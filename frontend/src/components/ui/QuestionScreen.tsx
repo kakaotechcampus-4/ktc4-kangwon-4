@@ -50,6 +50,11 @@ interface QuestionScreenProps {
   /** 보기 대신 놓는 큰 그림 하나 (폐업 시기의 달력) */
   illustration?: string
   action: { label: string; onClick: () => void; disabled?: boolean; variant?: 'brand' | 'neutral' }
+  /**
+   * 보기 아래의 글자 버튼 하나 ("잘 모르겠어요"). 시안에 없는 자리라, 보기 안에 섞어 다른 보기와
+   * 함께 골라지지 않게 따로 둔다. 아래쪽 버튼보다 약하게 그려 주요 행동을 하나로 남긴다(FE 규칙 5)
+   */
+  secondary?: { label: string; onClick: () => void }
   /** 아래쪽 [이전] 버튼. 시안은 마지막 질문에만 둔다 */
   onPrevious?: () => void
   /** 제목 위에 놓는 안내 하나 (보내기에 실패했을 때) */
@@ -214,6 +219,7 @@ export function QuestionScreen({
   box,
   illustration,
   action,
+  secondary,
   onPrevious,
   notice,
 }: QuestionScreenProps) {
@@ -278,6 +284,15 @@ export function QuestionScreen({
           </span>
         )}
         {!optionsFirst && <Choices input={input} labelledBy={titleId} />}
+        {secondary && (
+          <button
+            type="button"
+            onClick={secondary.onClick}
+            className="-mt-4 h-12 cursor-pointer self-center rounded-lg px-3 text-16 font-medium text-fg-neutral-muted underline underline-offset-4 active:bg-bg-transparent-pressed"
+          >
+            {secondary.label}
+          </button>
+        )}
       </main>
 
       <div className="flex shrink-0 gap-2 px-4 pt-3 pb-8.5">

@@ -602,6 +602,16 @@ describe('toCaseCreateRequest', () => {
     expect(toCaseCreateRequest(diagnosis({ insurances: null }))).toBeNull()
   })
 
+  /** 모르는 것을 "가입한 적 없음"으로 보내면 보험 신고 할 일이 해당 없음으로 빠진다(#156 다물님) */
+  it('보험을 모르면 네 칸을 모두 비워 보낸다', () => {
+    expect(toCaseCreateRequest(diagnosis({ insurances: 'UNKNOWN' }))).toMatchObject({
+      pension_enrolled: null,
+      health_insurance_enrolled: null,
+      employment_insurance_enrolled: null,
+      industrial_accident_insurance_enrolled: null,
+    })
+  })
+
   /** "이번 달"에서 날짜를 지어내면 서버가 그 날짜로 기한을 계산한다(FE 규칙 7) */
   it('폐업 시기를 골라도 날짜는 비워 보낸다', () => {
     expect(toCaseCreateRequest(diagnosis({ closure: 'THIS_MONTH' }))?.planned_closure_date).toBeNull()
