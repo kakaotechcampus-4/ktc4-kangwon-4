@@ -57,3 +57,15 @@ def get_all_step_dependencies(session: Session) -> list[StepDependency]:
 
 def get_all_step_eligibilities(session: Session) -> list[StepEligibility]:
     return session.exec(select(StepEligibility)).all()
+
+
+def create_step_dependency(session: Session, dependency: StepDependency) -> StepDependency:
+    session.add(dependency)
+    session.flush()
+    return dependency
+
+
+def create_step_eligibility(session: Session, eligibility: StepEligibility) -> StepEligibility:
+    session.add(eligibility)
+    session.flush()
+    return eligibility

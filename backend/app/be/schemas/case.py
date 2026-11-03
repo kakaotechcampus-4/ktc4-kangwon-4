@@ -27,6 +27,18 @@ class CaseCreateRequest(BaseModel):
     restoration_clause: RestorationClause = "UNKNOWN"
     planned_closure_date: date | None = None
 
+    # 직원 고용 이력과 사업장 4대보험 가입 이력. 넷 다 "지금"이 아니라 "있었던 적"을 묻는다.
+    # 안 보내면 None(=안 물어봄)이고 AI에는 모름으로 넘어간다. 안 물어본 것을 false로
+    # 채우면 AI가 해당 절차를 "해당 없음"으로 보고 로드맵에서 빼버린다.
+    #
+    # 보험 네 칸은 같이 보내야 뜻이 산다. 하나만 false로 오고 나머지가 None이면
+    # "해당 없음"이 아니라 "모름"으로 남는다(rules.py:129-136).
+    had_employees: bool | None = None
+    pension_enrolled: bool | None = None
+    health_insurance_enrolled: bool | None = None
+    employment_insurance_enrolled: bool | None = None
+    industrial_accident_insurance_enrolled: bool | None = None
+
 
 class CaseCreateResponse(BaseModel):
     model_config = {"from_attributes": True}

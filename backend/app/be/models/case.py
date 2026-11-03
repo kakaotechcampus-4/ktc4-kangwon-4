@@ -20,6 +20,21 @@ class Case(TimestampMixin, table=True):
     has_business_loan: bool | None = Field(default=None)
     has_service_contracts: bool | None = Field(default=None)
 
+    # 직원 고용 이력과 사업장 4대보험 가입 이력. 모두 "지금"이 아니라 "있었던 적"을 묻는다
+    # (blocker_candidates.py:43-47). 지금 직원이 0명이어도 지난달 내보낸 직원의 퇴직금 정산이
+    # 남아 있고, 이미 탈퇴한 보험도 상실·탈퇴 신고 대상이기 때문이다.
+    #
+    # NULL은 "안 물어봤다"는 뜻이고 AI에는 모름으로 넘어간다. false("아니오")와 다르다 —
+    # 안 물어본 것을 false로 두면 AI가 해당 절차를 "해당 없음"으로 보고 로드맵에서 빼버린다.
+    #
+    # 보험은 네 칸을 같이 채워야 한다. AI는 넷 중 하나라도 true면 해당, 넷 다 false여야
+    # 해당 없음으로 보고, 섞이면 모름으로 둔다(rules.py:129-136).
+    had_employees: bool | None = Field(default=None)
+    pension_enrolled: bool | None = Field(default=None)
+    health_insurance_enrolled: bool | None = Field(default=None)
+    employment_insurance_enrolled: bool | None = Field(default=None)
+    industrial_accident_insurance_enrolled: bool | None = Field(default=None)
+
     case_status: str = Field(
         default="IN_PROGRESS",
         sa_column=Column(Enum("IN_PROGRESS", "COMPLETED", name="case_status_enum"), server_default="IN_PROGRESS", nullable=False),

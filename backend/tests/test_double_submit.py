@@ -24,6 +24,7 @@ from app.be.schemas.case import (
     CaseCreateRequest,
     CaseResultsSubmitRequest,
 )
+from app.be.services import procedure_registry
 from app.be.services.case import create_case, submit_case_conflicts_decision, submit_case_results
 
 
@@ -37,6 +38,11 @@ def mysql_engine():
         engine = create_engine(container.get_connection_url() + "?charset=utf8mb4")
         try:
             SQLModel.metadata.create_all(engine)
+            # 앱이 뜰 때 하는 적재를 그대로 한다(main.lifespan). 요청 경로는 읽기만 하므로
+            # 이게 없으면 Case 생성이 ProcedureRegistryMissingError로 멈춘다.
+            with Session(engine) as session:
+                procedure_registry.ensure_cafe_procedure_registry(session)
+                session.commit()
             yield engine
         finally:
             engine.dispose()
