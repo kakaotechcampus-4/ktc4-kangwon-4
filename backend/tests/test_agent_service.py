@@ -33,7 +33,9 @@ from app.common.agent_data import (
     InMemoryReviewedProcedureStore,
     build_known_procedure_steps,
 )
-from app.common.agent_dto import CaseSnapshot, DocumentContext, RedactedInput, document_input_text
+from app.common.agent_dto import (
+    CaseSnapshot, DocumentContext, RedactedInput, document_input_text, document_replan_text,
+)
 from app.common.agent_service import (
     build_conflict_input,
     build_planning_input,
@@ -492,3 +494,46 @@ def test_import_cli_rejects_invalid_source_before_importing_database(monkeypatch
     ))
     with pytest.raises(ProcedureStoreError, match="synthetic invalid source"):
         import_cli.main()
+
+
+CLAUSE = "원상복구 범위는 카운터·싱크대 부분이다."
+
+
+def lease(clause=CLAUSE, *, confirmed=True):
+    fields = [("restoration_clause", clause, clause)]
+    return document_record(DocumentKind.LEASE, fields, needs_confirmation=True,
+                           confirmed_fields={"restoration_clause": clause} if confirmed else None)
+
+
+def test_replan_runs_only_when_a_new_restoration_clause_is_confirmed():
+    first = DocumentContext(documents=[lease()])
+    text = document_replan_text(DocumentContext(), first)
+    assert text is not None and CLAUSE in text
+    # 확인 필요 서류를 아직 확인하지 않았으면 부르지 않는다
+    assert document_replan_text(DocumentContext(), DocumentContext(documents=[lease(confirmed=False)])) is None
+
+
+@pytest.mark.parametrize("after_documents", [
+    # 같은 조항을 다시 올림
+    lambda: [lease(), lease()],
+    # 금액 서류만 더함 — 금액 대조는 서류 점검이 한다
+    lambda: [lease(), document_record(DocumentKind.TAX_INVOICE, TAX_INVOICE_FIELDS)],
+    # 조항 서류를 뺌 — 이미 반영한 사실을 되돌리지 않는다
+    lambda: [],
+], ids=["same-clause-reupload", "amount-only", "removed"])
+def test_replan_is_skipped_when_no_judgment_value_changes(after_documents):
+    before = DocumentContext(documents=[lease()])
+    assert document_replan_text(before, DocumentContext(documents=after_documents())) is None
+
+
+def test_replan_runs_again_when_the_confirmed_clause_changes():
+    before = DocumentContext(documents=[lease()])
+    changed = "원상복구 범위는 전체이며 철거가 필요하다."
+    text = document_replan_text(before, DocumentContext(documents=[lease(changed)]))
+    assert text is not None and changed in text
+
+
+def test_amount_only_upload_never_starts_a_judgment():
+    after = DocumentContext(documents=[document_record(DocumentKind.TAX_INVOICE, TAX_INVOICE_FIELDS)])
+    assert document_input_text(after) is not None  # 글은 만들 수 있어도
+    assert document_replan_text(None, after) is None  # 판단은 부르지 않는다

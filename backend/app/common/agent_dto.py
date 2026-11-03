@@ -39,15 +39,15 @@ DB 칸에 맞추기
     문자열로 바꾸고, snapshot을 만들 때 다시 status="UNKNOWN", value=None으로 되돌린다.
 
 서류를 올린 뒤 다시 판단 (서류 추출·점검 자체는 app.agent.document_tool의 DocumentTool)
-    서류가 바뀌면 document_input_text(DocumentContext)가 돌려준 글을 RedactedInput(USER_INPUT)에
-    담아 build_planning_input(trigger_type="DOCUMENT_SUBMITTED", ...)으로 다시 판단한다.
-    글이 None이면 판단에 넘길 값이 없으므로 부르지 않는다.
+    서류가 바뀌면 document_replan_text(바뀌기 전, 바뀐 뒤 DocumentContext)가 돌려준 글을
+    RedactedInput(USER_INPUT)에 담아 build_planning_input(trigger_type="DOCUMENT_SUBMITTED", ...)으로
+    다시 판단한다. None이면(원상복구 조항이 새로 생기거나 바뀌지 않음) 부르지 않는다.
 
 JSON 응답을 다시 읽을 때는 Pydantic TypeAdapter(AgentGraphOutput)을 쓴다.
 이 DTO는 내부 Python 호출용이며 FE HTTP 응답이나 DB 저장 완료를 뜻하지 않는다.
 """
 
-from app.agent.document_tool.models import DocumentContext, document_input_text
+from app.agent.document_tool.models import DocumentContext, document_input_text, document_replan_text
 from app.agent.schemas import (
     AgentGraphInput,
     AgentGraphOutput,
@@ -92,4 +92,5 @@ __all__ = [
     "ReviewedPlanOutcome",
     "SafeFailureOutcome",
     "document_input_text",
+    "document_replan_text",
 ]

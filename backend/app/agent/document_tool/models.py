@@ -128,7 +128,16 @@ def document_input_text(context: DocumentContext) -> str | None:
     pymupdf 없이 BE가 import할 수 있게 checks.py가 아니라 이 파일에 둔다.
     """
 
-    lines: list[str] = []
+    lines = [line for _name, _value, line in _replan_values(context)]
+    if not lines:
+        return None
+    return "\n".join(["사장님이 올린 서류에서 꺼낸 내용입니다.", *lines])
+
+
+def _replan_values(context: DocumentContext) -> list[tuple[DocumentFieldName, str, str]]:
+    """(칸, 값, 글 한 줄). 확인 규칙은 document_input_text 설명과 같다."""
+
+    values: list[tuple[DocumentFieldName, str, str]] = []
     for record in context.documents:
         analysis, confirmed = record.analysis, record.confirmed_fields
         if confirmed is None and analysis.needs_confirmation:
@@ -137,10 +146,31 @@ def document_input_text(context: DocumentContext) -> str | None:
         for name, field_label in REPLAN_FIELD_LABELS.items():
             if confirmed is not None:
                 if name in confirmed:
-                    lines.append(f"{label} {field_label}(사장님 확인): {confirmed[name]}")
+                    values.append((name, confirmed[name], f"{label} {field_label}(사장님 확인): {confirmed[name]}"))
                 continue
-            values = [f.value for f in analysis.fields if f.name == name]
-            lines.extend(f"{label} {field_label}: {value}" for value in dict.fromkeys(values))
-    if not lines:
-        return None
-    return "\n".join(["사장님이 올린 서류에서 꺼낸 내용입니다.", *lines])
+            found = [f.value for f in analysis.fields if f.name == name]
+            values.extend((name, value, f"{label} {field_label}: {value}") for value in dict.fromkeys(found))
+    return values
+
+
+# 서류 값 중 Case 사실(원상복구 범위·철거 필요 여부)을 바꿀 수 있는 칸. 금액·세액 대조는 서류 점검이 하므로
+# 금액 서류만 더해졌을 때는 다시 판단하지 않는다(#137 승준님 리뷰).
+REPLAN_TRIGGER_FIELDS: frozenset[DocumentFieldName] = frozenset({"restoration_clause"})
+
+
+def document_replan_text(before: DocumentContext | None, after: DocumentContext) -> str | None:
+    """서류가 바뀐 뒤 다시 판단해야 하면 그 글, 아니면 None. BE는 None이면 판단을 부르지 않는다.
+
+    판단을 바꿀 수 있는 값(REPLAN_TRIGGER_FIELDS)이 새로 생기거나 달라졌을 때만 부른다.
+    같은 값의 재업로드·확인, 금액 서류 추가, 서류 빼기는 부르지 않는다. 서류를 빼도 이미 판단에
+    반영된 사실을 되돌리지는 않는다.
+    """
+
+    def trigger_values(context: DocumentContext | None) -> set[tuple[DocumentFieldName, str]]:
+        if context is None:
+            return set()
+        return {(name, value) for name, value, _line in _replan_values(context) if name in REPLAN_TRIGGER_FIELDS}
+
+    if trigger_values(after) - trigger_values(before):
+        return document_input_text(after)
+    return None
