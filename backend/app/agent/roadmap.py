@@ -76,7 +76,8 @@ class RoadmapInput(AgentSchema):
     has_business_loan: StrictBool | None = None
     has_service_contracts: StrictBool | None = None
     restoration_clause: Literal["EXISTS", "NOT_EXISTS", "UNKNOWN"] = "UNKNOWN"
-    support_approved: StrictBool | None = None  # User-reported agency decision, not AI eligibility.
+    # 사장님이 알려준 점포철거비 1차 적격심사 결과. AI의 자격 판단이 아니고, 뒤의 정산 검토·비용 지급과도 다르다.
+    support_approved: StrictBool | None = None
     completed_checklists: set[str] = Field(default_factory=set)
     reviewed_plan: ReviewedPlanOutcome | None = None
     documents: DocumentContext | None = None
