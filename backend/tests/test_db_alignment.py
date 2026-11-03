@@ -385,7 +385,7 @@ def test_closure_month_and_exact_date_cannot_both_be_given():
 
     from app.be.schemas.case import CaseCreateRequest
 
-    base = {"business_type": "카페", "franchise_status": False, "lease_status": "LEASED_PAID"}
+    base = {"business_type": "CAFE", "franchise_status": False, "lease_status": "LEASED_PAID"}
     assert CaseCreateRequest(**base, planned_closure_month="2026-12").planned_closure_month == "2026-12"
     assert CaseCreateRequest(**base, planned_closure_date=date(2026, 12, 15)).planned_closure_month is None
     # 화면은 셋 중 하나만 고른다. 둘 다 오면 FE 실수라 조용히 하나를 버리지 않고 거절한다
