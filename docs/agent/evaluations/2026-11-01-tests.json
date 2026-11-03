@@ -1,0 +1,8 @@
+{
+  "captured_at": "2026-11-01T07:25:45.122570+00:00",
+  "command": "python -m pytest -q tests",
+  "cwd": "backend",
+  "exit_code": 0,
+  "elapsed_seconds": 35.837,
+  "includes_isolated_mysql": true
+}

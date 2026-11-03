@@ -13,22 +13,20 @@ import { LoginPage } from './pages/LoginPage'
 import { NotificationsPage } from './pages/NotificationsPage'
 import { ReplanPage } from './pages/ReplanPage'
 import { ResultInputPage } from './pages/ResultInputPage'
-import { StartPage } from './pages/StartPage'
 import { TaskPage } from './pages/TaskPage'
 
 /**
  * Hero Loop의 화면 순서가 그대로 경로가 된다.
  *
- *   /login          로그인      인증 가드 밖에 있다
+ *   /login          로그인      소개 4장 + 카카오. 인증 가드 밖에 있다
  *   /login/callback 로그인 처리  카카오가 돌려보내는 자리. 역시 가드 밖이다
  *   /          진입 분기      보낼 곳만 정하고 화면은 없다
- *   /start     시작 화면      Case가 없는 사용자만 본다
- *   /cases/new Case 생성      사장님이 이미 아는 것만 묻는다
+ *   /cases/new 상황 진단      Case가 없는 사용자만 본다. 질문 한 장씩(?step=), 마지막에 Case를 만든다
  *   /case      현재 Case(홈)  지금 무엇이 막혀 있고 무엇을 할 차례인가
  *   /task      할 일 상세     무엇을 어떻게 물어보면 되는가
  *   /results   결과 입력      실행한 결과를 한 줄로 말한다
  *   /confirm   충돌 확인      기존 기록과 어긋날 때만 들른다 (CONFLICT)
- *   /replan    재계획 결과    무엇이 바뀌었고 다음은 무엇인가
+ *   /replan    반영 결과      무엇이 바뀌었고 다음은 무엇인가 (?history= 판단 번호로 다시 묻는다)
  *
  * 하단 탭이 있는 화면은 `TabLayout` 아래에 둔다. 홈 탭은 `/case`로 간다.
  * `/`는 로그인 뒤 보낼 곳만 정하고, 탭에서는 가리키지 않는다.
@@ -53,7 +51,6 @@ export const router = createBrowserRouter([
     element: <RequireAuth />,
     children: [
       { path: '/', element: <EntryPage /> },
-      { path: '/start', element: <StartPage /> },
       { path: '/cases/new', element: <CaseCreatePage /> },
       { path: '/task', element: <TaskPage /> },
       { path: '/results', element: <ResultInputPage /> },

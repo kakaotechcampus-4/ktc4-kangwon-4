@@ -10,15 +10,16 @@ from app.agent.document_tool.models import DocumentContext, DocumentKind
 from document_fixtures import DocumentClient, document_pdf
 
 
-async def settlement_context(service, *, transfer=True):
+async def settlement_context(service, *, transfer=True, bank_copy=True):
     context = DocumentContext(applicant_name="김리본", business_name="봄날개인카페", closure_date=date(2026, 10, 31))
     documents = {
         DocumentKind.CONSTRUCTION_STATEMENT: {"amount": "3,300,000원", "supplier": "그린철거", "buyer": "봄날개인카페"},
         DocumentKind.TAX_INVOICE: {"supply_amount": "3,000,000원", "tax_amount": "300,000원", "supplier": "그린철거", "buyer": "봄날개인카페"},
         DocumentKind.BEFORE_PHOTO: {}, DocumentKind.AFTER_PHOTO: {},
         DocumentKind.CLOSURE_CERTIFICATE: {"closure_date": "2026년 10월 31일"},
-        DocumentKind.BANK_COPY: {"account_holder": "김리본"},
     }
+    if bank_copy:
+        documents[DocumentKind.BANK_COPY] = {"account_holder": "김리본"}
     if transfer:
         documents[DocumentKind.TRANSFER] = {"amount": "3,300,000원", "sender": "김리본", "recipient": "그린철거"}
     for kind, fields in documents.items():
@@ -29,7 +30,7 @@ async def settlement_context(service, *, transfer=True):
     return context
 
 
-def test_missing_transfer_then_new_document_only_recheck_and_nine_file_zip(tmp_path):
+def test_missing_transfer_then_new_document_only_recheck_and_eight_file_zip(tmp_path):
     async def run():
         client = DocumentClient()
         service = DocumentService(tmp_path, client, reviewer=client, submission_policy="RRN_BACK_ONLY")
@@ -47,7 +48,35 @@ def test_missing_transfer_then_new_document_only_recheck_and_nine_file_zip(tmp_p
         assert context.document_check.status == "COMPLETE"
         assert len(context.document_check.steps) == 6
         with ZipFile(io.BytesIO(settlement_zip(context, service))) as archive:
-            assert archive.testzip() is None and len(archive.namelist()) == 9
+            assert archive.testzip() is None and len(archive.namelist()) == 8
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("blank_fields", ["counterparty", "applicant_and_buyer"])
+def test_whitespace_names_cannot_complete_document_checks(tmp_path, blank_fields):
+    async def run():
+        client = DocumentClient()
+        service = DocumentService(tmp_path, client, reviewer=client, submission_policy="RRN_BACK_ONLY")
+        context = await settlement_context(service, bank_copy=False)
+        if blank_fields == "applicant_and_buyer":
+            context.business_name = None
+            context.applicant_name = " \t "
+        names = {"supplier", "recipient"} if blank_fields == "counterparty" else {"buyer", "sender"}
+        for index, record in enumerate(context.documents):
+            fields = {field.name: " \t " if field.name in names else field.value
+                      for field in record.analysis.fields}
+            if names.intersection(fields):
+                context.documents[index] = service.confirm_analysis(
+                    context.case_id, record, record.analysis.kind, confirmed_fields=fields,
+                )
+        originals = [record.model_dump_json() for record in context.documents]
+        context.document_check = check_settlement(context, service)
+        assert [record.model_dump_json() for record in context.documents] == originals
+        expected = ({"COUNTERPARTY_UNREADABLE"} if blank_fields == "counterparty"
+                    else {"APPLICANT_UNCONFIRMED", "BUYER_UNCONFIRMED"})
+        assert {issue.code for issue in context.document_check.issues} == expected
+        with pytest.raises(DocumentError):
+            settlement_zip(context, service)
     asyncio.run(run())
 
 
@@ -82,6 +111,45 @@ def test_checked_zip_is_blocked_after_processing_policy_changes(tmp_path):
         client.config.reasoning_effort = "medium"
         with pytest.raises(DocumentError, match="설정"):
             settlement_zip(context, service)
+    asyncio.run(run())
+
+
+def test_bank_copy_is_not_a_required_settlement_document(tmp_path):
+    # 2026 점포철거비 공고의 정산 서류 목록에 통장 사본이 없다.
+    async def run():
+        client = DocumentClient()
+        service = DocumentService(tmp_path, client, reviewer=client, submission_policy="RRN_BACK_ONLY")
+        context = await settlement_context(service, bank_copy=False)
+        context.document_check = check_settlement(context, service)
+        assert context.document_check.status == "COMPLETE"
+        assert context.document_check.issues == []
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("buyer", ["다른가게", None, "김리본"])
+def test_missing_store_name_still_requires_a_confirmed_buyer(tmp_path, buyer):
+    async def run():
+        client = DocumentClient()
+        service = DocumentService(tmp_path, client, reviewer=client, submission_policy="RRN_BACK_ONLY")
+        context = await settlement_context(service, bank_copy=False)
+        context.business_name = None
+        for index, record in enumerate(context.documents):
+            if record.analysis.kind not in {DocumentKind.CONSTRUCTION_STATEMENT, DocumentKind.TAX_INVOICE}:
+                continue
+            fields = {field.name: field.value for field in record.analysis.fields if field.name != "buyer"}
+            if buyer is not None:
+                fields["buyer"] = buyer
+            context.documents[index] = service.confirm_analysis(
+                context.case_id, record, record.analysis.kind, confirmed_fields=fields,
+            )
+        context.document_check = check_settlement(context, service)
+        if buyer == context.applicant_name:
+            assert context.document_check.status == "COMPLETE"
+            assert settlement_zip(context, service)
+        else:
+            assert {issue.code for issue in context.document_check.issues} == {"BUYER_UNCONFIRMED"}
+            with pytest.raises(DocumentError):
+                settlement_zip(context, service)
     asyncio.run(run())
 
 

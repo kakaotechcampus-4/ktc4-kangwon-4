@@ -109,9 +109,8 @@ async def run_judgment(
         known_procedure_steps=agent_runtime_service.build_known_procedure_steps(session),
         # None은 "절차 목록의 step_code가 AI 논리 코드와 같으면 알아서 맺어라"는 뜻이고,
         # 빈 표({})는 "맺을 게 없다"는 뜻이라 서로 다르다(action_catalog.resolve_procedure_bindings).
-        # 지금은 임시 절차의 이름을 논리 코드와 같게 둬서 자동으로 맺는다(case.py).
-        # TODO: 실제 폐업절차 데이터가 들어오면 이름이 달라진다. 그때는 어느 절차에 맺을지
-        # 정해 여기에 직접 넘겨야 한다.
+        # 절차의 step_code를 AI 논리 코드와 같게 적재하므로 자동으로 맺힌다
+        # (procedure_registry.ensure_cafe_procedure_registry).
         procedure_bindings=None,
         procedure_store=reviewed_procedure_service.load_reviewed_procedures(),
         support_catalog=agent_runtime_service.empty_support_catalog(),

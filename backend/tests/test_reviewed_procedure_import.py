@@ -9,6 +9,7 @@ from sqlmodel import Session
 from app.agent.procedure_tool.store import ProcedureStoreError, ReviewedProcedureRecord
 from app.be.crud import case as case_crud
 from app.be.crud import evidence as evidence_crud
+from app.be.services import official_document
 from app.be.models.evidence import Evidence
 from app.be.services.reviewed_procedure import import_reviewed_procedures
 from app.common.agent_data import InMemoryReviewedProcedureStore
@@ -52,6 +53,12 @@ def writes(monkeypatch):
     )
     writer = MagicMock(side_effect=lambda _, row: rows.append(row) or row)
     monkeypatch.setattr(evidence_crud, "create_evidence", writer)
+    # 본문은 공용 표(official_document)에 들어가고 Case 쪽은 그 줄을 가리킨다. 여기서는
+    # 세션이 mock이라 실제 적재가 돌지 않으므로, 가리킬 번호를 정해준다.
+    monkeypatch.setattr(
+        official_document, "ensure_official_documents",
+        lambda _, store: {r.content_hash.removeprefix("sha256:"): 7 for r in store.records()},
+    )
     return rows, writer
 
 
@@ -60,7 +67,9 @@ def test_preserves_source_and_normalizes_time_without_committing(writes):
     row, = import_reviewed_procedures(session, 1, store(), as_of=AS_OF)
     assert row.source_ref == "https://example.go.kr/closure"
     assert row.locator == row.source_ref
-    assert row.excerpt == "테스트 전용 발췌"
+    # 본문은 Case마다 복사하지 않는다. 공용 줄을 가리키기만 한다.
+    assert row.excerpt is None
+    assert row.official_document_id == 7
     assert row.source_version == "synthetic/1"
     assert row.source_type == "OFFICIAL_DOCUMENT"
     assert row.content_hash == "a" * 64
@@ -107,13 +116,20 @@ def test_long_version_is_rejected_before_write(writes):
 
 
 def test_existing_id_conflict_is_checked_before_any_new_write(writes):
+    """같은 자료 ID에 다른 내용이 오면 하나도 쓰지 않는다.
+
+    본문은 이제 Evidence에 없으므로 본문 대신 그 해시로 알아챈다. 본문이 바뀌면 해시도
+    바뀌기 때문이다. 해시는 같은데 본문만 다른 경우는 공용 자료 적재 쪽이 막는다
+    (official_document.ensure_official_documents).
+    """
+
     session = MagicMock(spec=Session)
     import_reviewed_procedures(session, 1, store(), as_of=AS_OF)
     writes[1].reset_mock()
     with pytest.raises(ProcedureStoreError, match="다른 내용"):
         import_reviewed_procedures(
             session, 1,
-            store(record(record_id="NEW"), record(excerpt="승인 원문 변경")),
+            store(record(record_id="NEW"), record(content_hash="sha256:" + "b" * 64)),
             as_of=AS_OF,
         )
     writes[1].assert_not_called()

@@ -1,0 +1,27 @@
+{
+  "actual_factory_config": {
+    "document": {
+      "model": "gpt-6-luna",
+      "effort": "low"
+    },
+    "info": {
+      "model": "gpt-6.1-sol",
+      "effort": "high"
+    },
+    "supervisor": {
+      "model": "gpt-6-luna",
+      "effort": "high"
+    },
+    "review": {
+      "model": "gpt-6.1-sol",
+      "effort": "xhigh"
+    },
+    "safety": {
+      "model": "gpt-6.1-sol",
+      "effort": "xhigh"
+    }
+  },
+  "max_response_bytes": 8388608,
+  "no_provider_calls": true,
+  "passed": true
+}

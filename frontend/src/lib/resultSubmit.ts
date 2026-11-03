@@ -57,10 +57,22 @@ export async function submitResult(historyId: number, rawInput: string): Promise
   return accepted.case_history_id as number
 }
 
+/**
+ * 판단 번호 하나의 결과를 한 번 묻는다.
+ *
+ * 기다릴 때(`waitForResult`)와 반영 결과 화면(`/replan?history=`)이 같이 쓴다. 401 은
+ * `UnauthorizedError`, 그 밖의 실패 응답은 `ApiError` 로 올라간다 — 404 는 그 번호가 없다는 것,
+ * 409 는 그 번호 뒤로 새 판단이 생겼다는 것이다.
+ */
+export async function fetchResultStatus(historyId: number): Promise<CaseResultsSubmitResponse | null> {
+  const response = await request(`/cases/results/status?case_history_id=${historyId}`)
+  return (await response.json()) as CaseResultsSubmitResponse | null
+}
+
 /** 기다린 끝에 얻은 것 */
 export type WaitResult =
   /** 판단이 끝났다. `PENDING` 이 아닌 응답이 그대로 담긴다 */
-  | { kind: 'SETTLED'; body: CaseResultsSubmitResponse }
+  | { kind: 'SETTLED'; body: CaseResultsSubmitResponse | null }
   /**
    * 이 제출을 더 물어볼 수 없다 — 그사이 더 새로운 제출이 생겼거나(409),
    * 제출 기록이 없다(404). 다른 탭에서 보냈을 때 이렇게 된다.
@@ -115,10 +127,9 @@ export async function waitForResult(
     await sleep(POLL_INTERVAL_MS, signal)
 
     // `undefined` 는 이번에 답을 못 받았다는 뜻이다. 본문이 `null` 인 답과 구분한다
-    let body: CaseResultsSubmitResponse | undefined
+    let body: CaseResultsSubmitResponse | null | undefined
     try {
-      const response = await request(`/cases/results/status?case_history_id=${historyId}`)
-      body = (await response.json()) as CaseResultsSubmitResponse
+      body = await fetchResultStatus(historyId)
     } catch (error: unknown) {
       if (signal.aborted) throw signal.reason
       if (error instanceof UnauthorizedError) throw error

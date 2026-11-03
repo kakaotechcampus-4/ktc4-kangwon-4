@@ -100,12 +100,46 @@ def test_no_clause_does_not_establish_no_restoration_or_demolition():
     assert view["support_application"].status == "NEEDS_CONFIRMATION"
 
 
+@pytest.mark.parametrize("month,day,status", [
+    ("2026-12", None, "IN_PROGRESS"),
+    (None, "2026-12-20", "COMPLETED"),
+    (None, None, "NEEDS_CONFIRMATION"),
+])
+def test_closure_month_preserves_precision_and_only_marks_date_task_in_progress(month, day, status):
+    value = request(planned_closure_month=month, planned_closure_date=day)
+    before = value.model_dump_json()
+    view = tasks(value)
+    assert view["closure_date"].status == status
+    assert view["intake"].status == "COMPLETED"
+    assert view["support_approval"].status == "NEEDS_CONFIRMATION"
+    assert value.model_dump_json() == before
+    date_fact = next(f for f in value.case_snapshot.facts if f.field_path == "planned_closure_date")
+    assert date_fact.model_dump(mode="json")["value"] == day
+
+
 def test_owned_and_no_current_staff_do_not_erase_past_employment_procedures():
     view = tasks(request(lease_status="OWNED", employee_count=0, had_employees=True))
     assert view["notify_landlord"].status == view["deposit_settlement"].status == "NOT_APPLICABLE"
     assert view["notify_employees"].status == "NOT_APPLICABLE"
     assert view["employee_payments"].status == "NOT_STARTED"
     assert view["employee_insurance"].status == "NOT_STARTED"
+
+
+def test_staff_notice_carries_reviewed_dismissal_notice_guidance():
+    task = tasks(request(employee_count=2))["notify_employees"]
+    assert "30일 전에" in task.guidance
+    # 직원 여부가 "모름"이어도 뜨므로, 해고하는 경우에만 해당한다는 조건이 문장에 있어야 한다
+    assert task.guidance.startswith("폐업으로 직원을 해고하는 경우")
+    assert task.guidance_source.reviewed_by and task.guidance_source.reviewed_at
+    assert "제26조(해고의 예고)" in task.guidance_source.excerpt
+    # 설명은 원문 범위를 넘지 않는다. 원문에 없는 기한·금액을 덧붙이지 않는다
+    assert "30일분 이상의 통상임금" in task.guidance_source.excerpt
+
+
+def test_guidance_is_not_shown_when_the_task_does_not_apply():
+    task = tasks(request(employee_count=0, had_employees=False))["notify_employees"]
+    assert task.status == "NOT_APPLICABLE"
+    assert task.guidance is None and task.guidance_source is None
 
 
 @pytest.mark.parametrize("task_id,codes", [

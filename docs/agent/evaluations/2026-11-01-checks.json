@@ -1,0 +1,66 @@
+{
+  "checks": [
+    {
+      "command": [
+        "ruff",
+        "check",
+        "backend/app/agent/mobile",
+        "backend/app/agent/llm.py",
+        "backend/app/agent/tracing.py",
+        "backend/app/agent/graph.py",
+        "backend/app/agent/prompts.py",
+        "backend/scripts/evaluate_agent_roles.py",
+        "backend/scripts/evaluation_metrics.py",
+        "backend/scripts/evaluate_mobile.py",
+        "backend/scripts/evaluate_mobile_reports.py",
+        "backend/scripts/setup_agent_ocr.py",
+        "backend/tests/test_agent_evaluation.py",
+        "backend/tests/test_evaluation_metrics.py",
+        "backend/tests/test_mobile_agent.py",
+        "backend/tests/test_tracing.py",
+        "backend/tests/test_evaluate_planning.py",
+        "backend/tests/test_llm_limits.py"
+      ],
+      "exit_code": 0,
+      "stdout": "All checks passed!\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "ruff",
+        "check",
+        "backend/scripts/evaluate_planning.py",
+        "--ignore",
+        "C408,PLW1510"
+      ],
+      "exit_code": 0,
+      "stdout": "All checks passed!\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    }
+  ],
+  "legacy_lint": "evaluate_planning.py has 8 existing C408/PLW1510 findings, same rules already failed in the base file; scoped ignore used only for this legacy file.",
+  "pip_check": "No broken requirements found.",
+  "environment_settings_tests": "76 passed in 7.07s after applying final model/effort settings",
+  "legacy_lint_rule_counts": {
+    "base": {
+      "I001": 1,
+      "C408": 7,
+      "PLW1510": 1
+    },
+    "current": {
+      "C408": 7,
+      "PLW1510": 1
+    }
+  },
+  "final_regression": "595 passed in 34.82s"
+}

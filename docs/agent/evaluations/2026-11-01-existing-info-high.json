@@ -1,0 +1,67 @@
+{
+  "code_digest": "sha256:38ba4eaaba28d3a716b97ad5ef129eeeaa6cc6248e86227b7a5b08ce58e31f3a",
+  "code_unchanged": true,
+  "synthetic_case": true,
+  "trials": [
+    {
+      "case": "info",
+      "model": "gpt-6.1-sol",
+      "effort": "high",
+      "review_results": [],
+      "fact_fields": [],
+      "conflict_fields": [
+        "demolition_required",
+        "restoration_scope"
+      ],
+      "passed": true,
+      "elapsed_ms": 11241,
+      "provider_usage": [
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 5313,
+          "completion_tokens": 761,
+          "reasoning_tokens": 269,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "high",
+          "schema_name": "reborn_info_analysis",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 10397,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 1
+      },
+      "status": "REVIEWED_PLAN",
+      "metrics": {
+        "runs": 1,
+        "successful_runs": 1,
+        "success_rate": 1.0,
+        "http_attempts": 1,
+        "usage_complete": true,
+        "attempts_with_reported_usage": 1,
+        "reported_tokens": {
+          "prompt_tokens": 5313,
+          "completion_tokens": 761
+        },
+        "total_tokens": 6074,
+        "tokens_per_success": 6074.0,
+        "estimated_cost_krw": 25.84953,
+        "cost_per_success_krw": 25.84953,
+        "uncached_cost_krw": 25.84953,
+        "cache_usage_complete": true,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 11241,
+        "median_latency_ms": 11241,
+        "max_latency_ms": 11241,
+        "transport_retries": 0,
+        "review_revise_count": 0
+      }
+    }
+  ],
+  "passed": true
+}

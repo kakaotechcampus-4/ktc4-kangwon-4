@@ -172,7 +172,12 @@ export type ResultsEntry =
    */
   | { kind: 'ANSWER'; questions: string[]; historyId: number }
   /**
-   * 지금은 결과를 받을 때가 아니다 — 판단 중이거나 판단이 실패했다.
+   * 판단이 실패했는데, 사장님이 더 알려주시면 풀린다(`NEEDS_DETAIL`). 무엇이 더 필요한지
+   * 보여주고 글을 다시 받는다.
+   */
+  | { kind: 'RESUBMIT'; notice: Extract<FailureNotice, { kind: 'NEEDS_DETAIL' }>; historyId: number }
+  /**
+   * 지금은 결과를 받을 때가 아니다 — 판단 중이거나, 더 적어도 풀리지 않는 실패다.
    *
    * 둘 다 `/case` 가 이미 안내하는 상태라 그쪽으로 보낸다. 여기서 같은 안내를 한 번 더
    * 만들면 두 화면의 문구가 따로 놀게 된다.
@@ -196,8 +201,13 @@ export type ResultsEntry =
 export type SubmitState =
   /** 아직 보내지 않음 */
   | { kind: 'IDLE' }
-  /** 보내고 기다리는 중 */
-  | { kind: 'PENDING' }
+  /**
+   * 보내고 기다리는 중.
+   *
+   * `accepted` 는 서버가 접수 번호를 돌려줬는지다. 처리 단계 줄의 첫 줄("보냈어요")이 이것으로만
+   * 끝난다 — 서버가 처리 단계를 내려주지 않아서, 화면이 확실히 아는 사건은 접수와 결과뿐이다.
+   */
+  | { kind: 'PENDING'; accepted: boolean }
   /** 입력만으로는 상태를 확정할 수 없어 되묻는다 */
   | { kind: 'NEEDS_MORE_INFO'; questions: string[] }
   /**
@@ -275,12 +285,16 @@ export interface FactChange {
  *
  * `changes`가 빈 배열이면 "바뀐 것이 없음"이다. 별도 플래그를 두지 않는다 —
  * 서버가 상태 이름을 정하고 프론트가 그 이름을 해석하는 층을 만들지 않기 위해서다.
- * `blocker`·`nextAction`의 `null` 의미는 `CurrentCaseView`와 같다.
+ * `blocker`의 `null` 의미는 `CurrentCaseView`와 같다.
+ *
+ * `nextAction`은 꼭 있다. 다음 할 일이 없는 반영 응답은 어댑터가 읽지 못한 응답으로 돌려서
+ * 이 화면까지 오지 않는다(`toSubmitOutcome`). 폐업을 다 마쳐 할 일이 없어지는 날이 오면
+ * 그때는 이 화면이 아니라 완료 화면으로 보낸다.
  */
 export interface ReplanView {
   changes: FactChange[]
   blocker: Blocker | null
-  nextAction: NextAction | null
+  nextAction: NextAction
 }
 
 /**
@@ -306,21 +320,52 @@ export type LeaseStatus =
   /** 자가 */
   | 'OWNED'
 
+/** 상황 진단 첫 질문 "어떤 가게를 정리하시나요?"의 보기 */
+export type DiagnosisBusiness = 'PERSONAL_CAFE' | 'FRANCHISE_CAFE' | 'RESTAURANT'
+
+/** "가게에 해당하는 것을 모두 골라주세요"의 보기 */
+export type DiagnosisSituation = 'LEASE' | 'STAFF' | 'LOAN' | 'CONTRACT'
+
+/** "가입했던 적이 있는 보험을 모두 골라주세요"의 보기 (4대보험) */
+export type DiagnosisInsurance = 'PENSION' | 'HEALTH' | 'EMPLOYMENT' | 'INDUSTRIAL_ACCIDENT'
+
+/** "원상복구 조항이 있나요?"의 보기. 서버 `restoration_clause`와 같은 세 값이다 */
+export type DiagnosisRestorationClause = 'EXISTS' | 'NOT_EXISTS' | 'UNKNOWN'
+
+/** "언제 문을 닫으실 생각이세요?"의 보기 */
+export type DiagnosisClosure = 'THIS_MONTH' | 'NEXT_MONTH' | 'UNDECIDED'
+
 /**
- * Case 생성 폼이 들고 있는 값.
+ * 상황 진단에서 사장님이 고른 답. 보낼 값이 아니라 **고른 보기 그대로**다.
  *
- * 아직 아무것도 고르지 않은 상태를 `null`로 둔다. `false`나 빈 문자열을 기본값으로
- * 두면 "아니오를 골랐다"와 "아직 안 골랐다"가 같아져서 제출을 막을 근거가 사라진다.
+ * 서버 칸으로 바꾸는 일은 보낼 때 어댑터가 한 번만 한다. 여기서 미리 바꿔 두면
+ * "개인 카페"와 "프랜차이즈 카페"가 같은 `CAFE`가 되어, 뒤로 돌아왔을 때 무엇을
+ * 골랐는지 화면에 다시 표시할 수 없다.
  *
- * 직원 수와 폐업 예정일이 문자열인 것은 입력 중간 상태 때문이다. 숫자로 들고 있으면
- * 사용자가 지우는 순간 값을 뭘로 둘지 애매해진다. 숫자 변환은 보낼 때 한 번만 한다.
+ * 아직 답하지 않은 질문은 `null`이다. 여럿 고르는 질문도 마찬가지로, 빈 배열은
+ * "해당하는 게 없어요"를 고른 것이고 `null`은 아직 그 질문에 오지 않은 것이다.
+ *
+ * 조건에 따라 나오는 질문(월세·원상복구·직원 수 등)의 답은, 앞 답을 바꿔 그 질문이
+ * 빠져도 지우지 않는다. 다시 켜면 그대로 남아 있게 하고, 보낼 때 조건을 다시 본다.
  */
-export interface CaseDraft {
-  businessType: string
-  franchiseStatus: boolean | null
-  leaseStatus: LeaseStatus | null
-  /** 선택 항목. 비어 있으면 모른다는 뜻이고 서버에는 `null`로 간다 */
-  employeeCount: string
-  /** 선택 항목. `YYYY-MM-DD` */
-  plannedClosureDate: string
+export interface DiagnosisAnswers {
+  business: DiagnosisBusiness | null
+  /** 다른 음식점일 때만 묻는다. 카페는 첫 질문에서 이미 정해진다 */
+  franchise: boolean | null
+  situations: DiagnosisSituation[] | null
+  /** 빌린 가게일 때만 묻는다. `true`면 월세를 낸다 */
+  paysRent: boolean | null
+  /** 빌린 가게일 때만 묻는다 */
+  restorationClause: DiagnosisRestorationClause | null
+  /** 직원이 있을 때만 묻는다. 정직원 + 아르바이트가 보낼 직원 수가 된다 */
+  fullTimeCount: number
+  partTimeCount: number
+  /** 지금 직원이 없을 때만 묻는다 */
+  hadEmployees: boolean | null
+  /**
+   * 고른 보험. 빈 목록은 "가입한 적 없어요", `UNKNOWN`은 "잘 모르겠어요"다.
+   * 둘을 나누는 것은 서버에서 뜻이 달라서다 — 없음은 보험 할 일을 빼고, 모름은 확인 필요로 남긴다
+   */
+  insurances: DiagnosisInsurance[] | 'UNKNOWN' | null
+  closure: DiagnosisClosure | null
 }

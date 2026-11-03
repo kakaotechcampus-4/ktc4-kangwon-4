@@ -22,7 +22,11 @@ Case 생성 → Blocker 1개 판정 → Next Action 1개 제시
   `@tailwindcss/vite` 플러그인과 `src/index.css`의 `@import "tailwindcss";` 로 동작한다.
   3버전 방식(`tailwind.config.js`, `@tailwind base;`)을 쓰지 않는다
 - 통신 **Fetch API** — axios 등 HTTP 클라이언트를 추가하지 않는다
-- 상태관리는 **React 내장**(`useState` / `useContext`). 외부 상태 라이브러리를 도입하지 않는다
+- 상태관리는 **React 내장**(`useState` / `useContext`)이 기본이다. 서버 데이터(Case, 판단 결과)는
+  서버에 다시 묻고 전역에 들고 있지 않는다. **화면 여러 장에 걸쳐 이어지는 사용자의 답·선택만**
+  **Zustand**(`src/stores/`)에 둔다 — 지금은 상황 진단 답(`useDiagnosisStore`) 하나다.
+  처음엔 전역 상태가 없어 넣지 않았는데, 진단이 `?step=` 여러 장으로 나뉘고 새로고침에도 답이
+  남아야 해서 넣었다(상황 진단 온보딩, 11/03). 새로 넣을 때도 "여러 화면이 같은 사용자 입력을 보는가"를 먼저 묻는다
 - **Mobile-first** 반응형. 좁은 쪽 기준은 375px, 기본 컨테이너는 `max-w-md`(약 448px)다.
   넓은 화면에서 2단으로 나눌 내용이 있는 화면만 `AppShell` 의 `width="wide"` 를 쓴다
   (지금은 `/case`). 폼처럼 한 줄로 읽는 화면은 넓혀도 읽기 어려워지기만 한다
@@ -48,17 +52,14 @@ Case 생성 → Blocker 1개 판정 → Next Action 1개 제시
    2단계로 갈지는 BE 계약 확인이 필요하다 — `docs/be-agent-integration-requirements.md`
    §4의 P0 결정 목록에 미확정으로 올라 있다.)*
 
-4. **`result` 7종을 전부 분기한다. 미처리 분기를 남기지 않는다.**
-   `UPDATED` / `NO_CHANGE` / `NEEDS_MORE_INFO` / `CONFLICT` /
-   `INVALID_TRANSITION` / `REPLAN_FAILED` / `CASE_NOT_FOUND`
-   응답 타입은 discriminated union으로 정의해 컴파일 단계에서 누락이 잡히게 한다.
+4. **판단 결과 `result` 6종을 전부 분기한다. 미처리 분기를 남기지 않는다.**
+   `PENDING` / `UPDATED` / `NO_CHANGE` / `NEEDS_MORE_INFO` / `CONFLICT` / `FAILED`
+   (`types/api.ts`의 `ResultsSubmitResult`). 응답 타입은 discriminated union으로 정의해
+   컴파일 단계에서 누락이 잡히게 한다. `FAILED`는 `recovery_action_code`로 한 번 더 가른다.
 
-   **이 목록은 확정 전이다.** `docs/be-agent-integration-requirements.md` §6.3이
-   `CONFLICT`를 200 또는 409로 두고 `VERSION_CONFLICT`·`SAFE_FAILURE`를 후보로
-   추가했다. 409가 확정되면 아래 "본문으로 분기한다"도 함께 다시 본다.
-
-   **`res.ok`가 아니라 본문의 `result`로 분기한다.** 검증 실패도 HTTP 200으로
-   오고, 404는 `CASE_NOT_FOUND`뿐이다.
+   **판단 결과는 본문의 `result`로, 요청이 받아들여졌는지는 HTTP 상태로 가른다.**
+   401은 로그인 만료, 404는 Case나 그 판단 번호가 없다는 것, 409는 화면이 아는 판단이
+   낡았다는 것(더 새로운 판단·처리 중인 제출·미결 충돌)이다.
 
 5. **한 화면에서 강하게 강조하는 것은 Next Action 하나다.**
    Blocker는 그 이유를 설명하는 보조 정보로 둔다. 주요 버튼도 화면당 하나다.

@@ -30,12 +30,14 @@ CHECK_NAMES = (
     "서류 종류 나누기", "상호·금액·날짜 꺼내기", "필요한 서류가 다 있는지",
     "서류끼리 금액 맞춰보기", "개인정보 가리기", "확인할 일 정리",
 )
-# The six groups shown by the supplied prototype. This is a named demo
-# checklist, not a claim that every public notice requires exactly these six.
+# 2026 희망리턴패키지 점포철거비 공고(2026-01-19) 원문의 2차 정산 서류: 공사내역서,
+# 전자세금계산서, 이체확인증, 철거 전·후 사진. 폐업 예정자는 폐업사실증명원도 낸다.
+# 통장 사본은 목록에 없어 필수로 보지 않는다(올리면 예금주 대조만 한다).
+# TODO: 카드 결제(카드전표·카드대금 완납확인증) 대체 경로는 서류 종류가 없어 아직 받지 못한다.
 SETTLEMENT_GROUPS = (
     {DocumentKind.CONSTRUCTION_STATEMENT}, {DocumentKind.TAX_INVOICE},
     {DocumentKind.BEFORE_PHOTO, DocumentKind.AFTER_PHOTO}, {DocumentKind.TRANSFER},
-    {DocumentKind.CLOSURE_CERTIFICATE}, {DocumentKind.BANK_COPY},
+    {DocumentKind.CLOSURE_CERTIFICATE},
 )
 
 
@@ -107,8 +109,9 @@ def check_settlement(case: DocumentContext, service: DocumentService, *, progres
     for kind, records in by_kind.items():
         if len(records) == 1:
             record = records[0]
-            fields[kind] = (record.confirmed_fields if record.confirmed_fields is not None
-                            else {field.name: field.value for field in record.analysis.fields})
+            values = (record.confirmed_fields if record.confirmed_fields is not None
+                      else {field.name: field.value for field in record.analysis.fields})
+            fields[kind] = {name: value.strip() for name, value in values.items()}
     for kind in (DocumentKind.CONSTRUCTION_STATEMENT, DocumentKind.TAX_INVOICE, DocumentKind.TRANSFER):
         if kind not in fields:
             continue
@@ -147,15 +150,17 @@ def check_settlement(case: DocumentContext, service: DocumentService, *, progres
             issue("APPLICANT_UNCONFIRMED", "신청인과 보낸 사람·예금주를 확인해 주세요.")
         elif identity(value) != identity(case.applicant_name):
             issue("APPLICANT_MISMATCH", "신청인과 보낸 사람 또는 예금주가 다릅니다.")
-    if case.business_name:
-        buyers = {identity(value) for value in (case.business_name, case.applicant_name) if value}
-        for kind in (DocumentKind.CONSTRUCTION_STATEMENT, DocumentKind.TAX_INVOICE):
-            if kind not in fields:
-                continue
-            buyer = fields.get(kind, {}).get("buyer")
-            if not buyer:
-                issue("BUYER_UNCONFIRMED", "서류의 공급받는 자를 확인해 주세요.", by_kind[kind])
-            elif identity(buyer) not in buyers:
+    buyers = {identity(value) for value in (case.business_name, case.applicant_name) if value}
+    for kind in (DocumentKind.CONSTRUCTION_STATEMENT, DocumentKind.TAX_INVOICE):
+        if kind not in fields:
+            continue
+        buyer = fields[kind].get("buyer")
+        if not buyer:
+            issue("BUYER_UNCONFIRMED", "서류의 공급받는 자를 확인해 주세요.", by_kind[kind])
+        elif identity(buyer) not in buyers:
+            if not case.business_name:
+                issue("BUYER_UNCONFIRMED", "서류의 공급받는 자와 가게·신청인의 관계를 확인해 주세요.", by_kind[kind])
+            else:
                 issue("BUYER_MISMATCH", "서류의 공급받는 자와 확인한 가게·신청인 이름이 다릅니다.", by_kind[kind])
     certificate = fields.get(DocumentKind.CLOSURE_CERTIFICATE, {})
     actual_date = certificate.get("closure_date")

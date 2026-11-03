@@ -53,6 +53,7 @@ Vite 가 읽지 않습니다. 고친 뒤에는 개발 서버를 다시 띄웁니
 | React Router | 라우팅. v7부터 `react-router-dom`이 아니라 `react-router` 한 패키지입니다 |
 | Fetch API | 통신 |
 | React 내장 | 상태관리 (`useState` / `useContext`) |
+| Zustand | 화면 여러 장에 걸쳐 이어지는 답만 (`src/stores/`). 지금은 상황 진단 답 하나. 서버 데이터는 넣지 않습니다 |
 | Pretendard | 본문 글꼴. npm 패키지로 직접 배포 (`src/main.tsx`) |
 
 Mobile-first 반응형, 기준 폭 375px.
@@ -62,36 +63,43 @@ Mobile-first 반응형, 기준 폭 375px.
 
 색·글자 크기·모서리·그림자는 `src/styles/tokens.css`의 토큰으로 씁니다. 규칙은 `docs/ui-guidelines.md`에 있습니다.
 
-**아직 도입하지 않은 것** — 상태관리 라이브러리
+상황 진단의 이모지는 Microsoft Fluent Emoji(MIT)입니다. 라이선스는 `src/assets/emoji/LICENSE`에 있습니다.
 
 ## 화면
 
 | 경로 | 화면 | 내용 |
 |---|---|---|
-| `/login` | 로그인 | 카카오. 인증 가드 밖 |
+| `/login` | 로그인 | 소개 4장 + 카카오로 시작하기. 인증 가드 밖 |
 | `/login/callback` | 로그인 처리 | 카카오가 돌려보내는 자리. 역시 가드 밖 |
 | `/` | 진입 분기 | 보낼 곳만 정하고 화면은 없다 |
-| `/start` | 시작 화면 | Case가 없는 사용자만 본다 |
-| `/cases/new` | Case 생성 | 사장님이 이미 아는 것만 묻는다 |
+| `/cases/new` | 상황 진단 | Case가 없는 사용자만 본다. 질문 한 장씩(`?step=`), 답에 따라 질문이 생기고 빠진다. 마지막에 가입 요청을 보내고 저장하는 동안 "만드는 중" |
 | `/case` | 현재 Case (홈) | 하단 탭. 지금 할 일 하나, 또는 리본이 일하는 중인지 |
 | `/task` | 할 일 상세 | 할 일과 "이렇게 물어보세요" 목록 |
-| `/results` | 결과 입력 | 할 일의 결과를 글로 전달. 리본이 되물었으면 그 질문에 답한다 |
-| `/confirm` | 충돌 확인 | 기존 기록과 어긋날 때만 들른다 |
-| `/replan` | 재계획 결과 | 무엇이 바뀌었고 다음은 무엇인가 |
+| `/results` | 결과 입력 | 할 일의 결과를 글로 전달. 리본이 되물었으면 그 질문에 답하고, 더 알려주셔야 하는 실패면 다시 적는다. 보낸 뒤 판단이 끝날 때까지 처리 화면 |
+| `/confirm` | 충돌 확인 | 기존 기록과 어긋날 때만 들른다. 실서버에서는 고르기까지만 되고 보내기는 잠겨 있다(#108 AI 연결 전) |
+| `/replan` | 반영 결과 | 무엇이 바뀌었고 다음 할 일은 무엇인가. 주소의 판단 번호(`?history=`)로 다시 묻는다 |
 | `/docs` | 서류함 | 하단 탭. 아직 API가 없어 빈 상태 |
 | `/log` | 작업 기록 | 하단 탭. 아직 API가 없어 빈 상태 |
 | `/notifications` | 알림 | 탭 화면의 종 버튼으로 들어온다. 아직 빈 상태 |
 
 로그인 화면 둘을 뺀 전부가 인증 가드 아래에 있습니다. 로그인하지 않고 열면 `/login`으로 갑니다.
 
-`/`는 화면이 아니라 분기입니다. 로그인 여부와 Case 유무를 보고 `/login`·`/start`·`/case` 중
+`/`는 화면이 아니라 분기입니다. 로그인 여부와 Case 유무를 보고 `/login`·`/cases/new`·`/case` 중
 하나로 보냅니다. 판단을 한곳에 모아두면 새 화면이 늘어도 규칙이 갈라지지 않습니다.
 
-`/confirm`·`/replan`은 이전 화면에서 라우터 state로 데이터를 받습니다. 주소로 직접 열면
+`/confirm`은 이전 화면에서 라우터 state로 충돌 목록을 받습니다. 주소로 직접 열면
 개발·Preview에서는 Mock으로, 그 외에는 `/`로 이동합니다.
 
-**Case 가 있는지는 서버에 물어봅니다.** `/` · `/start` · `/case` · `/task` 가 들어올 때마다
-`GET /cases` 를, `/results` 는 `GET /cases/results` 를 부릅니다. 앞 화면에서 받은 값을 넘겨받지 않는 것은, 그 값이 히스토리에 남아
+`/replan`은 결과를 넘겨받지 않고 주소의 판단 번호로 `GET /cases/results/status` 를 다시 부릅니다.
+그 뒤로 새 판단이 생겼으면(409) 지난 결과 대신 그렇다고 알리고, 번호가 이상하거나 반영된 결과가
+아니면 `/case` 로 보냅니다. Mock 으로 볼 때만 넘겨받은 결과로 그립니다.
+
+`/cases/new`의 `?step=`은 주소로 직접 고쳐 열 수 있어서, 앞 질문에 답하지 않았으면 답하지 않은
+첫 질문으로 바꿔 끼웁니다. 고른 답은 `sessionStorage`(Zustand)에 두어 질문을 넘기거나 새로고침해도
+남고, 가입 요청이 받아들여지면 비웁니다. 로그인이 만료되거나 저장에 실패하면 남겨 두어 이어서 보냅니다.
+
+**Case 가 있는지는 서버에 물어봅니다.** `/` · `/cases/new` · `/case` · `/task` 가 들어올 때마다
+`GET /cases` 를, `/results` 는 `GET /cases/results` 를, `/replan` 은 `GET /cases/results/status` 를 부릅니다. 앞 화면에서 받은 값을 넘겨받지 않는 것은, 그 값이 히스토리에 남아
 오래된 Case 가 "지금 상황"인 척 다시 뜨기 때문입니다.
 
 로그인 토큰은 `sessionStorage`에 둡니다. 탭을 닫으면 풀립니다 — 가게나 공용 PC에서 쓰는
@@ -144,7 +152,8 @@ PR 브랜치마다 Preview 주소가 달라 등록할 수 없어서, **리뷰어
 
 ```
 /?mock=logged-out           로그인 안 된 상태
-/?mock=no-case              Case가 없는 사용자 (시작 화면)
+/?mock=no-case              Case가 없는 사용자 (상황 진단으로). 진단 화면을 직접 볼 때는 /cases/new?mock=no-case
+/cases/new?mock=creating    상황 진단을 보낸 뒤 저장하는 동안 ("만드는 중")
 /?mock=pending              판단 중 (Case를 막 만든 직후)
 /?mock=pending-long         판단 중인데 오래 걸려 자동 조회를 멈춘 상태
 /?mock=more-info            다음 할 일을 정하려면 더 물어봐야 하는 상태
@@ -165,6 +174,7 @@ PR 브랜치마다 Preview 주소가 달라 등록할 수 없어서, **리뷰어
 /results?mock=stale            그사이 상황이 바뀜
 /results?mock=too-long         판단이 오래 걸림
 /results?mock=unrecognized     판단 결과를 읽지 못함
+/results?mock=judgment-failed-detail  홈의 "다시 알려주기"에서 온 경우 (더 알려주셔야 하는 실패)
 /replan?mock=no-change      바뀐 것 없음
 ```
 
@@ -194,7 +204,7 @@ frontend/
 │  └─ ui-guidelines.md
 ├─ src/
 │  ├─ components/     재사용 UI
-│  │  └─ ui/          새 시안 공통 부품(버튼·배지·로더·빈 상태·머리말·탭·탭 틀·할 일 카드·홈 띠·단계 카드).
+│  │  └─ ui/          새 시안 부품(버튼·배지·로더·빈 상태·머리말·탭·탭 틀·할 일 카드·홈 띠·단계 카드·소개·질문 한 장).
 │  │                  components/ 바로 아래의 옛 부품은 화면을 교체하며 지운다
 │  ├─ pages/          화면
 │  ├─ hooks/          화면이 데이터를 구하는 방법
@@ -203,8 +213,10 @@ frontend/
 │  │                  view.ts — 화면이 필요한 모양 (camelCase)
 │  ├─ mocks/          Mock 전환(?mock=)용 데이터
 │  ├─ lib/            화면에 속하지 않는 보조 코드
+│  ├─ stores/         Zustand — 화면 여러 장에 걸쳐 이어지는 답 (상황 진단)
 │  ├─ styles/         tokens.css — 색·글자 크기·모서리·그림자 토큰
-│  ├─ assets/         brand/ — 워드마크·망치 마크 SVG
+│  ├─ assets/         brand/ — 워드마크·망치 마크·카카오 심볼 SVG
+│  │                  emoji/ — 상황 진단의 Fluent Emoji SVG (MIT, LICENSE 동봉)
 │  ├─ routes.tsx      라우트 정의
 │  ├─ main.tsx        진입점
 │  ├─ App.tsx         RouterProvider
