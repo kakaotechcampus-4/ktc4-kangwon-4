@@ -6,10 +6,8 @@ from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
-from test_action_codes import StubModel, source, supervisor_request
-from test_info_replanning import Responses, finding, output
-
 from app.agent.info_agent.agent import InfoAnalysisAgent
+from app.agent.procedure_tool.cafe import build_cafe_reviewed_snapshot
 from app.agent.procedure_tool.store import ReviewedProcedureRecord
 from app.agent.procedure_tool.stored_tool import (
     ProcedureLookupInputError,
@@ -25,6 +23,9 @@ from app.agent.schemas import (
     ReviewSubject,
 )
 from app.agent.supervisor import SupervisorAgent
+from pydantic import ValidationError
+from test_action_codes import StubModel, source, supervisor_request
+from test_info_replanning import Responses, finding, output
 
 NOW = datetime(2026, 10, 4, tzinfo=timezone.utc)
 
@@ -202,6 +203,59 @@ def test_unreviewed_metadata_is_rejected():
     with pytest.raises(ProcedureLookupInputError) as error:
         lookup(record_changes={"reviewed_by": None, "reviewed_at": None})
     assert error.value.code == "PROCEDURE_REVIEW_REQUIRED"
+
+
+def test_reviewed_source_needs_no_reviewer_or_review_time():
+    result, evidence = lookup(record_changes={
+        "reviewed": True, "reviewed_by": None, "reviewed_at": None,
+    })
+    assert result.completion_status == "COMPLETE"
+    assert result.evidence_records == [evidence]
+    with pytest.raises(ProcedureLookupInputError) as error:
+        lookup(record_changes={"reviewed": True, "reviewed_by": None, "reviewed_at": None},
+               as_of=date(2027, 2, 1))
+    assert error.value.code == "PROCEDURE_REVIEW_REQUIRED"
+
+
+def test_explicit_unreviewed_status_overrides_legacy_reviewer_metadata():
+    with pytest.raises(ProcedureLookupInputError) as error:
+        lookup(record_changes={"reviewed": False})
+    assert error.value.code == "PROCEDURE_REVIEW_REQUIRED"
+
+
+@pytest.mark.parametrize("value", [1, "true"])
+def test_review_status_rejects_coercion(value):
+    with pytest.raises(ValidationError):
+        lookup(record_changes={"reviewed": value})
+
+
+def test_eight_reviewed_cafe_sources_can_be_looked_up_without_signature_metadata():
+    snapshot = build_cafe_reviewed_snapshot()
+    records = snapshot.records
+    assert len(records) == 8
+    assert all(record.is_reviewed and record.reviewed_by is None and record.reviewed_at is None
+               for record in records)
+    as_of = date(2026, 11, 3)
+    evidence = [EvidenceRecord(
+        evidence_id="case-source-" + record.record_id, source_type="OFFICIAL_DOCUMENT",
+        source_ref=record.canonical_url, source_version=snapshot.snapshot_version,
+        excerpt=record.excerpt, content_hash=record.content_hash,
+        published_at=record.published_at, retrieved_at=record.retrieved_at,
+        freshness_status=record.freshness(as_of), parent_evidence_refs=[], locator=None,
+    ) for record in records]
+    store = SimpleNamespace(snapshot_version=snapshot.snapshot_version, records=lambda: records)
+    request = ProcedureLookupInput(
+        lookup_goal="BUSINESS_CLOSURE", evidence_records=evidence,
+        search_queries=["등록 절차 코드 조회"],
+        procedure_step_codes=sorted({code for record in records for code in record.step_codes}),
+        as_of=as_of, locale="ko-KR", source_policy="OFFICIAL_ONLY",
+        max_results_per_query=5, based_on_snapshot_id=uuid4(), review_feedback=[],
+    )
+    result = asyncio.run(StoredProcedureLookupTool(store).lookup(request))
+    assert result.completion_status == "COMPLETE"
+    assert len(result.documents) == 8
+    assert result.evidence_records == evidence
+    assert all(document.freshness_status == "CURRENT" for document in result.documents)
 
 
 @pytest.mark.parametrize("status", ["UNKNOWN", "STALE"])
