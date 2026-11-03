@@ -12,6 +12,8 @@ import { HomeBanner } from '../components/ui/HomeBanner'
 import { HomeStageCard } from '../components/ui/HomeStageCard'
 import { TaskCard } from '../components/ui/TaskCard'
 import { useCase } from '../hooks/useCase'
+import { useLogs } from '../hooks/useLogs'
+import { useRoadmap } from '../hooks/useRoadmap'
 import type { FailureNotice, JudgmentView } from '../types/view'
 
 /**
@@ -99,15 +101,28 @@ export function CurrentCasePage() {
   )
 }
 
-/** 시안 홈의 뼈대: 리본이 해둔 일 띠 · 머리 문구 · 할 일 카드 · 단계 카드 */
+/**
+ * 시안 홈의 뼈대: 리본이 해둔 일 띠 · 머리 문구 · 할 일 카드 · 단계 카드
+ *
+ * 띠는 기록 조회에서 리본이 한 일만 골라 채운다. 기록을 불러오지 못하면 띠만 빈 모양으로
+ * 두고 홈은 그대로 그린다 — 띠는 덧붙는 정보라 할 일 카드를 가리면 안 된다.
+ *
+ * 단계 카드는 로드맵의 지금 단계로 칠한다. 로드맵을 받지 못했으면 빈 막대로 둔다.
+ */
 function HomeFrame({ headline, children }: { headline: string; children: ReactNode }) {
+  const { query } = useLogs()
+  const ribbonItems = query.status === 'READY' ? query.entries.filter((entry) => entry.actor === 'RIBBON') : []
+  const roadmap = useRoadmap()
+  const currentStage =
+    roadmap.status === 'READY' ? roadmap.view.stages.find((stage) => stage.stage === roadmap.view.currentStage) : undefined
+
   return (
     <>
-      <HomeBanner />
+      <HomeBanner items={ribbonItems} />
       <div className="flex flex-1 flex-col gap-3 px-4 pt-6 pb-4">
         <h1 className="mb-1 text-24 font-bold text-pretty">{headline}</h1>
         {children}
-        <HomeStageCard />
+        <HomeStageCard stage={currentStage ? { number: currentStage.stage, title: currentStage.title } : null} />
       </div>
     </>
   )

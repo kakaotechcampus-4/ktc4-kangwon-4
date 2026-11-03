@@ -1,0 +1,611 @@
+import { IconCheckmarkCircleFill } from '@karrotmarket/react-monochrome-icon'
+import { type ReactNode, useEffect, useId, useRef, useState } from 'react'
+import { Navigate, useLocation, useNavigate, useParams } from 'react-router'
+
+import { BottomSheet } from '../components/ui/BottomSheet'
+import { Button } from '../components/ui/Button'
+import { InfoBox } from '../components/ui/InfoBox'
+import { TopBar } from '../components/ui/TopBar'
+import { useRoadmap } from '../hooks/useRoadmap'
+import { ApiError, UnauthorizedError } from '../lib/api'
+import { usesMockData } from '../lib/auth'
+import { embedPostcode, loadPostcode, toRoadAddress } from '../lib/postcode'
+import { saveChecklist, saveClosureReport, saveDepositReturn, saveSupportApproval } from '../lib/roadmapActions'
+import { taskFlowOf } from '../lib/taskFlows'
+import type { ClosureReason, DepositReturnResult } from '../types/api'
+import type { RoadmapTaskView } from '../types/view'
+
+/** 저장 상태. 저장이 끝나기 전에는 화면의 체크·결과를 바꾸지 않는다(FE 규칙 2) */
+type SaveState = 'IDLE' | 'SAVING' | 'FAILED' | 'REJECTED'
+
+/**
+ * 로드맵 할 일 하나 (시안 M09 할 일 흐름). 할 일마다 어떤 장면을 열지는 `taskFlowOf` 가 고른다.
+ *
+ * 시안의 세부 체크 줄("조건 네 줄", "퇴직 후 14일 안에")은 넣지 않는다. 서버가 줄 목록을 주지 않고,
+ * FE가 들고 있으면 무엇을 확인할지를 FE가 정하게 된다(FE 규칙 1·7, 승준님 #149). 할 일 하나를
+ * 통째로 체크하고, 검수한 설명이 있으면 그것을 보여준다.
+ */
+export function TaskFlowPage() {
+  const { taskId = '' } = useParams()
+  const { search } = useLocation()
+  const roadmap = useRoadmap()
+
+  if (roadmap.status === 'UNAVAILABLE') {
+    return (
+      <TaskFrame>
+        <InfoBox title="할 일 화면은 준비 중이에요.">폐업 전체 순서가 열리면 여기서 할 일을 하나씩 마칠 수 있어요.</InfoBox>
+      </TaskFrame>
+    )
+  }
+
+  const task = roadmap.view.stages.flatMap((stage) => stage.tasks).find((item) => item.id === taskId)
+  // 없는 할 일이거나, 이 가게에 해당하지 않는 할 일이다. 순서 화면에서 다시 고르게 한다
+  if (!task || task.status === 'NOT_APPLICABLE') return <Navigate to={{ pathname: '/roadmap', search }} replace />
+
+  switch (taskFlowOf(task)) {
+    case 'DOCUMENT_CHECK':
+      return <Navigate to={{ pathname: '/docs/check', search }} replace />
+    case 'CHECK':
+      return <CheckFlow task={task} />
+    case 'ATTACH':
+      return <CheckFlow task={task} attach />
+    case 'SUPPORT_RESULT':
+      return <SupportResultFlow task={task} />
+    case 'REPORT_RESULT':
+      return <ReportResultFlow task={task} />
+    case 'CLOSURE_REPORT':
+      return <ClosureReportFlow task={task} />
+    case 'DEPOSIT':
+      return <DepositFlow task={task} />
+    case 'INFO':
+      return <InfoFlow task={task} />
+  }
+}
+
+/** 저장 실패를 화면 상태로. 401 은 로그인으로 보낸다 */
+function useSaveErrors() {
+  const navigate = useNavigate()
+  return (error: unknown): SaveState | null => {
+    if (error instanceof UnauthorizedError) {
+      navigate('/login', { replace: true })
+      return null
+    }
+    // 이 가게에서 받지 않는 항목이거나 Case 가 없다. 다시 눌러도 같다
+    if (error instanceof ApiError && error.status >= 400 && error.status < 500) return 'REJECTED'
+    return 'FAILED'
+  }
+}
+
+/**
+ * 체크 장면. 서류가 필요한 할 일(`attach`)은 서류함에 올리는 길을 먼저 둔다 — 올린 서류가 정산
+ * 점검에 쓰인다. 체크는 사장님이 "했다"고 알리는 것이고, 할 일 상태는 로드맵이 다시 계산한다.
+ */
+export function CheckFlow({ task, attach = false }: { task: RoadmapTaskView; attach?: boolean }) {
+  const navigate = useNavigate()
+  const { search } = useLocation()
+  const usesMock = usesMockData(search)
+  const toSaveState = useSaveErrors()
+  // 처음은 서버가 준 상태다. 저장하면 저장된 값으로 바꾼다
+  const [checked, setChecked] = useState(task.status === 'COMPLETED')
+  const [save, setSave] = useState<SaveState>('IDLE')
+
+  async function toggle() {
+    const next = !checked
+    setSave('SAVING')
+    try {
+      // Mock 은 서버가 없다. 저장된 것으로 둔다
+      setChecked(usesMock ? next : await saveChecklist(task.id, next))
+      setSave('IDLE')
+    } catch (error: unknown) {
+      const state = toSaveState(error)
+      if (state) setSave(state)
+    }
+  }
+
+  return (
+    <TaskFrame>
+      <TaskHeader task={task} />
+      {attach && (
+        <InfoBox
+          title="서류를 서류함에 올려 주세요."
+          action={{ label: '서류함에 올리기', onClick: () => navigate({ pathname: '/docs', search }) }}
+        >
+          올린 서류는 정산 서류 점검에 쓰여요.
+        </InfoBox>
+      )}
+      {checked && save !== 'SAVING' && (
+        <p className="flex items-center gap-2 text-17 font-bold">
+          <IconCheckmarkCircleFill size={22} className="text-fg-brand" aria-hidden="true" />
+          마치셨다고 기록했어요
+        </p>
+      )}
+      <SaveNotice save={save} />
+      <div className="mt-auto flex flex-col gap-2">
+        {checked ? (
+          <Button variant="outline" disabled={save === 'SAVING' || save === 'REJECTED'} onClick={toggle}>
+            완료 취소하기
+          </Button>
+        ) : (
+          <Button disabled={save === 'SAVING' || save === 'REJECTED'} onClick={toggle}>
+            다 했어요
+          </Button>
+        )}
+      </div>
+    </TaskFrame>
+  )
+}
+
+const SUPPORT_OPTIONS: { value: boolean | null; label: string }[] = [
+  { value: true, label: '승인됐어요' },
+  { value: false, label: '안 됐어요' },
+  { value: null, label: '아직 몰라요' },
+]
+
+/**
+ * 철거비 1차 적격심사 결과 (시안 "승인 결과"). 사장님이 소상공인24에서 본 결과를 남긴다.
+ *
+ * 시안은 고른 보기마다 "정산 단계는 건너뛰어요" 같은 안내를 다는데 넣지 않는다. 다음에 무엇을 할지는
+ * 로드맵 판단이 정한다(FE 규칙 1). 처음에는 아무것도 골라 두지 않는다 — 서버가 지금 값을 돌려주지 않아,
+ * 짐작해 골라 두면 사장님이 확인하지 않고 넘긴다.
+ */
+export function SupportResultFlow({ task }: { task: RoadmapTaskView }) {
+  const { search } = useLocation()
+  const usesMock = usesMockData(search)
+  const toSaveState = useSaveErrors()
+  const [picked, setPicked] = useState<number | null>(null)
+  const [saved, setSaved] = useState<boolean | null | undefined>(undefined)
+  const [save, setSave] = useState<SaveState>('IDLE')
+
+  async function submit() {
+    if (picked === null) return
+    const value = SUPPORT_OPTIONS[picked].value
+    setSave('SAVING')
+    try {
+      setSaved(usesMock ? value : await saveSupportApproval(value))
+      setSave('IDLE')
+    } catch (error: unknown) {
+      const state = toSaveState(error)
+      if (state) setSave(state)
+    }
+  }
+
+  const savedLabel = saved === undefined ? null : SUPPORT_OPTIONS.find((option) => option.value === saved)?.label
+
+  return (
+    <TaskFrame>
+      <TaskHeader task={task} sub="소상공인24에서 확인한 결과를 알려 주세요." />
+      <div role="radiogroup" aria-label="1차 적격심사 결과" className="flex flex-col gap-2">
+        {SUPPORT_OPTIONS.map((option, index) => (
+          <button
+            key={option.label}
+            type="button"
+            role="radio"
+            aria-checked={picked === index}
+            onClick={() => setPicked(index)}
+            className={`flex min-h-14 cursor-pointer items-center rounded-14 px-4 text-17 font-medium ring-inset ${
+              picked === index ? 'bg-bg-brand-weak ring-2 ring-stroke-brand-solid' : 'ring-1 ring-stroke-neutral-weak'
+            }`}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+      {savedLabel && save !== 'SAVING' && (
+        <p className="flex items-center gap-2 text-17 font-bold">
+          <IconCheckmarkCircleFill size={22} className="text-fg-brand" aria-hidden="true" />
+          &ldquo;{savedLabel}&rdquo;로 기록했어요
+        </p>
+      )}
+      <SaveNotice save={save} />
+      <div className="mt-auto">
+        <Button disabled={picked === null || save === 'SAVING' || save === 'REJECTED'} onClick={submit}>
+          기록하기
+        </Button>
+      </div>
+    </TaskFrame>
+  )
+}
+
+/**
+ * 공식 절차. 사장님이 기관·임대인과 한 일을 결과 입력으로 알려 주면 판단이 다음 순서를 정한다.
+ * 체크로 완료하지 않는다 — 절차가 끝났는지는 판단이 정하는 것이라서다.
+ */
+function ReportResultFlow({ task }: { task: RoadmapTaskView }) {
+  const navigate = useNavigate()
+  const { search } = useLocation()
+  return (
+    <TaskFrame>
+      <TaskHeader task={task} />
+      <InfoBox>이 일은 하신 결과를 알려 주시면 리본이 확인해 다음 순서를 정해요.</InfoBox>
+      <div className="mt-auto">
+        <Button onClick={() => navigate({ pathname: '/results', search })}>결과 알려주기</Button>
+      </div>
+    </TaskFrame>
+  )
+}
+
+const DEPOSIT_OPTIONS: { value: DepositReturnResult; label: string }[] = [
+  { value: 'FULL', label: '다 받았어요' },
+  { value: 'PARTIAL', label: '일부 빼고 받았어요' },
+  { value: 'NONE', label: '아직 못 받았어요' },
+]
+
+/**
+ * 보증금 정산 기록 (시안 가게 반환 "보증금은 돌려받으셨나요?").
+ *
+ * [기록하기] 한 번으로 두 가지를 남긴다(11/03 시우님) — 보증금 결과(#168 `PUT /cases/deposit-return`)와
+ * 로드맵의 "보증금 정산 기록" 체크(#149). 시안에서도 기록하기 한 번이 그 할 일을 끝낸다. 결과를 먼저
+ * 저장하고, 성공한 뒤에 체크를 보낸다. 체크만 실패하면 결과는 남아 있으니 체크만 다시 보내게 한다.
+ *
+ * 시안은 "아직 못 받았어요"에 법률 상담 안내를 다는데 넣지 않는다. 무엇을 해야 할지는 판단이 정한다
+ * (FE 규칙 1). 리본은 기록만 하고 판단하지 않는다는 시안 문구는 그대로 둔다.
+ */
+export function DepositFlow({ task }: { task: RoadmapTaskView }) {
+  const { search } = useLocation()
+  const usesMock = usesMockData(search)
+  const toSaveState = useSaveErrors()
+  const [picked, setPicked] = useState<DepositReturnResult | null>(null)
+  const [saved, setSaved] = useState<DepositReturnResult | null>(null)
+  /** 결과는 저장했는데 체크를 못 했다. 체크만 다시 보낸다 */
+  const [checkPending, setCheckPending] = useState(false)
+  const [save, setSave] = useState<SaveState>('IDLE')
+
+  async function markChecklist() {
+    if (!usesMock) await saveChecklist(task.id, true)
+    setCheckPending(false)
+  }
+
+  async function submit() {
+    if (picked === null) return
+    setSave('SAVING')
+    try {
+      setSaved(usesMock ? picked : await saveDepositReturn(picked))
+    } catch (error: unknown) {
+      const state = toSaveState(error)
+      if (state) setSave(state)
+      return
+    }
+    try {
+      await markChecklist()
+      setSave('IDLE')
+    } catch (error: unknown) {
+      setCheckPending(true)
+      const state = toSaveState(error)
+      if (state) setSave(state)
+    }
+  }
+
+  async function retryChecklist() {
+    setSave('SAVING')
+    try {
+      await markChecklist()
+      setSave('IDLE')
+    } catch (error: unknown) {
+      const state = toSaveState(error)
+      if (state) setSave(state)
+    }
+  }
+
+  const savedLabel = DEPOSIT_OPTIONS.find((option) => option.value === saved)?.label
+
+  return (
+    <TaskFrame>
+      <TaskHeader task={task} sub="리본은 기록만 하고 판단하지 않아요." />
+      <div role="radiogroup" aria-label="보증금 돌려받았는지" className="flex flex-col gap-2">
+        {DEPOSIT_OPTIONS.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            role="radio"
+            aria-checked={picked === option.value}
+            onClick={() => setPicked(option.value)}
+            className={`flex min-h-14 cursor-pointer items-center rounded-14 px-4 text-17 font-medium ring-inset ${
+              picked === option.value ? 'bg-bg-brand-weak ring-2 ring-stroke-brand-solid' : 'ring-1 ring-stroke-neutral-weak'
+            }`}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+
+      {savedLabel && save !== 'SAVING' && !checkPending && (
+        <p className="flex items-center gap-2 text-17 font-bold">
+          <IconCheckmarkCircleFill size={22} className="text-fg-brand" aria-hidden="true" />
+          &ldquo;{savedLabel}&rdquo;로 기록했어요
+        </p>
+      )}
+      {checkPending ? (
+        <InfoBox
+          tone="critical"
+          title="보증금 결과는 저장했는데 할 일 체크는 못 했어요."
+          action={{
+            label: '체크만 다시 보내기',
+            onClick: retryChecklist,
+            // 서버가 받지 않는 항목이면 다시 보내도 같다
+            disabled: save === 'SAVING' || save === 'REJECTED',
+          }}
+        >
+          다시 보내면 폐업 전체 순서에 마친 것으로 남아요.
+        </InfoBox>
+      ) : (
+        <SaveNotice save={save} />
+      )}
+
+      <div className="mt-auto">
+        <Button disabled={picked === null || save === 'SAVING' || save === 'REJECTED' || checkPending} onClick={submit}>
+          기록하기
+        </Button>
+      </div>
+    </TaskFrame>
+  )
+}
+
+const CLOSURE_REASONS: { value: ClosureReason; label: string }[] = [
+  { value: 'BUSINESS_SLUMP', label: '사업 부진' },
+  { value: 'PERSONAL', label: '개인 사정' },
+  { value: 'OTHER', label: '기타' },
+]
+
+/**
+ * 통합 폐업 신고 (시안 ④ "폐업 정보 확인" · "가게 주소 확인"). 신고에 적을 실제 폐업일·사유·주소를
+ * 한 번에 저장한다(#168 `PUT /cases/closure-report`).
+ *
+ * 시안은 두 장으로 나눴지만 서버가 한 번에 받아서 한 장에 둔다 — 두 장이면 첫 장만 채우고 떠났을 때
+ * 저장할 길이 없다. 시안의 날짜 칩(10월 31일 등)은 예시라 날짜 고르기로 받는다.
+ *
+ * 폐업일은 가입 때 정한 시기(예상 달)와 다른, 신고할 실제 날짜다. 처음에는 비워 두고 고르게 한다.
+ * 폐업일·사유·도로명 주소는 꼭 받고, 상세 주소는 비워도 된다(단독 건물 등).
+ *
+ * 저장한 뒤에는 접수증을 서류함에 올리고 결과를 알려 달라고 안내한다. 통합 폐업 신고는 공식
+ * 절차라 끝났는지는 판단이 정한다.
+ *
+ * TODO: 저장해 둔 값으로 칸을 채워 연다(`GET /cases` 의 `case.closure_date` 등, #168). 지금은 빈 칸에서
+ * 시작하고, 다시 저장하면 덮어쓴다.
+ */
+export function ClosureReportFlow({ task }: { task: RoadmapTaskView }) {
+  const navigate = useNavigate()
+  const { search } = useLocation()
+  const usesMock = usesMockData(search)
+  const toSaveState = useSaveErrors()
+  const [closureDate, setClosureDate] = useState('')
+  const [reason, setReason] = useState<ClosureReason | null>(null)
+  const [roadAddress, setRoadAddress] = useState('')
+  const [detail, setDetail] = useState('')
+  const [finding, setFinding] = useState(false)
+  const [save, setSave] = useState<SaveState>('IDLE')
+  const [saved, setSaved] = useState(false)
+  const dateId = useId()
+  const detailId = useId()
+
+  const ready = closureDate !== '' && reason !== null && roadAddress !== ''
+
+  async function submit() {
+    if (!ready || reason === null) return
+    const body = {
+      closure_date: closureDate,
+      closure_reason: reason,
+      road_address: roadAddress,
+      address_detail: detail.trim() === '' ? null : detail.trim(),
+    }
+    setSave('SAVING')
+    try {
+      if (!usesMock) await saveClosureReport(body)
+      setSaved(true)
+      setSave('IDLE')
+    } catch (error: unknown) {
+      const state = toSaveState(error)
+      if (state) setSave(state)
+    }
+  }
+
+  return (
+    <TaskFrame>
+      <TaskHeader task={task} sub="사업자등록증에 적힌 것과 같게 적어 주세요." />
+
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor={dateId} className="text-15 font-medium text-fg-neutral-muted">
+          폐업일
+        </label>
+        <input
+          id={dateId}
+          type="date"
+          value={closureDate}
+          onChange={(event) => setClosureDate(event.target.value)}
+          className="h-13 rounded-xl px-3 text-17 ring-1 ring-stroke-neutral-weak ring-inset"
+        />
+      </div>
+
+      <div role="radiogroup" aria-label="폐업 사유" className="flex flex-col gap-1.5">
+        <span aria-hidden="true" className="text-15 font-medium text-fg-neutral-muted">
+          폐업 사유
+        </span>
+        <div className="flex gap-2">
+          {CLOSURE_REASONS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              role="radio"
+              aria-checked={reason === option.value}
+              onClick={() => setReason(option.value)}
+              className={`h-12 flex-1 cursor-pointer rounded-full text-16 font-medium ring-inset ${
+                reason === option.value ? 'bg-bg-brand-weak ring-2 ring-stroke-brand-solid' : 'ring-1 ring-stroke-neutral-weak'
+              }`}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <span className="text-15 font-medium text-fg-neutral-muted">가게 주소</span>
+        {roadAddress !== '' && <p className="text-17 font-medium">{roadAddress}</p>}
+        <Button variant="outline" onClick={() => setFinding(true)}>
+          {roadAddress === '' ? '주소 찾기' : '주소 다시 찾기'}
+        </Button>
+        <label htmlFor={detailId} className="mt-2 text-15 font-medium text-fg-neutral-muted">
+          상세 주소 (선택)
+        </label>
+        <input
+          id={detailId}
+          value={detail}
+          maxLength={100}
+          placeholder="예: 1층"
+          onChange={(event) => setDetail(event.target.value)}
+          className="h-13 rounded-xl px-3 text-17 ring-1 ring-stroke-neutral-weak ring-inset"
+        />
+      </div>
+
+      {saved && save !== 'SAVING' && (
+        <>
+          <p className="flex items-center gap-2 text-17 font-bold">
+            <IconCheckmarkCircleFill size={22} className="text-fg-brand" aria-hidden="true" />
+            신고 정보를 저장했어요
+          </p>
+          <InfoBox
+            title="신고를 마치면 접수증을 서류함에 올려 주세요."
+            action={{ label: '서류함에 올리기', onClick: () => navigate({ pathname: '/docs', search }) }}
+          >
+            신고한 결과는 결과 알려주기로 알려 주시면 리본이 다음 순서를 정해요.
+          </InfoBox>
+        </>
+      )}
+      <SaveNotice save={save} />
+
+      <div className="mt-auto flex flex-col gap-2">
+        {saved && (
+          <Button variant="outline" onClick={() => navigate({ pathname: '/results', search })}>
+            결과 알려주기
+          </Button>
+        )}
+        <Button disabled={!ready || save === 'SAVING' || save === 'REJECTED'} onClick={submit}>
+          {saved ? '다시 저장하기' : '저장하기'}
+        </Button>
+      </div>
+
+      <AddressSheet
+        open={finding}
+        onClose={() => setFinding(false)}
+        onSelect={(address) => {
+          setFinding(false)
+          setRoadAddress(address)
+        }}
+      />
+    </TaskFrame>
+  )
+}
+
+/**
+ * 주소 찾기 시트. 다음 우편번호 찾기 창을 시트 안에 띄운다.
+ *
+ * 새 창(팝업)으로 열지 않는다. 휴대폰 브라우저는 팝업을 막거나 새 탭으로 열어, 고른 뒤 돌아오는 길을
+ * 잃기 쉽다. 스크립트를 받지 못하면 다시 받을 수 있게 안내한다.
+ */
+export function AddressSheet({
+  open,
+  onClose,
+  onSelect,
+}: {
+  open: boolean
+  onClose: () => void
+  onSelect: (roadAddress: string) => void
+}) {
+  const container = useRef<HTMLDivElement>(null)
+  // 고른 뒤 부를 함수는 늘 최신 것을 쓴다. 효과의 의존으로 두면 바깥 화면이 다시 그려질 때마다 찾기 창을
+  // 새로 띄워, 사장님이 적던 검색어가 지워진다
+  const latestSelect = useRef(onSelect)
+  useEffect(() => {
+    latestSelect.current = onSelect
+  }, [onSelect])
+  const [failed, setFailed] = useState(false)
+  const [attempt, setAttempt] = useState(0)
+
+  useEffect(() => {
+    if (!open) return
+    let current = true
+    loadPostcode().then(
+      () => {
+        if (!current || !container.current) return
+        container.current.replaceChildren()
+        embedPostcode(container.current, (data) => latestSelect.current(toRoadAddress(data)))
+      },
+      () => {
+        if (current) setFailed(true)
+      },
+    )
+    return () => {
+      current = false
+    }
+  }, [open, attempt])
+
+  return (
+    <BottomSheet open={open} onClose={onClose} title="가게 주소 찾기" description="도로명이나 건물 이름으로 찾아 주세요.">
+      {failed ? (
+        <InfoBox
+          tone="critical"
+          title="주소 찾기를 불러오지 못했어요."
+          action={{
+            label: '다시 불러오기',
+            onClick: () => {
+              setFailed(false)
+              setAttempt((count) => count + 1)
+            },
+          }}
+        >
+          연결 상태를 확인하고 다시 불러와 주세요.
+        </InfoBox>
+      ) : (
+        <div ref={container} className="h-[440px] overflow-hidden rounded-xl" />
+      )}
+    </BottomSheet>
+  )
+}
+
+/** 사장님이 따로 할 것이 없는 할 일(가입 때 정한 것 등) */
+function InfoFlow({ task }: { task: RoadmapTaskView }) {
+  return (
+    <TaskFrame>
+      <TaskHeader task={task} />
+      <InfoBox>이 일은 여기서 따로 하실 것이 없어요. 리본이 가게 정보로 확인해요.</InfoBox>
+    </TaskFrame>
+  )
+}
+
+/** 할 일 이름과 검수한 설명 */
+function TaskHeader({ task, sub }: { task: RoadmapTaskView; sub?: string }) {
+  return (
+    <div>
+      <h1 className="text-24 font-bold">{task.title}</h1>
+      {sub && <p className="mt-2 text-17 text-fg-neutral-muted">{sub}</p>}
+      {task.guidance && <p className="mt-3 text-15 text-fg-neutral-muted">{task.guidance}</p>}
+    </div>
+  )
+}
+
+function SaveNotice({ save }: { save: SaveState }) {
+  if (save === 'FAILED') {
+    return (
+      <InfoBox tone="critical" title="저장하지 못했어요.">
+        연결이 불안정했을 수 있어요. 다시 눌러 주세요.
+      </InfoBox>
+    )
+  }
+  if (save === 'REJECTED') {
+    return (
+      <InfoBox tone="critical" title="이 할 일은 지금 기록할 수 없어요.">
+        폐업 전체 순서에서 다시 확인해 주세요.
+      </InfoBox>
+    )
+  }
+  return null
+}
+
+/** 탭 없는 화면의 틀 */
+function TaskFrame({ children }: { children: ReactNode }) {
+  return (
+    <div className="mx-auto flex min-h-dvh max-w-[402px] flex-col bg-bg-layer-default">
+      <TopBar title="할 일" />
+      <main className="flex flex-1 flex-col gap-5 px-4 pt-2 pb-8">{children}</main>
+    </div>
+  )
+}
