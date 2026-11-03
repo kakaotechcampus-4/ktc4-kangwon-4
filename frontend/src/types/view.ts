@@ -369,3 +369,20 @@ export interface DiagnosisAnswers {
   insurances: DiagnosisInsurance[] | 'UNKNOWN' | null
   closure: DiagnosisClosure | null
 }
+
+/** 기록을 남긴 쪽. 서버 `actor`와 같은 값이다 */
+export type LogActor = 'OWNER' | 'RIBBON'
+
+/**
+ * 기록 탭의 한 줄 (시안 M08).
+ *
+ * 문구는 서버가 주지 않고 사건 코드(`event`)만 준다. 화면이 코드를 문구로 바꾼다
+ * (`adapters/logs.ts`).
+ */
+export interface LogEntry {
+  key: string
+  actor: LogActor
+  text: string
+  /** `10.17` 처럼 월.일. 서버가 준 날짜 글자를 그대로 잘라 쓴다 */
+  date: string
+}

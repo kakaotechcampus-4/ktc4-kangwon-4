@@ -12,6 +12,8 @@ import { HomeBanner } from '../components/ui/HomeBanner'
 import { HomeStageCard } from '../components/ui/HomeStageCard'
 import { TaskCard } from '../components/ui/TaskCard'
 import { useCase } from '../hooks/useCase'
+import { usesMockData } from '../lib/auth'
+import { mockLogEntries } from '../mocks/logs'
 import type { FailureNotice, JudgmentView } from '../types/view'
 
 /**
@@ -99,11 +101,18 @@ export function CurrentCasePage() {
   )
 }
 
-/** 시안 홈의 뼈대: 리본이 해둔 일 띠 · 머리 문구 · 할 일 카드 · 단계 카드 */
+/**
+ * 시안 홈의 뼈대: 리본이 해둔 일 띠 · 머리 문구 · 할 일 카드 · 단계 카드
+ *
+ * TODO(#143): 띠는 기록 조회에서 리본이 한 일만 골라 채운다. 머지 전에는 Mock 으로 볼 때만 채운다.
+ */
 function HomeFrame({ headline, children }: { headline: string; children: ReactNode }) {
+  const { search } = useLocation()
+  const ribbonItems = usesMockData(search) ? mockLogEntries.filter((entry) => entry.actor === 'RIBBON') : []
+
   return (
     <>
-      <HomeBanner />
+      <HomeBanner items={ribbonItems} />
       <div className="flex flex-1 flex-col gap-3 px-4 pt-6 pb-4">
         <h1 className="mb-1 text-24 font-bold text-pretty">{headline}</h1>
         {children}
