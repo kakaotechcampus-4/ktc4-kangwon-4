@@ -7,6 +7,7 @@ from sqlmodel import Session
 
 from app.be.routers.auth import router as auth_router
 from app.be.routers.case import router as case_router
+from app.be.routers.document import router as document_router
 from app.be.db import get_engine, reset_all_tables
 from app.be.services import procedure_registry
 from app.common.config import get_settings
@@ -29,12 +30,14 @@ app = FastAPI(lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["GET", "POST"],
+    # DELETE는 서류 빼기(DELETE /cases/documents/{id})에 쓴다
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],
     expose_headers=["Access-Token", "Refresh-Token"],
 )
 app.include_router(auth_router)
 app.include_router(case_router)
+app.include_router(document_router)
 
 
 @app.get("/health")
