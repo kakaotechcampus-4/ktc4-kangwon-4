@@ -1,17 +1,16 @@
-name: Agent CI
+name: BE·Agent CI
 
 on:
   pull_request:
     paths:
-      - "backend/app/agent/**"
-      - "backend/app/common/**"
+      - "backend/app/**"
       - "backend/tests/**"
       - "backend/scripts/**"
       - "backend/requirements*.txt"
-      - ".github/workflows/agent-ci.yml"
+      - ".github/workflows/be-agent-ci.yml"
 
 concurrency:
-  group: agent-ci-${{ github.ref }}
+  group: be-agent-ci-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
