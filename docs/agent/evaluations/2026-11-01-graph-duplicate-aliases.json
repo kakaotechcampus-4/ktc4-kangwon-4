@@ -1,0 +1,57 @@
+{
+  "evaluation_only": true,
+  "human_review_claimed": false,
+  "source_snapshot_sha256": "b0c79b927df47415cd9d6bea813eb26412ec3bb96128776393abc12441fec683",
+  "code_digest": "sha256:62b1fe1276e362e978818e1b43118b7c63a6455d941a4bfc219be6c78dc7ea37",
+  "code_unchanged": true,
+  "trials": [
+    {
+      "case": "benchmark_case1",
+      "trigger": "CASE_CREATED",
+      "graph_input_digest": "sha256:8139c94d109822497d7e7f50b5794ea3e20214a8990320bcb32399e8574d7f95",
+      "status": "SAFE_FAILURE",
+      "calls": [],
+      "limits": {
+        "max_llm_calls_per_run": 40,
+        "run_deadline_seconds": 420.0
+      },
+      "failure_code": "STRUCTURED_OUTPUT_FAILED",
+      "failed_component": null,
+      "message_code": "AGENT_STRUCTURED_OUTPUT_FAILED",
+      "recovery_action_code": "NONE",
+      "requested_field_paths": [],
+      "retryable": false,
+      "conflicts": [],
+      "elapsed_ms": 198,
+      "calls_by_role": {},
+      "provider_usage": [],
+      "passed": false,
+      "metrics": {
+        "runs": 1,
+        "successful_runs": 0,
+        "success_rate": 0.0,
+        "http_attempts": 0,
+        "usage_complete": false,
+        "attempts_with_reported_usage": 0,
+        "reported_tokens": {
+          "prompt_tokens": 0,
+          "completion_tokens": 0
+        },
+        "total_tokens": null,
+        "tokens_per_success": null,
+        "estimated_cost_krw": null,
+        "cost_per_success_krw": null,
+        "uncached_cost_krw": null,
+        "cache_usage_complete": false,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 198,
+        "median_latency_ms": 198,
+        "max_latency_ms": 198,
+        "transport_retries": 0,
+        "review_revise_count": 0
+      }
+    }
+  ],
+  "passed": false
+}

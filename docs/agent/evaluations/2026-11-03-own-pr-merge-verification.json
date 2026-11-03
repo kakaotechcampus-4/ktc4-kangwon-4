@@ -1,0 +1,216 @@
+{
+  "recorded_at": "2026-11-03T04:17:45.746258+00:00",
+  "user_authorization": "Merge only PRs authored by tokengeoji after review corrections and validation are complete",
+  "scope_prs": [
+    121,
+    128,
+    130,
+    132
+  ],
+  "source_prs_merged": [
+    121,
+    128,
+    132
+  ],
+  "base_at_start": "9cb8283",
+  "target_branch": "develop",
+  "merge_method": "merge",
+  "local_tests": [
+    {
+      "pr": 121,
+      "head": "e46efbdf20fb7a51c69e786c9c1d418220a83879",
+      "passed": 609,
+      "seconds": 39.25,
+      "mysql_included": true,
+      "provider_calls": 0,
+      "log_sha256": "7f1599721422bcc9378eeb2204618c8fcdc5907c7c67b4200e7e9aac963e2d5e"
+    },
+    {
+      "pr": 128,
+      "head": "58a975c960164a594b300dc6b7fc651f3ad81836",
+      "passed": 649,
+      "seconds": 48.81,
+      "mysql_included": true,
+      "provider_calls": 0,
+      "log_sha256": "3a58c7c9e693ec25f65ae8bb82b14c4ad5920ceda6f4c2799c2f9fd5e60c2b56"
+    },
+    {
+      "pr": 132,
+      "head": "7f71e39961450bd188a524f505e8f43951beea62",
+      "passed": 688,
+      "seconds": 46.82,
+      "mysql_included": true,
+      "provider_calls": 0,
+      "log_sha256": "88c89213b20541c1d50690c2fb1ba810759c495e86579264a86895f445325846"
+    }
+  ],
+  "remote_ci": [
+    {
+      "pr": 121,
+      "run_id": 41576682306,
+      "head": "e46efbdf20fb7a51c69e786c9c1d418220a83879",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/actions/runs/41576682306",
+      "pytest_passed": 599,
+      "pytest_seconds": 40.65,
+      "log_sha256": "a0e8b68676e6510c8e0f518e6c9790e90dd5a6ac47f93c2d44c2b9d1c0464409",
+      "log_note": null
+    },
+    {
+      "pr": 128,
+      "run_id": 41576760382,
+      "head": "58a975c960164a594b300dc6b7fc651f3ad81836",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/actions/runs/41576760382",
+      "pytest_passed": 639,
+      "pytest_seconds": 52.19,
+      "log_sha256": "405409b9442fce5793a17928cd069e4d28c93acf7b04e444d6b36470de1b3203",
+      "log_note": null
+    },
+    {
+      "pr": 132,
+      "run_id": 41576787715,
+      "head": "7f71e39961450bd188a524f505e8f43951beea62",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/actions/runs/41576787715",
+      "pytest_passed": 678,
+      "pytest_seconds": 50.93,
+      "log_sha256": "398df36d7af1582821e0ff6c01ea836a8fea82accc9ab1f9674779cf575c32fc",
+      "log_note": null
+    }
+  ],
+  "replay": {
+    "code_commit": "7f71e39961450bd188a524f505e8f43951beea62",
+    "artifact_sha256": "2b1f166d0746fe9cf8453fc74e6a9214e8accb82bb50199afee27e59eff19f50",
+    "checks": [
+      "graph",
+      "replan",
+      "documents_missing",
+      "documents_complete"
+    ],
+    "provider_calls": 0,
+    "all_outputs_equal": true
+  },
+  "merges": [
+    {
+      "pr": 121,
+      "author": "tokengeoji",
+      "head": "e46efbdf20fb7a51c69e786c9c1d418220a83879",
+      "base_before": "9cb8283dab16d729d5bd5c461fbb621d0dcb0647",
+      "checks": [
+        {
+          "name": "Vercel Preview Comments",
+          "conclusion": "success",
+          "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/runs/125721748402"
+        },
+        {
+          "name": "mock-regression",
+          "conclusion": "success",
+          "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/actions/runs/41576682306/job/125721696708"
+        }
+      ],
+      "result": {
+        "sha": "1380775c787da54087134e912049eb2ee76910a3",
+        "merged": true,
+        "message": "Pull Request successfully merged"
+      }
+    },
+    {
+      "pr": 128,
+      "author": "tokengeoji",
+      "head": "58a975c960164a594b300dc6b7fc651f3ad81836",
+      "base_before": "1380775c787da54087134e912049eb2ee76910a3",
+      "validated_base_tree": "23d0487cb74ee6db1ac9827db726cd1012d675bc",
+      "checks": [
+        {
+          "name": "Vercel Preview Comments",
+          "conclusion": "success",
+          "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/runs/125722003641"
+        },
+        {
+          "name": "mock-regression",
+          "conclusion": "success",
+          "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/actions/runs/41576760382/job/125721948150"
+        }
+      ],
+      "result": {
+        "sha": "640ee4f8f0e15d8817115c285783a807b4d8835e",
+        "merged": true,
+        "message": "Pull Request successfully merged"
+      }
+    },
+    {
+      "pr": 132,
+      "author": "tokengeoji",
+      "head": "7f71e39961450bd188a524f505e8f43951beea62",
+      "base_before": "640ee4f8f0e15d8817115c285783a807b4d8835e",
+      "validated_base_tree": "ee7427633aac0c53098cfd8bbe0cfacbc39adc3d",
+      "checks": [
+        {
+          "name": "Vercel Preview Comments",
+          "conclusion": "success",
+          "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/runs/125722092403"
+        },
+        {
+          "name": "mock-regression",
+          "conclusion": "success",
+          "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/actions/runs/41576787715/job/125722038695"
+        }
+      ],
+      "result": {
+        "sha": "27ecd60ed8471b2cafd2adb7f7b7518a92b6027a",
+        "merged": true,
+        "message": "Pull Request successfully merged"
+      }
+    }
+  ],
+  "review_audit": {
+    "source": "before-<pr>.json and checks-before.json in local archive",
+    "unresolved_inline_threads": {
+      "121": 0,
+      "128": 0,
+      "130": 0,
+      "132": 0
+    },
+    "active_change_requests": 0,
+    "requested_reviewers_unchanged": true,
+    "retargeted_own_prs": {
+      "128": "feature/agent-observability -> develop",
+      "132": "feature/document-agent-runtime -> develop"
+    }
+  },
+  "conflict_resolution": {
+    "file": "backend/scripts/evaluate_planning.py",
+    "reason": "Latest merged #119 changed intake values from 카페 to CAFE",
+    "result": "Preserve current evaluation implementation and canonical CAFE in all four intake fixtures; earlier artifacts and their fingerprints unchanged",
+    "frontend_backend_manual_edits": false
+  },
+  "tree_verification": {
+    "after_132_merge": "origin/develop and validated feature/agent-roadmap-view trees match exactly",
+    "after_121_merge": "Develop tree matched validated parent e46efbd before #128 merge",
+    "after_128_merge": "Develop tree matched validated parent 58a975c before #132 merge"
+  },
+  "raw_pr_130": {
+    "existing_files": 59,
+    "existing_json_parse_passed": 54,
+    "source_changes": 0,
+    "own_merge_record": "PR #130 final merge is recorded in its GitHub conversation and local final-status.json after this record is committed"
+  },
+  "new_model_usage": {
+    "provider_calls": 0,
+    "tokens": 0,
+    "estimated_cost_krw": 0,
+    "note": "No new live model quality run; prior paid evaluations remain separate"
+  },
+  "remaining_scope": {
+    "other_author_prs": "Not merged or retargeted by this work",
+    "document_replan_pr137": "Partial confirmation fix and date/quote policy remain PM/AI follow-up; PR unchanged",
+    "official_sources_pr133": "Eight official source records still require user human review; no reviewer/time fabricated",
+    "frontend_backend_integration": "Upload/storage, Docker dependency connection, API/FE app E2E are separate owner tasks",
+    "raw_evidence": "Prior detailed TODOs retained in 2026-11-02-pr-review-execution.json"
+  },
+  "local_archive": "eval-runs/merge-own-prs-20261103"
+}

@@ -1,0 +1,1536 @@
+{
+  "synthetic_data": true,
+  "supervisor_cases": {
+    "scope_unknown": {
+      "trigger": {
+        "trigger_type": "CASE_CREATED",
+        "input_event_id": "synthetic-input",
+        "client_event_id": null,
+        "input": {
+          "input_event_id": "synthetic-input",
+          "source_type": "USER_INPUT",
+          "redacted_text": "합성 테스트 입력",
+          "redactions": [],
+          "submitted_at": "2026-09-25T00:00:00Z"
+        },
+        "submitted_at": "2026-09-25T00:00:00Z"
+      },
+      "case_snapshot": {
+        "active_blocker_candidate_ids": [],
+        "snapshot_id": "00000000-0000-0000-0000-000000000004",
+        "case_id": 1,
+        "case_status": "IN_PROGRESS",
+        "facts": [
+          {
+            "field_path": "business_type",
+            "value_type": "STRING",
+            "value": "카페",
+            "status": "CONFIRMED",
+            "evidence_refs": [
+              "synthetic-document"
+            ],
+            "updated_at": "2026-09-25T00:00:00Z"
+          },
+          {
+            "field_path": "franchise_status",
+            "value_type": "BOOLEAN",
+            "value": false,
+            "status": "CONFIRMED",
+            "evidence_refs": [
+              "synthetic-document"
+            ],
+            "updated_at": "2026-09-25T00:00:00Z"
+          },
+          {
+            "field_path": "lease_status",
+            "value_type": "ENUM",
+            "value": "LEASED_PAID",
+            "status": "CONFIRMED",
+            "evidence_refs": [
+              "synthetic-document"
+            ],
+            "updated_at": "2026-09-25T00:00:00Z"
+          },
+          {
+            "field_path": "restoration_scope",
+            "value_type": "ENUM",
+            "value": null,
+            "status": "UNKNOWN",
+            "evidence_refs": [],
+            "updated_at": null
+          },
+          {
+            "field_path": "demolition_required",
+            "value_type": "ENUM",
+            "value": null,
+            "status": "UNKNOWN",
+            "evidence_refs": [],
+            "updated_at": null
+          },
+          {
+            "field_path": "restoration_status",
+            "value_type": "ENUM",
+            "value": null,
+            "status": "UNKNOWN",
+            "evidence_refs": [],
+            "updated_at": null
+          }
+        ],
+        "procedure_progress": [],
+        "evidence_records": [
+          {
+            "evidence_id": "synthetic-document",
+            "source_type": "OFFICIAL_DOCUMENT",
+            "source_ref": "https://example.org/synthetic",
+            "source_version": null,
+            "locator": null,
+            "excerpt": "합성 테스트 절차입니다.",
+            "parent_evidence_refs": [],
+            "published_at": null,
+            "retrieved_at": "2026-09-25T00:00:00Z",
+            "freshness_status": "CURRENT",
+            "content_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+          }
+        ],
+        "captured_at": "2026-09-25T00:00:00Z"
+      },
+      "known_procedure_steps": [
+        {
+          "procedure_step": {
+            "procedure_step_id": 1,
+            "step_code": "FILE_TAX_BUSINESS_CLOSURE"
+          },
+          "step_name": "합성 절차",
+          "utterance_aliases": [],
+          "registry_version": "synthetic/1",
+          "applicable_business_type": "ALL",
+          "deprecated_at": null,
+          "dependencies": [],
+          "eligibility_conditions": []
+        },
+        {
+          "procedure_step": {
+            "procedure_step_id": 4,
+            "step_code": "CONFIRM_RESTORATION_SCOPE"
+          },
+          "step_name": "원상복구 범위 확인",
+          "utterance_aliases": [],
+          "registry_version": "synthetic/1",
+          "applicable_business_type": "ALL",
+          "deprecated_at": null,
+          "dependencies": [],
+          "eligibility_conditions": []
+        }
+      ],
+      "source_results": [
+        {
+          "meta": {
+            "schema_version": "agent-io/2.0",
+            "run_id": "00000000-0000-0000-0000-000000000002",
+            "call_id": "00000000-0000-0000-0000-000000000005",
+            "parent_call_id": null,
+            "case_id": 1,
+            "component": "PROCEDURE_TOOL",
+            "attempt": 1,
+            "requested_at": "2026-09-25T00:00:00Z",
+            "trace_id": null
+          },
+          "output_digest": "sha256:02ea693d58ae02bbc409b29e787d40c3a4cb591feeaba2472d4dd0b53e7934c5",
+          "output": {
+            "completion_status": "COMPLETE",
+            "lookup_id": "00000000-0000-0000-0000-000000000007",
+            "documents": [
+              {
+                "document_id": "00000000-0000-0000-0000-000000000008",
+                "title": "합성 자료",
+                "authority_name": "합성 기관",
+                "canonical_url": "https://example.org/synthetic",
+                "source_domain": "example.org",
+                "excerpt": "합성 테스트 절차입니다.",
+                "published_at": null,
+                "retrieved_at": "2026-09-25T00:00:00Z",
+                "freshness_status": "CURRENT",
+                "content_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+                "evidence_ref": "synthetic-document",
+                "search_query": "합성",
+                "step_codes": [
+                  "FILE_TAX_BUSINESS_CLOSURE",
+                  "CONFIRM_RESTORATION_SCOPE"
+                ]
+              }
+            ],
+            "warnings": [],
+            "evidence_records": [
+              {
+                "evidence_id": "synthetic-document",
+                "source_type": "OFFICIAL_DOCUMENT",
+                "source_ref": "https://example.org/synthetic",
+                "source_version": null,
+                "locator": null,
+                "excerpt": "합성 테스트 절차입니다.",
+                "parent_evidence_refs": [],
+                "published_at": null,
+                "retrieved_at": "2026-09-25T00:00:00Z",
+                "freshness_status": "CURRENT",
+                "content_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+              }
+            ],
+            "based_on_snapshot_id": "00000000-0000-0000-0000-000000000004",
+            "as_of": "2026-09-25"
+          }
+        },
+        {
+          "meta": {
+            "schema_version": "agent-io/2.0",
+            "run_id": "00000000-0000-0000-0000-000000000002",
+            "call_id": "00000000-0000-0000-0000-000000000003",
+            "parent_call_id": null,
+            "case_id": 1,
+            "component": "INFO_AGENT",
+            "attempt": 1,
+            "requested_at": "2026-09-25T00:00:00Z",
+            "trace_id": null
+          },
+          "output_digest": "sha256:4809c04a3a635375a674ed15b355b3036a5139e071f2d3afcb1ca57b7259ce51",
+          "output": {
+            "completion_status": "COMPLETE",
+            "fact_candidates": [],
+            "procedure_progress_observations": [],
+            "procedure_findings": [
+              {
+                "finding_id": "00000000-0000-0000-0000-000000000001",
+                "procedure_step": {
+                  "procedure_step_id": 1,
+                  "step_code": "FILE_TAX_BUSINESS_CLOSURE"
+                },
+                "step_name": "합성 절차",
+                "summary": {
+                  "text": "합성 테스트 절차입니다.",
+                  "evidence_refs": [
+                    "synthetic-document"
+                  ]
+                },
+                "relevance": "RELEVANT",
+                "current_status": "NOT_STARTED",
+                "decision_authority": "OFFICIAL_AGENCY",
+                "requires_confirmation": true,
+                "required_actions": [
+                  {
+                    "text": "합성 테스트 절차입니다.",
+                    "evidence_refs": [
+                      "synthetic-document"
+                    ]
+                  }
+                ],
+                "required_documents": [],
+                "application_channel": null,
+                "application_url": null,
+                "deadline": null,
+                "evidence_refs": [
+                  "synthetic-document"
+                ]
+              },
+              {
+                "finding_id": "00000000-0000-0000-0000-000000000032",
+                "procedure_step": {
+                  "procedure_step_id": 4,
+                  "step_code": "CONFIRM_RESTORATION_SCOPE"
+                },
+                "step_name": "원상복구 범위 확인",
+                "summary": {
+                  "text": "합성 테스트 절차입니다.",
+                  "evidence_refs": [
+                    "synthetic-document"
+                  ]
+                },
+                "relevance": "RELEVANT",
+                "current_status": "NOT_STARTED",
+                "decision_authority": "OFFICIAL_AGENCY",
+                "requires_confirmation": true,
+                "required_actions": [],
+                "required_documents": [],
+                "application_channel": null,
+                "application_url": null,
+                "deadline": null,
+                "evidence_refs": [
+                  "synthetic-document"
+                ]
+              }
+            ],
+            "conflicts": [],
+            "missing_fields": [],
+            "uncertainties": [],
+            "question_candidates": [],
+            "evidence_records": [],
+            "parser_version": "synthetic/1",
+            "based_on_snapshot_id": "00000000-0000-0000-0000-000000000004",
+            "based_on_procedure_lookup_call_id": "00000000-0000-0000-0000-000000000005",
+            "based_on_procedure_lookup_digest": "sha256:02ea693d58ae02bbc409b29e787d40c3a4cb591feeaba2472d4dd0b53e7934c5"
+          }
+        }
+      ],
+      "draft_version": 1,
+      "review_feedback": [],
+      "fact_overlays": null,
+      "previous_draft": null
+    },
+    "scope_partial": {
+      "trigger": {
+        "trigger_type": "CASE_CREATED",
+        "input_event_id": "synthetic-input",
+        "client_event_id": null,
+        "input": {
+          "input_event_id": "synthetic-input",
+          "source_type": "USER_INPUT",
+          "redacted_text": "합성 테스트 입력",
+          "redactions": [],
+          "submitted_at": "2026-09-25T00:00:00Z"
+        },
+        "submitted_at": "2026-09-25T00:00:00Z"
+      },
+      "case_snapshot": {
+        "active_blocker_candidate_ids": [],
+        "snapshot_id": "00000000-0000-0000-0000-000000000004",
+        "case_id": 1,
+        "case_status": "IN_PROGRESS",
+        "facts": [
+          {
+            "field_path": "business_type",
+            "value_type": "STRING",
+            "value": "카페",
+            "status": "CONFIRMED",
+            "evidence_refs": [
+              "synthetic-document"
+            ],
+            "updated_at": "2026-09-25T00:00:00Z"
+          },
+          {
+            "field_path": "franchise_status",
+            "value_type": "BOOLEAN",
+            "value": false,
+            "status": "CONFIRMED",
+            "evidence_refs": [
+              "synthetic-document"
+            ],
+            "updated_at": "2026-09-25T00:00:00Z"
+          },
+          {
+            "field_path": "lease_status",
+            "value_type": "ENUM",
+            "value": "LEASED_PAID",
+            "status": "CONFIRMED",
+            "evidence_refs": [
+              "synthetic-document"
+            ],
+            "updated_at": "2026-09-25T00:00:00Z"
+          },
+          {
+            "field_path": "restoration_scope",
+            "value_type": "ENUM",
+            "value": "PARTIAL",
+            "status": "CONFIRMED",
+            "evidence_refs": [
+              "synthetic-document"
+            ],
+            "updated_at": "2026-09-25T00:00:00Z"
+          },
+          {
+            "field_path": "demolition_required",
+            "value_type": "ENUM",
+            "value": "REQUIRED",
+            "status": "CONFIRMED",
+            "evidence_refs": [
+              "synthetic-document"
+            ],
+            "updated_at": "2026-09-25T00:00:00Z"
+          },
+          {
+            "field_path": "restoration_status",
+            "value_type": "ENUM",
+            "value": "IN_PROGRESS",
+            "status": "CONFIRMED",
+            "evidence_refs": [
+              "synthetic-document"
+            ],
+            "updated_at": "2026-09-25T00:00:00Z"
+          }
+        ],
+        "procedure_progress": [],
+        "evidence_records": [
+          {
+            "evidence_id": "synthetic-document",
+            "source_type": "OFFICIAL_DOCUMENT",
+            "source_ref": "https://example.org/synthetic",
+            "source_version": null,
+            "locator": null,
+            "excerpt": "합성 테스트 절차입니다.",
+            "parent_evidence_refs": [],
+            "published_at": null,
+            "retrieved_at": "2026-09-25T00:00:00Z",
+            "freshness_status": "CURRENT",
+            "content_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+          }
+        ],
+        "captured_at": "2026-09-25T00:00:00Z"
+      },
+      "known_procedure_steps": [
+        {
+          "procedure_step": {
+            "procedure_step_id": 1,
+            "step_code": "FILE_TAX_BUSINESS_CLOSURE"
+          },
+          "step_name": "합성 절차",
+          "utterance_aliases": [],
+          "registry_version": "synthetic/1",
+          "applicable_business_type": "ALL",
+          "deprecated_at": null,
+          "dependencies": [],
+          "eligibility_conditions": []
+        },
+        {
+          "procedure_step": {
+            "procedure_step_id": 4,
+            "step_code": "CONFIRM_RESTORATION_SCOPE"
+          },
+          "step_name": "원상복구 범위 확인",
+          "utterance_aliases": [],
+          "registry_version": "synthetic/1",
+          "applicable_business_type": "ALL",
+          "deprecated_at": null,
+          "dependencies": [],
+          "eligibility_conditions": []
+        }
+      ],
+      "source_results": [
+        {
+          "meta": {
+            "schema_version": "agent-io/2.0",
+            "run_id": "00000000-0000-0000-0000-000000000002",
+            "call_id": "00000000-0000-0000-0000-000000000005",
+            "parent_call_id": null,
+            "case_id": 1,
+            "component": "PROCEDURE_TOOL",
+            "attempt": 1,
+            "requested_at": "2026-09-25T00:00:00Z",
+            "trace_id": null
+          },
+          "output_digest": "sha256:02ea693d58ae02bbc409b29e787d40c3a4cb591feeaba2472d4dd0b53e7934c5",
+          "output": {
+            "completion_status": "COMPLETE",
+            "lookup_id": "00000000-0000-0000-0000-000000000007",
+            "documents": [
+              {
+                "document_id": "00000000-0000-0000-0000-000000000008",
+                "title": "합성 자료",
+                "authority_name": "합성 기관",
+                "canonical_url": "https://example.org/synthetic",
+                "source_domain": "example.org",
+                "excerpt": "합성 테스트 절차입니다.",
+                "published_at": null,
+                "retrieved_at": "2026-09-25T00:00:00Z",
+                "freshness_status": "CURRENT",
+                "content_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+                "evidence_ref": "synthetic-document",
+                "search_query": "합성",
+                "step_codes": [
+                  "FILE_TAX_BUSINESS_CLOSURE",
+                  "CONFIRM_RESTORATION_SCOPE"
+                ]
+              }
+            ],
+            "warnings": [],
+            "evidence_records": [
+              {
+                "evidence_id": "synthetic-document",
+                "source_type": "OFFICIAL_DOCUMENT",
+                "source_ref": "https://example.org/synthetic",
+                "source_version": null,
+                "locator": null,
+                "excerpt": "합성 테스트 절차입니다.",
+                "parent_evidence_refs": [],
+                "published_at": null,
+                "retrieved_at": "2026-09-25T00:00:00Z",
+                "freshness_status": "CURRENT",
+                "content_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+              }
+            ],
+            "based_on_snapshot_id": "00000000-0000-0000-0000-000000000004",
+            "as_of": "2026-09-25"
+          }
+        },
+        {
+          "meta": {
+            "schema_version": "agent-io/2.0",
+            "run_id": "00000000-0000-0000-0000-000000000002",
+            "call_id": "00000000-0000-0000-0000-000000000003",
+            "parent_call_id": null,
+            "case_id": 1,
+            "component": "INFO_AGENT",
+            "attempt": 1,
+            "requested_at": "2026-09-25T00:00:00Z",
+            "trace_id": null
+          },
+          "output_digest": "sha256:4809c04a3a635375a674ed15b355b3036a5139e071f2d3afcb1ca57b7259ce51",
+          "output": {
+            "completion_status": "COMPLETE",
+            "fact_candidates": [],
+            "procedure_progress_observations": [],
+            "procedure_findings": [
+              {
+                "finding_id": "00000000-0000-0000-0000-000000000001",
+                "procedure_step": {
+                  "procedure_step_id": 1,
+                  "step_code": "FILE_TAX_BUSINESS_CLOSURE"
+                },
+                "step_name": "합성 절차",
+                "summary": {
+                  "text": "합성 테스트 절차입니다.",
+                  "evidence_refs": [
+                    "synthetic-document"
+                  ]
+                },
+                "relevance": "RELEVANT",
+                "current_status": "NOT_STARTED",
+                "decision_authority": "OFFICIAL_AGENCY",
+                "requires_confirmation": true,
+                "required_actions": [
+                  {
+                    "text": "합성 테스트 절차입니다.",
+                    "evidence_refs": [
+                      "synthetic-document"
+                    ]
+                  }
+                ],
+                "required_documents": [],
+                "application_channel": null,
+                "application_url": null,
+                "deadline": null,
+                "evidence_refs": [
+                  "synthetic-document"
+                ]
+              },
+              {
+                "finding_id": "00000000-0000-0000-0000-000000000032",
+                "procedure_step": {
+                  "procedure_step_id": 4,
+                  "step_code": "CONFIRM_RESTORATION_SCOPE"
+                },
+                "step_name": "원상복구 범위 확인",
+                "summary": {
+                  "text": "합성 테스트 절차입니다.",
+                  "evidence_refs": [
+                    "synthetic-document"
+                  ]
+                },
+                "relevance": "RELEVANT",
+                "current_status": "NOT_STARTED",
+                "decision_authority": "OFFICIAL_AGENCY",
+                "requires_confirmation": true,
+                "required_actions": [],
+                "required_documents": [],
+                "application_channel": null,
+                "application_url": null,
+                "deadline": null,
+                "evidence_refs": [
+                  "synthetic-document"
+                ]
+              }
+            ],
+            "conflicts": [],
+            "missing_fields": [],
+            "uncertainties": [],
+            "question_candidates": [],
+            "evidence_records": [],
+            "parser_version": "synthetic/1",
+            "based_on_snapshot_id": "00000000-0000-0000-0000-000000000004",
+            "based_on_procedure_lookup_call_id": "00000000-0000-0000-0000-000000000005",
+            "based_on_procedure_lookup_digest": "sha256:02ea693d58ae02bbc409b29e787d40c3a4cb591feeaba2472d4dd0b53e7934c5"
+          }
+        }
+      ],
+      "draft_version": 1,
+      "review_feedback": [],
+      "fact_overlays": null,
+      "previous_draft": null
+    },
+    "owned": {
+      "trigger": {
+        "trigger_type": "CASE_CREATED",
+        "input_event_id": "synthetic-input",
+        "client_event_id": null,
+        "input": {
+          "input_event_id": "synthetic-input",
+          "source_type": "USER_INPUT",
+          "redacted_text": "합성 테스트 입력",
+          "redactions": [],
+          "submitted_at": "2026-09-25T00:00:00Z"
+        },
+        "submitted_at": "2026-09-25T00:00:00Z"
+      },
+      "case_snapshot": {
+        "active_blocker_candidate_ids": [],
+        "snapshot_id": "00000000-0000-0000-0000-000000000004",
+        "case_id": 1,
+        "case_status": "IN_PROGRESS",
+        "facts": [
+          {
+            "field_path": "business_type",
+            "value_type": "STRING",
+            "value": "카페",
+            "status": "CONFIRMED",
+            "evidence_refs": [
+              "synthetic-document"
+            ],
+            "updated_at": "2026-09-25T00:00:00Z"
+          },
+          {
+            "field_path": "franchise_status",
+            "value_type": "BOOLEAN",
+            "value": false,
+            "status": "CONFIRMED",
+            "evidence_refs": [
+              "synthetic-document"
+            ],
+            "updated_at": "2026-09-25T00:00:00Z"
+          },
+          {
+            "field_path": "lease_status",
+            "value_type": "ENUM",
+            "value": "OWNED",
+            "status": "CONFIRMED",
+            "evidence_refs": [
+              "synthetic-document"
+            ],
+            "updated_at": "2026-09-25T00:00:00Z"
+          },
+          {
+            "field_path": "restoration_scope",
+            "value_type": "ENUM",
+            "value": "NOT_REQUIRED",
+            "status": "CONFIRMED",
+            "evidence_refs": [
+              "synthetic-document"
+            ],
+            "updated_at": "2026-09-25T00:00:00Z"
+          },
+          {
+            "field_path": "demolition_required",
+            "value_type": "ENUM",
+            "value": "NOT_REQUIRED",
+            "status": "CONFIRMED",
+            "evidence_refs": [
+              "synthetic-document"
+            ],
+            "updated_at": "2026-09-25T00:00:00Z"
+          },
+          {
+            "field_path": "restoration_status",
+            "value_type": "ENUM",
+            "value": "NOT_REQUIRED",
+            "status": "CONFIRMED",
+            "evidence_refs": [
+              "synthetic-document"
+            ],
+            "updated_at": "2026-09-25T00:00:00Z"
+          }
+        ],
+        "procedure_progress": [],
+        "evidence_records": [
+          {
+            "evidence_id": "synthetic-document",
+            "source_type": "OFFICIAL_DOCUMENT",
+            "source_ref": "https://example.org/synthetic",
+            "source_version": null,
+            "locator": null,
+            "excerpt": "합성 테스트 절차입니다.",
+            "parent_evidence_refs": [],
+            "published_at": null,
+            "retrieved_at": "2026-09-25T00:00:00Z",
+            "freshness_status": "CURRENT",
+            "content_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+          }
+        ],
+        "captured_at": "2026-09-25T00:00:00Z"
+      },
+      "known_procedure_steps": [
+        {
+          "procedure_step": {
+            "procedure_step_id": 1,
+            "step_code": "FILE_TAX_BUSINESS_CLOSURE"
+          },
+          "step_name": "합성 절차",
+          "utterance_aliases": [],
+          "registry_version": "synthetic/1",
+          "applicable_business_type": "ALL",
+          "deprecated_at": null,
+          "dependencies": [],
+          "eligibility_conditions": []
+        },
+        {
+          "procedure_step": {
+            "procedure_step_id": 4,
+            "step_code": "CONFIRM_RESTORATION_SCOPE"
+          },
+          "step_name": "원상복구 범위 확인",
+          "utterance_aliases": [],
+          "registry_version": "synthetic/1",
+          "applicable_business_type": "ALL",
+          "deprecated_at": null,
+          "dependencies": [],
+          "eligibility_conditions": []
+        }
+      ],
+      "source_results": [
+        {
+          "meta": {
+            "schema_version": "agent-io/2.0",
+            "run_id": "00000000-0000-0000-0000-000000000002",
+            "call_id": "00000000-0000-0000-0000-000000000005",
+            "parent_call_id": null,
+            "case_id": 1,
+            "component": "PROCEDURE_TOOL",
+            "attempt": 1,
+            "requested_at": "2026-09-25T00:00:00Z",
+            "trace_id": null
+          },
+          "output_digest": "sha256:02ea693d58ae02bbc409b29e787d40c3a4cb591feeaba2472d4dd0b53e7934c5",
+          "output": {
+            "completion_status": "COMPLETE",
+            "lookup_id": "00000000-0000-0000-0000-000000000007",
+            "documents": [
+              {
+                "document_id": "00000000-0000-0000-0000-000000000008",
+                "title": "합성 자료",
+                "authority_name": "합성 기관",
+                "canonical_url": "https://example.org/synthetic",
+                "source_domain": "example.org",
+                "excerpt": "합성 테스트 절차입니다.",
+                "published_at": null,
+                "retrieved_at": "2026-09-25T00:00:00Z",
+                "freshness_status": "CURRENT",
+                "content_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+                "evidence_ref": "synthetic-document",
+                "search_query": "합성",
+                "step_codes": [
+                  "FILE_TAX_BUSINESS_CLOSURE",
+                  "CONFIRM_RESTORATION_SCOPE"
+                ]
+              }
+            ],
+            "warnings": [],
+            "evidence_records": [
+              {
+                "evidence_id": "synthetic-document",
+                "source_type": "OFFICIAL_DOCUMENT",
+                "source_ref": "https://example.org/synthetic",
+                "source_version": null,
+                "locator": null,
+                "excerpt": "합성 테스트 절차입니다.",
+                "parent_evidence_refs": [],
+                "published_at": null,
+                "retrieved_at": "2026-09-25T00:00:00Z",
+                "freshness_status": "CURRENT",
+                "content_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+              }
+            ],
+            "based_on_snapshot_id": "00000000-0000-0000-0000-000000000004",
+            "as_of": "2026-09-25"
+          }
+        },
+        {
+          "meta": {
+            "schema_version": "agent-io/2.0",
+            "run_id": "00000000-0000-0000-0000-000000000002",
+            "call_id": "00000000-0000-0000-0000-000000000003",
+            "parent_call_id": null,
+            "case_id": 1,
+            "component": "INFO_AGENT",
+            "attempt": 1,
+            "requested_at": "2026-09-25T00:00:00Z",
+            "trace_id": null
+          },
+          "output_digest": "sha256:4809c04a3a635375a674ed15b355b3036a5139e071f2d3afcb1ca57b7259ce51",
+          "output": {
+            "completion_status": "COMPLETE",
+            "fact_candidates": [],
+            "procedure_progress_observations": [],
+            "procedure_findings": [
+              {
+                "finding_id": "00000000-0000-0000-0000-000000000001",
+                "procedure_step": {
+                  "procedure_step_id": 1,
+                  "step_code": "FILE_TAX_BUSINESS_CLOSURE"
+                },
+                "step_name": "합성 절차",
+                "summary": {
+                  "text": "합성 테스트 절차입니다.",
+                  "evidence_refs": [
+                    "synthetic-document"
+                  ]
+                },
+                "relevance": "RELEVANT",
+                "current_status": "NOT_STARTED",
+                "decision_authority": "OFFICIAL_AGENCY",
+                "requires_confirmation": true,
+                "required_actions": [
+                  {
+                    "text": "합성 테스트 절차입니다.",
+                    "evidence_refs": [
+                      "synthetic-document"
+                    ]
+                  }
+                ],
+                "required_documents": [],
+                "application_channel": null,
+                "application_url": null,
+                "deadline": null,
+                "evidence_refs": [
+                  "synthetic-document"
+                ]
+              },
+              {
+                "finding_id": "00000000-0000-0000-0000-000000000032",
+                "procedure_step": {
+                  "procedure_step_id": 4,
+                  "step_code": "CONFIRM_RESTORATION_SCOPE"
+                },
+                "step_name": "원상복구 범위 확인",
+                "summary": {
+                  "text": "합성 테스트 절차입니다.",
+                  "evidence_refs": [
+                    "synthetic-document"
+                  ]
+                },
+                "relevance": "RELEVANT",
+                "current_status": "NOT_STARTED",
+                "decision_authority": "OFFICIAL_AGENCY",
+                "requires_confirmation": true,
+                "required_actions": [],
+                "required_documents": [],
+                "application_channel": null,
+                "application_url": null,
+                "deadline": null,
+                "evidence_refs": [
+                  "synthetic-document"
+                ]
+              }
+            ],
+            "conflicts": [],
+            "missing_fields": [],
+            "uncertainties": [],
+            "question_candidates": [],
+            "evidence_records": [],
+            "parser_version": "synthetic/1",
+            "based_on_snapshot_id": "00000000-0000-0000-0000-000000000004",
+            "based_on_procedure_lookup_call_id": "00000000-0000-0000-0000-000000000005",
+            "based_on_procedure_lookup_digest": "sha256:02ea693d58ae02bbc409b29e787d40c3a4cb591feeaba2472d4dd0b53e7934c5"
+          }
+        }
+      ],
+      "draft_version": 1,
+      "review_feedback": [],
+      "fact_overlays": null,
+      "previous_draft": null
+    },
+    "missing_employee_count": {
+      "trigger": {
+        "trigger_type": "CASE_CREATED",
+        "input_event_id": "synthetic-input",
+        "client_event_id": null,
+        "input": {
+          "input_event_id": "synthetic-input",
+          "source_type": "USER_INPUT",
+          "redacted_text": "합성 테스트 입력",
+          "redactions": [],
+          "submitted_at": "2026-09-25T00:00:00Z"
+        },
+        "submitted_at": "2026-09-25T00:00:00Z"
+      },
+      "case_snapshot": {
+        "active_blocker_candidate_ids": [],
+        "snapshot_id": "00000000-0000-0000-0000-000000000004",
+        "case_id": 1,
+        "case_status": "IN_PROGRESS",
+        "facts": [
+          {
+            "field_path": "business_type",
+            "value_type": "STRING",
+            "value": "카페",
+            "status": "CONFIRMED",
+            "evidence_refs": [
+              "synthetic-document"
+            ],
+            "updated_at": "2026-09-25T00:00:00Z"
+          },
+          {
+            "field_path": "franchise_status",
+            "value_type": "BOOLEAN",
+            "value": false,
+            "status": "CONFIRMED",
+            "evidence_refs": [
+              "synthetic-document"
+            ],
+            "updated_at": "2026-09-25T00:00:00Z"
+          },
+          {
+            "field_path": "lease_status",
+            "value_type": "ENUM",
+            "value": "OWNED",
+            "status": "CONFIRMED",
+            "evidence_refs": [
+              "synthetic-document"
+            ],
+            "updated_at": "2026-09-25T00:00:00Z"
+          },
+          {
+            "field_path": "restoration_scope",
+            "value_type": "ENUM",
+            "value": null,
+            "status": "UNKNOWN",
+            "evidence_refs": [],
+            "updated_at": null
+          },
+          {
+            "field_path": "demolition_required",
+            "value_type": "ENUM",
+            "value": null,
+            "status": "UNKNOWN",
+            "evidence_refs": [],
+            "updated_at": null
+          },
+          {
+            "field_path": "restoration_status",
+            "value_type": "ENUM",
+            "value": null,
+            "status": "UNKNOWN",
+            "evidence_refs": [],
+            "updated_at": null
+          }
+        ],
+        "procedure_progress": [],
+        "evidence_records": [
+          {
+            "evidence_id": "synthetic-document",
+            "source_type": "OFFICIAL_DOCUMENT",
+            "source_ref": "https://example.org/synthetic",
+            "source_version": null,
+            "locator": null,
+            "excerpt": "합성 테스트 절차입니다.",
+            "parent_evidence_refs": [],
+            "published_at": null,
+            "retrieved_at": "2026-09-25T00:00:00Z",
+            "freshness_status": "CURRENT",
+            "content_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+          }
+        ],
+        "captured_at": "2026-09-25T00:00:00Z"
+      },
+      "known_procedure_steps": [
+        {
+          "procedure_step": {
+            "procedure_step_id": 1,
+            "step_code": "FILE_TAX_BUSINESS_CLOSURE"
+          },
+          "step_name": "합성 절차",
+          "utterance_aliases": [],
+          "registry_version": "synthetic/1",
+          "applicable_business_type": "ALL",
+          "deprecated_at": null,
+          "dependencies": [],
+          "eligibility_conditions": []
+        },
+        {
+          "procedure_step": {
+            "procedure_step_id": 4,
+            "step_code": "CONFIRM_RESTORATION_SCOPE"
+          },
+          "step_name": "원상복구 범위 확인",
+          "utterance_aliases": [],
+          "registry_version": "synthetic/1",
+          "applicable_business_type": "ALL",
+          "deprecated_at": null,
+          "dependencies": [],
+          "eligibility_conditions": []
+        }
+      ],
+      "source_results": [
+        {
+          "meta": {
+            "schema_version": "agent-io/2.0",
+            "run_id": "00000000-0000-0000-0000-000000000002",
+            "call_id": "00000000-0000-0000-0000-000000000005",
+            "parent_call_id": null,
+            "case_id": 1,
+            "component": "PROCEDURE_TOOL",
+            "attempt": 1,
+            "requested_at": "2026-09-25T00:00:00Z",
+            "trace_id": null
+          },
+          "output_digest": "sha256:02ea693d58ae02bbc409b29e787d40c3a4cb591feeaba2472d4dd0b53e7934c5",
+          "output": {
+            "completion_status": "COMPLETE",
+            "lookup_id": "00000000-0000-0000-0000-000000000007",
+            "documents": [
+              {
+                "document_id": "00000000-0000-0000-0000-000000000008",
+                "title": "합성 자료",
+                "authority_name": "합성 기관",
+                "canonical_url": "https://example.org/synthetic",
+                "source_domain": "example.org",
+                "excerpt": "합성 테스트 절차입니다.",
+                "published_at": null,
+                "retrieved_at": "2026-09-25T00:00:00Z",
+                "freshness_status": "CURRENT",
+                "content_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+                "evidence_ref": "synthetic-document",
+                "search_query": "합성",
+                "step_codes": [
+                  "FILE_TAX_BUSINESS_CLOSURE",
+                  "CONFIRM_RESTORATION_SCOPE"
+                ]
+              }
+            ],
+            "warnings": [],
+            "evidence_records": [
+              {
+                "evidence_id": "synthetic-document",
+                "source_type": "OFFICIAL_DOCUMENT",
+                "source_ref": "https://example.org/synthetic",
+                "source_version": null,
+                "locator": null,
+                "excerpt": "합성 테스트 절차입니다.",
+                "parent_evidence_refs": [],
+                "published_at": null,
+                "retrieved_at": "2026-09-25T00:00:00Z",
+                "freshness_status": "CURRENT",
+                "content_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+              }
+            ],
+            "based_on_snapshot_id": "00000000-0000-0000-0000-000000000004",
+            "as_of": "2026-09-25"
+          }
+        },
+        {
+          "meta": {
+            "schema_version": "agent-io/2.0",
+            "run_id": "00000000-0000-0000-0000-000000000002",
+            "call_id": "00000000-0000-0000-0000-000000000003",
+            "parent_call_id": null,
+            "case_id": 1,
+            "component": "INFO_AGENT",
+            "attempt": 1,
+            "requested_at": "2026-09-25T00:00:00Z",
+            "trace_id": null
+          },
+          "output_digest": "sha256:6a7614f1fb59317499d5d4e3439070c79cda0a51db25d6affd50d17b963ae4ac",
+          "output": {
+            "completion_status": "COMPLETE",
+            "fact_candidates": [],
+            "procedure_progress_observations": [],
+            "procedure_findings": [
+              {
+                "finding_id": "00000000-0000-0000-0000-000000000001",
+                "procedure_step": {
+                  "procedure_step_id": 1,
+                  "step_code": "FILE_TAX_BUSINESS_CLOSURE"
+                },
+                "step_name": "합성 절차",
+                "summary": {
+                  "text": "합성 테스트 절차입니다.",
+                  "evidence_refs": [
+                    "synthetic-document"
+                  ]
+                },
+                "relevance": "RELEVANT",
+                "current_status": "NOT_STARTED",
+                "decision_authority": "OFFICIAL_AGENCY",
+                "requires_confirmation": true,
+                "required_actions": [
+                  {
+                    "text": "합성 테스트 절차입니다.",
+                    "evidence_refs": [
+                      "synthetic-document"
+                    ]
+                  }
+                ],
+                "required_documents": [],
+                "application_channel": null,
+                "application_url": null,
+                "deadline": null,
+                "evidence_refs": [
+                  "synthetic-document"
+                ]
+              },
+              {
+                "finding_id": "00000000-0000-0000-0000-000000000032",
+                "procedure_step": {
+                  "procedure_step_id": 4,
+                  "step_code": "CONFIRM_RESTORATION_SCOPE"
+                },
+                "step_name": "원상복구 범위 확인",
+                "summary": {
+                  "text": "합성 테스트 절차입니다.",
+                  "evidence_refs": [
+                    "synthetic-document"
+                  ]
+                },
+                "relevance": "RELEVANT",
+                "current_status": "NOT_STARTED",
+                "decision_authority": "OFFICIAL_AGENCY",
+                "requires_confirmation": true,
+                "required_actions": [],
+                "required_documents": [],
+                "application_channel": null,
+                "application_url": null,
+                "deadline": null,
+                "evidence_refs": [
+                  "synthetic-document"
+                ]
+              }
+            ],
+            "conflicts": [],
+            "missing_fields": [
+              {
+                "field_path": "employee_count",
+                "reason_summary": "현재 판단에 필요한 합성 항목",
+                "blocks": [
+                  "SUPERVISOR_DECISION"
+                ],
+                "question_candidate_id": "00000000-0000-0000-0000-000000000051"
+              }
+            ],
+            "uncertainties": [],
+            "question_candidates": [
+              {
+                "question_id": "00000000-0000-0000-0000-000000000051",
+                "text": "합성 누락 질문",
+                "resolves_field_paths": [
+                  "employee_count"
+                ],
+                "reason_summary": "합성 미확인 항목"
+              }
+            ],
+            "evidence_records": [],
+            "parser_version": "synthetic/1",
+            "based_on_snapshot_id": "00000000-0000-0000-0000-000000000004",
+            "based_on_procedure_lookup_call_id": "00000000-0000-0000-0000-000000000005",
+            "based_on_procedure_lookup_digest": "sha256:02ea693d58ae02bbc409b29e787d40c3a4cb591feeaba2472d4dd0b53e7934c5"
+          }
+        }
+      ],
+      "draft_version": 1,
+      "review_feedback": [],
+      "fact_overlays": null,
+      "previous_draft": null
+    }
+  },
+  "info_input": {
+    "input": {
+      "input_event_id": "synthetic-input",
+      "source_type": "USER_INPUT",
+      "redacted_text": "임대인에게 원상복구 범위는 일부이고 철거가 필요하다고 들었어요.",
+      "redactions": [],
+      "submitted_at": "2026-09-25T00:00:00Z"
+    },
+    "case_snapshot": {
+      "active_blocker_candidate_ids": [],
+      "snapshot_id": "00000000-0000-0000-0000-000000000004",
+      "case_id": 1,
+      "case_status": "IN_PROGRESS",
+      "facts": [
+        {
+          "field_path": "business_type",
+          "value_type": "STRING",
+          "value": "카페",
+          "status": "CONFIRMED",
+          "evidence_refs": [
+            "synthetic-document"
+          ],
+          "updated_at": "2026-09-25T00:00:00Z"
+        },
+        {
+          "field_path": "franchise_status",
+          "value_type": "BOOLEAN",
+          "value": false,
+          "status": "CONFIRMED",
+          "evidence_refs": [
+            "synthetic-document"
+          ],
+          "updated_at": "2026-09-25T00:00:00Z"
+        },
+        {
+          "field_path": "lease_status",
+          "value_type": "ENUM",
+          "value": "OWNED",
+          "status": "CONFIRMED",
+          "evidence_refs": [
+            "synthetic-document"
+          ],
+          "updated_at": "2026-09-25T00:00:00Z"
+        },
+        {
+          "field_path": "restoration_scope",
+          "value_type": "ENUM",
+          "value": "NOT_REQUIRED",
+          "status": "CONFIRMED",
+          "evidence_refs": [
+            "synthetic-document"
+          ],
+          "updated_at": "2026-09-25T00:00:00Z"
+        },
+        {
+          "field_path": "restoration_status",
+          "value_type": "ENUM",
+          "value": "NOT_REQUIRED",
+          "status": "CONFIRMED",
+          "evidence_refs": [
+            "synthetic-document"
+          ],
+          "updated_at": "2026-09-25T00:00:00Z"
+        },
+        {
+          "field_path": "demolition_required",
+          "value_type": "ENUM",
+          "value": "NOT_REQUIRED",
+          "status": "CONFIRMED",
+          "evidence_refs": [
+            "synthetic-document"
+          ],
+          "updated_at": "2026-09-25T00:00:00Z"
+        }
+      ],
+      "procedure_progress": [
+        {
+          "requirements_confirmed": false,
+          "submitted": false,
+          "procedure_step": {
+            "procedure_step_id": 3,
+            "step_code": "CONFIRM_RESTORATION_SCOPE"
+          },
+          "status": "COMPLETED",
+          "evidence_refs": [
+            "synthetic-document"
+          ],
+          "updated_at": "2026-09-25T00:00:00Z"
+        }
+      ],
+      "evidence_records": [
+        {
+          "evidence_id": "synthetic-document",
+          "source_type": "OFFICIAL_DOCUMENT",
+          "source_ref": "https://example.org/synthetic",
+          "source_version": null,
+          "locator": null,
+          "excerpt": "합성 테스트 절차입니다.",
+          "parent_evidence_refs": [],
+          "published_at": null,
+          "retrieved_at": "2026-09-25T00:00:00Z",
+          "freshness_status": "CURRENT",
+          "content_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "captured_at": "2026-09-25T00:00:00Z"
+    },
+    "conflict_confirmation": null,
+    "fact_overlays": [],
+    "allowed_field_paths": [
+      "business_type",
+      "franchise_status",
+      "employee_count",
+      "lease_status",
+      "restoration_status",
+      "restoration_scope",
+      "restoration_scope_detail",
+      "demolition_required",
+      "planned_closure_date"
+    ],
+    "known_procedure_steps": [
+      {
+        "procedure_step": {
+          "procedure_step_id": 1,
+          "step_code": "FILE_TAX_BUSINESS_CLOSURE"
+        },
+        "step_name": "합성 절차",
+        "utterance_aliases": [],
+        "registry_version": "synthetic/1",
+        "applicable_business_type": "ALL",
+        "deprecated_at": null,
+        "dependencies": [],
+        "eligibility_conditions": []
+      },
+      {
+        "procedure_step": {
+          "procedure_step_id": 2,
+          "step_code": "FILE_FOOD_SERVICE_CLOSURE"
+        },
+        "step_name": "합성 절차 2",
+        "utterance_aliases": [],
+        "registry_version": "synthetic/1",
+        "applicable_business_type": "ALL",
+        "deprecated_at": null,
+        "dependencies": [],
+        "eligibility_conditions": []
+      },
+      {
+        "procedure_step": {
+          "procedure_step_id": 3,
+          "step_code": "CONFIRM_RESTORATION_SCOPE"
+        },
+        "step_name": "합성 절차 3",
+        "utterance_aliases": [],
+        "registry_version": "synthetic/1",
+        "applicable_business_type": "ALL",
+        "deprecated_at": null,
+        "dependencies": [],
+        "eligibility_conditions": []
+      }
+    ],
+    "source_call_id": "00000000-0000-0000-0000-000000000028",
+    "procedure_lookup_call_id": "00000000-0000-0000-0000-000000000005",
+    "procedure_lookup_result": {
+      "completion_status": "COMPLETE",
+      "lookup_id": "00000000-0000-0000-0000-000000000007",
+      "documents": [
+        {
+          "document_id": "00000000-0000-0000-0000-000000000008",
+          "title": "합성 자료",
+          "authority_name": "합성 기관",
+          "canonical_url": "https://example.org/synthetic",
+          "source_domain": "example.org",
+          "excerpt": "합성 테스트 절차입니다.",
+          "published_at": null,
+          "retrieved_at": "2026-09-25T00:00:00Z",
+          "freshness_status": "CURRENT",
+          "content_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "evidence_ref": "synthetic-document",
+          "search_query": "합성",
+          "step_codes": [
+            "FILE_TAX_BUSINESS_CLOSURE"
+          ]
+        },
+        {
+          "document_id": "00000000-0000-0000-0000-000000000016",
+          "title": "합성 자료",
+          "authority_name": "합성 기관",
+          "canonical_url": "https://example.org/synthetic-2",
+          "source_domain": "example.org",
+          "excerpt": "합성 테스트 절차입니다.",
+          "published_at": null,
+          "retrieved_at": "2026-09-25T00:00:00Z",
+          "freshness_status": "CURRENT",
+          "content_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "evidence_ref": "synthetic-2",
+          "search_query": "합성",
+          "step_codes": [
+            "FILE_FOOD_SERVICE_CLOSURE"
+          ]
+        },
+        {
+          "document_id": "00000000-0000-0000-0000-000000000017",
+          "title": "합성 자료",
+          "authority_name": "합성 기관",
+          "canonical_url": "https://example.org/synthetic-3",
+          "source_domain": "example.org",
+          "excerpt": "합성 테스트 절차입니다.",
+          "published_at": null,
+          "retrieved_at": "2026-09-25T00:00:00Z",
+          "freshness_status": "CURRENT",
+          "content_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "evidence_ref": "synthetic-3",
+          "search_query": "합성",
+          "step_codes": [
+            "CONFIRM_RESTORATION_SCOPE"
+          ]
+        }
+      ],
+      "warnings": [],
+      "evidence_records": [
+        {
+          "evidence_id": "synthetic-document",
+          "source_type": "OFFICIAL_DOCUMENT",
+          "source_ref": "https://example.org/synthetic",
+          "source_version": null,
+          "locator": null,
+          "excerpt": "합성 테스트 절차입니다.",
+          "parent_evidence_refs": [],
+          "published_at": null,
+          "retrieved_at": "2026-09-25T00:00:00Z",
+          "freshness_status": "CURRENT",
+          "content_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        {
+          "evidence_id": "synthetic-2",
+          "source_type": "OFFICIAL_DOCUMENT",
+          "source_ref": "https://example.org/synthetic-2",
+          "source_version": null,
+          "locator": null,
+          "excerpt": "합성 테스트 절차입니다.",
+          "parent_evidence_refs": [],
+          "published_at": null,
+          "retrieved_at": "2026-09-25T00:00:00Z",
+          "freshness_status": "CURRENT",
+          "content_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        {
+          "evidence_id": "synthetic-3",
+          "source_type": "OFFICIAL_DOCUMENT",
+          "source_ref": "https://example.org/synthetic-3",
+          "source_version": null,
+          "locator": null,
+          "excerpt": "합성 테스트 절차입니다.",
+          "parent_evidence_refs": [],
+          "published_at": null,
+          "retrieved_at": "2026-09-25T00:00:00Z",
+          "freshness_status": "CURRENT",
+          "content_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "based_on_snapshot_id": "00000000-0000-0000-0000-000000000004",
+      "as_of": "2026-09-25"
+    },
+    "review_feedback": []
+  },
+  "support_catalog": {
+    "catalog_version": "synthetic-llm-role-check",
+    "programs": [
+      {
+        "support_program": {
+          "support_program_id": 1,
+          "wiki_uuid": "00000000-0000-0000-0000-000000000006"
+        },
+        "program_name": "합성 지원사업 테스트 전용",
+        "related_steps": [],
+        "criteria": [
+          {
+            "criterion_code": "LEASE",
+            "field_path": "lease_status",
+            "operator": "EQ",
+            "required_values": [
+              "LEASED_PAID"
+            ],
+            "evidence_refs": [
+              "synthetic-document"
+            ]
+          }
+        ],
+        "required_documents": [],
+        "application_channel": null,
+        "application_url": null,
+        "application_period": null,
+        "source_version": "synthetic-only",
+        "freshness_status": "CURRENT",
+        "evidence_refs": [
+          "synthetic-document"
+        ]
+      }
+    ],
+    "evidence_records": [
+      {
+        "evidence_id": "synthetic-document",
+        "source_type": "OFFICIAL_DOCUMENT",
+        "source_ref": "https://example.org/synthetic",
+        "source_version": null,
+        "locator": null,
+        "excerpt": "합성 테스트 절차입니다.",
+        "parent_evidence_refs": [],
+        "published_at": null,
+        "retrieved_at": "2026-09-25T00:00:00Z",
+        "freshness_status": "CURRENT",
+        "content_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    ]
+  },
+  "support_input": {
+    "planning_context": {
+      "case_snapshot": {
+        "active_blocker_candidate_ids": [],
+        "snapshot_id": "00000000-0000-0000-0000-000000000004",
+        "case_id": 1,
+        "case_status": "IN_PROGRESS",
+        "facts": [
+          {
+            "field_path": "business_type",
+            "value_type": "STRING",
+            "value": "카페",
+            "status": "CONFIRMED",
+            "evidence_refs": [
+              "synthetic-document"
+            ],
+            "updated_at": "2026-09-25T00:00:00Z"
+          },
+          {
+            "field_path": "franchise_status",
+            "value_type": "BOOLEAN",
+            "value": false,
+            "status": "CONFIRMED",
+            "evidence_refs": [
+              "synthetic-document"
+            ],
+            "updated_at": "2026-09-25T00:00:00Z"
+          },
+          {
+            "field_path": "lease_status",
+            "value_type": "ENUM",
+            "value": "LEASED_PAID",
+            "status": "CONFIRMED",
+            "evidence_refs": [
+              "synthetic-document"
+            ],
+            "updated_at": "2026-09-25T00:00:00Z"
+          },
+          {
+            "field_path": "restoration_scope",
+            "value_type": "ENUM",
+            "value": null,
+            "status": "UNKNOWN",
+            "evidence_refs": [],
+            "updated_at": null
+          },
+          {
+            "field_path": "demolition_required",
+            "value_type": "ENUM",
+            "value": null,
+            "status": "UNKNOWN",
+            "evidence_refs": [],
+            "updated_at": null
+          },
+          {
+            "field_path": "restoration_status",
+            "value_type": "ENUM",
+            "value": null,
+            "status": "UNKNOWN",
+            "evidence_refs": [],
+            "updated_at": null
+          }
+        ],
+        "procedure_progress": [],
+        "evidence_records": [
+          {
+            "evidence_id": "synthetic-document",
+            "source_type": "OFFICIAL_DOCUMENT",
+            "source_ref": "https://example.org/synthetic",
+            "source_version": null,
+            "locator": null,
+            "excerpt": "합성 테스트 절차입니다.",
+            "parent_evidence_refs": [],
+            "published_at": null,
+            "retrieved_at": "2026-09-25T00:00:00Z",
+            "freshness_status": "CURRENT",
+            "content_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+          }
+        ],
+        "captured_at": "2026-09-25T00:00:00Z"
+      },
+      "fact_overlays": []
+    },
+    "as_of": "2026-09-25",
+    "review_feedback": []
+  },
+  "expected_actions": {
+    "scope_unknown": "CONFIRM_RESTORATION_SCOPE",
+    "scope_partial": "CONFIRM_TAX_CLOSURE_REQUIREMENTS",
+    "owned": "CONFIRM_TAX_CLOSURE_REQUIREMENTS",
+    "missing_employee_count": null
+  },
+  "source_note": "합성 입력과 합성 구성요소 자료로 LLM 호출 계약을 검증합니다. 실제 지원 자격이나 공식자료 검수 결과가 아닙니다."
+}

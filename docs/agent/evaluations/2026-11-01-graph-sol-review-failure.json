@@ -1,0 +1,358 @@
+{
+  "evaluation_only": true,
+  "synthetic_case": true,
+  "human_review_claimed": false,
+  "source_snapshot_sha256": "b0c79b927df47415cd9d6bea813eb26412ec3bb96128776393abc12441fec683",
+  "code_digest": "sha256:d007044808a4d1e0804c2c17de812a8f9fc3ca4c9569f0f2adc9fac1d47401d3",
+  "code_unchanged": true,
+  "trials": [
+    {
+      "case": "benchmark_case1",
+      "trigger": "CASE_CREATED",
+      "graph_input_digest": "sha256:8139c94d109822497d7e7f50b5794ea3e20214a8990320bcb32399e8574d7f95",
+      "status": "SAFE_FAILURE",
+      "calls": [
+        {
+          "role": "info",
+          "model": "gpt-6.1-sol",
+          "schema_name": "reborn_info_analysis",
+          "reasoning_effort": "xhigh",
+          "max_completion_tokens": 16000,
+          "stream": true,
+          "request_without_model_digest": "1a3816b67b2a5a405d060e4ec9d961aae32556f976aa0b88a519cac75240e6cc",
+          "http_status": 200,
+          "headers_latency_ms": 20229
+        },
+        {
+          "role": "supervisor",
+          "model": "gpt-6.1-sol",
+          "schema_name": "reborn_supervisor_draft",
+          "reasoning_effort": "xhigh",
+          "max_completion_tokens": 16000,
+          "stream": true,
+          "request_without_model_digest": "1117b60f53da5d8838ffa1c377b50963ff22c4571a0b9ead8da9bca62406c994",
+          "http_status": 200,
+          "headers_latency_ms": 3429
+        },
+        {
+          "role": "shared",
+          "model": "gpt-6.1-sol",
+          "schema_name": "reborn_review_output",
+          "reasoning_effort": "xhigh",
+          "max_completion_tokens": 16000,
+          "stream": true,
+          "request_without_model_digest": "f8368a0eab10439cdc10fd8f45fdf8f69075c5b9bdcfbf30114ebeafd0ddefbd",
+          "http_status": 200,
+          "headers_latency_ms": 20229
+        },
+        {
+          "role": "supervisor",
+          "model": "gpt-6.1-sol",
+          "schema_name": "reborn_supervisor_draft",
+          "reasoning_effort": "xhigh",
+          "max_completion_tokens": 16000,
+          "stream": true,
+          "request_without_model_digest": "5a6edfc715f9067ed00a7cb72285d6f6d9f0e63826963cef6671ec1d473da135",
+          "http_status": 200,
+          "headers_latency_ms": 5617
+        },
+        {
+          "role": "shared",
+          "model": "gpt-6.1-sol",
+          "schema_name": "reborn_review_output",
+          "reasoning_effort": "xhigh",
+          "max_completion_tokens": 16000,
+          "stream": true,
+          "request_without_model_digest": "f43fef59f7f5ae030073b60c4cf68bf50a31fe74f679803e0c414f5eee24b620",
+          "http_status": 200,
+          "headers_latency_ms": 20254
+        },
+        {
+          "role": "supervisor",
+          "model": "gpt-6.1-sol",
+          "schema_name": "reborn_supervisor_draft",
+          "reasoning_effort": "xhigh",
+          "max_completion_tokens": 16000,
+          "stream": true,
+          "request_without_model_digest": "23a038fbc88084af72e493cb1d2024ca6d4f286420a00768285f376938ceae5d",
+          "http_status": 200,
+          "headers_latency_ms": 6633
+        },
+        {
+          "role": "shared",
+          "model": "gpt-6.1-sol",
+          "schema_name": "reborn_review_output",
+          "reasoning_effort": "xhigh",
+          "max_completion_tokens": 16000,
+          "stream": true,
+          "request_without_model_digest": "b6784ef7b6851d4fb06c5558156cada525a599a5000ec6079193aeff20156d5e",
+          "http_status": 200,
+          "headers_latency_ms": 20236
+        }
+      ],
+      "limits": {
+        "max_llm_calls_per_run": 40,
+        "run_deadline_seconds": 420.0
+      },
+      "failure_code": "REVIEW_RETRY_EXHAUSTED",
+      "failed_component": "REVIEW_TOOL",
+      "message_code": "REVIEW_RETRY_EXHAUSTED",
+      "recovery_action_code": "RESUBMIT_INPUT",
+      "requested_field_paths": [
+        "pension_enrolled",
+        "health_insurance_enrolled",
+        "employment_insurance_enrolled",
+        "industrial_accident_insurance_enrolled",
+        "restoration_scope",
+        "demolition_required",
+        "planned_closure_date"
+      ],
+      "retryable": false,
+      "conflicts": [],
+      "elapsed_ms": 244053,
+      "calls_by_role": {
+        "info": 1,
+        "supervisor": 3,
+        "shared": 3
+      },
+      "provider_usage": [
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 11690,
+          "completion_tokens": 11551,
+          "reasoning_tokens": 7681,
+          "cached_prompt_tokens": 3082,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_info_analysis",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 138870,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 18590,
+          "completion_tokens": 128,
+          "reasoning_tokens": 85,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_supervisor_draft",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 3678,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 32222,
+          "completion_tokens": 2341,
+          "reasoning_tokens": 2048,
+          "cached_prompt_tokens": 2996,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_review_output",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 38168,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 22124,
+          "completion_tokens": 221,
+          "reasoning_tokens": 178,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_supervisor_draft",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 5855,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 32222,
+          "completion_tokens": 1524,
+          "reasoning_tokens": 1226,
+          "cached_prompt_tokens": 2996,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_review_output",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 22709,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 22130,
+          "completion_tokens": 257,
+          "reasoning_tokens": 214,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_supervisor_draft",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 6881,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 32222,
+          "completion_tokens": 1656,
+          "reasoning_tokens": 1379,
+          "cached_prompt_tokens": 2996,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_review_output",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 27593,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "review_results": [
+        {
+          "reviewed_subject_id": "e659a091-e524-4f95-9996-4cca84da7e64",
+          "reviewed_subject_digest": "sha256:829dd758822498f2bf5a358d140bf6706527563e36f3a77307ff4d6e8f724fbc",
+          "verdict": "REVISE",
+          "issues": [
+            {
+              "issue_code": "CONTRACT_VIOLATION",
+              "category": "CONTRACT",
+              "severity": "BLOCKING",
+              "target_component": "SUPERVISOR",
+              "target_call_id": null,
+              "target_path": "/supervisor_draft/decision/blockers",
+              "reason_summary": "Info에서 일정 구체화를 막는 미확인 항목으로 제시한 planned_closure_date가 여전히 UNKNOWN인데 전체 blockers에서 누락되었습니다.",
+              "evidence_refs": [
+                "synthetic-fe-case-input"
+              ]
+            },
+            {
+              "issue_code": "CONTRACT_VIOLATION",
+              "category": "CONTRACT",
+              "severity": "BLOCKING",
+              "target_component": "SUPERVISOR",
+              "target_call_id": null,
+              "target_path": "/supervisor_draft/decision/blockers/12/description",
+              "reason_summary": "blockers[12]와 [13]은 blockers[0]에 포함된 원상복구 범위·철거 필요 여부 미확인을 각각 반복하여 동일 차단 조건을 중복 집계합니다.",
+              "evidence_refs": []
+            }
+          ],
+          "missing_evidence": [],
+          "recommended_rework_targets": [
+            "SUPERVISOR"
+          ],
+          "resolution_reason": "임대인 확인 ACTION과 단일 절차 target은 타당하지만, 전체 blockers의 누락과 중복을 정리해야 합니다."
+        },
+        {
+          "reviewed_subject_id": "f076d46f-e078-4d74-bf14-ab134d258ece",
+          "reviewed_subject_digest": "sha256:f750eb35b0751cfa8104ce4887fec5766c3281eaed9b9bec585cffface3d8df8",
+          "verdict": "REVISE",
+          "issues": [
+            {
+              "issue_code": "CONTRACT_VIOLATION",
+              "category": "CONTRACT",
+              "severity": "BLOCKING",
+              "target_component": "SUPERVISOR",
+              "target_call_id": null,
+              "target_path": "/supervisor_draft/decision/blockers",
+              "reason_summary": "blockers[0]의 원상복구 범위·철거 필요 여부 미확인이 blockers[12]와 blockers[13]에 중복 기재되어 있습니다.",
+              "evidence_refs": []
+            },
+            {
+              "issue_code": "CONTRACT_VIOLATION",
+              "category": "CONTRACT",
+              "severity": "BLOCKING",
+              "target_component": "SUPERVISOR",
+              "target_call_id": null,
+              "target_path": "/supervisor_draft/decision/blockers",
+              "reason_summary": "폐업 예정일은 UNKNOWN이며 INFO_AGENT도 일정 구체화를 막는 미확인 항목으로 제시했으나 전체 blockers에서 누락됐습니다. 선택된 확인 ACTION의 실행 가능성과는 별개의 누락입니다.",
+              "evidence_refs": [
+                "synthetic-fe-case-input"
+              ]
+            }
+          ],
+          "missing_evidence": [],
+          "recommended_rework_targets": [
+            "SUPERVISOR"
+          ],
+          "resolution_reason": "임대인에게 원상복구 범위와 철거 필요 여부를 확인하는 ACTION은 적절하지만, 전체 blocker 목록에 중복과 누락이 있습니다."
+        },
+        {
+          "reviewed_subject_id": "5ff4d6be-ed35-46ef-b2a2-5a381d6b9d5f",
+          "reviewed_subject_digest": "sha256:9f53aba21951fd1a509dcfc34e730cc340c642b58ce4bf6a7b57e6f0a7b8184c",
+          "verdict": "REVISE",
+          "issues": [
+            {
+              "issue_code": "CONTRACT_VIOLATION",
+              "category": "CONTRACT",
+              "severity": "BLOCKING",
+              "target_component": "SUPERVISOR",
+              "target_call_id": null,
+              "target_path": "/supervisor_draft/decision/blockers",
+              "reason_summary": "폐업 예정일은 여전히 UNKNOWN이며 Info missing_fields에도 일정 구체화를 막는 조건으로 제시되었지만, 전체 blockers에서 누락되었습니다.",
+              "evidence_refs": [
+                "synthetic-fe-case-input"
+              ]
+            },
+            {
+              "issue_code": "CONTRACT_VIOLATION",
+              "category": "CONTRACT",
+              "severity": "BLOCKING",
+              "target_component": "SUPERVISOR",
+              "target_call_id": null,
+              "target_path": "/supervisor_draft/decision/blockers",
+              "reason_summary": "blockers[0]에 포함된 원상복구 범위·철거 필요 여부 미확인이 blockers[12]와 blockers[13]에 다시 기재되어 중복됩니다.",
+              "evidence_refs": []
+            }
+          ],
+          "missing_evidence": [],
+          "recommended_rework_targets": [
+            "SUPERVISOR"
+          ],
+          "resolution_reason": "임대인 확인 ACTION과 단일 절차 target은 타당하지만, 전체 blocker 목록에 누락과 중복이 있습니다."
+        }
+      ],
+      "passed": false,
+      "metrics": {
+        "runs": 1,
+        "successful_runs": 0,
+        "success_rate": 0.0,
+        "http_attempts": 7,
+        "usage_complete": true,
+        "attempts_with_reported_usage": 7,
+        "reported_tokens": {
+          "prompt_tokens": 171200,
+          "completion_tokens": 17678
+        },
+        "total_tokens": 188878,
+        "tokens_per_success": null,
+        "estimated_cost_krw": 703.42107,
+        "cost_per_success_krw": null,
+        "uncached_cost_krw": 735.9376500000001,
+        "cache_usage_complete": true,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 244053,
+        "median_latency_ms": 244053,
+        "max_latency_ms": 244053,
+        "transport_retries": 0,
+        "review_revise_count": 3
+      }
+    }
+  ],
+  "passed": false
+}
