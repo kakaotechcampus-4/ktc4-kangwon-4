@@ -47,5 +47,5 @@ jobs:
       - name: Prepare local document OCR
         run: python scripts/setup_agent_ocr.py
       - name: Run mocked Agent regression tests
-        # 실제 MySQL 통합 검사와 LLM 평가 스크립트는 실행하지 않는다.
-        run: python -m pytest tests --ignore=tests/test_reviewed_procedure_db.py -q
+        # LLM 평가 스크립트는 실행하지 않는다.
+        run: python -m pytest tests -q
