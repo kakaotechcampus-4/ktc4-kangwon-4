@@ -6,8 +6,9 @@ import {
   IconPlusLine,
   IconTrashcanLine,
 } from '@karrotmarket/react-monochrome-icon'
-import { type ChangeEvent, type ReactNode, useState } from 'react'
+import { type ChangeEvent, type ReactNode, useId, useState } from 'react'
 
+import { DOCUMENT_KINDS } from '../adapters/documents'
 import { Badge } from '../components/ui/Badge'
 import { BottomSheet } from '../components/ui/BottomSheet'
 import { Button } from '../components/ui/Button'
@@ -28,7 +29,9 @@ import type { DocumentCheckView, DocumentView } from '../types/view'
  * 점검 규칙이 두 곳에 생긴다(FE 규칙 1).
  */
 export function DocsPage() {
-  const { query, action, upload, remove } = useDocuments()
+  const { query, action, upload, remove, confirm } = useDocuments()
+  /** 종류·값을 확인하고 있는 서류 */
+  const [confirming, setConfirming] = useState<DocumentView | null>(null)
   const [sheetOpen, setSheetOpen] = useState(false)
   /** 빼기 전에 묻고 있는 서류. 서버에서 지우면 되돌릴 길이 없어 한 번 묻는다 */
   const [removing, setRemoving] = useState<DocumentView | null>(null)
@@ -78,7 +81,13 @@ export function DocsPage() {
           <p className="text-15 text-fg-neutral-muted">서류 {documents.length}개가 모였어요.</p>
           <ul className="flex flex-col">
             {documents.map((document) => (
-              <DocumentRow key={document.id} document={document} check={check} onRemove={() => setRemoving(document)} />
+              <DocumentRow
+                key={document.id}
+                document={document}
+                check={check}
+                onRemove={() => setRemoving(document)}
+                onConfirm={() => setConfirming(document)}
+              />
             ))}
           </ul>
         </>
@@ -98,6 +107,16 @@ export function DocsPage() {
       <div className="mt-auto flex flex-col gap-2">{uploadButton}</div>
 
       <UploadSheet open={sheetOpen} onClose={() => setSheetOpen(false)} onPicked={handlePicked} />
+      {/* 서류마다 새로 그린다. 앞 서류에서 고친 값이 다음 서류의 칸에 남으면 안 된다 */}
+      <ConfirmSheet
+        key={confirming?.id ?? 'none'}
+        document={confirming}
+        onCancel={() => setConfirming(null)}
+        onConfirm={(id, kind, values) => {
+          setConfirming(null)
+          confirm(id, kind, values)
+        }}
+      />
       <RemoveSheet
         document={removing}
         onCancel={() => setRemoving(null)}
@@ -118,13 +137,23 @@ function DocumentRow({
   document,
   check,
   onRemove,
+  onConfirm,
 }: {
   document: DocumentView
   check: DocumentCheckView | null
   onRemove: () => void
+  onConfirm: () => void
 }) {
+  // 확인이 필요한 서류는 배지가 곧 확인하러 가는 버튼이다. 확인하기 전에는 점검이 끝나지 않는다(#159)
   const badge = document.needsConfirmation ? (
-    <Badge tone="critical">확인 필요</Badge>
+    <button
+      type="button"
+      aria-label={`${document.kindLabel} 확인하기`}
+      onClick={onConfirm}
+      className="shrink-0 cursor-pointer rounded-md focus-visible:outline-2 focus-visible:outline-stroke-brand-solid"
+    >
+      <Badge tone="critical">확인하기</Badge>
+    </button>
   ) : check?.status === 'COMPLETE' ? (
     <Badge tone="brand">점검 완료</Badge>
   ) : (
@@ -153,6 +182,117 @@ function DocumentRow({
         <IconTrashcanLine size={20} aria-hidden="true" />
       </button>
     </li>
+  )
+}
+
+/**
+ * 확인이 필요한 서류의 종류와 값을 사장님이 확인하는 시트.
+ *
+ * 사진이나 글자 인식으로 읽은 서류는 리본이 확신하지 못해, 사장님이 확인해야 점검이 끝난다(#159).
+ * 종류를 모르면 골라야 넘어간다. 값은 **서버가 꺼낸 칸만** 보여주고 고치게 한다 — 어떤 서류에 어떤
+ * 값이 필요한지는 점검 규칙이 아는 것이라 FE가 칸을 늘리지 않는다(11/03 시우님).
+ *
+ * 빈 칸으로는 보내지 않는다. 서버는 받은 값을 사장님이 확인한 값으로 저장해서, 빈 값이 맞는 값으로
+ * 남는다.
+ */
+export function ConfirmSheet({
+  document,
+  onCancel,
+  onConfirm,
+}: {
+  document: DocumentView | null
+  onCancel: () => void
+  onConfirm: (id: string, kind: string, values: Record<string, string>) => void
+}) {
+  const kindKnown = DOCUMENT_KINDS.some((option) => option.kind === document?.kind)
+  const [kind, setKind] = useState(kindKnown && document ? document.kind : '')
+  const [values, setValues] = useState<Record<string, string>>(() =>
+    Object.fromEntries((document?.fields ?? []).map((field) => [field.name, field.value])),
+  )
+  const kindId = useId()
+
+  // 보이는 칸만 본다. 안 보이는 칸이 비어 있으면 사장님은 왜 버튼이 잠겼는지 알 수 없다
+  const filled = (document?.fields ?? [])
+    .filter((field) => field.label !== null)
+    .every((field) => (values[field.name] ?? '').trim().length > 0)
+  const ready = document !== null && kind !== '' && filled
+
+  return (
+    <BottomSheet
+      open={document !== null}
+      onClose={onCancel}
+      title="서류 확인하기"
+      description={document ? `${document.filename} · 리본이 읽은 내용이 맞는지 봐 주세요.` : undefined}
+    >
+      <form
+        className="flex flex-col gap-4"
+        onSubmit={(event) => {
+          event.preventDefault()
+          if (!ready) return
+          onConfirm(
+            document.id,
+            kind,
+            Object.fromEntries(Object.entries(values).map(([name, value]) => [name, value.trim()])),
+          )
+        }}
+      >
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor={kindId} className="text-15 font-medium text-fg-neutral-muted">
+            서류 종류
+          </label>
+          <select
+            id={kindId}
+            value={kind}
+            onChange={(event) => setKind(event.target.value)}
+            className="h-13 rounded-xl bg-bg-layer-default px-3 text-17 ring-1 ring-stroke-neutral-weak ring-inset"
+          >
+            <option value="" disabled>
+              종류를 골라 주세요
+            </option>
+            {DOCUMENT_KINDS.map((option) => (
+              <option key={option.kind} value={option.kind}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* 이름을 모르는 칸은 보여주지 않지만 `values` 에는 남아 원래 값 그대로 같이 보낸다 */}
+        {document?.fields.map(
+          (field) =>
+            field.label !== null && (
+              <FieldInput
+                key={field.name}
+                label={field.label}
+                value={values[field.name] ?? ''}
+                onChange={(value) => setValues((current) => ({ ...current, [field.name]: value }))}
+              />
+            ),
+        )}
+
+        <Button type="submit" disabled={!ready}>
+          맞아요, 확인했어요
+        </Button>
+      </form>
+    </BottomSheet>
+  )
+}
+
+/** 꺼낸 값 하나를 고치는 칸. 글자는 17px — 16px보다 작으면 iOS Safari가 포커스할 때 화면을 키운다 */
+function FieldInput({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  const id = useId()
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label htmlFor={id} className="text-15 font-medium text-fg-neutral-muted">
+        {label}
+      </label>
+      <input
+        id={id}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-13 rounded-xl px-3 text-17 ring-1 ring-stroke-neutral-weak ring-inset"
+      />
+    </div>
   )
 }
 

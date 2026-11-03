@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { MAX_UPLOAD_BYTES } from '../hooks/useDocuments'
 import { MOCK_UPLOAD_MS } from '../mocks/documents'
-import { DocsPage } from './DocsPage'
+import { ConfirmSheet, DocsPage } from './DocsPage'
 
 function renderAt(path: string) {
   render(
@@ -44,8 +44,59 @@ describe('DocsPage — Mock', () => {
     const rows = screen.getAllByRole('listitem')
     expect(rows[0]).toHaveTextContent('철거공사내역서')
     expect(rows[0]).toHaveTextContent('보관 중')
-    // 사진처럼 서버가 확신하지 못한 서류는 확인이 필요하다고 서버가 알려 준다
-    expect(screen.getByText('철거 전 사진').closest('li')).toHaveTextContent('확인 필요')
+    // 사진처럼 서버가 확신하지 못한 서류는 확인하러 가는 버튼이 배지 자리에 온다. 확인한 서류에는 없다
+    expect(screen.getByRole('button', { name: '철거 전 사진 확인하기' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '철거공사내역서 확인하기' })).not.toBeInTheDocument()
+  })
+
+  /** 고친 값이 다음 점검에 쓰인다. 확인한 뒤에도 "확인하기"가 남으면 점검이 끝나지 않는 줄 안다 */
+  it('확인 시트에서 고친 값으로 확인하면 확인하기가 사라진다', () => {
+    renderAt('/docs?mock=docs')
+
+    fireEvent.click(screen.getByRole('button', { name: '폐업신고 접수증 확인하기' }))
+    const ask = screen.getByRole('dialog', { name: '서류 확인하기' })
+    // 서버가 꺼낸 값을 칸에 채워 보여준다
+    const date = within(ask).getByLabelText('날짜')
+    expect(date).toHaveValue('2026-10-31')
+
+    fireEvent.change(date, { target: { value: '2026-11-01' } })
+    fireEvent.click(within(ask).getByRole('button', { name: '맞아요, 확인했어요' }))
+
+    expect(screen.queryByRole('dialog', { name: '서류 확인하기' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '폐업신고 접수증 확인하기' })).not.toBeInTheDocument()
+    expect(screen.getByText('IMG_0420.jpg').closest('li')).toHaveTextContent('보관 중')
+  })
+
+  /** 종류를 모르는 채로 확인하면 점검이 그 서류를 어디에도 넣지 못한다 */
+  it('종류를 모르는 서류는 종류를 골라야 확인할 수 있다', async () => {
+    vi.useFakeTimers()
+    renderAt('/docs?mock=docs')
+    pick(new File(['%PDF'], 'scan.pdf', { type: 'application/pdf' }))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(MOCK_UPLOAD_MS)
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: '종류 확인 필요 확인하기' }))
+    const ask = screen.getByRole('dialog', { name: '서류 확인하기' })
+    const submit = within(ask).getByRole('button', { name: '맞아요, 확인했어요' })
+    expect(submit).toBeDisabled()
+
+    fireEvent.change(within(ask).getByLabelText('서류 종류'), { target: { value: 'TRANSFER' } })
+    expect(submit).toBeEnabled()
+    fireEvent.click(submit)
+
+    expect(screen.getByText('scan.pdf').closest('li')).toHaveTextContent('이체확인증')
+  })
+
+  /** 빈 값으로 보내면 서버가 그것을 사장님이 확인한 값으로 남긴다 */
+  it('값을 비우면 확인할 수 없다', () => {
+    renderAt('/docs?mock=docs')
+
+    fireEvent.click(screen.getByRole('button', { name: '폐업신고 접수증 확인하기' }))
+    const ask = screen.getByRole('dialog', { name: '서류 확인하기' })
+    fireEvent.change(within(ask).getByLabelText('날짜'), { target: { value: '  ' } })
+
+    expect(within(ask).getByRole('button', { name: '맞아요, 확인했어요' })).toBeDisabled()
   })
 
   /** 무엇이 빠졌는지는 서버 문구로만 말한다. FE가 필요한 서류 목록을 들고 있지 않는다 */
@@ -112,5 +163,59 @@ describe('DocsPage — Mock', () => {
 
     expect(screen.getAllByRole('listitem')).toHaveLength(before - 1)
     expect(screen.queryByText('전자세금계산서.pdf')).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * 확인 시트가 서버로 보낼 값. 서버는 받은 값만 사장님이 확인한 값으로 저장해서(#159),
+ * 화면에 안 보이는 칸을 빼고 보내면 그 칸이 점검에서 "값 없음"이 된다.
+ */
+describe('ConfirmSheet', () => {
+  it('화면에 안 보이는 칸도 원래 값 그대로 같이 보낸다', () => {
+    const onConfirm = vi.fn()
+    render(
+      <ConfirmSheet
+        document={{
+          id: 'doc-1',
+          filename: 'transfer.jpg',
+          kind: 'TRANSFER',
+          kindLabel: '이체확인증',
+          needsConfirmation: true,
+          fields: [
+            { name: 'amount', label: '금액', value: '3,300,000원' },
+            { name: 'bank_code', label: null, value: '088' },
+          ],
+        }}
+        onCancel={() => {}}
+        onConfirm={onConfirm}
+      />,
+    )
+    const ask = screen.getByRole('dialog', { name: '서류 확인하기' })
+
+    // 이름을 모르는 칸은 보여주지 않는다
+    expect(within(ask).getAllByRole('textbox')).toHaveLength(1)
+    fireEvent.change(within(ask).getByLabelText('금액'), { target: { value: ' 3,000,000원 ' } })
+    fireEvent.click(within(ask).getByRole('button', { name: '맞아요, 확인했어요' }))
+
+    expect(onConfirm).toHaveBeenCalledWith('doc-1', 'TRANSFER', { amount: '3,000,000원', bank_code: '088' })
+  })
+  /** 안 보이는 칸이 비어 있어도 잠그면, 사장님은 무엇을 채워야 하는지 알 수 없다 */
+  it('안 보이는 칸이 비어 있어도 확인할 수 있다', () => {
+    render(
+      <ConfirmSheet
+        document={{
+          id: 'doc-2',
+          filename: 'receipt.jpg',
+          kind: 'CLOSURE_RECEIPT',
+          kindLabel: '폐업신고 접수증',
+          needsConfirmation: true,
+          fields: [{ name: 'bank_code', label: null, value: '' }],
+        }}
+        onCancel={() => {}}
+        onConfirm={() => {}}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: '맞아요, 확인했어요' })).toBeEnabled()
   })
 })

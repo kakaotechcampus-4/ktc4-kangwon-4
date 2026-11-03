@@ -40,6 +40,31 @@ const FIELD_LABEL: Record<string, string> = {
   restoration_clause: '원상복구 조항',
 }
 
+/**
+ * 사장님이 고를 수 있는 서류 종류. 서버 `DOCUMENT_LABELS`(#128 문서 Tool)와 같은 순서·이름이다.
+ *
+ * 종류를 모르는(`UNKNOWN`) 서류는 사장님이 여기서 골라 확인한다. 서버가 종류 목록을 응답에 싣기로
+ * 했지만(#159 리뷰, 승준님 동의) 아직 들어가지 않아 FE가 들고 있다. 서버가 주게 되면 그쪽으로
+ * 바꾼다. "종류 확인 필요"(`UNKNOWN`)는 고를 것이 아니라 뺐다.
+ */
+export const DOCUMENT_KINDS: readonly { kind: string; label: string }[] = [
+  { kind: 'LEASE', label: '임대차계약서' },
+  { kind: 'BUSINESS_REGISTRATION', label: '사업자등록 자료' },
+  { kind: 'BUSINESS_LICENSE', label: '영업신고증' },
+  { kind: 'CONSTRUCTION_STATEMENT', label: '철거공사내역서' },
+  { kind: 'TAX_INVOICE', label: '전자세금계산서' },
+  { kind: 'BEFORE_PHOTO', label: '철거 전 사진' },
+  { kind: 'AFTER_PHOTO', label: '철거 후 사진' },
+  { kind: 'TRANSFER', label: '이체확인증' },
+  { kind: 'CLOSURE_CERTIFICATE', label: '폐업사실증명원' },
+  { kind: 'BANK_COPY', label: '통장 사본' },
+  { kind: 'CLOSURE_RECEIPT', label: '폐업신고 접수증' },
+  { kind: 'CARD_SALES', label: '카드 매출 내역' },
+  { kind: 'CASH_SALES', label: '현금영수증 매출' },
+  { kind: 'PURCHASE_INVOICE', label: '매입 세금계산서' },
+  { kind: 'DEPOSIT_STATEMENT', label: '보증금 공제 내역' },
+]
+
 const CHECK_STATUSES: readonly DocumentCheckStatus[] = ['COMPLETE', 'ISSUES', 'ERROR']
 const STEP_STATUSES = ['WAITING', 'RUNNING', 'DONE', 'NEEDS_CONFIRMATION', 'ERROR'] as const
 
@@ -71,10 +96,9 @@ function toFields(fields: unknown, confirmed: unknown): DocumentFieldView[] | nu
     }
   }
 
-  return [...values].flatMap(([name, { value, label }]) => {
-    const shown = label ?? FIELD_LABEL[name]
-    return shown ? [{ name, label: shown, value }] : []
-  })
+  // 이름을 모르는 칸도 버리지 않는다. 화면에는 안 보이지만, 확인할 때 원래 값 그대로 같이 보내야
+  // 서버가 그 칸을 "값 없음"으로 저장하지 않는다(#159: 받은 값만 확인한 값으로 남긴다)
+  return [...values].map(([name, { value, label }]) => ({ name, label: label ?? FIELD_LABEL[name] ?? null, value }))
 }
 
 function toDocument(value: unknown): DocumentView | null {

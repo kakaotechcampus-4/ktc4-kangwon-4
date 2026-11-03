@@ -39,6 +39,15 @@ const DOCUMENTS: DocumentView[] = [
     fields: [],
   },
   {
+    // 사진으로 찍은 서류. 값은 읽었지만 리본이 확신하지 못해 사장님이 확인해야 한다
+    id: 'mock-closure-receipt',
+    filename: 'IMG_0420.jpg',
+    kind: 'CLOSURE_RECEIPT',
+    kindLabel: '폐업신고 접수증',
+    needsConfirmation: true,
+    fields: [{ name: 'date', label: '날짜', value: '2026-10-31' }],
+  },
+  {
     id: 'mock-closure-certificate',
     filename: '폐업사실증명원.pdf',
     kind: 'CLOSURE_CERTIFICATE',

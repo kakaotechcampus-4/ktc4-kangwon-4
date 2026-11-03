@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react'
 import { useLocation } from 'react-router'
 
+import { DOCUMENT_KINDS } from '../adapters/documents'
 import { usesMockData } from '../lib/auth'
 import { readMockKey } from '../lib/mockSwitch'
 import { mockDocuments, mockDocumentsWithIssues, simulateUpload } from '../mocks/documents'
@@ -71,6 +72,34 @@ export function useDocuments() {
     [usesMock],
   )
 
+  /**
+   * 사장님이 종류와 값을 확인했다. `values` 는 확인 시트에 보인 칸 전부다 — 서버는 받은 값만
+   * 확인한 것으로 저장해서, 빠진 칸은 점검에서 값이 없는 것으로 본다(#159).
+   *
+   * TODO(#159): `POST /cases/documents/{id}/confirm` `{kind, confirmed_fields}` 로 잇는다.
+   */
+  const confirm = useCallback(
+    (id: string, kind: string, values: Record<string, string>) => {
+      if (!usesMock) return
+      const kindLabel = DOCUMENT_KINDS.find((option) => option.kind === kind)?.label ?? kind
+      setMockView((view) => ({
+        documents: view.documents.map((document) =>
+          document.id !== id
+            ? document
+            : {
+                ...document,
+                kind,
+                kindLabel,
+                needsConfirmation: false,
+                fields: document.fields.map((field) => ({ ...field, value: values[field.name] ?? field.value })),
+              },
+        ),
+        check: null,
+      }))
+    },
+    [usesMock],
+  )
+
   const query: DocumentsQuery = usesMock ? { status: 'READY', view: mockView } : { status: 'UNAVAILABLE' }
-  return { query, action, upload, remove }
+  return { query, action, upload, remove, confirm }
 }

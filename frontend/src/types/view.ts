@@ -393,7 +393,11 @@ export interface LogEntry {
 export interface DocumentFieldView {
   /** 서버 칸 이름(`amount` 등). 확인해서 다시 보낼 때 이 이름으로 보낸다 */
   name: string
-  label: string
+  /**
+   * 화면 말. 모르는 칸이면 `null` 이고 화면에 보여주지 않는다 — 영어 칸 이름을 띄울 수 없다.
+   * 그래도 확인할 때는 원래 값 그대로 같이 보낸다
+   */
+  label: string | null
   value: string
 }
 

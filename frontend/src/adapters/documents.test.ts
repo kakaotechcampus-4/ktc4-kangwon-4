@@ -47,8 +47,11 @@ describe('toDocumentsView', () => {
     ])
   })
 
-  /** 서버가 값 이름을 주기로 했다(#159). 주면 그것을, 우리가 모르는 칸이면 영어로 띄우지 않는다 */
-  it('서버가 준 값 이름을 먼저 쓰고, 모르는 칸은 보여주지 않는다', () => {
+  /**
+   * 서버가 값 이름을 주기로 했다(#159). 주면 그것을 쓴다. 모르는 칸은 이름을 비워 화면에서 숨기되
+   * 버리지 않는다 — 확인할 때 그 값을 빼고 보내면 서버가 "값 없음"으로 저장한다
+   */
+  it('서버가 준 값 이름을 먼저 쓰고, 모르는 칸은 이름 없이 남긴다', () => {
     const view = toDocumentsView({
       documents: [
         serverDocument({
@@ -61,7 +64,10 @@ describe('toDocumentsView', () => {
       check: null,
     })
 
-    expect(view?.documents[0].fields).toEqual([{ name: 'amount', label: '이체 금액', value: '1원' }])
+    expect(view?.documents[0].fields).toEqual([
+      { name: 'amount', label: '이체 금액', value: '1원' },
+      { name: 'bank_code', label: null, value: '088' },
+    ])
   })
 
   /** 깨진 한 장만 빼면 사장님은 그 서류를 다시 올리고, 점검의 "빠진 서류"와도 어긋난다 */
