@@ -70,6 +70,7 @@ MEMBERS ──1:N──► CASE ──1:N──► CASE_FIELD_HISTORY
 | restoration_scope_detail | VARCHAR | | NULLABLE | `"바닥재·전기배선까지 철거 필요"` | nullable, 구체적인 원상복구 범위 자연어 기록 |
 | demolition_required | ENUM | | NOT NULL, DEFAULT `UNKNOWN` | `REQUIRED` | `UNKNOWN`/`REQUIRED` / `NOT_REQUIRED` |
 | planned_closure_date | DATE | | NULLABLE | `2026-12-31` | nullable |
+| planned_closure_month | VARCHAR(7) | | NULLABLE | `2026-12` | 날짜를 못 정했을 때의 예상 달. `planned_closure_date`와 같이 오면 422로 거절한다. 가게 등록 때만 받고 AI 대화로는 저장하지 않는다 |
 | completed_at | DATETIME | | NULLABLE | `NULL` | nullable |
 | created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-09-01 10:24:00` | |
 | updated_at | DATETIME | | NOT NULL, ON UPDATE CURRENT_TIMESTAMP | `2026-09-10 09:11:00` | |
