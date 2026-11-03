@@ -3,7 +3,7 @@
 진짜 MySQL이 필요하다(격리된 mysql:8.0 컨테이너, Docker와 requirements-dev.txt 필요).
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -16,7 +16,8 @@ from app.be.crud.case_history import get_case_created_history
 from app.be.crud.member import create_member
 from app.be.models.case_history import CaseHistory
 from app.be.schemas.case import CaseCreateRequest
-from app.be.services.case import create_case, get_case_logs
+from app.be.services import procedure_registry
+from app.be.services.case import create_case, get_case_logs, update_case_checklist, update_case_support_approval
 from app.be.services.decision_record import mark_judgment_failed
 
 SIGNED_UP = datetime(2026, 10, 14, 9, 0, 0)
@@ -32,6 +33,10 @@ def mysql_engine():
         engine = create_engine(container.get_connection_url() + "?charset=utf8mb4")
         try:
             SQLModel.metadata.create_all(engine)
+            # 앱이 뜰 때 하는 절차 적재를 그대로 한다(main.lifespan). 없으면 create_case가 멈춘다.
+            with Session(engine) as session:
+                procedure_registry.ensure_cafe_procedure_registry(session)
+                session.commit()
             yield engine
         finally:
             engine.dispose()
@@ -74,7 +79,9 @@ def add_history(engine, case_id: int, source: str, status: str, created_at: date
 
 def logs_of(engine, member_id: int) -> list[tuple[str, str, datetime]]:
     with Session(engine) as session:
-        return [(log.actor, log.event, log.occurred_at) for log in get_case_logs(session, member_id).logs]
+        # 비교하기 쉽게 시간대를 뗀다. 시간대가 붙는지는 따로 본다.
+        return [(log.actor, log.event, log.occurred_at.replace(tzinfo=None))
+                for log in get_case_logs(session, member_id).logs]
 
 
 def test_a_finished_sign_up_shows_the_ribbon_judgment_above_the_owner_input(mysql_engine, signed_up):
@@ -154,3 +161,59 @@ def test_when_both_happen_in_the_same_second_the_ribbon_log_stays_on_top(mysql_e
     finish_sign_up(mysql_engine, case_id, SIGNED_UP)
 
     assert [actor for actor, _, _ in logs_of(mysql_engine, member_id)] == ["RIBBON", "OWNER"]
+
+
+def items_of(engine, member_id: int):
+    with Session(engine) as session:
+        return get_case_logs(session, member_id).logs
+
+
+def test_times_go_out_in_korean_time(mysql_engine, signed_up):
+    """시간대 없이 주면 브라우저가 자기 시간대로 읽어서, 한국 밖에서 보면 시각이 밀린다."""
+
+    member_id, _ = signed_up
+
+    occurred_at = items_of(mysql_engine, member_id)[0].occurred_at
+
+    assert occurred_at.utcoffset() == timedelta(hours=9)
+    assert occurred_at.isoformat() == "2026-10-14T09:00:00+09:00"
+
+
+def test_a_decided_next_action_carries_its_title(mysql_engine, signed_up):
+    member_id, case_id = signed_up
+    finish_sign_up(mysql_engine, case_id, datetime(2026, 10, 14, 9, 2, 0))
+    with Session(mysql_engine) as session:
+        get_case_created_history(session, case_id).next_action = "임대인에게 원상복구 범위 묻기"
+        session.commit()
+
+    ribbon = items_of(mysql_engine, member_id)[0]
+
+    assert (ribbon.event, ribbon.detail) == ("NEXT_ACTION_DECIDED", "임대인에게 원상복구 범위 묻기")
+
+
+def test_checking_and_unchecking_both_show_up(mysql_engine, signed_up):
+    member_id, _ = signed_up
+    with Session(mysql_engine) as session:
+        update_case_checklist(session, member_id, "dispose_stock", True)
+        update_case_checklist(session, member_id, "dispose_stock", False)
+
+    checks = [(log.event, log.task_id) for log in items_of(mysql_engine, member_id) if log.task_id]
+
+    assert sorted(checks) == [("CHECKLIST_COMPLETED", "dispose_stock"), ("CHECKLIST_UNCHECKED", "dispose_stock")]
+
+
+@pytest.mark.parametrize(("approved", "detail"), [(True, "APPROVED"), (False, "REJECTED"), (None, "UNKNOWN")])
+def test_the_reported_support_result_shows_up_with_its_value(mysql_engine, signed_up, approved, detail):
+    member_id, _ = signed_up
+    with Session(mysql_engine) as session:
+        update_case_support_approval(session, member_id, approved)
+
+    reported = [log for log in items_of(mysql_engine, member_id) if log.event == "SUPPORT_RESULT_REPORTED"]
+
+    assert [(log.actor, log.detail) for log in reported] == [("OWNER", detail)]
+
+
+def test_no_support_log_until_the_owner_reports_one(mysql_engine, signed_up):
+    member_id, _ = signed_up
+
+    assert all(log.event != "SUPPORT_RESULT_REPORTED" for log in items_of(mysql_engine, member_id))
