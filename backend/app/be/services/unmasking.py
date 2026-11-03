@@ -15,6 +15,7 @@ from sqlmodel import Session
 
 from app.be.crud import case_field_history as case_field_history_crud
 from app.be.crud import case_history as case_history_crud
+from app.be.crud import conflict_reference as conflict_reference_crud
 from app.be.services.redaction import hidden_originals
 
 
@@ -36,13 +37,32 @@ class HiddenTextRestorer:
         for row in case_field_history_crud.get_case_field_histories_by_case_id(session, case_id):
             self._before_by_row_id[row.id] = self._current_by_field.get(row.canonical_field)
             self._current_by_field[row.canonical_field] = row.case_history_id
+        # 충돌 결정 이력에는 사장님이 쓴 글이 없다 — 버튼을 누른 것이라 raw_input이 NULL이다
+        # (services/case.py의 submit_case_conflicts_decision). 그 결정이 바꾼 값은 충돌에 담겨
+        # 있던 값이고, 충돌 줄에는 그 값이 어느 제출에서 나왔는지가 남아 있다. 그래서 값을 만든
+        # 이력에 글이 없으면 같은 칸의 충돌을 따라 원문을 찾는다.
+        #
+        # "글이 없으면 직전 제출을 쓴다"로 때우면 안 된다. 그 사이 다른 칸 때문에 낸 제출이
+        # 있으면 거기 적힌 남의 주소가 들어간다. 틀린 주소를 보여주는 것은 [주소]를 보여주는
+        # 것보다 나쁘다(restore_hidden_text 설명).
+        self._conflict_origin_by_field: dict[str, int] = {}
+        for conflict in conflict_reference_crud.get_decided_conflicts_by_case_id(session, case_id):
+            self._conflict_origin_by_field[conflict.canonical_field] = conflict.case_history_id
 
-    def restore(self, value: str | None, case_history_id: int | None) -> str | None:
-        """`case_history_id`는 이 값을 만든 입력. 모르면 되돌리지 않고 그대로 둔다."""
+    def restore(
+        self, value: str | None, case_history_id: int | None, field: str | None = None
+    ) -> str | None:
+        """`case_history_id`는 이 값을 만든 입력. 모르면 되돌리지 않고 그대로 둔다.
+
+        `field`를 주면, 그 입력에 글이 없을 때 같은 칸의 충돌을 따라 원문을 찾는다.
+        """
 
         if value is None or "[" not in value or case_history_id is None:
             return value
         raw_input = self._raw_input_by_history_id.get(case_history_id)
+        if raw_input is None and field is not None:
+            origin = self._conflict_origin_by_field.get(field)
+            raw_input = self._raw_input_by_history_id.get(origin) if origin is not None else None
         if raw_input is None:
             return value
         return restore_hidden_text(value, raw_input)
@@ -65,7 +85,9 @@ class _NothingToRestore:
     된다. 나중에 응답에 칸이 하나 늘 때 한 쪽을 빠뜨리면, 되돌릴 때만 값이 비는 버그가 난다.
     """
 
-    def restore(self, value: str | None, case_history_id: int | None) -> str | None:
+    def restore(
+        self, value: str | None, case_history_id: int | None, field: str | None = None
+    ) -> str | None:
         return value
 
     def source_of_previous(self, row_id: int) -> int | None:

@@ -13,6 +13,7 @@ from unittest.mock import MagicMock
 
 from app.be.crud import case_field_history as case_field_history_crud
 from app.be.crud import case_history as case_history_crud
+from app.be.crud import conflict_reference as conflict_reference_crud
 from app.be.services import case as case_service
 from app.be.services.unmasking import HiddenTextRestorer, restore_hidden_text
 
@@ -172,3 +173,51 @@ def test_an_unknown_submission_leaves_the_value_hidden(monkeypatch):
 
     assert restorer.restore("마포구 [주소] 전체", None) == "마포구 [주소] 전체"
     assert restorer.restore("마포구 [주소] 전체", 999) == "마포구 [주소] 전체"
+
+
+@pytest.fixture
+def case_whose_last_change_came_from_a_conflict_decision(monkeypatch):
+    """충돌 결정으로 값이 바뀐 Case. 그 이력에는 사장님이 쓴 글이 없다.
+
+    충돌 결정은 버튼을 누른 것이라 raw_input이 NULL이다(services/case.py의
+    submit_case_conflicts_decision). 되돌릴 원문을 그 이력에서 찾으면 없다.
+    """
+
+    rows = [
+        field_row(1, 11, None, "서울특별시 마포구 [주소] 전체"),
+        field_row(2, 33, "서울특별시 마포구 [주소] 전체", "서울특별시 마포구 [주소] 일부"),
+    ]
+    monkeypatch.setattr(
+        case_history_crud, "get_case_histories_by_case_id",
+        lambda *_: [*histories(), SimpleNamespace(id=33, raw_input=None)],
+    )
+    monkeypatch.setattr(
+        case_field_history_crud, "get_case_field_histories_by_case_id", lambda *_: rows
+    )
+    monkeypatch.setattr(
+        case_field_history_crud, "get_case_field_histories_by_case_history_id",
+        lambda _session, case_history_id: [r for r in rows if r.case_history_id == case_history_id],
+    )
+    # 결정이 끝난 충돌 한 줄. "이 칸의 값이 11번 제출에서 나왔다"가 여기 남아 있다.
+    monkeypatch.setattr(
+        conflict_reference_crud, "get_decided_conflicts_by_case_id",
+        lambda *_: [SimpleNamespace(
+            canonical_field="restoration_scope_detail", case_history_id=11, status="CONFIRMED"
+        )],
+    )
+    return rows
+
+
+def test_a_conflict_decision_shows_the_restored_text(
+    case_whose_last_change_came_from_a_conflict_decision
+):
+    """충돌 결정이 바꾼 값도 되돌려야 한다.
+
+    #136으로 충돌 결정이 실제로 돌기 시작하면서 이 경로가 화면에 보이게 됐다. 결정 이력에는
+    글이 없지만, 그 결정이 다룬 충돌을 낸 제출에 원문이 있다.
+    """
+
+    changes = case_service._field_changes(MagicMock(spec=Session), CASE_ID, 33)
+
+    assert changes[0].stored_value == "서울특별시 마포구 월드컵북로 12 1층 전체"
+    assert changes[0].new_value == "서울특별시 마포구 월드컵북로 12 1층 일부"
