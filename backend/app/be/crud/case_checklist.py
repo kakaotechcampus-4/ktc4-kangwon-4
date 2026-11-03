@@ -24,3 +24,7 @@ def create_case_checklist_history(session: Session, history: CaseChecklistHistor
     session.add(history)
     session.flush()
     return history
+
+
+def get_case_checklist_histories_by_case_id(session: Session, case_id: int) -> list[CaseChecklistHistory]:
+    return session.exec(select(CaseChecklistHistory).where(CaseChecklistHistory.case_id == case_id)).all()

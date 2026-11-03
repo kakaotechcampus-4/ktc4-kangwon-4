@@ -18,6 +18,21 @@ ResultsSubmitResult = Literal["PENDING", "UPDATED", "NO_CHANGE", "NEEDS_MORE_INF
 ConflictSide = Literal["PROPOSED", "STORED"]
 # 사장님이 직접 체크하는 로드맵 항목. AI 로드맵(#132)의 목록을 그대로 쓴다.
 ChecklistTaskId = Literal[tuple(sorted(CHECKLIST_IDS))]
+CaseLogActor = Literal["OWNER", "RIBBON"]
+CaseLogEvent = Literal[
+    # 사장님이 한 일
+    "CASE_CREATED",
+    "RESULT_SUBMITTED",
+    "CONFLICT_DECIDED",
+    "CHECKLIST_COMPLETED",
+    "CHECKLIST_UNCHECKED",
+    "SUPPORT_RESULT_REPORTED",
+    # 리본이 한 일
+    "NEXT_ACTION_DECIDED",
+    "MORE_INFO_REQUESTED",
+    "CONFLICT_FOUND",
+    "JUDGMENT_FAILED",
+]
 
 
 class CaseCreateRequest(BaseModel):
@@ -190,3 +205,17 @@ class CaseSupportApprovalRequest(BaseModel):
 
 class CaseSupportApprovalResponse(BaseModel):
     approved: bool | None
+class CaseLogItem(BaseModel):
+    actor: CaseLogActor
+    event: CaseLogEvent
+    # 한국 시각(+09:00)을 붙여 내려준다. 시간대 없이 주면 브라우저가 자기 시간대로 읽어 시각이 밀린다.
+    occurred_at: datetime
+    # 체크 기록(CHECKLIST_*)일 때 어떤 항목인지. 그 밖에는 null
+    task_id: ChecklistTaskId | None
+    # 문구를 만들 때 쓸 값. NEXT_ACTION_DECIDED는 정한 할 일 제목,
+    # SUPPORT_RESULT_REPORTED는 APPROVED/REJECTED/UNKNOWN. 그 밖에는 null
+    detail: str | None
+
+
+class CaseLogResponse(BaseModel):
+    logs: list[CaseLogItem]

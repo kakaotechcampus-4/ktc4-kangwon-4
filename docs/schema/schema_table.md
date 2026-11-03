@@ -156,6 +156,7 @@ CASE에 대한 발화·이벤트 원본 이력.
 | recovery_action_code | ENUM | | NULLABLE | `RETRY` | 판단이 실패했을 때 화면이 안내할 다음 행동 — `RETRY` / `RESUBMIT_INPUT` / `CONTACT_SUPPORT` / `NONE`. 실패가 아니면 NULL |
 | requested_field_paths | JSON | | NULLABLE | `["restoration_scope"]` | 판단을 멈추게 한 CASE 필드 목록. 실패가 아니면 NULL |
 | retryable | BOOLEAN | | NULLABLE | `true` | 재시도하면 성공할 가능성이 있는지. 실패가 아니면 NULL |
+| judged_at | DATETIME | | NULLABLE | `2026-10-17 14:02:11` | 판단이 끝난 시각. 판단 중(`PENDING`)이면 NULL. 기록 탭의 "리본이 한 일" 시각 |
 | priority_blocker_id | BIGINT | FK | NULLABLE | `NULL` | 이 시점에 최우선인 블로커 참조 |
 | created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-09-10 09:10:00` | |
 

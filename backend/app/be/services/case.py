@@ -16,7 +16,7 @@ from app.be.models.case import Case
 from app.be.models.case_checklist import CaseChecklist, CaseChecklistHistory
 from app.be.models.case_history import CaseHistory
 from app.be.models.evidence import ConflictReference, Evidence
-from app.be.models.mixins import kst_now
+from app.be.models.mixins import KST, kst_now
 from app.be.models.procedure_step import CaseProcedureStep
 from app.be.schemas.case import (
     CaseChecklistResponse,
@@ -25,6 +25,8 @@ from app.be.schemas.case import (
     CaseCreateRequest,
     CaseGetDetailResponse,
     CaseGetResponse,
+    CaseLogItem,
+    CaseLogResponse,
     CaseResultsEntryResponse,
     CaseResultsSubmitAcceptedResponse,
     CaseResultsSubmitRequest,
@@ -567,6 +569,58 @@ def update_case_support_approval(
     case.support_approved_at = kst_now()
     session.commit()
     return CaseSupportApprovalResponse(approved=approved)
+
+
+_LOG_OWNER_EVENTS = {
+    "CASE_CREATED": "CASE_CREATED",
+    "USER_INPUT": "RESULT_SUBMITTED",
+    "CONFLICT_DECISION": "CONFLICT_DECIDED",
+}
+_LOG_RIBBON_EVENTS = {
+    "DONE": "NEXT_ACTION_DECIDED",
+    "NEEDS_MORE_INFO": "MORE_INFO_REQUESTED",
+    "CONFLICT": "CONFLICT_FOUND",
+    "FAILED": "JUDGMENT_FAILED",
+}
+
+
+def get_case_logs(session: Session, member_id: int) -> CaseLogResponse:
+    """기록 탭(M08 Log)과 홈의 "리본이 해둔 일" 띠. 문구는 FE가 event 코드로 만든다."""
+
+    case = case_crud.get_case_by_member_id(session, member_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case를 찾을 수 없습니다.")
+
+    logs = []
+    for history in case_history_crud.get_case_histories_by_case_id(session, case.id):
+        owner_event = _LOG_OWNER_EVENTS.get(history.source)
+        if owner_event is None:
+            continue
+        logs.append(_log("OWNER", owner_event, history.created_at))
+        if history.judged_at is not None and history.judgment_status in _LOG_RIBBON_EVENTS:
+            logs.append(_log(
+                "RIBBON", _LOG_RIBBON_EVENTS[history.judgment_status], history.judged_at,
+                detail=history.next_action if history.judgment_status == "DONE" else None,
+            ))
+
+    # 체크를 풀어도 체크했던 기록은 남는다(지금 상태가 아니라 이력을 읽는다).
+    for checklist in case_checklist_crud.get_case_checklist_histories_by_case_id(session, case.id):
+        event = "CHECKLIST_COMPLETED" if checklist.completed else "CHECKLIST_UNCHECKED"
+        logs.append(_log("OWNER", event, checklist.created_at, task_id=checklist.task_id))
+
+    # 심사 결과는 마지막으로 알려 준 것 하나만 남는다(값과 시각을 Case에 덮어쓴다).
+    if case.support_approved_at is not None:
+        result = {True: "APPROVED", False: "REJECTED", None: "UNKNOWN"}[case.support_approved]
+        logs.append(_log("OWNER", "SUPPORT_RESULT_REPORTED", case.support_approved_at, detail=result))
+
+    # 최근 것부터. 시각이 같으면 사장님이 보낸 뒤 리본이 판단한 것이라 리본 기록을 위로 둔다.
+    logs.sort(key=lambda log: (log.occurred_at, log.actor == "RIBBON"), reverse=True)
+    return CaseLogResponse(logs=logs)
+
+
+def _log(actor: str, event: str, at, *, task_id: str | None = None, detail: str | None = None) -> CaseLogItem:
+    # DB에는 시간대 없이 한국 시각이 들어 있다(kst_now, MySQL TZ=Asia/Seoul). 내보낼 때 +09:00을 붙인다.
+    return CaseLogItem(actor=actor, event=event, occurred_at=at.replace(tzinfo=KST), task_id=task_id, detail=detail)
 
 
 def _create_case_creation_evidence(
