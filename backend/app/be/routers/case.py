@@ -4,6 +4,10 @@ from sqlmodel import Session
 from app.be.db import get_db
 from app.be.dependencies.auth import get_current_member_id
 from app.be.schemas.case import (
+    CaseClosureReportRequest,
+    CaseClosureReportResponse,
+    CaseDepositReturnRequest,
+    CaseDepositReturnResponse,
     CaseChecklistResponse,
     CaseChecklistUpdateRequest,
     CaseConflictsDecisionRequest,
@@ -134,3 +138,21 @@ def update_case_support_approval(
     session: Session = Depends(get_db),
 ):
     return case_service.update_case_support_approval(session, member_id, approval_request.approved)
+
+
+@router.put("/cases/closure-report", response_model=CaseClosureReportResponse)
+def update_case_closure_report(
+    report_request: CaseClosureReportRequest,
+    member_id: int = Depends(get_current_member_id),
+    session: Session = Depends(get_db),
+):
+    return case_service.update_case_closure_report(session, member_id, report_request)
+
+
+@router.put("/cases/deposit-return", response_model=CaseDepositReturnResponse)
+def update_case_deposit_return(
+    deposit_request: CaseDepositReturnRequest,
+    member_id: int = Depends(get_current_member_id),
+    session: Session = Depends(get_db),
+):
+    return case_service.update_case_deposit_return(session, member_id, deposit_request.result)

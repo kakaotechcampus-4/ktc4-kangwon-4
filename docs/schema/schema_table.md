@@ -74,6 +74,11 @@ MEMBERS ──1:N──► CASE ──1:N──► CASE_FIELD_HISTORY
 | planned_closure_date | DATE | | NULLABLE | `2026-12-31` | nullable |
 | planned_closure_month | VARCHAR(7) | | NULLABLE | `2026-12` | 날짜를 못 정했을 때의 예상 달. `planned_closure_date`와 같이 오면 422로 거절한다. 가게 등록 때만 받고 AI 대화로는 저장하지 않는다 |
 | completed_at | DATETIME | | NULLABLE | `NULL` | nullable |
+| closure_date | DATE | | NULLABLE | `2026-10-31` | 통합 폐업 신고 화면에서 확인한 **실제 폐업일**. 가입 때 예상일(`planned_closure_date`)과 별개. AI 판단에 쓰지 않음 |
+| closure_reason | ENUM | | NULLABLE | `BUSINESS_SLUMP` | 폐업 사유. `BUSINESS_SLUMP`(사업 부진) / `PERSONAL`(개인 사정) / `OTHER`(기타) |
+| road_address | VARCHAR(200) | | NULLABLE | `"서울 마포구 망원로 52 (망원동)"` | 가게 도로명 주소(주소 찾기로 고름). AI에 넘기지 않음 |
+| address_detail | VARCHAR(100) | | NULLABLE | `"1층"` | 상세 주소. 없을 수 있음 |
+| deposit_return_result | ENUM | | NULLABLE | `PARTIAL` | 보증금 반환 결과. `FULL`(다 받음) / `PARTIAL`(일부 빼고 받음) / `NONE`(아직 못 받음). 리본은 기록만 하고 판단하지 않음 |
 | created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-09-01 10:24:00` | |
 | updated_at | DATETIME | | NOT NULL, ON UPDATE CURRENT_TIMESTAMP | `2026-09-10 09:11:00` | |
 
