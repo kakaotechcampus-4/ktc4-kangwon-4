@@ -388,3 +388,44 @@ export interface LogEntry {
   /** `10.17` 처럼 월.일. 서버가 준 날짜 글자를 그대로 잘라 쓴다 */
   date: string
 }
+
+/** 서류에서 꺼낸 값 하나. 이름은 화면 말로 바꿔 둔다 */
+export interface DocumentFieldView {
+  /** 서버 칸 이름(`amount` 등). 확인해서 다시 보낼 때 이 이름으로 보낸다 */
+  name: string
+  label: string
+  value: string
+}
+
+/**
+ * 서류함의 서류 한 장.
+ *
+ * 종류 이름(`kindLabel`)과 확인이 필요한지(`needsConfirmation`)는 서버가 정해 준 그대로다.
+ * 화면이 파일 이름이나 값을 보고 다시 가리지 않는다.
+ */
+export interface DocumentView {
+  id: string
+  filename: string
+  /** 서버 종류 코드(`TRANSFER` 등). 사장님이 종류를 고쳐 보낼 때 쓴다 */
+  kind: string
+  kindLabel: string
+  needsConfirmation: boolean
+  /** 사장님이 확인했으면 확인한 값, 아니면 서버가 꺼낸 값 */
+  fields: DocumentFieldView[]
+}
+
+/** 정산 서류 점검 결과 */
+export type DocumentCheckStatus = 'COMPLETE' | 'ISSUES' | 'ERROR'
+
+export interface DocumentCheckView {
+  status: DocumentCheckStatus
+  steps: { name: string; status: 'WAITING' | 'RUNNING' | 'DONE' | 'NEEDS_CONFIRMATION' | 'ERROR' }[]
+  /** 서버가 쓴 문구 그대로("정산 점검 목록에서 빠진 서류: 이체확인증") */
+  issues: string[]
+}
+
+/** 서류함 화면 데이터. 서류를 더하거나 빼면 서버가 지난 점검을 지워 `check` 가 `null` 이 된다 */
+export interface DocumentsView {
+  documents: DocumentView[]
+  check: DocumentCheckView | null
+}
