@@ -1,3 +1,4 @@
+import type { CaseLogResponse } from '../types/api'
 import type { LogActor, LogEntry } from '../types/view'
 
 /**
@@ -5,9 +6,6 @@ import type { LogActor, LogEntry } from '../types/view'
  *
  * 서버는 문구 없이 사건 코드만 준다(#143 "문구는 FE가 event 코드로 만든다"). 코드 → 문구는
  * 화면에 띄우는 말을 고르는 것이라 판단이 아니라 표시다.
- *
- * TODO(#143): 머지되면 `types/api.ts` 에 응답 모양을 넣고 `unknown` 대신 그 타입으로 받는다.
- * 지금은 머지 전이라 확정되지 않은 칸을 타입에 넣지 않는다(FE 규칙 9).
  */
 
 /** 사건 코드 → 문장. 누가 했는지는 줄 아래(`사장님 · 10.17`)에 따로 적어서 문장에 넣지 않는다 */
@@ -15,20 +13,35 @@ const EVENT_TEXT: Record<string, { actor: LogActor; text: string }> = {
   CASE_CREATED: { actor: 'OWNER', text: '가게 상황을 알려주셨어요' },
   RESULT_SUBMITTED: { actor: 'OWNER', text: '할 일 결과를 알려주셨어요' },
   CONFLICT_DECIDED: { actor: 'OWNER', text: '기록과 다른 부분에서 맞는 쪽을 고르셨어요' },
+  /*
+   * 어떤 할 일인지는 적지 않는다. 서버는 항목 번호(`task_id`)만 주고 이름은 로드맵이 따로
+   * 내려주는데, 이름을 FE가 따로 들고 있으면 로드맵과 어긋날 수 있다(11/03 시우님).
+   * TODO(로드맵 조회 API): 로드맵 이름을 받게 되면 "재고·장비 처분을 마치셨어요"처럼 적는다
+   */
+  CHECKLIST_COMPLETED: { actor: 'OWNER', text: '할 일 하나를 마치셨어요' },
+  CHECKLIST_UNCHECKED: { actor: 'OWNER', text: '마친 할 일 하나를 되돌리셨어요' },
+  SUPPORT_RESULT_REPORTED: { actor: 'OWNER', text: '점포철거비 1차 심사 결과를 알려주셨어요' },
   NEXT_ACTION_DECIDED: { actor: 'RIBBON', text: '다음 할 일을 정했어요' },
   MORE_INFO_REQUESTED: { actor: 'RIBBON', text: '더 여쭤볼 것을 정리했어요' },
   CONFLICT_FOUND: { actor: 'RIBBON', text: '기록과 다른 부분을 찾았어요' },
   JUDGMENT_FAILED: { actor: 'RIBBON', text: '다음 할 일을 정하지 못했어요' },
 }
 
+/** 철거비 심사 결과(`detail`) → 덧붙이는 한 줄. 사장님이 알려 준 값이지 리본의 판단이 아니다 */
+const SUPPORT_RESULT_DETAIL: Record<string, string> = {
+  APPROVED: '승인됐다고 하셨어요',
+  REJECTED: '안 됐다고 하셨어요',
+  UNKNOWN: '아직 모른다고 하셨어요',
+}
+
 /** 누가 했는지 화면 말 */
 export const ACTOR_LABEL: Record<LogActor, string> = { OWNER: '사장님', RIBBON: '리본' }
 
 /**
- * `2026-10-17T14:02:11` → `10.17`.
+ * `2026-10-17T14:02:11+09:00` → `10.17`.
  *
- * `Date` 로 바꾸지 않는다. 서버는 시간대 없이 한국 시각을 보내서(#143), `Date` 로 읽으면
- * 브라우저 시간대에 따라 날짜가 밀린다. 글자에서 월·일만 잘라 쓰면 그런 일이 없다.
+ * `Date` 로 바꾸지 않는다. 서버가 한국 시각을 보내니 글자에서 월·일만 잘라 쓰면 브라우저
+ * 시간대와 상관없이 사장님이 겪은 날짜 그대로다. 시간대가 빠져 와도 같다.
  */
 function toDateLabel(value: unknown): string | null {
   if (typeof value !== 'string') return null
@@ -36,30 +49,44 @@ function toDateLabel(value: unknown): string | null {
   return matched ? `${matched[1]}.${matched[2]}` : null
 }
 
+/** 줄 아래 덧붙일 한 줄. 정한 할 일 제목, 심사 결과. 없거나 모르는 값이면 붙이지 않는다 */
+function toDetail(event: string, detail: unknown): string | undefined {
+  if (typeof detail !== 'string' || detail.length === 0) return undefined
+  if (event === 'NEXT_ACTION_DECIDED') return detail
+  if (event === 'SUPPORT_RESULT_REPORTED') return SUPPORT_RESULT_DETAIL[detail]
+  return undefined
+}
+
 /**
  * 기록 목록을 화면 줄로. 목록 모양이 아니면 `null`(화면이 "불러오지 못했어요"로 그린다).
  *
- * **모르는 코드는 그 줄만 뺀다.** 서버가 사건을 늘리면(#149 체크·#159 서류 기록 예정)
- * FE가 따라오기 전까지 코드가 영어로 뜨거나 목록 전체가 사라지면 안 된다. 날짜를 못 읽는
- * 줄도 같다.
+ * **모르는 코드는 그 줄만 뺀다.** 서버가 사건을 늘려도(#159 서류 기록 예정) FE가 따라오기
+ * 전까지 코드가 영어로 뜨거나 목록 전체가 사라지면 안 된다. 날짜를 못 읽는 줄도 같다.
  *
  * 누가 했는지는 서버 `actor` 를 그대로 쓰되, 코드와 어긋나면 그 줄을 뺀다 — 사장님이 한 일을
  * 리본이 했다고 적으면 기록이 거짓이 된다.
  *
  * 순서는 서버 그대로다(최근 것부터).
  */
-export function toLogEntries(body: unknown): LogEntry[] | null {
-  const logs = (body as { logs?: unknown } | null)?.logs
+export function toLogEntries(body: CaseLogResponse | null): LogEntry[] | null {
+  const logs: unknown = body?.logs
   if (!Array.isArray(logs)) return null
 
   const entries: LogEntry[] = []
   logs.forEach((item: unknown, index) => {
-    const row = item as { actor?: unknown; event?: unknown; occurred_at?: unknown } | null
-    const known = typeof row?.event === 'string' ? EVENT_TEXT[row.event] : undefined
+    const row = item as Partial<Record<'actor' | 'event' | 'occurred_at' | 'detail', unknown>> | null
+    const event = typeof row?.event === 'string' ? row.event : ''
+    const known = EVENT_TEXT[event]
     const date = toDateLabel(row?.occurred_at)
     if (!known || date === null || row?.actor !== known.actor) return
 
-    entries.push({ key: `${index}-${row.event}`, actor: known.actor, text: known.text, date })
+    entries.push({
+      key: `${index}-${event}`,
+      actor: known.actor,
+      text: known.text,
+      detail: toDetail(event, row?.detail),
+      date,
+    })
   })
   return entries
 }

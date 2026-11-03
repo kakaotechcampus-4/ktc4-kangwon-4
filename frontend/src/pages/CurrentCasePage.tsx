@@ -12,8 +12,7 @@ import { HomeBanner } from '../components/ui/HomeBanner'
 import { HomeStageCard } from '../components/ui/HomeStageCard'
 import { TaskCard } from '../components/ui/TaskCard'
 import { useCase } from '../hooks/useCase'
-import { usesMockData } from '../lib/auth'
-import { mockLogEntries } from '../mocks/logs'
+import { useLogs } from '../hooks/useLogs'
 import type { FailureNotice, JudgmentView } from '../types/view'
 
 /**
@@ -104,11 +103,12 @@ export function CurrentCasePage() {
 /**
  * 시안 홈의 뼈대: 리본이 해둔 일 띠 · 머리 문구 · 할 일 카드 · 단계 카드
  *
- * TODO(#143): 띠는 기록 조회에서 리본이 한 일만 골라 채운다. 머지 전에는 Mock 으로 볼 때만 채운다.
+ * 띠는 기록 조회에서 리본이 한 일만 골라 채운다. 기록을 불러오지 못하면 띠만 빈 모양으로
+ * 두고 홈은 그대로 그린다 — 띠는 덧붙는 정보라 할 일 카드를 가리면 안 된다.
  */
 function HomeFrame({ headline, children }: { headline: string; children: ReactNode }) {
-  const { search } = useLocation()
-  const ribbonItems = usesMockData(search) ? mockLogEntries.filter((entry) => entry.actor === 'RIBBON') : []
+  const { query } = useLogs()
+  const ribbonItems = query.status === 'READY' ? query.entries.filter((entry) => entry.actor === 'RIBBON') : []
 
   return (
     <>

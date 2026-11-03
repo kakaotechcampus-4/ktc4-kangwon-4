@@ -315,3 +315,45 @@ export interface CaseResultsSubmitResponse {
   recovery_action_code: RecoveryActionCode | null
   requested_field_paths: string[] | null
 }
+
+/** 기록을 남긴 쪽. `OWNER` 사장님, `RIBBON` 리본 */
+export type CaseLogActor = 'OWNER' | 'RIBBON'
+
+/**
+ * 기록 사건 코드(#143). 문구는 서버가 주지 않고 FE가 코드로 만든다.
+ *
+ *   사장님  CASE_CREATED · RESULT_SUBMITTED · CONFLICT_DECIDED
+ *           CHECKLIST_COMPLETED · CHECKLIST_UNCHECKED · SUPPORT_RESULT_REPORTED
+ *   리본    NEXT_ACTION_DECIDED · MORE_INFO_REQUESTED · CONFLICT_FOUND · JUDGMENT_FAILED
+ */
+export type CaseLogEvent =
+  | 'CASE_CREATED'
+  | 'RESULT_SUBMITTED'
+  | 'CONFLICT_DECIDED'
+  | 'CHECKLIST_COMPLETED'
+  | 'CHECKLIST_UNCHECKED'
+  | 'SUPPORT_RESULT_REPORTED'
+  | 'NEXT_ACTION_DECIDED'
+  | 'MORE_INFO_REQUESTED'
+  | 'CONFLICT_FOUND'
+  | 'JUDGMENT_FAILED'
+
+/** 기록 한 줄 */
+export interface CaseLogItem {
+  actor: CaseLogActor
+  event: CaseLogEvent
+  /** 한국 시각, 시간대(`+09:00`)가 붙어 온다 */
+  occurred_at: string
+  /** 체크 기록(`CHECKLIST_*`)일 때 어떤 항목인지. 그 밖에는 `null` */
+  task_id: string | null
+  /**
+   * 문구에 쓸 값. `NEXT_ACTION_DECIDED` 는 정한 할 일 제목,
+   * `SUPPORT_RESULT_REPORTED` 는 `APPROVED` / `REJECTED` / `UNKNOWN`. 그 밖에는 `null`
+   */
+  detail: string | null
+}
+
+/** `GET /cases/logs` 응답. 최근 것부터. Case 가 없으면 404 */
+export interface CaseLogResponse {
+  logs: CaseLogItem[]
+}
