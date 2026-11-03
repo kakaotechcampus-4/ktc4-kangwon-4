@@ -1,0 +1,74 @@
+import { fireEvent, render, screen } from '@testing-library/react'
+import { MemoryRouter } from 'react-router'
+import { describe, expect, it } from 'vitest'
+
+import { RoadmapPage } from './RoadmapPage'
+
+function renderAt(path: string) {
+  render(
+    <MemoryRouter initialEntries={[path]}>
+      <RoadmapPage />
+    </MemoryRouter>,
+  )
+}
+
+const stageButton = (title: RegExp) => screen.getByRole('button', { name: title })
+
+/** 로드맵 조회 API(현종님 작업 예정)가 머지 전이다. 가짜 순서가 실서버에 뜨면 하지 않은 일이 완료로 보인다 */
+describe('RoadmapPage — 서버', () => {
+  it('준비 중이라고 알리고 단계를 그리지 않는다', () => {
+    renderAt('/roadmap')
+
+    expect(screen.getByText('폐업 전체 순서는 준비 중이에요.')).toBeInTheDocument()
+    expect(screen.queryByRole('list')).not.toBeInTheDocument()
+  })
+})
+
+describe('RoadmapPage — Mock', () => {
+  /** 지금 단계는 서버가 정한다. 그 단계만 펼쳐 지금 할 일이 먼저 보이게 한다 */
+  it('지금 단계만 펼치고, 다른 단계는 눌러야 펼친다', () => {
+    renderAt('/roadmap?mock=roadmap')
+
+    expect(stageButton(/원상복구·철거/)).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByText('원상복구 범위 확인')).toBeInTheDocument()
+    expect(stageButton(/영업 마무리·폐업 신고/)).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByText('재고·장비 처분')).not.toBeInTheDocument()
+
+    fireEvent.click(stageButton(/영업 마무리·폐업 신고/))
+
+    expect(screen.getByText('재고·장비 처분')).toBeInTheDocument()
+  })
+
+  it('할 일마다 서버가 준 상태를 글자 배지로 단다', () => {
+    renderAt('/roadmap?mock=roadmap')
+
+    expect(screen.getByText('1차 적격심사 결과 확인').closest('li')).toHaveTextContent('확인 필요')
+    expect(screen.getByText('원상복구 범위 확인').closest('li')).toHaveTextContent('진행 중')
+    expect(screen.getByText('철거 업체 정하기').closest('li')).toHaveTextContent('예정')
+  })
+
+  /** 이 가게가 할 필요 없는 일까지 세면 끝까지 해도 다 채워지지 않는다 */
+  it('단계의 완료 수는 해당 없는 할 일을 빼고 센다', () => {
+    renderAt('/roadmap?mock=roadmap')
+
+    // 1단계는 5개 중 하나가 해당 없음이고, 남은 4개 중 3개를 마쳤다
+    expect(stageButton(/폐업 준비/)).toHaveTextContent('3/4')
+    fireEvent.click(stageButton(/폐업 준비/))
+    expect(screen.getByText('은행에 폐업 후 상환 조건 확인').closest('li')).toHaveTextContent('해당 없음')
+  })
+
+  it('검수한 설명이 있는 할 일은 설명을 함께 보여준다', () => {
+    renderAt('/roadmap?mock=roadmap')
+    fireEvent.click(stageButton(/폐업 준비/))
+
+    expect(screen.getByText(/30일 전에 알려야 하고/)).toBeInTheDocument()
+  })
+
+  /** 미지원 업종은 단계가 비어 온다. 빈 화면 대신 서버 안내를 보여준다 */
+  it('미지원 업종이면 서버 안내 문구를 보여준다', () => {
+    renderAt('/roadmap?mock=roadmap-unsupported')
+
+    expect(screen.getByText(/개인 카페만 폐업 순서를 안내해요/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /폐업 준비/ })).not.toBeInTheDocument()
+  })
+})

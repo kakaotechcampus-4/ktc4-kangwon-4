@@ -433,3 +433,47 @@ export interface DocumentsView {
   documents: DocumentView[]
   check: DocumentCheckView | null
 }
+
+/** 로드맵 할 일의 상태. 서버(AI 로드맵 `TaskStatus`)와 같은 값이다 */
+export type RoadmapTaskStatus = 'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETED' | 'NOT_APPLICABLE' | 'NEEDS_CONFIRMATION'
+
+/**
+ * 로드맵 할 일의 종류. 서버와 같은 값이다.
+ *
+ *   CHECKLIST       사장님이 체크하는 항목(체크 저장 `PUT /cases/checklists/{task_id}`)
+ *   PROCEDURE       공식 절차. 결과를 알려주면 판단이 상태를 바꾼다
+ *   DOCUMENT_CHECK  서류 점검
+ *   CASE_FACT       가게 정보로 정해지는 것(폐업 날짜, 철거비 심사 결과 등)
+ */
+export type RoadmapTaskKind = 'CHECKLIST' | 'PROCEDURE' | 'DOCUMENT_CHECK' | 'CASE_FACT'
+
+export interface RoadmapTaskView {
+  /** 서버 할 일 번호(`dispose_stock` 등) */
+  id: string
+  title: string
+  kind: RoadmapTaskKind
+  status: RoadmapTaskStatus
+  /** 검수한 설명. 일부 할 일에만 있다(#144) */
+  guidance?: string
+}
+
+export interface RoadmapStageView {
+  stage: number
+  title: string
+  tasks: RoadmapTaskView[]
+}
+
+/**
+ * 로드맵 화면 데이터 (시안 M03).
+ *
+ * 현재 단계는 서버가 정한다(현종님 로드맵 조회 API 계획). 화면이 할 일 상태를 보고 짐작하지 않는다.
+ * 미지원 업종(프랜차이즈 카페·다른 음식점)이면 `supported` 가 `false` 이고 단계가 비어 있다.
+ */
+export interface RoadmapView {
+  supported: boolean
+  /** 미지원일 때 서버가 쓴 안내 문구 */
+  unsupportedReason: string | null
+  /** 지금 단계 번호(1~5). 서버가 안 주면 `null` 이고 어느 단계도 강조하지 않는다 */
+  currentStage: number | null
+  stages: RoadmapStageView[]
+}
