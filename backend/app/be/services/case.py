@@ -19,6 +19,9 @@ from app.be.models.evidence import ConflictReference, Evidence
 from app.be.models.mixins import KST, kst_now
 from app.be.models.procedure_step import CaseProcedureStep
 from app.be.schemas.case import (
+    CaseClosureReportRequest,
+    CaseClosureReportResponse,
+    CaseDepositReturnResponse,
     CaseChecklistResponse,
     CaseSupportApprovalResponse,
     CaseConflictsDecisionRequest,
@@ -569,6 +572,35 @@ def update_case_support_approval(
     case.support_approved_at = kst_now()
     session.commit()
     return CaseSupportApprovalResponse(approved=approved)
+
+
+def update_case_closure_report(
+    session: Session, member_id: int, report: CaseClosureReportRequest
+) -> CaseClosureReportResponse:
+    """통합 폐업 신고 화면에서 확인한 폐업일·폐업 사유·가게 주소를 저장한다. 다시 보내면 덮어쓴다."""
+
+    case = case_crud.get_case_by_member_id(session, member_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case를 찾을 수 없습니다.")
+
+    case.closure_date = report.closure_date
+    case.closure_reason = report.closure_reason
+    case.road_address = report.road_address
+    case.address_detail = report.address_detail
+    session.commit()
+    return CaseClosureReportResponse(**report.model_dump())
+
+
+def update_case_deposit_return(session: Session, member_id: int, result: str) -> CaseDepositReturnResponse:
+    """가게 반환 화면에서 사장님이 알려 준 보증금 반환 결과를 저장한다. 다시 보내면 덮어쓴다."""
+
+    case = case_crud.get_case_by_member_id(session, member_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case를 찾을 수 없습니다.")
+
+    case.deposit_return_result = result
+    session.commit()
+    return CaseDepositReturnResponse(result=result)
 
 
 _LOG_OWNER_EVENTS = {
