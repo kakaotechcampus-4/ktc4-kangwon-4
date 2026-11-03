@@ -95,7 +95,7 @@ _LABOR_STANDARDS_ACT_26 = GuidanceSource(
 # 예외 2호(부득이한 사유)는 설명에서 뺀다. 경영 악화로 하는 폐업을 예외로 오해하기 쉽다. 원문은 근거에 남는다.
 GUIDANCE = {
     "notify_employees": (
-        "직원을 내보내려면 적어도 30일 전에 알려야 하고, 30일 전에 알리지 못했다면 30일분 이상의 통상임금을 "
+        "폐업으로 직원을 해고하는 경우, 적어도 30일 전에 알려야 하고 30일 전에 알리지 못했다면 30일분 이상의 통상임금을 "
         "줘야 해요. 계속 일한 기간이 3개월 미만인 직원 등은 예외예요.",
         _LABOR_STANDARDS_ACT_26,
     ),
@@ -134,6 +134,7 @@ class RoadmapTask(AgentSchema):
     status: TaskStatus
     procedure_steps: list[ProcedureStepRef] = Field(default_factory=list)
     # 기한·금액처럼 근거가 필요한 설명. 근거(guidance_source)가 있는 할 일에만 붙인다.
+    # 화면 안내용이고, Agent의 절차 근거나 완료 판정을 대신하지 않는다(#144 리뷰).
     guidance: str | None = None
     guidance_source: GuidanceSource | None = None
 

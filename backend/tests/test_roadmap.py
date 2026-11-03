@@ -111,6 +111,8 @@ def test_owned_and_no_current_staff_do_not_erase_past_employment_procedures():
 def test_staff_notice_carries_reviewed_dismissal_notice_guidance():
     task = tasks(request(employee_count=2))["notify_employees"]
     assert "30일 전에" in task.guidance
+    # 직원 여부가 "모름"이어도 뜨므로, 해고하는 경우에만 해당한다는 조건이 문장에 있어야 한다
+    assert task.guidance.startswith("폐업으로 직원을 해고하는 경우")
     assert task.guidance_source.reviewed_by and task.guidance_source.reviewed_at
     assert "제26조(해고의 예고)" in task.guidance_source.excerpt
     # 설명은 원문 범위를 넘지 않는다. 원문에 없는 기한·금액을 덧붙이지 않는다
