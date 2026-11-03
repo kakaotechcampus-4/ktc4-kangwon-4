@@ -26,7 +26,7 @@ export function TaskPage() {
   const navigate = useNavigate()
   const { query, refresh, refreshing } = useCase()
 
-  if (query.status === 'EMPTY') return <Navigate to={{ pathname: '/start', search }} replace />
+  if (query.status === 'EMPTY') return <Navigate to={{ pathname: '/cases/new', search }} replace />
 
   if (query.status === 'LOADING') {
     return (

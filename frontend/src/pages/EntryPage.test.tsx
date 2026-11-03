@@ -21,7 +21,7 @@ function renderAt(path: string) {
     [
       { path: '/', element: <EntryPage /> },
       { path: '/case', element: <p>현재 Case</p> },
-      { path: '/start', element: <p>시작 화면</p> },
+      { path: '/cases/new', element: <p>상황 진단</p> },
     ],
     { initialEntries: [path] },
   )
@@ -39,12 +39,12 @@ afterEach(() => {
  * 물어보거나, 없는 사용자에게 빈 Case 화면을 보여주게 된다.
  */
 describe('EntryPage', () => {
-  it('서버에 Case가 없으면 시작 화면으로 보낸다', async () => {
+  it('서버에 Case가 없으면 상황 진단으로 보낸다', async () => {
     saveTokens('access-1', 'refresh-1')
     mockCase({ case: null })
     renderAt('/')
 
-    expect(await screen.findByText('시작 화면')).toBeInTheDocument()
+    expect(await screen.findByText('상황 진단')).toBeInTheDocument()
   })
 
   it('서버에 Case가 있으면 현재 Case로 보낸다', async () => {
@@ -64,12 +64,12 @@ describe('EntryPage', () => {
     expect(await screen.findByText('현재 Case')).toBeInTheDocument()
   })
 
-  it('?mock=no-case면 서버와 무관하게 시작 화면으로 보낸다', async () => {
+  it('?mock=no-case면 서버와 무관하게 상황 진단으로 보낸다', async () => {
     saveTokens('access-1', 'refresh-1')
     mockCase({ case: { business_type: '카페' } })
     renderAt('/?mock=no-case')
 
-    expect(await screen.findByText('시작 화면')).toBeInTheDocument()
+    expect(await screen.findByText('상황 진단')).toBeInTheDocument()
   })
 
   /**
@@ -80,7 +80,7 @@ describe('EntryPage', () => {
     saveTokens('access-1', 'refresh-1')
     mockCase({ case: null })
     const router = renderAt('/?mock=no-case')
-    await screen.findByText('시작 화면')
+    await screen.findByText('상황 진단')
 
     expect(router.state.location.search).toBe('?mock=no-case')
   })
@@ -96,13 +96,13 @@ describe('EntryPage', () => {
       [
         { path: '/', element: <EntryPage /> },
         { path: '/case', element: <p>현재 Case</p> },
-        { path: '/start', element: <p>시작 화면</p> },
+        { path: '/cases/new', element: <p>상황 진단</p> },
       ],
       { initialEntries: ['/case', '/'], initialIndex: 1 },
     )
 
     render(<RouterProvider router={router} />)
-    await screen.findByText('시작 화면')
+    await screen.findByText('상황 진단')
 
     await router.navigate(-1)
 

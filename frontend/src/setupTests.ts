@@ -9,6 +9,8 @@ import '@testing-library/jest-dom/vitest'
 import { cleanup } from '@testing-library/react'
 import { afterEach } from 'vitest'
 
+import { useDiagnosisStore } from './stores/useDiagnosisStore'
+
 /**
  * 렌더한 화면을 테스트마다 걷어낸다.
  *
@@ -25,4 +27,16 @@ afterEach(cleanup)
  */
 afterEach(() => {
   window.sessionStorage.clear()
+})
+
+/**
+ * 진단 답은 저장소만이 아니라 메모리(Zustand)에도 들고 있다. 저장소를 지워도 메모리에
+ * 남은 답이 다음 테스트의 첫 화면에 그대로 나온다.
+ *
+ * 저장소를 지우는 위 정리보다 뒤에 둔다. 비우는 순간 저장소에 빈 답을 한 번 쓰는데,
+ * 그것까지 남기지 않으려면 지우기가 마지막이어야 한다 — `afterEach`는 나중에 건 것이
+ * 먼저 돈다.
+ */
+afterEach(() => {
+  useDiagnosisStore.getState().reset()
 })
