@@ -7,6 +7,7 @@ import {
   toConflicts,
   toDecisionRequest,
   toResultsEntry,
+  toResultSteps,
   toSubmitOutcome,
   toValueLabel,
 } from './results'
@@ -410,5 +411,22 @@ describe('toAnswerInput', () => {
         { question: '프랜차이즈 가게인가요?', answer: '   ' },
       ]),
     ).toBe('[리본이 물어본 것] 직원이 몇 명인가요?\n[사장님 답] 2명이요')
+  })
+})
+
+/**
+ * 충돌 확인에서 보낸 것은 글을 정리하는 판단이 아니다. 문구는 달라도 기다리는 사건은 같아서,
+ * 줄이 끝나는 때까지 달라지면 같은 기다림이 다른 속도로 보인다.
+ */
+describe('toResultSteps', () => {
+  it('충돌 결정은 둘째 줄 문구만 다르고 끝나는 때는 같다', () => {
+    for (const stage of ['SENDING', 'WAITING', 'DONE'] as const) {
+      const result = toResultSteps(stage)
+      const decision = toResultSteps(stage, 'DECISION')
+
+      expect(decision.map((step) => step.status)).toEqual(result.map((step) => step.status))
+      expect(decision[1].label).toBe('고르신 내용을 반영하고 있어요')
+      expect([decision[0].label, decision[2].label]).toEqual([result[0].label, result[2].label])
+    }
   })
 })

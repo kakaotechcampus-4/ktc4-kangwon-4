@@ -4,9 +4,8 @@ import { Navigate, useLocation, useNavigate } from 'react-router'
 
 import { toResultSteps } from '../adapters/results'
 import { Button } from '../components/ui/Button'
-import { HammerLoader } from '../components/ui/HammerLoader'
 import { InfoBox } from '../components/ui/InfoBox'
-import { ProcessSteps } from '../components/ui/ProcessSteps'
+import { ProcessingScreen } from '../components/ui/ProcessingScreen'
 import { TopBar } from '../components/ui/TopBar'
 import { usesMockData } from '../lib/auth'
 import { conflictConfirm, simulateConfirm } from '../mocks/resultFlow'
@@ -87,19 +86,11 @@ export function ConfirmChangePage() {
   if (isPending) {
     return (
       <ConfirmFrame>
-        <main className="flex flex-col gap-6 px-4 pt-2 pb-8">
-          <div className="flex flex-col items-center gap-5 pt-2 text-center">
-            <HammerLoader size={72} label="고르신 내용을 반영하는 중" />
-            <div>
-              <h1 className="text-26 font-bold">고르신 내용을 반영하고 있어요</h1>
-              <p className="mt-2 text-17 text-fg-neutral-muted">사장님이 하실 일은 없어요.</p>
-            </div>
-          </div>
-          <ProcessSteps steps={toResultSteps('WAITING')} />
-          {/* 결과 입력의 처리 화면과 같은 말을 한다 */}
-          <InfoBox>화면을 떠나셔도 계속 처리돼요. 끝나면 홈에서 보실 수 있어요.</InfoBox>
-          <Button disabled>처리 중이에요</Button>
-        </main>
+        <ProcessingScreen
+          title="고르신 내용을 반영하고 있어요"
+          loaderLabel="고르신 내용을 반영하는 중"
+          steps={toResultSteps('WAITING', 'DECISION')}
+        />
       </ConfirmFrame>
     )
   }

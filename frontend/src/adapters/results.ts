@@ -327,14 +327,20 @@ export function toAnswerInput(pairs: AnswerPair[]): string {
  *   DONE     반영된 결과가 왔다
  *
  * 둘째·셋째 줄이 서버 안에서 언제 갈리는지는 알 수 없어, 결과가 오면 함께 끝난다.
+ *
+ * 충돌 확인에서 보낸 것(`DECISION`)은 둘째 줄만 다르다. 글을 정리하는 것이 아니라 고른 쪽을
+ * 반영하는 판단이라서다. 기다리는 사건은 같아서 줄이 끝나는 때도 같다.
  */
-export function toResultSteps(stage: 'SENDING' | 'WAITING' | 'DONE'): Step[] {
+export function toResultSteps(stage: 'SENDING' | 'WAITING' | 'DONE', sent: 'RESULT' | 'DECISION' = 'RESULT'): Step[] {
   const status = (sending: StepStatus, waiting: StepStatus): StepStatus =>
     stage === 'DONE' ? 'done' : stage === 'WAITING' ? waiting : sending
 
   return [
     { label: '보냈어요', status: status('run', 'done') },
-    { label: '리본이 내용을 정리하고 있어요', status: status('wait', 'run') },
+    {
+      label: sent === 'DECISION' ? '고르신 내용을 반영하고 있어요' : '리본이 내용을 정리하고 있어요',
+      status: status('wait', 'run'),
+    },
     { label: '다음 할 일 다시 정하기', status: status('wait', 'wait') },
   ]
 }
