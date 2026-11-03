@@ -108,34 +108,39 @@ class ReviewDecision(Model):
 
 
 # 상호·거래 상대·예금주 같은 이름은 판단에 필요하지 않아 다시 판단하는 글에 넣지 않는다.
+# 날짜(일반 날짜·폐업일)도 넣지 않는다. AI가 저장하는 날짜는 폐업 예정일뿐이라, 이미 지난
+# 폐업일이 예정일로 들어갈 수 있다(#137 승준님 리뷰). 날짜 대조는 서류 점검(checks.py)이 한다.
 REPLAN_FIELD_LABELS: dict[DocumentFieldName, str] = {
-    "amount": "금액", "supply_amount": "공급가액", "tax_amount": "세액",
-    "date": "날짜", "closure_date": "폐업일", "restoration_clause": "원상복구 조항",
+    "amount": "금액", "supply_amount": "공급가액", "tax_amount": "세액", "restoration_clause": "원상복구 조항",
 }
 
 
 def document_input_text(context: DocumentContext) -> str | None:
     """서류를 올린 뒤 기존 판단 흐름(DOCUMENT_SUBMITTED)에 넘길 글. 값마다 한 줄이다.
 
-    사장님이 고친 값이 있으면 그 값을, 없으면 서류에서 꺼낸 원문(quote)을 쓴다.
-    확인이 필요한데 아직 확인하지 않은 서류는 넣지 않는다. 정보분석 Agent는 이 글을
-    사장님 입력(USER_INPUT)으로 읽고 한 줄을 그대로 인용하므로, 서류 값이 기존 사실을
+    사장님 확인값 목록이 있으면 그 목록에 있는 값만 쓴다(checks.py와 같다). 빈 목록이면 넣을
+    값이 없고, 목록에 없는 칸을 서류에서 꺼낸 값으로 채우지 않는다. 목록이 없으면 꺼낸 값을
+    쓰되, 확인이 필요한 서류는 넣지 않는다.
+    서류 원문 인용(quote)이 아니라 꺼낸 값(value)을 쓴다. 인용에는 "가나철거 합계금액 …"처럼
+    이름이 같이 들어 있을 수 있고, 뒤의 민감정보 검사는 이름을 보지 않는다.
+    정보분석 Agent는 이 글을 사장님 입력(USER_INPUT)으로 읽으므로, 서류 값이 기존 사실을
     바로 덮지 않고 기존의 변경 후보·충돌 확인 흐름을 탄다.
     pymupdf 없이 BE가 import할 수 있게 checks.py가 아니라 이 파일에 둔다.
     """
 
     lines: list[str] = []
     for record in context.documents:
-        analysis, confirmed = record.analysis, record.confirmed_fields or {}
-        if analysis.needs_confirmation and not confirmed:
+        analysis, confirmed = record.analysis, record.confirmed_fields
+        if confirmed is None and analysis.needs_confirmation:
             continue
         label = DOCUMENT_LABELS[analysis.kind]
         for name, field_label in REPLAN_FIELD_LABELS.items():
-            if name in confirmed:
-                lines.append(f"{label} {field_label}(사장님 확인): {confirmed[name]}")
-            else:
-                quotes = [f.quote for f in analysis.fields if f.name == name]
-                lines.extend(f"{label} {field_label}: {quote}" for quote in dict.fromkeys(quotes))
+            if confirmed is not None:
+                if name in confirmed:
+                    lines.append(f"{label} {field_label}(사장님 확인): {confirmed[name]}")
+                continue
+            values = [f.value for f in analysis.fields if f.name == name]
+            lines.extend(f"{label} {field_label}: {value}" for value in dict.fromkeys(values))
     if not lines:
         return None
     return "\n".join(["사장님이 올린 서류에서 꺼낸 내용입니다.", *lines])

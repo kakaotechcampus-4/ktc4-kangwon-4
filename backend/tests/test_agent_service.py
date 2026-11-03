@@ -258,28 +258,54 @@ def document_record(kind, fields, *, needs_confirmation=False, confirmed_fields=
     )
 
 
-def test_document_text_quotes_values_but_leaves_out_names():
+def test_document_text_uses_values_so_names_inside_quotes_stay_out():
     context = DocumentContext(documents=[document_record(DocumentKind.TAX_INVOICE, [
         ("supplier", "가나철거", "공급자 상호 가나철거"),
-        ("amount", "3300000", "합계금액 3,300,000원"),
+        # 인용 안에 상호가 같이 들어 있다. 이름 칸만 빼면 이 상호가 그대로 남는다
+        ("amount", "3300000", "가나철거 합계금액 3,300,000원"),
     ])])
 
     text = document_input_text(context)
 
-    assert text == "사장님이 올린 서류에서 꺼낸 내용입니다.\n전자세금계산서 금액: 합계금액 3,300,000원"
+    assert text == "사장님이 올린 서류에서 꺼낸 내용입니다.\n전자세금계산서 금액: 3300000"
     assert "가나철거" not in text
 
 
-def test_document_text_prefers_owner_corrections_and_skips_unconfirmed_documents():
+def test_document_text_leaves_out_dates_so_a_past_closure_is_not_read_as_planned():
     context = DocumentContext(documents=[
-        document_record(DocumentKind.CLOSURE_CERTIFICATE, [("closure_date", "2026-11-30", "폐업일 2026.11.30")],
-                        needs_confirmation=True, confirmed_fields={"closure_date": "2026-12-01"}),
-        document_record(DocumentKind.TRANSFER, [("amount", "100", "이체금액 100원")], needs_confirmation=True),
+        document_record(DocumentKind.CLOSURE_CERTIFICATE, [("closure_date", "2026-11-30", "폐업일 2026.11.30")]),
+        document_record(DocumentKind.TRANSFER, [("date", "2026-11-02", "이체일 2026.11.02")],
+                        confirmed_fields={"date": "2026-11-03"}),
     ])
 
-    assert document_input_text(context) == (
-        "사장님이 올린 서류에서 꺼낸 내용입니다.\n폐업사실증명원 폐업일(사장님 확인): 2026-12-01"
-    )
+    assert document_input_text(context) is None
+
+
+TAX_INVOICE_FIELDS = [("amount", "3300000", "합계금액 3,300,000원"), ("tax_amount", "300000", "세액 300,000원")]
+
+
+@pytest.mark.parametrize(("needs_confirmation", "confirmed_fields", "expected"), [
+    # 고친 값 목록이 있으면 그 목록만 쓴다. 고치지 않은 세액을 꺼낸 값으로 채우지 않는다
+    (True, {"amount": "3500000"}, ["전자세금계산서 금액(사장님 확인): 3500000"]),
+    (False, {"amount": "3500000"}, ["전자세금계산서 금액(사장님 확인): 3500000"]),
+    # 빈 목록은 "넘길 값 없음"이다. 확인 필요 여부와 상관없이 꺼낸 값으로 돌아가지 않는다
+    (False, {}, None),
+    (True, {}, None),
+    # 목록이 없을 때만 꺼낸 값을 쓰고, 확인이 필요한 서류는 넣지 않는다
+    (True, None, None),
+    (False, None, ["전자세금계산서 금액: 3300000", "전자세금계산서 세액: 300000"]),
+])
+def test_document_text_uses_only_the_owner_confirmed_list_when_there_is_one(
+    needs_confirmation, confirmed_fields, expected
+):
+    context = DocumentContext(documents=[document_record(
+        DocumentKind.TAX_INVOICE, TAX_INVOICE_FIELDS,
+        needs_confirmation=needs_confirmation, confirmed_fields=confirmed_fields,
+    )])
+
+    text = document_input_text(context)
+
+    assert text == (None if expected is None else "\n".join(["사장님이 올린 서류에서 꺼낸 내용입니다.", *expected]))
     assert document_input_text(DocumentContext()) is None
 
 
