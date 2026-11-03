@@ -20,6 +20,7 @@ from pydantic import (
 )
 
 from app.agent.action_catalog import ProcedureBindings, resolve_procedure_bindings
+from app.agent.claim_safety import demolition_preparation_only
 from app.agent.guardrails import (
     GuardrailViolation,
     ensure_no_sensitive_text,
@@ -1031,6 +1032,9 @@ class InfoAnalysisAgent:
                 )
             semantic = self._retain_exact_procedure_details(semantic, evidence_by_id)
             self._validate_procedure_details(semantic, evidence_by_id)
+            preparation_only = demolition_preparation_only(
+                semantic.step_code, [evidence_by_id[ref] for ref in refs],
+            )
             findings.append(
                 ProcedureFinding(
                     finding_id=self._uuid(),
@@ -1041,18 +1045,20 @@ class InfoAnalysisAgent:
                         if item.procedure_step == known
                     ),
                     summary=semantic.summary,
-                    relevance=semantic.relevance,
+                    relevance=(ProcedureRelevance.POSSIBLY_RELEVANT
+                               if preparation_only and semantic.relevance == ProcedureRelevance.RELEVANT
+                               else semantic.relevance),
                     current_status=progress_by_step.get(
                         (known.procedure_step_id, known.step_code),
                         ProcedureProgressStatus.NOT_STARTED,
                     ),
                     decision_authority=semantic.decision_authority,
-                    requires_confirmation=(known.procedure_step_id, known.step_code) not in ready_steps,
+                    requires_confirmation=preparation_only or (known.procedure_step_id, known.step_code) not in ready_steps,
                     required_actions=semantic.required_actions,
                     required_documents=semantic.required_documents,
-                    application_channel=semantic.application_channel,
-                    application_url=semantic.application_url,
-                    deadline=semantic.deadline,
+                    application_channel=None if preparation_only else semantic.application_channel,
+                    application_url=None if preparation_only else semantic.application_url,
+                    deadline=None if preparation_only else semantic.deadline,
                     evidence_refs=semantic.evidence_refs,
                 )
             )

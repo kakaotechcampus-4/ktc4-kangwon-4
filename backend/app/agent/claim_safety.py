@@ -155,6 +155,14 @@ def has_support_action_language(*values: str) -> bool:
     return _SUPPORT_ACTION_CONTEXT_PATTERN.search(" ".join(values)) is not None
 
 
+def demolition_preparation_only(step_code: str, evidence: Sequence[EvidenceRecord]) -> bool:
+    """A grant notice supports conditional evidence preparation, not demolition orders."""
+    return step_code == "PERFORM_RESTORATION" and any(
+        "점포철거비" in (item.excerpt or "") or has_support_action_language(item.excerpt or "")
+        for item in evidence
+    )
+
+
 def references_other_known_label(
     text: str,
     *,
