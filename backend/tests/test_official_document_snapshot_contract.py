@@ -64,15 +64,18 @@ def new_case(engine):
 
 def test_official_documents_reach_the_agent_with_every_field_filled(mysql_engine):
     """AI가 근거를 가리키고 신선도를 따지는 데 쓰는 값들이 다 실려 나간다."""
+    from app.be.services.reviewed_procedure import load_reviewed_procedures
+
+    store = load_reviewed_procedures()
     records = official_records(mysql_engine, new_case(mysql_engine))
 
-    assert len(records) == 4
+    assert len(records) == len(store.records())
     for record in records:
         assert record.evidence_id.startswith("procedure:")
         assert record.source_ref.startswith("https://")
         # 버전과 해시가 있어야 "이 Case가 이 버전의 이 내용을 봤다"가 증명된다.
         # 본문을 공용으로 빼도 이 둘은 Case 쪽에 남아야 한다.
-        assert record.source_version == "reviewed-procedures/2026-10-04"
+        assert record.source_version == store.snapshot_version
         # AI는 "sha256:" 접두사를 떼고 64자만 들고 있다(schemas._normalize_content_hash).
         assert len(record.content_hash) == 64 and record.content_hash.isalnum()
         assert record.excerpt and len(record.excerpt) > 50
@@ -114,25 +117,23 @@ def test_the_lookup_tool_still_finds_the_documents_after_the_body_moved(mysql_en
     """
     import asyncio
     from datetime import date
-    from app.agent.schemas import ProcedureLookupInput
     from app.agent.procedure_tool.stored_tool import StoredProcedureLookupTool
+    from app.agent.schemas import ProcedureLookupInput
     from app.be.services.reviewed_procedure import load_reviewed_procedures
+    from test_reviewed_procedure_db import all_terms_query
 
     store = load_reviewed_procedures()
     case_id = new_case(mysql_engine)
     with Session(mysql_engine) as session:
         snapshot = build_case_snapshot(session, case_id)
 
-    # 자료마다 걸린 검색어를 그대로 넣는다. Tool이 질의와 자료의 단어를 맞춰 고르기 때문에,
+    # 자료에 걸린 검색어를 그대로 넣는다. Tool이 질의와 자료의 단어를 맞춰 고르기 때문에,
     # 아무 문장이나 넣으면 본문이 멀쩡해도 0건이 된다.
     result = asyncio.run(StoredProcedureLookupTool(store).lookup(ProcedureLookupInput(
         lookup_goal="BUSINESS_CLOSURE",
-        search_queries=[
-            " ".join([*record.required_terms, *record.any_terms[:1]])
-            for record in store.records()
-        ],
+        search_queries=[all_terms_query(store)],
         as_of=date(2026, 10, 4), locale="ko-KR", source_policy="OFFICIAL_ONLY",
-        max_results_per_query=4, based_on_snapshot_id=snapshot.snapshot_id,
+        max_results_per_query=10, based_on_snapshot_id=snapshot.snapshot_id,
         evidence_records=snapshot.evidence_records, review_feedback=[],
     )))
 
