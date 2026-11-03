@@ -84,7 +84,8 @@ export function ConfirmChangePage() {
     switch (outcome.kind) {
       // 반영 결과는 판단 번호로 다시 묻는다. 결과를 들고 가면 새로고침 때 지난 판단이 지금 것처럼 뜬다
       case 'REPLAN':
-        return leave(`/replan?history=${acceptedId}`)
+        // `from=confirm` 은 반영 결과가 "이해했어요" 대신 고른 것을 반영했다고 말하게 하는 표시다
+        return leave(`/replan?history=${acceptedId}&from=confirm`)
 
       // AI에는 결정 뒤 또 충돌이 나는 경로가 없다(#136 승준님). 그래도 오면 새 충돌을 처음부터 고른다.
       // 고른 것은 비우지 않아도 된다 — 서버 번호로 열쇠를 만들어(`toConflicts`) 앞의 선택이
@@ -176,7 +177,9 @@ export function ConfirmChangePage() {
     setSending({ kind: 'PENDING', accepted: true })
     const replan = await simulateConfirm(choices)
     if (!alive.current) return
-    navigate({ pathname: '/replan', search }, { state: replan, replace: true })
+    const params = new URLSearchParams(search)
+    params.set('from', 'confirm')
+    navigate({ pathname: '/replan', search: `?${params.toString()}` }, { state: replan, replace: true })
   }
 
   // 보내는 동안은 결과 입력과 같은 처리 화면을 보여준다

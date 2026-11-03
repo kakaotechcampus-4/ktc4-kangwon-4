@@ -150,6 +150,10 @@ describe('ConfirmChangePage', () => {
       vi.runAllTimers()
     })
     expect(router.state.location.pathname).toBe('/replan')
+    // 반영 결과가 고른 것을 반영했다고 말하게 하는 표시를 붙이고, Mock 표시는 그대로 이어간다
+    const params = new URLSearchParams(router.state.location.search)
+    expect(params.get('from')).toBe('confirm')
+    expect(params.get('mock')).toBe('conflict')
 
     await act(async () => {
       await router.navigate(-1)
@@ -317,7 +321,7 @@ describe('ConfirmChangePage — 서버', () => {
     await decideAndWait()
 
     expect(router.state.location.pathname).toBe('/replan')
-    expect(router.state.location.search).toBe('?history=21')
+    expect(router.state.location.search).toBe('?history=21&from=confirm')
     await act(async () => {
       await router.navigate(-1)
     })

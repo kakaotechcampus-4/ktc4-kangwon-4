@@ -55,6 +55,7 @@ function parseHistoryId(search: string): number | null {
 export function ReplanPage() {
   const { search, state } = useLocation()
   const usesMock = usesMockData(search)
+  const decided = cameFromConfirm(search)
 
   if (usesMock) {
     const fallback = Object.hasOwn(MOCKS, readMockKey(search))
@@ -64,17 +65,27 @@ export function ReplanPage() {
         : null
     const view = (state as ReplanView | null) ?? fallback
     if (!view) return <Navigate to={{ pathname: '/', search }} replace />
-    return <Replanned view={view} search={search} />
+    return <Replanned view={view} search={search} decided={decided} />
   }
 
   const historyId = parseHistoryId(search)
   // 번호가 없거나 이상하면 물어볼 것이 없다. 요청을 보내지 않고 지금 상황으로 보낸다
   if (historyId === null) return <Navigate to="/case" replace />
   // 번호가 바뀌면 새로 그린다. 앞 번호의 결과가 잠깐이라도 남아 보이지 않게 한다
-  return <ServerReplan key={historyId} historyId={historyId} />
+  return <ServerReplan key={historyId} historyId={historyId} decided={decided} />
 }
 
-function ServerReplan({ historyId }: { historyId: number }) {
+/**
+ * 충돌 확인에서 고른 것을 보낸 뒤 왔는지(`?from=confirm`).
+ *
+ * 서버 응답만으로는 무엇을 보냈는지 알 수 없어 주소에 싣는다. 결과 입력의 바로잡기 표시(`?fix=1`)와
+ * 같은 방식이다. 새로고침해도 남아 같은 문구로 다시 그린다.
+ */
+function cameFromConfirm(search: string): boolean {
+  return new URLSearchParams(search).get('from') === 'confirm'
+}
+
+function ServerReplan({ historyId, decided }: { historyId: number; decided: boolean }) {
   const navigate = useNavigate()
   const [query, setQuery] = useState<ReplanQuery>({ status: 'LOADING' })
   /** 다시 불러오기를 누를 때마다 올려 조회를 다시 돌린다 */
@@ -152,7 +163,7 @@ function ServerReplan({ historyId }: { historyId: number }) {
       )
 
     case 'READY':
-      return <Replanned view={query.view} search="" />
+      return <Replanned view={query.view} search="" decided={decided} />
   }
 }
 
@@ -170,8 +181,12 @@ function ServerReplan({ historyId }: { historyId: number }) {
  * 다르게 이해했으면 결과 입력으로 보내 바로잡아 적게 한다. 이미 반영한 값과 다르면
  * 서버가 충돌(`CONFLICT`)로 돌려줄 수 있고, 그러면 사장님이 어느 쪽이 맞는지 고른다.
  * 충돌이 꼭 오는 것은 아니다 — AI가 바로 반영(`UPDATED`)하거나 되물을(`NEEDS_MORE_INFO`) 수도 있다.
+ *
+ * **충돌 확인에서 왔으면(`decided`) 묻지 않는다.** 바뀐 값은 AI가 이해한 것이 아니라 사장님이
+ * 직접 고른 것이라 "이렇게 이해했어요"가 맞지 않고, 바로잡을 것도 없다. 제목·상자 이름·단계 줄을
+ * 고른 것을 반영한 말로 바꾸고 [홈으로] 하나만 둔다.
  */
-function Replanned({ view, search }: { view: ReplanView; search: string }) {
+function Replanned({ view, search, decided }: { view: ReplanView; search: string; decided: boolean }) {
   const navigate = useNavigate()
   const { changes, nextAction } = view
   const changed = changes.length > 0
@@ -182,7 +197,11 @@ function Replanned({ view, search }: { view: ReplanView; search: string }) {
         <div className="flex flex-col items-center pt-2 text-center">
           <IconCheckmarkCircleFill aria-hidden="true" className="size-16 text-fg-brand" />
           <h1 className="mt-4 text-26 font-bold">
-            {changed ? '이렇게 이해하고 반영했어요' : '가게 정보에 바뀐 내용은 없어요'}
+            {!changed
+              ? '가게 정보에 바뀐 내용은 없어요'
+              : decided
+                ? '고르신 내용을 반영했어요'
+                : '이렇게 이해하고 반영했어요'}
           </h1>
           {/* 바뀐 것이 없으면 다음 할 일도 그대로일 수 있어서 "정했어요" 대신 "확인했어요"라고 쓴다 */}
           <p className="mt-2 text-17 text-fg-neutral-muted">
@@ -190,11 +209,11 @@ function Replanned({ view, search }: { view: ReplanView; search: string }) {
           </p>
         </div>
 
-        <ProcessSteps steps={toResultSteps('DONE')} />
+        <ProcessSteps steps={toResultSteps('DONE', decided ? 'DECISION' : 'RESULT')} />
 
         {changed && (
           <section className="flex flex-col gap-3 rounded-2xl bg-bg-layer-default-pressed px-4.5 py-4">
-            <h2 className="text-15 font-bold text-fg-neutral-muted">이해한 내용</h2>
+            <h2 className="text-15 font-bold text-fg-neutral-muted">{decided ? '바뀐 내용' : '이해한 내용'}</h2>
             <ul className="flex flex-col gap-3">
               {changes.map((change) => (
                 <li key={change.key}>
@@ -220,7 +239,7 @@ function Replanned({ view, search }: { view: ReplanView; search: string }) {
           {nextAction.reason && <p className="text-15 text-fg-neutral-muted">{nextAction.reason}</p>}
         </section>
 
-        {changed ? (
+        {changed && !decided ? (
           <div className="flex flex-col gap-3">
             <Button onClick={() => navigate({ pathname: '/case', search })}>맞아요</Button>
             <Button variant="outline" onClick={() => navigate({ pathname: '/results', search: withFix(search) })}>
