@@ -18,6 +18,7 @@ from app.be.crud.case import get_case_by_member_id
 from app.be.crud.member import create_member
 from app.be.models.case_checklist import CaseChecklist, CaseChecklistHistory
 from app.be.schemas.case import CaseCreateRequest, ChecklistTaskId
+from app.be.services import procedure_registry
 from app.be.services.case import create_case, update_case_checklist, update_case_support_approval
 
 
@@ -31,6 +32,10 @@ def mysql_engine():
         engine = create_engine(container.get_connection_url() + "?charset=utf8mb4")
         try:
             SQLModel.metadata.create_all(engine)
+            # 앱이 뜰 때 하는 절차 적재를 그대로 한다(main.lifespan). 없으면 create_case가 멈춘다.
+            with Session(engine) as session:
+                procedure_registry.ensure_cafe_procedure_registry(session)
+                session.commit()
             yield engine
         finally:
             engine.dispose()
@@ -154,3 +159,19 @@ def test_reporting_the_support_result_stamps_when(mysql_engine, member_id):
 
     with Session(mysql_engine) as session:
         assert get_case_by_member_id(session, member_id).support_approved_at is not None
+
+
+def test_browsers_may_send_put_to_the_checklist_api():
+    """CORS가 GET·POST만 열려 있으면 브라우저가 PUT 요청을 보내기 전 확인(preflight)에서 막는다."""
+
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    response = TestClient(app).options(
+        "/cases/checklists/dispose_stock",
+        headers={"Origin": "https://example.com", "Access-Control-Request-Method": "PUT"},
+    )
+
+    assert response.status_code == 200
+    assert "PUT" in response.headers["access-control-allow-methods"]
