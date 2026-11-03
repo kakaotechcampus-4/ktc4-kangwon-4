@@ -9,15 +9,27 @@ import { toCaseCreateRequest, toCurrentCaseView, toFacts } from './case'
 const SERVER_CASE: CaseResponse = {
   id: 1,
   member_id: 42,
+  store_name: null,
   business_type: '카페',
   franchise_status: false,
   employee_count: 2,
+  has_business_loan: false,
+  has_service_contracts: false,
   lease_status: 'LEASED_PAID',
+  restoration_clause: 'UNKNOWN',
   restoration_status: 'UNKNOWN',
   restoration_scope: 'UNKNOWN',
   restoration_scope_detail: null,
   demolition_required: 'UNKNOWN',
   planned_closure_date: '2026-12-31',
+  planned_closure_month: null,
+  case_status: 'IN_PROGRESS',
+  completed_at: null,
+  closure_date: null,
+  closure_reason: null,
+  road_address: null,
+  address_detail: null,
+  deposit_return_result: null,
 }
 
 function factFor(serverCase: CaseResponse, key: string) {

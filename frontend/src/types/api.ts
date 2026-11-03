@@ -59,43 +59,59 @@ export interface CaseCreateRequest {
 }
 
 /**
- * Case 를 이루는 값들. 두 응답이 공통으로 담는 부분이다.
+ * `GET /cases` 안에 담겨 오는 Case. 서버 `CaseGetDetailResponse` 와 같다.
  *
  * 화면이 실제로 읽는 것은 여기까지다 — `adapters/case.ts` 가 이 모양만 보면 된다.
  */
-interface CaseFields {
+export interface CaseResponse {
   id: number
   member_id: number
+  /** 진단에서 묻지 않아 늘 `null` 로 보낸다(#156) */
+  store_name: string | null
   business_type: string
   franchise_status: boolean
   employee_count: number | null
+  has_business_loan: boolean | null
+  has_service_contracts: boolean | null
   lease_status: LeaseStatus
+  restoration_clause: RestorationClause
   restoration_status: RestorationStatus
   restoration_scope: RestorationScope
   restoration_scope_detail: string | null
   demolition_required: DemolitionRequired
   /** `YYYY-MM-DD` */
   planned_closure_date: string | null
+  /** 폐업 예상 달 `YYYY-MM`. 가입 때 "이번 달"·"다음 달"을 고르면 온다(#153) */
+  planned_closure_month: string | null
+  /** 부가세 신고를 체크하면 `COMPLETED`, 풀면 다시 `IN_PROGRESS`(#167) */
+  case_status: CaseStatus
+  /** `COMPLETED` 가 된 시각. 진행 중이면 `null`(#167) */
+  completed_at: string | null
+  /**
+   * 통합 폐업 신고에 적을 값(#168 `PUT /cases/closure-report`). 저장 전에는 모두 `null` 이다.
+   * 폐업일은 가입 때의 예상 달과 다른, 신고할 실제 날짜다. `YYYY-MM-DD`
+   */
+  closure_date: string | null
+  closure_reason: ClosureReason | null
+  road_address: string | null
+  address_detail: string | null
+  /** 보증금 돌려받았는지(#168 `PUT /cases/deposit-return`). 기록 전에는 `null` */
+  deposit_return_result: DepositReturnResult | null
 }
 
 /**
- * `GET /cases` 안에 담겨 오는 Case.
- *
- * 서버가 조회용과 생성용 응답을 나눴다. 조회 쪽에는 진행 상태와 시각이 빠져 있다.
- * 하나로 합쳐두면 실제로는 안 오는 필드를 있는 것처럼 적게 되고, 그 필드를 쓰는
- * 코드가 생기면 `undefined` 를 값으로 다루게 된다.
- */
-export type CaseResponse = CaseFields
-
-/**
- * `POST /cases` 응답. 조회보다 네 개가 더 온다.
+ * `POST /cases` 응답. 조회 모양에 만든·바꾼 시각이 더 온다.
  *
  * 지금은 생성 직후 `/case` 로 옮겨 가며 다시 조회하므로 FE 가 읽는 값이 없다.
  * 그래도 모양은 적어둔다 — 서버가 무엇을 주는지가 이 파일의 일이다.
+ *
+ * 저장 전 칸(폐업 신고·보증금)은 가입 응답에는 없다. 그래서 조회 모양에서 빼고 시각을 더한다.
  */
-export interface CaseCreateResponse extends CaseFields {
-  case_status: CaseStatus
-  completed_at: string | null
+export interface CaseCreateResponse
+  extends Omit<
+    CaseResponse,
+    'closure_date' | 'closure_reason' | 'road_address' | 'address_detail' | 'deposit_return_result'
+  > {
   created_at: string
   updated_at: string
 }
