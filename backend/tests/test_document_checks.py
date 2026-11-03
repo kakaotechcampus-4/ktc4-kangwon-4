@@ -98,6 +98,33 @@ def test_bank_copy_is_not_a_required_settlement_document(tmp_path):
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("buyer", ["다른가게", None, "김리본"])
+def test_missing_store_name_still_requires_a_confirmed_buyer(tmp_path, buyer):
+    async def run():
+        client = DocumentClient()
+        service = DocumentService(tmp_path, client, reviewer=client, submission_policy="RRN_BACK_ONLY")
+        context = await settlement_context(service, bank_copy=False)
+        context.business_name = None
+        for index, record in enumerate(context.documents):
+            if record.analysis.kind not in {DocumentKind.CONSTRUCTION_STATEMENT, DocumentKind.TAX_INVOICE}:
+                continue
+            fields = {field.name: field.value for field in record.analysis.fields if field.name != "buyer"}
+            if buyer is not None:
+                fields["buyer"] = buyer
+            context.documents[index] = service.confirm_analysis(
+                context.case_id, record, record.analysis.kind, confirmed_fields=fields,
+            )
+        context.document_check = check_settlement(context, service)
+        if buyer == context.applicant_name:
+            assert context.document_check.status == "COMPLETE"
+            assert settlement_zip(context, service)
+        else:
+            assert {issue.code for issue in context.document_check.issues} == {"BUYER_UNCONFIRMED"}
+            with pytest.raises(DocumentError):
+                settlement_zip(context, service)
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("kind,changes,expected", [
     (DocumentKind.TRANSFER, {"amount": "4,000,000원"}, "AMOUNT_MISMATCH"),
     (DocumentKind.TAX_INVOICE, {"amount": "3,400,000원"}, "INVOICE_TOTAL_MISMATCH"),
