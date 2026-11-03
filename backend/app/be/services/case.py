@@ -123,6 +123,7 @@ def create_case(session: Session, member_id: int, case_request: CaseCreateReques
         lease_status=case_request.lease_status,
         restoration_clause=case_request.restoration_clause,
         planned_closure_date=case_request.planned_closure_date,
+        planned_closure_month=case_request.planned_closure_month,
         had_employees=case_request.had_employees,
         pension_enrolled=case_request.pension_enrolled,
         health_insurance_enrolled=case_request.health_insurance_enrolled,

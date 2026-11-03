@@ -28,6 +28,19 @@ from app.agent.schemas import (
     validate_procedure_registry,
 )
 
+class GuidanceSource(AgentSchema):
+    """설명의 근거. 사람이 원문과 대조해 검수한 기록만 둔다."""
+
+    authority_name: str
+    title: str
+    canonical_url: str
+    excerpt: str
+    content_hash: str
+    retrieved_at: str
+    reviewed_by: str
+    reviewed_at: str
+
+
 TaskStatus = Literal["NOT_STARTED", "IN_PROGRESS", "COMPLETED", "NOT_APPLICABLE", "NEEDS_CONFIRMATION"]
 
 STAGES = ("폐업 준비", "원상복구·철거", "영업 마무리·폐업 신고", "지원금 정산·가게 반환", "세금·마무리")
@@ -41,7 +54,7 @@ TASKS = (
     (2, "restoration", "원상복구 범위 확인", "lease", ("CONFIRM_RESTORATION_SCOPE",)),
     (2, "support_conditions", "점포철거비 조건 확인", "demolition", ()),
     (2, "support_application", "소상공인24 사전 신청", "demolition", ()),
-    (2, "support_approval", "승인 결과 확인", "demolition", ()),
+    (2, "support_approval", "1차 적격심사 결과 확인", "demolition", ()),
     (2, "choose_contractor", "철거 업체 정하기", "demolition", ()),
     (2, "before_photo", "철거 전 사진", "demolition", ()),
     (2, "restoration_work", "원상복구·철거 작업", "lease", ("PERFORM_RESTORATION",)),
@@ -61,6 +74,32 @@ TASKS = (
     (5, "income_tax", "종합소득세 신고 여부 확인", "always", ()),
     (5, "post_closure_support", "폐업 후 지원 안내 확인", "always", ()),
 )
+_LABOR_STANDARDS_ACT_26 = GuidanceSource(
+    authority_name="국가법령정보센터",
+    title="근로기준법 제26조(해고의 예고) [시행 2026. 10. 8.] [법률 제21533호]",
+    canonical_url="https://www.law.go.kr/법령/근로기준법/제26조",
+    excerpt=(
+        "제26조(해고의 예고) 사용자는 근로자를 해고(경영상 이유에 의한 해고를 포함한다)하려면 적어도 30일 전에 "
+        "예고를 하여야 하고, 30일 전에 예고를 하지 아니하였을 때에는 30일분 이상의 통상임금을 지급하여야 한다. "
+        "다만, 다음 각 호의 어느 하나에 해당하는 경우에는 그러하지 아니하다. "
+        "1. 근로자가 계속 근로한 기간이 3개월 미만인 경우 "
+        "2. 천재ㆍ사변, 그 밖의 부득이한 사유로 사업을 계속하는 것이 불가능한 경우 "
+        "3. 근로자가 고의로 사업에 막대한 지장을 초래하거나 재산상 손해를 끼친 경우로서 고용노동부령으로 정하는 "
+        "사유에 해당하는 경우"
+    ),
+    content_hash="sha256:5244edfdef6450e44524a79a90299429f8b2aec33fc38c2487fb271814af9cee",
+    retrieved_at="2026-11-02T17:34:58Z",
+    reviewed_by="healthy27",
+    reviewed_at="2026-11-02T17:36:55Z",
+)
+# 예외 2호(부득이한 사유)는 설명에서 뺀다. 경영 악화로 하는 폐업을 예외로 오해하기 쉽다. 원문은 근거에 남는다.
+GUIDANCE = {
+    "notify_employees": (
+        "폐업으로 직원을 해고하는 경우, 적어도 30일 전에 알려야 하고 30일 전에 알리지 못했다면 30일분 이상의 통상임금을 "
+        "줘야 해요. 계속 일한 기간이 3개월 미만인 직원 등은 예외예요.",
+        _LABOR_STANDARDS_ACT_26,
+    ),
+}
 CHECKLIST_IDS = {key for _, key, _, _, codes in TASKS if not codes} - {
     "intake", "closure_date", "support_approval", "document_check",
 }
@@ -76,7 +115,8 @@ class RoadmapInput(AgentSchema):
     has_business_loan: StrictBool | None = None
     has_service_contracts: StrictBool | None = None
     restoration_clause: Literal["EXISTS", "NOT_EXISTS", "UNKNOWN"] = "UNKNOWN"
-    support_approved: StrictBool | None = None  # User-reported agency decision, not AI eligibility.
+    # 사장님이 알려준 점포철거비 1차 적격심사 결과. AI의 자격 판단이 아니고, 뒤의 정산 검토·비용 지급과도 다르다.
+    support_approved: StrictBool | None = None
     completed_checklists: set[str] = Field(default_factory=set)
     reviewed_plan: ReviewedPlanOutcome | None = None
     documents: DocumentContext | None = None
@@ -94,6 +134,10 @@ class RoadmapTask(AgentSchema):
     kind: Literal["CHECKLIST", "PROCEDURE", "DOCUMENT_CHECK", "CASE_FACT"]
     status: TaskStatus
     procedure_steps: list[ProcedureStepRef] = Field(default_factory=list)
+    # 기한·금액처럼 근거가 필요한 설명. 근거(guidance_source)가 있는 할 일에만 붙인다.
+    # 화면 안내용이고, Agent의 절차 근거나 완료 판정을 대신하지 않는다(#144 리뷰).
+    guidance: str | None = None
+    guidance_source: GuidanceSource | None = None
 
 
 class RoadmapStage(AgentSchema):
@@ -177,7 +221,7 @@ def build_roadmap(request: RoadmapInput, *, procedure_bindings: ProcedureBinding
     if business_type_code(facts.get("business_type")) != "CAFE" or facts.get("franchise_status") is not False:
         return Roadmap(
             case_id=snapshot.case_id, snapshot_id=snapshot.snapshot_id, supported=False,
-            unsupported_reason="현재 로드맵은 업종 코드 CAFE인 개인 카페만 지원합니다. 프랜차이즈 카페와 일반 음식점은 지원 준비 중입니다.",
+            unsupported_reason="지금은 개인 카페만 폐업 순서를 안내해요. 프랜차이즈 카페와 일반 음식점은 준비 중이에요.",
             stages=[], next_action=None, next_task_id=None, questions_for_user=[],
         )
     lease = facts.get("lease_status") in {"LEASED_PAID", "LEASED_FREE"}
@@ -236,7 +280,9 @@ def build_roadmap(request: RoadmapInput, *, procedure_bindings: ProcedureBinding
                               and check.status == "COMPLETE" else "NEEDS_CONFIRMATION")
             elif key in request.completed_checklists:
                 status = "COMPLETED"
-        stages[stage - 1].tasks.append(RoadmapTask(task_id=key, title=title, kind=kind, status=status, procedure_steps=refs))
+        guidance, source = GUIDANCE.get(key, (None, None)) if applicable is not False else (None, None)
+        stages[stage - 1].tasks.append(RoadmapTask(task_id=key, title=title, kind=kind, status=status, procedure_steps=refs,
+                                                   guidance=guidance, guidance_source=source))
     next_task = None
     if action is not None and action.target.target_kind == "PROCEDURE":
         next_task = next((t.task_id for s in stages for t in s.tasks if action.target.procedure_step in t.procedure_steps), None)

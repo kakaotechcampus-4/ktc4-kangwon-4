@@ -147,4 +147,19 @@
       opacity: 0.45;
     }
   }
+
+  /*
+   * 소개 화면 위의 진행 막대가 왼쪽부터 차오른다(`animate-intro-progress`).
+   * 다 차면 다음 장으로 넘긴다 — 넘기는 시점을 따로 재지 않고 이 움직임이 끝나는 것으로 안다
+   */
+  --animate-intro-progress: intro-progress 4.5s linear forwards;
+
+  @keyframes intro-progress {
+    from {
+      width: 0;
+    }
+    to {
+      width: 100%;
+    }
+  }
 }

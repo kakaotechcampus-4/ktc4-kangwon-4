@@ -36,7 +36,7 @@ export function CurrentCasePage() {
    * 아직 Case를 만들지 않은 사용자가 주소로 직접 들어온 경우다.
    * 빈 화면을 보여주는 대신 만들러 보낸다.
    */
-  if (query.status === 'EMPTY') return <Navigate to={{ pathname: '/start', search }} replace />
+  if (query.status === 'EMPTY') return <Navigate to={{ pathname: '/cases/new', search }} replace />
 
   if (query.status === 'LOADING') {
     return (

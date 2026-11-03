@@ -1210,8 +1210,10 @@ def test_staff_history_guides_this_plan_without_becoming_case_changes(employee_c
         if employee_count is not None:
             text = f"현재 직원은 {employee_count}명이고 " + text
         response = output([finding(TAX, "doc1")])
+        # 대화로 저장하지 않는 칸 중 직원·보험 이력(참/거짓)만 보고한다. 예상 폐업 달은 문자열이라 뺀다
         reports = [
-            (field.value, True) for field in CASE_FIELD_SPECS if field not in CaseFieldKey
+            (field.value, True) for field, (value_type, _) in CASE_FIELD_SPECS.items()
+            if field not in CaseFieldKey and value_type.value == "BOOLEAN"
         ]
         if employee_count is not None:
             reports.insert(0, ("employee_count", employee_count))

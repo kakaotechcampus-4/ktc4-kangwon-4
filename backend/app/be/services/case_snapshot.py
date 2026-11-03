@@ -1,5 +1,5 @@
 from datetime import datetime
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from sqlmodel import Session
 
@@ -78,7 +78,17 @@ def build_user_input(case_history_id: int, raw_input: str, submitted_at: datetim
     )
 
 
-def build_case_snapshot(session: Session, case_id: int) -> CaseSnapshot:
+def build_case_snapshot(
+    session: Session, case_id: int, *, snapshot_id: UUID | None = None
+) -> CaseSnapshot:
+    """Case의 지금 상태를 AI가 받는 모양으로 만든다.
+
+    snapshot_id는 보통 새로 발급한다. 딱 하나 예외가 충돌 확인이다 — 그때는 충돌을 보관할 때
+    받은 번호를 그대로 써야 한다. 새 번호를 찍으면 AI가 "내가 준 충돌이 아니다"로 보고
+    STALE_CONFLICT_CONFIRMATION으로 거절해서, 값이 하나도 안 바뀌었어도 모든 결정이 실패한다
+    (schemas.CaseSnapshot.snapshot_id 설명, #114에서 확정).
+    """
+
     case = case_crud.get_case_by_id(session, case_id)
     if case is None:
         raise ValueError(f"case {case_id} not found")
@@ -87,9 +97,7 @@ def build_case_snapshot(session: Session, case_id: int) -> CaseSnapshot:
     case_procedure_steps = procedure_step_crud.get_case_procedure_steps_by_case_id(session, case_id)
 
     return CaseSnapshot(
-        # TODO: snapshot_id 재사용 정책 미확정(AI팀 2026-09-29 답변 — "발급·보관·재사용 방식은
-        # 구현돼 있지 않음, BE·AI가 함께 확정 필요"). 정책 정해지기 전까지는 매번 새로 발급한다.
-        snapshot_id=uuid4(),
+        snapshot_id=snapshot_id or uuid4(),
         case_id=case.id,
         case_status=CaseStatus(case.case_status),
         facts=_build_facts(session, case, evidences),
@@ -189,10 +197,17 @@ def _build_evidence_records(
         parent = evidence_id_by_row_id.get(link.parent_evidence_id)
         if parent is not None:
             parents.setdefault(link.evidence_id, []).append(parent)
-    return [_build_evidence_record(e, parents.get(e.id, [])) for e in evidences]
+    # 공식 자료는 본문을 Case마다 복사하지 않고 official_document 한 줄에 둔다. AI는 DB 표가
+    # 아니라 여기서 조립한 것만 보므로, 넘기기 직전에 본문을 도로 채워 전과 같은 모양을 만든다.
+    bodies = evidence_crud.get_official_document_bodies(
+        session, [e.official_document_id for e in evidences if e.official_document_id]
+    )
+    return [_build_evidence_record(e, parents.get(e.id, []), bodies) for e in evidences]
 
 
-def _build_evidence_record(evidence: Evidence, parent_evidence_refs: list[str]) -> EvidenceRecord:
+def _build_evidence_record(
+    evidence: Evidence, parent_evidence_refs: list[str], bodies: dict[int, str] | None = None
+) -> EvidenceRecord:
     source_type = EvidenceSourceType(evidence.source_type)
     return EvidenceRecord(
         evidence_id=evidence.evidence_id,
@@ -203,7 +218,7 @@ def _build_evidence_record(evidence: Evidence, parent_evidence_refs: list[str]) 
         # 최신 입력만 가리면 소용이 없다. 같은 글이 근거로도 저장돼 있어서, 여기를 두면
         # 검수 모델이 원문을 그대로 받는다(승준님 #107 리뷰). 공식 자료는 사람이 쓴 글이
         # 아니라 가리지 않는다 — 가리면 저장된 content_hash와 어긋난다.
-        excerpt=_redacted_excerpt(evidence.excerpt, source_type),
+        excerpt=_excerpt_of(evidence, source_type, bodies),
         parent_evidence_refs=parent_evidence_refs,
         published_at=evidence.published_at.replace(tzinfo=KST) if evidence.published_at else None,
         retrieved_at=evidence.retrieved_at.replace(tzinfo=KST),
@@ -211,6 +226,26 @@ def _build_evidence_record(evidence: Evidence, parent_evidence_refs: list[str]) 
         # DB는 64자 hex만 저장하고, AI 쪽은 "sha256:" 접두사가 붙은 형식만 받는다.
         content_hash=f"sha256:{evidence.content_hash}" if evidence.content_hash else None,
     )
+
+
+def _excerpt_of(
+    evidence: Evidence, source_type: EvidenceSourceType, bodies: dict[int, str] | None
+) -> str | None:
+    """이 근거의 본문. 공식 자료는 공용 줄에서 가져온다.
+
+    가리키는 줄이 없으면 빈 본문으로 넘기지 않고 멈춘다. 본문 없는 공식 자료를 넘기면
+    절차조회가 짝을 못 찾아 "자료 없음"이 되고, 사장님에게는 근거 없는 안내가 나간다.
+    """
+
+    if evidence.official_document_id is None:
+        return _redacted_excerpt(evidence.excerpt, source_type)
+    body = (bodies or {}).get(evidence.official_document_id)
+    if body is None:
+        raise StoredEvidenceMissingError(
+            f"근거 {evidence.evidence_id}가 가리키는 공식 자료 "
+            f"{evidence.official_document_id}가 DB에 없다"
+        )
+    return body
 
 
 def _redacted_excerpt(excerpt: str | None, source_type: EvidenceSourceType) -> str | None:

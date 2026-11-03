@@ -125,6 +125,23 @@ def test_owned_and_no_current_staff_do_not_erase_past_employment_procedures():
     assert view["employee_insurance"].status == "NOT_STARTED"
 
 
+def test_staff_notice_carries_reviewed_dismissal_notice_guidance():
+    task = tasks(request(employee_count=2))["notify_employees"]
+    assert "30일 전에" in task.guidance
+    # 직원 여부가 "모름"이어도 뜨므로, 해고하는 경우에만 해당한다는 조건이 문장에 있어야 한다
+    assert task.guidance.startswith("폐업으로 직원을 해고하는 경우")
+    assert task.guidance_source.reviewed_by and task.guidance_source.reviewed_at
+    assert "제26조(해고의 예고)" in task.guidance_source.excerpt
+    # 설명은 원문 범위를 넘지 않는다. 원문에 없는 기한·금액을 덧붙이지 않는다
+    assert "30일분 이상의 통상임금" in task.guidance_source.excerpt
+
+
+def test_guidance_is_not_shown_when_the_task_does_not_apply():
+    task = tasks(request(employee_count=0, had_employees=False))["notify_employees"]
+    assert task.status == "NOT_APPLICABLE"
+    assert task.guidance is None and task.guidance_source is None
+
+
 @pytest.mark.parametrize("task_id,codes", [
     ("closure_submission", ("FILE_TAX_BUSINESS_CLOSURE", "FILE_FOOD_SERVICE_CLOSURE")),
     ("employee_insurance", ("REPORT_EMPLOYEE_INSURANCE_LOSS", "REPORT_WORKPLACE_INSURANCE_CLOSURE")),
