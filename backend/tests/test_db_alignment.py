@@ -380,16 +380,17 @@ def test_reviewed_staff_facts_keep_internal_context_and_save_only_case_fields(mo
     assert outcome.model_dump_json() == before
 
 
-def test_closure_month_is_kept_only_when_no_exact_date_is_given():
+def test_closure_month_and_exact_date_cannot_both_be_given():
     from datetime import date
 
     from app.be.schemas.case import CaseCreateRequest
 
     base = {"business_type": "카페", "franchise_status": False, "lease_status": "LEASED_PAID"}
     assert CaseCreateRequest(**base, planned_closure_month="2026-12").planned_closure_month == "2026-12"
-    # 둘 다 오면 정확한 날짜를 쓴다. 예상 달을 같이 남기면 어느 쪽이 맞는지 AI가 헷갈린다
-    both = CaseCreateRequest(**base, planned_closure_date=date(2026, 12, 15), planned_closure_month="2026-11")
-    assert both.planned_closure_month is None and both.planned_closure_date == date(2026, 12, 15)
+    assert CaseCreateRequest(**base, planned_closure_date=date(2026, 12, 15)).planned_closure_month is None
+    # 화면은 셋 중 하나만 고른다. 둘 다 오면 FE 실수라 조용히 하나를 버리지 않고 거절한다
+    with pytest.raises(ValidationError):
+        CaseCreateRequest(**base, planned_closure_date=date(2026, 12, 15), planned_closure_month="2026-11")
     for wrong in ("2026-13", "2026-1", "2026/12", "12월"):
         with pytest.raises(ValidationError):
             CaseCreateRequest(**base, planned_closure_month=wrong)

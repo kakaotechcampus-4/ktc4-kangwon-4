@@ -26,7 +26,8 @@ class CaseCreateRequest(BaseModel):
     lease_status: LeaseStatus
     restoration_clause: RestorationClause = "UNKNOWN"
     planned_closure_date: date | None = None
-    # 날짜를 못 정했으면 예상 달만 "YYYY-MM"으로 받는다. 둘 다 오면 정확한 날짜를 쓴다
+    # 날짜를 못 정했으면 예상 달만 "YYYY-MM"으로 받는다. 화면에서 셋 중 하나만 고르므로
+    # 둘 다 오는 건 FE 실수다. 조용히 하나를 버리면 실수가 묻혀서 422로 거절한다(#145 리뷰)
     planned_closure_month: str | None = Field(default=None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
 
     # 직원 고용 이력과 사업장 4대보험 가입 이력. 넷 다 "지금"이 아니라 "있었던 적"을 묻는다.
@@ -42,9 +43,9 @@ class CaseCreateRequest(BaseModel):
     industrial_accident_insurance_enrolled: bool | None = None
 
     @model_validator(mode="after")
-    def prefer_exact_closure_date(self) -> "CaseCreateRequest":
-        if self.planned_closure_date is not None:
-            self.planned_closure_month = None
+    def reject_both_closure_date_and_month(self) -> "CaseCreateRequest":
+        if self.planned_closure_date is not None and self.planned_closure_month is not None:
+            raise ValueError("planned_closure_date와 planned_closure_month는 하나만 보낸다")
         return self
 
 
@@ -67,7 +68,7 @@ class CaseCreateResponse(BaseModel):
     restoration_scope_detail: str | None
     demolition_required: DemolitionRequired
     planned_closure_date: date | None
-    planned_closure_month: str | None = None
+    planned_closure_month: str | None
     completed_at: datetime | None
     created_at: datetime
     updated_at: datetime
@@ -91,7 +92,7 @@ class CaseGetDetailResponse(BaseModel):
     restoration_scope_detail: str | None
     demolition_required: DemolitionRequired
     planned_closure_date: date | None
-    planned_closure_month: str | None = None
+    planned_closure_month: str | None
 
 
 class NextActionResponse(BaseModel):
