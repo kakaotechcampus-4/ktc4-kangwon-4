@@ -18,6 +18,8 @@ BE는 이 모듈에서 import하며, 필드 이름은 snake_case를 사용한다
         MVP의 정상 판단은 Blocker 1개 필수. ACTION은 Next Action도 1개 반환.
         BE는 저장 직전 outcome.assert_integrity()와 현재 Case 상태를 재확인한다.
     CONFLICT: conflicts와 evidence_records를 보관하고 사용자 확인을 받는다.
+        retained_info_result가 있으면 함께 보관하고 build_conflict_input에 그대로 돌려준다.
+        당시 비식별 입력은 인용 검증에만 쓰고 새 사실 추출 입력으로 재사용하지 않는다.
         확인 전에는 Case를 변경하지 않는다.
     SAFE_FAILURE: failure_code / retryable / recovery_action_code를 처리한다.
         검수되지 않은 판단이나 변경 후보는 반환하지 않는다.
@@ -55,6 +57,7 @@ from app.agent.schemas import (
     RedactedInput,
     Redaction,
     ResultSubmittedTrigger,
+    RetainedInfoResult,
     ReviewedPlanOutcome,
     SafeFailureOutcome,
 )
@@ -75,6 +78,7 @@ __all__ = [
     "RedactedInput",
     "Redaction",
     "ResultSubmittedTrigger",
+    "RetainedInfoResult",
     "ReviewedPlanOutcome",
     "SafeFailureOutcome",
 ]

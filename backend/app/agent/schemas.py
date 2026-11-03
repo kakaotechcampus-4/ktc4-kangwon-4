@@ -969,11 +969,21 @@ class InfoAnalysisInput(AgentSchema):
                 item.conflict_ref for item, selected in self.conflict_confirmation.choices()
                 if selected
             }
-            if {item.confirmed_conflict_ref for item in self.fact_overlays} != accepted:
+            confirmed = [item for item in self.fact_overlays
+                         if item.source_type == FactChangeSourceType.CONFIRMED_CONFLICT]
+            if {item.confirmed_conflict_ref for item in confirmed} != accepted:
                 raise ValueError("Info overlays must equal accepted conflict choices")
-            if any(item.source_type != FactChangeSourceType.CONFIRMED_CONFLICT
-                   for item in self.fact_overlays):
-                raise ValueError("confirmation cannot introduce new Info facts")
+            source = self.conflict_confirmation.retained_info_result
+            retained = {} if source is None else {item.candidate_id: item for item in source.output.fact_candidates}
+            for item in self.fact_overlays:
+                if item.source_type == FactChangeSourceType.CONFIRMED_CONFLICT:
+                    continue
+                candidate = retained.get(item.source_fact_candidate_id)
+                if (candidate is None or candidate.requires_confirmation
+                        or item.source_type != FactChangeSourceType.INFO_ANALYSIS
+                        or item.field_path != candidate.field_path
+                        or item.proposed_value != candidate.value):
+                    raise ValueError("confirmation cannot introduce new Info facts")
         elif self.input is None and (
             not self.fact_overlays or any(
                 item.source_type != FactChangeSourceType.CONFIRMED_CONFLICT for item in self.fact_overlays
@@ -991,9 +1001,9 @@ class InfoAnalysisInput(AgentSchema):
             for overlay in self.fact_overlays:
                 current = facts.get(overlay.field_path)
                 if (
-                    current is None
-                    or current.status != overlay.before_status
-                    or not case_field_values_equal(overlay.field_path, current.value, overlay.before_value)
+                    (FactStatus.UNKNOWN if current is None else current.status) != overlay.before_status
+                    or not case_field_values_equal(overlay.field_path,
+                                                   None if current is None else current.value, overlay.before_value)
                 ):
                     raise ValueError(
                         "Info overlay before state must match its snapshot"
@@ -1874,6 +1884,9 @@ class ConflictConfirmedTrigger(AgentSchema):
             "The request's case_snapshot must carry its snapshot_id and equal state."
         ),
     )
+    retained_info_result: RetainedInfoResult | None = Field(
+        default=None, description="Stored non-conflicting Info facts/progress; BE restores this from its saved outcome, never client input."
+    )
     confirmed_at: AwareDatetime = Field(
         description="When the user confirmed; used as the planning as-of date."
     )
@@ -1881,7 +1894,8 @@ class ConflictConfirmedTrigger(AgentSchema):
     @model_validator(mode="after")
     def validate_choices(self) -> ConflictConfirmedTrigger:
         if self.confirmed_conflict is not None:
-            if self.conflicts or self.selections or self.conflict_snapshot is not None:
+            if (self.conflicts or self.selections or self.conflict_snapshot is not None
+                    or self.retained_info_result is not None):
                 raise ValueError("use either the legacy acceptance or a complete batch")
             return self
         if not self.conflicts or not self.selections or self.conflict_snapshot is None:
@@ -1896,6 +1910,19 @@ class ConflictConfirmedTrigger(AgentSchema):
             conflict.assert_integrity()
             if conflict.snapshot_id != self.conflict_snapshot.snapshot_id:
                 raise ValueError("conflict batch must share its stored baseline")
+        if self.retained_info_result is not None:
+            source = self.retained_info_result
+            if not isinstance(source.output, InfoAnalysisResult):
+                raise ValueError("retained result must be Info analysis")
+            info = source.output
+            if (info.based_on_snapshot_id != self.conflict_snapshot.snapshot_id
+                    or source.meta.case_id != self.conflict_snapshot.case_id
+                    or any(item.source_call_id != source.meta.call_id for item in self.conflicts)):
+                raise ValueError("retained Info must belong to the original conflict batch")
+            if (info.conflicts or info.procedure_findings or info.missing_fields
+                    or info.question_candidates or info.uncertainties
+                    or {f.field_path for f in info.fact_candidates} & {c.field_path for c in self.conflicts}):
+                raise ValueError("retain only non-conflicting facts and progress, not old procedure analysis")
         return self
 
     def choices(self) -> list[tuple[ConflictCandidate, bool]]:
@@ -2009,6 +2036,12 @@ class ReviewSourceResult(AgentSchema):
         if self.output_digest != canonical_digest(self.output):
             raise ValueError("source output_digest does not match output")
         return self
+
+
+class RetainedInfoResult(ReviewSourceResult):
+    """Validated facts/progress and their original redacted input; never re-extracted."""
+
+    input: RedactedInput
 
 
 class SupervisorAgentInput(AgentSchema):
@@ -2319,6 +2352,9 @@ class ConflictOutcome(AgentSchema):
     outcome_type: Literal["CONFLICT"] = Field(
         description="Discriminator for confirmed-Case fact conflicts."
     )
+    retained_info_result: RetainedInfoResult | None = Field(
+        default=None, description="Non-conflicting facts/progress to persist and return unchanged on confirmation."
+    )
     run_id: RuntimeUUID = Field(
         description="Graph run identifier that produced these conflicts."
     )
@@ -2359,6 +2395,12 @@ class ConflictOutcome(AgentSchema):
 
     @model_validator(mode="after")
     def validate_conflicts(self) -> ConflictOutcome:
+        if self.retained_info_result is not None:
+            source = RetainedInfoResult.model_validate(self.retained_info_result.model_dump(mode="python"))
+            if (not isinstance(source.output, InfoAnalysisResult)
+                    or source.meta.run_id != self.run_id or source.meta.case_id != self.case_id
+                    or source.output.based_on_snapshot_id != self.snapshot_id):
+                raise ValueError("retained Info result must match its conflict outcome")
         _ensure_unique(self.conflicts, lambda item: item.conflict_ref, "conflict_ref")
         _ensure_unique(self.conflicts, lambda item: item.candidate_id, "candidate_id")
         _ensure_unique(
@@ -2597,6 +2639,7 @@ __all__ = [
     "NonNullStrictScalar",
     "PlanningContext",
     "ProcedureActionTarget",
+    "ProcedureCompletionConfirmation",
     "ProcedureCompletionStatus",
     "ProcedureDependency",
     "ProcedureEligibility",
@@ -2608,7 +2651,6 @@ __all__ = [
     "ProcedureProgress",
     "ProcedureProgressChangeCandidate",
     "ProcedureProgressObservation",
-    "ProcedureCompletionConfirmation",
     "ProcedureProgressStatus",
     "ProcedureRelevance",
     "ProcedureSourceDocument",
@@ -2620,6 +2662,7 @@ __all__ = [
     "RedactionType",
     "RequiredDocument",
     "ResultSubmittedTrigger",
+    "RetainedInfoResult",
     "ReviewIssue",
     "ReviewIssueCode",
     "ReviewProof",

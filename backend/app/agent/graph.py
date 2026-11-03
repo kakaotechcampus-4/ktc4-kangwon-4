@@ -42,6 +42,7 @@ from app.agent.schemas import (
     ProcedureLookupInput,
     ProcedureLookupResult,
     ProcedureProgressStatus,
+    RetainedInfoResult,
     ReviewedPlanOutcome,
     ReviewIssue,
     ReviewProof,
@@ -335,10 +336,16 @@ class AgentGraph:
             Component.INFO_AGENT,
             attempt=state.get("revision_count", 0) + 1,
         )
+        retained = getattr(request.trigger, "retained_info_result", None)
+        analysis_overlays = list(confirmed_overlays)
+        if retained is not None:
+            analysis_overlays.extend(build_fact_overlays(
+                request.case_snapshot, retained.output, meta.call_id, uuid_factory=self._uuid,
+            ))
         component_input = InfoAnalysisInput(
             input=trigger_input,
             case_snapshot=request.case_snapshot,
-            fact_overlays=confirmed_overlays,
+            fact_overlays=analysis_overlays,
             conflict_confirmation=(request.trigger if isinstance(request.trigger, ConflictConfirmedTrigger) else None),
             allowed_field_paths=list(CASE_FIELD_SPECS),
             known_procedure_steps=[
@@ -354,6 +361,14 @@ class AgentGraph:
             self._check_deadline()
             self._record_rework_start(meta)
             output = await self._info_agent.analyze(component_input)
+            if retained is not None:
+                if output.fact_candidates or output.procedure_progress_observations or output.conflicts:
+                    raise ValueError("confirmation analysis cannot extract fresh facts or progress")
+                output = InfoAnalysisResult.model_validate(output.model_dump() | {
+                    "fact_candidates": retained.output.fact_candidates,
+                    "procedure_progress_observations": retained.output.procedure_progress_observations,
+                    "evidence_records": [*output.evidence_records, *retained.output.evidence_records],
+                })
             output = self._restore_procedure_completion(request, output)
             source = ReviewSourceResult(
                 meta=meta,
@@ -429,6 +444,17 @@ class AgentGraph:
         if len(info_sources) != 1:
             raise RuntimeError("conflict outcome requires one Info result")
         info = info_sources[0].output
+        fields = {item.field_path for item in info.conflicts}
+        kept_facts = [item for item in info.fact_candidates if item.field_path not in fields]
+        retained = None
+        if kept_facts or info.procedure_progress_observations:
+            kept = InfoAnalysisResult.model_validate(info.model_dump() | {
+                "completion_status": "PARTIAL", "fact_candidates": kept_facts,
+                "procedure_findings": [], "conflicts": [], "missing_fields": [],
+                "uncertainties": [], "question_candidates": [],
+            })
+            retained = RetainedInfoResult(meta=info_sources[0].meta, input=state["request"].trigger.input,
+                                         output=kept, output_digest=canonical_digest(kept))
         evidence_by_id = {}
         for evidence in [
             *state["request"].case_snapshot.evidence_records,
@@ -442,6 +468,8 @@ class AgentGraph:
         pending = [
             ref for conflict in info.conflicts for ref in conflict.source_evidence_refs
         ]
+        if retained is not None:
+            pending.extend(item.evidence_id for item in retained.output.evidence_records)
         included = set()
         while pending:
             ref = pending.pop()
@@ -467,6 +495,7 @@ class AgentGraph:
             conflicts=info.conflicts,
             evidence_records=evidence_records,
             conflict_snapshot=baseline,
+            retained_info_result=retained,
             message_code="CONFIRM_CONFLICT",
         )
         return {"phase": "COMPLETED", "outcome": outcome}

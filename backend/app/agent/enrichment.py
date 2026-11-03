@@ -18,6 +18,8 @@ from app.agent.schemas import (
     FactOperation,
     FactStatus,
     InfoAnalysisResult,
+)
+from app.agent.schemas import (
     case_field_values_equal as same_fact_value,
 )
 
@@ -81,6 +83,12 @@ def build_conflict_overlays(
         or confirmation_state(baseline) != confirmation_state(snapshot)
     ):
         raise StaleConfirmationError("Case state changed after the conflict batch")
+    if trigger.retained_info_result is not None:
+        saved = {item.evidence_id: item for item in snapshot.evidence_records}
+        for evidence in trigger.retained_info_result.output.evidence_records:
+            current = saved.get(evidence.evidence_id)
+            if current is None or not evidence_records_equal(current, evidence):
+                raise StaleConfirmationError("retained input evidence is missing or changed")
     overlays = []
     for conflict, accepted in trigger.choices():
         candidate = build_confirmed_conflict_overlay(snapshot, conflict, uuid_factory=uuid_factory)

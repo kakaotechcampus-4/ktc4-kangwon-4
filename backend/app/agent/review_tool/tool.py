@@ -383,6 +383,9 @@ def _validate_integrity(subject: ReviewSubject) -> _ReviewContext:
             continue
         for observation in source.output.procedure_progress_observations:
             original_input = getattr(subject.trigger, "input", None)
+            retained = getattr(subject.trigger, "retained_info_result", None)
+            if retained is not None:
+                original_input = retained.input
             if confirmation is not None and confirmation.matches(observation):
                 original_input = confirmation.input
             if original_input is None:
@@ -416,15 +419,34 @@ def _validate_mutation_provenance(
             }
         except (AttributeError, TypeError, ValueError) as exc:
             raise ReviewIntegrityError("confirmed-conflict provenance is invalid") from exc
-        if (
-            len(mutations.fact_changes) != len(expected_changes)
-            or {item.confirmed_conflict_ref for item in mutations.fact_changes} != set(expected_changes)
-            or any(item.source_type != FactChangeSourceType.CONFIRMED_CONFLICT for item in mutations.fact_changes)
-            or mutations.procedure_progress_changes
-        ):
+        confirmed = [item for item in mutations.fact_changes
+                     if item.source_type == FactChangeSourceType.CONFIRMED_CONFLICT]
+        if (len(confirmed) != len(expected_changes)
+                or {item.confirmed_conflict_ref for item in confirmed} != set(expected_changes)):
             raise ReviewIntegrityError(
                 "conflict confirmation must contain exactly the accepted changes"
             )
+        retained = subject.trigger.retained_info_result
+        others = [item for item in mutations.fact_changes if item not in confirmed]
+        if retained is None:
+            if others or mutations.procedure_progress_changes:
+                raise ReviewIntegrityError("conflict confirmation must contain exactly the accepted changes")
+        else:
+            sources = [item for item in subject.source_results if item.meta.component == Component.INFO_AGENT]
+            if (len(sources) != 1
+                    or sources[0].output.fact_candidates != retained.output.fact_candidates
+                    or sources[0].output.procedure_progress_observations != retained.output.procedure_progress_observations):
+                raise ReviewIntegrityError("confirmation Info differs from its retained input")
+            expected = {item.field_path: item for item in build_fact_overlays(
+                subject.snapshot, retained.output, sources[0].meta.call_id,
+            ) if item.field_path in CaseFieldKey}
+            if (len(others) != len(expected) or any(
+                item.field_path not in expected
+                or canonical_digest(item, exclude={"candidate_id"})
+                != canonical_digest(expected[item.field_path], exclude={"candidate_id"})
+                for item in others
+            )):
+                raise ReviewIntegrityError("retained facts must be reviewed unchanged")
     snapshot_facts = {fact.field_path: fact for fact in subject.snapshot.facts}
     for candidate in mutations.fact_changes:
         if candidate.field_path not in CaseFieldKey:
