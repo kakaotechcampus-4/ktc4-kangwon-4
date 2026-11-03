@@ -128,3 +128,42 @@ def test_review_rejects_a_model_pass_for_altered_retained_changes(forgery):
     })
     with pytest.raises(ReviewIntegrityError):
         asyncio.run(graph._review_tool.review(bad))
+
+
+def test_document_clause_that_differs_from_a_confirmed_fact_goes_to_conflict():
+    # #137: 서류로 확인한 원상복구 조항이 이미 확정된 사실과 다르면 덮어쓰지 않고 사장님 확인(CONFLICT)으로 간다.
+    from uuid import UUID
+
+    from app.agent.document_tool.models import (
+        DocumentAnalysis, DocumentContext, DocumentKind, DocumentRecord, ExtractedField, document_input_text,
+    )
+
+    graph, request, _, _, _ = graph_run_inputs("DOCUMENT_SUBMITTED")
+    lease = next(fact for fact in request.case_snapshot.facts if fact.field_path == "lease_status")
+    request.case_snapshot.facts.append(lease.model_copy(update={
+        "field_path": "restoration_scope", "value": "FULL",
+    }))
+    clause = "원상복구 범위는 카운터·싱크대 부분이다."
+    request.trigger.input.redacted_text = document_input_text(DocumentContext(documents=[DocumentRecord(
+        document_id=UUID(int=137), filename="lease.pdf", content_hash="h", redaction_count=0,
+        cache_key="c", artifact_hash="a", confirmed_fields={"restoration_clause": clause},
+        analysis=DocumentAnalysis(kind=DocumentKind.LEASE, needs_confirmation=True, fields=[
+            ExtractedField(name="restoration_clause", value=clause, page=1, quote=clause)]),
+    )]))
+    first = output([finding("FILE_TAX_BUSINESS_CLOSURE", "doc1")])
+    first["facts"] = [{
+        "operation": "SET", "field_path": "restoration_scope", "value_type": "ENUM", "value": "PARTIAL",
+        "source_text": clause, "confidence_bps": 9500, "requires_confirmation": False,
+        "reason_summary": "사장님이 확인한 서류 조항",
+    }]
+    graph._info_agent = InfoAnalysisAgent(
+        Responses(first, output([finding("FILE_TAX_BUSINESS_CLOSURE", "doc1")])),
+        clock=lambda: NOW, max_local_attempts=1,
+    )
+    original = request.model_dump_json()
+
+    outcome = asyncio.run(graph.run(request))
+
+    assert outcome.outcome_type == "CONFLICT", outcome
+    assert [item.field_path for item in outcome.conflicts] == ["restoration_scope"]
+    assert request.model_dump_json() == original  # 확정 사실을 바로 바꾸지 않는다

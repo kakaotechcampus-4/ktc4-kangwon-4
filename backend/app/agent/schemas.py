@@ -1847,6 +1847,34 @@ class ResultSubmittedTrigger(AgentSchema):
         return self
 
 
+class DocumentSubmittedTrigger(AgentSchema):
+    """사장님이 서류를 올린 뒤 다시 판단한다.
+
+    input.redacted_text는 서류에서 꺼낸 값의 원문 요약(document_tool.models.document_input_text)이다.
+    근거 종류는 USER_INPUT으로 남긴다. 이 코드에서 OFFICIAL_DOCUMENT는 절차 조회에 쓰는
+    기관 안내 문서이고 금액·기한 문구를 허용하는 근거라서, 사장님이 올린 서류를 섞지 않는다.
+    """
+
+    trigger_type: Literal["DOCUMENT_SUBMITTED"]
+    input_event_id: NonEmptyStr
+    client_event_id: NonEmptyStr | None = Field(
+        description=(
+            "Client-provided event ID, distinct from input_event_id. Use null when "
+            "absent; this field does not implement duplicate-request prevention."
+        )
+    )
+    input: RedactedInput
+    submitted_at: AwareDatetime
+
+    @model_validator(mode="after")
+    def validate_event(self) -> DocumentSubmittedTrigger:
+        if self.input.input_event_id != self.input_event_id:
+            raise ValueError("trigger and input event IDs must match")
+        if self.input.source_type != InputSourceType.USER_INPUT:
+            raise ValueError("document input is recorded as USER_INPUT")
+        return self
+
+
 class ConflictSelection(AgentSchema):
     conflict_ref: NonEmptyStr
     accepted: StrictBool
@@ -1938,7 +1966,7 @@ class ConflictConfirmedTrigger(AgentSchema):
 
 
 RunTrigger: TypeAlias = Annotated[
-    CaseCreatedTrigger | ResultSubmittedTrigger | ConflictConfirmedTrigger,
+    CaseCreatedTrigger | ResultSubmittedTrigger | DocumentSubmittedTrigger | ConflictConfirmedTrigger,
     Field(discriminator="trigger_type"),
 ]
 
@@ -2617,6 +2645,7 @@ __all__ = [
     "DecisionType",
     "Digest",
     "DiscoverSupportInput",
+    "DocumentSubmittedTrigger",
     "EvidenceRecord",
     "EvidenceSourceType",
     "FactCandidate",
