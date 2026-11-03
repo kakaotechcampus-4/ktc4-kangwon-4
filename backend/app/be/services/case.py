@@ -13,7 +13,7 @@ from app.be.crud import conflict_reference as conflict_reference_crud
 from app.be.crud import evidence as evidence_crud
 from app.be.crud import procedure_step as procedure_step_crud
 from app.be.models.case import Case
-from app.be.models.case_checklist import CaseChecklist
+from app.be.models.case_checklist import CaseChecklist, CaseChecklistHistory
 from app.be.models.case_history import CaseHistory
 from app.be.models.evidence import ConflictReference, Evidence
 from app.be.models.mixins import kst_now
@@ -524,10 +524,18 @@ def update_case_checklist(
         raise HTTPException(status_code=404, detail="Case를 찾을 수 없습니다.")
 
     checklist = case_checklist_crud.get_case_checklist(session, case.id, task_id)
-    if completed and checklist is None:
+    if completed == (checklist is not None):
+        # 이미 그 상태다. 같은 요청을 두 번 보내도 이력이 쌓이지 않게 아무것도 하지 않는다.
+        return CaseChecklistResponse(task_id=task_id, completed=completed)
+
+    if completed:
         case_checklist_crud.create_case_checklist(session, CaseChecklist(case_id=case.id, task_id=task_id))
-    elif not completed and checklist is not None:
+    else:
         case_checklist_crud.delete_case_checklist(session, checklist)
+    # 지금 상태(case_checklist)는 풀면 지우지만, 기록 탭에는 체크했다가 푼 것까지 남아야 한다.
+    case_checklist_crud.create_case_checklist_history(
+        session, CaseChecklistHistory(case_id=case.id, task_id=task_id, completed=completed)
+    )
     session.commit()
     return CaseChecklistResponse(task_id=task_id, completed=completed)
 
@@ -542,6 +550,7 @@ def update_case_support_approval(
         raise HTTPException(status_code=404, detail="Case를 찾을 수 없습니다.")
 
     case.support_approved = approved
+    case.support_approved_at = kst_now()
     session.commit()
     return CaseSupportApprovalResponse(approved=approved)
 

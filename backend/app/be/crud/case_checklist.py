@@ -1,6 +1,6 @@
 from sqlmodel import Session, select
 
-from app.be.models.case_checklist import CaseChecklist
+from app.be.models.case_checklist import CaseChecklist, CaseChecklistHistory
 
 
 def get_case_checklist(session: Session, case_id: int, task_id: str) -> CaseChecklist | None:
@@ -18,3 +18,9 @@ def create_case_checklist(session: Session, checklist: CaseChecklist) -> CaseChe
 def delete_case_checklist(session: Session, checklist: CaseChecklist) -> None:
     session.delete(checklist)
     session.flush()
+
+
+def create_case_checklist_history(session: Session, history: CaseChecklistHistory) -> CaseChecklistHistory:
+    session.add(history)
+    session.flush()
+    return history

@@ -16,7 +16,7 @@ from testcontainers.community.mysql import MySqlContainer
 from app.agent.roadmap import CHECKLIST_IDS
 from app.be.crud.case import get_case_by_member_id
 from app.be.crud.member import create_member
-from app.be.models.case_checklist import CaseChecklist
+from app.be.models.case_checklist import CaseChecklist, CaseChecklistHistory
 from app.be.schemas.case import CaseCreateRequest, ChecklistTaskId
 from app.be.services.case import create_case, update_case_checklist, update_case_support_approval
 
@@ -53,6 +53,15 @@ def checked_tasks(engine, member_id: int) -> list[str]:
         return sorted(row.task_id for row in session.exec(
             select(CaseChecklist).where(CaseChecklist.case_id == case.id)
         ))
+
+
+def history_of(engine, member_id: int) -> list[tuple[str, bool]]:
+    with Session(engine) as session:
+        case = get_case_by_member_id(session, member_id)
+        return [(row.task_id, row.completed) for row in session.exec(
+            select(CaseChecklistHistory).where(CaseChecklistHistory.case_id == case.id)
+            .order_by(CaseChecklistHistory.id)
+        )]
 
 
 def check(engine, member_id: int, task_id: str, completed: bool) -> None:
@@ -116,3 +125,32 @@ def test_tasks_that_are_not_user_checklists_are_rejected(task_id):
 
     with pytest.raises(ValidationError):
         TypeAdapter(ChecklistTaskId).validate_python(task_id)
+
+
+def test_checking_and_unchecking_both_stay_in_the_history(mysql_engine, member_id):
+    """지금 상태는 풀면 지우지만, 기록 탭에는 체크했다가 푼 것까지 남아야 한다."""
+
+    check(mysql_engine, member_id, "dispose_stock", True)
+    check(mysql_engine, member_id, "dispose_stock", False)
+    check(mysql_engine, member_id, "dispose_stock", True)
+
+    assert history_of(mysql_engine, member_id) == [
+        ("dispose_stock", True), ("dispose_stock", False), ("dispose_stock", True),
+    ]
+
+
+def test_a_request_that_changes_nothing_adds_no_history(mysql_engine, member_id):
+    check(mysql_engine, member_id, "dispose_stock", False)
+    check(mysql_engine, member_id, "dispose_stock", True)
+    check(mysql_engine, member_id, "dispose_stock", True)
+
+    assert history_of(mysql_engine, member_id) == [("dispose_stock", True)]
+
+
+def test_reporting_the_support_result_stamps_when(mysql_engine, member_id):
+    with Session(mysql_engine) as session:
+        assert get_case_by_member_id(session, member_id).support_approved_at is None
+        update_case_support_approval(session, member_id, False)
+
+    with Session(mysql_engine) as session:
+        assert get_case_by_member_id(session, member_id).support_approved_at is not None

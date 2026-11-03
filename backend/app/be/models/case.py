@@ -53,6 +53,8 @@ class Case(TimestampMixin, table=True):
     )
     # 사장님이 알려 준 철거비 지원 승인 결과. null이면 아직 모름. AI가 판단한 지원 자격이 아니다.
     support_approved: bool | None = Field(default=None)
+    # 승인 결과를 마지막으로 알려 준 시각. 기록 탭에 "승인 결과를 알려주셨어요"로 보인다
+    support_approved_at: datetime | None = Field(default=None, sa_column=Column(DateTime, nullable=True))
 
     planned_closure_date: date | None = Field(default=None, sa_column=Column(Date, nullable=True))
     completed_at: datetime | None = Field(default=None, sa_column=Column(DateTime, nullable=True))
