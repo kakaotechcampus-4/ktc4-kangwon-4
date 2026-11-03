@@ -18,6 +18,7 @@ import type {
   CurrentCaseView,
   DiagnosisAnswers,
   DiagnosisBusiness,
+  DiagnosisClosure,
   DiagnosisInsurance,
   Fact,
   FailureNotice,
@@ -305,6 +306,29 @@ export function toCurrentCaseView(envelope: CasesEnvelope, serverCase: CaseRespo
  */
 export const MAX_EMPLOYEE_COUNT = 1000
 
+/** 한국 시간의 연·월. 밤 9시 이후 UTC로는 아직 전날이라, 그냥 읽으면 달 마지막 날 밤에 지난달이 나온다 */
+const KOREA_MONTH = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', year: 'numeric', month: 'numeric' })
+
+/**
+ * 폐업 시기 보기 → 예상 달 `YYYY-MM`. "아직"이면 `null`.
+ *
+ * 사장님이 고른 달을 달 표기로 옮기는 것이지 기한 계산이 아니다(FE 규칙 7). 그 달로
+ * 무엇을 언제 할지는 서버가 정하고, 날짜(1일·말일)로 바꾸지도 않는다(#153).
+ */
+function closureMonthOf(closure: DiagnosisClosure, now: Date): string | null {
+  if (closure === 'UNDECIDED') return null
+
+  const parts = KOREA_MONTH.formatToParts(now)
+  const year = Number(parts.find((part) => part.type === 'year')?.value)
+  const month = Number(parts.find((part) => part.type === 'month')?.value)
+
+  // 1~12월을 0부터 세어 넘김을 처리한다. 12월의 다음 달은 다음 해 1월이다
+  const index = month - 1 + (closure === 'NEXT_MONTH' ? 1 : 0)
+  const targetYear = year + Math.floor(index / 12)
+  const targetMonth = (index % 12) + 1
+  return `${targetYear}-${String(targetMonth).padStart(2, '0')}`
+}
+
 /** 업종 보기 → 서버 업종 코드와 프랜차이즈 여부. 카페는 보기에서 이미 둘 다 정해진다 */
 const BUSINESS_REQUEST: Record<DiagnosisBusiness, { business_type: string; franchise_status: boolean | null }> = {
   PERSONAL_CAFE: { business_type: 'CAFE', franchise_status: false },
@@ -330,7 +354,8 @@ const BUSINESS_REQUEST: Record<DiagnosisBusiness, { business_type: string; franc
  * - 대출·배달앱: 골랐으면 `true`, 안 골랐으면 `false`
  * - 보험: 네 칸을 늘 같이 `true`/`false`로 보낸다. 하나라도 `null`이면 서버는 "해당 없음"이
  *   아니라 "모름"으로 본다. "잘 모르겠어요"면 네 칸 모두 `null`
- * - 폐업 예정일: 시기("이번 달" 등)에서 날짜를 지어내지 않고 비워 보낸다
+ * - 폐업 시기: "이번 달 안에"·"다음 달"은 예상 달(`planned_closure_month`), "아직"은 비워 보낸다.
+ *   정확한 날짜는 묻지 않아 늘 비운다 — 둘을 같이 보내면 서버가 거절한다(#145)
  * - 가게 이름: 진단에서 묻지 않아 비워 보낸다
  *
  * 화면에서 답해야 넘어가는 질문에 답이 없으면 `null`이다. 화면이 이미 순서로 막고 있지만,
@@ -339,8 +364,8 @@ const BUSINESS_REQUEST: Record<DiagnosisBusiness, { business_type: string; franc
  * 앞 답을 바꿔 빠진 질문의 답(빌린 가게를 해제한 뒤의 월세 답 등)은 여기서 버린다.
  * 저장소에는 남겨 두어, 다시 켜면 고른 것이 그대로 보인다.
  */
-export function toCaseCreateRequest(answers: DiagnosisAnswers): CaseCreateRequest | null {
-  if (answers.business === null || answers.situations === null) return null
+export function toCaseCreateRequest(answers: DiagnosisAnswers, now: Date): CaseCreateRequest | null {
+  if (answers.business === null || answers.situations === null || answers.closure === null) return null
 
   const business = BUSINESS_REQUEST[answers.business]
   const franchiseStatus = business.franchise_status ?? answers.franchise
@@ -374,6 +399,7 @@ export function toCaseCreateRequest(answers: DiagnosisAnswers): CaseCreateReques
     lease_status: leaseStatus,
     restoration_clause: restorationClause,
     planned_closure_date: null,
+    planned_closure_month: closureMonthOf(answers.closure, now),
     had_employees: staffed ? null : answers.hadEmployees,
     pension_enrolled: enrolled('PENSION'),
     health_insurance_enrolled: enrolled('HEALTH'),

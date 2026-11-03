@@ -84,6 +84,7 @@ describe('CaseCreatePage', () => {
       lease_status: 'OWNED',
       restoration_clause: 'UNKNOWN',
       planned_closure_date: null,
+      planned_closure_month: null,
       had_employees: false,
       pension_enrolled: false,
       health_insurance_enrolled: false,

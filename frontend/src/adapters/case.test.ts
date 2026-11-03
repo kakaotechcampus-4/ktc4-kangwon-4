@@ -485,8 +485,13 @@ const diagnosis = (patch: Partial<DiagnosisAnswers>): DiagnosisAnswers => ({
   restorationClause: 'UNKNOWN',
   hadEmployees: false,
   insurances: [],
+  closure: 'UNDECIDED',
   ...patch,
 })
+
+/** 한국 시간 2026-11-03 12:00. 예상 달을 보는 테스트만 시각을 따로 준다 */
+const NOW = new Date('2026-11-03T03:00:00Z')
+const request = (answers: DiagnosisAnswers, now = NOW) => toCaseCreateRequest(answers, now)
 
 /**
  * 시안의 답은 서버 칸과 1:1이 아니다. 여기서 잘못 옮기면 서버가 422로 막거나,
@@ -495,15 +500,15 @@ const diagnosis = (patch: Partial<DiagnosisAnswers>): DiagnosisAnswers => ({
 describe('toCaseCreateRequest', () => {
   /** 글자("개인 카페")를 보내면 로드맵이 전부 해당 없음이 된다(#119 현종님 실측) */
   it('업종 보기를 업종 코드와 프랜차이즈 여부로 바꾼다', () => {
-    expect(toCaseCreateRequest(diagnosis({ business: 'PERSONAL_CAFE' }))).toMatchObject({
+    expect(request(diagnosis({ business: 'PERSONAL_CAFE' }))).toMatchObject({
       business_type: 'CAFE',
       franchise_status: false,
     })
-    expect(toCaseCreateRequest(diagnosis({ business: 'FRANCHISE_CAFE' }))).toMatchObject({
+    expect(request(diagnosis({ business: 'FRANCHISE_CAFE' }))).toMatchObject({
       business_type: 'CAFE',
       franchise_status: true,
     })
-    expect(toCaseCreateRequest(diagnosis({ business: 'RESTAURANT', franchise: true }))).toMatchObject({
+    expect(request(diagnosis({ business: 'RESTAURANT', franchise: true }))).toMatchObject({
       business_type: 'RESTAURANT',
       franchise_status: true,
     })
@@ -511,48 +516,48 @@ describe('toCaseCreateRequest', () => {
 
   /** 서버가 프랜차이즈 여부를 확정값으로만 받는다. 모르는 채로 보내면 판단이 시작되지 않는다 */
   it('다른 음식점인데 프랜차이즈 여부를 모르면 보내지 않는다', () => {
-    expect(toCaseCreateRequest(diagnosis({ business: 'RESTAURANT' }))).toBeNull()
+    expect(request(diagnosis({ business: 'RESTAURANT' }))).toBeNull()
   })
 
   it('빌린 가게면 월세 답으로, 안 골랐으면 자가로 보낸다', () => {
-    expect(toCaseCreateRequest(diagnosis({ situations: ['LEASE'], paysRent: true }))?.lease_status).toBe(
+    expect(request(diagnosis({ situations: ['LEASE'], paysRent: true }))?.lease_status).toBe(
       'LEASED_PAID',
     )
-    expect(toCaseCreateRequest(diagnosis({ situations: ['LEASE'], paysRent: false }))?.lease_status).toBe(
+    expect(request(diagnosis({ situations: ['LEASE'], paysRent: false }))?.lease_status).toBe(
       'LEASED_FREE',
     )
-    expect(toCaseCreateRequest(diagnosis({ situations: [] }))?.lease_status).toBe('OWNED')
-    expect(toCaseCreateRequest(diagnosis({ situations: ['LEASE'] }))).toBeNull()
+    expect(request(diagnosis({ situations: [] }))?.lease_status).toBe('OWNED')
+    expect(request(diagnosis({ situations: ['LEASE'] }))).toBeNull()
   })
 
   /** 빌린 가게를 해제하면 월세 질문이 빠진다. 남아 있던 월세 답으로 "빌린 가게"가 되면 안 된다 */
   it('앞 답을 바꿔 빠진 질문의 답은 보내지 않는다', () => {
-    expect(toCaseCreateRequest(diagnosis({ situations: [], paysRent: true }))?.lease_status).toBe('OWNED')
+    expect(request(diagnosis({ situations: [], paysRent: true }))?.lease_status).toBe('OWNED')
     expect(
-      toCaseCreateRequest(diagnosis({ situations: [], fullTimeCount: 3, partTimeCount: 1 }))?.employee_count,
+      request(diagnosis({ situations: [], fullTimeCount: 3, partTimeCount: 1 }))?.employee_count,
     ).toBe(0)
   })
 
   it('직원을 골랐으면 정직원과 아르바이트를 더해 보낸다', () => {
     expect(
-      toCaseCreateRequest(diagnosis({ situations: ['STAFF'], fullTimeCount: 2, partTimeCount: 1 }))
+      request(diagnosis({ situations: ['STAFF'], fullTimeCount: 2, partTimeCount: 1 }))
         ?.employee_count,
     ).toBe(3)
   })
 
   /** 서버는 0~1000명만 받는다. 직원이 있다고 했는데 0명이면 앞 답과 어긋난다 */
   it('직원을 골랐는데 0명이거나 상한을 넘으면 보내지 않는다', () => {
-    expect(toCaseCreateRequest(diagnosis({ situations: ['STAFF'] }))).toBeNull()
-    expect(toCaseCreateRequest(diagnosis({ situations: ['STAFF'], fullTimeCount: 1001 }))).toBeNull()
+    expect(request(diagnosis({ situations: ['STAFF'] }))).toBeNull()
+    expect(request(diagnosis({ situations: ['STAFF'], fullTimeCount: 1001 }))).toBeNull()
   })
 
   /** 고르지 않은 것은 "모름"이 아니라 "없음"이다. 비워 보내면 서버는 "안 물어봄"으로 저장한다 */
   it('대출·배달앱은 골랐는지로 보낸다', () => {
-    expect(toCaseCreateRequest(diagnosis({ situations: ['LOAN', 'CONTRACT'] }))).toMatchObject({
+    expect(request(diagnosis({ situations: ['LOAN', 'CONTRACT'] }))).toMatchObject({
       has_business_loan: true,
       has_service_contracts: true,
     })
-    expect(toCaseCreateRequest(diagnosis({ situations: [] }))).toMatchObject({
+    expect(request(diagnosis({ situations: [] }))).toMatchObject({
       has_business_loan: false,
       has_service_contracts: false,
     })
@@ -561,14 +566,14 @@ describe('toCaseCreateRequest', () => {
   /** 서버가 이 칸에 `null`을 받지 않는다(422). 자가면 원상복구 할 일이 빠져 값이 쓰이지 않는다 */
   it('원상복구 조항은 빌린 가게면 고른 답, 자가면 모름으로 보낸다', () => {
     expect(
-      toCaseCreateRequest(diagnosis({ situations: ['LEASE'], paysRent: true, restorationClause: 'EXISTS' }))
+      request(diagnosis({ situations: ['LEASE'], paysRent: true, restorationClause: 'EXISTS' }))
         ?.restoration_clause,
     ).toBe('EXISTS')
     expect(
-      toCaseCreateRequest(diagnosis({ situations: [], restorationClause: 'NOT_EXISTS' }))?.restoration_clause,
+      request(diagnosis({ situations: [], restorationClause: 'NOT_EXISTS' }))?.restoration_clause,
     ).toBe('UNKNOWN')
     expect(
-      toCaseCreateRequest(diagnosis({ situations: ['LEASE'], paysRent: true, restorationClause: null })),
+      request(diagnosis({ situations: ['LEASE'], paysRent: true, restorationClause: null })),
     ).toBeNull()
   })
 
@@ -577,34 +582,34 @@ describe('toCaseCreateRequest', () => {
    * 지금 있으면 비워 두고 서버가 직원 수로 알게 한다
    */
   it('예전 직원 답은 지금 직원이 없을 때만 보낸다', () => {
-    expect(toCaseCreateRequest(diagnosis({ hadEmployees: true }))?.had_employees).toBe(true)
+    expect(request(diagnosis({ hadEmployees: true }))?.had_employees).toBe(true)
     expect(
-      toCaseCreateRequest(diagnosis({ situations: ['STAFF'], fullTimeCount: 1, hadEmployees: false }))
+      request(diagnosis({ situations: ['STAFF'], fullTimeCount: 1, hadEmployees: false }))
         ?.had_employees,
     ).toBeNull()
-    expect(toCaseCreateRequest(diagnosis({ hadEmployees: null }))).toBeNull()
+    expect(request(diagnosis({ hadEmployees: null }))).toBeNull()
   })
 
   /** 하나라도 비면 서버가 넷을 다 "모름"으로 본다. "가입한 적 없어요"가 "해당 없음"이 되려면 넷 다 false여야 한다 */
   it('보험 네 칸을 늘 같이 채워 보낸다', () => {
-    expect(toCaseCreateRequest(diagnosis({ insurances: ['PENSION', 'EMPLOYMENT'] }))).toMatchObject({
+    expect(request(diagnosis({ insurances: ['PENSION', 'EMPLOYMENT'] }))).toMatchObject({
       pension_enrolled: true,
       health_insurance_enrolled: false,
       employment_insurance_enrolled: true,
       industrial_accident_insurance_enrolled: false,
     })
-    expect(toCaseCreateRequest(diagnosis({ insurances: [] }))).toMatchObject({
+    expect(request(diagnosis({ insurances: [] }))).toMatchObject({
       pension_enrolled: false,
       health_insurance_enrolled: false,
       employment_insurance_enrolled: false,
       industrial_accident_insurance_enrolled: false,
     })
-    expect(toCaseCreateRequest(diagnosis({ insurances: null }))).toBeNull()
+    expect(request(diagnosis({ insurances: null }))).toBeNull()
   })
 
   /** 모르는 것을 "가입한 적 없음"으로 보내면 보험 신고 할 일이 해당 없음으로 빠진다(#156 다물님) */
   it('보험을 모르면 네 칸을 모두 비워 보낸다', () => {
-    expect(toCaseCreateRequest(diagnosis({ insurances: 'UNKNOWN' }))).toMatchObject({
+    expect(request(diagnosis({ insurances: 'UNKNOWN' }))).toMatchObject({
       pension_enrolled: null,
       health_insurance_enrolled: null,
       employment_insurance_enrolled: null,
@@ -612,13 +617,35 @@ describe('toCaseCreateRequest', () => {
     })
   })
 
-  /** "이번 달"에서 날짜를 지어내면 서버가 그 날짜로 기한을 계산한다(FE 규칙 7) */
-  it('폐업 시기를 골라도 날짜는 비워 보낸다', () => {
-    expect(toCaseCreateRequest(diagnosis({ closure: 'THIS_MONTH' }))?.planned_closure_date).toBeNull()
+  /**
+   * 예상 달을 보내야 로드맵의 "날짜 정하기"가 진행 중이 된다(#153). 날짜는 지어내지 않는다 —
+   * "이번 달"을 1일·말일로 바꾸면 서버가 그 날짜로 기한을 계산하고(FE 규칙 7), 둘을 같이 보내면 422다
+   */
+  it('폐업 시기는 예상 달로 보내고 날짜는 비운다', () => {
+    expect(request(diagnosis({ closure: 'THIS_MONTH' }))).toMatchObject({
+      planned_closure_month: '2026-11',
+      planned_closure_date: null,
+    })
+    expect(request(diagnosis({ closure: 'NEXT_MONTH' }))?.planned_closure_month).toBe('2026-12')
+    expect(request(diagnosis({ closure: 'UNDECIDED' }))?.planned_closure_month).toBeNull()
   })
 
-  it('업종이나 해당 항목에 답하지 않았으면 보내지 않는다', () => {
-    expect(toCaseCreateRequest(diagnosis({ business: null }))).toBeNull()
-    expect(toCaseCreateRequest(diagnosis({ situations: null }))).toBeNull()
+  it('12월의 다음 달은 다음 해 1월이다', () => {
+    const december = new Date('2026-12-15T03:00:00Z')
+    expect(request(diagnosis({ closure: 'NEXT_MONTH' }), december)?.planned_closure_month).toBe('2027-01')
+  })
+
+  /** 한국 12월 1일 새벽은 UTC로 아직 11월 30일이다. 사장님이 보는 달력은 한국 시간이다 */
+  it('이번 달은 한국 시간으로 센다', () => {
+    const koreaDecemberFirst = new Date('2026-11-30T15:30:00Z')
+    expect(request(diagnosis({ closure: 'THIS_MONTH' }), koreaDecemberFirst)?.planned_closure_month).toBe(
+      '2026-12',
+    )
+  })
+
+  it('업종이나 해당 항목, 폐업 시기에 답하지 않았으면 보내지 않는다', () => {
+    expect(request(diagnosis({ business: null }))).toBeNull()
+    expect(request(diagnosis({ situations: null }))).toBeNull()
+    expect(request(diagnosis({ closure: null }))).toBeNull()
   })
 })

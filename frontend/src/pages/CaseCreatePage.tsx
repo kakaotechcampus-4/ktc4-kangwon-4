@@ -396,7 +396,7 @@ export function CaseCreatePage() {
   }
 
   function handleSubmit() {
-    const body = toCaseCreateRequest(answers)
+    const body = toCaseCreateRequest(answers, new Date())
     // 순서가 이미 막고 있다. 여기서 한 번 더 거르는 것은 빈 값을 서버까지 보내지 않으려는 것
     if (body === null) return
 

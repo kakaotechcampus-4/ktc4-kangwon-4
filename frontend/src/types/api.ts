@@ -47,6 +47,8 @@ export interface CaseCreateRequest {
   restoration_clause: RestorationClause
   /** `YYYY-MM-DD` */
   planned_closure_date: string | null
+  /** 날짜를 못 정했을 때의 예상 달 `YYYY-MM`. 날짜와 같이 보내면 422 */
+  planned_closure_month: string | null
   /** 지금이 아니라 "있었던 적". 지금 직원이 있으면 서버가 직원 수로 안다 */
   had_employees: boolean | null
   /** 이 사업장의 4대보험 가입 이력. 넷을 같이 보내야 "해당 없음"이 된다 */
