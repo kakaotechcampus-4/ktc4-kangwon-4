@@ -130,8 +130,10 @@ def check_documents(
         raise _rejected(error) from None
     save_context(directory, updated)
 
-    # 기록 탭 문구가 "점검하고 제출 파일을 만들었어요"라 통과한 점검만 남긴다
-    if updated.document_check is not None and updated.document_check.status == "COMPLETE":
+    # 기록 탭 문구가 "점검하고 제출 파일을 만들었어요"라 통과한 점검만 남긴다.
+    # 서류를 바꾸지 않고 다시 눌러 통과한 것은 남기지 않는다. 서류가 바뀌면 지난 점검이 지워진다.
+    passed_before = context.document_check is not None and context.document_check.status == "COMPLETE"
+    if not passed_before and updated.document_check is not None and updated.document_check.status == "COMPLETE":
         case_document_history_crud.create_case_document_history(
             session, CaseDocumentHistory(case_id=case.id, action="CHECKED"),
         )

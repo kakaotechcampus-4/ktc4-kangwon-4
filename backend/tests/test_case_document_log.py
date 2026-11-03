@@ -111,6 +111,8 @@ def test_only_passed_check_is_logged_as_ribbon(documents):
 
     _upload(engine, member_id, tool, directory, DocumentKind.TRANSFER, TRANSFER)
     assert _check(engine, member_id, tool, directory).document_check.status == "COMPLETE"
+    # 서류를 바꾸지 않고 [점검]을 다시 눌러 또 통과해도 한 줄만 남는다
+    assert _check(engine, member_id, tool, directory).document_check.status == "COMPLETE"
 
     logs = _document_logs(engine, member_id)
     assert logs.count(("RIBBON", "DOCUMENTS_CHECKED", None)) == 1
