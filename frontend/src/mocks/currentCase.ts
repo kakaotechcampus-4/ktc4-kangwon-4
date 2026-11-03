@@ -26,10 +26,10 @@ const facts: Fact[] = [
 ]
 
 /**
- * 판단 상태와 상관없이 같은 가게 쪽 값. 폐업 신고·보증금은 저장 전으로 둔다 — 할 일 화면이
- * 지금처럼 빈 칸에서 열린다. 채워 열린 모양은 테스트가 본다.
+ * 판단 상태와 상관없이 같은 가게 쪽 값. 진행 중이고, 폐업 신고·보증금은 저장 전으로 둔다 — 할 일
+ * 화면이 지금처럼 빈 칸에서 열린다. 채워 열린 모양은 테스트가 본다.
  */
-const store = { facts, closureReport: null, depositReturn: null }
+const store = { facts, completed: false, closureReport: null, depositReturn: null }
 
 /**
  * 판단이 끝난 상태.
@@ -136,4 +136,15 @@ export const judgmentConflictCase: CurrentCaseView = {
 export const unrecognizedCase: CurrentCaseView = {
   ...store,
   judgment: { status: 'UNRECOGNIZED' },
+}
+
+/**
+ * 폐업 정리를 모두 마친 상태(시안 `closed`). 사장님이 부가세 신고를 마쳤다고 체크하면 서버가 바꾼다.
+ *
+ * 판단은 `doneCase` 와 같게 둔다. 완료돼도 마지막 판단 기록은 남아 있어서, 홈이 판단보다 완료를
+ * 먼저 보는지가 이 Mock 으로 드러난다.
+ */
+export const completedCase: CurrentCaseView = {
+  ...doneCase,
+  completed: true,
 }

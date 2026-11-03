@@ -323,11 +323,18 @@ function toDepositReturn(serverCase: CaseResponse): DepositReturnResult | null {
   return result && DEPOSIT_RETURN_RESULTS.includes(result) ? result : null
 }
 
-/** 현재 Case 화면이 필요한 전체 데이터 */
+/**
+ * 현재 Case 화면이 필요한 전체 데이터
+ *
+ * 완료는 `case_status` 하나로 본다. `completed_at` 이 비어 와도 완료다 — 서버가 상태로 완료라고 했고,
+ * 화면은 그 시각을 쓰지 않는다. 반대로 `IN_PROGRESS` 나 우리가 모르는 값이면 진행 중이다. 진행 중인
+ * 가게에 완료 화면을 띄우면 [결과 알려주기]가 사라져 사장님이 할 일을 놓친다.
+ */
 export function toCurrentCaseView(envelope: CasesEnvelope, serverCase: CaseResponse): CurrentCaseView {
   return {
     facts: toFacts(serverCase),
     judgment: toJudgmentView(envelope),
+    completed: serverCase.case_status === 'COMPLETED',
     closureReport: toClosureReport(serverCase),
     depositReturn: toDepositReturn(serverCase),
   }

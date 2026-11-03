@@ -145,6 +145,13 @@ export interface CurrentCaseView {
   /** 확인된 것과 미확인을 모두 담는다. 서버가 정한 순서를 그대로 쓴다 */
   facts: Fact[]
   judgment: JudgmentView
+  /**
+   * 폐업 정리를 모두 마쳤는지. 서버가 `case_status` 를 `COMPLETED` 로 바꿨을 때만 `true` 다(#167).
+   *
+   * 판단(`judgment`)과는 다른 축이다. 완료돼도 마지막 판단 기록은 남아 있고, 완료를 풀면(부가세 체크를
+   * 풀면) 그 판단이 다시 지금 할 일이 된다.
+   */
+  completed: boolean
   /** 저장해 둔 통합 폐업 신고 정보. 저장 전이면 `null`. 신고 화면을 이 값으로 채워 연다 */
   closureReport: ClosureReportView | null
   /** 기록해 둔 보증금 결과. 기록 전이면 `null`. 보증금 화면을 이 값으로 골라 둔 채 연다 */

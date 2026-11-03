@@ -207,6 +207,30 @@ describe('toCurrentCaseView 저장해 둔 폐업 신고·보증금', () => {
   })
 })
 
+/**
+ * 폐업 완료(#167). 서버가 `case_status` 를 `COMPLETED` 로 바꿨을 때만 완료다. 진행 중인 가게에 완료
+ * 화면을 띄우면 [결과 알려주기]가 사라져 사장님이 할 일을 놓친다.
+ */
+describe('toCurrentCaseView 폐업 완료', () => {
+  const viewOf = (serverCase: CaseResponse) => toCurrentCaseView(envelopeOf({ judgment_status: 'DONE' }), serverCase)
+
+  it('완료면 완료로 본다', () => {
+    expect(viewOf({ ...SERVER_CASE, case_status: 'COMPLETED', completed_at: '2026-11-04T10:00:00' }).completed).toBe(true)
+  })
+
+  it('완료 시각이 비어 와도 상태가 완료면 완료로 본다', () => {
+    expect(viewOf({ ...SERVER_CASE, case_status: 'COMPLETED', completed_at: null }).completed).toBe(true)
+  })
+
+  it('진행 중이면 완료가 아니다', () => {
+    expect(viewOf(SERVER_CASE).completed).toBe(false)
+  })
+
+  it('모르는 상태면 완료로 보지 않는다', () => {
+    expect(viewOf({ ...SERVER_CASE, case_status: 'CLOSED' } as unknown as CaseResponse).completed).toBe(false)
+  })
+})
+
 describe('toCurrentCaseView', () => {
   it('가게 정보는 판단 상태와 무관하게 담는다', () => {
     const view = toCurrentCaseView(envelopeOf({ judgment_status: 'PENDING' }), SERVER_CASE)
