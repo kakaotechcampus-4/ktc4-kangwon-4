@@ -41,7 +41,7 @@ TASKS = (
     (2, "restoration", "원상복구 범위 확인", "lease", ("CONFIRM_RESTORATION_SCOPE",)),
     (2, "support_conditions", "점포철거비 조건 확인", "demolition", ()),
     (2, "support_application", "소상공인24 사전 신청", "demolition", ()),
-    (2, "support_approval", "승인 결과 확인", "demolition", ()),
+    (2, "support_approval", "1차 적격심사 결과 확인", "demolition", ()),
     (2, "choose_contractor", "철거 업체 정하기", "demolition", ()),
     (2, "before_photo", "철거 전 사진", "demolition", ()),
     (2, "restoration_work", "원상복구·철거 작업", "lease", ("PERFORM_RESTORATION",)),
