@@ -15,7 +15,7 @@ from app.agent.action_catalog import (
     effective_procedure_progress,
     resolve_procedure_bindings,
 )
-from app.agent.claim_safety import expand_evidence
+from app.agent.claim_safety import demolition_preparation_only, expand_evidence
 from app.agent.procedure_tool.rules import (
     employment_history,
     employment_history_conflicts,
@@ -350,6 +350,18 @@ def build_blocker_candidates(
                     if confirmation else finding.required_actions[0].text
                 )
                 questions = [preparation_question if confirmation else progress_question]
+                if demolition_preparation_only(logical_code, [evidence_by_id[ref] for ref in finding.evidence_refs]):
+                    description = "증빙 제출이 필요한 경우의 철거 전 준비사항을 확인할 필요가 있습니다."
+                    title = "철거 전에 필요한 증빙 준비사항을 확인하세요."
+                    reason = "증빙 제출이 필요한 경우, 철거 전에 확보할 자료를 미리 확인하기 위한 안내입니다."
+                    names = sorted([" ".join(item.name.split()) for item in finding.required_documents],
+                                   key=lambda name: "사진" not in name)
+                    questions = [
+                        f"증빙 제출이 필요한 경우, {name} 준비 방법을 확인하셨나요?" for name in names[:6]
+                    ] or ["증빙 제출이 필요한 경우 철거 전 준비할 자료의 종류와 준비 방법을 확인하셨나요?"]
+                    issued = [name for name in names if "공사내역서" in name or "세금계산서" in name]
+                    if issued:
+                        questions.append(f"증빙 제출이 필요한 경우, 철거 업체의 {', '.join(issued)} 발급 방법을 확인하셨나요?")
         action = {key: row[key] for key in ("action_code", "target")}
         action.update(
             title=title, reason=reason, questions_to_ask=questions, evidence_refs=refs

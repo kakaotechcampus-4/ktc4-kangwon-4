@@ -5,7 +5,11 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
 
-from app.agent.claim_safety import REQUIRED_CLAIM_SOURCES, expand_evidence
+from app.agent.claim_safety import (
+    REQUIRED_CLAIM_SOURCES,
+    demolition_preparation_only,
+    expand_evidence,
+)
 from app.agent.schemas import (
     CaseSnapshot,
     EvidenceRecord,
@@ -311,7 +315,9 @@ def build_action_candidates(
                         "procedure_step": finding.procedure_step.model_dump(mode="json"),
                     }, logical_code=logical_code)
                     continue
-                ready = not finding.requires_confirmation
+                ready = not finding.requires_confirmation and not demolition_preparation_only(
+                    logical_code, evidence,
+                )
                 for code, definition in ACTION_DEFINITIONS.items():
                     bound_step = (
                         resolved_bindings.get(definition.procedure_logical_code)
