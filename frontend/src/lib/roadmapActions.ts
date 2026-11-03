@@ -1,8 +1,13 @@
 import type {
   CaseChecklistResponse,
   CaseChecklistUpdateRequest,
+  CaseClosureReportRequest,
+  CaseClosureReportResponse,
+  CaseDepositReturnRequest,
+  CaseDepositReturnResponse,
   CaseSupportApprovalRequest,
   CaseSupportApprovalResponse,
+  DepositReturnResult,
 } from '../types/api'
 import { ApiError, request } from './api'
 
@@ -36,4 +41,27 @@ export async function saveSupportApproval(approved: boolean | null): Promise<boo
     throw new ApiError(response.status, '저장된 심사 결과를 읽지 못했습니다.')
   }
   return saved.approved
+}
+
+/** 통합 폐업 신고 정보(폐업일 · 사유 · 주소)를 저장한다(#168). 저장된 값을 돌려준다 */
+export async function saveClosureReport(body: CaseClosureReportRequest): Promise<CaseClosureReportResponse> {
+  const response = await request('/cases/closure-report', { method: 'PUT', body })
+  const saved = (await response.json()) as Partial<CaseClosureReportResponse>
+
+  if (typeof saved.closure_date !== 'string' || typeof saved.road_address !== 'string' || !saved.closure_reason) {
+    throw new ApiError(response.status, '저장된 신고 정보를 읽지 못했습니다.')
+  }
+  return saved as CaseClosureReportResponse
+}
+
+/** 보증금을 돌려받았는지 저장한다(#168). 저장된 값을 돌려준다 */
+export async function saveDepositReturn(result: DepositReturnResult): Promise<DepositReturnResult> {
+  const body: CaseDepositReturnRequest = { result }
+  const response = await request('/cases/deposit-return', { method: 'PUT', body })
+  const saved = (await response.json()) as Partial<CaseDepositReturnResponse>
+
+  if (saved.result !== 'FULL' && saved.result !== 'PARTIAL' && saved.result !== 'NONE') {
+    throw new ApiError(response.status, '저장된 보증금 결과를 읽지 못했습니다.')
+  }
+  return saved.result
 }

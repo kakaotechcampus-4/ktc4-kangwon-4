@@ -380,3 +380,34 @@ export interface CaseSupportApprovalRequest {
 export interface CaseSupportApprovalResponse {
   approved: boolean | null
 }
+
+/** 폐업 사유. `BUSINESS_SLUMP` 사업 부진 · `PERSONAL` 개인 사정 · `OTHER` 기타 */
+export type ClosureReason = 'BUSINESS_SLUMP' | 'PERSONAL' | 'OTHER'
+
+/**
+ * `PUT /cases/closure-report` 로 보내는 것(#168). 통합 폐업 신고의 "폐업 정보 · 가게 주소" 두 장을 한 번에.
+ *
+ * 다시 보내면 덮어쓴다. AI 판단에는 넘어가지 않는다(신고 요약에 보여주는 값). 가입 때 받은 예상일
+ * (`planned_closure_date`)과 다른 칸이다 — 이쪽은 신고할 **실제 폐업일**이다.
+ */
+export interface CaseClosureReportRequest {
+  /** `YYYY-MM-DD` */
+  closure_date: string
+  closure_reason: ClosureReason
+  /** 도로명 주소. 1~200자 */
+  road_address: string
+  /** 상세 주소. 100자까지, 없으면 `null` */
+  address_detail: string | null
+}
+
+export type CaseClosureReportResponse = CaseClosureReportRequest
+
+/** 보증금을 돌려받았는지. `FULL` 다 받음 · `PARTIAL` 일부 빼고 받음 · `NONE` 아직 못 받음 */
+export type DepositReturnResult = 'FULL' | 'PARTIAL' | 'NONE'
+
+/** `PUT /cases/deposit-return` 로 보내는 것과 그 응답(#168) */
+export interface CaseDepositReturnRequest {
+  result: DepositReturnResult
+}
+
+export type CaseDepositReturnResponse = CaseDepositReturnRequest

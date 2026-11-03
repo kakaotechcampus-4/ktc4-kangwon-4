@@ -1,15 +1,18 @@
 import { IconCheckmarkCircleFill } from '@karrotmarket/react-monochrome-icon'
-import { type ReactNode, useState } from 'react'
+import { type ReactNode, useEffect, useId, useRef, useState } from 'react'
 import { Navigate, useLocation, useNavigate, useParams } from 'react-router'
 
+import { BottomSheet } from '../components/ui/BottomSheet'
 import { Button } from '../components/ui/Button'
 import { InfoBox } from '../components/ui/InfoBox'
 import { TopBar } from '../components/ui/TopBar'
 import { useRoadmap } from '../hooks/useRoadmap'
 import { ApiError, UnauthorizedError } from '../lib/api'
 import { usesMockData } from '../lib/auth'
-import { saveChecklist, saveSupportApproval } from '../lib/roadmapActions'
+import { embedPostcode, loadPostcode, toRoadAddress } from '../lib/postcode'
+import { saveChecklist, saveClosureReport, saveSupportApproval } from '../lib/roadmapActions'
 import { taskFlowOf } from '../lib/taskFlows'
+import type { ClosureReason } from '../types/api'
 import type { RoadmapTaskView } from '../types/view'
 
 /** 저장 상태. 저장이 끝나기 전에는 화면의 체크·결과를 바꾸지 않는다(FE 규칙 2) */
@@ -50,8 +53,9 @@ export function TaskFlowPage() {
       return <SupportResultFlow task={task} />
     case 'REPORT_RESULT':
       return <ReportResultFlow task={task} />
-    // 폐업 정보·주소·보증금 장면은 다음 커밋에서 붙인다
     case 'CLOSURE_REPORT':
+      return <ClosureReportFlow task={task} />
+    // 보증금 장면은 다음 커밋에서 붙인다
     case 'DEPOSIT':
     case 'INFO':
       return <InfoFlow task={task} />
@@ -217,6 +221,227 @@ function ReportResultFlow({ task }: { task: RoadmapTaskView }) {
         <Button onClick={() => navigate({ pathname: '/results', search })}>결과 알려주기</Button>
       </div>
     </TaskFrame>
+  )
+}
+
+const CLOSURE_REASONS: { value: ClosureReason; label: string }[] = [
+  { value: 'BUSINESS_SLUMP', label: '사업 부진' },
+  { value: 'PERSONAL', label: '개인 사정' },
+  { value: 'OTHER', label: '기타' },
+]
+
+/**
+ * 통합 폐업 신고 (시안 ④ "폐업 정보 확인" · "가게 주소 확인"). 신고에 적을 실제 폐업일·사유·주소를
+ * 한 번에 저장한다(#168 `PUT /cases/closure-report`).
+ *
+ * 시안은 두 장으로 나눴지만 서버가 한 번에 받아서 한 장에 둔다 — 두 장이면 첫 장만 채우고 떠났을 때
+ * 저장할 길이 없다. 시안의 날짜 칩(10월 31일 등)은 예시라 날짜 고르기로 받는다.
+ *
+ * 폐업일은 가입 때 정한 시기(예상 달)와 다른, 신고할 실제 날짜다. 처음에는 비워 두고 고르게 한다.
+ * 폐업일·사유·도로명 주소는 꼭 받고, 상세 주소는 비워도 된다(단독 건물 등).
+ *
+ * 저장한 뒤에는 접수증을 서류함에 올리고 결과를 알려 달라고 안내한다. 통합 폐업 신고는 공식
+ * 절차라 끝났는지는 판단이 정한다.
+ *
+ * TODO: 저장해 둔 값으로 칸을 채워 연다(`GET /cases` 의 `case.closure_date` 등, #168). 지금은 빈 칸에서
+ * 시작하고, 다시 저장하면 덮어쓴다.
+ */
+export function ClosureReportFlow({ task }: { task: RoadmapTaskView }) {
+  const navigate = useNavigate()
+  const { search } = useLocation()
+  const usesMock = usesMockData(search)
+  const toSaveState = useSaveErrors()
+  const [closureDate, setClosureDate] = useState('')
+  const [reason, setReason] = useState<ClosureReason | null>(null)
+  const [roadAddress, setRoadAddress] = useState('')
+  const [detail, setDetail] = useState('')
+  const [finding, setFinding] = useState(false)
+  const [save, setSave] = useState<SaveState>('IDLE')
+  const [saved, setSaved] = useState(false)
+  const dateId = useId()
+  const detailId = useId()
+
+  const ready = closureDate !== '' && reason !== null && roadAddress !== ''
+
+  async function submit() {
+    if (!ready || reason === null) return
+    const body = {
+      closure_date: closureDate,
+      closure_reason: reason,
+      road_address: roadAddress,
+      address_detail: detail.trim() === '' ? null : detail.trim(),
+    }
+    setSave('SAVING')
+    try {
+      if (!usesMock) await saveClosureReport(body)
+      setSaved(true)
+      setSave('IDLE')
+    } catch (error: unknown) {
+      const state = toSaveState(error)
+      if (state) setSave(state)
+    }
+  }
+
+  return (
+    <TaskFrame>
+      <TaskHeader task={task} sub="사업자등록증에 적힌 것과 같게 적어 주세요." />
+
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor={dateId} className="text-15 font-medium text-fg-neutral-muted">
+          폐업일
+        </label>
+        <input
+          id={dateId}
+          type="date"
+          value={closureDate}
+          onChange={(event) => setClosureDate(event.target.value)}
+          className="h-13 rounded-xl px-3 text-17 ring-1 ring-stroke-neutral-weak ring-inset"
+        />
+      </div>
+
+      <div role="radiogroup" aria-label="폐업 사유" className="flex flex-col gap-1.5">
+        <span aria-hidden="true" className="text-15 font-medium text-fg-neutral-muted">
+          폐업 사유
+        </span>
+        <div className="flex gap-2">
+          {CLOSURE_REASONS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              role="radio"
+              aria-checked={reason === option.value}
+              onClick={() => setReason(option.value)}
+              className={`h-12 flex-1 cursor-pointer rounded-full text-16 font-medium ring-inset ${
+                reason === option.value ? 'bg-bg-brand-weak ring-2 ring-stroke-brand-solid' : 'ring-1 ring-stroke-neutral-weak'
+              }`}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <span className="text-15 font-medium text-fg-neutral-muted">가게 주소</span>
+        {roadAddress !== '' && <p className="text-17 font-medium">{roadAddress}</p>}
+        <Button variant="outline" onClick={() => setFinding(true)}>
+          {roadAddress === '' ? '주소 찾기' : '주소 다시 찾기'}
+        </Button>
+        <label htmlFor={detailId} className="mt-2 text-15 font-medium text-fg-neutral-muted">
+          상세 주소 (선택)
+        </label>
+        <input
+          id={detailId}
+          value={detail}
+          maxLength={100}
+          placeholder="예: 1층"
+          onChange={(event) => setDetail(event.target.value)}
+          className="h-13 rounded-xl px-3 text-17 ring-1 ring-stroke-neutral-weak ring-inset"
+        />
+      </div>
+
+      {saved && save !== 'SAVING' && (
+        <>
+          <p className="flex items-center gap-2 text-17 font-bold">
+            <IconCheckmarkCircleFill size={22} className="text-fg-brand" aria-hidden="true" />
+            신고 정보를 저장했어요
+          </p>
+          <InfoBox
+            title="신고를 마치면 접수증을 서류함에 올려 주세요."
+            action={{ label: '서류함에 올리기', onClick: () => navigate({ pathname: '/docs', search }) }}
+          >
+            신고한 결과는 결과 알려주기로 알려 주시면 리본이 다음 순서를 정해요.
+          </InfoBox>
+        </>
+      )}
+      <SaveNotice save={save} />
+
+      <div className="mt-auto flex flex-col gap-2">
+        {saved && (
+          <Button variant="outline" onClick={() => navigate({ pathname: '/results', search })}>
+            결과 알려주기
+          </Button>
+        )}
+        <Button disabled={!ready || save === 'SAVING' || save === 'REJECTED'} onClick={submit}>
+          {saved ? '다시 저장하기' : '저장하기'}
+        </Button>
+      </div>
+
+      <AddressSheet
+        open={finding}
+        onClose={() => setFinding(false)}
+        onSelect={(address) => {
+          setFinding(false)
+          setRoadAddress(address)
+        }}
+      />
+    </TaskFrame>
+  )
+}
+
+/**
+ * 주소 찾기 시트. 다음 우편번호 찾기 창을 시트 안에 띄운다.
+ *
+ * 새 창(팝업)으로 열지 않는다. 휴대폰 브라우저는 팝업을 막거나 새 탭으로 열어, 고른 뒤 돌아오는 길을
+ * 잃기 쉽다. 스크립트를 받지 못하면 다시 받을 수 있게 안내한다.
+ */
+export function AddressSheet({
+  open,
+  onClose,
+  onSelect,
+}: {
+  open: boolean
+  onClose: () => void
+  onSelect: (roadAddress: string) => void
+}) {
+  const container = useRef<HTMLDivElement>(null)
+  // 고른 뒤 부를 함수는 늘 최신 것을 쓴다. 효과의 의존으로 두면 바깥 화면이 다시 그려질 때마다 찾기 창을
+  // 새로 띄워, 사장님이 적던 검색어가 지워진다
+  const latestSelect = useRef(onSelect)
+  useEffect(() => {
+    latestSelect.current = onSelect
+  }, [onSelect])
+  const [failed, setFailed] = useState(false)
+  const [attempt, setAttempt] = useState(0)
+
+  useEffect(() => {
+    if (!open) return
+    let current = true
+    loadPostcode().then(
+      () => {
+        if (!current || !container.current) return
+        container.current.replaceChildren()
+        embedPostcode(container.current, (data) => latestSelect.current(toRoadAddress(data)))
+      },
+      () => {
+        if (current) setFailed(true)
+      },
+    )
+    return () => {
+      current = false
+    }
+  }, [open, attempt])
+
+  return (
+    <BottomSheet open={open} onClose={onClose} title="가게 주소 찾기" description="도로명이나 건물 이름으로 찾아 주세요.">
+      {failed ? (
+        <InfoBox
+          tone="critical"
+          title="주소 찾기를 불러오지 못했어요."
+          action={{
+            label: '다시 불러오기',
+            onClick: () => {
+              setFailed(false)
+              setAttempt((count) => count + 1)
+            },
+          }}
+        >
+          연결 상태를 확인하고 다시 불러와 주세요.
+        </InfoBox>
+      ) : (
+        <div ref={container} className="h-[440px] overflow-hidden rounded-xl" />
+      )}
+    </BottomSheet>
   )
 }
 

@@ -1,10 +1,10 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import type { ReactElement } from 'react'
 import { createMemoryRouter, RouterProvider } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { RoadmapTaskView } from '../types/view'
-import { CheckFlow, SupportResultFlow, TaskFlowPage } from './TaskFlowPage'
+import { CheckFlow, ClosureReportFlow, SupportResultFlow, TaskFlowPage } from './TaskFlowPage'
 
 function renderAt(path: string) {
   const router = createMemoryRouter(
@@ -190,5 +190,91 @@ describe('SupportResultFlow — 서버', () => {
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
     expect(url).toMatch(/\/cases\/support-approval$/)
     expect(JSON.parse(init.body as string)).toEqual({ approved: null })
+  })
+})
+
+/** 주소 찾기 창 대신 고른 주소를 바로 돌려준다. 실제 창은 외부 서비스라 브라우저에서 확인한다 */
+function stubPostcode(picked = { roadAddress: '서울 마포구 망원로 52', bname: '망원동', buildingName: '', apartment: 'N' as const }) {
+  const embed = vi.fn()
+  window.daum = {
+    Postcode: vi.fn(function Postcode(this: unknown, options: { oncomplete: (data: typeof picked) => void }) {
+      return { embed: () => embed(options.oncomplete) }
+    }) as never,
+  }
+  return () => embed.mock.calls[0][0](picked)
+}
+
+const closureTask: RoadmapTaskView = { id: 'closure_submission', title: '통합 폐업 신고', kind: 'PROCEDURE', status: 'NOT_STARTED' }
+
+/**
+ * 통합 폐업 신고(#168). 폐업일·사유·도로명 주소가 다 있어야 서버가 받는다. 하나라도 빈 채로
+ * 보내면 422 라, 다 채우기 전에는 저장을 잠근다.
+ */
+describe('ClosureReportFlow', () => {
+  afterEach(() => {
+    delete window.daum
+  })
+
+  it('폐업일·사유·주소를 다 채워야 저장할 수 있고, 주소는 찾기에서 고른다', async () => {
+    const pick = stubPostcode()
+    renderFlow(<ClosureReportFlow task={closureTask} />)
+    const save = screen.getByRole('button', { name: '저장하기' })
+
+    fireEvent.change(screen.getByLabelText('폐업일'), { target: { value: '2026-10-31' } })
+    fireEvent.click(screen.getByRole('radio', { name: '사업 부진' }))
+    expect(save).toBeDisabled()
+
+    fireEvent.click(screen.getByRole('button', { name: '주소 찾기' }))
+    await vi.waitFor(() => expect(window.daum?.Postcode).toHaveBeenCalled())
+    act(() => pick())
+
+    expect(screen.getByText('서울 마포구 망원로 52 (망원동)')).toBeInTheDocument()
+    expect(save).toBeEnabled()
+  })
+
+  /** 상세 주소는 비워도 된다(단독 건물 등). 빈 글자를 보내면 빈 주소가 저장된다 */
+  it('네 값을 한 번에 보내고, 상세 주소를 비우면 없는 것으로 보낸다', async () => {
+    const pick = stubPostcode()
+    const fetchMock = serve(
+      json({ closure_date: '2026-10-31', closure_reason: 'PERSONAL', road_address: '서울 마포구 망원로 52 (망원동)', address_detail: null }),
+    )
+    renderFlow(<ClosureReportFlow task={closureTask} />)
+
+    fireEvent.change(screen.getByLabelText('폐업일'), { target: { value: '2026-10-31' } })
+    fireEvent.click(screen.getByRole('radio', { name: '개인 사정' }))
+    fireEvent.click(screen.getByRole('button', { name: '주소 찾기' }))
+    await vi.waitFor(() => expect(window.daum?.Postcode).toHaveBeenCalled())
+    act(() => pick())
+    fireEvent.change(screen.getByLabelText('상세 주소 (선택)'), { target: { value: '   ' } })
+    fireEvent.click(screen.getByRole('button', { name: '저장하기' }))
+
+    expect(await screen.findByText('신고 정보를 저장했어요')).toBeInTheDocument()
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    expect(url).toMatch(/\/cases\/closure-report$/)
+    expect(init.method).toBe('PUT')
+    expect(JSON.parse(init.body as string)).toEqual({
+      closure_date: '2026-10-31',
+      closure_reason: 'PERSONAL',
+      road_address: '서울 마포구 망원로 52 (망원동)',
+      address_detail: null,
+    })
+    // 신고는 공식 절차라 끝났는지는 판단이 정한다. 결과를 알려 달라고 이어 준다
+    expect(screen.getByRole('button', { name: '결과 알려주기' })).toBeInTheDocument()
+  })
+
+  it('저장이 끝나기 전에는 저장했다고 하지 않는다', async () => {
+    const pick = stubPostcode()
+    serve(hanging)
+    renderFlow(<ClosureReportFlow task={closureTask} />)
+
+    fireEvent.change(screen.getByLabelText('폐업일'), { target: { value: '2026-10-31' } })
+    fireEvent.click(screen.getByRole('radio', { name: '기타' }))
+    fireEvent.click(screen.getByRole('button', { name: '주소 찾기' }))
+    await vi.waitFor(() => expect(window.daum?.Postcode).toHaveBeenCalled())
+    act(() => pick())
+    fireEvent.click(screen.getByRole('button', { name: '저장하기' }))
+
+    expect(screen.queryByText('신고 정보를 저장했어요')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '저장하기' })).toBeDisabled()
   })
 })
