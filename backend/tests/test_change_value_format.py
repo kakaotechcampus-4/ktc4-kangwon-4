@@ -108,6 +108,7 @@ def saved_conflict(monkeypatch):
             SimpleNamespace(
                 conflicts=[conflict], evidence_records=[],
                 conflict_snapshot=SimpleNamespace(model_dump=lambda **_: {}),
+                retained_info_result=None,
             ),
         )
         return saved[0]
