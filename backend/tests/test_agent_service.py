@@ -32,6 +32,7 @@ from app.be.models.procedure_step import ProcedureStep, StepDependency
 from app.common.agent_data import (
     InMemoryReviewedProcedureStore,
     build_known_procedure_steps,
+    load_reviewed_procedures,
 )
 from app.common.agent_dto import (
     CaseSnapshot, DocumentContext, RedactedInput, document_input_text, document_replan_text,
@@ -494,6 +495,18 @@ def test_import_cli_rejects_invalid_source_before_importing_database(monkeypatch
     ))
     with pytest.raises(ProcedureStoreError, match="synthetic invalid source"):
         import_cli.main()
+
+
+def test_bundled_demolition_support_notice_is_reviewed_for_restoration_work():
+    # 철거를 권할 때 근거로 쓸 2026 점포철거비 공고 원문. 사람이 검수한 자료만 AI가 쓴다.
+    record = next(
+        item for item in load_reviewed_procedures().records()
+        if item.record_id == "DEMOLITION_SUPPORT_2026"
+    )
+    assert record.step_codes == ["PERFORM_RESTORATION"]
+    assert record.reviewed_by is not None and record.reviewed_at is not None
+    assert "자력철거 시 지원불가" in record.excerpt
+    assert "이체확인증" in record.excerpt and "통장 사본" not in record.excerpt
 
 
 CLAUSE = "원상복구 범위는 카운터·싱크대 부분이다."
