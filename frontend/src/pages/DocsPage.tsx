@@ -30,6 +30,8 @@ import type { DocumentCheckView, DocumentView } from '../types/view'
 export function DocsPage() {
   const { query, action, upload, remove } = useDocuments()
   const [sheetOpen, setSheetOpen] = useState(false)
+  /** 빼기 전에 묻고 있는 서류. 서버에서 지우면 되돌릴 길이 없어 한 번 묻는다 */
+  const [removing, setRemoving] = useState<DocumentView | null>(null)
 
   function handlePicked(file: File) {
     setSheetOpen(false)
@@ -76,7 +78,7 @@ export function DocsPage() {
           <p className="text-15 text-fg-neutral-muted">서류 {documents.length}개가 모였어요.</p>
           <ul className="flex flex-col">
             {documents.map((document) => (
-              <DocumentRow key={document.id} document={document} check={check} onRemove={() => remove(document.id)} />
+              <DocumentRow key={document.id} document={document} check={check} onRemove={() => setRemoving(document)} />
             ))}
           </ul>
         </>
@@ -96,6 +98,14 @@ export function DocsPage() {
       <div className="mt-auto flex flex-col gap-2">{uploadButton}</div>
 
       <UploadSheet open={sheetOpen} onClose={() => setSheetOpen(false)} onPicked={handlePicked} />
+      <RemoveSheet
+        document={removing}
+        onCancel={() => setRemoving(null)}
+        onConfirm={(id) => {
+          setRemoving(null)
+          remove(id)
+        }}
+      />
     </div>
   )
 }
@@ -143,6 +153,40 @@ function DocumentRow({
         <IconTrashcanLine size={20} aria-hidden="true" />
       </button>
     </li>
+  )
+}
+
+/**
+ * 빼기 전에 묻는 시트.
+ *
+ * 줄 끝의 휴지통은 스크롤하다 잘못 누르기 쉬운 자리이고, 서버에서 지운 서류는 되돌릴 API 가
+ * 없다(#159 `DELETE`). 무엇을 빼는지 종류 이름과 파일 이름으로 보여주고 한 번 더 묻는다.
+ */
+function RemoveSheet({
+  document,
+  onCancel,
+  onConfirm,
+}: {
+  document: DocumentView | null
+  onCancel: () => void
+  onConfirm: (id: string) => void
+}) {
+  return (
+    <BottomSheet
+      open={document !== null}
+      onClose={onCancel}
+      title="이 서류를 뺄까요?"
+      description={document ? `${document.kindLabel} · ${document.filename}` : undefined}
+    >
+      <div className="flex gap-2">
+        <Button variant="outline" className="flex-1" onClick={onCancel}>
+          그대로 두기
+        </Button>
+        <Button className="flex-1" onClick={() => document && onConfirm(document.id)}>
+          빼기
+        </Button>
+      </div>
+    </BottomSheet>
   )
 }
 

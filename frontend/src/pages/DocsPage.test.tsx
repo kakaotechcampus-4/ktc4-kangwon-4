@@ -86,11 +86,29 @@ describe('DocsPage — Mock', () => {
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
   })
 
-  it('서류를 빼면 목록에서 사라진다', () => {
+  /** 서버에서 지운 서류는 되돌릴 수 없다. 줄 끝 휴지통을 잘못 눌러도 바로 사라지면 안 된다 */
+  it('빼기 전에 한 번 묻고, 그대로 두면 남긴다', () => {
     renderAt('/docs?mock=docs')
     const before = screen.getAllByRole('listitem').length
 
     fireEvent.click(screen.getByRole('button', { name: '전자세금계산서 빼기' }))
+    const ask = screen.getByRole('dialog', { name: '이 서류를 뺄까요?' })
+    expect(ask).toHaveTextContent('전자세금계산서 · 전자세금계산서.pdf')
+    // 묻는 동안에는 아직 지우지 않았다
+    expect(screen.getAllByRole('listitem')).toHaveLength(before)
+
+    fireEvent.click(within(ask).getByRole('button', { name: '그대로 두기' }))
+
+    expect(screen.queryByRole('dialog', { name: '이 서류를 뺄까요?' })).not.toBeInTheDocument()
+    expect(screen.getAllByRole('listitem')).toHaveLength(before)
+  })
+
+  it('빼기를 한 번 더 누르면 목록에서 사라진다', () => {
+    renderAt('/docs?mock=docs')
+    const before = screen.getAllByRole('listitem').length
+
+    fireEvent.click(screen.getByRole('button', { name: '전자세금계산서 빼기' }))
+    fireEvent.click(within(screen.getByRole('dialog', { name: '이 서류를 뺄까요?' })).getByRole('button', { name: '빼기' }))
 
     expect(screen.getAllByRole('listitem')).toHaveLength(before - 1)
     expect(screen.queryByText('전자세금계산서.pdf')).not.toBeInTheDocument()
