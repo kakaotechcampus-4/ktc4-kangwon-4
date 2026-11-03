@@ -124,6 +124,18 @@ CASE의 필드 단위 변경 이력 (감사 추적용). `CASE_HISTORY`(발화·�
 | completed | BOOLEAN | | NOT NULL | `true` | `true` 체크함 / `false` 체크를 풂 |
 | created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-10-30 10:00:00` | 체크하거나 푼 시각 |
 
+### CASE_DOCUMENT_HISTORY
+
+서류를 올리고 점검한 이력. 한 줄씩 쌓고 지우지 않는다. 기록 탭이 읽는다. 서류 목록 자체는 서류 폴더의 JSON 파일(#159)에 있는데, 거기에는 올린 시각이 없고 서류를 빼면 줄이 사라져서 기록용으로 따로 남긴다. 빼기·확인은 남기지 않는다.
+
+| 컬럼 | 타입 | 키 | 제약조건 | 예시 값 | 설명 |
+|---|---|---|---|---|---|
+| id | BIGINT | PK | NOT NULL, AUTO_INCREMENT | 1 | |
+| case_id | BIGINT | FK | NOT NULL | 1 | |
+| action | ENUM | | NOT NULL | `UPLOADED` | `UPLOADED` 서류를 올림 / `CHECKED` 정산 서류 점검을 통과함(`COMPLETE`일 때만) |
+| document_kind | VARCHAR(30) | | NULLABLE | `"TRANSFER"` | 올린 순간의 서류 종류(문서 Tool의 종류 코드). 나중에 종류를 고쳐도 바꾸지 않는다. 점검이면 NULL |
+| created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-11-04 10:00:00` | 올리거나 점검한 시각 |
+
 ## 2. 판단 로그 & 블로커
 
 에이전트가 사용자 발화나 배치 작업을 처리하면서 내린 판단을 기록하고,
