@@ -10,9 +10,9 @@ import { useRoadmap } from '../hooks/useRoadmap'
 import { ApiError, UnauthorizedError } from '../lib/api'
 import { usesMockData } from '../lib/auth'
 import { embedPostcode, loadPostcode, toRoadAddress } from '../lib/postcode'
-import { saveChecklist, saveClosureReport, saveSupportApproval } from '../lib/roadmapActions'
+import { saveChecklist, saveClosureReport, saveDepositReturn, saveSupportApproval } from '../lib/roadmapActions'
 import { taskFlowOf } from '../lib/taskFlows'
-import type { ClosureReason } from '../types/api'
+import type { ClosureReason, DepositReturnResult } from '../types/api'
 import type { RoadmapTaskView } from '../types/view'
 
 /** 저장 상태. 저장이 끝나기 전에는 화면의 체크·결과를 바꾸지 않는다(FE 규칙 2) */
@@ -55,8 +55,8 @@ export function TaskFlowPage() {
       return <ReportResultFlow task={task} />
     case 'CLOSURE_REPORT':
       return <ClosureReportFlow task={task} />
-    // 보증금 장면은 다음 커밋에서 붙인다
     case 'DEPOSIT':
+      return <DepositFlow task={task} />
     case 'INFO':
       return <InfoFlow task={task} />
   }
@@ -219,6 +219,122 @@ function ReportResultFlow({ task }: { task: RoadmapTaskView }) {
       <InfoBox>이 일은 하신 결과를 알려 주시면 리본이 확인해 다음 순서를 정해요.</InfoBox>
       <div className="mt-auto">
         <Button onClick={() => navigate({ pathname: '/results', search })}>결과 알려주기</Button>
+      </div>
+    </TaskFrame>
+  )
+}
+
+const DEPOSIT_OPTIONS: { value: DepositReturnResult; label: string }[] = [
+  { value: 'FULL', label: '다 받았어요' },
+  { value: 'PARTIAL', label: '일부 빼고 받았어요' },
+  { value: 'NONE', label: '아직 못 받았어요' },
+]
+
+/**
+ * 보증금 정산 기록 (시안 가게 반환 "보증금은 돌려받으셨나요?").
+ *
+ * [기록하기] 한 번으로 두 가지를 남긴다(11/03 시우님) — 보증금 결과(#168 `PUT /cases/deposit-return`)와
+ * 로드맵의 "보증금 정산 기록" 체크(#149). 시안에서도 기록하기 한 번이 그 할 일을 끝낸다. 결과를 먼저
+ * 저장하고, 성공한 뒤에 체크를 보낸다. 체크만 실패하면 결과는 남아 있으니 체크만 다시 보내게 한다.
+ *
+ * 시안은 "아직 못 받았어요"에 법률 상담 안내를 다는데 넣지 않는다. 무엇을 해야 할지는 판단이 정한다
+ * (FE 규칙 1). 리본은 기록만 하고 판단하지 않는다는 시안 문구는 그대로 둔다.
+ */
+export function DepositFlow({ task }: { task: RoadmapTaskView }) {
+  const { search } = useLocation()
+  const usesMock = usesMockData(search)
+  const toSaveState = useSaveErrors()
+  const [picked, setPicked] = useState<DepositReturnResult | null>(null)
+  const [saved, setSaved] = useState<DepositReturnResult | null>(null)
+  /** 결과는 저장했는데 체크를 못 했다. 체크만 다시 보낸다 */
+  const [checkPending, setCheckPending] = useState(false)
+  const [save, setSave] = useState<SaveState>('IDLE')
+
+  async function markChecklist() {
+    if (!usesMock) await saveChecklist(task.id, true)
+    setCheckPending(false)
+  }
+
+  async function submit() {
+    if (picked === null) return
+    setSave('SAVING')
+    try {
+      setSaved(usesMock ? picked : await saveDepositReturn(picked))
+    } catch (error: unknown) {
+      const state = toSaveState(error)
+      if (state) setSave(state)
+      return
+    }
+    try {
+      await markChecklist()
+      setSave('IDLE')
+    } catch (error: unknown) {
+      setCheckPending(true)
+      const state = toSaveState(error)
+      if (state) setSave(state)
+    }
+  }
+
+  async function retryChecklist() {
+    setSave('SAVING')
+    try {
+      await markChecklist()
+      setSave('IDLE')
+    } catch (error: unknown) {
+      const state = toSaveState(error)
+      if (state) setSave(state)
+    }
+  }
+
+  const savedLabel = DEPOSIT_OPTIONS.find((option) => option.value === saved)?.label
+
+  return (
+    <TaskFrame>
+      <TaskHeader task={task} sub="리본은 기록만 하고 판단하지 않아요." />
+      <div role="radiogroup" aria-label="보증금 돌려받았는지" className="flex flex-col gap-2">
+        {DEPOSIT_OPTIONS.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            role="radio"
+            aria-checked={picked === option.value}
+            onClick={() => setPicked(option.value)}
+            className={`flex min-h-14 cursor-pointer items-center rounded-14 px-4 text-17 font-medium ring-inset ${
+              picked === option.value ? 'bg-bg-brand-weak ring-2 ring-stroke-brand-solid' : 'ring-1 ring-stroke-neutral-weak'
+            }`}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+
+      {savedLabel && save !== 'SAVING' && !checkPending && (
+        <p className="flex items-center gap-2 text-17 font-bold">
+          <IconCheckmarkCircleFill size={22} className="text-fg-brand" aria-hidden="true" />
+          &ldquo;{savedLabel}&rdquo;로 기록했어요
+        </p>
+      )}
+      {checkPending ? (
+        <InfoBox
+          tone="critical"
+          title="보증금 결과는 저장했는데 할 일 체크는 못 했어요."
+          action={{
+            label: '체크만 다시 보내기',
+            onClick: retryChecklist,
+            // 서버가 받지 않는 항목이면 다시 보내도 같다
+            disabled: save === 'SAVING' || save === 'REJECTED',
+          }}
+        >
+          다시 보내면 폐업 전체 순서에 마친 것으로 남아요.
+        </InfoBox>
+      ) : (
+        <SaveNotice save={save} />
+      )}
+
+      <div className="mt-auto">
+        <Button disabled={picked === null || save === 'SAVING' || save === 'REJECTED' || checkPending} onClick={submit}>
+          기록하기
+        </Button>
       </div>
     </TaskFrame>
   )

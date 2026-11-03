@@ -4,7 +4,7 @@ import { createMemoryRouter, RouterProvider } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { RoadmapTaskView } from '../types/view'
-import { CheckFlow, ClosureReportFlow, SupportResultFlow, TaskFlowPage } from './TaskFlowPage'
+import { CheckFlow, ClosureReportFlow, DepositFlow, SupportResultFlow, TaskFlowPage } from './TaskFlowPage'
 
 function renderAt(path: string) {
   const router = createMemoryRouter(
@@ -276,5 +276,81 @@ describe('ClosureReportFlow', () => {
 
     expect(screen.queryByText('신고 정보를 저장했어요')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '저장하기' })).toBeDisabled()
+  })
+})
+
+const depositTask: RoadmapTaskView = { id: 'deposit_settlement', title: '보증금 정산 기록', kind: 'CHECKLIST', status: 'NOT_STARTED' }
+
+/** 주소로 답을 고른다. 부른 순서가 아니라 주소로 골라야 순서를 바꾸는 정당한 수정에 테스트가 깨지지 않는다 */
+function serveByUrl(answers: Record<'deposit' | 'checklist', Answer[]>) {
+  const calls = { deposit: 0, checklist: 0 }
+  const fetchMock = vi.fn(async (url: string) => {
+    const kind = url.includes('/cases/deposit-return') ? 'deposit' : 'checklist'
+    const list = answers[kind]
+    return list[Math.min(calls[kind]++, list.length - 1)]()
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
+}
+
+const urlsOf = (fetchMock: ReturnType<typeof serveByUrl>) => fetchMock.mock.calls.map(([url]) => url as string)
+
+/**
+ * 보증금 정산 기록. [기록하기] 한 번으로 결과(#168)와 로드맵 체크(#149)를 함께 남긴다.
+ * 결과가 저장되지 않았는데 체크만 켜지면, 로드맵은 끝났다고 하는데 기록은 비어 있다.
+ */
+describe('DepositFlow', () => {
+  it('결과를 먼저 저장하고, 그다음 체크를 켠다', async () => {
+    const fetchMock = serveByUrl({
+      deposit: [json({ result: 'PARTIAL' })],
+      checklist: [json({ task_id: 'deposit_settlement', completed: true })],
+    })
+    renderFlow(<DepositFlow task={depositTask} />)
+
+    expect(screen.getByRole('button', { name: '기록하기' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('radio', { name: '일부 빼고 받았어요' }))
+    fireEvent.click(screen.getByRole('button', { name: '기록하기' }))
+
+    expect(await screen.findByText(/일부 빼고 받았어요.*로 기록했어요/)).toBeInTheDocument()
+    const urls = urlsOf(fetchMock)
+    expect(urls[0]).toMatch(/\/cases\/deposit-return$/)
+    expect(urls[1]).toMatch(/\/cases\/checklists\/deposit_settlement$/)
+    expect(JSON.parse((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as string)).toEqual({
+      result: 'PARTIAL',
+    })
+  })
+
+  /** 결과를 못 남겼으면 체크도 보내지 않는다. 체크만 켜지면 기록이 빈 채로 끝난 것이 된다 */
+  it('결과 저장이 실패하면 체크를 보내지 않는다', async () => {
+    const fetchMock = serveByUrl({ deposit: [status(500)], checklist: [json({ task_id: 'deposit_settlement', completed: true })] })
+    renderFlow(<DepositFlow task={depositTask} />)
+
+    fireEvent.click(screen.getByRole('radio', { name: '다 받았어요' }))
+    fireEvent.click(screen.getByRole('button', { name: '기록하기' }))
+
+    expect(await screen.findByText('저장하지 못했어요.')).toBeInTheDocument()
+    expect(urlsOf(fetchMock).some((url) => url.includes('/cases/checklists/'))).toBe(false)
+  })
+
+  /** 결과는 서버에 남았다. 같은 결과를 다시 보내지 않고 체크만 다시 보낸다 */
+  it('체크만 실패하면 결과는 저장됐다고 알리고 체크만 다시 보낸다', async () => {
+    const fetchMock = serveByUrl({
+      deposit: [json({ result: 'NONE' })],
+      checklist: [status(500), json({ task_id: 'deposit_settlement', completed: true })],
+    })
+    renderFlow(<DepositFlow task={depositTask} />)
+
+    fireEvent.click(screen.getByRole('radio', { name: '아직 못 받았어요' }))
+    fireEvent.click(screen.getByRole('button', { name: '기록하기' }))
+
+    expect(await screen.findByText('보증금 결과는 저장했는데 할 일 체크는 못 했어요.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '기록하기' })).toBeDisabled()
+
+    fireEvent.click(screen.getByRole('button', { name: '체크만 다시 보내기' }))
+
+    expect(await screen.findByText(/아직 못 받았어요.*로 기록했어요/)).toBeInTheDocument()
+    const urls = urlsOf(fetchMock)
+    expect(urls.filter((url) => url.includes('/cases/deposit-return'))).toHaveLength(1)
+    expect(urls.filter((url) => url.includes('/cases/checklists/'))).toHaveLength(2)
   })
 })
