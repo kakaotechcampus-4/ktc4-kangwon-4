@@ -88,7 +88,7 @@ def submit_case_conflicts_decision(
     background_tasks.add_task(
         conflict_decision_service.run_conflict_decision_in_background,
         response.case_history_id,
-        {item.conflict_reference_id: item.side.value for item in decision_request.decisions},
+        {item.conflict_reference_id: item.side for item in decision_request.decisions},
     )
 
     return response

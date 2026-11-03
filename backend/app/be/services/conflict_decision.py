@@ -108,6 +108,20 @@ async def run_conflict_decision(
     # 되물을 것이 또 생겨도(NEEDS_MORE_INFO) 고른 값은 저장한다. 안 그러면 사장님이 답을
     # 했는데 Case가 그대로라 같은 질문을 또 받는다.
     if outcome.outcome_type == "CONFLICT":
+        # 이 분기에서는 고른 값이 Case에 들어가지 않는다. CONFLICT에는 검수를 통과한 변경이
+        # 없어서 반영할 것이 없고, 그런데도 고른 충돌은 닫는다. 결정이 기록(CONFIRMED/
+        # REJECTED)으로만 남고 값은 사라지는 셈이라, 조용히 넘기지 않고 남긴다.
+        #
+        # 안 닫을 수는 없다. 남겨두면 다음 확인 묶음에 판단이 다른 충돌 두 개가 섞이는데,
+        # 되살릴 Case 상태는 첫 줄의 판단에서 한 벌만 꺼내므로(_restore_batch) AI가 묶음
+        # 전체를 STALE로 거절한다.
+        #
+        # TODO: 정상적인 확인 결과로 새 충돌이 생기는 경로는 지금 Agent에 없다고 확인받았다
+        # (승준님 #136). 이 분기가 실제로 돌면 사라진 값을 어떻게 할지 정해야 한다.
+        logger.warning(
+            "case_history %s 재판단에서 또 충돌이 나서 사장님이 고른 값 %s는 반영하지 않고 "
+            "충돌만 닫는다", case_history_id, choices,
+        )
         decision_record_service.save_conflict(session, history, outcome, resolved_conflicts=choices)
         return outcome, None
 

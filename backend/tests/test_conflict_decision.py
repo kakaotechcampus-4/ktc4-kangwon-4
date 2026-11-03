@@ -21,9 +21,9 @@ from app.be.services import conflict_decision
 from app.be.services import decision_record as decision_record_service
 from app.be.services import reviewed_procedure as reviewed_procedure_service
 
-from uuid import uuid4
+from uuid import UUID, uuid4
 
-from sqlmodel import SQLModel, create_engine
+from sqlmodel import SQLModel, create_engine, select
 from testcontainers.community.mysql import MySqlContainer
 
 from app.be.crud.member import create_member
@@ -252,6 +252,189 @@ def test_the_stored_snapshot_survives_a_round_trip_through_mysql(mysql_engine):
 
     assert restored == original
 
+
+
+
+def reviewed_plan_setting_employee_count():
+    """employee_count를 2로 바꾸는 검수 통과 판단 하나. 실제 모델은 부르지 않는다."""
+    import hashlib
+    from app.agent.review_tool import ReviewTool
+    from app.agent.schemas import FactCandidate, ReviewProof, ReviewSubject, ReviewedPlanOutcome
+    from app.agent.supervisor.agent import SupervisorAgent
+    from test_action_codes import NOW, StubModel, evidence, source, supervisor_request
+
+    async def build():
+        request = supervisor_request()
+        text = "직원은 2명입니다."
+        request.trigger.input.redacted_text = text
+        user_evidence = evidence(
+            evidence_id="synthetic-staff-report", source_type="USER_INPUT",
+            source_ref=request.trigger.input.input_event_id, excerpt=text,
+            content_hash=hashlib.sha256(text.encode()).hexdigest(),
+        )
+        info = request.source_results[1].output.model_copy(deep=True)
+        info.evidence_records = [user_evidence]
+        info.fact_candidates = [FactCandidate(
+            candidate_id=UUID(int=100), operation="SET", field_path="employee_count",
+            value_type="INTEGER", value=2,
+            source_span={"input_event_id": request.trigger.input.input_event_id,
+                         "text": text, "start_offset": 0, "end_offset": len(text)},
+            source_evidence_refs=[user_evidence.evidence_id], confidence_bps=9500,
+            requires_confirmation=False, reason_summary="합성 직원 보고",
+        )]
+        request.source_results[1] = source(info)
+        draft = await SupervisorAgent(StubModel(), max_local_attempts=1).draft(request)
+        subject = ReviewSubject.create(
+            schema_version="agent-io/2.0", review_subject_id=UUID(int=90), review_attempt=1,
+            run_id=UUID(int=2), case_id=1, trigger=request.trigger, snapshot=request.case_snapshot,
+            known_procedure_steps=request.known_procedure_steps,
+            source_results=request.source_results, supervisor_draft=draft,
+        )
+        result = await ReviewTool(StubModel(), max_output_attempts=1).review(subject)
+        meta = request.source_results[1].meta.model_copy(
+            update={"component": "REVIEW_TOOL", "call_id": UUID(int=91)},
+        )
+        return ReviewedPlanOutcome(
+            outcome_type="REVIEWED_PLAN", review_subject=subject,
+            review_proof=ReviewProof.from_passed_review(
+                subject=subject, result=result, review_meta=meta, reviewed_at=NOW,
+            ),
+        )
+
+    return asyncio.run(build())
+
+
+def test_the_choice_and_the_saved_value_live_or_die_together(mysql_engine):
+    """값 저장과 충돌 닫기가 같은 commit 안에 있는지 진짜 DB로 확인한다.
+
+    흐름 테스트는 save_reviewed_plan을 통째로 가짜로 바꿔 넘긴 인자만 보기 때문에, 값을
+    먼저 commit하고 그 뒤에 충돌을 닫도록 순서를 바꿔도 전부 통과한다(현석님·승준님 #136).
+    그래서 여기서는 진짜 저장 함수를 부르고, 충돌을 닫는 도중에 일부러 실패를 낸다.
+    없는 충돌 번호를 주면 _resolve_conflicts가 바로 거기서 멈춘다.
+
+    둘이 한 트랜잭션이면 값도 같이 되돌아간다. 값을 먼저 commit하면 사장님이 고른 값만
+    남고 충돌은 PENDING으로 남아서, 다음 확인 화면이 이미 답한 것을 또 묻는다.
+    """
+    from app.be.models.case import Case
+    from app.be.models.case_history import CaseHistory
+
+    outcome = reviewed_plan_setting_employee_count()
+    with Session(mysql_engine) as session:
+        case_id = new_case_id(session)
+        case = session.get(Case, case_id)
+        # 합성 판단이 본 "바뀌기 전 값"에 맞춘다. 다르면 저장 전 대조에서 먼저 걸린다.
+        case.employee_count = None
+        history = CaseHistory(
+            case_id=case_id, raw_input="직원은 2명입니다.", source="USER_INPUT",
+            judgment_status="PENDING",
+        )
+        session.add(history)
+        session.commit()
+        history_id = history.id
+
+        with pytest.raises(ValueError, match="conflict_reference 9999 not found"):
+            decision_record_service.save_reviewed_plan(
+                session, history, outcome, resolved_conflicts={9999: "PROPOSED"},
+            )
+
+    with Session(mysql_engine) as session:
+        assert session.get(Case, case_id).employee_count is None
+        assert session.get(CaseHistory, history_id).judgment_status == "PENDING"
+
+
+def test_a_new_conflict_closes_the_decided_one_without_saving_the_chosen_value(mysql_engine):
+    """또 충돌이 난 분기에서 무엇이 남고 무엇이 사라지는지 진짜 DB로 고정한다(승준님 #136).
+
+    이 분기는 Case 값을 건드리지 않는다. AI가 CONFLICT를 돌려줄 때는 검수를 통과한 변경이
+    아예 없어서 반영할 것이 없다. 그래서 사장님이 방금 고른 값은 저장되지 않고 고른
+    충돌만 닫힌다 — 결정이 기록으로만 남고 Case에는 반영되지 않는 상태다.
+
+    그래도 닫는 쪽을 골랐다. 안 닫으면 다음 확인 묶음에 판단이 다른 충돌 두 개가 섞이는데,
+    되살릴 Case 상태는 첫 줄의 판단에서 한 벌만 꺼내므로(_restore_batch) 새 충돌 쪽이
+    옛 상태와 함께 넘어가 AI가 묶음 전체를 STALE로 거절한다.
+    """
+    from app.be.models.case import Case
+    from app.be.models.case_history import CaseHistory
+    from app.be.models.evidence import ConflictReference
+
+    with Session(mysql_engine) as session:
+        case_id = new_case_id(session)
+        first = CaseHistory(case_id=case_id, raw_input="전체 철거래요", source="USER_INPUT",
+                            judgment_status="CONFLICT")
+        session.add(first)
+        session.commit()
+        decided = decision_record_service.evidence_crud.create_conflict_reference(session, ConflictReference(
+            conflict_ref="cr_old", case_id=case_id, case_history_id=first.id,
+            canonical_field="demolition_required", committed_value="NOT_REQUIRED",
+            proposed_value="REQUIRED", conflict_digest="0" * 64,
+            candidate_payload={"conflict_ref": "cr_old"},
+        ))
+        session.commit()
+        decided_id = decided.id
+
+        second = CaseHistory(case_id=case_id, source="CONFLICT_DECISION", judgment_status="PENDING")
+        session.add(second)
+        session.commit()
+
+        decision_record_service.save_conflict(
+            session, second,
+            SimpleNamespace(
+                evidence_records=[],
+                conflicts=[SimpleNamespace(
+                    conflict_ref="cr_new", field_path=SimpleNamespace(value="lease_status"),
+                    committed_value="OWNED", proposed_value="LEASED_PAID",
+                    conflict_digest="1" * 64,
+                    model_dump=lambda **_: {"conflict_ref": "cr_new"},
+                )],
+                conflict_snapshot=SimpleNamespace(model_dump=lambda **_: {"snapshot_id": SNAPSHOT_ID}),
+            ),
+            resolved_conflicts={decided_id: "PROPOSED"},
+        )
+
+    with Session(mysql_engine) as session:
+        rows = {row.conflict_ref: row for row in session.exec(
+            select(ConflictReference).where(ConflictReference.case_id == case_id)
+        ).all()}
+        # 고른 충돌은 닫히고, 새로 난 충돌만 확인 대기로 남는다.
+        assert rows["cr_old"].status == "CONFIRMED" and rows["cr_old"].decided_at is not None
+        assert rows["cr_new"].status == "PENDING"
+        # 고른 값(REQUIRED)은 Case에 반영되지 않는다. 이 분기에는 반영할 변경이 없다.
+        assert session.get(Case, case_id).demolition_required == "UNKNOWN"
+
+
+def test_submitting_a_decision_schedules_the_rejudgment(monkeypatch):
+    """접수만 하고 끝내면 그 이력은 PENDING에서 안 바뀌고, 그 Case는 다시 잠긴다.
+
+    실제 모델 대신 뒤에서 돌 작업이 등록되는지만 본다(승준님 #136). 화면이 보낸 DB 번호와
+    고른 쪽이 그대로 넘어가는지도 함께 본다 — 여기서 어긋나면 엉뚱한 충돌이 닫힌다.
+    """
+    from fastapi import BackgroundTasks
+    from app.be.routers import case as case_router
+    from app.be.schemas.case import CaseConflictsDecisionRequest, CaseResultsSubmitAcceptedResponse
+    from app.be.services import case as case_service
+
+    monkeypatch.setattr(
+        case_service, "submit_case_conflicts_decision",
+        lambda *_a: CaseResultsSubmitAcceptedResponse(case_history_id=HISTORY_ID),
+    )
+    background_tasks = BackgroundTasks()
+
+    case_router.submit_case_conflicts_decision(
+        CaseConflictsDecisionRequest(decisions=[
+            {"conflict_reference_id": 4, "side": "PROPOSED"},
+            {"conflict_reference_id": 7, "side": "STORED"},
+        ]),
+        background_tasks,
+        member_id=1,
+        session=MagicMock(spec=Session),
+    )
+
+    assert [task.func for task in background_tasks.tasks] == [
+        conflict_decision.run_conflict_decision_in_background
+    ]
+    assert [task.args for task in background_tasks.tasks] == [
+        (HISTORY_ID, {4: "PROPOSED", 7: "STORED"})
+    ]
 
 @pytest.fixture(scope="module")
 def mysql_engine():
