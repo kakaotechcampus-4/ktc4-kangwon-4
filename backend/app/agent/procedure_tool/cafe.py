@@ -1,10 +1,4 @@
-"""Fixed cafe procedure definitions and official text compared on 2026-10-18.
-
-This module performs no network or database access. Hashes identify fetched HTML
-or PDF bytes; excerpts normalize decorative source glyphs only. Automated
-comparison supports human review; it does not approve these records for serving.
-A team member must read them and record their name and review time before use.
-"""
+"""Fixed cafe procedures and eight sources reviewed by the project owner."""
 
 from collections.abc import Mapping
 from urllib.parse import urlsplit
@@ -18,8 +12,9 @@ from app.agent.schemas import (
 )
 
 CAFE_REGISTRY_VERSION = "cafe-closure/2026-10-18"
-# Text-only correction; fetched-body hashes and collection times are unchanged.
-CAFE_SOURCE_VERSION = "cafe-official-sources/2026-10-18-text1"
+CAFE_SOURCE_VERSION = "cafe-official-sources/2026-11-03-reviewed1"
+# Review completion was recorded in PR #133, comment 6595672218.
+_REVIEWED_AT = "2026-11-03T04:44:58Z"
 
 _OFFICIAL_RECORDS = (
     {
@@ -375,19 +370,19 @@ _OFFICIAL_RECORDS = (
 
 
 def build_cafe_reviewed_snapshot() -> ReviewedProcedureSnapshot:
-    """Return detached records awaiting human review for this collected version."""
+    """Return the owner's reviewed bundle without fetching or changing source text."""
     return ReviewedProcedureSnapshot.model_validate(
         {
             "snapshot_version": CAFE_SOURCE_VERSION,
-            "generated_at": max(record["retrieved_at"] for record in _OFFICIAL_RECORDS),
+            "generated_at": _REVIEWED_AT,
             "locale": "ko-KR",
             "records": [
                 {
                     **record,
                     "source_domain": urlsplit(record["canonical_url"]).hostname,
                     "published_at": None,
-                    "reviewed_by": None,
-                    "reviewed_at": None,
+                    "reviewed_by": "tokengeoji",
+                    "reviewed_at": _REVIEWED_AT,
                     "review_valid_days": 90,
                     "required_terms": ["폐업"],
                 }
