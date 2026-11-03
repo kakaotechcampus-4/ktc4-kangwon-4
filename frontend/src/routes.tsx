@@ -6,6 +6,8 @@ import { CaseCreatePage } from './pages/CaseCreatePage'
 import { ConfirmChangePage } from './pages/ConfirmChangePage'
 import { LoginCallbackPage } from './pages/LoginCallbackPage'
 import { CurrentCasePage } from './pages/CurrentCasePage'
+import { DocsCheckPage } from './pages/DocsCheckPage'
+import { DocsDonePage } from './pages/DocsDonePage'
 import { DocsPage } from './pages/DocsPage'
 import { EntryPage } from './pages/EntryPage'
 import { LogPage } from './pages/LogPage'
@@ -56,6 +58,8 @@ export const router = createBrowserRouter([
       { path: '/results', element: <ResultInputPage /> },
       { path: '/confirm', element: <ConfirmChangePage /> },
       { path: '/replan', element: <ReplanPage /> },
+      { path: '/docs/check', element: <DocsCheckPage /> },
+      { path: '/docs/done', element: <DocsDonePage /> },
       {
         element: <TabLayout />,
         children: [

@@ -4,7 +4,13 @@ import { useLocation } from 'react-router'
 import { DOCUMENT_KINDS } from '../adapters/documents'
 import { usesMockData } from '../lib/auth'
 import { readMockKey } from '../lib/mockSwitch'
-import { mockDocuments, mockDocumentsWithIssues, simulateUpload } from '../mocks/documents'
+import {
+  mockDocuments,
+  mockDocumentsComplete,
+  mockDocumentsWithIssues,
+  simulateCheck,
+  simulateUpload,
+} from '../mocks/documents'
 import type { DocumentsView } from '../types/view'
 
 /**
@@ -24,6 +30,9 @@ export type DocumentsQuery =
 /** 올리기 · 빼기의 결과. 실패했으면 화면이 안내를 띄운다 */
 export type DocumentAction = 'IDLE' | 'UPLOADING' | 'TOO_LARGE' | 'FAILED'
 
+/** 점검을 보내는 중인지. 점검 결과 자체는 `view.check` 에 담긴다 */
+export type CheckAction = 'IDLE' | 'RUNNING' | 'FAILED'
+
 /**
  * 서류함 데이터와 올리기 · 빼기.
  *
@@ -33,13 +42,19 @@ export type DocumentAction = 'IDLE' | 'UPLOADING' | 'TOO_LARGE' | 'FAILED'
  * `?mock=docs-issues` 면 점검에서 빠진 서류가 나온 상태다.
  */
 export function useDocuments() {
-  const { search } = useLocation()
+  const { search, pathname } = useLocation()
   const usesMock = usesMockData(search)
   const mockKey = readMockKey(search)
 
   const [mockView, setMockView] = useState<DocumentsView>(() =>
-    mockKey === 'docs-issues' ? mockDocumentsWithIssues : mockDocuments,
+    mockKey === 'docs-issues'
+      ? mockDocumentsWithIssues
+      : // 정산 파일 화면은 Mock 이 화면마다 새로 시작해도 통과한 점검에서 연다. 점검 화면에서 넘어온 흐름이 끊기지 않게
+        mockKey === 'docs-complete' || pathname === '/docs/done'
+        ? mockDocumentsComplete
+        : mockDocuments,
   )
+  const [checking, setChecking] = useState<CheckAction>('IDLE')
   const [action, setAction] = useState<DocumentAction>('IDLE')
   /** 한 번에 한 장만. 올리는 동안 또 고르면 두 장이 서로의 결과를 덮는다 */
   const busy = useRef(false)
@@ -100,6 +115,25 @@ export function useDocuments() {
     [usesMock],
   )
 
+  /**
+   * 정산 서류 점검. 신청인 이름은 이체확인증의 보낸 사람과, 실제 폐업일은 폐업사실증명원과 맞춰 본다.
+   * 폐업일을 비우면 서버가 "폐업일 미확인"으로 점검을 끝내지 않는다(#159). 이름·날짜는 점검에만
+   * 쓰이고 Case 에는 남지 않는다.
+   *
+   * TODO(#159): `POST /cases/documents/check` `{applicant_name, closure_date}` 로 잇는다.
+   */
+  const runCheck = useCallback(
+    async (applicantName: string, closureDate: string | null) => {
+      void applicantName
+      void closureDate
+      if (!usesMock) return
+      setChecking('RUNNING')
+      setMockView(await simulateCheck(mockView))
+      setChecking('IDLE')
+    },
+    [usesMock, mockView],
+  )
+
   const query: DocumentsQuery = usesMock ? { status: 'READY', view: mockView } : { status: 'UNAVAILABLE' }
-  return { query, action, upload, remove, confirm }
+  return { query, action, upload, remove, confirm, checking, runCheck }
 }

@@ -7,6 +7,7 @@ import {
   IconTrashcanLine,
 } from '@karrotmarket/react-monochrome-icon'
 import { type ChangeEvent, type ReactNode, useId, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router'
 
 import { DOCUMENT_KINDS } from '../adapters/documents'
 import { Badge } from '../components/ui/Badge'
@@ -29,6 +30,8 @@ import type { DocumentCheckView, DocumentView } from '../types/view'
  * 점검 규칙이 두 곳에 생긴다(FE 규칙 1).
  */
 export function DocsPage() {
+  const navigate = useNavigate()
+  const { search } = useLocation()
   const { query, action, upload, remove, confirm } = useDocuments()
   /** 종류·값을 확인하고 있는 서류 */
   const [confirming, setConfirming] = useState<DocumentView | null>(null)
@@ -104,7 +107,22 @@ export function DocsPage() {
         </InfoBox>
       )}
 
-      <div className="mt-auto flex flex-col gap-2">{uploadButton}</div>
+      <div className="mt-auto flex flex-col gap-2">
+        {uploadButton}
+        {/*
+          주 버튼은 하나다(FE 규칙 5). 점검을 통과했으면 제출 파일로, 아니면 점검으로 간다.
+          서류가 없으면 점검할 것이 없어 두지 않는다
+        */}
+        {check?.status === 'COMPLETE' ? (
+          <Button onClick={() => navigate({ pathname: '/docs/done', search })}>정산 제출 파일 보기</Button>
+        ) : (
+          documents.length > 0 && (
+            <Button disabled={action === 'UPLOADING'} onClick={() => navigate({ pathname: '/docs/check', search })}>
+              정산 서류 점검하기
+            </Button>
+          )
+        )}
+      </div>
 
       <UploadSheet open={sheetOpen} onClose={() => setSheetOpen(false)} onPicked={handlePicked} />
       {/* 서류마다 새로 그린다. 앞 서류에서 고친 값이 다음 서류의 칸에 남으면 안 된다 */}

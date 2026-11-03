@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -217,5 +217,19 @@ describe('ConfirmSheet', () => {
     )
 
     expect(screen.getByRole('button', { name: '맞아요, 확인했어요' })).toBeEnabled()
+  })
+})
+
+/** 주 버튼은 하나다. 점검을 통과했는데 다시 점검하러 보내면 제출 파일을 찾지 못한다 */
+describe('DocsPage — 다음 단계 버튼', () => {
+  it('서류가 있으면 점검하러 가고, 통과했으면 제출 파일을 보러 간다', () => {
+    renderAt('/docs?mock=docs')
+    expect(screen.getByRole('button', { name: '정산 서류 점검하기' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '정산 제출 파일 보기' })).not.toBeInTheDocument()
+
+    cleanup()
+    renderAt('/docs?mock=docs-complete')
+    expect(screen.getByRole('button', { name: '정산 제출 파일 보기' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '정산 서류 점검하기' })).not.toBeInTheDocument()
   })
 })

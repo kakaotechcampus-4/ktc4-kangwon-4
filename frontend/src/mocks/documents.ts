@@ -91,3 +91,27 @@ export function simulateUpload(view: DocumentsView, file: File): Promise<Documen
     window.setTimeout(() => resolve({ documents: [...view.documents, added], check: null }), MOCK_UPLOAD_MS)
   })
 }
+
+/** `?mock=docs-complete`: 점검을 통과해 제출 파일을 받을 수 있는 상태 */
+export const mockDocumentsComplete: DocumentsView = {
+  documents: DOCUMENTS.map((document) => ({ ...document, needsConfirmation: false })),
+  check: {
+    status: 'COMPLETE',
+    steps: [
+      { name: '서류 종류 나누기', status: 'DONE' },
+      { name: '빠진 서류 찾기', status: 'DONE' },
+      { name: '금액 맞춰 보기', status: 'DONE' },
+    ],
+    issues: [],
+  },
+}
+
+/**
+ * 가짜 점검. 서버 점검 규칙(#128 `check_settlement`)을 흉내 내지 않고, 확인이 필요한 서류가
+ * 남았는지만 본다 — Mock 에서 두 결과(통과·확인할 것 있음)를 모두 볼 수 있으면 된다.
+ */
+export function simulateCheck(view: DocumentsView): Promise<DocumentsView> {
+  const pending = view.documents.some((document) => document.needsConfirmation)
+  const check = pending ? mockDocumentsWithIssues.check : mockDocumentsComplete.check
+  return new Promise((resolve) => window.setTimeout(() => resolve({ ...view, check }), MOCK_UPLOAD_MS))
+}
