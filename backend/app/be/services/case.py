@@ -7,6 +7,7 @@ from sqlmodel import Session
 
 from app.be.crud import case as case_crud
 from app.be.crud import case_checklist as case_checklist_crud
+from app.be.crud import case_document_history as case_document_history_crud
 from app.be.crud import case_field_history as case_field_history_crud
 from app.be.crud import case_history as case_history_crud
 from app.be.crud import conflict_reference as conflict_reference_crud
@@ -687,6 +688,15 @@ def get_case_logs(session: Session, member_id: int) -> CaseLogResponse:
     if case.support_approved_at is not None:
         result = {True: "APPROVED", False: "REJECTED", None: "UNKNOWN"}[case.support_approved]
         logs.append(_log("OWNER", "SUPPORT_RESULT_REPORTED", case.support_approved_at, detail=result))
+
+    # 서류를 빼도 올린 기록은 남는다. 점검은 통과한 것만 쌓여 있다(services/document.py).
+    for document_history in case_document_history_crud.get_case_document_histories_by_case_id(session, case.id):
+        if document_history.action == "UPLOADED":
+            logs.append(_log(
+                "OWNER", "DOCUMENT_UPLOADED", document_history.created_at, detail=document_history.document_kind,
+            ))
+        else:
+            logs.append(_log("RIBBON", "DOCUMENTS_CHECKED", document_history.created_at))
 
     # 최근 것부터. 시각이 같으면 사장님이 보낸 뒤 리본이 판단한 것이라 리본 기록을 위로 둔다.
     logs.sort(key=lambda log: (log.occurred_at, log.actor == "RIBBON"), reverse=True)
