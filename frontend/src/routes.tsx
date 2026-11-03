@@ -35,9 +35,16 @@ import { TaskPage } from './pages/TaskPage'
  * 하단 탭이 있는 화면은 `TabLayout` 아래에 둔다. 홈 탭은 `/case`로 간다.
  * `/`는 로그인 뒤 보낼 곳만 정하고, 탭에서는 가리키지 않는다.
  *
- *   /docs          서류함      아직 API가 없어 빈 상태
- *   /log           작업 기록   아직 API가 없어 빈 상태
+ *   /docs          서류함      올린 서류 · 올리기 시트. 서류 API(#159) 전이라 실서버에서는 빈 상태
+ *   /log           작업 기록   사장님·리본이 한 일 (GET /cases/logs)
  *   /notifications 알림        탭 화면의 종 버튼으로 들어온다. 아직 빈 상태
+ *
+ * 탭 밖에서 밀려 들어오는 화면이다. 뒤로 버튼으로 돌아간다.
+ *
+ *   /roadmap          폐업 전체 순서  홈 단계 카드로 들어온다. 로드맵 조회 API 전이라 실서버에서는 준비 중
+ *   /roadmap/:taskId  할 일          할 일마다 체크·첨부·고르기 등을 연다 (lib/taskFlows.ts)
+ *   /docs/check       서류 점검      정산 서류를 점검한다
+ *   /docs/done        정산 제출 파일  점검을 통과했을 때만
  *
  * `/confirm`은 `/results`와 `/replan` 사이의 단계가 아니라 예외 분기다.
  * 정상 경로는 `/results`에서 `/replan`으로 바로 간다.
