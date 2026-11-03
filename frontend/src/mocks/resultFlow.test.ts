@@ -17,8 +17,8 @@ afterEach(() => {
 /**
  * 대기 중인 타이머를 모두 흘려보내고 결과를 받는다.
  *
- * 지연 시간을 숫자로 적지 않는 것은, 그 값이 `PendingCard`의 문구 전환에 맞춰
- * 조정될 수 있어서다. 테스트가 구현의 숫자를 따라다니게 만들지 않는다.
+ * 지연 시간을 숫자로 적지 않는 것은, 화면을 눈으로 보려고 언제든 조정하는 값이라서다.
+ * 테스트가 구현의 숫자를 따라다니게 만들지 않는다.
  */
 async function skipPending<T>(promise: Promise<T>): Promise<T> {
   await vi.runAllTimersAsync()
