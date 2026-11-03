@@ -216,6 +216,25 @@ def get_case(session: Session, member_id: int) -> CaseGetResponse:
 
     _assert_judgment_is_showable(latest_history)
 
+    # 충돌 결정이 실패하면 충돌은 미결로 남지만 마지막 이력은 FAILED다. 그대로 내보내면 홈이
+    # 실패 카드를 그려서 충돌 확인으로 돌아갈 길이 없다. 진입 조회(get_case_results_entry)처럼
+    # 처리 중이 아니고 미결 충돌이 있으면 CONFLICT로 본다.
+    if latest_history.judgment_status != "PENDING" and conflict_reference_crud.get_pending_conflicts_by_case_id(
+        session, case.id
+    ):
+        return CaseGetResponse(
+            case=_case_detail(session, case),
+            blocker=None,
+            next_action=None,
+            judgment_status="CONFLICT",
+            case_history_id=None,
+            questions_for_user=None,
+            recovery_action_code=None,
+            requested_field_paths=None,
+            retryable=None,
+            changes=None,
+        )
+
     next_action = (
         NextActionResponse(
             title=latest_history.next_action,
