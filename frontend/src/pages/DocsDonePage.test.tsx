@@ -1,8 +1,9 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { createMemoryRouter, RouterProvider } from 'react-router'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { DocsDonePage } from './DocsDonePage'
+import { completeCheck, issuesCheck, json, serve, serverDocument, serverList, status } from './docsTestServer'
 
 function renderAt(path: string) {
   const router = createMemoryRouter(
@@ -21,14 +22,38 @@ function renderAt(path: string) {
  * 사장님은 [파일 받기]를 누르고 나서야 실패를 안다.
  */
 describe('DocsDonePage', () => {
-  /*
-   * TODO(#159): 서류 API 에 연결하면 "서버 점검이 ISSUES 면 돌려보낸다"를 따로 본다. 지금은 실서버가
-   * 준비 중이라 늘 돌려보내고, Mock 은 이 화면을 통과한 점검으로 열어서 그 갈래를 만들 수 없다
-   */
-  it('통과한 점검이 없으면 점검 화면으로 돌려보낸다', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('서버 점검이 통과하지 않았으면 점검 화면으로 돌려보낸다', async () => {
+    serve(json(serverList([serverDocument()], issuesCheck)))
     const router = renderAt('/docs/done')
 
-    expect(router.state.location.pathname).toBe('/docs/check')
+    await vi.waitFor(() => expect(router.state.location.pathname).toBe('/docs/check'))
+  })
+
+  /** 로그인 헤더를 실어 받아야 해서 링크가 아니라 요청으로 받는다 */
+  it('통과했으면 파일 받기로 제출 파일을 받는다', async () => {
+    const { calls } = serve(json(serverList([serverDocument()], completeCheck)), () => new Response('PK'))
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:zip'), revokeObjectURL: vi.fn() }))
+    renderAt('/docs/done')
+
+    fireEvent.click(await screen.findByRole('button', { name: '파일 받기' }))
+
+    await vi.waitFor(() => expect(calls()).toHaveLength(2))
+    expect(calls()[1].url).toMatch(/\/cases\/documents\/settlement\.zip$/)
+    await vi.waitFor(() => expect(URL.createObjectURL).toHaveBeenCalled())
+  })
+
+  /** 그사이 서류가 바뀌면 서버가 422 로 막는다. 아무 말 없이 끝나면 받은 줄 안다 */
+  it('파일을 받지 못하면 알린다', async () => {
+    serve(json(serverList([serverDocument()], completeCheck)), status(422))
+    renderAt('/docs/done')
+
+    fireEvent.click(await screen.findByRole('button', { name: '파일 받기' }))
+
+    expect(await screen.findByText('파일을 받지 못했어요.')).toBeInTheDocument()
   })
 
   /** 가짜 파일을 진짜 제출 파일처럼 내려주면 안 된다. 받는 길은 서류 API 가 열릴 때 붙인다 */

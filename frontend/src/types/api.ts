@@ -411,3 +411,89 @@ export interface CaseDepositReturnRequest {
 }
 
 export type CaseDepositReturnResponse = CaseDepositReturnRequest
+
+/** 서류 종류(#128 문서 Tool `DocumentKind`). `UNKNOWN` 은 종류를 모르는 서류 */
+export type DocumentKind =
+  | 'LEASE'
+  | 'BUSINESS_REGISTRATION'
+  | 'BUSINESS_LICENSE'
+  | 'CONSTRUCTION_STATEMENT'
+  | 'TAX_INVOICE'
+  | 'BEFORE_PHOTO'
+  | 'AFTER_PHOTO'
+  | 'TRANSFER'
+  | 'CLOSURE_CERTIFICATE'
+  | 'BANK_COPY'
+  | 'CLOSURE_RECEIPT'
+  | 'CARD_SALES'
+  | 'CASH_SALES'
+  | 'PURCHASE_INVOICE'
+  | 'DEPOSIT_STATEMENT'
+  | 'UNKNOWN'
+
+/** 서류에서 꺼낸 값 이름(#128 `DocumentFieldName`) */
+export type DocumentFieldName =
+  | 'business_name'
+  | 'supplier'
+  | 'buyer'
+  | 'sender'
+  | 'recipient'
+  | 'account_holder'
+  | 'amount'
+  | 'supply_amount'
+  | 'tax_amount'
+  | 'date'
+  | 'closure_date'
+  | 'restoration_clause'
+
+/** 서류 한 장(#159). 종류 이름·확인 필요 여부는 서버가 정해서 준다 */
+export interface DocumentResponse {
+  document_id: string
+  filename: string
+  kind: DocumentKind
+  kind_label: string
+  /** 종류를 모르거나 사진·글자 인식처럼 확신하지 못한 서류. 사장님이 확인해야 점검이 끝난다 */
+  needs_confirmation: boolean
+  fields: { name: DocumentFieldName; value: string; page: number }[]
+  /** 사장님이 확인한 값. 확인 전이면 `null` */
+  confirmed_fields: Partial<Record<DocumentFieldName, string>> | null
+}
+
+/**
+ * 정산 서류 점검 결과(#159).
+ *
+ * `status` 는 서버 응답에 글자(`str`)로 열려 있어 그대로 적는다. 문서 Tool 이 내는 값은
+ * `COMPLETE` · `ISSUES` · `ERROR` 셋이고(#159 승준님), 그 밖의 값은 어댑터가 읽지 못한 것으로 둔다.
+ */
+export interface DocumentCheckResponse {
+  status: string
+  steps: { name: string; status: 'WAITING' | 'RUNNING' | 'DONE' | 'NEEDS_CONFIRMATION' | 'ERROR' }[]
+  issues: { code: string; document_ids: string[]; message: string }[]
+  checked_at: string
+}
+
+/**
+ * 서류 목록(`GET /cases/documents`). 올리기·확인·빼기·점검도 모두 이 모양을 돌려준다.
+ * 서류를 더하거나 빼거나 확인하면 지난 점검은 지워진다(`check: null`).
+ */
+export interface DocumentListResponse {
+  documents: DocumentResponse[]
+  check: DocumentCheckResponse | null
+}
+
+/** `POST /cases/documents/{id}/confirm` — 사장님이 확인한 종류와 값 전부 */
+export interface DocumentConfirmRequest {
+  kind: DocumentKind
+  confirmed_fields: Partial<Record<DocumentFieldName, string>>
+}
+
+/**
+ * `POST /cases/documents/check`. 이름은 이체확인증의 보낸 사람과, 폐업일은 폐업사실증명원과 맞춰 본다.
+ * 폐업일을 비우면 예정일로 대신하지 않고 "폐업일 미확인"으로 점검이 끝나지 않는다
+ */
+export interface DocumentCheckRequest {
+  /** 1~50자 */
+  applicant_name: string
+  /** `YYYY-MM-DD` */
+  closure_date: string | null
+}

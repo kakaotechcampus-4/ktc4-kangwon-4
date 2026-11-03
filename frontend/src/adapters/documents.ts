@@ -14,8 +14,8 @@ import { isReadableText } from './case'
  * 서버가 정해서 준다. 화면은 그대로 옮기기만 한다 — 어떤 서류가 정산에 필요한지 FE가 셈하면
  * 점검 규칙이 두 곳에 생긴다(FE 규칙 1).
  *
- * TODO(#159): 머지되면 `types/api.ts` 에 응답 모양을 넣고 `unknown` 대신 그 타입으로 받는다.
- * 지금은 머지 전이라 확정되지 않은 칸을 타입에 넣지 않는다(FE 규칙 9).
+ * 응답 모양은 `types/api.ts` 의 `DocumentListResponse`(#159)다. 그래도 `unknown` 으로 받아 칸마다 본다 —
+ * `check.status` 처럼 서버가 글자로 열어 둔 칸이 있고, 깨진 목록을 빈 서류함으로 그리면 안 된다.
  */
 
 /**

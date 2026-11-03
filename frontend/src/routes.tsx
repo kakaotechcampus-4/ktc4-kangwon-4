@@ -35,7 +35,7 @@ import { TaskPage } from './pages/TaskPage'
  * 하단 탭이 있는 화면은 `TabLayout` 아래에 둔다. 홈 탭은 `/case`로 간다.
  * `/`는 로그인 뒤 보낼 곳만 정하고, 탭에서는 가리키지 않는다.
  *
- *   /docs          서류함      올린 서류 · 올리기 시트. 서류 API(#159) 전이라 실서버에서는 빈 상태
+ *   /docs          서류함      올린 서류 · 올리기 시트 · 확인 · 빼기 (서류 API #159)
  *   /log           작업 기록   사장님·리본이 한 일 (GET /cases/logs)
  *   /notifications 알림        탭 화면의 종 버튼으로 들어온다. 아직 빈 상태
  *

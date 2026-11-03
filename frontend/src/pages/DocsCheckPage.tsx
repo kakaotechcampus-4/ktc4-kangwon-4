@@ -39,23 +39,37 @@ export function DocsCheckPage() {
   const navigate = useNavigate()
   // ?mock= 을 다음 화면에도 이어 준다. 빠지면 Mock 으로 보던 흐름이 실서버 화면으로 바뀐다
   const { search } = useLocation()
-  const { query, checking, runCheck } = useDocuments()
+  const { query, reload, checking, runCheck } = useDocuments()
   const [asking, setAsking] = useState(false)
 
-  if (query.status === 'UNAVAILABLE') {
+  if (query.status === 'LOADING') {
+    return (
+      <CheckFrame>
+        <div className="flex flex-1 items-center justify-center">
+          <HammerLoader size={48} label="서류함을 불러오는 중" />
+        </div>
+      </CheckFrame>
+    )
+  }
+
+  if (query.status === 'LOAD_FAILED') {
     return (
       <CheckFrame>
         <main className="flex flex-col gap-6 px-4 pt-2 pb-8">
-          <InfoBox
-            title="서류 점검은 준비 중이에요."
-            action={{ label: '서류함으로 가기', onClick: () => navigate({ pathname: '/docs', search }) }}
-          >
-            서류를 받는 기능이 열리면 여기서 정산 서류를 점검할 수 있어요.
+          <InfoBox title="서류함을 불러오지 못했어요." action={{ label: '다시 불러오기', onClick: reload }}>
+            연결 상태를 확인하고 다시 불러와 주세요.
           </InfoBox>
         </main>
       </CheckFrame>
     )
   }
+
+  // 점검을 보내지 못했으면 지난 결과는 그대로라, 어느 화면에서든 위에 알린다
+  const sendNotice = checking === 'FAILED' && (
+    <InfoBox tone="critical" title="점검을 보내지 못했어요.">
+      연결이 불안정했을 수 있어요. 다시 점검해 주세요.
+    </InfoBox>
+  )
 
   const { documents, check } = query.view
 
@@ -103,6 +117,7 @@ export function DocsCheckPage() {
           title="정산 서류를 점검할게요"
           sub={`서류함에 있는 서류 ${documents.length}개를 그대로 써요.`}
         />
+        {sendNotice && <div className="px-4">{sendNotice}</div>}
         <div className="mt-auto px-4 pb-8">
           <Button onClick={startCheck}>점검 시작하기</Button>
         </div>
@@ -123,6 +138,7 @@ export function DocsCheckPage() {
             sub="남은 확인 사항이 없어요."
           />
           <main className="flex flex-col gap-6 px-4 pb-8">
+            {sendNotice}
             <ProcessSteps steps={steps} />
             <Button onClick={() => navigate({ pathname: '/docs/done', search })}>결과 보기</Button>
           </main>
@@ -138,6 +154,7 @@ export function DocsCheckPage() {
             sub="서류를 더하거나 고친 뒤 다시 점검해 주세요."
           />
           <main className="flex flex-col gap-6 px-4 pb-8">
+            {sendNotice}
             <ProcessSteps steps={steps} />
             <InfoBox tone="critical" title="점검에서 찾은 것">
               <ul className="flex flex-col gap-1">
@@ -166,6 +183,7 @@ export function DocsCheckPage() {
             sub="서류함은 그대로예요. 다시 점검해 주세요."
           />
           <main className="flex flex-col gap-6 px-4 pb-8">
+            {sendNotice}
             <ProcessSteps steps={steps} />
             <Button onClick={startCheck}>다시 점검하기</Button>
           </main>

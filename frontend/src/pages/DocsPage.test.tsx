@@ -3,8 +3,11 @@ import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { MAX_UPLOAD_BYTES } from '../hooks/useDocuments'
+import { REQUEST_TIMEOUT_MS } from '../lib/api'
+import { UPLOAD_TIMEOUT_MS } from '../lib/documentsApi'
 import { MOCK_UPLOAD_MS } from '../mocks/documents'
 import { ConfirmSheet, DocsPage } from './DocsPage'
+import { hanging, json, serve, serverDocument, serverList, status } from './docsTestServer'
 
 function renderAt(path: string) {
   render(
@@ -28,12 +31,140 @@ afterEach(() => {
 })
 
 /** 서류 API(#159)가 머지 전이다. 눌러도 받을 곳이 없는 버튼을 열어 두면 고장으로 읽힌다 */
+/**
+ * 서류 API(#159). 서류함은 사장님이 정산에 낼 서류를 모으는 곳이라, 불러오지 못한 것을 빈 서류함으로
+ * 그리거나 저장이 끝나기 전에 목록을 바꾸면 올린 서류가 사라지거나 생긴 줄 안다.
+ */
 describe('DocsPage — 서버', () => {
-  it('받을 곳이 생기기 전에는 빈 상태와 꺼진 올리기 버튼을 둔다', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('들어올 때 서류 목록을 불러와 그린다', async () => {
+    const { calls } = serve(json(serverList([serverDocument()])))
     renderAt('/docs')
 
-    expect(screen.getByText('아직 모인 서류가 없어요')).toBeInTheDocument()
-    expect(uploadButton()).toBeDisabled()
+    expect(await screen.findByText('transfer.pdf')).toBeInTheDocument()
+    expect(calls()[0].url).toMatch(/\/cases\/documents$/)
+  })
+
+  it('불러오지 못하면 그렇다고 말하고 다시 불러올 수 있다', async () => {
+    serve(status(500), json(serverList([serverDocument()])))
+    renderAt('/docs')
+
+    fireEvent.click(await screen.findByRole('button', { name: '다시 불러오기' }))
+
+    expect(await screen.findByText('transfer.pdf')).toBeInTheDocument()
+  })
+
+  /** Case 가 없으면 서버가 404 를 준다. 서류가 없는 것과 같다 */
+  it('Case 가 없으면 빈 서류함으로 둔다', async () => {
+    serve(status(404))
+    renderAt('/docs')
+
+    expect(await screen.findByText('아직 모인 서류가 없어요')).toBeInTheDocument()
+  })
+
+  /** 깨진 목록을 빈 서류함으로 그리면 사장님은 올린 서류가 사라진 줄 안다 */
+  it('받은 목록을 읽지 못하면 빈 서류함이 아니라 불러오지 못한 것으로 둔다', async () => {
+    serve(json({ documents: 'none' }))
+    renderAt('/docs')
+
+    expect(await screen.findByText('서류함을 불러오지 못했어요')).toBeInTheDocument()
+    expect(screen.queryByText('아직 모인 서류가 없어요')).not.toBeInTheDocument()
+  })
+
+  /** 파일 한 장을 그대로 보내고, 서버가 돌려준 목록으로 바꾼다 */
+  it('고른 파일을 올리고 서버가 돌려준 목록을 그린다', async () => {
+    const { calls } = serve(json(serverList([])), json(serverList([serverDocument({ filename: 'scan.pdf' })])))
+    renderAt('/docs')
+    await screen.findByText('아직 모인 서류가 없어요')
+
+    pick(new File(['%PDF'], 'scan.pdf', { type: 'application/pdf' }))
+
+    expect(await screen.findByText('scan.pdf')).toBeInTheDocument()
+    const sent = calls()[1]
+    expect(sent.method).toBe('POST')
+    expect(sent.body).toBeInstanceOf(FormData)
+    expect((sent.body as FormData).get('file')).toBeInstanceOf(File)
+  })
+
+  it.each([
+    [502, '서류를 읽지 못했어요.'],
+    [422, '이 파일은 올릴 수 없어요.'],
+    [500, '서류를 올리지 못했어요.'],
+  ])('올리기가 %s 이면 알맞게 안내하고 목록은 그대로 둔다', async (code, title) => {
+    serve(json(serverList([serverDocument()])), status(code))
+    renderAt('/docs')
+    await screen.findByText('transfer.pdf')
+
+    pick(new File(['%PDF'], 'scan.pdf', { type: 'application/pdf' }))
+
+    expect(await screen.findByText(title)).toBeInTheDocument()
+    expect(screen.getAllByRole('listitem')).toHaveLength(1)
+  })
+
+  /** 서버는 끊긴 뒤에도 읽기를 마치고 저장해 둔다. 같은 파일을 다시 올리면 된다고 알린다 */
+  it('올리기를 오래 기다리다 끊기면 다시 올리라고 알린다', async () => {
+    vi.useFakeTimers()
+    serve(json(serverList([])), hanging)
+    renderAt('/docs')
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    pick(new File(['%PDF'], 'scan.pdf', { type: 'application/pdf' }))
+    // 다른 요청의 제한 시간(15초)이 지나도 서류는 아직 읽는 중이다
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS)
+    })
+    expect(screen.getByRole('status')).toHaveTextContent('서류를 읽는 중')
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(UPLOAD_TIMEOUT_MS - REQUEST_TIMEOUT_MS)
+    })
+
+    expect(screen.getByText('읽는 데 시간이 오래 걸려 기다림이 끊겼어요.')).toBeInTheDocument()
+  })
+
+  it('빼기를 확인하면 DELETE 를 보내고 서버가 돌려준 목록을 그린다', async () => {
+    const { calls } = serve(json(serverList([serverDocument()])), json(serverList([])))
+    renderAt('/docs')
+    await screen.findByText('transfer.pdf')
+
+    fireEvent.click(screen.getByRole('button', { name: '이체확인증 빼기' }))
+    fireEvent.click(within(screen.getByRole('dialog', { name: '이 서류를 뺄까요?' })).getByRole('button', { name: '빼기' }))
+
+    expect(await screen.findByText('아직 모인 서류가 없어요')).toBeInTheDocument()
+    expect(calls()[1]).toMatchObject({ url: expect.stringMatching(/\/cases\/documents\/doc-1$/), method: 'DELETE' })
+  })
+
+  /** 빼기가 실패했는데 목록에서 지우면, 서버에는 남은 서류를 사장님은 뺀 줄 안다 */
+  it('빼기가 실패하면 목록을 그대로 두고 알린다', async () => {
+    serve(json(serverList([serverDocument()])), status(500))
+    renderAt('/docs')
+    await screen.findByText('transfer.pdf')
+
+    fireEvent.click(screen.getByRole('button', { name: '이체확인증 빼기' }))
+    fireEvent.click(within(screen.getByRole('dialog', { name: '이 서류를 뺄까요?' })).getByRole('button', { name: '빼기' }))
+
+    expect(await screen.findByText('바꾼 내용을 저장하지 못했어요.')).toBeInTheDocument()
+    expect(screen.getByText('transfer.pdf')).toBeInTheDocument()
+  })
+
+  it('확인한 종류와 값을 보낸다', async () => {
+    const { calls } = serve(
+      json(serverList([serverDocument({ needs_confirmation: true })])),
+      json(serverList([serverDocument()])),
+    )
+    renderAt('/docs')
+
+    fireEvent.click(await screen.findByRole('button', { name: '이체확인증 확인하기' }))
+    fireEvent.click(within(screen.getByRole('dialog', { name: '서류 확인하기' })).getByRole('button', { name: '맞아요, 확인했어요' }))
+
+    await vi.waitFor(() => expect(calls()).toHaveLength(2))
+    expect(calls()[1]).toMatchObject({ url: expect.stringMatching(/\/cases\/documents\/doc-1\/confirm$/), method: 'POST' })
+    expect(JSON.parse(calls()[1].body as string)).toEqual({ kind: 'TRANSFER', confirmed_fields: { amount: '3,300,000원' } })
   })
 })
 

@@ -33,7 +33,7 @@ import type { DocumentCheckView, DocumentView } from '../types/view'
 export function DocsPage() {
   const navigate = useNavigate()
   const { search } = useLocation()
-  const { query, action, upload, remove, confirm } = useDocuments()
+  const { query, reload, action, upload, remove, confirm } = useDocuments()
   /** 종류·값을 확인하고 있는 서류 */
   const [confirming, setConfirming] = useState<DocumentView | null>(null)
   const [sheetOpen, setSheetOpen] = useState(false)
@@ -58,14 +58,22 @@ export function DocsPage() {
     </Button>
   )
 
-  // 서류 API 가 들어오기 전(#159)에는 받을 곳이 없다. 눌리는데 아무 일도 없으면 고장으로 읽혀 꺼 둔다
-  if (query.status === 'UNAVAILABLE') {
+  if (query.status === 'LOADING') {
+    return (
+      <div className="flex flex-1 items-center justify-center">
+        <HammerLoader size={48} label="서류함을 불러오는 중" />
+      </div>
+    )
+  }
+
+  // 불러오지 못한 것을 빈 서류함으로 그리면 올린 서류가 사라진 줄 안다
+  if (query.status === 'LOAD_FAILED') {
     return (
       <EmptyState
         icon={<IconDocumentTrayLine size={32} />}
-        title="아직 모인 서류가 없어요"
-        description={'서류를 받는 기능은 준비 중이에요.\n할 일을 하면서 올린 서류가 여기에 모여요'}
-        action={uploadButton}
+        title="서류함을 불러오지 못했어요"
+        description="연결 상태를 확인하고 다시 불러와 주세요"
+        action={<Button onClick={reload}>다시 불러오기</Button>}
       />
     )
   }
@@ -379,10 +387,35 @@ function ActionNotice({ action }: { action: DocumentAction }) {
           20MB 이하의 파일을 올려 주세요.
         </InfoBox>
       )
-    case 'FAILED':
+    // 서버는 끊긴 뒤에도 읽기를 마치고 저장해 둔다. 같은 파일을 다시 올리면 저장된 결과를 쓴다(#159)
+    case 'TIMED_OUT':
+      return (
+        <InfoBox tone="critical" title="읽는 데 시간이 오래 걸려 기다림이 끊겼어요.">
+          같은 파일을 한 번 더 올려 주시면 이어서 받아요.
+        </InfoBox>
+      )
+    case 'UNREADABLE':
+      return (
+        <InfoBox tone="critical" title="서류를 읽지 못했어요.">
+          잠시 뒤 다시 올려 주세요. 사진이면 글자가 잘 보이게 다시 찍어 주세요.
+        </InfoBox>
+      )
+    case 'REJECTED':
+      return (
+        <InfoBox tone="critical" title="이 파일은 올릴 수 없어요.">
+          비어 있거나 받을 수 없는 파일이에요. 사진이나 PDF로 다시 골라 주세요.
+        </InfoBox>
+      )
+    case 'UPLOAD_FAILED':
       return (
         <InfoBox tone="critical" title="서류를 올리지 못했어요.">
-          잠시 뒤 같은 파일을 다시 올려 주세요.
+          연결이 불안정했을 수 있어요. 같은 파일을 다시 올려 주세요.
+        </InfoBox>
+      )
+    case 'CHANGE_FAILED':
+      return (
+        <InfoBox tone="critical" title="바꾼 내용을 저장하지 못했어요.">
+          서류함은 그대로예요. 잠시 뒤 다시 해 주세요.
         </InfoBox>
       )
   }

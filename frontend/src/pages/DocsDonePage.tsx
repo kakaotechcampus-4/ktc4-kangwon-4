@@ -1,9 +1,14 @@
 import { IconBoxFlapLine, IconCheckmarkCircleFill, IconXmarkLine } from '@karrotmarket/react-monochrome-icon'
+import { useState } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router'
 
 import { Button } from '../components/ui/Button'
+import { HammerLoader } from '../components/ui/HammerLoader'
 import { InfoBox } from '../components/ui/InfoBox'
 import { useDocuments } from '../hooks/useDocuments'
+import { UnauthorizedError } from '../lib/api'
+import { usesMockData } from '../lib/auth'
+import { downloadSettlement } from '../lib/documentsApi'
 
 /**
  * 정산 제출 파일 (시안 M07). 점검을 통과한 서류를 ZIP 한 개로 받는다.
@@ -15,16 +20,47 @@ import { useDocuments } from '../hooks/useDocuments'
  * 시안의 "정산 서류 6종을 확인했고", "다음 할 일: 가게 돌려주고 보증금 정산받기"는 넣지 않았다.
  * 몇 종인지는 서버가 정하고, 다음 할 일은 로드맵 판단이 정한다.
  *
- * TODO(#159): `GET /cases/documents/settlement.zip` 을 받아 내려받게 한다. 로그인 헤더를 실어야 해서
- * 링크로 열 수 없고, 받아 온 파일을 브라우저 내려받기로 넘긴다. 그 전에는 Mock 에서 버튼을 꺼 둔다 —
- * 가짜 파일을 진짜 제출 파일처럼 내려주면 안 된다.
+ * [파일 받기]는 `GET /cases/documents/settlement.zip` 을 받아 브라우저 내려받기로 넘긴다. 로그인 헤더를
+ * 실어야 해서 링크로 열 수 없다. Mock 에서는 꺼 둔다 — 가짜 파일을 진짜 제출 파일처럼 내려주면 안 된다.
  */
 export function DocsDonePage() {
   const navigate = useNavigate()
   const { search } = useLocation()
-  const { query } = useDocuments()
+  const { query, reload } = useDocuments()
+  const usesMock = usesMockData(search)
+  const [download, setDownload] = useState<'IDLE' | 'BUSY' | 'FAILED'>('IDLE')
 
-  if (query.status !== 'READY' || query.view.check?.status !== 'COMPLETE') {
+  async function handleDownload() {
+    setDownload('BUSY')
+    try {
+      saveFile(await downloadSettlement(), 'settlement.zip')
+      setDownload('IDLE')
+    } catch (error: unknown) {
+      if (error instanceof UnauthorizedError) return navigate('/login', { replace: true })
+      // 그사이 서류가 바뀌어 점검이 지워졌을 수도 있다(422). 어느 쪽이든 다시 받아 보게 한다
+      setDownload('FAILED')
+    }
+  }
+
+  if (query.status === 'LOADING') {
+    return (
+      <div className="mx-auto flex min-h-dvh max-w-[402px] items-center justify-center bg-bg-layer-default">
+        <HammerLoader size={48} label="정산 파일을 확인하는 중" />
+      </div>
+    )
+  }
+
+  if (query.status === 'LOAD_FAILED') {
+    return (
+      <div className="mx-auto flex min-h-dvh max-w-[402px] flex-col justify-center bg-bg-layer-default px-4">
+        <InfoBox title="정산 파일을 확인하지 못했어요." action={{ label: '다시 불러오기', onClick: reload }}>
+          연결 상태를 확인하고 다시 불러와 주세요.
+        </InfoBox>
+      </div>
+    )
+  }
+
+  if (query.view.check?.status !== 'COMPLETE') {
     return <Navigate to={{ pathname: '/docs/check', search }} replace />
   }
 
@@ -70,16 +106,31 @@ export function DocsDonePage() {
         </div>
 
         <InfoBox>리본은 대신 제출하지 않아요. 이 파일로 소상공인24에서 사장님이 직접 제출해요.</InfoBox>
+        {download === 'FAILED' && (
+          <InfoBox tone="critical" title="파일을 받지 못했어요.">
+            서류가 바뀌었다면 다시 점검해 주세요. 아니면 잠시 뒤 다시 받아 주세요.
+          </InfoBox>
+        )}
 
         <div className="mt-auto flex gap-2">
           <Button variant="outline" className="flex-1" onClick={() => navigate({ pathname: '/case', search })}>
             홈으로
           </Button>
-          <Button className="flex-2" disabled>
-            파일 받기
+          <Button className="flex-2" disabled={usesMock || download === 'BUSY'} onClick={handleDownload}>
+            {download === 'BUSY' ? '받는 중이에요' : '파일 받기'}
           </Button>
         </div>
       </main>
     </div>
   )
+}
+
+/** 받은 파일을 브라우저 내려받기로 넘긴다. 잠깐 쓴 주소는 바로 돌려준다 */
+function saveFile(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  link.click()
+  URL.revokeObjectURL(url)
 }

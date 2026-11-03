@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { MOCK_UPLOAD_MS } from '../mocks/documents'
 import { ApplicantSheet, DocsCheckPage } from './DocsCheckPage'
+import { issuesCheck, json, serve, serverDocument, serverList, status } from './docsTestServer'
 
 function renderAt(path: string) {
   const router = createMemoryRouter(
@@ -25,12 +26,44 @@ afterEach(() => {
 })
 
 /** 서류 API(#159) 머지 전이다. 점검할 곳이 없는데 점검 버튼이 눌리면 고장으로 읽힌다 */
+/** 서류 API(#159). 점검은 서버가 하고, 화면은 보낸 이름·날짜와 서버 결과만 옮긴다 */
 describe('DocsCheckPage — 서버', () => {
-  it('준비 중이라고 알리고 서류함으로 가는 길만 둔다', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('이름과 폐업일을 보내고 서버가 돌려준 결과를 그린다', async () => {
+    const { calls } = serve(json(serverList([serverDocument()])), json(serverList([serverDocument()], issuesCheck)))
     renderAt('/docs/check')
 
-    expect(screen.getByText('서류 점검은 준비 중이에요.')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '점검 시작하기' })).not.toBeInTheDocument()
+    fireEvent.click(await screen.findByRole('button', { name: '점검 시작하기' }))
+    fireEvent.change(within(sheet()!).getByLabelText('신청인 이름'), { target: { value: '김리본' } })
+    fireEvent.change(within(sheet()!).getByLabelText('실제 폐업일 (선택)'), { target: { value: '2026-10-31' } })
+    fireEvent.click(within(sheet()!).getByRole('button', { name: '점검하기' }))
+
+    expect(await screen.findByText('정산 점검 목록에서 빠진 서류: 이체확인증')).toBeInTheDocument()
+    expect(calls()[1]).toMatchObject({ url: expect.stringMatching(/\/cases\/documents\/check$/), method: 'POST' })
+    expect(JSON.parse(calls()[1].body as string)).toEqual({ applicant_name: '김리본', closure_date: '2026-10-31' })
+  })
+
+  /** 보내지 못했는데 아무 말이 없으면 점검이 된 줄 안다 */
+  it('점검을 보내지 못하면 알리고 다시 할 수 있게 둔다', async () => {
+    serve(json(serverList([serverDocument()])), status(500))
+    renderAt('/docs/check')
+
+    fireEvent.click(await screen.findByRole('button', { name: '점검 시작하기' }))
+    fireEvent.change(within(sheet()!).getByLabelText('신청인 이름'), { target: { value: '김리본' } })
+    fireEvent.click(within(sheet()!).getByRole('button', { name: '점검하기' }))
+
+    expect(await screen.findByText('점검을 보내지 못했어요.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '점검 시작하기' })).toBeEnabled()
+  })
+
+  it('서류함을 불러오지 못하면 다시 불러올 수 있다', async () => {
+    serve(status(500))
+    renderAt('/docs/check')
+
+    expect(await screen.findByText('서류함을 불러오지 못했어요.')).toBeInTheDocument()
   })
 })
 
