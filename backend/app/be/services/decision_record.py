@@ -169,6 +169,16 @@ def save_conflict(
     # (save_reviewed_plan의 TODO). 그 자리가 생기면 이 칸도 거기로 옮기는 것이 맞다.
     history.conflict_snapshot = outcome.conflict_snapshot.model_dump(mode="json")
 
+    # 같은 글에서 충돌이 아니었던 사실·진행 보고도 함께 보관한다. 사장님이 셋을 말했는데
+    # 하나만 충돌이면, 이것을 안 들고 있다가 확인 뒤 재판단에 못 돌려줘서 나머지 둘이
+    # 사라졌다. AI는 확인 뒤에 원문을 다시 읽지 않으므로(ConflictConfirmedTrigger에 입력 글이
+    # 없다) 여기서 통째로 들고 있다가 그대로 돌려주는 것 말고는 되살릴 길이 없다.
+    #
+    # 한 글자도 바꾸지 않는다. 비식별 입력·Info 결과·meta·다이제스트를 AI가 다시 대조한다.
+    # 화면이 보낸 값이 아니라 이 보관값을 쓴다(승준님 #154).
+    if outcome.retained_info_result is not None:
+        history.retained_info_result = outcome.retained_info_result.model_dump(mode="json")
+
     # 같은 충돌이 두 번 저장되는 것을 따로 막지 않는다. 전에 두었던 "이미 있으면 건너뛰기"는
     # conflict_ref로 비교했는데, AI가 판단할 때마다 새 UUID로 만들어서(info_agent/agent.py의
     # _conflict) 내용이 같아도 값이 달라 한 번도 걸리지 않았다.

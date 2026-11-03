@@ -24,6 +24,15 @@ class CaseHistory(CreatedAtMixin, table=True):
             " 충돌을 낸 판단에만 값이 있다."
         ),
     )
+    retained_info_result: dict | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+        description=(
+            "같은 글에서 충돌이 아니었던 사실·진행 보고. 확인 뒤 재판단에 그대로 돌려줘야"
+            " 반영된다 — AI는 원문을 다시 읽지 않으므로, 이걸 빠뜨리면 사장님이 함께 말한"
+            " 내용이 사라진다. 충돌을 낸 판단에만 값이 있고, 그 전 이력은 NULL이다."
+        ),
+    )
     source: str = Field(
         sa_column=Column(
             Enum("USER_INPUT", "SYSTEM_BATCH", "CASE_CREATED", "CONFLICT_DECISION", name="case_history_source_enum"),
