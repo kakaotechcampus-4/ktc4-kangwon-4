@@ -69,8 +69,8 @@ MEMBERS ──1:N──► CASE ──1:N──► CASE_FIELD_HISTORY
 | restoration_scope | ENUM | | NOT NULL, DEFAULT `UNKNOWN` | `FULL` | `UNKNOWN`/`PARTIAL` / `FULL` / `NOT_REQUIRED` |
 | restoration_scope_detail | VARCHAR | | NULLABLE | `"바닥재·전기배선까지 철거 필요"` | nullable, 구체적인 원상복구 범위 자연어 기록 |
 | demolition_required | ENUM | | NOT NULL, DEFAULT `UNKNOWN` | `REQUIRED` | `UNKNOWN`/`REQUIRED` / `NOT_REQUIRED` |
-| support_approved | BOOLEAN | | NULLABLE | `true` | 사장님이 알려 준 철거비 지원 승인 결과. `true` 승인 / `false` 거절 / `null` 아직 모름. AI가 판단한 지원 자격이 아님 |
-| support_approved_at | DATETIME | | NULLABLE | `2026-10-22 15:00:00` | 승인 결과를 마지막으로 알려 준 시각(KST). 기록 탭의 "승인 결과를 알려주셨어요" 시각 |
+| support_approved | BOOLEAN | | NULLABLE | `true` | 사장님이 알려 준 점포철거비 **1차 적격심사** 결과. `true` 통과 / `false` 탈락 / `null` 아직 모름. AI가 판단한 지원 자격이 아니고, 뒤의 정산 검토·비용 지급과도 다름 |
+| support_approved_at | DATETIME | | NULLABLE | `2026-10-22 15:00:00` | 심사 결과를 마지막으로 알려 준 시각(KST). 기록 탭의 "승인 결과를 알려주셨어요" 시각 |
 | planned_closure_date | DATE | | NULLABLE | `2026-12-31` | nullable |
 | planned_closure_month | VARCHAR(7) | | NULLABLE | `2026-12` | 날짜를 못 정했을 때의 예상 달. `planned_closure_date`와 같이 오면 422로 거절한다. 가게 등록 때만 받고 AI 대화로는 저장하지 않는다 |
 | completed_at | DATETIME | | NULLABLE | `NULL` | nullable |

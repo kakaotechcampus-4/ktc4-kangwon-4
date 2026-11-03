@@ -557,7 +557,7 @@ def update_case_checklist(
 def update_case_support_approval(
     session: Session, member_id: int, approved: bool | None
 ) -> CaseSupportApprovalResponse:
-    """사장님이 알려 준 철거비 지원 승인 결과를 저장한다. null은 "아직 모름"으로 되돌린다."""
+    """사장님이 알려 준 점포철거비 1차 적격심사 결과를 저장한다. null은 "아직 모름"으로 되돌린다."""
 
     case = case_crud.get_case_by_member_id(session, member_id)
     if case is None:
