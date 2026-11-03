@@ -247,6 +247,23 @@ export interface CaseResultsSubmitRequest {
 }
 
 /**
+ * 충돌 하나에 고른 쪽. 서버 말로 `PROPOSED` 는 이번에 말씀하신 것, `STORED` 는 지금 기록이다.
+ * 화면은 `INCOMING` 이라 부른다(`types/view.ts` `ConflictSide`) — 바꾸는 것은 어댑터가 한다
+ */
+export type ConflictDecisionSide = 'PROPOSED' | 'STORED'
+
+/**
+ * `POST /cases/results/decision` 으로 보내는 것.
+ *
+ * 남은 충돌을 **전부** 한 번에 보낸다. 하나라도 빠지거나 같은 충돌이 두 번 있으면 422 다.
+ * 응답은 결과 제출과 같은 접수 번호(`CaseResultsSubmitAcceptedResponse`)이고, 결과도 같은
+ * `GET /cases/results/status` 로 받는다.
+ */
+export interface CaseConflictsDecisionRequest {
+  decisions: { conflict_reference_id: number; side: ConflictDecisionSide }[]
+}
+
+/**
  * `POST /cases/results` 응답. **접수 번호만 온다.**
  *
  * 판단은 뒤에서 돌고 몇 분이 걸릴 수 있어서, 결과는 이 번호로 따로 물어봐야 한다.
