@@ -148,6 +148,14 @@ def official_payloads(session, case_id):
     return {row.evidence_id: row.model_dump() for row in official_rows(session, case_id)}
 
 
+def body_of(session, row):
+    """근거 한 줄의 본문. 공식 자료는 Case가 아니라 공용 줄이 들고 있다."""
+
+    return evidence_crud.get_official_document_bodies(session, [row.official_document_id])[
+        row.official_document_id
+    ]
+
+
 def lookup_request(snapshot):
     return ProcedureLookupInput(
         lookup_goal="BUSINESS_CLOSURE", search_queries=["합성 절차"],
@@ -164,7 +172,9 @@ def test_case_creation_imports_four_approved_documents_and_reuses_their_ids(mysq
         baseline = official_payloads(session, case_id)
         assert len(baseline) == len(store.records()) == 4
         assert {row["source_version"] for row in baseline.values()} == {store.snapshot_version}
-        assert {row["excerpt"] for row in baseline.values()} == {
+        # 본문은 Case마다 복사되지 않는다. 공용 줄에서 읽어야 자료와 같다.
+        assert {row["excerpt"] for row in baseline.values()} == {None}
+        assert {body_of(session, row) for row in official_rows(session, case_id)} == {
             record.excerpt for record in store.records()
         }
         repeated = import_reviewed_procedures(session, case_id, store, as_of=AS_OF)
@@ -212,7 +222,8 @@ def test_committed_rows_reach_tool_without_new_evidence_ids(mysql_engine, approv
             assert len(rows) == 2
             for row in rows:
                 source = records[row.source_ref]
-                assert row.excerpt == source.excerpt
+                assert row.excerpt is None
+                assert body_of(session, row) == source.excerpt
                 assert row.content_hash == source.content_hash.removeprefix("sha256:")
                 assert row.source_version == approved_store.snapshot_version
                 assert row.locator == source.canonical_url
@@ -282,11 +293,10 @@ def test_same_id_changed_payload_is_rejected(mysql_engine, approved_store):
             import_reviewed_procedures(session, case_id, changed, as_of=AS_OF)
         session.rollback()
     with Session(mysql_engine) as session:
-        assert {row.excerpt for row in official_rows(
-            session, case_id, version=approved_store.snapshot_version,
-        )} == {
-            record.excerpt for record in approved_store.records()
-        }
+        assert {
+            body_of(session, row)
+            for row in official_rows(session, case_id, version=approved_store.snapshot_version)
+        } == {record.excerpt for record in approved_store.records()}
 
 
 def test_caller_rolls_back_partial_import(mysql_engine, approved_store, monkeypatch):
