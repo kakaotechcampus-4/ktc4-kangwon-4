@@ -411,7 +411,7 @@ export function ResultInputPage() {
             entry.ask.kind === 'RESULT' &&
             correcting && (
               <InfoBox title="앞서 알려주신 내용을 바로잡아 적어 주세요.">
-                이미 반영한 내용과 다르면, 어느 쪽이 맞는지 한 번 더 여쭤볼게요.
+                이미 반영한 내용과 다르면, 필요할 때 어느 쪽이 맞는지 여쭤볼게요.
               </InfoBox>
             )
           )

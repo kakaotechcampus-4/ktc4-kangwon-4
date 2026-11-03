@@ -168,7 +168,8 @@ function ServerReplan({ historyId }: { historyId: number }) {
  * 바뀐 칸이 있으면 시안의 "이렇게 이해했어요"처럼 AI가 이해한 내용으로 보여주고 맞는지 묻는다.
  * `UPDATED` 는 서버가 이미 반영한 결과라 "반영하기 전 확인"이 아니다 — 제목도 반영했다고 쓴다.
  * 다르게 이해했으면 결과 입력으로 보내 바로잡아 적게 한다. 이미 반영한 값과 다르면
- * 서버가 충돌(`CONFLICT`)로 돌려주고, 사장님이 어느 쪽이 맞는지 고른다.
+ * 서버가 충돌(`CONFLICT`)로 돌려줄 수 있고, 그러면 사장님이 어느 쪽이 맞는지 고른다.
+ * 충돌이 꼭 오는 것은 아니다 — AI가 바로 반영(`UPDATED`)하거나 되물을(`NEEDS_MORE_INFO`) 수도 있다.
  */
 function Replanned({ view, search }: { view: ReplanView; search: string }) {
   const navigate = useNavigate()
