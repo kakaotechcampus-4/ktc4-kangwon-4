@@ -46,8 +46,8 @@ def get_conflict_reference_by_id(session: Session, conflict_reference_id: int) -
 def get_decided_conflicts_by_case_id(session: Session, case_id: int) -> list[ConflictReference]:
     """사장님이 결정을 끝낸(PENDING이 아닌) 충돌 전부, 오래된 것부터. 없으면 빈 리스트.
 
-    화면에 낼 때 가림 문구를 되돌리는 쪽이 쓴다(services.unmasking). 충돌 결정으로 바뀐 값은
-    그 결정 이력에 글이 없어서, 그 값이 담겨 있던 충돌 줄을 따라 원문을 찾아야 한다.
+    화면에 낼 때 가림 문구를 되돌리는 쪽이 쓴다(services.unmasking). 채택·거절 중 무엇을
+    쓸지는 거기서 가른다 — 그 규칙을 질의에 넣으면 검사가 닿지 못한다.
     """
 
     return session.exec(

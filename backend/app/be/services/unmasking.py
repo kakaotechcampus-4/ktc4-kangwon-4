@@ -42,12 +42,23 @@ class HiddenTextRestorer:
         # 있던 값이고, 충돌 줄에는 그 값이 어느 제출에서 나왔는지가 남아 있다. 그래서 값을 만든
         # 이력에 글이 없으면 같은 칸의 충돌을 따라 원문을 찾는다.
         #
-        # "글이 없으면 직전 제출을 쓴다"로 때우면 안 된다. 그 사이 다른 칸 때문에 낸 제출이
-        # 있으면 거기 적힌 남의 주소가 들어간다. 틀린 주소를 보여주는 것은 [주소]를 보여주는
-        # 것보다 나쁘다(restore_hidden_text 설명).
-        self._conflict_origin_by_field: dict[str, int] = {}
+        # 같은 칸을 두 번 결정했으면 되돌리지 않는다. 어느 결정이 지금 보는 값을 만들었는지
+        # 가리키는 기록이 없어서, 칸만 보고 고르면 다른 제출의 주소가 들어간다. 실측으로
+        # "서울특별시 마포구 테헤란로 5 2층"처럼 두 주소가 섞인 글자가 나왔다(승준님 #158 리뷰).
+        # 틀린 주소를 보여주는 것은 [주소]를 보여주는 것보다 나쁘다(restore_hidden_text 설명).
+        #
+        # 거절(REJECTED)도 쓰지 않는다. "기존 값 유지"를 고른 것이라 Case 값을 만든 입력이
+        # 아닌데, 결정이 끝났다는 이유로 섞으면 사장님이 쓰지 않기로 한 주소가 화면에 뜬다.
+        origins: dict[str, set[int]] = {}
         for conflict in conflict_reference_crud.get_decided_conflicts_by_case_id(session, case_id):
-            self._conflict_origin_by_field[conflict.canonical_field] = conflict.case_history_id
+            if conflict.status != "CONFIRMED":
+                continue
+            origins.setdefault(conflict.canonical_field, set()).add(conflict.case_history_id)
+        self._conflict_origin_by_field = {
+            field: next(iter(histories))
+            for field, histories in origins.items()
+            if len(histories) == 1
+        }
 
     def restore(
         self, value: str | None, case_history_id: int | None, field: str | None = None

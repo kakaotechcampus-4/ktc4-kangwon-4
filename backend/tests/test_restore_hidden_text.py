@@ -221,3 +221,63 @@ def test_a_conflict_decision_shows_the_restored_text(
 
     assert changes[0].stored_value == "서울특별시 마포구 월드컵북로 12 1층 전체"
     assert changes[0].new_value == "서울특별시 마포구 월드컵북로 12 1층 일부"
+
+
+def decided(case_history_id: int, status: str = "CONFIRMED"):
+    """결정이 끝난 충돌 한 줄. 그 값이 어느 제출에서 나왔는지가 들어 있다."""
+    return SimpleNamespace(
+        canonical_field="restoration_scope_detail",
+        case_history_id=case_history_id,
+        status=status,
+    )
+
+
+def restorer_with(monkeypatch, conflicts):
+    """결정 이력 둘(22·44)이 섞인 Case. 22번이 만든 값을 되돌려 본다."""
+    monkeypatch.setattr(
+        case_history_crud, "get_case_histories_by_case_id",
+        lambda *_: [
+            SimpleNamespace(id=11, raw_input=FIRST_INPUT),
+            SimpleNamespace(id=22, raw_input=None),
+            SimpleNamespace(id=33, raw_input=SECOND_INPUT),
+            SimpleNamespace(id=44, raw_input=None),
+        ],
+    )
+    monkeypatch.setattr(
+        case_field_history_crud, "get_case_field_histories_by_case_id", lambda *_: []
+    )
+    monkeypatch.setattr(
+        conflict_reference_crud, "get_decided_conflicts_by_case_id", lambda *_: conflicts
+    )
+    return HiddenTextRestorer(MagicMock(spec=Session), CASE_ID)
+
+
+def test_the_same_field_decided_twice_keeps_the_text_hidden(monkeypatch):
+    """같은 칸을 두 번 결정했으면 되돌리지 않는다(승준님 #158 리뷰).
+
+    어느 결정이 지금 보는 값을 만들었는지 가리키는 기록이 없다. 칸만 보고 마지막 충돌을
+    고르면 11번이 만든 값에 33번 글의 주소가 들어가, 실제로 "마포구 테헤란로 5 2층"처럼
+    두 주소가 섞인 글자가 나왔다. 그런 글자를 보여주느니 [주소]를 그대로 둔다.
+    """
+    restorer = restorer_with(monkeypatch, [decided(11), decided(33)])
+
+    restored = restorer.restore(
+        "서울특별시 마포구 [주소] 전체", 22, "restoration_scope_detail"
+    )
+
+    assert restored == "서울특별시 마포구 [주소] 전체"
+
+
+def test_a_rejected_proposal_never_supplies_the_original_text(monkeypatch):
+    """거절한 제안의 글로 되돌리지 않는다(승준님 #158 리뷰).
+
+    "기존 값 유지"를 고르면 Case 값은 그대로다. 그 글은 값을 만든 입력이 아닌데, 결정이
+    끝났다는 이유로 섞으면 사장님이 쓰지 않기로 한 주소가 화면에 뜬다.
+    """
+    restorer = restorer_with(monkeypatch, [decided(11), decided(33, "REJECTED")])
+
+    restored = restorer.restore(
+        "서울특별시 마포구 [주소] 전체", 22, "restoration_scope_detail"
+    )
+
+    assert restored == "서울특별시 마포구 월드컵북로 12 1층 전체"
