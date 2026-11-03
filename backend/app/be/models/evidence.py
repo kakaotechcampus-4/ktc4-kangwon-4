@@ -16,6 +16,11 @@ class OfficialDocument(CreatedAtMixin, table=True):
 
     버전을 올릴 때는 이 줄을 고치는 것이 아니라 새 줄을 넣는다. 그래야 예전 Case가 예전
     줄을 계속 가리켜서, 그 Case가 무엇을 보고 판단했는지가 나중에도 그대로 남는다.
+
+    다만 이것이 재적재를 없애지는 않는다. 절차조회는 Case 근거의 source_version이 지금
+    검수 목록 버전과 같은 것만 고르므로(stored_tool.py:73), 목록 버전이 올라가면 예전
+    Case는 자료를 못 찾는다. 예전 Case를 새 버전으로 옮기려면 여전히 다시 적재해야 한다
+    (scripts/import_reviewed_procedures.py). 이 표가 없애는 것은 본문 복제뿐이다.
     """
 
     __tablename__ = "official_document"

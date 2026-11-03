@@ -22,6 +22,9 @@ def ensure_official_documents(session: Session, store: ReviewedProcedureStore) -
 
     같은 문서의 같은 버전은 다시 쓰지 않는다. 버전이 올라가면 이 줄을 고치는 것이 아니라
     새 줄이 생긴다. 그래야 예전 Case가 예전 줄을 계속 가리킨다.
+
+    예전 Case를 새 버전으로 옮기는 것은 별개다. 절차조회가 버전이 같은 자료만 고르므로
+    (stored_tool.py:73), 옮기려면 그 Case를 다시 적재해야 한다.
     """
 
     version = store.snapshot_version

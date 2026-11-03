@@ -55,7 +55,7 @@ def new_case(engine):
     with Session(engine) as session:
         member = create_member(session, oauth_id=str(uuid4()), nickname="합성 사용자")
         case, _ = create_case(session, member.id, CaseCreateRequest(
-            business_type="카페", franchise_status=False, employee_count=2,
+            business_type="CAFE", franchise_status=False, employee_count=2,
             lease_status="LEASED_PAID",
         ))
         session.commit()
@@ -102,3 +102,43 @@ def test_official_text_is_not_redacted(mysql_engine):
               for record in load_reviewed_procedures().records()}
     for record in official_records(mysql_engine, new_case(mysql_engine)):
         assert record.excerpt == stored[record.content_hash]
+
+
+def test_the_lookup_tool_still_finds_the_documents_after_the_body_moved(mysql_engine):
+    """본문을 공용 표로 뺀 뒤에도 절차조회가 자료를 그대로 찾아야 한다.
+
+    조회 Tool은 Case 근거와 검수 목록을 대조해서 짝이 있는 것만 돌려준다. 본문·출처·버전·
+    해시 중 하나라도 어긋나면 조용히 "자료 없음"이 되고, 그러면 AI가 근거를 못 대서 모든
+    판단이 "상담원에게 문의"로 끝난다(#65). 스냅샷 필드만 보는 위 검사들과 달리 실제
+    Tool까지 돌려서 계약이 보존됐는지 본다(승준님 #134 리뷰 요청).
+    """
+    import asyncio
+    from datetime import date
+    from app.agent.schemas import ProcedureLookupInput
+    from app.agent.procedure_tool.stored_tool import StoredProcedureLookupTool
+    from app.be.services.reviewed_procedure import load_reviewed_procedures
+
+    store = load_reviewed_procedures()
+    case_id = new_case(mysql_engine)
+    with Session(mysql_engine) as session:
+        snapshot = build_case_snapshot(session, case_id)
+
+    # 자료마다 걸린 검색어를 그대로 넣는다. Tool이 질의와 자료의 단어를 맞춰 고르기 때문에,
+    # 아무 문장이나 넣으면 본문이 멀쩡해도 0건이 된다.
+    result = asyncio.run(StoredProcedureLookupTool(store).lookup(ProcedureLookupInput(
+        lookup_goal="BUSINESS_CLOSURE",
+        search_queries=[
+            " ".join([*record.required_terms, *record.any_terms[:1]])
+            for record in store.records()
+        ],
+        as_of=date(2026, 10, 4), locale="ko-KR", source_policy="OFFICIAL_ONLY",
+        max_results_per_query=4, based_on_snapshot_id=snapshot.snapshot_id,
+        evidence_records=snapshot.evidence_records, review_feedback=[],
+    )))
+
+    assert result.completion_status == "COMPLETE"
+    assert len(result.documents) == len(store.records())
+    # 본문이 공용 줄에서 온 것이지만 Tool이 보는 값은 전과 같아야 한다.
+    assert {item.excerpt for item in result.documents} == {
+        record.excerpt for record in store.records()
+    }
