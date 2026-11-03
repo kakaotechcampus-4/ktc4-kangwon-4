@@ -52,6 +52,34 @@ def test_missing_transfer_then_new_document_only_recheck_and_eight_file_zip(tmp_
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("blank_fields", ["counterparty", "applicant_and_buyer"])
+def test_whitespace_names_cannot_complete_document_checks(tmp_path, blank_fields):
+    async def run():
+        client = DocumentClient()
+        service = DocumentService(tmp_path, client, reviewer=client, submission_policy="RRN_BACK_ONLY")
+        context = await settlement_context(service, bank_copy=False)
+        if blank_fields == "applicant_and_buyer":
+            context.business_name = None
+            context.applicant_name = " \t "
+        names = {"supplier", "recipient"} if blank_fields == "counterparty" else {"buyer", "sender"}
+        for index, record in enumerate(context.documents):
+            fields = {field.name: " \t " if field.name in names else field.value
+                      for field in record.analysis.fields}
+            if names.intersection(fields):
+                context.documents[index] = service.confirm_analysis(
+                    context.case_id, record, record.analysis.kind, confirmed_fields=fields,
+                )
+        originals = [record.model_dump_json() for record in context.documents]
+        context.document_check = check_settlement(context, service)
+        assert [record.model_dump_json() for record in context.documents] == originals
+        expected = ({"COUNTERPARTY_UNREADABLE"} if blank_fields == "counterparty"
+                    else {"APPLICANT_UNCONFIRMED", "BUYER_UNCONFIRMED"})
+        assert {issue.code for issue in context.document_check.issues} == expected
+        with pytest.raises(DocumentError):
+            settlement_zip(context, service)
+    asyncio.run(run())
+
+
 def test_uncertain_ocr_correction_is_explicit_and_does_not_replace_extraction(tmp_path):
     async def run():
         client = DocumentClient()

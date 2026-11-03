@@ -109,8 +109,9 @@ def check_settlement(case: DocumentContext, service: DocumentService, *, progres
     for kind, records in by_kind.items():
         if len(records) == 1:
             record = records[0]
-            fields[kind] = (record.confirmed_fields if record.confirmed_fields is not None
-                            else {field.name: field.value for field in record.analysis.fields})
+            values = (record.confirmed_fields if record.confirmed_fields is not None
+                      else {field.name: field.value for field in record.analysis.fields})
+            fields[kind] = {name: value.strip() for name, value in values.items()}
     for kind in (DocumentKind.CONSTRUCTION_STATEMENT, DocumentKind.TAX_INVOICE, DocumentKind.TRANSFER):
         if kind not in fields:
             continue
