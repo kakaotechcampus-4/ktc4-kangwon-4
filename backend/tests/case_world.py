@@ -21,6 +21,7 @@ from app.be.models.case_field_history import CaseFieldHistory
 from app.be.models.case_history import CaseHistory
 from app.be.models.evidence import ConflictReference
 from app.be.schemas.case import CaseCreateRequest
+from app.be.services import procedure_registry
 from app.be.services.case import create_case
 
 
@@ -34,6 +35,10 @@ def case_engine():
         engine = create_engine(container.get_connection_url() + "?charset=utf8mb4")
         try:
             SQLModel.metadata.create_all(engine)
+            # 앱이 뜰 때 하는 절차 적재를 그대로 한다(main.lifespan). 없으면 create_case가 멈춘다.
+            with Session(engine) as session:
+                procedure_registry.ensure_cafe_procedure_registry(session)
+                session.commit()
             yield engine
         finally:
             engine.dispose()
