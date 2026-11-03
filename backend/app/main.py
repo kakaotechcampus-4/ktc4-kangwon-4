@@ -30,8 +30,8 @@ app = FastAPI(lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    # DELETE는 서류 빼기(DELETE /cases/documents/{id})에 쓴다
-    allow_methods=["GET", "POST", "DELETE"],
+    # PUT은 할 일 체크(PUT /cases/checklists/...), DELETE는 서류 빼기(DELETE /cases/documents/{id})에 쓴다
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
     expose_headers=["Access-Token", "Refresh-Token"],
 )

@@ -6,21 +6,30 @@ from fastapi import HTTPException
 from sqlmodel import Session
 
 from app.be.crud import case as case_crud
+from app.be.crud import case_checklist as case_checklist_crud
 from app.be.crud import case_field_history as case_field_history_crud
 from app.be.crud import case_history as case_history_crud
 from app.be.crud import conflict_reference as conflict_reference_crud
 from app.be.crud import evidence as evidence_crud
 from app.be.crud import procedure_step as procedure_step_crud
 from app.be.models.case import Case
+from app.be.models.case_checklist import CaseChecklist, CaseChecklistHistory
 from app.be.models.case_history import CaseHistory
 from app.be.models.evidence import ConflictReference, Evidence
-from app.be.models.mixins import kst_now
+from app.be.models.mixins import KST, kst_now
 from app.be.models.procedure_step import CaseProcedureStep
 from app.be.schemas.case import (
+    CaseClosureReportRequest,
+    CaseClosureReportResponse,
+    CaseDepositReturnResponse,
+    CaseChecklistResponse,
+    CaseSupportApprovalResponse,
     CaseConflictsDecisionRequest,
     CaseCreateRequest,
     CaseGetDetailResponse,
     CaseGetResponse,
+    CaseLogItem,
+    CaseLogResponse,
     CaseResultsEntryResponse,
     CaseResultsSubmitAcceptedResponse,
     CaseResultsSubmitRequest,
@@ -51,8 +60,10 @@ def _field_changes(session: Session, case_id: int, case_history_id: int) -> list
     return [
         FieldChangeResponse(
             field=row.canonical_field,
-            stored_value=restorer.restore(row.before_value, restorer.source_of_previous(row.id)),
-            new_value=restorer.restore(row.after_value, row.case_history_id),
+            stored_value=restorer.restore(
+                row.before_value, restorer.source_of_previous(row.id), row.canonical_field
+            ),
+            new_value=restorer.restore(row.after_value, row.case_history_id, row.canonical_field),
         )
         for row in rows
     ]
@@ -77,9 +88,13 @@ def _conflict_items(
             id=conflict.id,
             field=conflict.canonical_field,
             stored_value=restorer.restore(
-                conflict.committed_value, restorer.source_of_current(conflict.canonical_field)
+                conflict.committed_value,
+                restorer.source_of_current(conflict.canonical_field),
+                conflict.canonical_field,
             ),
-            proposed_value=restorer.restore(conflict.proposed_value, conflict.case_history_id),
+            proposed_value=restorer.restore(
+                conflict.proposed_value, conflict.case_history_id, conflict.canonical_field
+            ),
         )
         for conflict in conflicts
     ]
@@ -94,7 +109,7 @@ def _case_detail(session: Session, case: Case) -> CaseGetDetailResponse:
     )
     return detail.model_copy(
         update={
-            field: restorer.restore(getattr(detail, field), restorer.source_of_current(field))
+            field: restorer.restore(getattr(detail, field), restorer.source_of_current(field), field)
             for field in ("business_type", "restoration_scope_detail")
         }
     )
@@ -200,6 +215,25 @@ def get_case(session: Session, member_id: int) -> CaseGetResponse:
         raise HTTPException(status_code=500, detail="Case에 대한 최초 판단 기록이 없습니다.")
 
     _assert_judgment_is_showable(latest_history)
+
+    # 충돌 결정이 실패하면 충돌은 미결로 남지만 마지막 이력은 FAILED다. 그대로 내보내면 홈이
+    # 실패 카드를 그려서 충돌 확인으로 돌아갈 길이 없다. 진입 조회(get_case_results_entry)처럼
+    # 처리 중이 아니고 미결 충돌이 있으면 CONFLICT로 본다.
+    if latest_history.judgment_status != "PENDING" and conflict_reference_crud.get_pending_conflicts_by_case_id(
+        session, case.id
+    ):
+        return CaseGetResponse(
+            case=_case_detail(session, case),
+            blocker=None,
+            next_action=None,
+            judgment_status="CONFLICT",
+            case_history_id=None,
+            questions_for_user=None,
+            recovery_action_code=None,
+            requested_field_paths=None,
+            retryable=None,
+            changes=None,
+        )
 
     next_action = (
         NextActionResponse(
@@ -357,6 +391,10 @@ def submit_case_results(
     if case is None:
         raise HTTPException(status_code=404, detail="Case를 찾을 수 없습니다.")
 
+    if case.case_status == "COMPLETED":
+        # AI는 진행 중인 Case만 판단한다. 완료된 Case로 판단을 돌리면 AI 입력 검사에서 거절된다.
+        raise HTTPException(status_code=409, detail="폐업 정리를 마친 Case입니다.")
+
     if conflict_reference_crud.get_pending_conflicts_by_case_id(session, case.id):
         raise HTTPException(status_code=409, detail="확인 대기 중인 충돌이 있습니다.")
 
@@ -398,6 +436,10 @@ def submit_case_conflicts_decision(
     case = case_crud.lock_case_by_member_id(session, member_id)
     if case is None:
         raise HTTPException(status_code=404, detail="Case를 찾을 수 없습니다.")
+
+    if case.case_status == "COMPLETED":
+        # AI는 진행 중인 Case만 판단한다. 완료된 Case로 판단을 돌리면 AI 입력 검사에서 거절된다.
+        raise HTTPException(status_code=409, detail="폐업 정리를 마친 Case입니다.")
 
     pending_conflicts = conflict_reference_crud.get_pending_conflicts_by_case_id(session, case.id)
     if not pending_conflicts:
@@ -517,6 +559,143 @@ def get_case_results_submit_status(
             questions_to_ask=latest_history.next_action_questions_to_ask or [],
         ),
     )
+
+
+# 이 항목을 체크하면 폐업 정리를 마친 것으로 본다(시안 closed 화면).
+_CLOSING_TASK_ID = "vat_submission"
+
+
+def update_case_checklist(
+    session: Session, member_id: int, task_id: str, completed: bool
+) -> CaseChecklistResponse:
+    """로드맵 항목을 사장님이 체크하거나 푼다. 같은 요청을 두 번 보내도 결과가 같다.
+
+    "이 가게에 해당하는 항목인지"는 여기서 보지 않는다. AI 로드맵(record_checklist)이 Case
+    스냅샷과 절차 목록으로 판단하는 일이라, 로드맵 조회 API를 만들 때 함께 붙인다.
+    """
+
+    # 같은 항목 체크가 동시에 두 번 오면 둘 다 "없음"을 보고 만들려다 unique에 걸린다. 줄을 세운다.
+    case = case_crud.lock_case_by_member_id(session, member_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case를 찾을 수 없습니다.")
+
+    checklist = case_checklist_crud.get_case_checklist(session, case.id, task_id)
+    if completed == (checklist is not None):
+        # 이미 그 상태다. 같은 요청을 두 번 보내도 이력이 쌓이지 않게 아무것도 하지 않는다.
+        return CaseChecklistResponse(task_id=task_id, completed=completed)
+
+    if completed:
+        case_checklist_crud.create_case_checklist(session, CaseChecklist(case_id=case.id, task_id=task_id))
+    else:
+        case_checklist_crud.delete_case_checklist(session, checklist)
+    # 지금 상태(case_checklist)는 풀면 지우지만, 기록 탭에는 체크했다가 푼 것까지 남아야 한다.
+    case_checklist_crud.create_case_checklist_history(
+        session, CaseChecklistHistory(case_id=case.id, task_id=task_id, completed=completed)
+    )
+    if task_id == _CLOSING_TASK_ID:
+        # 시안: 홈 "홈택스에서 부가세 신고를 마쳐주세요" → [신고했어요] → 폐업 정리 완료.
+        # 실수로 눌렀다가 풀면 다시 진행 중으로 돌린다. 완료 뒤에 남는 할 일(종합소득세 등)은
+        # 로드맵에 그대로 두고 완료로 본다.
+        case.case_status = "COMPLETED" if completed else "IN_PROGRESS"
+        case.completed_at = kst_now() if completed else None
+    session.commit()
+    return CaseChecklistResponse(task_id=task_id, completed=completed)
+
+
+def update_case_support_approval(
+    session: Session, member_id: int, approved: bool | None
+) -> CaseSupportApprovalResponse:
+    """사장님이 알려 준 점포철거비 1차 적격심사 결과를 저장한다. null은 "아직 모름"으로 되돌린다."""
+
+    case = case_crud.get_case_by_member_id(session, member_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case를 찾을 수 없습니다.")
+
+    case.support_approved = approved
+    case.support_approved_at = kst_now()
+    session.commit()
+    return CaseSupportApprovalResponse(approved=approved)
+
+
+def update_case_closure_report(
+    session: Session, member_id: int, report: CaseClosureReportRequest
+) -> CaseClosureReportResponse:
+    """통합 폐업 신고 화면에서 확인한 폐업일·폐업 사유·가게 주소를 저장한다. 다시 보내면 덮어쓴다."""
+
+    case = case_crud.get_case_by_member_id(session, member_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case를 찾을 수 없습니다.")
+
+    case.closure_date = report.closure_date
+    case.closure_reason = report.closure_reason
+    case.road_address = report.road_address
+    case.address_detail = report.address_detail
+    session.commit()
+    return CaseClosureReportResponse(**report.model_dump())
+
+
+def update_case_deposit_return(session: Session, member_id: int, result: str) -> CaseDepositReturnResponse:
+    """가게 반환 화면에서 사장님이 알려 준 보증금 반환 결과를 저장한다. 다시 보내면 덮어쓴다."""
+
+    case = case_crud.get_case_by_member_id(session, member_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case를 찾을 수 없습니다.")
+
+    case.deposit_return_result = result
+    session.commit()
+    return CaseDepositReturnResponse(result=result)
+
+
+_LOG_OWNER_EVENTS = {
+    "CASE_CREATED": "CASE_CREATED",
+    "USER_INPUT": "RESULT_SUBMITTED",
+    "CONFLICT_DECISION": "CONFLICT_DECIDED",
+}
+_LOG_RIBBON_EVENTS = {
+    "DONE": "NEXT_ACTION_DECIDED",
+    "NEEDS_MORE_INFO": "MORE_INFO_REQUESTED",
+    "CONFLICT": "CONFLICT_FOUND",
+    "FAILED": "JUDGMENT_FAILED",
+}
+
+
+def get_case_logs(session: Session, member_id: int) -> CaseLogResponse:
+    """기록 탭(M08 Log)과 홈의 "리본이 해둔 일" 띠. 문구는 FE가 event 코드로 만든다."""
+
+    case = case_crud.get_case_by_member_id(session, member_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case를 찾을 수 없습니다.")
+
+    logs = []
+    for history in case_history_crud.get_case_histories_by_case_id(session, case.id):
+        owner_event = _LOG_OWNER_EVENTS.get(history.source)
+        if owner_event is None:
+            continue
+        logs.append(_log("OWNER", owner_event, history.created_at))
+        if history.judged_at is not None and history.judgment_status in _LOG_RIBBON_EVENTS:
+            logs.append(_log(
+                "RIBBON", _LOG_RIBBON_EVENTS[history.judgment_status], history.judged_at,
+                detail=history.next_action if history.judgment_status == "DONE" else None,
+            ))
+
+    # 체크를 풀어도 체크했던 기록은 남는다(지금 상태가 아니라 이력을 읽는다).
+    for checklist in case_checklist_crud.get_case_checklist_histories_by_case_id(session, case.id):
+        event = "CHECKLIST_COMPLETED" if checklist.completed else "CHECKLIST_UNCHECKED"
+        logs.append(_log("OWNER", event, checklist.created_at, task_id=checklist.task_id))
+
+    # 심사 결과는 마지막으로 알려 준 것 하나만 남는다(값과 시각을 Case에 덮어쓴다).
+    if case.support_approved_at is not None:
+        result = {True: "APPROVED", False: "REJECTED", None: "UNKNOWN"}[case.support_approved]
+        logs.append(_log("OWNER", "SUPPORT_RESULT_REPORTED", case.support_approved_at, detail=result))
+
+    # 최근 것부터. 시각이 같으면 사장님이 보낸 뒤 리본이 판단한 것이라 리본 기록을 위로 둔다.
+    logs.sort(key=lambda log: (log.occurred_at, log.actor == "RIBBON"), reverse=True)
+    return CaseLogResponse(logs=logs)
+
+
+def _log(actor: str, event: str, at, *, task_id: str | None = None, detail: str | None = None) -> CaseLogItem:
+    # DB에는 시간대 없이 한국 시각이 들어 있다(kst_now, MySQL TZ=Asia/Seoul). 내보낼 때 +09:00을 붙인다.
+    return CaseLogItem(actor=actor, event=event, occurred_at=at.replace(tzinfo=KST), task_id=task_id, detail=detail)
 
 
 def _create_case_creation_evidence(

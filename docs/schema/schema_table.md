@@ -62,16 +62,23 @@ MEMBERS ──1:N──► CASE ──1:N──► CASE_FIELD_HISTORY
 | industrial_accident_insurance_enrolled | BOOLEAN | | NULLABLE | `true` | 이 사업장의 산재보험 가입 이력. 이미 종료했어도 `true`. 보험 네 칸은 같이 받아야 한다 — 넷 중 하나라도 `true`면 보험 신고 절차가 "해당", 넷 다 `false`여야 "해당 없음", 섞이면 "모름"이다 |
 | has_business_loan | BOOLEAN | | NULLABLE | `false` | 사업 대출이 남아 있는지. 가입 때 사장님이 입력. `null`이면 안 물어봄 |
 | has_service_contracts | BOOLEAN | | NULLABLE | `true` | 배달앱·카드단말기 등 해지할 서비스 계약이 있는지. 가입 때 사장님이 입력. `null`이면 안 물어봄 |
-| case_status | ENUM | | NOT NULL, DEFAULT `IN_PROGRESS` | `IN_PROGRESS` | `IN_PROGRESS` / `COMPLETED` |
+| case_status | ENUM | | NOT NULL, DEFAULT `IN_PROGRESS` | `IN_PROGRESS` | `IN_PROGRESS` / `COMPLETED`. 사장님이 부가세 폐업 확정신고(체크 항목 `vat_submission`)를 체크하면 `COMPLETED`, 풀면 `IN_PROGRESS`. `COMPLETED`면 결과 제출·충돌 결정을 받지 않는다(409) |
 | lease_status | ENUM | | NOT NULL | `LEASED_PAID` | `LEASED_PAID`/`LEASED_FREE`/`OWNED` |
 | restoration_clause | ENUM | | NOT NULL, DEFAULT `UNKNOWN` | `EXISTS` | `EXISTS`/`NOT_EXISTS`/`UNKNOWN` — 임대차계약서에 원상복구 조항이 있는지. 가입 때 사장님이 입력. AI가 채우는 `restoration_*`(진행·범위)와 다른 값 |
 | restoration_status | ENUM | | NOT NULL, DEFAULT `UNKNOWN` | `UNKNOWN` | `UNKNOWN`/`NOT_STARTED`/`IN_PROGRESS`/`COMPLETED`/`NOT_REQUIRED` — Case 생성 직후 `UNKNOWN`으로 시작, `restoration_scope` 확정 후 나머지 값으로 전환 |
 | restoration_scope | ENUM | | NOT NULL, DEFAULT `UNKNOWN` | `FULL` | `UNKNOWN`/`PARTIAL` / `FULL` / `NOT_REQUIRED` |
 | restoration_scope_detail | VARCHAR | | NULLABLE | `"바닥재·전기배선까지 철거 필요"` | nullable, 구체적인 원상복구 범위 자연어 기록 |
 | demolition_required | ENUM | | NOT NULL, DEFAULT `UNKNOWN` | `REQUIRED` | `UNKNOWN`/`REQUIRED` / `NOT_REQUIRED` |
+| support_approved | BOOLEAN | | NULLABLE | `true` | 사장님이 알려 준 점포철거비 **1차 적격심사** 결과. `true` 통과 / `false` 탈락 / `null` 아직 모름. AI가 판단한 지원 자격이 아니고, 뒤의 정산 검토·비용 지급과도 다름 |
+| support_approved_at | DATETIME | | NULLABLE | `2026-10-22 15:00:00` | 심사 결과를 마지막으로 알려 준 시각(KST). 기록 탭의 "승인 결과를 알려주셨어요" 시각 |
 | planned_closure_date | DATE | | NULLABLE | `2026-12-31` | nullable |
 | planned_closure_month | VARCHAR(7) | | NULLABLE | `2026-12` | 날짜를 못 정했을 때의 예상 달. `planned_closure_date`와 같이 오면 422로 거절한다. 가게 등록 때만 받고 AI 대화로는 저장하지 않는다 |
-| completed_at | DATETIME | | NULLABLE | `NULL` | nullable |
+| completed_at | DATETIME | | NULLABLE | `NULL` | 폐업 정리를 마친 시각(KST). 진행 중이면 NULL |
+| closure_date | DATE | | NULLABLE | `2026-10-31` | 통합 폐업 신고 화면에서 확인한 **실제 폐업일**. 가입 때 예상일(`planned_closure_date`)과 별개. AI 판단에 쓰지 않음 |
+| closure_reason | ENUM | | NULLABLE | `BUSINESS_SLUMP` | 폐업 사유. `BUSINESS_SLUMP`(사업 부진) / `PERSONAL`(개인 사정) / `OTHER`(기타) |
+| road_address | VARCHAR(200) | | NULLABLE | `"서울 마포구 망원로 52 (망원동)"` | 가게 도로명 주소(주소 찾기로 고름). AI에 넘기지 않음 |
+| address_detail | VARCHAR(100) | | NULLABLE | `"1층"` | 상세 주소. 없을 수 있음 |
+| deposit_return_result | ENUM | | NULLABLE | `PARTIAL` | 보증금 반환 결과. `FULL`(다 받음) / `PARTIAL`(일부 빼고 받음) / `NONE`(아직 못 받음). 리본은 기록만 하고 판단하지 않음 |
 | created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-09-01 10:24:00` | |
 | updated_at | DATETIME | | NOT NULL, ON UPDATE CURRENT_TIMESTAMP | `2026-09-10 09:11:00` | |
 
@@ -93,6 +100,29 @@ CASE의 필드 단위 변경 이력 (감사 추적용). `CASE_HISTORY`(발화·�
 | created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP ⚠️ 추정 | `2026-09-10 09:11:00` | |
 
 ---
+
+### CASE_CHECKLIST
+
+사장님이 직접 체크한 로드맵 항목의 **지금 상태**. 줄이 있으면 체크됨, 체크를 풀면 줄을 지운다. 체크하고 푼 이력은 `CASE_CHECKLIST_HISTORY`에 따로 남는다. 체크할 수 있는 항목은 AI 로드맵(`app/agent/roadmap.py`)의 `CHECKLIST_IDS`다. 공식 절차 진행 상태는 `CASE_PROCEDURE_STEP`이 따로 갖는다.
+
+| 컬럼 | 타입 | 키 | 제약조건 | 예시 값 | 설명 |
+|---|---|---|---|---|---|
+| id | BIGINT | PK | NOT NULL, AUTO_INCREMENT | 1 | |
+| case_id | BIGINT | FK | NOT NULL, UNIQUE(case_id, task_id) | 1 | |
+| task_id | VARCHAR(50) | | NOT NULL | `"dispose_stock"` | 체크한 항목 |
+| created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-10-30 10:00:00` | 체크한 시각 |
+
+### CASE_CHECKLIST_HISTORY
+
+로드맵 항목을 체크하고 푼 이력. 상태가 실제로 바뀔 때만 한 줄씩 쌓고 지우지 않는다(같은 요청을 두 번 보내면 쌓이지 않는다). 기록 탭이 읽는다.
+
+| 컬럼 | 타입 | 키 | 제약조건 | 예시 값 | 설명 |
+|---|---|---|---|---|---|
+| id | BIGINT | PK | NOT NULL, AUTO_INCREMENT | 1 | |
+| case_id | BIGINT | FK | NOT NULL | 1 | |
+| task_id | VARCHAR(50) | | NOT NULL | `"dispose_stock"` | 체크하거나 푼 항목 |
+| completed | BOOLEAN | | NOT NULL | `true` | `true` 체크함 / `false` 체크를 풂 |
+| created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-10-30 10:00:00` | 체크하거나 푼 시각 |
 
 ## 2. 판단 로그 & 블로커
 
@@ -120,6 +150,7 @@ CASE에 대한 발화·이벤트 원본 이력.
 | case_id | BIGINT | FK | NOT NULL | 1 | |
 | raw_input | TEXT | | NULLABLE | `"임대인이랑 얘기 끝났어요, 다음 달까지 나가기로 했어요"` | 입력 원문. `USER_INPUT`·`CASE_CREATED`는 사장님이 쓴 문장이 항상 들어가고, `SYSTEM_BATCH`는 배치가 에이전트에 전달한 지시문이 들어갈 수 있다. 문장 없이 고른 값만 있는 `CONFLICT_DECISION`만 NULL |
 | conflict_snapshot | JSON | | NULLABLE | `{"snapshot_id": "…", "facts": […]}` | 충돌이 났을 때의 Case 상태 전체. 사장님이 고른 뒤 Agent에 **그대로** 돌려줘야 한다 — Agent가 받은 것이 자기가 준 것과 같은지 대조하고 다르면 거절한다. 다시 만들어 넘기면 안 된다. 충돌을 낸 판단에만 값이 있다 |
+| retained_info_result | JSON | | NULLABLE | `{"meta": {…}, "output": {…}, "input": {…}}` | 같은 글에서 충돌이 **아니었던** 사실·진행 보고. 확인 뒤 재판단에 그대로 돌려줘야 반영된다 — Agent는 원문을 다시 읽지 않으므로 빠뜨리면 사장님이 함께 말한 내용이 사라진다. 충돌을 낸 판단에만 값이 있다 |
 | source | ENUM | | NOT NULL | `USER_INPUT` | `USER_INPUT` / `SYSTEM_BATCH` / `CASE_CREATED` / `CONFLICT_DECISION` — `CASE_CREATED`는 Case 생성 직후 첫 Blocker/Next Action 판단, `CONFLICT_DECISION`은 충돌 확인(`POST /cases/results/decision`)에서 고른 결정에 대한 판단 |
 | judgment_status | ENUM | | NOT NULL | `PENDING` | 판단 진행 상태. 입력을 받으면 `PENDING`으로 시작해 판단이 끝나면 갱신된다 — `PENDING` / `DONE` / `NEEDS_MORE_INFO` / `CONFLICT` / `FAILED` |
 | next_action | TEXT | | NULLABLE | `"부가가치세 확정신고를 진행하세요"` | 다음 액션 제안, 판단이 발생한 경우에만 채워짐 (AI 문장은 길이 제한이 없어 TEXT) |
@@ -131,6 +162,7 @@ CASE에 대한 발화·이벤트 원본 이력.
 | recovery_action_code | ENUM | | NULLABLE | `RETRY` | 판단이 실패했을 때 화면이 안내할 다음 행동 — `RETRY` / `RESUBMIT_INPUT` / `CONTACT_SUPPORT` / `NONE`. 실패가 아니면 NULL |
 | requested_field_paths | JSON | | NULLABLE | `["restoration_scope"]` | 판단을 멈추게 한 CASE 필드 목록. 실패가 아니면 NULL |
 | retryable | BOOLEAN | | NULLABLE | `true` | 재시도하면 성공할 가능성이 있는지. 실패가 아니면 NULL |
+| judged_at | DATETIME | | NULLABLE | `2026-10-17 14:02:11` | 판단이 끝난 시각. 판단 중(`PENDING`)이면 NULL. 기록 탭의 "리본이 한 일" 시각 |
 | priority_blocker_id | BIGINT | FK | NULLABLE | `NULL` | 이 시점에 최우선인 블로커 참조 |
 | created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-09-10 09:10:00` | |
 

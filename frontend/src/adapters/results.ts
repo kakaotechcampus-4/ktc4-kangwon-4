@@ -1,6 +1,7 @@
 import type { Step, StepStatus } from '../components/ui/ProcessSteps'
 import { factLabelOf, fieldLabelOf, FRANCHISE_OPTIONS, LEASE_OPTIONS } from '../lib/caseOptions'
 import type {
+  CaseConflictsDecisionRequest,
   CaseResultsEntryResponse,
   CaseResultsSubmitResponse,
   LeaseStatus,
@@ -9,6 +10,7 @@ import type {
 import type {
   ConfirmView,
   ConflictItem,
+  ConflictSide,
   FactChange,
   ResultsEntry,
   SubmitOutcome,
@@ -164,6 +166,30 @@ export function toConflicts(value: unknown): ConflictItem[] | null {
   return conflicts
 }
 
+/**
+ * 충돌마다 고른 쪽을 결정 요청 모양으로. 하나라도 고르지 않았으면 `null`.
+ *
+ * 서버는 남은 충돌을 전부 받아야 판단을 다시 돌린다(일부만이면 422). 화면이 이미 다 고르기
+ * 전에는 버튼을 잠그지만, 보내는 쪽에서 한 번 더 걸러 반쪽 요청이 나가지 않게 한다.
+ *
+ * 항목은 화면 열쇠가 아니라 서버 번호(`referenceId`)로 가리킨다.
+ */
+export function toDecisionRequest(
+  conflicts: ConflictItem[],
+  choices: Record<string, ConflictSide>,
+): CaseConflictsDecisionRequest | null {
+  const decisions: CaseConflictsDecisionRequest['decisions'] = []
+  for (const conflict of conflicts) {
+    const side = choices[conflict.key]
+    if (side === undefined) return null
+    decisions.push({
+      conflict_reference_id: conflict.referenceId,
+      side: side === 'INCOMING' ? 'PROPOSED' : 'STORED',
+    })
+  }
+  return { decisions }
+}
+
 /** 충돌 확인 화면 데이터. 사장님이 한 말이나 충돌 목록 중 하나라도 없으면 `null` */
 function toConfirmView(rawInput: unknown, conflicts: unknown): ConfirmView | null {
   const items = toConflicts(conflicts)
@@ -301,14 +327,20 @@ export function toAnswerInput(pairs: AnswerPair[]): string {
  *   DONE     반영된 결과가 왔다
  *
  * 둘째·셋째 줄이 서버 안에서 언제 갈리는지는 알 수 없어, 결과가 오면 함께 끝난다.
+ *
+ * 충돌 확인에서 보낸 것(`DECISION`)은 둘째 줄만 다르다. 글을 정리하는 것이 아니라 고른 쪽을
+ * 반영하는 판단이라서다. 기다리는 사건은 같아서 줄이 끝나는 때도 같다.
  */
-export function toResultSteps(stage: 'SENDING' | 'WAITING' | 'DONE'): Step[] {
+export function toResultSteps(stage: 'SENDING' | 'WAITING' | 'DONE', sent: 'RESULT' | 'DECISION' = 'RESULT'): Step[] {
   const status = (sending: StepStatus, waiting: StepStatus): StepStatus =>
     stage === 'DONE' ? 'done' : stage === 'WAITING' ? waiting : sending
 
   return [
     { label: '보냈어요', status: status('run', 'done') },
-    { label: '리본이 내용을 정리하고 있어요', status: status('wait', 'run') },
+    {
+      label: sent === 'DECISION' ? '고르신 내용을 반영하고 있어요' : '리본이 내용을 정리하고 있어요',
+      status: status('wait', 'run'),
+    },
     { label: '다음 할 일 다시 정하기', status: status('wait', 'wait') },
   ]
 }

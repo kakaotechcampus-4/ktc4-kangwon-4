@@ -1,6 +1,7 @@
+from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import JSON, BigInteger, Boolean, Column, Enum, ForeignKey, String, Text
+from sqlalchemy import JSON, BigInteger, Boolean, Column, DateTime, Enum, ForeignKey, String, Text
 from sqlmodel import Field, Relationship
 
 from app.be.models.mixins import CreatedAtMixin
@@ -22,6 +23,15 @@ class CaseHistory(CreatedAtMixin, table=True):
             "충돌이 났을 때의 Case 상태 전체. 사용자가 고른 뒤 AI에 그대로 돌려줘야 한다"
             " — AI가 받은 것이 자기가 준 것과 같은지 대조하고, 다르면 STALE로 거절한다."
             " 충돌을 낸 판단에만 값이 있다."
+        ),
+    )
+    retained_info_result: dict | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+        description=(
+            "같은 글에서 충돌이 아니었던 사실·진행 보고. 확인 뒤 재판단에 그대로 돌려줘야"
+            " 반영된다 — AI는 원문을 다시 읽지 않으므로, 이걸 빠뜨리면 사장님이 함께 말한"
+            " 내용이 사라진다. 충돌을 낸 판단에만 값이 있고, 그 전 이력은 NULL이다."
         ),
     )
     source: str = Field(
@@ -88,6 +98,11 @@ class CaseHistory(CreatedAtMixin, table=True):
         default=None,
         sa_column=Column(Boolean, nullable=True),
         description="재시도하면 성공할 가능성이 있는지. 실패가 아니면 NULL",
+    )
+    judged_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime, nullable=True),
+        description="판단이 끝난 시각. 판단 중(PENDING)이면 NULL",
     )
     priority_blocker_id: int | None = Field(
         default=None, sa_column=Column(BigInteger, ForeignKey("blocker.id", use_alter=True, name="fk_case_history_priority_blocker"), nullable=True)

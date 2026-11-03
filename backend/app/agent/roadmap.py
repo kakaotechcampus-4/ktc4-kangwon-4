@@ -265,7 +265,11 @@ def build_roadmap(request: RoadmapInput, *, procedure_bindings: ProcedureBinding
                     value = facts.get("planned_closure_date")
                 else:
                     value = request.support_approved
-                status = "COMPLETED" if value is not None else "NEEDS_CONFIRMATION"
+                status = (
+                    "COMPLETED" if value is not None
+                    else "IN_PROGRESS" if key == "closure_date" and facts.get("planned_closure_month")
+                    else "NEEDS_CONFIRMATION"
+                )
             elif key == "document_check":
                 documents = request.documents
                 check = documents.document_check if documents else None
