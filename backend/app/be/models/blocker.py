@@ -11,6 +11,8 @@ class Blocker(TimestampMixin, table=True):
 
     id: int | None = Field(default=None, sa_column=Column(BigInteger, primary_key=True, autoincrement=True))
     case_id: int = Field(sa_column=Column(BigInteger, ForeignKey("case.id"), nullable=False))
+    # Agent의 후보 식별자. 예전 판단에는 없으므로 NULL을 유지하고 임의로 만들지 않는다.
+    candidate_id: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
 
     created_from_case_history_id: int = Field(
         sa_column=Column(
