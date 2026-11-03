@@ -149,15 +149,17 @@ def check_settlement(case: DocumentContext, service: DocumentService, *, progres
             issue("APPLICANT_UNCONFIRMED", "신청인과 보낸 사람·예금주를 확인해 주세요.")
         elif identity(value) != identity(case.applicant_name):
             issue("APPLICANT_MISMATCH", "신청인과 보낸 사람 또는 예금주가 다릅니다.")
-    if case.business_name:
-        buyers = {identity(value) for value in (case.business_name, case.applicant_name) if value}
-        for kind in (DocumentKind.CONSTRUCTION_STATEMENT, DocumentKind.TAX_INVOICE):
-            if kind not in fields:
-                continue
-            buyer = fields.get(kind, {}).get("buyer")
-            if not buyer:
-                issue("BUYER_UNCONFIRMED", "서류의 공급받는 자를 확인해 주세요.", by_kind[kind])
-            elif identity(buyer) not in buyers:
+    buyers = {identity(value) for value in (case.business_name, case.applicant_name) if value}
+    for kind in (DocumentKind.CONSTRUCTION_STATEMENT, DocumentKind.TAX_INVOICE):
+        if kind not in fields:
+            continue
+        buyer = fields[kind].get("buyer")
+        if not buyer:
+            issue("BUYER_UNCONFIRMED", "서류의 공급받는 자를 확인해 주세요.", by_kind[kind])
+        elif identity(buyer) not in buyers:
+            if not case.business_name:
+                issue("BUYER_UNCONFIRMED", "서류의 공급받는 자와 가게·신청인의 관계를 확인해 주세요.", by_kind[kind])
+            else:
                 issue("BUYER_MISMATCH", "서류의 공급받는 자와 확인한 가게·신청인 이름이 다릅니다.", by_kind[kind])
     certificate = fields.get(DocumentKind.CLOSURE_CERTIFICATE, {})
     actual_date = certificate.get("closure_date")
