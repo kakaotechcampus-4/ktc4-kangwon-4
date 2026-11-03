@@ -365,6 +365,9 @@ CASE와 SUPPORT_ITEM 간 자격 비교 결과.
 Agent 판단의 근거 출처, CASE 필드 값 충돌 확인, Agent의 판단·리뷰 결과를 기록하는 도메인입니다.
 
 ```
+OFFICIAL_DOCUMENT (공식 자료 본문 한 벌, Case 무관)
+   │
+   ▼
 EVIDENCE ◄──┬── EVIDENCE_LINEAGE (근거 간 파생관계, N:M, EVIDENCE.id 참조)
             │
 CASE ──────┴── CONFLICT_REFERENCE (필드값 충돌 1회성 참조)
@@ -385,12 +388,28 @@ Agent 판단의 근거가 되는 출처 기록.
 | source_ref | VARCHAR | | NOT NULL ⚠️ 추정 | `"희망리턴패키지 공고문 §3"` | 출처 참조 |
 | source_version | VARCHAR | | NULLABLE | `"2026-08판"` | 출처 버전 (nullable) |
 | locator | VARCHAR | | NULLABLE ⚠️ 추정 | `"3페이지 2단락"` | 출처 내 위치 |
-| excerpt | TEXT | | NULLABLE ⚠️ 추정 | `"임차 매장만 지원 대상..."` | 발췌 내용 |
+| excerpt | TEXT | | NULLABLE ⚠️ 추정 | `"임차 매장만 지원 대상..."` | 발췌 내용. 공식 자료면 비어 있고 본문은 `OFFICIAL_DOCUMENT`에 있다 |
+| official_document_id | BIGINT | FK | NULLABLE | 1 | 공식 자료일 때 본문이 있는 `OFFICIAL_DOCUMENT.id`. 사장님 입력 등 그 밖의 근거는 NULL |
 | published_at | DATETIME | | NULLABLE | `NULL` | 원본 게시 시각 (nullable) |
 | retrieved_at | DATETIME | | NOT NULL ⚠️ 추정 | `2026-09-10 10:00:00` | 수집 시각 |
 | freshness_status | ENUM | | NOT NULL ⚠️ 추정 | `CURRENT` | `CURRENT` / `STALE` / `UNKNOWN` |
 | content_hash | VARCHAR | | NULLABLE | `"a1b2c3..."` | 내용 해시 (nullable, 변경 감지용) |
 | created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP ⚠️ 추정 | `2026-09-10 10:00:00` | (updated_at 없음 — ERD 확정) |
+
+### OFFICIAL_DOCUMENT
+
+공식 자료(국세청 안내문, 지원사업 공고 등) 본문. 같은 문서를 Case마다 `EVIDENCE`에 복사하지 않고 여기 한 벌만 두며, `EVIDENCE.official_document_id`가 가리킨다. 문서 한 건의 한 버전마다 한 줄이고, 한 번 적으면 고치지 않는다. 버전이 바뀌면 새 줄을 넣어서, 예전 Case는 예전 줄을 계속 가리킨다(그 Case가 무엇을 보고 판단했는지 남김).
+
+| 컬럼 | 타입 | 키 | 제약조건 | 예시 값 | 설명 |
+|---|---|---|---|---|---|
+| id | BIGINT | PK | NOT NULL, AUTO_INCREMENT | 1 | 내부 식별자 |
+| source_ref | VARCHAR(500) | UK(복합) | NOT NULL | `"https://www.nts.go.kr/..."` | 출처 참조(원문 URL) |
+| source_version | VARCHAR(100) | UK(복합) | NOT NULL | `"2026-08판"` | 출처 버전. `(source_ref, source_version)`이 같은 줄은 하나만 둔다 |
+| excerpt | TEXT | | NOT NULL | `"폐업신고는 사업장 관할 세무서에..."` | 본문 |
+| content_hash | VARCHAR(64) | | NOT NULL | `"a1b2c3..."` | 본문 해시. Case 쪽 값과 대조한다 |
+| published_at | DATETIME | | NULLABLE | `NULL` | 원본 게시 시각 |
+| retrieved_at | DATETIME | | NOT NULL | `2026-09-10 10:00:00` | 수집 시각 |
+| created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-09-10 10:00:00` | |
 
 ### EVIDENCE_LINEAGE
 
