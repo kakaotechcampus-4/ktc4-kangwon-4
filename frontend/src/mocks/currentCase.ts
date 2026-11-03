@@ -26,6 +26,12 @@ const facts: Fact[] = [
 ]
 
 /**
+ * 판단 상태와 상관없이 같은 가게 쪽 값. 폐업 신고·보증금은 저장 전으로 둔다 — 할 일 화면이
+ * 지금처럼 빈 칸에서 열린다. 채워 열린 모양은 테스트가 본다.
+ */
+const store = { facts, closureReport: null, depositReturn: null }
+
+/**
  * 판단이 끝난 상태.
  *
  * `blocker` 와 다음 할 일이 반드시 함께 있다 — 서버가 둘 중 하나라도 비면 `DONE` 으로
@@ -36,7 +42,7 @@ const facts: Fact[] = [
  * 화면이 어떻게 보이는지 확인할 길이 필요하다.
  */
 export const doneCase: CurrentCaseView = {
-  facts,
+  ...store,
   judgment: {
     status: 'DONE',
     blocker: {
@@ -54,7 +60,7 @@ export const doneCase: CurrentCaseView = {
 
 /** Case 를 막 만들어 판단이 아직 돌고 있는 상태. 생성 직후에는 반드시 여기를 거친다 */
 export const pendingCase: CurrentCaseView = {
-  facts,
+  ...store,
   judgment: { status: 'PENDING' },
 }
 
@@ -65,7 +71,7 @@ export const pendingCase: CurrentCaseView = {
  * 사장님이 임대인에게 물을 말이라 서로 다르다.
  */
 export const moreInfoCase: CurrentCaseView = {
-  facts,
+  ...store,
   judgment: {
     status: 'NEEDS_MORE_INFO',
     questions: [
@@ -85,13 +91,13 @@ export const moreInfoCase: CurrentCaseView = {
  * 화면을 미리 만들어 둘 성질의 것이 아니고**, 어댑터 테스트가 본다.
  */
 export const judgmentFailedCase: CurrentCaseView = {
-  facts,
+  ...store,
   judgment: { status: 'FAILED', notice: { kind: 'RETRY_AVAILABLE' } },
 }
 
 /** 다시 알아야 할 칸을 서버가 짚어준 실패. 이 화면만 `WARNING` 톤이다 */
 export const judgmentNeedsDetailCase: CurrentCaseView = {
-  facts,
+  ...store,
   judgment: {
     status: 'FAILED',
     notice: { kind: 'NEEDS_DETAIL', fields: ['원상복구 범위', '철거 필요 여부'], partial: false },
@@ -100,13 +106,13 @@ export const judgmentNeedsDetailCase: CurrentCaseView = {
 
 /** 사장님이 하실 수 있는 것이 없고 서비스가 들여다봐야 하는 실패 */
 export const judgmentServiceSideCase: CurrentCaseView = {
-  facts,
+  ...store,
   judgment: { status: 'FAILED', notice: { kind: 'SERVICE_SIDE' } },
 }
 
 /** 서버가 **할 수 있는 복구 행동이 없다고 말한** 실패 */
 export const judgmentNoRecoveryCase: CurrentCaseView = {
-  facts,
+  ...store,
   judgment: { status: 'FAILED', notice: { kind: 'NO_RECOVERY' } },
 }
 
@@ -117,7 +123,7 @@ export const judgmentNoRecoveryCase: CurrentCaseView = {
  * 말한다(#66).
  */
 export const judgmentConflictCase: CurrentCaseView = {
-  facts,
+  ...store,
   judgment: { status: 'CONFLICT' },
 }
 
@@ -128,6 +134,6 @@ export const judgmentConflictCase: CurrentCaseView = {
  * 무엇을 보여줄지가 여기서 확인된다.
  */
 export const unrecognizedCase: CurrentCaseView = {
-  facts,
+  ...store,
   judgment: { status: 'UNRECOGNIZED' },
 }

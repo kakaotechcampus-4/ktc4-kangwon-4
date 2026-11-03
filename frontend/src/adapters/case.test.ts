@@ -160,6 +160,53 @@ const NEXT_ACTION = {
   questions_to_ask: ['어디까지 원래대로 돌려놔야 하나요?', '철거까지 해야 하나요?'],
 }
 
+/**
+ * 폐업 신고·보증금 화면을 채워 열 값(#168). 서버가 폐업일·사유·도로명 주소를 한 번에 저장하므로,
+ * 셋 중 하나라도 없으면 저장된 적 없는 조합이라 빈 칸에서 열어야 한다.
+ */
+describe('toCurrentCaseView 저장해 둔 폐업 신고·보증금', () => {
+  const SAVED = {
+    ...SERVER_CASE,
+    closure_date: '2026-10-31',
+    closure_reason: 'PERSONAL',
+    road_address: '서울 마포구 망원로 52 (망원동)',
+    address_detail: '1층',
+    deposit_return_result: 'PARTIAL',
+  } satisfies CaseResponse
+  const viewOf = (serverCase: CaseResponse) => toCurrentCaseView(envelopeOf({ judgment_status: 'PENDING' }), serverCase)
+
+  it('저장 전이면 둘 다 비운다', () => {
+    const view = viewOf(SERVER_CASE)
+    expect(view.closureReport).toBeNull()
+    expect(view.depositReturn).toBeNull()
+  })
+
+  it('저장해 둔 값을 화면 모양으로 옮긴다', () => {
+    const view = viewOf(SAVED)
+    expect(view.closureReport).toEqual({
+      closureDate: '2026-10-31',
+      closureReason: 'PERSONAL',
+      roadAddress: '서울 마포구 망원로 52 (망원동)',
+      addressDetail: '1층',
+    })
+    expect(view.depositReturn).toBe('PARTIAL')
+  })
+
+  it.each(['closure_date', 'closure_reason', 'road_address'] as const)('%s 가 없으면 신고 정보를 비운다', (field) => {
+    expect(viewOf({ ...SAVED, [field]: null }).closureReport).toBeNull()
+  })
+
+  it('상세 주소는 비어 있어도 신고 정보로 본다', () => {
+    expect(viewOf({ ...SAVED, address_detail: null }).closureReport?.addressDetail).toBeNull()
+  })
+
+  it('모르는 값이면 고른 것이 없는 것으로 둔다', () => {
+    const view = viewOf({ ...SAVED, closure_reason: 'RETIRED', deposit_return_result: 'MAYBE' } as unknown as CaseResponse)
+    expect(view.closureReport).toBeNull()
+    expect(view.depositReturn).toBeNull()
+  })
+})
+
 describe('toCurrentCaseView', () => {
   it('가게 정보는 판단 상태와 무관하게 담는다', () => {
     const view = toCurrentCaseView(envelopeOf({ judgment_status: 'PENDING' }), SERVER_CASE)
