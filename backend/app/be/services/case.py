@@ -363,6 +363,10 @@ def submit_case_results(
     if case is None:
         raise HTTPException(status_code=404, detail="Case를 찾을 수 없습니다.")
 
+    if case.case_status == "COMPLETED":
+        # AI는 진행 중인 Case만 판단한다. 완료된 Case로 판단을 돌리면 AI 입력 검사에서 거절된다.
+        raise HTTPException(status_code=409, detail="폐업 정리를 마친 Case입니다.")
+
     if conflict_reference_crud.get_pending_conflicts_by_case_id(session, case.id):
         raise HTTPException(status_code=409, detail="확인 대기 중인 충돌이 있습니다.")
 
@@ -404,6 +408,10 @@ def submit_case_conflicts_decision(
     case = case_crud.lock_case_by_member_id(session, member_id)
     if case is None:
         raise HTTPException(status_code=404, detail="Case를 찾을 수 없습니다.")
+
+    if case.case_status == "COMPLETED":
+        # AI는 진행 중인 Case만 판단한다. 완료된 Case로 판단을 돌리면 AI 입력 검사에서 거절된다.
+        raise HTTPException(status_code=409, detail="폐업 정리를 마친 Case입니다.")
 
     pending_conflicts = conflict_reference_crud.get_pending_conflicts_by_case_id(session, case.id)
     if not pending_conflicts:
@@ -525,6 +533,10 @@ def get_case_results_submit_status(
     )
 
 
+# 이 항목을 체크하면 폐업 정리를 마친 것으로 본다(시안 closed 화면).
+_CLOSING_TASK_ID = "vat_submission"
+
+
 def update_case_checklist(
     session: Session, member_id: int, task_id: str, completed: bool
 ) -> CaseChecklistResponse:
@@ -552,6 +564,12 @@ def update_case_checklist(
     case_checklist_crud.create_case_checklist_history(
         session, CaseChecklistHistory(case_id=case.id, task_id=task_id, completed=completed)
     )
+    if task_id == _CLOSING_TASK_ID:
+        # 시안: 홈 "홈택스에서 부가세 신고를 마쳐주세요" → [신고했어요] → 폐업 정리 완료.
+        # 실수로 눌렀다가 풀면 다시 진행 중으로 돌린다. 완료 뒤에 남는 할 일(종합소득세 등)은
+        # 로드맵에 그대로 두고 완료로 본다.
+        case.case_status = "COMPLETED" if completed else "IN_PROGRESS"
+        case.completed_at = kst_now() if completed else None
     session.commit()
     return CaseChecklistResponse(task_id=task_id, completed=completed)
 
