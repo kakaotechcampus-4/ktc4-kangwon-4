@@ -86,7 +86,7 @@ class StoredProcedureLookupTool:
                 )
             evidence = candidates[0]
             freshness = record.freshness(request.as_of)
-            if record.reviewed_by is None or (
+            if not record.is_reviewed or (
                 evidence.freshness_status == FreshnessStatus.CURRENT
                 and freshness != FreshnessStatus.CURRENT
             ):

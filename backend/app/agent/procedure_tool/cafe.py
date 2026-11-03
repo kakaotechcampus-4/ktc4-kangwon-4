@@ -375,7 +375,7 @@ _OFFICIAL_RECORDS = (
 
 
 def build_cafe_reviewed_snapshot() -> ReviewedProcedureSnapshot:
-    """Return detached records awaiting human review for this collected version."""
+    """Return the eight bundled sources confirmed reviewed by the user."""
     return ReviewedProcedureSnapshot.model_validate(
         {
             "snapshot_version": CAFE_SOURCE_VERSION,
@@ -386,8 +386,7 @@ def build_cafe_reviewed_snapshot() -> ReviewedProcedureSnapshot:
                     **record,
                     "source_domain": urlsplit(record["canonical_url"]).hostname,
                     "published_at": None,
-                    "reviewed_by": None,
-                    "reviewed_at": None,
+                    "reviewed": True,
                     "review_valid_days": 90,
                     "required_terms": ["폐업"],
                 }

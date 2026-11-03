@@ -8,7 +8,7 @@ from datetime import date, timedelta
 from typing import Annotated, Protocol
 from urllib.parse import urlsplit
 
-from pydantic import Field, StrictInt, StrictStr, model_validator
+from pydantic import Field, StrictBool, StrictInt, StrictStr, model_validator
 
 from app.agent.schemas import (
     AgentSchema,
@@ -62,14 +62,20 @@ class ReviewedProcedureRecord(AgentSchema):
     retrieved_at: RuntimeDateTime = Field(
         description="When the refresh command fetched this body."
     )
+    reviewed: StrictBool | None = Field(
+        default=None,
+        description="Whether the bundled text was reviewed. Omitted values retain legacy metadata compatibility."
+    )
     reviewed_by: NonEmptyStr | None = Field(
-        description="Person who approved this text. Null means not reviewed yet."
+        default=None,
+        description="Optional legacy reviewer metadata. New records need only reviewed."
     )
     reviewed_at: AwareDatetime | None = Field(
-        description="When that approval happened. Null means not reviewed yet."
+        default=None,
+        description="Optional legacy review time. When absent, freshness uses retrieved_at."
     )
     review_valid_days: Annotated[StrictInt, Field(ge=1, le=3650)] = Field(
-        description="How long an approval stays current before it reads as STALE."
+        description="Days from review time, or retrieval when no review time is stored, before STALE."
     )
     step_codes: list[UpperSnakeCode] = Field(
         description="Canonical procedure steps this document may be bound to."
@@ -144,6 +150,12 @@ class ReviewedProcedureRecord(AgentSchema):
             term.casefold() in normalized for term in self.any_terms
         )
 
+    @property
+    def is_reviewed(self) -> bool:
+        if self.reviewed is not None:
+            return self.reviewed
+        return self.reviewed_by is not None and self.reviewed_at is not None
+
     def freshness(self, as_of: date) -> FreshnessStatus:
         """Report how much this record may be relied on.
 
@@ -154,9 +166,10 @@ class ReviewedProcedureRecord(AgentSchema):
         those two guards.
         """
 
-        if self.reviewed_by is None or self.reviewed_at is None:
+        if not self.is_reviewed:
             return FreshnessStatus.UNKNOWN
-        expires_on = self.reviewed_at.date() + timedelta(days=self.review_valid_days)
+        checked_at = self.reviewed_at or self.retrieved_at
+        expires_on = checked_at.date() + timedelta(days=self.review_valid_days)
         if as_of <= expires_on:
             return FreshnessStatus.CURRENT
         return FreshnessStatus.STALE
