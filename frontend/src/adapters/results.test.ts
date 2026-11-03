@@ -5,7 +5,9 @@ import {
   toAnswerInput,
   toChanges,
   toConflicts,
+  toDecisionRequest,
   toResultsEntry,
+  toResultSteps,
   toSubmitOutcome,
   toValueLabel,
 } from './results'
@@ -135,6 +137,31 @@ describe('toConflicts', () => {
     ['칸 이름이 없다', [{ id: 1, stored_value: 'OWNED', proposed_value: 'LEASED_PAID' }]],
   ])('%s 면 통째로 버린다', (_, value) => {
     expect(toConflicts(value)).toBeNull()
+  })
+})
+
+const CONFLICT_ITEMS = toConflicts([
+  { id: 4, field: 'lease_status', stored_value: 'OWNED', proposed_value: 'LEASED_PAID' },
+  { id: 7, field: 'demolition_required', stored_value: 'NOT_REQUIRED', proposed_value: 'REQUIRED' },
+])!
+
+/**
+ * 고른 쪽이 뒤집혀 나가면 사장님이 버린 값이 Case에 저장된다. 되돌릴 수 있는 자리는
+ * 이 화면뿐이라(`rollback` 없음) 여기서 틀리면 고칠 길이 없다.
+ */
+describe('toDecisionRequest', () => {
+  it('충돌마다 서버 번호와 고른 쪽을 서버 말로 싣는다', () => {
+    expect(toDecisionRequest(CONFLICT_ITEMS, { 'conflict-4': 'INCOMING', 'conflict-7': 'STORED' })).toEqual({
+      decisions: [
+        { conflict_reference_id: 4, side: 'PROPOSED' },
+        { conflict_reference_id: 7, side: 'STORED' },
+      ],
+    })
+  })
+
+  /** 서버는 남은 충돌을 전부 받아야 한다. 반쪽 요청은 422로 돌아온다 */
+  it('하나라도 고르지 않았으면 만들지 않는다', () => {
+    expect(toDecisionRequest(CONFLICT_ITEMS, { 'conflict-4': 'INCOMING' })).toBeNull()
   })
 })
 
@@ -384,5 +411,22 @@ describe('toAnswerInput', () => {
         { question: '프랜차이즈 가게인가요?', answer: '   ' },
       ]),
     ).toBe('[리본이 물어본 것] 직원이 몇 명인가요?\n[사장님 답] 2명이요')
+  })
+})
+
+/**
+ * 충돌 확인에서 보낸 것은 글을 정리하는 판단이 아니다. 문구는 달라도 기다리는 사건은 같아서,
+ * 줄이 끝나는 때까지 달라지면 같은 기다림이 다른 속도로 보인다.
+ */
+describe('toResultSteps', () => {
+  it('충돌 결정은 둘째 줄 문구만 다르고 끝나는 때는 같다', () => {
+    for (const stage of ['SENDING', 'WAITING', 'DONE'] as const) {
+      const result = toResultSteps(stage)
+      const decision = toResultSteps(stage, 'DECISION')
+
+      expect(decision.map((step) => step.status)).toEqual(result.map((step) => step.status))
+      expect(decision[1].label).toBe('고르신 내용을 반영하고 있어요')
+      expect([decision[0].label, decision[2].label]).toEqual([result[0].label, result[2].label])
+    }
   })
 })

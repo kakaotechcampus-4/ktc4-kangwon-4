@@ -1,7 +1,8 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { RouterProvider, createMemoryRouter } from 'react-router'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { CaseResultsSubmitResponse } from '../types/api'
 import type { ConfirmView } from '../types/view'
 import { ConfirmChangePage } from './ConfirmChangePage'
 
@@ -39,13 +40,13 @@ const TWO_CONFLICTS: ConfirmView = {
  * 앞뒤 화면을 실제 경로로 함께 등록한다. 히스토리가 어떻게 쌓이는지를 보는 테스트가
  * 있어서 이 화면만 띄워서는 확인할 수 없다. `/results`에서 넘어온 상황을 흉내 낸다.
  *
- * 기본은 Mock 으로 연다. 실서버에서는 아직 보낼 곳이 없어 진행 버튼이 잠기므로,
- * 진행한 뒤를 보는 테스트는 Mock 경로로만 확인할 수 있다.
+ * 기본은 Mock 으로 연다. 서버로 보내는 테스트는 `search` 를 비워 연다(아래 "서버").
  */
 function renderWith(view: ConfirmView | null, search = '?mock=conflict') {
   const router = createMemoryRouter(
     [
       { path: '/', element: <p>진입 분기</p> },
+      { path: '/login', element: <p>로그인</p> },
       { path: '/case', element: <p>현재 Case</p> },
       { path: '/results', element: <p>결과 입력</p> },
       { path: '/confirm', element: <ConfirmChangePage /> },
@@ -149,6 +150,10 @@ describe('ConfirmChangePage', () => {
       vi.runAllTimers()
     })
     expect(router.state.location.pathname).toBe('/replan')
+    // 반영 결과가 고른 것을 반영했다고 말하게 하는 표시를 붙이고, Mock 표시는 그대로 이어간다
+    const params = new URLSearchParams(router.state.location.search)
+    expect(params.get('from')).toBe('confirm')
+    expect(params.get('mock')).toBe('conflict')
 
     await act(async () => {
       await router.navigate(-1)
@@ -171,13 +176,111 @@ describe('ConfirmChangePage', () => {
   })
 })
 
+
+type Answer = () => Response
+
+const json =
+  (body: unknown, code = 200): Answer =>
+  () =>
+    new Response(JSON.stringify(body), { status: code })
+
+const status =
+  (code: number): Answer =>
+  () =>
+    new Response(null, { status: code })
+
+const offline: Answer = () => {
+  throw new TypeError('Failed to fetch')
+}
+
 /**
- * 충돌 결정을 받는 API(#108)가 머지 전이다. 실제 충돌은 보여주고 고르게 하되 보내지는 못한다.
- *
- * 여기가 풀리면 Mock 재계획이 실서버 화면에 뜬다 — 사장님은 반영된 줄 알지만 서버 기록은
- * 그대로다.
+ * 결정 보내기와 결과 묻기에 각각 순서대로 답한다. 목록이 끝나면 마지막 답을 계속 준다.
+ * 부른 순서가 아니라 주소로 답을 고른다(결과 입력 테스트와 같은 이유).
+ */
+function serve({ decide = [], judged = [] }: Partial<Record<'decide' | 'judged', Answer[]>>) {
+  const calls = { decide: 0, judged: 0 }
+  const pick = (kind: keyof typeof calls, answers: Answer[]) => {
+    const answer = answers[Math.min(calls[kind], answers.length - 1)]
+    calls[kind] += 1
+    return answer()
+  }
+
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    void init
+    return url.includes('/cases/results/decision') ? pick('decide', decide) : pick('judged', judged)
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
+}
+
+/** 결정으로 보낸 본문들 */
+function decisions(fetchMock: ReturnType<typeof serve>) {
+  return fetchMock.mock.calls
+    .filter(([url]) => url.includes('/cases/results/decision'))
+    .map(([, init]) => JSON.parse(init?.body as string))
+}
+
+function judgedBody(overrides: Partial<CaseResultsSubmitResponse>): CaseResultsSubmitResponse {
+  return {
+    result: 'PENDING',
+    changes: null,
+    blocker: null,
+    next_action: null,
+    questions_for_user: null,
+    raw_input: null,
+    conflicts: null,
+    recovery_action_code: null,
+    requested_field_paths: null,
+    ...overrides,
+  }
+}
+
+const ACCEPTED = json({ case_history_id: 21 })
+const UPDATED = json(
+  judgedBody({
+    result: 'UPDATED',
+    changes: [],
+    blocker: '철거 범위 미확인',
+    next_action: { title: '철거 업체 견적 받기', reason: '', questions_to_ask: [] },
+  }),
+)
+const failed = (code: CaseResultsSubmitResponse['recovery_action_code']) =>
+  json(judgedBody({ result: 'FAILED', recovery_action_code: code }))
+const INTERVAL_MS = 10_000
+
+/** 가짜 시계를 돌리고, 그 사이 끝난 요청과 그에 따른 렌더까지 반영한다 */
+async function advance(ms = 0) {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(ms)
+  })
+}
+
+/** 첫 충돌은 새 값, 둘째는 지금 기록을 고르고 보낸다 */
+function decide() {
+  chooseIncoming('필요함')
+  fireEvent.click(screen.getByRole('button', { name: /일부만/ }))
+  fireEvent.click(proceedButton())
+}
+
+/** 보내고, 판단 결과를 한 번 받을 때까지 기다린다 */
+async function decideAndWait() {
+  decide()
+  await advance(INTERVAL_MS)
+}
+
+/**
+ * 고른 것이 실제로 서버에 가는 경로. 여기서 틀리면 사장님은 반영된 줄 아는데 기록은 그대로이거나,
+ * 버린 값이 저장된다.
  */
 describe('ConfirmChangePage — 서버', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
   it('넘겨받은 충돌을 그리고 고를 수 있게 한다', () => {
     renderWith(TWO_CONFLICTS, '')
 
@@ -186,21 +289,178 @@ describe('ConfirmChangePage — 서버', () => {
     expect(screen.getByRole('button', { name: /필요함/ })).toHaveAttribute('aria-pressed', 'true')
   })
 
-  it('다 골라도 보낼 수 없고, 현재 상황으로 가는 길을 남긴다', () => {
+  /** 없는 충돌을 지어내 보여주면 사장님이 기록에 없는 것을 고르게 된다 */
+  it('넘겨받은 충돌 없이 열면 Mock 으로 채우지 않고 진입 분기로 돌려보낸다', async () => {
+    renderWith(null, '')
+    await advance()
+
+    expect(screen.getByText('진입 분기')).toBeInTheDocument()
+  })
+
+  it('고른 쪽을 충돌마다 서버 번호로 보낸다', async () => {
+    const fetchMock = serve({ decide: [ACCEPTED], judged: [UPDATED] })
+    renderWith(TWO_CONFLICTS, '')
+
+    await decideAndWait()
+
+    expect(decisions(fetchMock)).toEqual([
+      {
+        decisions: [
+          { conflict_reference_id: 1, side: 'PROPOSED' },
+          { conflict_reference_id: 2, side: 'STORED' },
+        ],
+      },
+    ])
+  })
+
+  /** 결과를 들고 가지 않고 번호로 다시 묻는다. 뒤로 가서 같은 결정을 또 보낼 수도 없다 */
+  it('반영되면 판단 번호로 반영 결과에 가고, 확인 화면으로 돌아올 수 없다', async () => {
+    serve({ decide: [ACCEPTED], judged: [UPDATED] })
     const router = renderWith(TWO_CONFLICTS, '')
 
-    chooseIncoming('필요함')
-    chooseIncoming('전체')
+    await decideAndWait()
+
+    expect(router.state.location.pathname).toBe('/replan')
+    expect(router.state.location.search).toBe('?history=21&from=confirm')
+    await act(async () => {
+      await router.navigate(-1)
+    })
+    expect(router.state.location.pathname).toBe('/results')
+  })
+
+  /** 고른 값은 저장됐고 물을 것이 남았다. 결과 입력이 그 질문을 받는다 */
+  it('되물으면 결과 입력으로 간다', async () => {
+    serve({
+      decide: [ACCEPTED],
+      judged: [json(judgedBody({ result: 'NEEDS_MORE_INFO', questions_for_user: ['철거는 전체인가요?'] }))],
+    })
+    const router = renderWith(TWO_CONFLICTS, '')
+
+    await decideAndWait()
+
+    expect(router.state.location.pathname).toBe('/results')
+  })
+
+  /** 실패하면 충돌이 그대로 남는다. 다시 해볼 수 있으면 고른 것을 지우지 않고 다시 보내게 한다 */
+  it('다시 해볼 수 있는 실패면 고른 채로 머물고, 다시 보낼 수 있다', async () => {
+    const fetchMock = serve({ decide: [ACCEPTED], judged: [failed('RETRY'), UPDATED] })
+    const router = renderWith(TWO_CONFLICTS, '')
+
+    await decideAndWait()
+
+    expect(router.state.location.pathname).toBe('/confirm')
+    expect(screen.getByRole('button', { name: /필요함/ })).toHaveAttribute('aria-pressed', 'true')
+    expect(proceedButton()).toBeEnabled()
+
+    fireEvent.click(proceedButton())
+    await advance(INTERVAL_MS)
+    expect(decisions(fetchMock)).toHaveLength(2)
+    expect(router.state.location.pathname).toBe('/replan')
+  })
+
+  /** 같은 선택으로 다시 보내도 풀리지 않는 실패다. 홈 실패 카드가 이유를 안내한다 */
+  it('그 밖의 실패면 홈으로 간다', async () => {
+    serve({ decide: [ACCEPTED], judged: [failed('CONTACT_SUPPORT')] })
+    const router = renderWith(TWO_CONFLICTS, '')
+
+    await decideAndWait()
+
+    expect(router.state.location.pathname).toBe('/case')
+  })
+
+  /** 이미 해결됐거나 직전 결정이 판단 중이다. 결과 입력이 지금 상태를 다시 물어 맞는 화면으로 보낸다 */
+  it('결정을 받을 수 없다는 답이면 결과 입력으로 다시 들어간다', async () => {
+    serve({ decide: [status(409)] })
+    const router = renderWith(TWO_CONFLICTS, '')
+
+    decide()
+    await advance()
+
+    expect(router.state.location.pathname).toBe('/results')
+  })
+
+  /** 서버가 받았는지 모른다. 이미 받았다면 다시 보낸 것은 409로 막혀 결과 입력이 정리한다 */
+  it('보내다 끊기면 고른 채로 머물고, 다시 보낼 수 있다', async () => {
+    serve({ decide: [offline] })
+    const router = renderWith(TWO_CONFLICTS, '')
+
+    decide()
+    await advance()
+
+    expect(router.state.location.pathname).toBe('/confirm')
+    expect(proceedButton()).toBeEnabled()
+  })
+
+  /** 요청을 잘못 만든 것이라 다시 보내도 같다. 누를 수 있게 두면 같은 실패를 되풀이한다 */
+  it('서버가 받지 않는 요청이면 다시 보낼 수 없고, 현재 상황으로 가는 길을 남긴다', async () => {
+    serve({ decide: [status(422)] })
+    const router = renderWith(TWO_CONFLICTS, '')
+
+    decide()
+    await advance()
 
     expect(proceedButton()).toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: '지금 상황 보기' }))
     expect(router.state.location.pathname).toBe('/case')
   })
 
-  /** 없는 충돌을 지어내 보여주면 사장님이 기록에 없는 것을 고르게 된다 */
-  it('넘겨받은 충돌 없이 열면 Mock 으로 채우지 않고 진입 분기로 돌려보낸다', async () => {
-    renderWith(null, '')
+  /** 접수는 됐고 판단이 아직이다. 다시 보내면 409라 버튼을 잠그고 홈에서 기다리게 한다 */
+  it('끝내 결과를 못 받으면 다시 보낼 수 없고, 현재 상황으로 가는 길을 남긴다', async () => {
+    serve({ decide: [ACCEPTED], judged: [json(judgedBody({ result: 'PENDING' }))] })
+    renderWith(TWO_CONFLICTS, '')
 
-    expect(await screen.findByText('진입 분기')).toBeInTheDocument()
+    decide()
+    await advance(10 * 60 * 1000 + INTERVAL_MS)
+
+    expect(proceedButton()).toBeDisabled()
+    expect(screen.getByRole('button', { name: '지금 상황 보기' })).toBeInTheDocument()
+  })
+
+  /** AI에는 없는 경로지만 오면, 앞에서 고른 것이 새 충돌에 섞이지 않게 처음부터 고른다 */
+  it('또 충돌이 나면 새 충돌을 처음부터 고른다', async () => {
+    serve({
+      decide: [ACCEPTED],
+      judged: [
+        json(
+          judgedBody({
+            result: 'CONFLICT',
+            raw_input: '다시 확인했는데 철거까지 해야 한대요.',
+            conflicts: [{ id: 9, field: 'lease_status', stored_value: 'OWNED', proposed_value: 'LEASED_PAID' }],
+          }),
+        ),
+      ],
+    })
+    const router = renderWith(TWO_CONFLICTS, '')
+
+    await decideAndWait()
+
+    expect(router.state.location.pathname).toBe('/confirm')
+    expect(screen.queryByRole('button', { name: /필요함/ })).not.toBeInTheDocument()
+    expect(proceedButton()).toBeDisabled()
+  })
+
+  it('로그인이 풀렸으면 로그인으로 간다', async () => {
+    serve({ decide: [status(401)] })
+    const router = renderWith(TWO_CONFLICTS, '')
+
+    decide()
+    await advance()
+
+    expect(router.state.location.pathname).toBe('/login')
+  })
+
+  /** 떠난 화면이 몇 초 뒤 결과를 받아 사장님을 다른 곳으로 끌고 가면 안 된다 */
+  it('기다리는 중에 화면을 떠나면 이동하지 않는다', async () => {
+    serve({ decide: [ACCEPTED], judged: [UPDATED] })
+    const router = renderWith(TWO_CONFLICTS, '')
+
+    decide()
+    await advance()
+    await act(async () => {
+      await router.navigate(-1)
+    })
+    await advance(INTERVAL_MS)
+
+    expect(router.state.location.pathname).toBe('/results')
   })
 })

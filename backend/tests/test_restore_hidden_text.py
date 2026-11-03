@@ -13,6 +13,7 @@ from unittest.mock import MagicMock
 
 from app.be.crud import case_field_history as case_field_history_crud
 from app.be.crud import case_history as case_history_crud
+from app.be.crud import conflict_reference as conflict_reference_crud
 from app.be.services import case as case_service
 from app.be.services.unmasking import HiddenTextRestorer, restore_hidden_text
 
@@ -92,7 +93,9 @@ def test_the_case_itself_shows_the_restored_free_text(case_with_two_submissions)
             lease_status="LEASED_PAID", restoration_clause="UNKNOWN", restoration_status="IN_PROGRESS",
             restoration_scope="PARTIAL", restoration_scope_detail="서울특별시 강남구 [주소]만",
             demolition_required="NOT_REQUIRED", planned_closure_date=None,
-            planned_closure_month=None,
+            planned_closure_month=None, case_status="IN_PROGRESS", completed_at=None,
+            closure_date=None, closure_reason=None,
+            road_address=None, address_detail=None, deposit_return_result=None,
         ),
     )
 
@@ -172,3 +175,111 @@ def test_an_unknown_submission_leaves_the_value_hidden(monkeypatch):
 
     assert restorer.restore("마포구 [주소] 전체", None) == "마포구 [주소] 전체"
     assert restorer.restore("마포구 [주소] 전체", 999) == "마포구 [주소] 전체"
+
+
+@pytest.fixture
+def case_whose_last_change_came_from_a_conflict_decision(monkeypatch):
+    """충돌 결정으로 값이 바뀐 Case. 그 이력에는 사장님이 쓴 글이 없다.
+
+    충돌 결정은 버튼을 누른 것이라 raw_input이 NULL이다(services/case.py의
+    submit_case_conflicts_decision). 되돌릴 원문을 그 이력에서 찾으면 없다.
+    """
+
+    rows = [
+        field_row(1, 11, None, "서울특별시 마포구 [주소] 전체"),
+        field_row(2, 33, "서울특별시 마포구 [주소] 전체", "서울특별시 마포구 [주소] 일부"),
+    ]
+    monkeypatch.setattr(
+        case_history_crud, "get_case_histories_by_case_id",
+        lambda *_: [*histories(), SimpleNamespace(id=33, raw_input=None)],
+    )
+    monkeypatch.setattr(
+        case_field_history_crud, "get_case_field_histories_by_case_id", lambda *_: rows
+    )
+    monkeypatch.setattr(
+        case_field_history_crud, "get_case_field_histories_by_case_history_id",
+        lambda _session, case_history_id: [r for r in rows if r.case_history_id == case_history_id],
+    )
+    # 결정이 끝난 충돌 한 줄. "이 칸의 값이 11번 제출에서 나왔다"가 여기 남아 있다.
+    monkeypatch.setattr(
+        conflict_reference_crud, "get_decided_conflicts_by_case_id",
+        lambda *_: [SimpleNamespace(
+            canonical_field="restoration_scope_detail", case_history_id=11, status="CONFIRMED"
+        )],
+    )
+    return rows
+
+
+def test_a_conflict_decision_shows_the_restored_text(
+    case_whose_last_change_came_from_a_conflict_decision
+):
+    """충돌 결정이 바꾼 값도 되돌려야 한다.
+
+    #136으로 충돌 결정이 실제로 돌기 시작하면서 이 경로가 화면에 보이게 됐다. 결정 이력에는
+    글이 없지만, 그 결정이 다룬 충돌을 낸 제출에 원문이 있다.
+    """
+
+    changes = case_service._field_changes(MagicMock(spec=Session), CASE_ID, 33)
+
+    assert changes[0].stored_value == "서울특별시 마포구 월드컵북로 12 1층 전체"
+    assert changes[0].new_value == "서울특별시 마포구 월드컵북로 12 1층 일부"
+
+
+def decided(case_history_id: int, status: str = "CONFIRMED"):
+    """결정이 끝난 충돌 한 줄. 그 값이 어느 제출에서 나왔는지가 들어 있다."""
+    return SimpleNamespace(
+        canonical_field="restoration_scope_detail",
+        case_history_id=case_history_id,
+        status=status,
+    )
+
+
+def restorer_with(monkeypatch, conflicts):
+    """결정 이력 둘(22·44)이 섞인 Case. 22번이 만든 값을 되돌려 본다."""
+    monkeypatch.setattr(
+        case_history_crud, "get_case_histories_by_case_id",
+        lambda *_: [
+            SimpleNamespace(id=11, raw_input=FIRST_INPUT),
+            SimpleNamespace(id=22, raw_input=None),
+            SimpleNamespace(id=33, raw_input=SECOND_INPUT),
+            SimpleNamespace(id=44, raw_input=None),
+        ],
+    )
+    monkeypatch.setattr(
+        case_field_history_crud, "get_case_field_histories_by_case_id", lambda *_: []
+    )
+    monkeypatch.setattr(
+        conflict_reference_crud, "get_decided_conflicts_by_case_id", lambda *_: conflicts
+    )
+    return HiddenTextRestorer(MagicMock(spec=Session), CASE_ID)
+
+
+def test_the_same_field_decided_twice_keeps_the_text_hidden(monkeypatch):
+    """같은 칸을 두 번 결정했으면 되돌리지 않는다(승준님 #158 리뷰).
+
+    어느 결정이 지금 보는 값을 만들었는지 가리키는 기록이 없다. 칸만 보고 마지막 충돌을
+    고르면 11번이 만든 값에 33번 글의 주소가 들어가, 실제로 "마포구 테헤란로 5 2층"처럼
+    두 주소가 섞인 글자가 나왔다. 그런 글자를 보여주느니 [주소]를 그대로 둔다.
+    """
+    restorer = restorer_with(monkeypatch, [decided(11), decided(33)])
+
+    restored = restorer.restore(
+        "서울특별시 마포구 [주소] 전체", 22, "restoration_scope_detail"
+    )
+
+    assert restored == "서울특별시 마포구 [주소] 전체"
+
+
+def test_a_rejected_proposal_never_supplies_the_original_text(monkeypatch):
+    """거절한 제안의 글로 되돌리지 않는다(승준님 #158 리뷰).
+
+    "기존 값 유지"를 고르면 Case 값은 그대로다. 그 글은 값을 만든 입력이 아닌데, 결정이
+    끝났다는 이유로 섞으면 사장님이 쓰지 않기로 한 주소가 화면에 뜬다.
+    """
+    restorer = restorer_with(monkeypatch, [decided(11), decided(33, "REJECTED")])
+
+    restored = restorer.restore(
+        "서울특별시 마포구 [주소] 전체", 22, "restoration_scope_detail"
+    )
+
+    assert restored == "서울특별시 마포구 월드컵북로 12 1층 전체"

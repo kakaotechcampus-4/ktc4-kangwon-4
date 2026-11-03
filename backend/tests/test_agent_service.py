@@ -11,13 +11,19 @@ import sys
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
-from uuid import UUID
+from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
 import pytest
 from pydantic import ValidationError
 
 from app.agent.action_catalog import resolve_procedure_bindings
+from app.agent.document_tool.models import (
+    DocumentAnalysis,
+    DocumentKind,
+    DocumentRecord,
+    ExtractedField,
+)
 from app.agent.guardrails import GuardrailViolation
 from app.agent.procedure_tool.store import ProcedureStoreError
 from app.agent.schemas import ProcedureStepRef
@@ -28,7 +34,9 @@ from app.common.agent_data import (
     build_known_procedure_steps,
     load_reviewed_procedures,
 )
-from app.common.agent_dto import CaseSnapshot, RedactedInput
+from app.common.agent_dto import (
+    CaseSnapshot, DocumentContext, RedactedInput, document_input_text, document_replan_text,
+)
 from app.common.agent_service import (
     build_conflict_input,
     build_planning_input,
@@ -214,12 +222,108 @@ def test_planning_input_rejects_an_unredacted_phone_number():
 
 
 def test_planning_input_rejects_an_unknown_trigger():
-    with pytest.raises(ValueError, match="CASE_CREATED or RESULT_SUBMITTED"):
+    with pytest.raises(ValueError, match="RESULT_SUBMITTED or DOCUMENT_SUBMITTED"):
         build_planning_input(
             trigger_type="CASE_CLOSED",
             case_snapshot=case_snapshot(),
             user_input=redacted_input(),
         )
+
+
+def test_planning_input_accepts_a_document_upload_as_owner_input():
+    request = build_planning_input(
+        trigger_type="DOCUMENT_SUBMITTED",
+        case_snapshot=case_snapshot(),
+        user_input=redacted_input(redacted_text="사장님이 올린 서류에서 꺼낸 내용입니다.\n이체확인증: 3,300,000원"),
+    )
+
+    assert request.trigger.trigger_type == "DOCUMENT_SUBMITTED"
+    assert request.trigger.input.source_type == "USER_INPUT"
+
+
+def test_a_document_upload_is_not_recorded_as_an_official_document():
+    with pytest.raises(ValidationError, match="USER_INPUT"):
+        build_planning_input(
+            trigger_type="DOCUMENT_SUBMITTED",
+            case_snapshot=case_snapshot(),
+            user_input=redacted_input(source_type="EXPERT_CONFIRMATION"),
+        )
+
+
+def document_record(kind, fields, *, needs_confirmation=False, confirmed_fields=None):
+    return DocumentRecord(
+        document_id=uuid4(), filename="doc.pdf", content_hash="h", redaction_count=0,
+        cache_key="c", artifact_hash="a", confirmed_fields=confirmed_fields,
+        analysis=DocumentAnalysis(
+            kind=kind, needs_confirmation=needs_confirmation,
+            fields=[ExtractedField(name=n, value=v, page=1, quote=q) for n, v, q in fields],
+        ),
+    )
+
+
+def test_document_text_uses_values_so_names_inside_quotes_stay_out():
+    context = DocumentContext(documents=[document_record(DocumentKind.TAX_INVOICE, [
+        ("supplier", "가나철거", "공급자 상호 가나철거"),
+        # 인용 안에 상호가 같이 들어 있다. 이름 칸만 빼면 이 상호가 그대로 남는다
+        ("amount", "3300000", "가나철거 합계금액 3,300,000원"),
+    ])])
+
+    text = document_input_text(context)
+
+    assert text == "사장님이 올린 서류에서 꺼낸 내용입니다.\n전자세금계산서 금액: 3300000"
+    assert "가나철거" not in text
+
+
+def test_document_text_leaves_out_dates_so_a_past_closure_is_not_read_as_planned():
+    context = DocumentContext(documents=[
+        document_record(DocumentKind.CLOSURE_CERTIFICATE, [("closure_date", "2026-11-30", "폐업일 2026.11.30")]),
+        document_record(DocumentKind.TRANSFER, [("date", "2026-11-02", "이체일 2026.11.02")],
+                        confirmed_fields={"date": "2026-11-03"}),
+    ])
+
+    assert document_input_text(context) is None
+
+
+TAX_INVOICE_FIELDS = [("amount", "3300000", "합계금액 3,300,000원"), ("tax_amount", "300000", "세액 300,000원")]
+
+
+@pytest.mark.parametrize(("needs_confirmation", "confirmed_fields", "expected"), [
+    # 고친 값 목록이 있으면 그 목록만 쓴다. 고치지 않은 세액을 꺼낸 값으로 채우지 않는다
+    (True, {"amount": "3500000"}, ["전자세금계산서 금액(사장님 확인): 3500000"]),
+    (False, {"amount": "3500000"}, ["전자세금계산서 금액(사장님 확인): 3500000"]),
+    # 빈 목록은 "넘길 값 없음"이다. 확인 필요 여부와 상관없이 꺼낸 값으로 돌아가지 않는다
+    (False, {}, None),
+    (True, {}, None),
+    # 목록이 없을 때만 꺼낸 값을 쓰고, 확인이 필요한 서류는 넣지 않는다
+    (True, None, None),
+    (False, None, ["전자세금계산서 금액: 3300000", "전자세금계산서 세액: 300000"]),
+])
+def test_document_text_uses_only_the_owner_confirmed_list_when_there_is_one(
+    needs_confirmation, confirmed_fields, expected
+):
+    context = DocumentContext(documents=[document_record(
+        DocumentKind.TAX_INVOICE, TAX_INVOICE_FIELDS,
+        needs_confirmation=needs_confirmation, confirmed_fields=confirmed_fields,
+    )])
+
+    text = document_input_text(context)
+
+    assert text == (None if expected is None else "\n".join(["사장님이 올린 서류에서 꺼낸 내용입니다.", *expected]))
+    assert document_input_text(DocumentContext()) is None
+
+
+def test_document_text_becomes_a_document_submitted_planning_input():
+    text = document_input_text(DocumentContext(documents=[
+        document_record(DocumentKind.TRANSFER, [("amount", "3300000", "이체금액 3,300,000원")]),
+    ]))
+
+    request = build_planning_input(
+        trigger_type="DOCUMENT_SUBMITTED",
+        case_snapshot=case_snapshot(),
+        user_input=redacted_input(redacted_text=text),
+    )
+
+    assert request.trigger.input.redacted_text == text
 
 
 @pytest.mark.parametrize("legacy", [True, False])
@@ -403,3 +507,46 @@ def test_bundled_demolition_support_notice_is_reviewed_for_restoration_work():
     assert record.reviewed_by is not None and record.reviewed_at is not None
     assert "자력철거 시 지원불가" in record.excerpt
     assert "이체확인증" in record.excerpt and "통장 사본" not in record.excerpt
+
+
+CLAUSE = "원상복구 범위는 카운터·싱크대 부분이다."
+
+
+def lease(clause=CLAUSE, *, confirmed=True):
+    fields = [("restoration_clause", clause, clause)]
+    return document_record(DocumentKind.LEASE, fields, needs_confirmation=True,
+                           confirmed_fields={"restoration_clause": clause} if confirmed else None)
+
+
+def test_replan_runs_only_when_a_new_restoration_clause_is_confirmed():
+    first = DocumentContext(documents=[lease()])
+    text = document_replan_text(DocumentContext(), first)
+    assert text is not None and CLAUSE in text
+    # 확인 필요 서류를 아직 확인하지 않았으면 부르지 않는다
+    assert document_replan_text(DocumentContext(), DocumentContext(documents=[lease(confirmed=False)])) is None
+
+
+@pytest.mark.parametrize("after_documents", [
+    # 같은 조항을 다시 올림
+    lambda: [lease(), lease()],
+    # 금액 서류만 더함 — 금액 대조는 서류 점검이 한다
+    lambda: [lease(), document_record(DocumentKind.TAX_INVOICE, TAX_INVOICE_FIELDS)],
+    # 조항 서류를 뺌 — 이미 반영한 사실을 되돌리지 않는다
+    lambda: [],
+], ids=["same-clause-reupload", "amount-only", "removed"])
+def test_replan_is_skipped_when_no_judgment_value_changes(after_documents):
+    before = DocumentContext(documents=[lease()])
+    assert document_replan_text(before, DocumentContext(documents=after_documents())) is None
+
+
+def test_replan_runs_again_when_the_confirmed_clause_changes():
+    before = DocumentContext(documents=[lease()])
+    changed = "원상복구 범위는 전체이며 철거가 필요하다."
+    text = document_replan_text(before, DocumentContext(documents=[lease(changed)]))
+    assert text is not None and changed in text
+
+
+def test_amount_only_upload_never_starts_a_judgment():
+    after = DocumentContext(documents=[document_record(DocumentKind.TAX_INVOICE, TAX_INVOICE_FIELDS)])
+    assert document_input_text(after) is not None  # 글은 만들 수 있어도
+    assert document_replan_text(None, after) is None  # 판단은 부르지 않는다
