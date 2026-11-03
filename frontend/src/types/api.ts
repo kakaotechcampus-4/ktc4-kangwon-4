@@ -357,3 +357,26 @@ export interface CaseLogItem {
 export interface CaseLogResponse {
   logs: CaseLogItem[]
 }
+
+/** `PUT /cases/checklists/{task_id}` 로 보내는 것. 같은 값을 두 번 보내도 결과는 같다 */
+export interface CaseChecklistUpdateRequest {
+  completed: boolean
+}
+
+/** 체크 저장 응답. 저장된 상태가 그대로 돌아온다. 할 일 상태(완료 등)는 로드맵이 다시 계산한다 */
+export interface CaseChecklistResponse {
+  task_id: string
+  completed: boolean
+}
+
+/**
+ * `PUT /cases/support-approval` 로 보내는 것. 점포철거비 1차 적격심사 결과를 사장님이 알려 준다.
+ * `true` 승인 · `false` 안 됨 · `null` 아직 모름. **키는 꼭 보낸다** — 빠지면 422 다
+ */
+export interface CaseSupportApprovalRequest {
+  approved: boolean | null
+}
+
+export interface CaseSupportApprovalResponse {
+  approved: boolean | null
+}

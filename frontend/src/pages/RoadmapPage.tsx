@@ -1,5 +1,6 @@
 import { IconCheckmarkCircleFill, IconChevronDownLine } from '@karrotmarket/react-monochrome-icon'
 import { type ReactNode, useState } from 'react'
+import { Link, useLocation } from 'react-router'
 
 import { Badge } from '../components/ui/Badge'
 import { InfoBox } from '../components/ui/InfoBox'
@@ -74,6 +75,7 @@ export function RoadmapPage() {
  * 짐작하는 것이 아니다.
  */
 function StageRow({ stage, current, last }: { stage: RoadmapStageView; current: boolean; last: boolean }) {
+  const { search } = useLocation()
   const [open, setOpen] = useState(current)
   const applicable = stage.tasks.filter((task) => task.status !== 'NOT_APPLICABLE')
   const done = applicable.filter((task) => task.status === 'COMPLETED').length
@@ -124,13 +126,11 @@ function StageRow({ stage, current, last }: { stage: RoadmapStageView; current: 
           <ul id={listId} className="mt-2 flex flex-col gap-1">
             {stage.tasks.map((task) => {
               const badge = STATUS_BADGE[task.status]
-              return (
-                <li
-                  key={task.id}
-                  className={`flex items-start gap-3 rounded-xl px-3 py-3 ${
-                    task.status === 'IN_PROGRESS' ? 'bg-bg-brand-weak' : ''
-                  }`}
-                >
+              const rowStyle = `flex items-start gap-3 rounded-xl px-3 py-3 ${
+                task.status === 'IN_PROGRESS' ? 'bg-bg-brand-weak' : ''
+              }`
+              const content = (
+                <>
                   <span className="min-w-0 flex-1">
                     <span
                       className={`block text-16 ${
@@ -144,6 +144,21 @@ function StageRow({ stage, current, last }: { stage: RoadmapStageView; current: 
                     )}
                   </span>
                   <Badge tone={badge.tone}>{badge.label}</Badge>
+                </>
+              )
+              return (
+                <li key={task.id}>
+                  {/* 해당 없는 할 일은 열 것이 없다. 눌리는데 아무 일도 없으면 고장으로 읽힌다 */}
+                  {task.status === 'NOT_APPLICABLE' ? (
+                    <div className={rowStyle}>{content}</div>
+                  ) : (
+                    <Link
+                      to={{ pathname: `/roadmap/${task.id}`, search }}
+                      className={`${rowStyle} active:bg-bg-transparent-pressed`}
+                    >
+                      {content}
+                    </Link>
+                  )}
                 </li>
               )
             })}

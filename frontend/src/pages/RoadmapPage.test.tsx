@@ -72,3 +72,18 @@ describe('RoadmapPage — Mock', () => {
     expect(screen.queryByRole('button', { name: /폐업 준비/ })).not.toBeInTheDocument()
   })
 })
+
+/** 해당 없는 할 일이 눌리면 아무것도 없는 화면이 열린다. 눌릴 것만 링크로 둔다 */
+describe('RoadmapPage — 할 일 열기', () => {
+  it('할 일은 그 할 일 화면으로 가는 링크이고, 해당 없는 할 일은 링크가 아니다', () => {
+    renderAt('/roadmap?mock=roadmap')
+
+    expect(screen.getByRole('link', { name: /원상복구 범위 확인/ })).toHaveAttribute(
+      'href',
+      '/roadmap/restoration?mock=roadmap',
+    )
+
+    fireEvent.click(stageButton(/폐업 준비/))
+    expect(screen.queryByRole('link', { name: /은행에 폐업 후 상환 조건 확인/ })).not.toBeInTheDocument()
+  })
+})

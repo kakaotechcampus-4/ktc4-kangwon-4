@@ -15,6 +15,7 @@ import { LoginPage } from './pages/LoginPage'
 import { NotificationsPage } from './pages/NotificationsPage'
 import { ReplanPage } from './pages/ReplanPage'
 import { RoadmapPage } from './pages/RoadmapPage'
+import { TaskFlowPage } from './pages/TaskFlowPage'
 import { ResultInputPage } from './pages/ResultInputPage'
 import { TaskPage } from './pages/TaskPage'
 
@@ -60,6 +61,7 @@ export const router = createBrowserRouter([
       { path: '/confirm', element: <ConfirmChangePage /> },
       { path: '/replan', element: <ReplanPage /> },
       { path: '/roadmap', element: <RoadmapPage /> },
+      { path: '/roadmap/:taskId', element: <TaskFlowPage /> },
       { path: '/docs/check', element: <DocsCheckPage /> },
       { path: '/docs/done', element: <DocsDonePage /> },
       {
