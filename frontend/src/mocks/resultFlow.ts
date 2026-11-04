@@ -154,6 +154,7 @@ const OUTCOMES: Record<string, SubmitOutcome> = {
   'failed-none': { kind: 'STAY', state: { kind: 'FAILED', notice: { kind: 'NO_RECOVERY' } } },
   'failed-unknown': { kind: 'STAY', state: { kind: 'FAILED', notice: { kind: 'UNKNOWN_CAUSE' } } },
   'send-failed': { kind: 'STAY', state: { kind: 'SEND_FAILED' } },
+  'send-rejected': { kind: 'STAY', state: { kind: 'SEND_REJECTED' } },
   stale: { kind: 'STAY', state: { kind: 'STALE' } },
   'too-long': { kind: 'STAY', state: { kind: 'WAITED_TOO_LONG' } },
   unrecognized: { kind: 'STAY', state: { kind: 'UNRECOGNIZED' } },

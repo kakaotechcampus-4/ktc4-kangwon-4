@@ -237,6 +237,8 @@ export function ResultInputPage() {
       if (error instanceof ApiError && (error.status === 409 || error.status === 404)) {
         return stay({ kind: 'STALE' })
       }
+      // 받을 수 없는 글이다(너무 긴 글 등). 같은 글을 다시 보내도 같은 답이라 고쳐 보내게 한다
+      if (error instanceof ApiError && error.status === 422) return stay({ kind: 'SEND_REJECTED' })
       return stay({ kind: 'SEND_FAILED' })
     }
 
@@ -678,6 +680,13 @@ function stayNotice(
         title: '결과를 보내지 못했어요.',
         description: '연결이 불안정했을 수 있어요. 적어 주신 내용은 그대로 있어요.',
         action: actions.retry,
+      }
+
+    case 'SEND_REJECTED':
+      return {
+        tone: 'critical',
+        title: '이대로는 보낼 수 없어요.',
+        description: '적어 주신 내용은 그대로 있어요. 고친 뒤 다시 보내 주세요.',
       }
 
     case 'STALE':

@@ -603,6 +603,21 @@ describe('ResultInputPage — 서버', () => {
       expect(fetchMock.mock.calls.length).toBe(sent)
     })
 
+    /** 서버가 받지 않는 글(422)을 "연결이 불안정"이라 하면 사장님은 같은 글로 다시 보내기만 되풀이한다 */
+    it('서버가 글을 받지 않으면(422) 고쳐서 보내라고 하고 다시 보내기를 두지 않는다', async () => {
+      serve({ entry: [READY], submit: [status(422)] })
+      renderFlow()
+      await advance()
+
+      submit('임대인이 철거하래요')
+      await advance()
+
+      expect(screen.getByText('이대로는 보낼 수 없어요.')).toBeInTheDocument()
+      expect(screen.queryByText(/연결이 불안정/)).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: '다시 보내기' })).not.toBeInTheDocument()
+      expect(screen.getByRole('textbox')).toHaveValue('임대인이 철거하래요')
+    })
+
     /** 이 화면이 아는 판단이 낡았다. 같은 글을 또 보내도 같은 답이 온다 */
     it('지금 받을 수 없다는 답이면 다시 보내기 대신 현재 상황으로 안내한다', async () => {
       serve({ entry: [READY], submit: [status(409)] })
