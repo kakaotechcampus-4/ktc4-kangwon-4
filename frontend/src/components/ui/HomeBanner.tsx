@@ -39,7 +39,8 @@ export function HomeBanner({ items = [] }: HomeBannerProps) {
       to="/log"
       className="relative flex min-h-19 shrink-0 items-center gap-3 bg-bg-brand-weak px-4 py-3.5 active:bg-bg-brand-weak-pressed"
     >
-      <span className="min-w-0 flex-1" aria-live="off">
+      {/* 줄이 바뀔 때마다 새로 그려 흐리게 들어오게 한다(0.3초). 쪽수 배지는 움직이지 않는다 */}
+      <span key={item ? index % count : 'empty'} className="min-w-0 flex-1 motion-safe:animate-fade-in" aria-live="off">
         <span className="block truncate text-17 font-bold">{item ? item.text : '리본이 해둔 일이 여기 모여요'}</span>
         <span className="mt-0.5 block truncate text-14 text-fg-neutral-muted">
           {item ? `리본이 해둔 일 · ${item.date}` : '서류를 읽거나 정리하면 알려드릴게요'}
