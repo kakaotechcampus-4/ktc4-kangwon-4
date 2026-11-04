@@ -581,12 +581,19 @@ def _new_tasks(session: Session, case_id: int, history: CaseHistory) -> list[New
     )
     if previous is None:
         return None
-    before = set(previous.roadmap_task_ids)
     return [
         NewTaskResponse(task_id=task_id, title=_ROADMAP_TASK_TITLES.get(task_id, task_id))
-        for task_id in history.roadmap_task_ids
-        if task_id not in before
+        for task_id in _added_task_ids(previous.roadmap_task_ids, history.roadmap_task_ids)
     ]
+
+
+def _added_task_ids(previous: list[str] | None, current: list[str] | None) -> list[str]:
+    """직전 판단 뒤에는 없었는데 이번 판단 뒤에 생긴 할 일. 둘 중 하나라도 목록이 없으면 비교하지 않는다."""
+
+    if previous is None or current is None:
+        return []
+    before = set(previous)
+    return [task_id for task_id in current if task_id not in before]
 
 
 # 이 항목을 체크하면 폐업 정리를 마친 것으로 본다(시안 closed 화면).
@@ -695,7 +702,12 @@ def get_case_logs(session: Session, member_id: int) -> CaseLogResponse:
         raise HTTPException(status_code=404, detail="Case를 찾을 수 없습니다.")
 
     logs = []
-    for history in case_history_crud.get_case_histories_by_case_id(session, case.id):
+    # 결과 화면의 "새로 생긴 할 일"(_new_tasks)과 같은 뺄셈. 판단 순서대로 돌며 목록이 남은 직전 판단과 비교한다.
+    previous_task_ids = None
+    for history in sorted(case_history_crud.get_case_histories_by_case_id(session, case.id), key=lambda row: row.id):
+        added = _added_task_ids(previous_task_ids, history.roadmap_task_ids)
+        if history.roadmap_task_ids is not None:
+            previous_task_ids = history.roadmap_task_ids
         owner_event = _LOG_OWNER_EVENTS.get(history.source)
         if owner_event is None:
             continue
@@ -705,6 +717,9 @@ def get_case_logs(session: Session, member_id: int) -> CaseLogResponse:
                 "RIBBON", _LOG_RIBBON_EVENTS[history.judgment_status], history.judged_at,
                 detail=history.next_action if history.judgment_status == "DONE" else None,
             ))
+        # 시안 "답변대로 할 일 3개를 추가했어요". 새로 생긴 게 있을 때만 남긴다.
+        if history.judged_at is not None and added:
+            logs.append(_log("RIBBON", "ROADMAP_TASKS_ADDED", history.judged_at, detail=str(len(added))))
 
     # 체크를 풀어도 체크했던 기록은 남는다(지금 상태가 아니라 이력을 읽는다).
     for checklist in case_checklist_crud.get_case_checklist_histories_by_case_id(session, case.id):
