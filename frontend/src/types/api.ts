@@ -369,6 +369,7 @@ export type CaseLogEvent =
   | 'MORE_INFO_REQUESTED'
   | 'CONFLICT_FOUND'
   | 'JUDGMENT_FAILED'
+  | 'ROADMAP_TASKS_ADDED'
 
 /** 기록 한 줄 */
 export interface CaseLogItem {
@@ -379,8 +380,9 @@ export interface CaseLogItem {
   /** 체크 기록(`CHECKLIST_*`)일 때 어떤 항목인지. 그 밖에는 `null` */
   task_id: string | null
   /**
-   * 문구에 쓸 값. `NEXT_ACTION_DECIDED` 는 정한 할 일 제목,
-   * `SUPPORT_RESULT_REPORTED` 는 `APPROVED` / `REJECTED` / `UNKNOWN`. 그 밖에는 `null`
+   * 문구에 쓸 값. `NEXT_ACTION_DECIDED` 는 정한 할 일 제목, `ROADMAP_TASKS_ADDED` 는 이번 판단으로
+   * 새로 생긴 할 일 개수 글자(예: `"3"`, #184), `SUPPORT_RESULT_REPORTED` 는 `APPROVED` / `REJECTED` / `UNKNOWN`.
+   * 그 밖에는 `null`
    */
   detail: string | null
 }

@@ -93,4 +93,28 @@ describe('toLogEntries', () => {
     expect(toLogEntries({ logs: 'none' } as unknown as CaseLogResponse)).toBeNull()
     expect(toLogEntries(logsOf())).toEqual([])
   })
+
+  /** 판단으로 로드맵 할 일이 늘었다(#184). 시안의 "답변대로"는 충돌에서 고른 뒤에도 생겨 뺀다 */
+  it('새로 생긴 할 일 개수를 문장에 넣는다', () => {
+    expect(toLogEntries(logsOf(log('RIBBON', 'ROADMAP_TASKS_ADDED', { detail: '3' })))).toEqual([
+      { key: '0-ROADMAP_TASKS_ADDED', actor: 'RIBBON', text: '할 일 3개를 새로 추가했어요', date: '10.17' },
+    ])
+  })
+
+  /** 개수를 못 읽었다고 줄을 빼면 리본이 한 일이 사라진다. "0개"·"-1개"처럼 틀린 숫자도 적지 않는다 */
+  it('개수를 읽지 못하면 개수 없이 쓴다', () => {
+    const entries = toLogEntries(
+      logsOf(
+        log('RIBBON', 'ROADMAP_TASKS_ADDED', { detail: null }),
+        log('RIBBON', 'ROADMAP_TASKS_ADDED', { detail: '0' }),
+        log('RIBBON', 'ROADMAP_TASKS_ADDED', { detail: '세 개' }),
+      ),
+    )
+
+    expect(entries?.map((entry) => entry.text)).toEqual(['할 일을 새로 추가했어요', '할 일을 새로 추가했어요', '할 일을 새로 추가했어요'])
+  })
+
+  it('할 일 추가를 사장님이 했다고 오면 그 줄을 뺀다', () => {
+    expect(toLogEntries(logsOf(log('OWNER', 'ROADMAP_TASKS_ADDED', { detail: '3' })))).toEqual([])
+  })
 })

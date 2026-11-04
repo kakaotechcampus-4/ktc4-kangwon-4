@@ -25,6 +25,11 @@ const EVENT_TEXT: Record<string, { actor: LogActor; text: string }> = {
   MORE_INFO_REQUESTED: { actor: 'RIBBON', text: '더 여쭤볼 것을 정리했어요' },
   CONFLICT_FOUND: { actor: 'RIBBON', text: '기록과 다른 부분을 찾았어요' },
   JUDGMENT_FAILED: { actor: 'RIBBON', text: '다음 할 일을 정하지 못했어요' },
+  /*
+   * 판단으로 로드맵 할 일이 새로 생겼다(#184). 개수는 `toText` 가 넣는다. 시안은 "답변대로 할 일 3개를
+   * 추가했어요"인데, 충돌에서 고른 뒤의 판단에도 이 줄이 생겨 "답변대로"는 뺀다(11/04 #184 리뷰)
+   */
+  ROADMAP_TASKS_ADDED: { actor: 'RIBBON', text: '할 일을 새로 추가했어요' },
 }
 
 /** 철거비 심사 결과(`detail`) → 덧붙이는 한 줄. 사장님이 알려 준 값이지 리본의 판단이 아니다 */
@@ -47,6 +52,14 @@ function toDateLabel(value: unknown): string | null {
   if (typeof value !== 'string') return null
   const matched = /^\d{4}-(\d{2})-(\d{2})/.exec(value)
   return matched ? `${matched[1]}.${matched[2]}` : null
+}
+
+/** 줄 문장. 할 일이 몇 개 새로 생겼는지는 서버가 개수 글자로 준다. 읽지 못하면 개수 없이 쓴다 */
+function toText(event: string, detail: unknown, text: string): string {
+  if (event === 'ROADMAP_TASKS_ADDED' && typeof detail === 'string' && /^[1-9]\d*$/.test(detail)) {
+    return `할 일 ${detail}개를 새로 추가했어요`
+  }
+  return text
 }
 
 /** 줄 아래 덧붙일 한 줄. 정한 할 일 제목, 심사 결과. 없거나 모르는 값이면 붙이지 않는다 */
@@ -83,7 +96,7 @@ export function toLogEntries(body: CaseLogResponse | null): LogEntry[] | null {
     entries.push({
       key: `${index}-${event}`,
       actor: known.actor,
-      text: known.text,
+      text: toText(event, row?.detail, known.text),
       detail: toDetail(event, row?.detail),
       date,
     })
