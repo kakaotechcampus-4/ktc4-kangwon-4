@@ -61,9 +61,10 @@ export const mockRoadmap: RoadmapView = {
       stage: 4,
       title: '지원금 정산·가게 반환',
       tasks: [
-        task('closure_certificate', '폐업사실증명원 발급', 'CHECKLIST', 'NOT_STARTED'),
+        // 1차 심사 결과를 아직 몰라서(위 `support_approval`) 서버가 정산 항목을 "확인 필요"로 준다(#181)
+        task('closure_certificate', '폐업사실증명원 발급', 'CHECKLIST', 'NEEDS_CONFIRMATION'),
         task('document_check', 'AI 서류 점검', 'DOCUMENT_CHECK', 'NOT_STARTED'),
-        task('settlement_submission', '소상공인24 정산 제출', 'CHECKLIST', 'NOT_STARTED'),
+        task('settlement_submission', '소상공인24 정산 제출', 'CHECKLIST', 'NEEDS_CONFIRMATION'),
         task('return_premises', '가게 반환', 'PROCEDURE', 'NOT_STARTED'),
         task('deposit_settlement', '보증금 정산 기록', 'CHECKLIST', 'NOT_STARTED'),
       ],

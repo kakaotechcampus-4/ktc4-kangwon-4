@@ -152,6 +152,17 @@ describe('TaskFlowPage — 서버', () => {
  * 한 줄 알고 넘어간다(FE 규칙 2).
  */
 describe('CheckFlow — 서버', () => {
+  /** 서버가 "확인 필요"로 준 할 일은 체크를 받지 않는다(422, #181). 눌러 보고 거절당하게 두지 않는다 */
+  it('확인이 필요한 할 일은 다 했어요를 꺼 두고, 보내지 않는다', () => {
+    const fetchMock = serve(json({}))
+    renderFlow(<CheckFlow task={{ ...checklistTask, status: 'NEEDS_CONFIRMATION' }} />)
+
+    expect(screen.getByText('아직 기록할 수 없는 할 일이에요.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '다 했어요' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '다 했어요' }))
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it('저장이 끝나기 전에는 기록했다고 하지 않는다', () => {
     serve(hanging)
     renderFlow(<CheckFlow task={checklistTask} />)

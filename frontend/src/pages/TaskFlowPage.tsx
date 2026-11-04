@@ -119,6 +119,11 @@ function useSaveErrors() {
 /**
  * 체크 장면. 서류가 필요한 할 일(`attach`)은 서류함에 올리는 길을 먼저 둔다 — 올린 서류가 정산
  * 점검에 쓰인다. 체크는 사장님이 "했다"고 알리는 것이고, 할 일 상태는 로드맵이 다시 계산한다.
+ *
+ * 서버가 "확인 필요"(`NEEDS_CONFIRMATION`)로 준 할 일은 [다 했어요]를 처음부터 끈다. 서버가 체크를
+ * 422 로 받지 않는다(#181) — 예를 들어 철거비 심사 결과를 모르면 정산 항목이 그렇다. 무엇이 확인돼야
+ * 하는지는 서버가 주지 않아 지어내지 않는다. 서버가 준 상태로 가르는 것이지 FE 판단이 아니다(규칙 1).
+ * 막는 것은 [다 했어요]뿐이다. 체크해 둔 것을 푸는 [완료 취소하기]는 따로 두어 막지 않는다(서버도 풀기는 늘 받는다).
  */
 export function CheckFlow({ task, attach = false }: { task: RoadmapTaskView; attach?: boolean }) {
   const navigate = useNavigate()
@@ -128,6 +133,7 @@ export function CheckFlow({ task, attach = false }: { task: RoadmapTaskView; att
   // 처음은 서버가 준 상태다. 저장하면 저장된 값으로 바꾼다
   const [checked, setChecked] = useState(task.status === 'COMPLETED')
   const [save, setSave] = useState<SaveState>('IDLE')
+  const waiting = task.status === 'NEEDS_CONFIRMATION'
 
   async function toggle() {
     const next = !checked
@@ -159,6 +165,9 @@ export function CheckFlow({ task, attach = false }: { task: RoadmapTaskView; att
           마치셨다고 기록했어요
         </p>
       )}
+      {waiting && (
+        <InfoBox title="아직 기록할 수 없는 할 일이에요.">필요한 내용이 확인되면 기록할 수 있어요.</InfoBox>
+      )}
       <SaveNotice save={save} />
       <div className="mt-auto flex flex-col gap-2">
         {checked ? (
@@ -166,7 +175,7 @@ export function CheckFlow({ task, attach = false }: { task: RoadmapTaskView; att
             완료 취소하기
           </Button>
         ) : (
-          <Button disabled={save === 'SAVING' || save === 'REJECTED'} onClick={toggle}>
+          <Button disabled={waiting || save === 'SAVING' || save === 'REJECTED'} onClick={toggle}>
             다 했어요
           </Button>
         )}
