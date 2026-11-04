@@ -6,8 +6,8 @@ from sqlmodel import Session
 from app.agent.roadmap import CompletedRoadmapSnapshot
 from app.agent.schemas import (
     CASE_FIELD_SPECS,
-    CaseFact,
     AgentFieldKey,
+    CaseFact,
     CaseFieldKey,
     CaseSnapshot,
     CaseStatus,
@@ -21,6 +21,7 @@ from app.agent.schemas import (
     ProcedureStepRef,
     RedactedInput,
 )
+from app.be.crud import blocker as blocker_crud
 from app.be.crud import case as case_crud
 from app.be.crud import case_field_history as case_field_history_crud
 from app.be.crud import case_history as case_history_crud
@@ -128,6 +129,10 @@ def _snapshot_fields(session: Session, case_id: int, snapshot_id: UUID | None) -
         facts=_build_facts(session, case, evidences),
         procedure_progress=[_build_procedure_progress(step) for step in case_procedure_steps],
         evidence_records=_build_evidence_records(session, case.id, evidences),
+        active_blocker_candidate_ids=sorted({
+            row.candidate_id for row in blocker_crud.get_active_blockers_by_case_id(session, case.id)
+            if row.candidate_id is not None
+        }),
         captured_at=datetime.now(KST),
     )
 
@@ -206,6 +211,8 @@ def _build_procedure_progress(step: CaseProcedureStep) -> ProcedureProgress:
     return ProcedureProgress(
         procedure_step=ProcedureStepRef(procedure_step_id=step.procedure_step_id, step_code=step.procedure_step.step_code),
         status=ProcedureProgressStatus(step.status),
+        requirements_confirmed=step.requirements_confirmed,
+        submitted=step.submitted,
         evidence_refs=list(step.evidence_refs or []),
         updated_at=step.updated_at.replace(tzinfo=KST),
     )

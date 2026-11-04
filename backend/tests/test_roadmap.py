@@ -61,6 +61,7 @@ def test_five_stages_preserve_unknown_values_without_calls_or_input_mutation(mon
     assert tasks(value)["closure_date"].status == "NEEDS_CONFIRMATION"
     assert tasks(value)["check_loan"].status == "NEEDS_CONFIRMATION"
     assert view.next_action is None and view.next_task_id is None
+    assert view.current_stage == 1
     assert value.model_dump_json() == original
     changed = record_checklist(value, "notify_landlord", completed=True)
     assert tasks(changed)["notify_landlord"].status == "COMPLETED"
@@ -201,10 +202,48 @@ def test_unsupported_business_returns_explicit_result_and_cannot_record_checklis
     assert (view.case_id, view.snapshot_id) == (value.case_snapshot.case_id, value.case_snapshot.snapshot_id)
     assert view.stages == view.questions_for_user == []
     assert view.next_action is None and view.next_task_id is None
+    assert view.current_stage is None
     assert type(view).model_validate_json(view.model_dump_json()) == view
     with pytest.raises(ValueError, match="개인 카페"):
         record_checklist(value, "dispose_stock", completed=True)
     assert value.model_dump_json() == original
+
+
+@pytest.mark.parametrize("lease,expected", [("LEASED_PAID", 2), ("OWNED", 3)])
+def test_current_stage_skips_finished_and_inapplicable_preparation(lease, expected):
+    value = request(
+        lease_status=lease, employee_count=0, planned_closure_date="2026-12-20",
+    )
+    value.has_business_loan = False
+    value.completed_checklists = {"notify_landlord"}
+    before = value.model_dump_json()
+
+    view = build_roadmap(value)
+
+    assert view.current_stage == expected
+    assert view.model_dump(mode="json")["current_stage"] == expected
+    assert value.model_dump_json() == before
+
+
+def test_no_current_stage_when_every_applicable_task_is_finished():
+    from app.agent.roadmap import CHECKLIST_IDS
+
+    value = request(
+        lease_status="OWNED", employee_count=0, had_employees=False,
+        pension_enrolled=False, health_insurance_enrolled=False,
+        employment_insurance_enrolled=False, industrial_accident_insurance_enrolled=False,
+        planned_closure_date="2026-12-20",
+    )
+    value.has_business_loan = value.has_service_contracts = False
+    value.completed_checklists = set(CHECKLIST_IDS)
+    progress(value, "FILE_TAX_BUSINESS_CLOSURE")
+    progress(value, "FILE_FOOD_SERVICE_CLOSURE")
+
+    view = build_roadmap(value)
+
+    assert all(t.status in {"COMPLETED", "NOT_APPLICABLE"} for s in view.stages for t in s.tasks)
+    assert view.current_stage is None
+    assert value.case_snapshot.case_status == "IN_PROGRESS"
 
 
 @pytest.mark.parametrize("field", ["business_type", "franchise_status", "lease_status"])
@@ -289,6 +328,8 @@ def test_existing_reviewed_plan_is_required_and_bound_to_same_snapshot():
     assert view.next_action == outcome.review_subject.supervisor_draft.decision.next_action
     assert view.next_action.action_code == "CONFIRM_TAX_CLOSURE_REQUIREMENTS"
     assert view.next_task_id == "closure_submission"
+    # 다음 할 일이 3단계여도 앞 단계에 남은 항목을 먼저 표시한다.
+    assert view.current_stage == 1
     value.case_snapshot.snapshot_id = uuid4()
     with pytest.raises(ValueError, match="stale"):
         build_roadmap(value)
@@ -312,6 +353,7 @@ def test_completed_case_can_be_read_without_relaxing_agent_judgment_input():
     value = RoadmapInput.model_validate(data)
     view = build_roadmap(value)
     assert view.next_action is None and len(view.stages) == 5
+    assert view.current_stage is None
     assert tasks(value)["income_tax"].status == "NOT_STARTED"
 
 

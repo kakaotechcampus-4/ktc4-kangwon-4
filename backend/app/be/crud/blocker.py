@@ -11,3 +11,9 @@ def create_blocker(session: Session, blocker: Blocker) -> Blocker:
 
 def get_blockers_by_case_id(session: Session, case_id: int) -> list[Blocker]:
     return session.exec(select(Blocker).where(Blocker.case_id == case_id)).all()
+
+
+def get_active_blockers_by_case_id(session: Session, case_id: int) -> list[Blocker]:
+    return session.exec(
+        select(Blocker).where(Blocker.case_id == case_id, Blocker.status == "ACTIVE")
+    ).all()
