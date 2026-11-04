@@ -463,7 +463,7 @@ function UploadSheet({
 /** 고르기 한 줄. `<label>` 이 숨긴 파일 입력을 감싸, 줄을 누르면 파일 고르기가 열린다 */
 function PickOption({ icon, label, children }: { icon: ReactNode; label: string; children: ReactNode }) {
   return (
-    <label className="flex min-h-14 cursor-pointer items-center gap-3 rounded-xl px-1 text-17 font-medium active:bg-bg-transparent-pressed">
+    <label className="press-scale flex min-h-14 cursor-pointer items-center gap-3 rounded-xl px-1 text-17 font-medium active:bg-bg-transparent-pressed">
       <span aria-hidden="true" className="text-fg-neutral-muted">
         {icon}
       </span>

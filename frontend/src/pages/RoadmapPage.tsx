@@ -155,7 +155,7 @@ function StageRow({ stage, current, last }: { stage: RoadmapStageView; current: 
                     <Link
                       to={{ pathname: `/roadmap/${task.id}`, search }}
                       viewTransition
-                      className={`${rowStyle} active:bg-bg-transparent-pressed`}
+                      className={`${rowStyle} press-scale active:bg-bg-transparent-pressed`}
                     >
                       {content}
                     </Link>

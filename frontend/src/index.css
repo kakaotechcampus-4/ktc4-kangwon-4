@@ -100,6 +100,25 @@ html[data-nav='back']::view-transition-new(screen) {
   }
 }
 
+/*
+ * 누르는 카드·줄이 누르는 동안 살짝(0.98배) 작아진다(시안 `scale(.98)`, 150ms). 손에 눌린 느낌을 준다.
+ * 버튼(`Button`)은 Motion 용수철로 따로 움직이고, 카드·줄·보기는 이것을 붙인다.
+ * 화면 끝까지 꽉 찬 띠(홈 띠)에는 붙이지 않는다. 작아지면 양옆에 틈이 생긴다
+ */
+@utility press-scale {
+  transition: transform 150ms cubic-bezier(0, 0, 0.15, 1);
+
+  &:active:not(:disabled) {
+    transform: scale(0.98);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    &:active:not(:disabled) {
+      transform: none;
+    }
+  }
+}
+
 /* "동작 줄이기"를 켠 사장님에게는 화면을 움직이지 않고 바로 바꾼다 */
 @media (prefers-reduced-motion: reduce) {
   ::view-transition-group(screen),

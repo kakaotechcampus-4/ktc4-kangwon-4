@@ -95,7 +95,7 @@ function Choices({ input, labelledBy }: { input: QuestionInput; labelledBy: stri
               role="radio"
               aria-checked={on}
               onClick={() => input.onSelect(option.value)}
-              className="flex min-h-20 cursor-pointer items-center gap-4 rounded-14 px-2 py-2.5 text-left active:bg-bg-transparent-pressed"
+              className="press-scale flex min-h-20 cursor-pointer items-center gap-4 rounded-14 px-2 py-2.5 text-left active:bg-bg-transparent-pressed"
             >
               <span className="grid size-15 shrink-0 place-items-center rounded-full bg-bg-neutral-weak">
                 {option.emoji && <img src={option.emoji} alt="" className="size-8.5" />}
@@ -123,7 +123,7 @@ function Choices({ input, labelledBy }: { input: QuestionInput; labelledBy: stri
               type="button"
               aria-pressed={on}
               onClick={() => input.onToggle(option.value)}
-              className={`relative flex min-h-31 cursor-pointer flex-col justify-between gap-3 rounded-2xl p-4.5 text-left active:scale-[.98] ${
+              className={`press-scale relative flex min-h-31 cursor-pointer flex-col justify-between gap-3 rounded-2xl p-4.5 text-left ${
                 on ? 'bg-bg-layer-default-pressed' : 'bg-bg-layer-default'
               } ${ringOf(on)}`}
             >
@@ -151,7 +151,7 @@ function Choices({ input, labelledBy }: { input: QuestionInput; labelledBy: stri
               role="radio"
               aria-checked={on}
               onClick={() => input.onSelect(option.value)}
-              className={`h-15 w-full shrink-0 cursor-pointer rounded-14 bg-bg-layer-default px-5 text-18 active:bg-bg-transparent-pressed ${
+              className={`press-scale h-15 w-full shrink-0 cursor-pointer rounded-14 bg-bg-layer-default px-5 text-18 active:bg-bg-transparent-pressed ${
                 on ? 'font-bold' : 'font-medium'
               } ${ringOf(on)}`}
             >
