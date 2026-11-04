@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { RouterProvider, createMemoryRouter } from 'react-router'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { DocsPage } from '../../pages/DocsPage'
 import { LogPage } from '../../pages/LogPage'
@@ -32,11 +32,14 @@ function renderAt(path: string) {
 }
 
 describe('TabLayout', () => {
-  it('서류함은 아직 서류가 없다는 화면을 보여준다', () => {
+  /** 서류함은 서버(#159)에서 목록을 불러온다. 비어 있다고 답하면 빈 서류함을 그린다 */
+  it('서류함은 머리말에 이름을 두고, 서류가 없으면 없다는 화면을 보여준다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ documents: [], check: null }), { status: 200 })))
     renderAt('/docs')
 
     expect(screen.getByRole('heading', { level: 1, name: '서류함' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { level: 2 })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 2 })).toBeInTheDocument()
+    vi.unstubAllGlobals()
   })
 
   it('홈 머리말은 이름 대신 워드마크를 두고, 제목은 화면에 맡긴다', () => {

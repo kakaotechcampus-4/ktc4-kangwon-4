@@ -72,16 +72,7 @@ def save_reviewed_plan(
     decision = outcome.review_subject.supervisor_draft.decision
     proof = outcome.review_proof
 
-    blocker = blocker_crud.create_blocker(
-        session,
-        Blocker(
-            case_id=history.case_id,
-            created_from_case_history_id=history.id,
-            description=decision.blocker.description,
-            blocker_evidence_refs=list(decision.blocker.evidence_refs),
-            status="ACTIVE",
-        ),
-    )
+    blocker = _save_blockers(session, history, outcome)
 
     # blocker와 case_history가 서로를 참조해서, blocker를 먼저 만들고 그 id를 채운다.
     # NEEDS_MORE_INFO는 다음 행동 자체가 없어서 next_action 관련 컬럼을 전부 NULL로 둔다
@@ -133,13 +124,39 @@ def save_reviewed_plan(
     # 사장님이 고른 값이 위에서 Case에 반영됐으니 그 충돌도 같이 닫는다. 한 트랜잭션이어야
     # 한다 — 값만 들어가고 충돌이 남으면 같은 것을 또 묻고, 충돌만 닫히고 값이 빠지면 고른
     # 내용이 사라진다.
-    _resolve_conflicts(session, resolved_conflicts)
+    _resolve_conflicts(session, history, resolved_conflicts)
 
     # TODO: grounded_claims(확인이 필요한 문장 표시)와 snapshot/known_procedure_steps(판단 당시
     # 입력)는 아직 담을 화면·테이블이 없어 저장하지 않는다.
     session.commit()
     session.refresh(record)
     return record
+
+
+def _save_blockers(session: Session, history: CaseHistory, outcome: ReviewedPlanOutcome) -> Blocker:
+    draft = outcome.review_subject.supervisor_draft
+    resolved = set(draft.resolved_blocker_candidate_ids)
+    if resolved:
+        for row in blocker_crud.get_active_blockers_by_case_id(session, history.case_id):
+            if row.candidate_id in resolved:
+                row.status = "RESOLVED"
+                row.resolved_from_case_history_id = history.id
+                row.resolved_at = kst_now()
+
+    # 같은 후보여도 판단별 문구·근거를 새 행에 남긴다. 기존 행을 고치면 과거 판단의
+    # priority_blocker_id가 가리키는 설명까지 달라진다. 해결할 때는 해당 후보의 행을 모두 닫는다.
+    priority = None
+    for candidate in draft.decision.blockers:
+        row = blocker_crud.create_blocker(session, Blocker(
+            case_id=history.case_id, candidate_id=candidate.candidate_id,
+            created_from_case_history_id=history.id, description=candidate.description,
+            blocker_evidence_refs=list(candidate.evidence_refs), status="ACTIVE",
+        ))
+        if candidate == draft.decision.blocker:
+            priority = row
+    if priority is None:
+        raise ValueError("reviewed blockers must contain the priority blocker")
+    return priority
 
 
 def save_conflict(
@@ -204,20 +221,26 @@ def save_conflict(
         )
     # 결정 뒤 재판단에서 또 다른 충돌이 나올 수 있다. 그때도 방금 고른 것은 닫아야 한다 —
     # 안 닫으면 다음 확인 화면이 이미 답한 충돌을 다시 묻고, 그 Case는 영영 안 풀린다.
-    _resolve_conflicts(session, resolved_conflicts)
+    _resolve_conflicts(session, history, resolved_conflicts)
 
     history.judgment_status = "CONFLICT"
     history.judged_at = kst_now()
     session.commit()
 
 
-def _resolve_conflicts(session: Session, choices: Mapping[int, str] | None) -> None:
-    """사장님이 결정한 충돌을 닫는다. 고른 쪽을 그대로 남긴다.
+def _resolve_conflicts(
+    session: Session, history: CaseHistory, choices: Mapping[int, str] | None
+) -> None:
+    """사장님이 결정한 충돌을 닫는다. 고른 쪽과 닫은 이력을 함께 남긴다.
 
     "새 값"은 채택(CONFIRMED), "기존 값 유지"는 거절(REJECTED)이다. 둘 다 결정이므로 어느
     쪽이든 더는 되묻지 않는다. 결정 접수 시점이 아니라 판단이 성공해서 값을 저장할 때
     닫는다 — 접수 때 닫으면 판단이 실패했을 때 값은 그대로인데 충돌만 사라져서, 사장님이
     다시 결정할 길이 없어진다(현석님 #108).
+
+    닫은 이력(`history`)을 적어 두는 것은 화면에 낼 때 쓴다. 이 결정이 바꾼 값은 결정
+    이력에서 나온 것으로 남는데 그 이력에는 글이 없어서, 이 칸을 거쳐야 충돌을 일으킨
+    제출의 원문에 닿는다(services.unmasking).
     """
 
     for conflict_reference_id, side in (choices or {}).items():
@@ -228,6 +251,7 @@ def _resolve_conflicts(session: Session, choices: Mapping[int, str] | None) -> N
             raise ValueError(f"conflict_reference {conflict_reference_id} not found")
         reference.status = "CONFIRMED" if side == "PROPOSED" else "REJECTED"
         reference.decided_at = kst_now()
+        reference.resolved_by_case_history_id = history.id
         session.add(reference)
 
 
@@ -315,10 +339,12 @@ def _assert_changes_are_current(session: Session, history: CaseHistory, mutation
             raise ValueError(
                 f"case {history.case_id} has no procedure step {change.procedure_step.step_code}"
             )
-        if step.status != change.before_status.value:
+        before = (change.before_status.value, change.before_requirements_confirmed, change.before_submitted)
+        current = (step.status, step.requirements_confirmed, step.submitted)
+        if current != before:
             raise StaleJudgmentError(
                 f"case {case.id}의 절차 {change.procedure_step.step_code}: 판단이 본 상태는 "
-                f"{change.before_status.value}인데 지금은 {step.status}"
+                f"{before}인데 지금은 {current} (진행 상태, 준비사항 확인, 신고 제출)"
             )
 
 
@@ -439,6 +465,8 @@ def _apply_procedure_progress_changes(
             )
         previous = step.status
         step.status = change.proposed_status.value
+        step.requirements_confirmed = change.proposed_requirements_confirmed
+        step.submitted = change.proposed_submitted
         # 완료된 절차는 근거 없이 스냅샷에 담을 수 없다(ProcedureProgress.completed_requires_evidence).
         # 다음 판단에 그대로 넘겨야 해서 어느 근거로 옮겼는지 함께 남긴다.
         step.evidence_refs = list(change.execution_evidence_refs)

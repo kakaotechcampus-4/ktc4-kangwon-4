@@ -152,6 +152,8 @@ class Roadmap(AgentSchema):
     supported: StrictBool = True
     unsupported_reason: str | None = None
     stages: list[RoadmapStage]
+    # 표시용 첫 미완료 단계. 완료 Case·미지원 업종·남은 항목 없음은 표시하지 않는다.
+    current_stage: int | None = None
     next_action: NextAction | None
     next_task_id: str | None
     questions_for_user: list[str]
@@ -286,7 +288,13 @@ def build_roadmap(request: RoadmapInput, *, procedure_bindings: ProcedureBinding
     next_task = None
     if action is not None and action.target.target_kind == "PROCEDURE":
         next_task = next((t.task_id for s in stages for t in s.tasks if action.target.procedure_step in t.procedure_steps), None)
+    current_stage = None if snapshot.case_status == "COMPLETED" else next(
+        (s.stage for s in stages
+         if any(t.status not in {"COMPLETED", "NOT_APPLICABLE"} for t in s.tasks)),
+        None,
+    )
     return Roadmap(case_id=snapshot.case_id, snapshot_id=snapshot.snapshot_id, stages=stages,
+                   current_stage=current_stage,
                    next_action=action, next_task_id=next_task, questions_for_user=questions)
 
 

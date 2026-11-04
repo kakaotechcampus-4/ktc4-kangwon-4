@@ -5,6 +5,9 @@
  * 컴포넌트는 이 타입만 받는다 — 그래야 서버 응답 형태가 바뀌어도 어댑터만 고치면 된다.
  */
 
+// 폐업 사유·보증금 결과는 서버 값을 그대로 고르는 보기라, 같은 값을 여기 한 벌 더 적지 않는다
+import type { ClosureReason, DepositReturnResult } from './api'
+
 /** fact 하나의 확인 상태 */
 export type FactStatus =
   /** 값이 확정됨 */
@@ -142,6 +145,27 @@ export interface CurrentCaseView {
   /** 확인된 것과 미확인을 모두 담는다. 서버가 정한 순서를 그대로 쓴다 */
   facts: Fact[]
   judgment: JudgmentView
+  /**
+   * 폐업 정리를 모두 마쳤는지. 서버가 `case_status` 를 `COMPLETED` 로 바꿨을 때만 `true` 다(#167).
+   *
+   * 판단(`judgment`)과는 다른 축이다. 완료돼도 마지막 판단 기록은 남아 있고, 완료를 풀면(부가세 체크를
+   * 풀면) 그 판단이 다시 지금 할 일이 된다.
+   */
+  completed: boolean
+  /** 저장해 둔 통합 폐업 신고 정보. 저장 전이면 `null`. 신고 화면을 이 값으로 채워 연다 */
+  closureReport: ClosureReportView | null
+  /** 기록해 둔 보증금 결과. 기록 전이면 `null`. 보증금 화면을 이 값으로 골라 둔 채 연다 */
+  depositReturn: DepositReturnResult | null
+}
+
+/** 통합 폐업 신고에 적을 값(#168). 서버가 폐업일·사유·도로명 주소를 한 번에 저장한다 */
+export interface ClosureReportView {
+  /** `YYYY-MM-DD`. 날짜 고르기 칸에 그대로 넣는다 */
+  closureDate: string
+  closureReason: ClosureReason
+  roadAddress: string
+  /** 상세 주소는 비워도 된다(단독 건물 등) */
+  addressDetail: string | null
 }
 
 /**
@@ -368,4 +392,112 @@ export interface DiagnosisAnswers {
    */
   insurances: DiagnosisInsurance[] | 'UNKNOWN' | null
   closure: DiagnosisClosure | null
+}
+
+/** 기록을 남긴 쪽. 서버 `actor`와 같은 값이다 */
+export type LogActor = 'OWNER' | 'RIBBON'
+
+/**
+ * 기록 탭의 한 줄 (시안 M08).
+ *
+ * 문구는 서버가 주지 않고 사건 코드(`event`)만 준다. 화면이 코드를 문구로 바꾼다
+ * (`adapters/logs.ts`).
+ */
+export interface LogEntry {
+  key: string
+  actor: LogActor
+  text: string
+  /** 덧붙이는 한 줄. 정한 할 일 제목이나 사장님이 알려 준 심사 결과. 없으면 그리지 않는다 */
+  detail?: string
+  /** `10.17` 처럼 월.일. 서버가 준 날짜 글자를 그대로 잘라 쓴다 */
+  date: string
+}
+
+/** 서류에서 꺼낸 값 하나. 이름은 화면 말로 바꿔 둔다 */
+export interface DocumentFieldView {
+  /** 서버 칸 이름(`amount` 등). 확인해서 다시 보낼 때 이 이름으로 보낸다 */
+  name: string
+  /**
+   * 화면 말. 모르는 칸이면 `null` 이고 화면에 보여주지 않는다 — 영어 칸 이름을 띄울 수 없다.
+   * 그래도 확인할 때는 원래 값 그대로 같이 보낸다
+   */
+  label: string | null
+  value: string
+}
+
+/**
+ * 서류함의 서류 한 장.
+ *
+ * 종류 이름(`kindLabel`)과 확인이 필요한지(`needsConfirmation`)는 서버가 정해 준 그대로다.
+ * 화면이 파일 이름이나 값을 보고 다시 가리지 않는다.
+ */
+export interface DocumentView {
+  id: string
+  filename: string
+  /** 서버 종류 코드(`TRANSFER` 등). 사장님이 종류를 고쳐 보낼 때 쓴다 */
+  kind: string
+  kindLabel: string
+  needsConfirmation: boolean
+  /** 사장님이 확인했으면 확인한 값, 아니면 서버가 꺼낸 값 */
+  fields: DocumentFieldView[]
+}
+
+/** 정산 서류 점검 결과 */
+export type DocumentCheckStatus = 'COMPLETE' | 'ISSUES' | 'ERROR'
+
+export interface DocumentCheckView {
+  status: DocumentCheckStatus
+  steps: { name: string; status: 'WAITING' | 'RUNNING' | 'DONE' | 'NEEDS_CONFIRMATION' | 'ERROR' }[]
+  /** 서버가 쓴 문구 그대로("정산 점검 목록에서 빠진 서류: 이체확인증") */
+  issues: string[]
+}
+
+/** 서류함 화면 데이터. 서류를 더하거나 빼면 서버가 지난 점검을 지워 `check` 가 `null` 이 된다 */
+export interface DocumentsView {
+  documents: DocumentView[]
+  check: DocumentCheckView | null
+}
+
+/** 로드맵 할 일의 상태. 서버(AI 로드맵 `TaskStatus`)와 같은 값이다 */
+export type RoadmapTaskStatus = 'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETED' | 'NOT_APPLICABLE' | 'NEEDS_CONFIRMATION'
+
+/**
+ * 로드맵 할 일의 종류. 서버와 같은 값이다.
+ *
+ *   CHECKLIST       사장님이 체크하는 항목(체크 저장 `PUT /cases/checklists/{task_id}`)
+ *   PROCEDURE       공식 절차. 결과를 알려주면 판단이 상태를 바꾼다
+ *   DOCUMENT_CHECK  서류 점검
+ *   CASE_FACT       가게 정보로 정해지는 것(폐업 날짜, 철거비 심사 결과 등)
+ */
+export type RoadmapTaskKind = 'CHECKLIST' | 'PROCEDURE' | 'DOCUMENT_CHECK' | 'CASE_FACT'
+
+export interface RoadmapTaskView {
+  /** 서버 할 일 번호(`dispose_stock` 등) */
+  id: string
+  title: string
+  kind: RoadmapTaskKind
+  status: RoadmapTaskStatus
+  /** 검수한 설명. 일부 할 일에만 있다(#144) */
+  guidance?: string
+}
+
+export interface RoadmapStageView {
+  stage: number
+  title: string
+  tasks: RoadmapTaskView[]
+}
+
+/**
+ * 로드맵 화면 데이터 (시안 M03).
+ *
+ * 현재 단계는 서버가 정한다(현종님 로드맵 조회 API 계획). 화면이 할 일 상태를 보고 짐작하지 않는다.
+ * 미지원 업종(프랜차이즈 카페·다른 음식점)이면 `supported` 가 `false` 이고 단계가 비어 있다.
+ */
+export interface RoadmapView {
+  supported: boolean
+  /** 미지원일 때 서버가 쓴 안내 문구 */
+  unsupportedReason: string | null
+  /** 지금 단계 번호(1~5). 서버가 안 주면 `null` 이고 어느 단계도 강조하지 않는다 */
+  currentStage: number | null
+  stages: RoadmapStageView[]
 }

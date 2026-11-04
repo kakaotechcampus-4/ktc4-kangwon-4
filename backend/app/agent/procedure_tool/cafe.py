@@ -1,10 +1,4 @@
-"""Fixed cafe procedure definitions and official text compared on 2026-10-18.
-
-This module performs no network or database access. Hashes identify fetched HTML
-or PDF bytes; excerpts normalize decorative source glyphs only. Automated
-comparison supports human review; it does not approve these records for serving.
-A team member must read them and record their name and review time before use.
-"""
+"""Fixed cafe procedures and eight sources reviewed by the project owner."""
 
 from collections.abc import Mapping
 from urllib.parse import urlsplit
@@ -18,12 +12,16 @@ from app.agent.schemas import (
 )
 
 CAFE_REGISTRY_VERSION = "cafe-closure/2026-10-18"
-# Text-only correction; fetched-body hashes and collection times are unchanged.
-CAFE_SOURCE_VERSION = "cafe-official-sources/2026-10-18-text1"
+CAFE_SOURCE_VERSION = "cafe-official-sources/2026-11-04-reviewed1"
+_GENERATED_AT = "2026-11-03T22:05:23.303347Z"
+# Review completion was recorded in PR #133, comment 6595672218.
+_REVIEWED_AT = "2026-11-03T04:44:58Z"
 
 _OFFICIAL_RECORDS = (
     {
         "record_id": "TAX_BUSINESS_CLOSURE",
+        "reviewed_by": "tokengeoji",
+        "reviewed_at": _REVIEWED_AT,
         "title": "휴·폐업 신고",
         "authority_name": "국세청",
         "canonical_url": "https://www.nts.go.kr/nts/cm/cntnts/cntntsView.do?cntntsId=7780&mi=2447",
@@ -46,6 +44,8 @@ _OFFICIAL_RECORDS = (
     },
     {
         "record_id": "CAFE_CLOSURE_AND_TAX_FOLLOWUP",
+        "reviewed_by": "tokengeoji",
+        "reviewed_at": _REVIEWED_AT,
         "title": "카페 폐업신고와 후속 세금 안내",
         "authority_name": "찾기쉬운 생활법령정보",
         "canonical_url": "https://www.easylaw.go.kr/CSP/CnpClsMainBtr.laf?ccfNo=5&cciNo=1&cnpClsNo=1&csmSeq=706&popMenu=ov",
@@ -101,6 +101,8 @@ _OFFICIAL_RECORDS = (
     },
     {
         "record_id": "LEASE_RESTORATION_AND_RETURN",
+        "reviewed_by": "tokengeoji",
+        "reviewed_at": _REVIEWED_AT,
         "title": "임차상가건물의 반환의무 및 원상회복의무",
         "authority_name": "찾기쉬운 생활법령정보",
         "canonical_url": "https://www.easylaw.go.kr/CSP/CnpClsMain.laf?ccfNo=3&cciNo=2&cnpClsNo=2&csmSeq=627&popMenu=ov",
@@ -122,6 +124,8 @@ _OFFICIAL_RECORDS = (
     },
     {
         "record_id": "EMPLOYEE_FINAL_SETTLEMENT",
+        "reviewed_by": "tokengeoji",
+        "reviewed_at": _REVIEWED_AT,
         "title": "퇴직 시 금품청산과 지급기일 합의",
         "authority_name": "고용노동부 1350",
         "canonical_url": "https://1350.moel.go.kr/rtmview.do?id=1000305482&page=2&type=ALL",
@@ -134,6 +138,8 @@ _OFFICIAL_RECORDS = (
     },
     {
         "record_id": "EMPLOYEE_RETIREMENT_BENEFITS",
+        "reviewed_by": "tokengeoji",
+        "reviewed_at": _REVIEWED_AT,
         "title": "퇴직급여 지급 대상과 기한",
         "authority_name": "고용노동부",
         "canonical_url": "https://www.moel.go.kr/news/cardinfo/view.do?bbs_seq=20210601566",
@@ -148,6 +154,8 @@ _OFFICIAL_RECORDS = (
     },
     {
         "record_id": "SOCIAL_INSURANCE_COMMON_CLOSURE_AND_LOSS",
+        "reviewed_by": "tokengeoji",
+        "reviewed_at": _REVIEWED_AT,
         "title": "2026년 국민연금 실무안내: 4대보험 공통신고와 기관별 처리결과",
         "authority_name": "국민연금공단",
         "canonical_url": "https://www.nps.or.kr/fileDown.do?atchFileId=FL26000086&atchFileSn=1",
@@ -204,6 +212,8 @@ _OFFICIAL_RECORDS = (
     },
     {
         "record_id": "WORKPLACE_INSURANCE_CLOSURE_FORM",
+        "reviewed_by": "tokengeoji",
+        "reviewed_at": _REVIEWED_AT,
         "title": "국민연금·건강보험 탈퇴 및 고용·산재보험 소멸 신고서",
         "authority_name": "국민건강보험공단",
         "canonical_url": "https://www.nhis.or.kr/static/html/wbdb/f/wbdbf0901.html",
@@ -325,6 +335,8 @@ _OFFICIAL_RECORDS = (
     },
     {
         "record_id": "EMPLOYEE_INSURANCE_LOSS_FORM",
+        "reviewed_by": "tokengeoji",
+        "reviewed_at": _REVIEWED_AT,
         "title": "사업장가입자 자격상실 신고서와 처리절차",
         "authority_name": "국가법령정보센터",
         "canonical_url": "https://www.law.go.kr/LSW/flDownload.do?bylClsCd=110202&flSeq=160222035&gubun=",
@@ -375,19 +387,19 @@ _OFFICIAL_RECORDS = (
 
 
 def build_cafe_reviewed_snapshot() -> ReviewedProcedureSnapshot:
-    """Return detached records awaiting human review for this collected version."""
+    """Return the owner's reviewed bundle without fetching or changing source text."""
     return ReviewedProcedureSnapshot.model_validate(
         {
             "snapshot_version": CAFE_SOURCE_VERSION,
-            "generated_at": max(record["retrieved_at"] for record in _OFFICIAL_RECORDS),
+            "generated_at": _GENERATED_AT,
             "locale": "ko-KR",
             "records": [
                 {
                     **record,
                     "source_domain": urlsplit(record["canonical_url"]).hostname,
                     "published_at": None,
-                    "reviewed_by": None,
-                    "reviewed_at": None,
+                    "reviewed_by": record.get("reviewed_by"),
+                    "reviewed_at": record.get("reviewed_at"),
                     "review_valid_days": 90,
                     "required_terms": ["폐업"],
                 }

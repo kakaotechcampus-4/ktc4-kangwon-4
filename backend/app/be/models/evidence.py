@@ -153,9 +153,27 @@ class ConflictReference(CreatedAtMixin, table=True):
     decided_at: datetime | None = Field(
         default=None, sa_column=Column(DateTime, nullable=True), description="결정된 시각. 결정 전엔 NULL"
     )
+    resolved_by_case_history_id: int | None = Field(
+        default=None,
+        sa_column=Column(
+            BigInteger,
+            ForeignKey("case_history.id", use_alter=True, name="fk_conflict_reference_resolved_by"),
+            nullable=True,
+        ),
+        description=(
+            "이 충돌을 닫은 결정 이력. 위 case_history_id(충돌을 일으킨 제출)와 짝이다."
+            " 결정 이력에는 사장님이 쓴 글이 없어서, 그 결정이 바꾼 값의 가림 문구를 되돌릴 때"
+            " 이 칸을 거쳐 제출의 원문을 찾는다(services.unmasking). 결정 전이거나 이 칸이"
+            " 생기기 전에 닫힌 충돌은 NULL"
+        ),
+    )
 
     case: "Case" = Relationship(back_populates="conflict_references")
-    case_history: "CaseHistory" = Relationship()
+    # case_history로 가는 외래키가 둘이라(충돌을 일으킨 제출, 그 충돌을 닫은 결정) 어느 쪽을
+    # 따라갈지 적어 준다. 이 관계는 "이번에 하신 말씀"을 보여줄 때 쓰는 제출 쪽이다.
+    case_history: "CaseHistory" = Relationship(
+        sa_relationship_kwargs={"foreign_keys": "ConflictReference.case_history_id"}
+    )
 
 
 class DecisionRecord(CreatedAtMixin, table=True):

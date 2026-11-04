@@ -55,11 +55,13 @@ Vite 가 읽지 않습니다. 고친 뒤에는 개발 서버를 다시 띄웁니
 | React 내장 | 상태관리 (`useState` / `useContext`) |
 | Zustand | 화면 여러 장에 걸쳐 이어지는 답만 (`src/stores/`). 지금은 상황 진단 답 하나. 서버 데이터는 넣지 않습니다 |
 | Pretendard | 본문 글꼴. npm 패키지로 직접 배포 (`src/main.tsx`) |
+| 다음 우편번호 서비스 | 통합 폐업 신고의 가게 주소 찾기. 패키지가 아니라 공식 스크립트를 주소 찾기를 열 때만 받습니다 (`src/lib/postcode.ts`) |
 
 Mobile-first 반응형, 기준 폭 375px.
 
 서버 통신은 `src/lib/api.ts` 한곳을 거칩니다. 주소와 `Access-Token` 헤더를 여기서 붙이고,
-인증이 통하지 않으면 로그인 화면으로 돌려보냅니다.
+인증이 통하지 않으면 로그인 화면으로 돌려보냅니다. 파일 올리기(`FormData`)와 요청별 제한 시간(`timeoutMs`)도
+여기서 받습니다.
 
 색·글자 크기·모서리·그림자는 `src/styles/tokens.css`의 토큰으로 씁니다. 규칙은 `docs/ui-guidelines.md`에 있습니다.
 
@@ -73,13 +75,17 @@ Mobile-first 반응형, 기준 폭 375px.
 | `/login/callback` | 로그인 처리 | 카카오가 돌려보내는 자리. 역시 가드 밖 |
 | `/` | 진입 분기 | 보낼 곳만 정하고 화면은 없다 |
 | `/cases/new` | 상황 진단 | Case가 없는 사용자만 본다. 질문 한 장씩(`?step=`), 답에 따라 질문이 생기고 빠진다. 마지막에 가입 요청을 보내고 저장하는 동안 "만드는 중" |
-| `/case` | 현재 Case (홈) | 하단 탭. 지금 할 일 하나, 또는 리본이 일하는 중인지 |
-| `/task` | 할 일 상세 | 할 일과 "이렇게 물어보세요" 목록 |
+| `/case` | 현재 Case (홈) | 하단 탭. 지금 할 일 하나, 또는 리본이 일하는 중인지. 폐업 정리를 마쳤으면(`case_status` `COMPLETED`, #167) 할 일 대신 완료 카드와 [전체 기록 보기] |
+| `/task` | 할 일 상세 | 할 일과 "이렇게 물어보세요" 목록. 폐업 정리를 마친 가게는 홈으로 보낸다 |
 | `/results` | 결과 입력 | 할 일의 결과를 글로 전달. 리본이 되물었으면 그 질문에 답하고, 더 알려주셔야 하는 실패면 다시 적는다. 보낸 뒤 판단이 끝날 때까지 처리 화면 |
 | `/confirm` | 충돌 확인 | 기존 기록과 어긋날 때만 들른다. 고른 쪽을 보내고(`POST /cases/results/decision`, #136) 결과 입력과 같은 처리 중 화면으로 판단을 기다린다 |
 | `/replan` | 반영 결과 | 무엇이 바뀌었고 다음 할 일은 무엇인가. 주소의 판단 번호(`?history=`)로 다시 묻는다 |
-| `/docs` | 서류함 | 하단 탭. 아직 API가 없어 빈 상태 |
-| `/log` | 작업 기록 | 하단 탭. 아직 API가 없어 빈 상태 |
+| `/docs` | 서류함 | 하단 탭. 올린 서류 목록 · 올리기 시트 · 확인 필요 서류 고치기 · 빼기(서류 API #159). 올리기는 서버가 다 읽을 때까지 기다려 최대 110초(배포의 Vercel 120초 제한보다 먼저 끊음) |
+| `/docs/check` | 서류 점검 | 정산 서류 점검. 점검 직전 신청인 이름 · 실제 폐업일을 묻는다 |
+| `/docs/done` | 정산 제출 파일 | 점검을 통과했을 때만. [파일 받기]로 ZIP 을 받는다(Mock 에서는 꺼짐) |
+| `/log` | 작업 기록 | 하단 탭. 사장님 · 리본이 한 일을 최근 것부터(`GET /cases/logs`). 홈 띠도 여기서 리본 줄만 쓴다 |
+| `/roadmap` | 폐업 전체 순서 | 다섯 단계와 할 일 상태. 홈 단계 카드로 들어온다. **로드맵 조회 API 전이라 실서버에서는 준비 중** |
+| `/roadmap/:taskId` | 할 일 | 할 일마다 체크 · 첨부 · 철거비 심사 결과 · 통합 폐업 신고(폐업일 · 사유 · 주소) · 보증금 · 결과 알려주기 중 하나를 연다. 저장은 실서버 API(#149 · #168). 통합 폐업 신고 · 보증금은 저장해 둔 값(`GET /cases`)으로 채워 연다 |
 | `/notifications` | 알림 | 탭 화면의 종 버튼으로 들어온다. 아직 빈 상태 |
 
 로그인 화면 둘을 뺀 전부가 인증 가드 아래에 있습니다. 로그인하지 않고 열면 `/login`으로 갑니다.
@@ -99,7 +105,8 @@ Mobile-first 반응형, 기준 폭 375px.
 남고, 가입 요청이 받아들여지면 비웁니다. 로그인이 만료되거나 저장에 실패하면 남겨 두어 이어서 보냅니다.
 
 **Case 가 있는지는 서버에 물어봅니다.** `/` · `/cases/new` · `/case` · `/task` 가 들어올 때마다
-`GET /cases` 를, `/results` 는 `GET /cases/results` 를, `/replan` 은 `GET /cases/results/status` 를 부릅니다. 앞 화면에서 받은 값을 넘겨받지 않는 것은, 그 값이 히스토리에 남아
+`GET /cases` 를, `/results` 는 `GET /cases/results` 를, `/replan` 은 `GET /cases/results/status` 를, `/log` 와 홈 띠는
+`GET /cases/logs` 를, `/docs` · `/docs/check` · `/docs/done` 은 `GET /cases/documents` 를 부릅니다. 앞 화면에서 받은 값을 넘겨받지 않는 것은, 그 값이 히스토리에 남아
 오래된 Case 가 "지금 상황"인 척 다시 뜨기 때문입니다.
 
 로그인 토큰은 `sessionStorage`에 둡니다. 탭을 닫으면 풀립니다 — 가게나 공용 PC에서 쓰는
@@ -163,6 +170,7 @@ PR 브랜치마다 Preview 주소가 달라 등록할 수 없어서, **리뷰어
 /?mock=judgment-failed-none     판단 실패 — 지금 이어서 할 수 있는 것이 없는 경우
 /?mock=judgment-conflict    말한 내용이 기록과 달라 확인이 필요한 상태
 /?mock=unrecognized         서버가 모르는 판단 상태를 보냈을 때
+/?mock=completed            폐업 정리를 모두 마친 상태 (부가세 신고를 체크한 뒤)
 /results?mock=conflict      제출하면 충돌 확인으로
 /results?mock=more-info     리본이 되물은 질문에 답하기 (보내면 또 되묻는다)
 /results?mock=failed-retry     판단 실패 — 같은 내용으로 다시 보낼 수 있는 경우
@@ -176,6 +184,12 @@ PR 브랜치마다 Preview 주소가 달라 등록할 수 없어서, **리뷰어
 /results?mock=unrecognized     판단 결과를 읽지 못함
 /results?mock=judgment-failed-detail  홈의 "다시 알려주기"에서 온 경우 (더 알려주셔야 하는 실패)
 /replan?mock=no-change      바뀐 것 없음
+/log?mock=logs-empty        기록이 아직 없음 (다른 키는 예시 기록)
+/docs?mock=docs             서류 목록 · 올리기 · 확인 필요 서류
+/docs?mock=docs-issues      점검에서 빠진 서류가 나온 상태
+/docs?mock=docs-complete    점검을 통과해 제출 파일을 볼 수 있는 상태
+/roadmap?mock=roadmap       폐업 전체 순서 (2단계 진행 중). 할 일을 누르면 할 일 화면
+/roadmap?mock=roadmap-unsupported  미지원 업종 안내
 ```
 
 `?mock=` 없이 가짜 로그인만 하면 **판단이 끝난 화면**이 나옵니다.
@@ -204,7 +218,7 @@ frontend/
 │  └─ ui-guidelines.md
 ├─ src/
 │  ├─ components/     재사용 UI
-│  │  └─ ui/          새 시안 부품(버튼·배지·로더·빈 상태·머리말·탭·탭 틀·할 일 카드·홈 띠·단계 카드·소개·질문 한 장·처리 중).
+│  │  └─ ui/          새 시안 부품(버튼·배지·로더·빈 상태·머리말·탭·탭 틀·할 일 카드·홈 띠·단계 카드·소개·질문 한 장·처리 중·아래 시트).
 │  │                  components/ 바로 아래의 옛 부품은 화면을 교체하며 지운다
 │  ├─ pages/          화면
 │  ├─ hooks/          화면이 데이터를 구하는 방법
@@ -212,7 +226,7 @@ frontend/
 │  ├─ types/          api.ts — 서버가 주는 모양 (snake_case)
 │  │                  view.ts — 화면이 필요한 모양 (camelCase)
 │  ├─ mocks/          Mock 전환(?mock=)용 데이터
-│  ├─ lib/            화면에 속하지 않는 보조 코드
+│  ├─ lib/            화면에 속하지 않는 보조 코드 (서버 호출 · 할 일 장면 표 · 주소 찾기 등)
 │  ├─ stores/         Zustand — 화면 여러 장에 걸쳐 이어지는 답 (상황 진단)
 │  ├─ styles/         tokens.css — 색·글자 크기·모서리·그림자 토큰
 │  ├─ assets/         brand/ — 워드마크·망치 마크·카카오 심볼 SVG

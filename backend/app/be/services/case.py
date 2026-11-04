@@ -60,10 +60,8 @@ def _field_changes(session: Session, case_id: int, case_history_id: int) -> list
     return [
         FieldChangeResponse(
             field=row.canonical_field,
-            stored_value=restorer.restore(
-                row.before_value, restorer.source_of_previous(row.id), row.canonical_field
-            ),
-            new_value=restorer.restore(row.after_value, row.case_history_id, row.canonical_field),
+            stored_value=restorer.restore(row.before_value, restorer.source_of_previous(row.id)),
+            new_value=restorer.restore(row.after_value, row.case_history_id),
         )
         for row in rows
     ]
@@ -88,13 +86,9 @@ def _conflict_items(
             id=conflict.id,
             field=conflict.canonical_field,
             stored_value=restorer.restore(
-                conflict.committed_value,
-                restorer.source_of_current(conflict.canonical_field),
-                conflict.canonical_field,
+                conflict.committed_value, restorer.source_of_current(conflict.canonical_field)
             ),
-            proposed_value=restorer.restore(
-                conflict.proposed_value, conflict.case_history_id, conflict.canonical_field
-            ),
+            proposed_value=restorer.restore(conflict.proposed_value, conflict.case_history_id),
         )
         for conflict in conflicts
     ]
@@ -109,7 +103,7 @@ def _case_detail(session: Session, case: Case) -> CaseGetDetailResponse:
     )
     return detail.model_copy(
         update={
-            field: restorer.restore(getattr(detail, field), restorer.source_of_current(field), field)
+            field: restorer.restore(getattr(detail, field), restorer.source_of_current(field))
             for field in ("business_type", "restoration_scope_detail")
         }
     )

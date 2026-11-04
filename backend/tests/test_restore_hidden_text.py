@@ -204,7 +204,8 @@ def case_whose_last_change_came_from_a_conflict_decision(monkeypatch):
     monkeypatch.setattr(
         conflict_reference_crud, "get_decided_conflicts_by_case_id",
         lambda *_: [SimpleNamespace(
-            canonical_field="restoration_scope_detail", case_history_id=11, status="CONFIRMED"
+            canonical_field="restoration_scope_detail", case_history_id=11,
+            status="CONFIRMED", resolved_by_case_history_id=33,
         )],
     )
     return rows
@@ -225,12 +226,13 @@ def test_a_conflict_decision_shows_the_restored_text(
     assert changes[0].new_value == "서울특별시 마포구 월드컵북로 12 1층 일부"
 
 
-def decided(case_history_id: int, status: str = "CONFIRMED"):
-    """결정이 끝난 충돌 한 줄. 그 값이 어느 제출에서 나왔는지가 들어 있다."""
+def decided(case_history_id: int, closed_by: int, status: str = "CONFIRMED"):
+    """결정이 끝난 충돌 한 줄. 어느 제출에서 나왔고 어느 결정이 닫았는지가 들어 있다."""
     return SimpleNamespace(
         canonical_field="restoration_scope_detail",
         case_history_id=case_history_id,
         status=status,
+        resolved_by_case_history_id=closed_by,
     )
 
 
@@ -254,32 +256,65 @@ def restorer_with(monkeypatch, conflicts):
     return HiddenTextRestorer(MagicMock(spec=Session), CASE_ID)
 
 
-def test_the_same_field_decided_twice_keeps_the_text_hidden(monkeypatch):
-    """같은 칸을 두 번 결정했으면 되돌리지 않는다(승준님 #158 리뷰).
+def test_the_same_field_decided_twice_still_restores_each_from_its_own_submission(monkeypatch):
+    """같은 칸을 두 번 결정해도 각 결정이 자기 제출의 글로 되돌린다.
 
-    어느 결정이 지금 보는 값을 만들었는지 가리키는 기록이 없다. 칸만 보고 마지막 충돌을
-    고르면 11번이 만든 값에 33번 글의 주소가 들어가, 실제로 "마포구 테헤란로 5 2층"처럼
-    두 주소가 섞인 글자가 나왔다. 그런 글자를 보여주느니 [주소]를 그대로 둔다.
+    전에는 칸 이름으로 충돌을 찾아서 어느 결정이 지금 보는 값을 만들었는지 가릴 수 없었고,
+    "마포구 테헤란로 5 2층"처럼 두 주소가 섞인 글자가 나왔다(승준님 #158 리뷰). 지금은
+    충돌 줄에 닫은 결정이 적혀 있어서 결정에서 제출로 바로 간다.
     """
-    restorer = restorer_with(monkeypatch, [decided(11), decided(33)])
+    restorer = restorer_with(monkeypatch, [decided(11, closed_by=22), decided(33, closed_by=44)])
 
-    restored = restorer.restore(
-        "서울특별시 마포구 [주소] 전체", 22, "restoration_scope_detail"
+    assert restorer.restore("서울특별시 마포구 [주소] 전체", 22) == (
+        "서울특별시 마포구 월드컵북로 12 1층 전체"
+    )
+    assert restorer.restore("서울특별시 강남구 [주소]만", 44) == "서울특별시 강남구 테헤란로 5 2층만"
+
+
+def test_a_rejected_proposal_does_not_reach_another_decision(monkeypatch):
+    """거절한 제안의 글이 다른 결정이 만든 값에 섞이지 않는다.
+
+    채택·거절을 가르지 않아도 된다. 거절한 충돌은 그것을 닫은 결정에만 달려 있고, 그 결정이
+    바꾼 값은 어차피 같은 제출에서 나온 것이기 때문이다.
+    """
+    restorer = restorer_with(
+        monkeypatch, [decided(11, closed_by=22), decided(33, closed_by=44, status="REJECTED")]
     )
 
-    assert restored == "서울특별시 마포구 [주소] 전체"
-
-
-def test_a_rejected_proposal_never_supplies_the_original_text(monkeypatch):
-    """거절한 제안의 글로 되돌리지 않는다(승준님 #158 리뷰).
-
-    "기존 값 유지"를 고르면 Case 값은 그대로다. 그 글은 값을 만든 입력이 아닌데, 결정이
-    끝났다는 이유로 섞으면 사장님이 쓰지 않기로 한 주소가 화면에 뜬다.
-    """
-    restorer = restorer_with(monkeypatch, [decided(11), decided(33, "REJECTED")])
-
-    restored = restorer.restore(
-        "서울특별시 마포구 [주소] 전체", 22, "restoration_scope_detail"
+    assert restorer.restore("서울특별시 마포구 [주소] 전체", 22) == (
+        "서울특별시 마포구 월드컵북로 12 1층 전체"
     )
+
+
+def test_a_fact_that_was_not_a_conflict_is_restored_too(monkeypatch):
+    """충돌이 아니었던 칸도 같은 길로 되돌아온다(현석님 #161 리뷰).
+
+    한 글에서 하나만 충돌이면 나머지는 보관됐다 결정 뒤 재판단에서 저장된다(#161). 그 값의
+    출처도 결정 이력이라 글이 없는데, 전에는 "그 칸의 충돌"을 찾는 방식이라 애초에 충돌이
+    아니었던 칸은 걸리지 않아 [주소]가 그대로 보였다.
+    """
+    restorer = restorer_with(monkeypatch, [decided(11, closed_by=22)])
+
+    # 임대차 형태가 충돌이었고, 원상복구 범위는 같은 글에 있었을 뿐 충돌이 아니었다.
+    restored = restorer.restore("서울특별시 마포구 [주소] 전체", 22)
 
     assert restored == "서울특별시 마포구 월드컵북로 12 1층 전체"
+
+
+def test_a_decision_that_closed_two_submissions_restores_nothing(monkeypatch):
+    """한 결정이 서로 다른 제출의 충돌을 닫았으면 되돌리지 않는다.
+
+    확인을 기다리는 충돌이 있는 동안은 새 제출이 막혀서(submit_case_results의 409) 지금은
+    나지 않는 모양이다. 그래도 어느 글이 그 값을 만들었는지 가릴 수 없으면 가린 채로 둔다.
+    """
+    restorer = restorer_with(monkeypatch, [decided(11, closed_by=22), decided(33, closed_by=22)])
+
+    assert restorer.restore("서울특별시 마포구 [주소] 전체", 22) == "서울특별시 마포구 [주소] 전체"
+
+
+def test_a_conflict_closed_before_this_link_existed_stays_hidden(monkeypatch):
+    """이 칸이 생기기 전에 닫힌 충돌은 NULL이라 따라갈 데가 없다."""
+
+    restorer = restorer_with(monkeypatch, [decided(11, closed_by=None)])
+
+    assert restorer.restore("서울특별시 마포구 [주소] 전체", 22) == "서울특별시 마포구 [주소] 전체"
