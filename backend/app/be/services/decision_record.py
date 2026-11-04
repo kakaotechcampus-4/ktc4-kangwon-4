@@ -72,16 +72,7 @@ def save_reviewed_plan(
     decision = outcome.review_subject.supervisor_draft.decision
     proof = outcome.review_proof
 
-    blocker = blocker_crud.create_blocker(
-        session,
-        Blocker(
-            case_id=history.case_id,
-            created_from_case_history_id=history.id,
-            description=decision.blocker.description,
-            blocker_evidence_refs=list(decision.blocker.evidence_refs),
-            status="ACTIVE",
-        ),
-    )
+    blocker = _save_blockers(session, history, outcome)
 
     # blocker와 case_history가 서로를 참조해서, blocker를 먼저 만들고 그 id를 채운다.
     # NEEDS_MORE_INFO는 다음 행동 자체가 없어서 next_action 관련 컬럼을 전부 NULL로 둔다
@@ -140,6 +131,32 @@ def save_reviewed_plan(
     session.commit()
     session.refresh(record)
     return record
+
+
+def _save_blockers(session: Session, history: CaseHistory, outcome: ReviewedPlanOutcome) -> Blocker:
+    draft = outcome.review_subject.supervisor_draft
+    resolved = set(draft.resolved_blocker_candidate_ids)
+    if resolved:
+        for row in blocker_crud.get_active_blockers_by_case_id(session, history.case_id):
+            if row.candidate_id in resolved:
+                row.status = "RESOLVED"
+                row.resolved_from_case_history_id = history.id
+                row.resolved_at = kst_now()
+
+    # 같은 후보여도 판단별 문구·근거를 새 행에 남긴다. 기존 행을 고치면 과거 판단의
+    # priority_blocker_id가 가리키는 설명까지 달라진다. 해결할 때는 해당 후보의 행을 모두 닫는다.
+    priority = None
+    for candidate in draft.decision.blockers:
+        row = blocker_crud.create_blocker(session, Blocker(
+            case_id=history.case_id, candidate_id=candidate.candidate_id,
+            created_from_case_history_id=history.id, description=candidate.description,
+            blocker_evidence_refs=list(candidate.evidence_refs), status="ACTIVE",
+        ))
+        if candidate == draft.decision.blocker:
+            priority = row
+    if priority is None:
+        raise ValueError("reviewed blockers must contain the priority blocker")
+    return priority
 
 
 def save_conflict(
