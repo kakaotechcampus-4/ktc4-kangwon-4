@@ -1,7 +1,8 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter } from 'react-router'
-import { describe, expect, it } from 'vitest'
+import { createMemoryRouter, MemoryRouter, RouterProvider } from 'react-router'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { saveTokens } from '../lib/auth'
 import { RoadmapPage } from './RoadmapPage'
 
 function renderAt(path: string) {
@@ -14,13 +15,80 @@ function renderAt(path: string) {
 
 const stageButton = (title: RegExp) => screen.getByRole('button', { name: title })
 
-/** 로드맵 조회 API(현종님 작업 예정)가 머지 전이다. 가짜 순서가 실서버에 뜨면 하지 않은 일이 완료로 보인다 */
-describe('RoadmapPage — 서버', () => {
-  it('준비 중이라고 알리고 단계를 그리지 않는다', () => {
-    renderAt('/roadmap')
+type Answer = () => Response | Promise<Response>
+const json = (body: unknown): Answer => () => new Response(JSON.stringify(body), { status: 200 })
+const status = (code: number): Answer => () => new Response(null, { status: code })
 
-    expect(screen.getByText('폐업 전체 순서는 준비 중이에요.')).toBeInTheDocument()
-    expect(screen.queryByRole('list')).not.toBeInTheDocument()
+function serve(...answers: Answer[]) {
+  let call = 0
+  const fetchMock = vi.fn(async () => answers[Math.min(call++, answers.length - 1)]())
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
+}
+
+/** 실서버 경로. 진단으로 보내는지 보려고 라우터에 진단 자리를 둔다 */
+function renderServer() {
+  saveTokens('access-1', 'refresh-1')
+  const router = createMemoryRouter(
+    [
+      { path: '/roadmap', element: <RoadmapPage /> },
+      { path: '/cases/new', element: <p>상황 진단</p> },
+    ],
+    { initialEntries: ['/roadmap'] },
+  )
+  render(<RouterProvider router={router} />)
+  return router
+}
+
+const SERVER_ROADMAP = {
+  supported: true,
+  unsupported_reason: null,
+  current_stage: 3,
+  stages: [
+    {
+      stage: 1,
+      title: '폐업 준비',
+      tasks: [{ task_id: 'closure_date', title: '폐업 날짜 정하기', kind: 'CASE_FACT', status: 'COMPLETED', guidance: null }],
+    },
+    {
+      stage: 3,
+      title: '영업 마무리·폐업 신고',
+      tasks: [{ task_id: 'dispose_stock', title: '재고·장비 처분', kind: 'CHECKLIST', status: 'NOT_STARTED', guidance: null }],
+    },
+  ],
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
+
+/** 로드맵 조회(`GET /cases/roadmap`, #178). 지금 단계는 서버(`current_stage`, #179)가 정한다 */
+describe('RoadmapPage — 서버', () => {
+  it('받은 로드맵을 그리고, 서버가 정한 지금 단계만 펼친다', async () => {
+    const fetchMock = serve(json(SERVER_ROADMAP))
+    renderServer()
+
+    expect(await screen.findByText('재고·장비 처분')).toBeInTheDocument()
+    expect(stageButton(/영업 마무리·폐업 신고/)).toHaveAttribute('aria-expanded', 'true')
+    expect(stageButton(/폐업 준비/)).toHaveAttribute('aria-expanded', 'false')
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/cases/roadmap'), expect.anything())
+  })
+
+  /** Case 가 없는 사용자는 볼 로드맵이 없다. 빈 화면 대신 상황 진단으로 */
+  it('Case 가 없으면(404) 상황 진단으로 보낸다', async () => {
+    serve(status(404))
+    renderServer()
+
+    expect(await screen.findByText('상황 진단')).toBeInTheDocument()
+  })
+
+  it('불러오지 못하면 알리고, 다시 불러오면 그린다', async () => {
+    serve(status(500), json(SERVER_ROADMAP))
+    renderServer()
+
+    fireEvent.click(await screen.findByRole('button', { name: '다시 불러오기' }))
+
+    expect(await screen.findByText('재고·장비 처분')).toBeInTheDocument()
   })
 })
 

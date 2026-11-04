@@ -22,9 +22,8 @@ interface HomeStageCardProps {
  * 막대는 시안처럼 지금 단계의 가운데까지 채운다(`(단계 - 0.5) / 5`). 단계를 다 마쳤다는 뜻이 아니라
  * 그 단계에 와 있다는 뜻이다. 폐업 정리를 마쳤으면 끝까지 채운다(시안 `closed`).
  *
- * 마친 뒤의 제목은 "폐업 단계" 그대로다. 시안은 "지금은 세금·마무리 단계"인데, 단계 이름은 로드맵이
- * 주는 값이라 FE 가 마지막 단계 이름을 적어 두지 않는다.
- * TODO(로드맵 조회 API): 단계 이름이 오면 마친 뒤의 제목을 다시 정한다.
+ * 마친 뒤의 제목은 "폐업 단계" 그대로다. 시안은 "지금은 세금·마무리 단계"인데, 폐업 정리를 마치면
+ * 서버가 지금 단계를 주지 않는다(`current_stage` `null`, #179). FE 가 마지막 단계 이름을 골라 붙이지 않는다.
  */
 export function HomeStageCard({ stage = null, completed = false }: HomeStageCardProps) {
   const { search } = useLocation()

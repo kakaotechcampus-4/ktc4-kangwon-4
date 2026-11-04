@@ -4,6 +4,7 @@ import { Navigate, useLocation, useNavigate, useParams } from 'react-router'
 
 import { BottomSheet } from '../components/ui/BottomSheet'
 import { Button } from '../components/ui/Button'
+import { HammerLoader } from '../components/ui/HammerLoader'
 import { InfoBox } from '../components/ui/InfoBox'
 import { TopBar } from '../components/ui/TopBar'
 import { useCase } from '../hooks/useCase'
@@ -29,12 +30,27 @@ type SaveState = 'IDLE' | 'SAVING' | 'FAILED' | 'REJECTED'
 export function TaskFlowPage() {
   const { taskId = '' } = useParams()
   const { search } = useLocation()
-  const roadmap = useRoadmap()
+  const { query: roadmap, reload } = useRoadmap()
 
-  if (roadmap.status === 'UNAVAILABLE') {
+  // 할 일 상태는 로드맵이 정한다. 로드맵을 받아야 어떤 장면을 열지 안다
+  if (roadmap.status === 'EMPTY') return <Navigate to={{ pathname: '/cases/new', search }} replace />
+
+  if (roadmap.status === 'LOADING') {
     return (
       <TaskFrame>
-        <InfoBox title="할 일 화면은 준비 중이에요.">폐업 전체 순서가 열리면 여기서 할 일을 하나씩 마칠 수 있어요.</InfoBox>
+        <div className="flex justify-center pt-16">
+          <HammerLoader size={48} label="할 일을 불러오는 중" />
+        </div>
+      </TaskFrame>
+    )
+  }
+
+  if (roadmap.status === 'LOAD_FAILED') {
+    return (
+      <TaskFrame>
+        <InfoBox title="할 일을 불러오지 못했어요." action={{ label: '다시 불러오기', onClick: reload }}>
+          연결 상태를 확인하고 다시 불러와 주세요.
+        </InfoBox>
       </TaskFrame>
     )
   }

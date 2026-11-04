@@ -128,7 +128,8 @@ function HomeFrame({
 }) {
   const { query } = useLogs()
   const ribbonItems = query.status === 'READY' ? query.entries.filter((entry) => entry.actor === 'RIBBON') : []
-  const roadmap = useRoadmap()
+  // 단계 카드는 덤이다. 불러오지 못해도 알리지 않고 "곧 보여드릴게요"로 둔다 — 홈의 주인공은 할 일 카드다
+  const { query: roadmap } = useRoadmap()
   // 머리말·카드·단계 카드가 차례로 올라온다. 뒤로 돌아온 홈은 이미 밀려 들어오는 중이라 올리지 않는다
   const rise = useEntersForward()
   const currentStage =
