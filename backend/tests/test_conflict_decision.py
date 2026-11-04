@@ -187,18 +187,20 @@ def test_closing_keeps_which_side_the_owner_picked(monkeypatch):
     )
 
     decision_record_service._resolve_conflicts(
-        MagicMock(spec=Session), {1: "PROPOSED", 2: "STORED"}
+        MagicMock(spec=Session), SimpleNamespace(id=9), {1: "PROPOSED", 2: "STORED"}
     )
 
     assert (rows[1].status, rows[2].status) == ("CONFIRMED", "REJECTED")
     assert rows[1].decided_at is not None and rows[2].decided_at is not None
+    # 어느 결정이 닫았는지 남겨야 그 값의 가림 문구를 되돌릴 수 있다(services.unmasking).
+    assert (rows[1].resolved_by_case_history_id, rows[2].resolved_by_case_history_id) == (9, 9)
 
 
 def test_closing_nothing_is_allowed(monkeypatch):
     """가입·결과 제출 판단은 닫을 충돌이 없다. 같은 저장 함수를 쓰므로 빈 값이 정상이다."""
 
-    decision_record_service._resolve_conflicts(MagicMock(spec=Session), None)
-    decision_record_service._resolve_conflicts(MagicMock(spec=Session), {})
+    decision_record_service._resolve_conflicts(MagicMock(spec=Session), SimpleNamespace(id=9), None)
+    decision_record_service._resolve_conflicts(MagicMock(spec=Session), SimpleNamespace(id=9), {})
 
 
 def test_the_stored_snapshot_survives_a_round_trip_through_mysql(mysql_engine):
@@ -384,6 +386,7 @@ def test_a_new_conflict_closes_the_decided_one_without_saving_the_chosen_value(m
         second = CaseHistory(case_id=case_id, source="CONFLICT_DECISION", judgment_status="PENDING")
         session.add(second)
         session.commit()
+        second_id = second.id
 
         decision_record_service.save_conflict(
             session, second,
@@ -408,6 +411,9 @@ def test_a_new_conflict_closes_the_decided_one_without_saving_the_chosen_value(m
         # 고른 충돌은 닫히고, 새로 난 충돌만 확인 대기로 남는다.
         assert rows["cr_old"].status == "CONFIRMED" and rows["cr_old"].decided_at is not None
         assert rows["cr_new"].status == "PENDING"
+        # 닫은 결정이 남아야 그 결정이 바꾼 값의 가림 문구를 되돌릴 수 있다(services.unmasking).
+        assert rows["cr_old"].resolved_by_case_history_id == second_id
+        assert rows["cr_new"].resolved_by_case_history_id is None
         # 고른 값(REQUIRED)은 Case에 반영되지 않는다. 이 분기에는 반영할 변경이 없다.
         assert session.get(Case, case_id).demolition_required == "UNKNOWN"
 
