@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { ReactElement } from 'react'
 import { createMemoryRouter, RouterProvider } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -49,8 +49,10 @@ const json = (body: unknown): Answer => () => new Response(JSON.stringify(body),
 const status = (code: number): Answer => () => new Response(null, { status: code })
 const hanging: Answer = () => new Promise(() => {})
 
-function serve(answer: Answer) {
-  const fetchMock = vi.fn(async () => answer())
+/** 부를 때마다 차례로 답한다. 목록이 끝나면 마지막 답을 계속 준다 */
+function serve(...answers: Answer[]) {
+  let call = 0
+  const fetchMock = vi.fn(async () => answers[Math.min(call++, answers.length - 1)]())
   vi.stubGlobal('fetch', fetchMock)
   return fetchMock
 }
@@ -59,83 +61,87 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('TaskFlowPage — 장면 고르기 (Mock)', () => {
-  it('체크 항목은 다 했어요로 기록하고 완료 취소로 되돌릴 수 있다', () => {
-    renderAt('/roadmap/dispose_stock?mock=roadmap')
+/**
+ * 장면 고르기에 쓰는 로드맵. Mock(`mocks/roadmap.ts`)은 시연용이라 바뀌므로 테스트가 따로 들고 있는다.
+ * 할 일 종류(체크 · 첨부 · 공식 절차 · 서류 점검)와 해당 없음을 하나씩 둔다
+ */
+const SCENE_ROADMAP = {
+  supported: true,
+  unsupported_reason: null,
+  current_stage: 2,
+  stages: [
+    {
+      stage: 2,
+      title: '원상복구·철거',
+      tasks: [
+        { task_id: 'restoration', title: '원상복구 범위 확인', kind: 'PROCEDURE', status: 'IN_PROGRESS', guidance: null },
+        { task_id: 'before_photo', title: '철거 전 사진', kind: 'CHECKLIST', status: 'NOT_STARTED', guidance: null },
+      ],
+    },
+    {
+      stage: 3,
+      title: '영업 마무리·폐업 신고',
+      tasks: [
+        { task_id: 'dispose_stock', title: '재고·장비 처분', kind: 'CHECKLIST', status: 'NOT_STARTED', guidance: null },
+        { task_id: 'check_loan', title: '은행에 폐업 후 상환 조건 확인', kind: 'CHECKLIST', status: 'NOT_APPLICABLE', guidance: null },
+      ],
+    },
+    {
+      stage: 4,
+      title: '지원금 정산·가게 반환',
+      tasks: [{ task_id: 'document_check', title: 'AI 서류 점검', kind: 'DOCUMENT_CHECK', status: 'NOT_STARTED', guidance: null }],
+    },
+  ],
+}
 
-    fireEvent.click(screen.getByRole('button', { name: '다 했어요' }))
+/** 서버가 위 로드맵(과 뒤이은 저장 응답들)을 주는 할 일 화면을 띄운다 */
+function renderTask(taskId: string, ...after: Answer[]) {
+  saveTokens('access-1', 'refresh-1')
+  serve(json(SCENE_ROADMAP), ...after)
+  return renderAt(`/roadmap/${taskId}`)
+}
 
-    expect(screen.getByText('마치셨다고 기록했어요')).toBeInTheDocument()
+/** 할 일 화면은 로드맵(`GET /cases/roadmap`)에서 그 할 일을 찾아 어떤 장면을 열지 정한다 */
+describe('TaskFlowPage — 장면 고르기', () => {
+  it('체크 항목은 다 했어요로 기록하고 완료 취소로 되돌릴 수 있다', async () => {
+    renderTask('dispose_stock', json({ task_id: 'dispose_stock', completed: true }), json({ task_id: 'dispose_stock', completed: false }))
+
+    fireEvent.click(await screen.findByRole('button', { name: '다 했어요' }))
+
+    expect(await screen.findByText('마치셨다고 기록했어요')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '완료 취소하기' }))
-    expect(screen.queryByText('마치셨다고 기록했어요')).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByText('마치셨다고 기록했어요')).not.toBeInTheDocument())
   })
 
   /** 사진은 서류함에 있어야 정산 점검에 쓰인다. 체크만 하고 끝나면 점검에서 빠진 서류가 된다 */
-  it('서류가 필요한 할 일은 서류함에 올리는 길을 먼저 둔다', () => {
-    const router = renderAt('/roadmap/before_photo?mock=roadmap')
+  it('서류가 필요한 할 일은 서류함에 올리는 길을 먼저 둔다', async () => {
+    const router = renderTask('before_photo')
 
-    fireEvent.click(screen.getByRole('button', { name: '서류함에 올리기' }))
+    fireEvent.click(await screen.findByRole('button', { name: '서류함에 올리기' }))
 
     expect(router.state.location.pathname).toBe('/docs')
-    expect(router.state.location.search).toBe('?mock=roadmap')
   })
 
   /** 공식 절차는 끝났는지를 판단이 정한다. 체크 버튼을 두면 사장님이 대신 완료한다 */
-  it('공식 절차는 체크 없이 결과 알려주기로 보낸다', () => {
-    const router = renderAt('/roadmap/restoration?mock=roadmap')
+  it('공식 절차는 체크 없이 결과 알려주기로 보낸다', async () => {
+    const router = renderTask('restoration')
 
+    fireEvent.click(await screen.findByRole('button', { name: '결과 알려주기' }))
     expect(screen.queryByRole('button', { name: '다 했어요' })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '결과 알려주기' }))
     expect(router.state.location.pathname).toBe('/results')
   })
 
-  it('서류 점검 할 일은 점검 화면으로 보낸다', () => {
-    const router = renderAt('/roadmap/document_check?mock=roadmap')
+  it('서류 점검 할 일은 점검 화면으로 보낸다', async () => {
+    const router = renderTask('document_check')
 
-    expect(router.state.location.pathname).toBe('/docs/check')
+    await waitFor(() => expect(router.state.location.pathname).toBe('/docs/check'))
   })
 
   /** 해당 없는 할 일과 없는 할 일은 열 것이 없다. 빈 화면 대신 순서로 돌려보낸다 */
-  it('해당 없거나 없는 할 일이면 로드맵으로 돌려보낸다', () => {
-    expect(renderAt('/roadmap/check_loan?mock=roadmap').state.location.pathname).toBe('/roadmap')
-  })
+  it.each(['check_loan', 'no_such_task'])('해당 없거나 없는 할 일(%s)이면 로드맵으로 돌려보낸다', async (taskId) => {
+    const router = renderTask(taskId)
 
-  it('없는 할 일 번호도 로드맵으로 돌려보낸다', () => {
-    expect(renderAt('/roadmap/no_such_task?mock=roadmap').state.location.pathname).toBe('/roadmap')
-  })
-
-})
-
-/** 할 일 화면은 로드맵(`GET /cases/roadmap`)에서 그 할 일을 찾아 어떤 장면을 열지 정한다 */
-describe('TaskFlowPage — 서버', () => {
-  const roadmapWith = (status: string) => ({
-    supported: true,
-    unsupported_reason: null,
-    current_stage: 3,
-    stages: [
-      {
-        stage: 3,
-        title: '영업 마무리·폐업 신고',
-        tasks: [{ task_id: 'dispose_stock', title: '재고·장비 처분', kind: 'CHECKLIST', status, guidance: null }],
-      },
-    ],
-  })
-
-  it('로드맵에서 할 일을 찾아 그 장면을 연다', async () => {
-    saveTokens('access-1', 'refresh-1')
-    serve(json(roadmapWith('NOT_STARTED')))
-    renderAt('/roadmap/dispose_stock')
-
-    expect(await screen.findByRole('button', { name: '다 했어요' })).toBeEnabled()
-  })
-
-  /** 서버가 해당 없다고 한 할 일은 열 것이 없다. 순서 화면에서 다시 고르게 한다 */
-  it('서버가 해당 없다고 한 할 일이면 로드맵으로 돌려보낸다', async () => {
-    saveTokens('access-1', 'refresh-1')
-    serve(json(roadmapWith('NOT_APPLICABLE')))
-    renderAt('/roadmap/dispose_stock')
-
-    expect(await screen.findByText('로드맵')).toBeInTheDocument()
+    await waitFor(() => expect(router.state.location.pathname).toBe('/roadmap'))
   })
 
   it('로드맵을 불러오지 못하면 알린다', async () => {
@@ -147,10 +153,19 @@ describe('TaskFlowPage — 서버', () => {
   })
 })
 
-/**
- * 실서버 저장(#149, 머지됨). 저장이 끝나기 전에 체크를 바꿔 보여주면, 저장이 실패해도 사장님은
- * 한 줄 알고 넘어간다(FE 규칙 2).
- */
+/** Mock 은 Preview 에서 화면을 보려고 둔다. 서버를 부르지 않고 열리는지, 다음 화면에 Mock 표시를 잇는지만 본다 */
+describe('TaskFlowPage — Mock', () => {
+  it('?mock= 이면 서버를 부르지 않고 할 일을 열고, 다음 화면에 Mock 표시를 잇는다', () => {
+    const fetchMock = serve(json(SCENE_ROADMAP))
+    const router = renderAt('/roadmap/before_photo?mock=roadmap')
+
+    fireEvent.click(screen.getByRole('button', { name: '서류함에 올리기' }))
+
+    expect(router.state.location.search).toBe('?mock=roadmap')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+})
+
 describe('CheckFlow — 서버', () => {
   /** 서버가 "확인 필요"로 준 할 일은 체크를 받지 않는다(422, #181). 눌러 보고 거절당하게 두지 않는다 */
   it('확인이 필요한 할 일은 다 했어요를 꺼 두고, 보내지 않는다', () => {
@@ -224,6 +239,21 @@ describe('SupportResultFlow — 서버', () => {
 
     for (const option of screen.getAllByRole('radio')) expect(option).toHaveAttribute('aria-checked', 'false')
     expect(screen.getByRole('button', { name: '기록하기' })).toBeDisabled()
+  })
+
+  /** 거절은 "이 값은 받지 않는다"는 뜻이다. 다른 답을 골라도 버튼이 꺼져 있으면 화면을 나갔다 와야 한다 */
+  it('거절된 뒤 다른 답을 고르면 다시 기록할 수 있다', async () => {
+    serve(status(422))
+    renderFlow(<SupportResultFlow task={supportTask} />)
+    fireEvent.click(screen.getByRole('radio', { name: '승인됐어요' }))
+    fireEvent.click(screen.getByRole('button', { name: '기록하기' }))
+    expect(await screen.findByText('이 할 일은 지금 기록할 수 없어요.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '기록하기' })).toBeDisabled()
+
+    fireEvent.click(screen.getByRole('radio', { name: '아직 몰라요' }))
+
+    expect(screen.getByRole('button', { name: '기록하기' })).toBeEnabled()
+    expect(screen.queryByText('이 할 일은 지금 기록할 수 없어요.')).not.toBeInTheDocument()
   })
 
   /** "아직 몰라요"는 키를 빼지 않고 null 로 보낸다. 빠지면 서버가 422 로 막는다 */
@@ -340,6 +370,40 @@ describe('ClosureReportFlow', () => {
     expect(screen.getByText('서울 마포구 망원로 52 (망원동)')).toBeInTheDocument()
     expect(screen.getByLabelText('상세 주소 (선택)')).toHaveValue('1층')
     expect(screen.getByRole('button', { name: '다시 저장하기' })).toBeEnabled()
+  })
+
+  /** 폐업일을 받지 않으면(422) 고친 날짜로 다시 저장할 수 있어야 한다 */
+  it('거절된 뒤 칸을 고치면 다시 저장할 수 있다', async () => {
+    serve(status(422))
+    renderFlow(
+      <ClosureReportFlow
+        task={closureTask}
+        initial={{ closureDate: '2026-10-31', closureReason: 'PERSONAL', roadAddress: '서울 마포구 망원로 52 (망원동)', addressDetail: null }}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: '다시 저장하기' }))
+    expect(await screen.findByText('이 할 일은 지금 기록할 수 없어요.')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('폐업일'), { target: { value: '2026-11-30' } })
+
+    expect(screen.getByRole('button', { name: '저장하기' })).toBeEnabled()
+  })
+
+  /** 저장한 뒤 고친 칸은 아직 서버에 없다. "저장했어요"가 남으면 고친 내용까지 저장된 줄 알고 떠난다 */
+  it('저장한 뒤 칸을 고치면 저장했다는 안내와 결과 알려주기를 내린다', () => {
+    renderFlow(
+      <ClosureReportFlow
+        task={closureTask}
+        initial={{ closureDate: '2026-10-31', closureReason: 'PERSONAL', roadAddress: '서울 마포구 망원로 52 (망원동)', addressDetail: null }}
+      />,
+    )
+    expect(screen.getByText('신고 정보를 저장했어요')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('폐업일'), { target: { value: '2026-11-30' } })
+
+    expect(screen.queryByText('신고 정보를 저장했어요')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '결과 알려주기' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '저장하기' })).toBeEnabled()
   })
 })
 

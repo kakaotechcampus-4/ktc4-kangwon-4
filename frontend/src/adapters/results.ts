@@ -325,7 +325,8 @@ export interface AnswerPair {
  *
  * 답을 적지 않은 질문은 뺀다. 질문만 덩그러니 보내면 AI가 답이 없는 것을 "모른다"로 읽을 수 있다.
  *
- * TODO(BE·AI): 재판단 입력에 직전 질문이 들어가게 되면 질문을 붙이지 않고 답만 보낸다.
+ * 재판단 입력에 직전 질문을 따로 넣지 않고 이 형식을 쓰기로 정했다(#120). 승준님이 실제 모델로 12가지 경우를
+ * 돌려, 질문을 사장님 말로 읽거나 답을 다른 질문에 붙인 경우가 없음을 확인했다.
  */
 export function toAnswerInput(pairs: AnswerPair[]): string {
   return pairs

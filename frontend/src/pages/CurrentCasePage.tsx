@@ -30,7 +30,7 @@ import type { FailureNotice, JudgmentView } from '../types/view'
  * 어느 상태에서도 **누를 것이 하나는 있어야 한다.** 할 일이 없다는 이유로 버튼까지
  * 사라지면 사장님은 화면만 보다 나가게 된다.
  *
- * 가게 정보 목록(업종·직원 수 등)은 시안 홈에 없어 뺐다. 들어갈 자리는 로드맵·기록(7번 PR)이다.
+ * 가게 정보 목록(업종·직원 수 등)은 시안 홈에 없어 뺐다.
  */
 export function CurrentCasePage() {
   const { search } = useLocation()
@@ -239,7 +239,7 @@ function judgmentCard(judgment: JudgmentView, waitedTooLong: boolean): JudgmentC
   switch (judgment.status) {
     /*
       막힌 것(`blocker`)은 홈에 그리지 않는다. 카드 안에 한 줄로 넣어 봤는데, 할 일의 이유와
-      겹쳐 읽혀 빼기로 했다(11/01). 할 일 상세(4번 PR)에서 다시 정한다.
+      겹쳐 읽혀 빼기로 했다(11/01). 할 일 상세도 이유(`reason`)만 보여준다.
     */
     case 'DONE': {
       const { nextAction } = judgment

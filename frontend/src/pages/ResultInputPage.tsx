@@ -186,12 +186,18 @@ export function ResultInputPage() {
    * 보낼 글. 질문에 답할 때는 질문을 붙이고, 답하지 않은 질문은 뺀다.
    * 다시 알려주실 때도 요청한 항목을 질문 자리에 붙인다 — AI 는 무엇을 물었는지 모른다.
    * 요청한 항목이 비어 있으면 물은 것이 없어서 글만 보낸다.
+   *
+   * **방금 보낸 결과가 "이것을 더 알려 달라"로 실패했으면 그 항목을 붙인다.** 화면을 열 때의 안내(홈의
+   * "다시 알려주기")보다 지금 화면에 떠 있는 실패 안내가 최신이다. 처음 안내를 붙이면 물은 것과 답이 엇갈리고,
+   * 할 일의 결과를 보내다 실패한 경우는 물은 것 없이 나간다.
    */
   const resubmitNotice = entry.status === 'READY' && entry.ask.kind === 'RESUBMIT' ? entry.ask.notice : null
+  const latestDetail = state.kind === 'FAILED' && state.notice.kind === 'NEEDS_DETAIL' ? state.notice : null
+  const askedFields = latestDetail ?? resubmitNotice
   const draft = questions
     ? toAnswerInput(questions.map((question) => ({ question, answer: answers[question] ?? '' })))
-    : resubmitNotice && resubmitNotice.fields.length > 0
-      ? toAnswerInput([{ question: requestedFieldsText(resubmitNotice), answer: text }])
+    : askedFields && askedFields.fields.length > 0
+      ? toAnswerInput([{ question: requestedFieldsText(askedFields), answer: text }])
       : text.trim()
   const isPending = state.kind === 'PENDING'
   /*
@@ -207,7 +213,10 @@ export function ResultInputPage() {
     state.kind === 'WAITED_TOO_LONG' ||
     state.kind === 'UNRECOGNIZED' ||
     (state.kind === 'FAILED' && (state.notice.kind === 'SERVICE_SIDE' || state.notice.kind === 'NO_RECOVERY'))
-  const canRetry = draft.length > 0
+  // 너무 긴 글은 자르지 않고 보내기를 막는다. 소리 없이 잘라 보내면 사장님이 적은 뒷부분이 사라진다.
+  // 아래 [보내기]와 실패 안내의 [다시 보내기]가 같은 조건을 쓴다
+  const tooLong = draft.length > MAX_RESULT_LENGTH
+  const canRetry = draft.length > 0 && !tooLong
   const goToCase = { label: '지금 상황 보기', onClick: () => navigate({ pathname: '/case', search }) }
   const notice = stayNotice(state, {
     retry: { label: '다시 보내기', onClick: handleSubmit, disabled: !canRetry },
@@ -234,6 +243,8 @@ export function ResultInputPage() {
       if (error instanceof ApiError && (error.status === 409 || error.status === 404)) {
         return stay({ kind: 'STALE' })
       }
+      // 받을 수 없는 글이다(너무 긴 글 등). 같은 글을 다시 보내도 같은 답이라 고쳐 보내게 한다
+      if (error instanceof ApiError && error.status === 422) return stay({ kind: 'SEND_REJECTED' })
       return stay({ kind: 'SEND_FAILED' })
     }
 
@@ -269,8 +280,8 @@ export function ResultInputPage() {
   }
 
   async function handleSubmit() {
-    // "다시 보내기" 버튼도 이 함수를 부른다. 폼에만 검증을 두면 그 경로로 빈 입력이 나간다
-    if (draft.length === 0 || entry.status !== 'READY') return
+    // "다시 보내기" 버튼도 이 함수를 부른다. 폼에만 검증을 두면 그 경로로 빈 입력·너무 긴 글이 나간다
+    if (draft.length === 0 || tooLong || entry.status !== 'READY') return
 
     // Mock 은 접수 단계가 없다. 보내는 순간 받은 것으로 둔다
     setState({ kind: 'PENDING', accepted: usesMock })
@@ -369,8 +380,6 @@ export function ResultInputPage() {
     )
   }
 
-  // 너무 긴 글은 자르지 않고 보내기를 막는다. 소리 없이 잘라 보내면 사장님이 적은 뒷부분이 사라진다
-  const tooLong = draft.length > MAX_RESULT_LENGTH
   const canSubmit = !formLocked && draft.length > 0 && !tooLong
   const answeredCount = questions
     ? questions.filter((question) => (answers[question] ?? '').trim() !== '').length
@@ -677,6 +686,13 @@ function stayNotice(
         title: '결과를 보내지 못했어요.',
         description: '연결이 불안정했을 수 있어요. 적어 주신 내용은 그대로 있어요.',
         action: actions.retry,
+      }
+
+    case 'SEND_REJECTED':
+      return {
+        tone: 'critical',
+        title: '이대로는 보낼 수 없어요.',
+        description: '적어 주신 내용은 그대로 있어요. 고친 뒤 다시 보내 주세요.',
       }
 
     case 'STALE':

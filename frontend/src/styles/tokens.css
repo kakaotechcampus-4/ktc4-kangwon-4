@@ -9,8 +9,8 @@
  * - 의미 이름(`@theme`): "어디에 쓰는 색인가". 화면 코드는 이것만 쓴다
  *   (`text-fg-neutral`, `bg-bg-brand-solid`, `border-stroke-neutral-weak`).
  *
- * Tailwind 기본 색(`gray-*` 등)은 아직 끄지 않는다. 옛 화면이 쓰고 있어서다.
- * 화면 교체가 끝나면 `--color-*: initial`로 끈다.
+ * Tailwind 기본 색(`gray-*`·`white` 등)은 끈다(`--color-*: initial`). 화면 교체가 끝나 쓰는 곳이 없고,
+ * 켜 두면 시안에 없는 색을 실수로 쓰게 된다. 쓰면 클래스가 만들어지지 않아 색이 빠진다.
  */
 
 :root {
@@ -44,6 +44,9 @@
 
 /* `inline`은 클래스에 변수 이름 대신 위 팔레트 값을 바로 넣게 한다 */
 @theme inline {
+  /* Tailwind 기본 색을 모두 끈다. 아래 의미 이름만 남는다 */
+  --color-*: initial;
+
   /* 글자 */
   --color-fg-neutral: var(--seed-color-palette-gray-1000);
   --color-fg-neutral-muted: var(--seed-color-palette-gray-800);

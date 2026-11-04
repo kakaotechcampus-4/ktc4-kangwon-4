@@ -169,14 +169,22 @@ export function useDocuments() {
     [usesMock, mockView, show, leftForLogin],
   )
 
-  /** 확인 · 빼기처럼 목록을 바꾸는 요청. 실패하면 목록은 그대로 두고 알린다 */
+  /**
+   * 확인 · 빼기처럼 목록을 바꾸는 요청. 실패하면 목록은 그대로 두고 알린다.
+   *
+   * **올리는 중이면 그 표시를 지우지 않는다.** 올리기는 수십 초 걸려서, 그사이 다른 서류를 빼거나 확인할 수
+   * 있다. 여기서 "올리는 중"을 지우면 [서류 올리기]가 다시 켜지는데, 올리기가 끝나기 전에 고른 파일은
+   * 아무 말 없이 버려진다(`upload` 는 한 번에 하나만 받는다). 올리기가 끝나면 올리기가 상태를 정한다.
+   */
   const change = useCallback(
     async (send: () => Promise<DocumentsView>) => {
-      setAction('IDLE')
+      setAction((current) => (current === 'UPLOADING' ? current : 'IDLE'))
       try {
         show(await send())
       } catch (error: unknown) {
-        if (alive.current && !leftForLogin(error)) setAction('CHANGE_FAILED')
+        if (alive.current && !leftForLogin(error)) {
+          setAction((current) => (current === 'UPLOADING' ? current : 'CHANGE_FAILED'))
+        }
       }
     },
     [show, leftForLogin],

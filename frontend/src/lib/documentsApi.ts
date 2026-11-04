@@ -27,7 +27,7 @@ import { ApiError, request } from './api'
  * 그래서 120초보다 조금 짧게 두어 "다시 올려 주세요" 안내가 나오게 한다. 10초는 응답이 오가는 여유다.
  *
  * 끊겨도 서버는 읽기를 마치고 저장해 두어, 같은 파일을 다시 올리면 그 결과를 쓴다(#159).
- * 확정된 "한 장 최대 몇 초"는 아직 없다 — 머지 뒤 배포 화면에서 한 장 올려 재 본다.
+ * 한 장에 최대 몇 초 걸리는지는 정해진 값이 없다. 배포 화면에서 실제 서류로 재 보고 고친다.
  */
 export const UPLOAD_TIMEOUT_MS = 110_000
 
@@ -70,8 +70,11 @@ export async function checkDocuments(applicantName: string, closureDate: string 
  * 정산 제출 파일(ZIP)을 받는다. 점검이 통과했을 때만 서버가 준다(그 밖에는 422).
  *
  * 로그인 헤더를 실어야 해서 링크로 열 수 없다. 받은 파일을 브라우저 내려받기로 넘긴다.
+ *
+ * 제한 시간은 올리기와 같다(`UPLOAD_TIMEOUT_MS`). 기본 15초는 응답을 다 받는 것까지 세는데, ZIP 에는 한 장에
+ * 20MB까지인 사진·내역서가 여러 장 들어가 휴대폰 연결로는 받는 도중 끊긴다.
  */
 export async function downloadSettlement(): Promise<Blob> {
-  const response = await request('/cases/documents/settlement.zip')
+  const response = await request('/cases/documents/settlement.zip', { timeoutMs: UPLOAD_TIMEOUT_MS })
   return response.blob()
 }

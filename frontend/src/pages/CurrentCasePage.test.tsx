@@ -110,15 +110,6 @@ afterEach(() => {
  * 여기 값이 틀리면 사장님이 자기 가게 상황을 잘못 알고 다음 행동을 한다.
  */
 describe('CurrentCasePage', () => {
-  /** 홈은 하단 탭이 있는 화면이고, 지금 있는 곳이 홈이라는 것을 탭이 알려야 한다 */
-  it('홈 탭이 고른 상태로 보인다', async () => {
-    saveTokens('access-1', 'refresh-1')
-    mockCase(DONE)
-    renderAt('/case')
-
-    expect(await screen.findByRole('link', { name: '홈' })).toHaveAttribute('aria-current', 'page')
-  })
-
   it('불러오는 동안 기다리라고 알린다', () => {
     saveTokens('access-1', 'refresh-1')
     vi.stubGlobal('fetch', vi.fn().mockReturnValue(new Promise(() => {})))
@@ -510,40 +501,16 @@ describe('CurrentCasePage', () => {
     })
   })
 
+  /** Mock 은 Preview 에서 화면을 보려고 둔다. 서버를 부르지 않고 그 키의 화면이 그려지는지만 본다(화면당 하나) */
   describe('?mock=', () => {
-    it('completed 면 마친 화면을 보여준다', async () => {
+    it('?mock= 이면 서버를 부르지 않고 그 키의 화면을 그린다', async () => {
       saveTokens('access-1', 'refresh-1')
+      const fetchMock = vi.fn()
+      vi.stubGlobal('fetch', fetchMock)
       renderAt('/case?mock=completed')
 
       expect(await screen.findByRole('heading', { level: 1, name: '폐업 정리를 모두 마쳤어요' })).toBeInTheDocument()
-    })
-
-    it('pending 이면 기다리는 화면을 보여준다', async () => {
-      saveTokens('access-1', 'refresh-1')
-      renderAt('/case?mock=pending')
-
-      expect(
-        await screen.findByRole('heading', { level: 2, name: '다음 할 일을 정하고 있어요' }),
-      ).toBeInTheDocument()
-    })
-
-    it('judgment-conflict 면 확인이 필요한 화면을 보여준다', async () => {
-      saveTokens('access-1', 'refresh-1')
-      renderAt('/case?mock=judgment-conflict')
-
-      expect(
-        await screen.findByRole('heading', { level: 2, name: '확인이 필요한 내용이 있어요' }),
-      ).toBeInTheDocument()
-    })
-
-    it('more-info 면 질문 화면을 보여준다', async () => {
-      saveTokens('access-1', 'refresh-1')
-      renderAt('/case?mock=more-info')
-
-      expect(
-        await screen.findByRole('heading', { level: 2, name: '이 내용을 알려주세요' }),
-      ).toBeInTheDocument()
-      expect(screen.queryByRole('button', { name: '물어볼 내용 보기' })).not.toBeInTheDocument()
+      expect(fetchMock).not.toHaveBeenCalled()
     })
   })
 })

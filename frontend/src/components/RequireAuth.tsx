@@ -12,8 +12,8 @@ import { useNavigationDirection } from '../lib/viewTransition'
  * 로그인 여부를 판단하는 규칙 자체는 `lib/auth`에 있다. `?mock=logged-out` 처리까지
  * 거기서 끝내는 이유는, 규칙이 두 군데로 나뉘면 한쪽만 고쳐져서 서로 다른 답을 내기 때문이다.
  *
- * TODO(API): 연동하면 보호된 요청이 401로 돌아올 때도 이 화면으로 보내야 한다.
- * 토큰이 중간에 만료되는 경우가 그렇다.
+ * 들어온 뒤 토큰이 만료되면 서버가 401 을 준다. 그때는 이 문이 아니라 서버를 부른 화면이
+ * 로그인으로 보낸다(`UnauthorizedError`).
  *
  * 화면 이동 방향도 여기서 한 번 적는다(`useNavigationDirection`). 움직이는 화면이 모두 이 아래에 있다.
  */

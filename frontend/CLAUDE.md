@@ -27,9 +27,9 @@ Case 생성 → Blocker 1개 판정 → Next Action 1개 제시
   **Zustand**(`src/stores/`)에 둔다 — 지금은 상황 진단 답(`useDiagnosisStore`) 하나다.
   처음엔 전역 상태가 없어 넣지 않았는데, 진단이 `?step=` 여러 장으로 나뉘고 새로고침에도 답이
   남아야 해서 넣었다(상황 진단 온보딩, 11/03). 새로 넣을 때도 "여러 화면이 같은 사용자 입력을 보는가"를 먼저 묻는다
-- **Mobile-first** 반응형. 좁은 쪽 기준은 375px, 기본 컨테이너는 `max-w-md`(약 448px)다.
-  넓은 화면에서 2단으로 나눌 내용이 있는 화면만 `AppShell` 의 `width="wide"` 를 쓴다
-  (지금은 `/case`). 폼처럼 한 줄로 읽는 화면은 넓혀도 읽기 어려워지기만 한다
+- **Mobile-first** 반응형. 좁은 쪽 기준은 375px, 화면 틀은 시안 기기 폭 402px
+  (`screen-frame mx-auto max-w-[402px]`)다. 넓은 화면에서도 넓히거나 2단으로 나누지 않고 가운데에 둔다.
+  화면 틀(`screen-frame`)은 화면마다 하나다 — 화면 이동 움직임이 이 틀만 옮긴다(`docs/ui-guidelines.md` "움직임")
 
 현재 설치된 패키지와 버전, 실행 방법은 `README.md`를 본다.
 

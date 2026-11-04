@@ -180,6 +180,7 @@ PR 브랜치마다 Preview 주소가 달라 등록할 수 없어서, **리뷰어
 /results?mock=failed-none      판단 실패 — 이번 판단에 할 수 있는 것이 없는 경우
 /results?mock=failed-unknown   판단 실패 — 이유를 알 수 없는 경우
 /results?mock=send-failed      결과를 보내지 못함
+/results?mock=send-rejected    서버가 글을 받지 않음 (422, 고쳐서 다시 보내기)
 /results?mock=stale            그사이 상황이 바뀜
 /results?mock=too-long         판단이 오래 걸림
 /results?mock=unrecognized     판단 결과를 읽지 못함
