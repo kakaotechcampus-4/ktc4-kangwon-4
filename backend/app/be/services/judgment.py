@@ -18,6 +18,7 @@ from app.be.models.evidence import DecisionRecord
 from app.be.services import agent_runtime as agent_runtime_service
 from app.be.services import case_snapshot as case_snapshot_service
 from app.be.services import decision_record as decision_record_service
+from app.be.services import document as document_service
 from app.be.services import reviewed_procedure as reviewed_procedure_service
 from app.common.agent_dto import AgentGraphOutput
 from app.common.agent_service import build_planning_input, run_case_planning
@@ -44,6 +45,27 @@ async def run_judgment_in_background(case_history_id: int) -> None:
                 decision_record_service.mark_judgment_failed(session, case_history_id, error)
         except Exception:
             logger.exception("case_history %s 판단 실패 상태 기록도 실패", case_history_id)
+    await judge_owed_documents(case_history_id)
+
+
+async def judge_owed_documents(case_history_id: int) -> None:
+    """판단(case_history_id)이 끝난 뒤, 그동안 판단에 못 넘긴 서류가 있으면 이어서 판단한다.
+
+    판단 중이거나 충돌 확인을 기다리는 동안 올린 서류는 저장만 되고 판단은 미뤄진다(#173 리뷰).
+    성공·실패 모두 부른다. 끝난 판단과 상관없이 서류는 새로 받은 입력이기 때문이다.
+    이어서 돈 판단이 끝나면 여기를 또 부르지만, 그때는 판단에 넘긴 서류와 지금 서류가 같아 멈춘다.
+    """
+
+    try:
+        with Session(get_engine()) as session:
+            next_history_id = document_service.queue_owed_document_judgment(
+                session, document_service.document_directory(), case_history_id
+            )
+    except Exception:
+        logger.exception("case_history %s 뒤 서류 재판단 확인 실패", case_history_id)
+        return
+    if next_history_id is not None:
+        await run_judgment_in_background(next_history_id)
 
 
 class UnknownJudgmentTriggerError(ValueError):
@@ -57,7 +79,7 @@ class UnknownJudgmentTriggerError(ValueError):
     retryable = False
 
 
-def _trigger_type_of(history: CaseHistory) -> Literal["CASE_CREATED", "RESULT_SUBMITTED"]:
+def _trigger_type_of(history: CaseHistory) -> Literal["CASE_CREATED", "RESULT_SUBMITTED", "DOCUMENT_SUBMITTED"]:
     """이 입력이 "가입하면서 받은 것"인지 "사장님이 결과를 알려준 것"인지 고른다.
 
     AI는 둘을 다르게 읽는다. 가입 입력은 처음 보는 Case를 세우는 것이고, 결과 보고는
@@ -72,6 +94,10 @@ def _trigger_type_of(history: CaseHistory) -> Literal["CASE_CREATED", "RESULT_SU
         return "CASE_CREATED"
     if history.source == "USER_INPUT":
         return "RESULT_SUBMITTED"
+    if history.source == "DOCUMENT_SUBMITTED":
+        # 서류 글(document_replan_text)도 근거는 사장님 입력(USER_INPUT)으로 남지만, AI는
+        # "사장님이 말한 결과"가 아니라 "서류에서 꺼낸 값"으로 읽어야 해서 트리거를 나눈다(#137).
+        return "DOCUMENT_SUBMITTED"
     raise UnknownJudgmentTriggerError(
         f"case_history {history.id}의 source {history.source}는 판단 트리거가 없다"
     )

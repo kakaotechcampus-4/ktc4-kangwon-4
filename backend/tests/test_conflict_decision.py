@@ -545,3 +545,22 @@ def test_the_retained_facts_survive_a_round_trip_through_mysql(mysql_engine):
         restored = RetainedInfoResult.model_validate(stored.retained_info_result)
 
     assert restored == original
+
+
+def test_a_finished_decision_goes_on_to_documents_that_waited(monkeypatch):
+    # 충돌 확인을 기다리는 동안 올린 서류는 판단이 미뤄진다. 확인 처리가 끝나면 그 서류를 본다(#173 리뷰).
+    checked = []
+
+    async def fake_decision(_session, _case_history_id, _choices):
+        return None
+
+    async def fake_owed(case_history_id):
+        checked.append(case_history_id)
+
+    monkeypatch.setattr(conflict_decision, "run_conflict_decision", fake_decision)
+    monkeypatch.setattr(conflict_decision, "Session", MagicMock())
+    monkeypatch.setattr(conflict_decision, "get_engine", MagicMock())
+    monkeypatch.setattr(conflict_decision.judgment_service, "judge_owed_documents", fake_owed)
+
+    asyncio.run(conflict_decision.run_conflict_decision_in_background(9, {}))
+    assert checked == [9]

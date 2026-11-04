@@ -18,6 +18,7 @@ from app.be.crud import case_history as case_history_crud
 from app.be.routers import case as case_router
 from app.be.schemas.case import CaseResultsSubmitAcceptedResponse, CaseResultsSubmitRequest
 from app.be.services import case as case_service
+from app.be.services import document as document_service
 from app.be.services import judgment
 from app.be.services import agent_runtime as agent_runtime_service
 from app.be.services import case_snapshot as case_snapshot_service
@@ -124,3 +125,26 @@ def test_submitting_a_result_schedules_the_judgment(monkeypatch):
     ]
     # 사장님이 보고 있던 직전 이력(5)이 아니라 방금 접수한 이력을 판단해야 한다.
     assert [task.args for task in background_tasks.tasks] == [(HISTORY_ID,)]
+
+
+def test_document_input_is_judged_as_document(trigger_of):
+    # 서류 글을 결과 보고로 넘기면 AI가 서류에서 꺼낸 값을 사장님이 직접 말한 진행 상황으로 읽는다(#137).
+    assert trigger_of("DOCUMENT_SUBMITTED") == "DOCUMENT_SUBMITTED"
+
+
+def test_a_finished_judgment_goes_on_to_documents_that_waited(monkeypatch):
+    # 판단 중에 올린 서류는 판단이 미뤄진다. 앞 판단(42)이 끝나면 그 서류로 이어서 판단(43)하고,
+    # 그 판단이 끝난 뒤에는 남은 서류가 없어 멈춘다(#173 리뷰).
+    ran, owed = [], {HISTORY_ID: HISTORY_ID + 1}
+
+    async def fake_run_judgment(_session, case_history_id):
+        ran.append(case_history_id)
+
+    monkeypatch.setattr(judgment, "run_judgment", fake_run_judgment)
+    monkeypatch.setattr(judgment, "Session", MagicMock())
+    monkeypatch.setattr(judgment, "get_engine", MagicMock())
+    monkeypatch.setattr(document_service, "queue_owed_document_judgment",
+                        lambda _session, _directory, case_history_id: owed.pop(case_history_id, None))
+
+    asyncio.run(judgment.run_judgment_in_background(HISTORY_ID))
+    assert ran == [HISTORY_ID, HISTORY_ID + 1]

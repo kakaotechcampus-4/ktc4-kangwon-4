@@ -30,6 +30,7 @@ from app.be.models.mixins import KST
 from app.be.services import agent_runtime as agent_runtime_service
 from app.be.services import case_snapshot as case_snapshot_service
 from app.be.services import decision_record as decision_record_service
+from app.be.services import judgment as judgment_service
 from app.be.services import reviewed_procedure as reviewed_procedure_service
 from app.common.agent_service import build_conflict_input, run_case_planning
 
@@ -67,6 +68,8 @@ async def run_conflict_decision_in_background(
                 decision_record_service.mark_judgment_failed(session, case_history_id, error)
         except Exception:
             logger.exception("case_history %s 실패 상태 기록도 실패", case_history_id)
+    # 충돌 확인을 기다리는 동안 올린 서류는 판단이 미뤄져 있다. 확인 처리가 끝났으니 이어서 본다.
+    await judgment_service.judge_owed_documents(case_history_id)
 
 
 async def run_conflict_decision(

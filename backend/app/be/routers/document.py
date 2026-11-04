@@ -2,7 +2,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Response, UploadFile
 from sqlmodel import Session
 
 from app.agent.document_tool.models import DocumentKind
@@ -18,6 +18,7 @@ from app.be.schemas.document import (
     document_list_response,
 )
 from app.be.services import document as document_service
+from app.be.services import judgment as judgment_service
 
 router = APIRouter()
 
@@ -42,6 +43,14 @@ def _current_case(session: Session, member_id: int) -> Case:
     return case
 
 
+def _judge_if_changed(background_tasks: BackgroundTasks, session: Session, directory: Path, case: Case) -> None:
+    # 판단에 아직 안 넘긴 원상복구 조항이 있으면 결과 제출(/results)처럼 응답 뒤에 판단을 돌린다.
+    # 화면은 서류 목록을 바로 받고, 다음 할 일은 홈(GET /cases)이 PENDING을 보고 다시 묻는다.
+    case_history_id = document_service.queue_document_judgment(session, directory, case)
+    if case_history_id is not None:
+        background_tasks.add_task(judgment_service.run_judgment_in_background, case_history_id)
+
+
 @router.get("/cases/documents", response_model=DocumentListResponse)
 def list_documents(
     member_id: int = Depends(get_current_member_id),
@@ -54,6 +63,7 @@ def list_documents(
 
 @router.post("/cases/documents", response_model=DocumentListResponse)
 async def upload_document(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     # 사장님이 "이체확인증 올리기"처럼 고르고 올렸으면 그 종류. 서류함에서 그냥 올리면 비워 AI가 나눈다.
     kind: DocumentKind | None = Form(default=None),
@@ -68,6 +78,8 @@ async def upload_document(
     context = await document_service.upload_document(
         session, tool, directory, case, file.filename or "document", content, kind,
     )
+    # 확인이 필요 없는 서류는 올리는 순간 값이 판단 글에 들어가므로 여기서도 본다
+    _judge_if_changed(background_tasks, session, directory, case)
     return document_list_response(context)
 
 
@@ -75,6 +87,7 @@ async def upload_document(
 def confirm_document(
     document_id: UUID,
     confirm_request: DocumentConfirmRequest,
+    background_tasks: BackgroundTasks,
     member_id: int = Depends(get_current_member_id),
     session: Session = Depends(get_db),
     directory: Path = Depends(get_document_directory),
@@ -84,6 +97,7 @@ def confirm_document(
     context = document_service.confirm_document(
         tool, directory, case, document_id, confirm_request.kind, confirm_request.confirmed_fields,
     )
+    _judge_if_changed(background_tasks, session, directory, case)
     return document_list_response(context)
 
 

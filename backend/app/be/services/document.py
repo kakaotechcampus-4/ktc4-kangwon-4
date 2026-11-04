@@ -17,13 +17,20 @@ from sqlmodel import Session
 from app.agent.document_tool.documents import DocumentError
 from app.agent.document_tool.models import DocumentContext, DocumentFieldName, DocumentKind
 from app.agent.document_tool.tool import DocumentTool
+from app.be.crud import case as case_crud
 from app.be.crud import case_document_history as case_document_history_crud
+from app.be.crud import case_history as case_history_crud
+from app.be.crud import conflict_reference as conflict_reference_crud
 from app.be.models.case import Case
 from app.be.models.case_document_history import CaseDocumentHistory
+from app.be.models.case_history import CaseHistory
+from app.common.agent_dto import document_replan_text
 
 logger = logging.getLogger(__name__)
 
 CONTEXT_FILE = "case_documents.json"
+# 마지막으로 판단에 넘긴 서류. 지금 서류와 비교해 판단에 아직 안 넘긴 원상복구 조항이 있는지 본다.
+JUDGED_CONTEXT_FILE = "judged_documents.json"
 MAX_UPLOAD_BYTES = 20_000_000
 
 
@@ -49,8 +56,8 @@ def load_context(directory: Path, case: Case) -> DocumentContext:
     return context
 
 
-def save_context(directory: Path, context: DocumentContext) -> None:
-    path = directory / str(context.case_id) / CONTEXT_FILE
+def save_context(directory: Path, context: DocumentContext, filename: str = CONTEXT_FILE) -> None:
+    path = directory / str(context.case_id) / filename
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     pending = path.with_suffix(".tmp")
     pending.write_text(context.model_dump_json(), encoding="utf-8")
@@ -139,6 +146,125 @@ def check_documents(
         )
         session.commit()
     return updated
+
+
+def queue_document_judgment(session: Session, directory: Path, case: Case) -> int | None:
+    """판단에 아직 안 넘긴 원상복구 조항이 있으면 판단 이력을 PENDING으로 남기고 그 번호를 돌려준다.
+
+    지금 서류를 "마지막으로 판단에 넘긴 서류"(JUDGED_CONTEXT_FILE)와 비교한다(document_replan_text).
+    같은 조항의 재업로드·금액 서류 추가·서류 빼기는 None이라 판단하지 않는다.
+    판단할 수 없는 상태라 건너뛰면 기준을 옮기지 않으므로, 진행 중인 판단이나 충돌 확인이
+    끝날 때 queue_owed_document_judgment가 같은 비교로 다시 판단을 넣는다.
+    판단을 부르는 일은 호출한 쪽이 한다. 결과는 홈(GET /cases)이 PENDING을 보고 다시 묻는다.
+    """
+
+    # 판단할 조항이 없으면 DB를 건드리지 않는다. 금액 서류만 올릴 때마다 Case를 잠그지 않게 한다.
+    if _pending_replan_text(directory, case) is None:
+        return None
+    member_id = case.member_id
+
+    # 라우터는 서류 처리(OCR)를 기다리기 전에 Case를 읽는다. MySQL은 한 트랜잭션 안에서 처음
+    # 읽은 시점을 계속 보여 주고, 이미 읽은 Case 객체도 저절로 다시 읽지 않는다. 그 사이 다른
+    # 요청이 PENDING을 넣거나 Case를 완료로 바꿔도 못 보므로, 여기서 트랜잭션을 끝내고 새로 잠근다.
+    # (commit하면 세션이 들고 있던 객체도 버려져 잠금 조회가 최신 값을 읽는다.)
+    session.commit()
+
+    # 결과 제출(case.submit_case_results)과 같은 이유로 Case를 잠그고 확인한다.
+    # 같은 Case에 PENDING이 둘 생기면 판단이 서로의 결과를 덮는다.
+    case = case_crud.lock_case_by_member_id(session, member_id)
+    blocked = _judgment_blocked_reason(session, case)
+    if blocked is not None:
+        logger.info("Case %s 서류 재판단 미룸: %s", case.id if case else None, blocked)
+        session.rollback()
+        return None
+
+    # 잠근 뒤 다시 본다. 기다리는 사이 다른 요청이 같은 서류로 판단을 넣었으면 기준이 옮겨져 있다.
+    context = load_context(directory, case)
+    text = _pending_replan_text(directory, case, context)
+    if text is None:
+        session.rollback()
+        return None
+
+    history = case_history_crud.create_case_history(
+        session,
+        CaseHistory(case_id=case.id, raw_input=text, source="DOCUMENT_SUBMITTED", judgment_status="PENDING"),
+    )
+    # 기준 파일과 PENDING 이력은 같이 남거나 같이 없어야 한다. PENDING만 남으면 실행할 작업 없이
+    # 홈이 계속 "판단 중"이고, 기준만 옮겨지면 이 서류가 판단에서 빠진다(#173 리뷰).
+    # 그래서 이력을 확정하기 전에 기준을 먼저 쓰고, 확정이 실패하면 기준을 되돌린다.
+    judged_path = _judged_context_path(directory, case)
+    previous_judged = judged_path.read_bytes() if judged_path.is_file() else None
+    try:
+        save_context(directory, context, JUDGED_CONTEXT_FILE)
+    except OSError:
+        # 서류는 이미 저장됐다. 판단할 수 없을 때처럼 이번 판단만 미룬다. 기준이 그대로라
+        # 다음 업로드나 다음 판단이 끝날 때 다시 시도한다.
+        logger.exception("Case %s 서류 판단 기준 저장 실패, 판단을 미룸", case.id)
+        session.rollback()
+        return None
+    try:
+        session.commit()
+    except Exception:
+        _restore_judged_context(judged_path, previous_judged)
+        raise
+    return history.id
+
+
+def queue_owed_document_judgment(session: Session, directory: Path, case_history_id: int) -> int | None:
+    """판단(case_history_id)이 끝난 뒤, 그동안 판단에 못 넘긴 서류가 있으면 판단을 넣는다.
+
+    판단 중이거나 충돌 확인을 기다리는 동안 올린 서류는 저장만 되고 판단은 미뤄진다.
+    그 서류가 빠지지 않게 판단·충돌 확인이 끝날 때마다 여기를 부른다(#173 리뷰).
+    """
+
+    history = case_history_crud.get_case_history_by_id(session, case_history_id)
+    case = case_crud.get_case_by_id(session, history.case_id) if history is not None else None
+    if case is None:
+        return None
+    return queue_document_judgment(session, directory, case)
+
+
+def _pending_replan_text(directory: Path, case: Case, context: DocumentContext | None = None) -> str | None:
+    """판단에 아직 안 넘긴 원상복구 조항이 있으면 판단 글, 없으면 None."""
+
+    current = context if context is not None else load_context(directory, case)
+    return document_replan_text(_load_judged_context(directory, case), current)
+
+
+def _judged_context_path(directory: Path, case: Case) -> Path:
+    return directory / str(document_case_id(case)) / JUDGED_CONTEXT_FILE
+
+
+def _load_judged_context(directory: Path, case: Case) -> DocumentContext | None:
+    # 없으면 서류로 판단한 적이 없다는 뜻이라, 지금 서류의 조항을 전부 새 값으로 본다
+    path = _judged_context_path(directory, case)
+    return DocumentContext.model_validate_json(path.read_bytes()) if path.is_file() else None
+
+
+def _restore_judged_context(path: Path, previous: bytes | None) -> None:
+    # 판단 이력 확정이 실패했을 때 기준을 쓰기 전으로 돌린다. 그래야 이 서류가 다음에 다시 판단된다.
+    try:
+        if previous is None:
+            path.unlink(missing_ok=True)
+        else:
+            path.write_bytes(previous)
+    except OSError:
+        logger.exception("서류 판단 기준 되돌리기 실패: %s", path)
+
+
+def _judgment_blocked_reason(session: Session, case: Case | None) -> str | None:
+    """지금 판단을 새로 돌릴 수 없으면 그 이유. 결과 제출이 409로 막는 경우와 같다."""
+
+    if case is None:
+        return "Case 없음"
+    if case.case_status == "COMPLETED":
+        return "폐업 정리를 마친 Case"
+    if conflict_reference_crud.get_pending_conflicts_by_case_id(session, case.id):
+        return "확인 대기 중인 충돌"
+    latest = case_history_crud.get_latest_user_driven_case_history(session, case.id)
+    if latest is not None and latest.judgment_status == "PENDING":
+        return "직전 판단 처리 중"
+    return None
 
 
 def settlement_zip(tool: DocumentTool, directory: Path, case: Case) -> bytes:
