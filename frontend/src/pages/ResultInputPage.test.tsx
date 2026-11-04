@@ -54,6 +54,37 @@ describe('ResultInputPage — Mock', () => {
     expect(screen.getByRole('button', { name: '보내기' })).toBeDisabled()
   })
 
+  /**
+   * 서버는 2,000자를 넘는 글을 받지 않는다(BE 422). 소리 없이 잘라 보내지 않고, 넘으면 보내기를 막고 줄여 달라고 한다.
+   * 평소 답은 수십 자라 1,800자 전에는 숫자를 띄우지 않는다
+   */
+  it('글이 1,800자를 넘으면 글자 수를, 2,000자를 넘으면 줄여 달라는 안내와 함께 보내기를 막는다', async () => {
+    renderFlow('/results?mock=updated')
+    const box = await screen.findByLabelText('어떻게 됐나요?')
+
+    fireEvent.change(box, { target: { value: '가'.repeat(1_800) } })
+    expect(screen.queryByText(/\/ 2,000자/)).not.toBeInTheDocument()
+
+    fireEvent.change(box, { target: { value: '가'.repeat(1_900) } })
+    expect(screen.getByText('1,900 / 2,000자')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '보내기' })).toBeEnabled()
+
+    fireEvent.change(box, { target: { value: '가'.repeat(2_001) } })
+    expect(screen.getByText('2,000자까지 보낼 수 있어요. 조금 줄여 주세요.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '보내기' })).toBeDisabled()
+  })
+
+  /** 되물은 질문에 답할 때는 질문을 붙여 보낸다. 칸 하나가 아니라 보내는 글 전체로 센다(승준님) */
+  it('질문에 답할 때는 물어본 질문까지 묶은 글 전체로 센다', async () => {
+    renderFlow('/results?mock=more-info')
+    const [first] = await screen.findAllByRole('textbox')
+
+    fireEvent.change(first, { target: { value: '가'.repeat(1_990) } })
+
+    expect(screen.getByText(/물어본 질문까지 함께 세요/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '보내기' })).toBeDisabled()
+  })
+
   /** 판단은 길면 2분 걸린다. 그동안 눌리는 폼이 그대로 있으면 같은 글을 또 보내게 된다 */
   it('보내는 동안은 폼 대신 처리 화면을 보여준다', async () => {
     vi.useFakeTimers()
@@ -186,6 +217,7 @@ function judgedBody(overrides: Partial<CaseResultsSubmitResponse>): CaseResultsS
     conflicts: null,
     recovery_action_code: null,
     requested_field_paths: null,
+    new_tasks: null,
     ...overrides,
   }
 }

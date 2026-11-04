@@ -47,15 +47,19 @@ function response(body: unknown, status = 200) {
 }
 
 /**
- * 홈은 Case 와 기록(띠)을 함께 부른다. 기록은 이 파일이 보는 것이 아니라 늘 빈 목록으로 답한다.
- * 띠가 채워지는 것은 `HomeBanner`·`LogPage` 테스트가 본다
+ * 홈은 Case 와 기록(띠)·로드맵(단계 카드)을 함께 부른다. 기록은 이 파일이 보는 것이 아니라 늘 빈 목록으로,
+ * 로드맵은 늘 실패로 답한다(단계 카드는 조용히 "곧 보여드릴게요"). 띠가 채워지는 것은 `HomeBanner`·`LogPage`,
+ * 단계 카드가 채워지는 것은 아래 "단계 카드" 테스트가 따로 본다
  */
 const isLogs = (url: string) => url.includes('/cases/logs')
+const isRoadmap = (url: string) => url.includes('/cases/roadmap')
 
 function mockCase(body: unknown, status = 200) {
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (url: string) => (isLogs(url) ? response({ logs: [] }) : response(body, status))),
+    vi.fn(async (url: string) =>
+      isLogs(url) ? response({ logs: [] }) : isRoadmap(url) ? response(null, 500) : response(body, status),
+    ),
   )
 }
 
@@ -66,6 +70,7 @@ function mockThenFail(body: unknown) {
     'fetch',
     vi.fn(async (url: string) => {
       if (isLogs(url)) return response({ logs: [] })
+      if (isRoadmap(url)) return response(null, 500)
       const first = !called
       called = true
       return first ? response(body) : response(null, 500)
@@ -466,6 +471,42 @@ describe('CurrentCasePage', () => {
       fireEvent.click(await screen.findByRole('button', { name: '전체 기록 보기' }))
 
       expect(await screen.findByText('기록 화면')).toBeInTheDocument()
+    })
+  })
+
+  /** 단계는 서버(`GET /cases/roadmap` `current_stage`, #179)가 정한다. 홈이 할 일 상태로 짐작하지 않는다 */
+  describe('단계 카드', () => {
+    const roadmapWithStage = {
+      supported: true,
+      unsupported_reason: null,
+      current_stage: 2,
+      stages: [{ stage: 2, title: '원상복구·철거', tasks: [] }],
+    }
+
+    it('로드맵이 준 지금 단계를 카드 제목에 쓴다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (url: string) =>
+          isLogs(url) ? response({ logs: [] }) : isRoadmap(url) ? response(roadmapWithStage) : response(DONE),
+        ),
+      )
+      renderAt('/case')
+
+      expect(await screen.findByRole('link', { name: /지금은 원상복구·철거 단계/ })).toBeInTheDocument()
+    })
+
+    /** 단계 카드는 덤이다. 로드맵 하나 못 받았다고 홈에 오류를 띄우면 할 일 카드가 가려진다 */
+    it('로드맵을 불러오지 못해도 알리지 않고 할 일 카드를 그대로 보여준다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      mockCase(DONE)
+      renderAt('/case')
+
+      expect(
+        await screen.findByRole('heading', { level: 2, name: '임대인에게 원상복구 범위를 확인하세요.' }),
+      ).toBeInTheDocument()
+      expect(await screen.findByText('단계 정보는 곧 보여드릴게요')).toBeInTheDocument()
+      expect(screen.queryByText(/불러오지 못했어요/)).not.toBeInTheDocument()
     })
   })
 

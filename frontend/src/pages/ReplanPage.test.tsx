@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react'
+import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { RouterProvider, createMemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -54,6 +54,7 @@ function judged(overrides: Partial<CaseResultsSubmitResponse>): CaseResultsSubmi
     conflicts: null,
     recovery_action_code: null,
     requested_field_paths: null,
+    new_tasks: null,
     ...overrides,
   }
 }
@@ -82,6 +83,34 @@ describe('ReplanPage — 서버', () => {
     expect(screen.queryByText('철거 전에 지원 조건을 확인해야 합니다.')).not.toBeInTheDocument()
     // 처리 중 화면에서 이어지게, 같은 단계 줄을 모두 끝난 모양으로 보여준다
     for (const step of screen.getAllByRole('listitem').slice(0, 3)) expect(step).toHaveTextContent('완료')
+  })
+
+  /** 시안 "할 일 3개가 새로 생겼어요"(#182). 서버가 준 순서 그대로, 누르는 줄이 아니라 목록이다 */
+  it('새로 생긴 할 일을 순서대로 보여준다', async () => {
+    serve(
+      json(
+        judged({
+          new_tasks: [
+            { task_id: 'support_application', title: '소상공인24 사전 신청' },
+            { task_id: 'before_photo', title: '철거 전 사진' },
+          ],
+        }),
+      ),
+    )
+    renderAt('/replan?history=13')
+
+    const box = await screen.findByRole('region', { name: '새로 생긴 할 일' })
+    const items = within(box).getAllByRole('listitem')
+    expect(items.map((item) => item.textContent)).toEqual(['소상공인24 사전 신청', '철거 전 사진'])
+    expect(within(box).queryByRole('link')).not.toBeInTheDocument()
+  })
+
+  it('새로 생긴 할 일이 없거나 비교할 수 없으면 그 상자를 그리지 않는다', async () => {
+    serve(json(judged({ new_tasks: null })))
+    renderAt('/replan?history=13')
+
+    expect(await screen.findByText('지원 조건 확인하기')).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '새로 생긴 할 일' })).not.toBeInTheDocument()
   })
 
   /** "반영했어요"라고 하고 바뀐 것이 없으면 사장님은 무엇이 반영됐는지 찾게 된다 */
@@ -241,6 +270,7 @@ describe('ReplanPage — Mock', () => {
       changes: [],
       blocker: null,
       nextAction: { title: '넘겨받은 할 일', reason: '' },
+      newTasks: [],
     }
     renderAt({ pathname: '/replan', search: '?mock=updated', state: view })
 

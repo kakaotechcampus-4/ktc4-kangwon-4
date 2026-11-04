@@ -3,6 +3,7 @@ import type { ReactElement } from 'react'
 import { createMemoryRouter, RouterProvider } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { saveTokens } from '../lib/auth'
 import type { RoadmapTaskView } from '../types/view'
 import { CheckFlow, ClosureReportFlow, DepositFlow, SupportResultFlow, TaskFlowPage } from './TaskFlowPage'
 
@@ -22,7 +23,7 @@ function renderAt(path: string) {
   return router
 }
 
-/** 실서버 경로의 장면 하나만 띄운다. 로드맵 조회 API 전이라 할 일 화면으로는 실서버에 닿을 수 없다 */
+/** 장면 하나만 띄운다. 장면이 보내는 저장 요청만 보려고 로드맵 조회를 건너뛴다 */
 function renderFlow(element: ReactElement) {
   const router = createMemoryRouter(
     [
@@ -103,10 +104,46 @@ describe('TaskFlowPage — 장면 고르기 (Mock)', () => {
     expect(renderAt('/roadmap/no_such_task?mock=roadmap').state.location.pathname).toBe('/roadmap')
   })
 
-  it('로드맵 조회 API 전에는 준비 중이라고 알린다', () => {
+})
+
+/** 할 일 화면은 로드맵(`GET /cases/roadmap`)에서 그 할 일을 찾아 어떤 장면을 열지 정한다 */
+describe('TaskFlowPage — 서버', () => {
+  const roadmapWith = (status: string) => ({
+    supported: true,
+    unsupported_reason: null,
+    current_stage: 3,
+    stages: [
+      {
+        stage: 3,
+        title: '영업 마무리·폐업 신고',
+        tasks: [{ task_id: 'dispose_stock', title: '재고·장비 처분', kind: 'CHECKLIST', status, guidance: null }],
+      },
+    ],
+  })
+
+  it('로드맵에서 할 일을 찾아 그 장면을 연다', async () => {
+    saveTokens('access-1', 'refresh-1')
+    serve(json(roadmapWith('NOT_STARTED')))
     renderAt('/roadmap/dispose_stock')
 
-    expect(screen.getByText('할 일 화면은 준비 중이에요.')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '다 했어요' })).toBeEnabled()
+  })
+
+  /** 서버가 해당 없다고 한 할 일은 열 것이 없다. 순서 화면에서 다시 고르게 한다 */
+  it('서버가 해당 없다고 한 할 일이면 로드맵으로 돌려보낸다', async () => {
+    saveTokens('access-1', 'refresh-1')
+    serve(json(roadmapWith('NOT_APPLICABLE')))
+    renderAt('/roadmap/dispose_stock')
+
+    expect(await screen.findByText('로드맵')).toBeInTheDocument()
+  })
+
+  it('로드맵을 불러오지 못하면 알린다', async () => {
+    saveTokens('access-1', 'refresh-1')
+    serve(status(500))
+    renderAt('/roadmap/dispose_stock')
+
+    expect(await screen.findByText('할 일을 불러오지 못했어요.')).toBeInTheDocument()
   })
 })
 
@@ -115,6 +152,17 @@ describe('TaskFlowPage — 장면 고르기 (Mock)', () => {
  * 한 줄 알고 넘어간다(FE 규칙 2).
  */
 describe('CheckFlow — 서버', () => {
+  /** 서버가 "확인 필요"로 준 할 일은 체크를 받지 않는다(422, #181). 눌러 보고 거절당하게 두지 않는다 */
+  it('확인이 필요한 할 일은 다 했어요를 꺼 두고, 보내지 않는다', () => {
+    const fetchMock = serve(json({}))
+    renderFlow(<CheckFlow task={{ ...checklistTask, status: 'NEEDS_CONFIRMATION' }} />)
+
+    expect(screen.getByText('아직 기록할 수 없는 할 일이에요.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '다 했어요' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '다 했어요' }))
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it('저장이 끝나기 전에는 기록했다고 하지 않는다', () => {
     serve(hanging)
     renderFlow(<CheckFlow task={checklistTask} />)

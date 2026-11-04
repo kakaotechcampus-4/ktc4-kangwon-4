@@ -10,7 +10,13 @@ import { TopBar } from '../components/ui/TopBar'
 import { ApiError, UnauthorizedError } from '../lib/api'
 import { usesMockData } from '../lib/auth'
 import { readMockKey } from '../lib/mockSwitch'
-import { fetchResultsEntry, submitResult, waitForResult } from '../lib/resultSubmit'
+import {
+  fetchResultsEntry,
+  MAX_RESULT_LENGTH,
+  RESULT_LENGTH_HINT_FROM,
+  submitResult,
+  waitForResult,
+} from '../lib/resultSubmit'
 import { judgmentNeedsDetailCase, moreInfoCase } from '../mocks/currentCase'
 import { resultInput, simulateSubmit } from '../mocks/resultFlow'
 import type { FailureNotice, NextAction, SubmitOutcome, SubmitState } from '../types/view'
@@ -363,7 +369,9 @@ export function ResultInputPage() {
     )
   }
 
-  const canSubmit = !formLocked && draft.length > 0
+  // 너무 긴 글은 자르지 않고 보내기를 막는다. 소리 없이 잘라 보내면 사장님이 적은 뒷부분이 사라진다
+  const tooLong = draft.length > MAX_RESULT_LENGTH
+  const canSubmit = !formLocked && draft.length > 0 && !tooLong
   const answeredCount = questions
     ? questions.filter((question) => (answers[question] ?? '').trim() !== '').length
     : 0
@@ -474,12 +482,38 @@ export function ResultInputPage() {
             대신 빠뜨린 것인지 한 번 보게 하고, 남은 질문은 서버가 다시 묻는다는 것을 알린다
           */}
           {partlyAnswered && <InfoBox>답하지 않은 질문은 비워 두셔도 돼요. 필요하면 다시 여쭤볼게요.</InfoBox>}
+          <LengthNotice length={draft.length} withQuestions={questions !== null} />
           <Button type="submit" disabled={!canSubmit}>
             보내기
           </Button>
         </form>
       </main>
     </ResultFrame>
+  )
+}
+
+/**
+ * 보낼 글이 길어지면 몇 자인지, 넘으면 줄여 달라고 알린다. 평소에는 아무것도 그리지 않는다.
+ *
+ * 질문에 답할 때는 물어본 질문도 함께 보내서(`toAnswerInput`), 적은 것보다 숫자가 크다. 그래서 그렇다고 적는다.
+ */
+function LengthNotice({ length, withQuestions }: { length: number; withQuestions: boolean }) {
+  if (length <= RESULT_LENGTH_HINT_FROM) return null
+  const count = `${length.toLocaleString('ko-KR')} / ${MAX_RESULT_LENGTH.toLocaleString('ko-KR')}자${
+    withQuestions ? ' (물어본 질문까지 함께 세요)' : ''
+  }`
+
+  if (length > MAX_RESULT_LENGTH) {
+    return (
+      <InfoBox tone="critical" title={`${MAX_RESULT_LENGTH.toLocaleString('ko-KR')}자까지 보낼 수 있어요. 조금 줄여 주세요.`}>
+        {count}
+      </InfoBox>
+    )
+  }
+  return (
+    <p aria-live="polite" className="text-right text-14 text-fg-neutral-muted tabular-nums">
+      {count}
+    </p>
   )
 }
 

@@ -1,9 +1,10 @@
 import { IconCheckmarkCircleFill, IconChevronDownLine } from '@karrotmarket/react-monochrome-icon'
 import { AnimatePresence, m, useReducedMotion } from 'motion/react'
 import { type ReactNode, useState } from 'react'
-import { Link, useLocation } from 'react-router'
+import { Link, Navigate, useLocation } from 'react-router'
 
 import { Badge } from '../components/ui/Badge'
+import { HammerLoader } from '../components/ui/HammerLoader'
 import { InfoBox } from '../components/ui/InfoBox'
 import { TopBar } from '../components/ui/TopBar'
 import { useRoadmap } from '../hooks/useRoadmap'
@@ -27,16 +28,29 @@ const STATUS_BADGE: Record<RoadmapTaskStatus, { tone: 'brand' | 'critical' | 'ne
  * 미지원 업종이면 서버가 쓴 안내 문구만 보여준다(#132 `unsupported_reason`). 홈의 할 일 카드는
  * 이와 상관없이 실제 판단을 따른다.
  *
- * 할 일을 누르면 여는 흐름은 다음 커밋에서 붙인다.
+ * 서버(`GET /cases/roadmap`)에서 불러온다. Case 가 없으면 상황 진단으로 보낸다.
  */
 export function RoadmapPage() {
-  const query = useRoadmap()
+  const { search } = useLocation()
+  const { query, reload } = useRoadmap()
 
-  if (query.status === 'UNAVAILABLE') {
+  if (query.status === 'EMPTY') return <Navigate to={{ pathname: '/cases/new', search }} replace />
+
+  if (query.status === 'LOADING') {
     return (
       <RoadmapFrame>
-        <InfoBox title="폐업 전체 순서는 준비 중이에요.">
-          할 일 순서를 보여주는 기능이 열리면 여기서 다섯 단계를 한눈에 볼 수 있어요.
+        <div className="flex justify-center pt-16">
+          <HammerLoader size={48} label="폐업 전체 순서를 불러오는 중" />
+        </div>
+      </RoadmapFrame>
+    )
+  }
+
+  if (query.status === 'LOAD_FAILED') {
+    return (
+      <RoadmapFrame>
+        <InfoBox title="폐업 전체 순서를 불러오지 못했어요." action={{ label: '다시 불러오기', onClick: reload }}>
+          연결 상태를 확인하고 다시 불러와 주세요.
         </InfoBox>
       </RoadmapFrame>
     )
