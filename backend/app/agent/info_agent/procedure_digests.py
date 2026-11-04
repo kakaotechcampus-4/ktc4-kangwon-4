@@ -127,3 +127,22 @@ def digest_draft_fields(
         "missing_fields": missing_fields,
         "uncertainties": [],
     }
+
+
+def with_digest_findings(fact_output: dict[str, Any], digest_fields: dict[str, Any]) -> dict[str, Any]:
+    """모델이 사장님 글에서 꺼낸 값에 정리본의 절차 정리를 붙인다(InfoAnalysisDraft 모양).
+
+    정리본의 원상복구 질문은 모델이 아직 다루지 않은 칸만 더한다. 방금 임대인 답변으로 범위가
+    정해졌거나(facts) 모델이 이미 묻기로 한 칸(missing_fields)은 다시 묻지 않는다.
+    """
+
+    handled = {item["field_path"] for item in [*fact_output["facts"], *fact_output["missing_fields"]]}
+    added = [item for item in digest_fields["missing_fields"] if item["field_path"] not in handled]
+    status = fact_output["completion_status"]
+    if added and status == InfoCompletionStatus.COMPLETE:
+        status = InfoCompletionStatus.NEEDS_USER_INPUT
+    return fact_output | {
+        "completion_status": status,
+        "procedure_findings": digest_fields["procedure_findings"],
+        "missing_fields": [*fact_output["missing_fields"], *added],
+    }

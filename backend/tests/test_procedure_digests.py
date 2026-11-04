@@ -117,3 +117,54 @@ def test_falls_back_to_the_info_model_when_the_digest_cannot_be_trusted(digests)
 def test_a_result_report_still_reads_the_owner_text_with_the_info_model():
     _, calls = info_result(result_text="임대인이 철거해야 한다고 했어요.")
     assert calls == ["reborn_info_analysis"]
+
+
+# ── Turn 2: 사장님 글이 있으면 모델은 값만 꺼내고, 절차 정리는 정리본이 채운다(A-2) ──
+
+LANDLORD = "카운터랑 싱크대는 빼고, 간판도 떼야 한대요. 바닥 타일은 그대로 둬도 된대요."
+
+
+class FactModel(NoModel):
+    """임대인 답변에서 범위·철거 여부만 꺼내 돌려주는 모델. 무엇을 받았는지 남긴다."""
+
+    seen: list[dict] = []
+
+    async def generate(self, response_model, messages, **kwargs):
+        if kwargs.get("schema_name") != "reborn_info_analysis":
+            raise AssertionError("only Info is under test")
+        FactModel.seen.append({"schema": response_model.__name__, "messages": messages})
+        fact = {"operation": "SET", "value_type": "ENUM", "source_text": "카운터랑 싱크대는 빼고, 간판도 떼야 한대요.",
+                "confidence_bps": 9000, "requires_confirmation": False, "reason_summary": "임대인 답변"}
+        return response_model.model_validate({
+            "completion_status": "COMPLETE",
+            "facts": [fact | {"field_path": "restoration_scope", "value": "PARTIAL"},
+                      fact | {"field_path": "demolition_required", "value": "REQUIRED"}],
+            "procedure_observations": [], "missing_fields": [], "uncertainties": [],
+            **({} if response_model.__name__ == "InfoFactProviderOutput" else {"procedure_findings": []}),
+        })
+
+
+def landlord_answer_info(digests="reviewed"):
+    FactModel.seen = []
+    with patch.object(NoModel, "from_env", classmethod(lambda cls, *a, **k: FactModel())):
+        info, _ = info_result(result_text=LANDLORD, digests=digests)
+    return info, FactModel.seen
+
+
+def test_landlord_answer_sends_only_the_owner_text_to_the_model():
+    info, seen = landlord_answer_info()
+    [call] = seen
+    assert call["schema"] == "InfoFactProviderOutput"
+    prompt = json.dumps(call["messages"], ensure_ascii=False)
+    # 절차 원문을 보내지 않는다. 임대차 반환 원문 한 문장이 프롬프트에 없어야 한다
+    assert "임차인은 임대차계약이 종료하면" not in prompt and LANDLORD in prompt
+    assert {item.field_path for item in info.fact_candidates} == {"restoration_scope", "demolition_required"}
+    assert {item.procedure_step.step_code for item in info.procedure_findings} == set(digest_file()["steps"])
+    # 방금 답으로 정해진 범위·철거 여부는 다시 묻지 않는다
+    assert info.question_candidates == []
+
+
+def test_landlord_answer_falls_back_to_the_full_analysis_without_a_trusted_digest():
+    # 이 가짜 모델은 절차 정리를 내지 않아 전체 분석 검사에 걸려 재시도까지 간다. 모양만 본다
+    _, seen = landlord_answer_info(digests="unreviewed")
+    assert seen and {call["schema"] for call in seen} == {"InfoProviderOutput"}
