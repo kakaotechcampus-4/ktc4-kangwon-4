@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -244,6 +244,8 @@ describe('DocsPage — Mock', () => {
 
     pick(new File(['%PDF'], '이체확인증.pdf', { type: 'application/pdf' }))
 
+    // 시트는 내려가는 움직임이 끝난 다음 순간에 닫힌다
+    await act(async () => {})
     expect(sheet()).not.toBeInTheDocument()
     expect(screen.getByRole('status')).toHaveTextContent('서류를 읽는 중')
     // 한 장을 읽는 동안 또 올리면 결과가 서로를 덮는다
@@ -269,7 +271,7 @@ describe('DocsPage — Mock', () => {
   })
 
   /** 서버에서 지운 서류는 되돌릴 수 없다. 줄 끝 휴지통을 잘못 눌러도 바로 사라지면 안 된다 */
-  it('빼기 전에 한 번 묻고, 그대로 두면 남긴다', () => {
+  it('빼기 전에 한 번 묻고, 그대로 두면 남긴다', async () => {
     renderAt('/docs?mock=docs')
     const before = screen.getAllByRole('listitem').length
 
@@ -281,7 +283,7 @@ describe('DocsPage — Mock', () => {
 
     fireEvent.click(within(ask).getByRole('button', { name: '그대로 두기' }))
 
-    expect(screen.queryByRole('dialog', { name: '이 서류를 뺄까요?' })).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '이 서류를 뺄까요?' })).not.toBeInTheDocument())
     expect(screen.getAllByRole('listitem')).toHaveLength(before)
   })
 

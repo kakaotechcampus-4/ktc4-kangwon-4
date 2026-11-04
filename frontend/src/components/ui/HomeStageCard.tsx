@@ -1,4 +1,5 @@
 import { IconChevronRightLine } from '@karrotmarket/react-monochrome-icon'
+import type { CSSProperties } from 'react'
 import { Link, useLocation } from 'react-router'
 
 /** 시안의 폐업 단계 짧은 이름. 단계 번호 1~5 순서다 */
@@ -33,7 +34,8 @@ export function HomeStageCard({ stage = null, completed = false }: HomeStageCard
   return (
     <Link
       to={{ pathname: '/roadmap', search }}
-      className="flex shrink-0 flex-col gap-3 rounded-2xl bg-bg-layer-default px-5 py-4.5 shadow-card active:bg-bg-layer-default-pressed"
+      viewTransition
+      className="press-scale flex shrink-0 flex-col gap-3 rounded-2xl bg-bg-layer-default px-5 py-4.5 shadow-card active:bg-bg-layer-default-pressed"
     >
       <span className="flex items-center gap-1">
         <span className="flex-1 text-17 font-bold">
@@ -47,8 +49,16 @@ export function HomeStageCard({ stage = null, completed = false }: HomeStageCard
         </span>
         <IconChevronRightLine size={20} aria-hidden="true" className="text-fg-neutral-subtle" />
       </span>
+      {/*
+        막대는 값이 바뀌면 그 너비까지 천천히 차오른다(`--duration-stage-fill`). 홈을 처음 그릴 때도
+        0에서 차오른다(`starting:w-0`). 단계 값이 아직 없으면 0으로 두어, 늦게 와도 0부터 찬다.
+        너비를 `style` 의 `width` 로 바로 주면 처음 값(0)보다 앞서서 차오르지 않아 변수(`--fill`)로 넘긴다
+      */}
       <span aria-hidden="true" className="h-1.5 overflow-hidden rounded-full bg-bg-neutral-weak">
-        {fill !== null && <span className="block h-full rounded-full bg-bg-brand-solid" style={{ width: `${fill}%` }} />}
+        <span
+          className="block h-full w-(--fill) rounded-full bg-bg-brand-solid transition-[width] duration-(--duration-stage-fill) ease-[cubic-bezier(0,0,0.15,1)] starting:w-0 motion-reduce:transition-none"
+          style={{ '--fill': `${fill ?? 0}%` } as CSSProperties}
+        />
       </span>
       <ol className="grid grid-cols-5">
         {STAGE_LABELS.map((label, index) => {

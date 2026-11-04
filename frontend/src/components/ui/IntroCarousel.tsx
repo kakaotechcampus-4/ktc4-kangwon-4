@@ -258,8 +258,9 @@ export function IntroCarousel() {
       </div>
 
       <div className="relative min-h-0 flex-1 overflow-hidden pt-11 select-none">
-        <div className="flex flex-col gap-9">
-          <div className="px-6 text-center">
+        {/* 장이 바뀔 때마다 새로 그려, 글은 흐리게 들어오고 그림은 조금 작은 데서 커지며 들어온다 */}
+        <div key={index} className="flex flex-col gap-9">
+          <div className="px-6 text-center motion-safe:animate-fade-in">
             <h1 className="text-26 font-bold whitespace-pre-line">
               {slide.pre}
               <span className="text-fg-brand-contrast">{slide.highlight}</span>
@@ -267,7 +268,7 @@ export function IntroCarousel() {
             </h1>
             <p className="mt-2.5 text-17 text-fg-neutral-muted">{slide.sub}</p>
           </div>
-          {slide.picture}
+          <div className="motion-safe:animate-picture-in">{slide.picture}</div>
         </div>
 
         <button

@@ -53,6 +53,7 @@ Vite 가 읽지 않습니다. 고친 뒤에는 개발 서버를 다시 띄웁니
 | React Router | 라우팅. v7부터 `react-router-dom`이 아니라 `react-router` 한 패키지입니다 |
 | Fetch API | 통신 |
 | React 내장 | 상태관리 (`useState` / `useContext`) |
+| Motion (`motion`, 14.4.0 고정) | 시트 끌기·용수철, 버튼 누르기, 로드맵 펼치기. 화면 이동은 브라우저 View Transitions, 나머지 움직임은 CSS ([UI 가이드라인 "움직임"](docs/ui-guidelines.md)) |
 | Zustand | 화면 여러 장에 걸쳐 이어지는 답만 (`src/stores/`). 지금은 상황 진단 답 하나. 서버 데이터는 넣지 않습니다 |
 | Pretendard | 본문 글꼴. npm 패키지로 직접 배포 (`src/main.tsx`) |
 | 다음 우편번호 서비스 | 통합 폐업 신고의 가게 주소 찾기. 패키지가 아니라 공식 스크립트를 주소 찾기를 열 때만 받습니다 (`src/lib/postcode.ts`) |

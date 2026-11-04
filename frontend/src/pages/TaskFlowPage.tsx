@@ -139,7 +139,7 @@ export function CheckFlow({ task, attach = false }: { task: RoadmapTaskView; att
       )}
       {checked && save !== 'SAVING' && (
         <p className="flex items-center gap-2 text-17 font-bold">
-          <IconCheckmarkCircleFill size={22} className="text-fg-brand" aria-hidden="true" />
+          <IconCheckmarkCircleFill size={22} className="text-fg-brand motion-safe:animate-pop" aria-hidden="true" />
           마치셨다고 기록했어요
         </p>
       )}
@@ -216,7 +216,7 @@ export function SupportResultFlow({ task }: { task: RoadmapTaskView }) {
       </div>
       {savedLabel && save !== 'SAVING' && (
         <p className="flex items-center gap-2 text-17 font-bold">
-          <IconCheckmarkCircleFill size={22} className="text-fg-brand" aria-hidden="true" />
+          <IconCheckmarkCircleFill size={22} className="text-fg-brand motion-safe:animate-pop" aria-hidden="true" />
           &ldquo;{savedLabel}&rdquo;로 기록했어요
         </p>
       )}
@@ -242,7 +242,7 @@ function ReportResultFlow({ task }: { task: RoadmapTaskView }) {
       <TaskHeader task={task} />
       <InfoBox>이 일은 하신 결과를 알려 주시면 리본이 확인해 다음 순서를 정해요.</InfoBox>
       <div className="mt-auto">
-        <Button onClick={() => navigate({ pathname: '/results', search })}>결과 알려주기</Button>
+        <Button onClick={() => navigate({ pathname: '/results', search }, { viewTransition: true })}>결과 알려주기</Button>
       </div>
     </TaskFrame>
   )
@@ -337,7 +337,7 @@ export function DepositFlow({ task, initial = null }: { task: RoadmapTaskView; i
 
       {savedLabel && save !== 'SAVING' && !checkPending && (
         <p className="flex items-center gap-2 text-17 font-bold">
-          <IconCheckmarkCircleFill size={22} className="text-fg-brand" aria-hidden="true" />
+          <IconCheckmarkCircleFill size={22} className="text-fg-brand motion-safe:animate-pop" aria-hidden="true" />
           &ldquo;{savedLabel}&rdquo;로 기록했어요
         </p>
       )}
@@ -486,7 +486,7 @@ export function ClosureReportFlow({ task, initial = null }: { task: RoadmapTaskV
       {saved && save !== 'SAVING' && (
         <>
           <p className="flex items-center gap-2 text-17 font-bold">
-            <IconCheckmarkCircleFill size={22} className="text-fg-brand" aria-hidden="true" />
+            <IconCheckmarkCircleFill size={22} className="text-fg-brand motion-safe:animate-pop" aria-hidden="true" />
             신고 정보를 저장했어요
           </p>
           <InfoBox
@@ -501,7 +501,7 @@ export function ClosureReportFlow({ task, initial = null }: { task: RoadmapTaskV
 
       <div className="mt-auto flex flex-col gap-2">
         {saved && (
-          <Button variant="outline" onClick={() => navigate({ pathname: '/results', search })}>
+          <Button variant="outline" onClick={() => navigate({ pathname: '/results', search }, { viewTransition: true })}>
             결과 알려주기
           </Button>
         )}
@@ -630,7 +630,7 @@ function SaveNotice({ save }: { save: SaveState }) {
 /** 탭 없는 화면의 틀 */
 function TaskFrame({ children }: { children: ReactNode }) {
   return (
-    <div className="mx-auto flex min-h-dvh max-w-[402px] flex-col bg-bg-layer-default">
+    <div className="screen-frame mx-auto flex min-h-dvh max-w-[402px] flex-col bg-bg-layer-default">
       <TopBar title="할 일" />
       <main className="flex flex-1 flex-col gap-5 px-4 pt-2 pb-8">{children}</main>
     </div>

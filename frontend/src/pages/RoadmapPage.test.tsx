@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
 
@@ -37,6 +37,19 @@ describe('RoadmapPage — Mock', () => {
     fireEvent.click(stageButton(/영업 마무리·폐업 신고/))
 
     expect(screen.getByText('재고·장비 처분')).toBeInTheDocument()
+  })
+
+  /**
+   * 접힌 단계의 할 일은 화면에서 빠져야 한다. 보이지만 않고 남아 있으면 키보드로 넘기다 숨은 할 일에
+   * 닿는다. 접는 움직임이 끝난 뒤에 빠지므로 기다려서 본다
+   */
+  it('펼친 단계를 다시 누르면 접고, 그 단계의 할 일을 빼낸다', async () => {
+    renderAt('/roadmap?mock=roadmap')
+
+    fireEvent.click(stageButton(/원상복구·철거/))
+
+    expect(stageButton(/원상복구·철거/)).toHaveAttribute('aria-expanded', 'false')
+    await waitFor(() => expect(screen.queryByText('원상복구 범위 확인')).not.toBeInTheDocument())
   })
 
   it('할 일마다 서버가 준 상태를 글자 배지로 단다', () => {

@@ -27,7 +27,7 @@ export function TabLayout() {
   const { pathname } = useLocation()
 
   return (
-    <div className="mx-auto flex h-dvh max-w-[402px] flex-col bg-bg-layer-default">
+    <div className="screen-frame mx-auto flex h-dvh max-w-[402px] flex-col bg-bg-layer-default">
       <header className="flex h-14 shrink-0 items-center gap-1 pr-1 pl-4">
         {pathname === HOME_PATH ? (
           <div className="flex flex-1 items-center gap-1">

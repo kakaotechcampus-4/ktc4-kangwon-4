@@ -15,6 +15,7 @@ import { TaskCard } from '../components/ui/TaskCard'
 import { useCase } from '../hooks/useCase'
 import { useLogs } from '../hooks/useLogs'
 import { useRoadmap } from '../hooks/useRoadmap'
+import { useEntersForward } from '../lib/viewTransition'
 import type { FailureNotice, JudgmentView } from '../types/view'
 
 /**
@@ -128,13 +129,15 @@ function HomeFrame({
   const { query } = useLogs()
   const ribbonItems = query.status === 'READY' ? query.entries.filter((entry) => entry.actor === 'RIBBON') : []
   const roadmap = useRoadmap()
+  // 머리말·카드·단계 카드가 차례로 올라온다. 뒤로 돌아온 홈은 이미 밀려 들어오는 중이라 올리지 않는다
+  const rise = useEntersForward()
   const currentStage =
     roadmap.status === 'READY' ? roadmap.view.stages.find((stage) => stage.stage === roadmap.view.currentStage) : undefined
 
   return (
     <>
       <HomeBanner items={ribbonItems} />
-      <div className="flex flex-1 flex-col gap-3 px-4 pt-6 pb-4">
+      <div className={`flex flex-1 flex-col gap-3 px-4 pt-6 pb-4 ${rise ? 'rise-children' : ''}`}>
         <h1 className="mb-1 text-24 font-bold text-pretty">{headline}</h1>
         {children}
         <HomeStageCard
@@ -175,7 +178,7 @@ function CompletedCard() {
   return (
     <TaskCard
       tone="brand"
-      icon={<IconCheckmarkCircleFill size={40} />}
+      icon={<IconCheckmarkCircleFill size={40} className="motion-safe:animate-pop" />}
       badge="완료"
       title="수고 많으셨어요, 사장님"
       description="모든 서류는 서류함에 있어요."
@@ -381,7 +384,7 @@ function TaskButton({ hasQuestions, locked }: { hasQuestions: boolean; locked: b
 
   return (
     <>
-      <Button size="lg" disabled={locked} onClick={() => navigate({ pathname: '/task', search })}>
+      <Button size="lg" disabled={locked} onClick={() => navigate({ pathname: '/task', search }, { viewTransition: true })}>
         {hasQuestions ? '물어볼 내용 보기' : '자세히 보기'}
       </Button>
       {locked && (
@@ -405,7 +408,7 @@ function AnswerButton({ locked, label = '답하러 가기' }: { locked: boolean;
 
   return (
     <>
-      <Button size="lg" disabled={locked} onClick={() => navigate({ pathname: '/results', search })}>
+      <Button size="lg" disabled={locked} onClick={() => navigate({ pathname: '/results', search }, { viewTransition: true })}>
         {label}
       </Button>
       {locked && (
