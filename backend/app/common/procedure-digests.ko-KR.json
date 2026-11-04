@@ -1,8 +1,8 @@
 {
-  "digest_version": "procedure-digests/2026-11-05-draft1",
+  "digest_version": "procedure-digests/2026-11-05-reviewed1",
   "based_on_snapshot_version": "cafe-official-sources/2026-11-04-reviewed1",
-  "reviewed_by": null,
-  "reviewed_at": null,
+  "reviewed_by": "healthy27",
+  "reviewed_at": "2026-11-05T00:00:00+09:00",
   "source_hashes": {
     "CAFE_CLOSURE_AND_TAX_FOLLOWUP": "sha256:3864664b0c2e4f512d9791e2342b9c05d7b91866cfa230d0d142f693c278a7d7",
     "DEMOLITION_SUPPORT_2026": "sha256:685b4c778f9e5e10c7b3261e414a8e83c9b9cf3a07f93e9fa8fc08293de92dd6",
