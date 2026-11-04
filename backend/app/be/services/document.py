@@ -189,10 +189,24 @@ def queue_document_judgment(session: Session, directory: Path, case: Case) -> in
         session,
         CaseHistory(case_id=case.id, raw_input=text, source="DOCUMENT_SUBMITTED", judgment_status="PENDING"),
     )
-    session.commit()
-    # 판단을 넣은 뒤에 기준을 옮긴다. 이 저장이 실패해도 서류가 빠지지는 않고,
-    # 이 판단이 끝난 뒤 같은 서류로 한 번 더 판단할 뿐이다.
-    save_context(directory, context, JUDGED_CONTEXT_FILE)
+    # 기준 파일과 PENDING 이력은 같이 남거나 같이 없어야 한다. PENDING만 남으면 실행할 작업 없이
+    # 홈이 계속 "판단 중"이고, 기준만 옮겨지면 이 서류가 판단에서 빠진다(#173 리뷰).
+    # 그래서 이력을 확정하기 전에 기준을 먼저 쓰고, 확정이 실패하면 기준을 되돌린다.
+    judged_path = _judged_context_path(directory, case)
+    previous_judged = judged_path.read_bytes() if judged_path.is_file() else None
+    try:
+        save_context(directory, context, JUDGED_CONTEXT_FILE)
+    except OSError:
+        # 서류는 이미 저장됐다. 판단할 수 없을 때처럼 이번 판단만 미룬다. 기준이 그대로라
+        # 다음 업로드나 다음 판단이 끝날 때 다시 시도한다.
+        logger.exception("Case %s 서류 판단 기준 저장 실패, 판단을 미룸", case.id)
+        session.rollback()
+        return None
+    try:
+        session.commit()
+    except Exception:
+        _restore_judged_context(judged_path, previous_judged)
+        raise
     return history.id
 
 
@@ -217,10 +231,25 @@ def _pending_replan_text(directory: Path, case: Case, context: DocumentContext |
     return document_replan_text(_load_judged_context(directory, case), current)
 
 
+def _judged_context_path(directory: Path, case: Case) -> Path:
+    return directory / str(document_case_id(case)) / JUDGED_CONTEXT_FILE
+
+
 def _load_judged_context(directory: Path, case: Case) -> DocumentContext | None:
     # 없으면 서류로 판단한 적이 없다는 뜻이라, 지금 서류의 조항을 전부 새 값으로 본다
-    path = directory / str(document_case_id(case)) / JUDGED_CONTEXT_FILE
+    path = _judged_context_path(directory, case)
     return DocumentContext.model_validate_json(path.read_bytes()) if path.is_file() else None
+
+
+def _restore_judged_context(path: Path, previous: bytes | None) -> None:
+    # 판단 이력 확정이 실패했을 때 기준을 쓰기 전으로 돌린다. 그래야 이 서류가 다음에 다시 판단된다.
+    try:
+        if previous is None:
+            path.unlink(missing_ok=True)
+        else:
+            path.write_bytes(previous)
+    except OSError:
+        logger.exception("서류 판단 기준 되돌리기 실패: %s", path)
 
 
 def _judgment_blocked_reason(session: Session, case: Case | None) -> str | None:

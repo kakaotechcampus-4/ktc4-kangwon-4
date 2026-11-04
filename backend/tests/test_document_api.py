@@ -264,3 +264,21 @@ def test_document_skipped_while_blocked_is_judged_once_the_block_ends(judged, mo
     assert queued == history.id and history.source == "DOCUMENT_SUBMITTED"
     assert "원상복구 조항: 임차인은 계약 종료 시 원상복구한다" in history.raw_input
     assert document_service.queue_owed_document_judgment(MagicMock(), judged.directory, history.id) is None
+
+
+def test_baseline_is_restored_when_the_judgment_cannot_be_saved(judged):
+    # 기준을 쓴 뒤 판단 이력 확정이 실패하면 기준을 되돌린다. 안 그러면 이 조항이 판단에서 빠진다(#173 리뷰)
+    judged.state.update({"latest_status": "PENDING"})
+    upload(judged.client, DocumentKind.LEASE, LEASE_CLAUSE)
+    judged.state.update({"latest_status": "DONE"})
+    case = case_crud.get_case_by_member_id(None, 1)
+    judged_path = document_service._judged_context_path(judged.directory, case)
+
+    failing = MagicMock()
+    failing.commit.side_effect = [None, RuntimeError("DB 연결 끊김")]  # 읽은 시점 끝내기는 되고, 이력 확정만 실패
+    with pytest.raises(RuntimeError):
+        document_service.queue_document_judgment(failing, judged.directory, case)
+    assert not judged_path.exists()
+
+    assert document_service.queue_document_judgment(MagicMock(), judged.directory, case) is not None
+    assert judged_path.is_file()

@@ -237,3 +237,43 @@ def test_document_judgment_sees_what_happened_while_the_document_was_read(
     expected = {"nothing": ["DOCUMENT_SUBMITTED"], "result_submitted": ["USER_INPUT"], "case_completed": []}
     assert sorted(pending) == expected[meanwhile]
     assert (queued is not None) == (meanwhile == "nothing")
+
+
+def test_a_failed_baseline_write_leaves_no_pending_and_recovers(mysql_engine, case_ready_for_a_result, monkeypatch, tmp_path):
+    """기준 파일(judged_documents.json)을 못 쓰면 PENDING을 남기지 않고, 쓸 수 있게 되면 다시 판단을 넣는다(#173 리뷰).
+
+    PENDING만 남으면 실행할 작업이 없어 홈이 계속 "판단 중"이고, 다음 업로드도 그 PENDING에 막힌다.
+    """
+
+    member_id, _, case_id = case_ready_for_a_result
+    # 기준 파일이 없을 때만 판단할 조항이 있다고 둔다(실제 비교와 같은 성질). 서류 내용은 관심사가 아니다
+    monkeypatch.setattr(
+        document_service, "_pending_replan_text",
+        lambda directory, case, *_: None if document_service._judged_context_path(directory, case).is_file()
+        else "원상복구 조항: 전부 원래대로",
+    )
+
+    def pending_document_judgments() -> int:
+        with Session(mysql_engine) as session:
+            return len(session.exec(select(CaseHistory).where(
+                CaseHistory.case_id == case_id, CaseHistory.source == "DOCUMENT_SUBMITTED",
+                CaseHistory.judgment_status == "PENDING",
+            )).all())
+
+    def queue() -> int | None:
+        with Session(mysql_engine) as session:
+            case = case_crud.get_case_by_member_id(session, member_id)
+            return document_service.queue_document_judgment(session, tmp_path, case)
+
+    with Session(mysql_engine) as session:
+        judged_path = document_service._judged_context_path(tmp_path, case_crud.get_case_by_member_id(session, member_id))
+    # 임시 파일 자리에 폴더를 두어 기준 쓰기만 실패하게 한다(권한과 달리 어느 계정으로 돌려도 실패한다)
+    blocker = judged_path.with_suffix(".tmp")
+    blocker.mkdir(parents=True)
+
+    assert queue() is None
+    assert pending_document_judgments() == 0 and not judged_path.exists()
+
+    blocker.rmdir()
+    assert queue() is not None
+    assert pending_document_judgments() == 1 and judged_path.is_file()
