@@ -4,6 +4,7 @@ import { Navigate, useLocation, useNavigate, useParams } from 'react-router'
 
 import { BottomSheet } from '../components/ui/BottomSheet'
 import { Button } from '../components/ui/Button'
+import { HammerLoader } from '../components/ui/HammerLoader'
 import { InfoBox } from '../components/ui/InfoBox'
 import { TopBar } from '../components/ui/TopBar'
 import { useCase } from '../hooks/useCase'
@@ -29,12 +30,27 @@ type SaveState = 'IDLE' | 'SAVING' | 'FAILED' | 'REJECTED'
 export function TaskFlowPage() {
   const { taskId = '' } = useParams()
   const { search } = useLocation()
-  const roadmap = useRoadmap()
+  const { query: roadmap, reload } = useRoadmap()
 
-  if (roadmap.status === 'UNAVAILABLE') {
+  // 할 일 상태는 로드맵이 정한다. 로드맵을 받아야 어떤 장면을 열지 안다
+  if (roadmap.status === 'EMPTY') return <Navigate to={{ pathname: '/cases/new', search }} replace />
+
+  if (roadmap.status === 'LOADING') {
     return (
       <TaskFrame>
-        <InfoBox title="할 일 화면은 준비 중이에요.">폐업 전체 순서가 열리면 여기서 할 일을 하나씩 마칠 수 있어요.</InfoBox>
+        <div className="flex justify-center pt-16">
+          <HammerLoader size={48} label="할 일을 불러오는 중" />
+        </div>
+      </TaskFrame>
+    )
+  }
+
+  if (roadmap.status === 'LOAD_FAILED') {
+    return (
+      <TaskFrame>
+        <InfoBox title="할 일을 불러오지 못했어요." action={{ label: '다시 불러오기', onClick: reload }}>
+          연결 상태를 확인하고 다시 불러와 주세요.
+        </InfoBox>
       </TaskFrame>
     )
   }
@@ -103,6 +119,11 @@ function useSaveErrors() {
 /**
  * 체크 장면. 서류가 필요한 할 일(`attach`)은 서류함에 올리는 길을 먼저 둔다 — 올린 서류가 정산
  * 점검에 쓰인다. 체크는 사장님이 "했다"고 알리는 것이고, 할 일 상태는 로드맵이 다시 계산한다.
+ *
+ * 서버가 "확인 필요"(`NEEDS_CONFIRMATION`)로 준 할 일은 [다 했어요]를 처음부터 끈다. 서버가 체크를
+ * 422 로 받지 않는다(#181) — 예를 들어 철거비 심사 결과를 모르면 정산 항목이 그렇다. 무엇이 확인돼야
+ * 하는지는 서버가 주지 않아 지어내지 않는다. 서버가 준 상태로 가르는 것이지 FE 판단이 아니다(규칙 1).
+ * 막는 것은 [다 했어요]뿐이다. 체크해 둔 것을 푸는 [완료 취소하기]는 따로 두어 막지 않는다(서버도 풀기는 늘 받는다).
  */
 export function CheckFlow({ task, attach = false }: { task: RoadmapTaskView; attach?: boolean }) {
   const navigate = useNavigate()
@@ -112,6 +133,7 @@ export function CheckFlow({ task, attach = false }: { task: RoadmapTaskView; att
   // 처음은 서버가 준 상태다. 저장하면 저장된 값으로 바꾼다
   const [checked, setChecked] = useState(task.status === 'COMPLETED')
   const [save, setSave] = useState<SaveState>('IDLE')
+  const waiting = task.status === 'NEEDS_CONFIRMATION'
 
   async function toggle() {
     const next = !checked
@@ -139,9 +161,12 @@ export function CheckFlow({ task, attach = false }: { task: RoadmapTaskView; att
       )}
       {checked && save !== 'SAVING' && (
         <p className="flex items-center gap-2 text-17 font-bold">
-          <IconCheckmarkCircleFill size={22} className="text-fg-brand" aria-hidden="true" />
+          <IconCheckmarkCircleFill size={22} className="text-fg-brand motion-safe:animate-pop" aria-hidden="true" />
           마치셨다고 기록했어요
         </p>
+      )}
+      {waiting && (
+        <InfoBox title="아직 기록할 수 없는 할 일이에요.">필요한 내용이 확인되면 기록할 수 있어요.</InfoBox>
       )}
       <SaveNotice save={save} />
       <div className="mt-auto flex flex-col gap-2">
@@ -150,7 +175,7 @@ export function CheckFlow({ task, attach = false }: { task: RoadmapTaskView; att
             완료 취소하기
           </Button>
         ) : (
-          <Button disabled={save === 'SAVING' || save === 'REJECTED'} onClick={toggle}>
+          <Button disabled={waiting || save === 'SAVING' || save === 'REJECTED'} onClick={toggle}>
             다 했어요
           </Button>
         )}
@@ -216,7 +241,7 @@ export function SupportResultFlow({ task }: { task: RoadmapTaskView }) {
       </div>
       {savedLabel && save !== 'SAVING' && (
         <p className="flex items-center gap-2 text-17 font-bold">
-          <IconCheckmarkCircleFill size={22} className="text-fg-brand" aria-hidden="true" />
+          <IconCheckmarkCircleFill size={22} className="text-fg-brand motion-safe:animate-pop" aria-hidden="true" />
           &ldquo;{savedLabel}&rdquo;로 기록했어요
         </p>
       )}
@@ -242,7 +267,7 @@ function ReportResultFlow({ task }: { task: RoadmapTaskView }) {
       <TaskHeader task={task} />
       <InfoBox>이 일은 하신 결과를 알려 주시면 리본이 확인해 다음 순서를 정해요.</InfoBox>
       <div className="mt-auto">
-        <Button onClick={() => navigate({ pathname: '/results', search })}>결과 알려주기</Button>
+        <Button onClick={() => navigate({ pathname: '/results', search }, { viewTransition: true })}>결과 알려주기</Button>
       </div>
     </TaskFrame>
   )
@@ -337,7 +362,7 @@ export function DepositFlow({ task, initial = null }: { task: RoadmapTaskView; i
 
       {savedLabel && save !== 'SAVING' && !checkPending && (
         <p className="flex items-center gap-2 text-17 font-bold">
-          <IconCheckmarkCircleFill size={22} className="text-fg-brand" aria-hidden="true" />
+          <IconCheckmarkCircleFill size={22} className="text-fg-brand motion-safe:animate-pop" aria-hidden="true" />
           &ldquo;{savedLabel}&rdquo;로 기록했어요
         </p>
       )}
@@ -486,7 +511,7 @@ export function ClosureReportFlow({ task, initial = null }: { task: RoadmapTaskV
       {saved && save !== 'SAVING' && (
         <>
           <p className="flex items-center gap-2 text-17 font-bold">
-            <IconCheckmarkCircleFill size={22} className="text-fg-brand" aria-hidden="true" />
+            <IconCheckmarkCircleFill size={22} className="text-fg-brand motion-safe:animate-pop" aria-hidden="true" />
             신고 정보를 저장했어요
           </p>
           <InfoBox
@@ -501,7 +526,7 @@ export function ClosureReportFlow({ task, initial = null }: { task: RoadmapTaskV
 
       <div className="mt-auto flex flex-col gap-2">
         {saved && (
-          <Button variant="outline" onClick={() => navigate({ pathname: '/results', search })}>
+          <Button variant="outline" onClick={() => navigate({ pathname: '/results', search }, { viewTransition: true })}>
             결과 알려주기
           </Button>
         )}
@@ -630,7 +655,7 @@ function SaveNotice({ save }: { save: SaveState }) {
 /** 탭 없는 화면의 틀 */
 function TaskFrame({ children }: { children: ReactNode }) {
   return (
-    <div className="mx-auto flex min-h-dvh max-w-[402px] flex-col bg-bg-layer-default">
+    <div className="screen-frame mx-auto flex min-h-dvh max-w-[402px] flex-col bg-bg-layer-default">
       <TopBar title="할 일" />
       <main className="flex flex-1 flex-col gap-5 px-4 pt-2 pb-8">{children}</main>
     </div>

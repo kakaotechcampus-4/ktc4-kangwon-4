@@ -50,7 +50,8 @@ export function ProcessSteps({ steps }: ProcessStepsProps) {
       {steps.map((step, index) => (
         <li key={step.label} className="flex items-center gap-3 py-2.5">
           <span aria-hidden="true" className="grid size-7 shrink-0 place-items-center">
-            {step.status === 'done' && <IconCheckmarkCircleFill className="size-7 text-fg-brand" />}
+            {/* 끝난 줄이 되는 순간 체크가 튀어 오른다 */}
+            {step.status === 'done' && <IconCheckmarkCircleFill className="size-7 text-fg-brand motion-safe:animate-pop" />}
             {step.status === 'run' && <HammerLoader size={24} />}
             {step.status === 'wait' && (
               <span className="grid size-6 place-items-center rounded-full text-13 font-bold text-fg-neutral-subtle ring-[1.5px] ring-stroke-neutral-weak ring-inset">

@@ -1,4 +1,5 @@
 import { IconChevronRightLine } from '@karrotmarket/react-monochrome-icon'
+import type { CSSProperties } from 'react'
 import { Link, useLocation } from 'react-router'
 
 /** 시안의 폐업 단계 짧은 이름. 단계 번호 1~5 순서다 */
@@ -21,9 +22,8 @@ interface HomeStageCardProps {
  * 막대는 시안처럼 지금 단계의 가운데까지 채운다(`(단계 - 0.5) / 5`). 단계를 다 마쳤다는 뜻이 아니라
  * 그 단계에 와 있다는 뜻이다. 폐업 정리를 마쳤으면 끝까지 채운다(시안 `closed`).
  *
- * 마친 뒤의 제목은 "폐업 단계" 그대로다. 시안은 "지금은 세금·마무리 단계"인데, 단계 이름은 로드맵이
- * 주는 값이라 FE 가 마지막 단계 이름을 적어 두지 않는다.
- * TODO(로드맵 조회 API): 단계 이름이 오면 마친 뒤의 제목을 다시 정한다.
+ * 마친 뒤의 제목은 "폐업 단계" 그대로다. 시안은 "지금은 세금·마무리 단계"인데, 폐업 정리를 마치면
+ * 서버가 지금 단계를 주지 않는다(`current_stage` `null`, #179). FE 가 마지막 단계 이름을 골라 붙이지 않는다.
  */
 export function HomeStageCard({ stage = null, completed = false }: HomeStageCardProps) {
   const { search } = useLocation()
@@ -33,7 +33,8 @@ export function HomeStageCard({ stage = null, completed = false }: HomeStageCard
   return (
     <Link
       to={{ pathname: '/roadmap', search }}
-      className="flex shrink-0 flex-col gap-3 rounded-2xl bg-bg-layer-default px-5 py-4.5 shadow-card active:bg-bg-layer-default-pressed"
+      viewTransition
+      className="press-scale flex shrink-0 flex-col gap-3 rounded-2xl bg-bg-layer-default px-5 py-4.5 shadow-card active:bg-bg-layer-default-pressed"
     >
       <span className="flex items-center gap-1">
         <span className="flex-1 text-17 font-bold">
@@ -47,8 +48,16 @@ export function HomeStageCard({ stage = null, completed = false }: HomeStageCard
         </span>
         <IconChevronRightLine size={20} aria-hidden="true" className="text-fg-neutral-subtle" />
       </span>
+      {/*
+        막대는 값이 바뀌면 그 너비까지 천천히 차오른다(`--duration-stage-fill`). 홈을 처음 그릴 때도
+        0에서 차오른다(`starting:w-0`). 단계 값이 아직 없으면 0으로 두어, 늦게 와도 0부터 찬다.
+        너비를 `style` 의 `width` 로 바로 주면 처음 값(0)보다 앞서서 차오르지 않아 변수(`--fill`)로 넘긴다
+      */}
       <span aria-hidden="true" className="h-1.5 overflow-hidden rounded-full bg-bg-neutral-weak">
-        {fill !== null && <span className="block h-full rounded-full bg-bg-brand-solid" style={{ width: `${fill}%` }} />}
+        <span
+          className="block h-full w-(--fill) rounded-full bg-bg-brand-solid transition-[width] duration-(--duration-stage-fill) ease-[cubic-bezier(0,0,0.15,1)] starting:w-0 motion-reduce:transition-none"
+          style={{ '--fill': `${fill ?? 0}%` } as CSSProperties}
+        />
       </span>
       <ol className="grid grid-cols-5">
         {STAGE_LABELS.map((label, index) => {

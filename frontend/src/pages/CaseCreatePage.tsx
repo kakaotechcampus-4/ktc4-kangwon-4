@@ -293,7 +293,7 @@ function DiagnosisQuestion({ step, answers, setAnswers, next, ...screen }: Diagn
  */
 function CreatingScreen() {
   return (
-    <div className="mx-auto flex h-dvh max-w-[402px] flex-col items-center justify-center gap-8 bg-bg-layer-default px-6 pb-24 text-center">
+    <div className="screen-frame mx-auto flex h-dvh max-w-[402px] flex-col items-center justify-center gap-8 bg-bg-layer-default px-6 pb-24 text-center">
       <HammerLoader size={72} label="폐업 순서를 만들고 있어요" />
       <div>
         <p className="text-26 font-bold whitespace-pre-line">{'사장님 가게에 맞는\n폐업 순서를 만들고 있어요'}</p>

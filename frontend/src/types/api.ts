@@ -316,7 +316,7 @@ export type ResultsSubmitResult =
  * `GET /cases/results/status?case_history_id=` 응답.
  *
  * 상태마다 채워지는 칸이 다르다. 안 쓰는 칸은 `null` 로 온다.
- *   UPDATED · NO_CHANGE  changes · blocker · next_action (NO_CHANGE 는 changes 가 빈 목록)
+ *   UPDATED · NO_CHANGE  changes · blocker · next_action · new_tasks (NO_CHANGE 는 changes 가 빈 목록)
  *   NEEDS_MORE_INFO      questions_for_user
  *   CONFLICT             raw_input · conflicts
  *   FAILED               recovery_action_code · requested_field_paths
@@ -334,6 +334,18 @@ export interface CaseResultsSubmitResponse {
   conflicts: ConflictItemResponse[] | null
   recovery_action_code: RecoveryActionCode | null
   requested_field_paths: string[] | null
+  /**
+   * 이번 판단으로 해야 할 일이 된 로드맵 할 일(#182, 시안 "할 일 3개가 새로 생겼어요"). 로드맵 순서다.
+   * 직전 판단과 비교할 수 없으면 `null`, 새로 생긴 게 없으면 빈 목록. `NO_CHANGE` 에도 온다 —
+   * 그사이 알려 준 심사 결과로 할 일이 늘었을 수 있다(현석님 #182)
+   */
+  new_tasks: NewTaskResponse[] | null
+}
+
+/** 새로 생긴 할 일 하나. 번호는 로드맵 할 일 번호(`task_id`)와 같다 */
+export interface NewTaskResponse {
+  task_id: string
+  title: string
 }
 
 /** 기록을 남긴 쪽. `OWNER` 사장님, `RIBBON` 리본 */
@@ -357,6 +369,9 @@ export type CaseLogEvent =
   | 'MORE_INFO_REQUESTED'
   | 'CONFLICT_FOUND'
   | 'JUDGMENT_FAILED'
+  | 'ROADMAP_TASKS_ADDED'
+  | 'DOCUMENT_UPLOADED'
+  | 'DOCUMENTS_CHECKED'
 
 /** 기록 한 줄 */
 export interface CaseLogItem {
@@ -367,8 +382,10 @@ export interface CaseLogItem {
   /** 체크 기록(`CHECKLIST_*`)일 때 어떤 항목인지. 그 밖에는 `null` */
   task_id: string | null
   /**
-   * 문구에 쓸 값. `NEXT_ACTION_DECIDED` 는 정한 할 일 제목,
-   * `SUPPORT_RESULT_REPORTED` 는 `APPROVED` / `REJECTED` / `UNKNOWN`. 그 밖에는 `null`
+   * 문구에 쓸 값. `NEXT_ACTION_DECIDED` 는 정한 할 일 제목, `ROADMAP_TASKS_ADDED` 는 이번 판단으로
+   * 새로 생긴 할 일 개수 글자(예: `"3"`, #184), `DOCUMENT_UPLOADED` 는 올린 서류 종류 코드(예: `TRANSFER`, #174),
+   * `SUPPORT_RESULT_REPORTED` 는 `APPROVED` / `REJECTED` / `UNKNOWN`.
+   * 그 밖에는 `null`
    */
   detail: string | null
 }
@@ -399,6 +416,48 @@ export interface CaseSupportApprovalRequest {
 
 export interface CaseSupportApprovalResponse {
   approved: boolean | null
+}
+
+/** 로드맵 할 일 상태(AI 로드맵 `TaskStatus`). 이것이 다가 아닐 수 있어 모르는 값은 어댑터가 뺀다 */
+export type RoadmapTaskStatusCode = 'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETED' | 'NOT_APPLICABLE' | 'NEEDS_CONFIRMATION'
+
+/** 로드맵 할 일 종류. `CHECKLIST` 체크 항목 · `PROCEDURE` 공식 절차 · `DOCUMENT_CHECK` 서류 점검 · `CASE_FACT` 가게 정보 */
+export type RoadmapTaskKindCode = 'CHECKLIST' | 'PROCEDURE' | 'DOCUMENT_CHECK' | 'CASE_FACT'
+
+/**
+ * 로드맵 할 일 한 줄. 서버는 이 밖에 절차 번호(`procedure_steps`)·설명 출처(`guidance_source`)도 주지만
+ * 화면이 쓰지 않아 옮기지 않는다
+ */
+export interface RoadmapTaskResponse {
+  /** 할 일 번호(`dispose_stock` 등). 체크 저장 `PUT /cases/checklists/{task_id}` 의 그 번호다 */
+  task_id: string
+  title: string
+  kind: RoadmapTaskKindCode
+  status: RoadmapTaskStatusCode
+  /** 검수한 설명. 없으면 `null` */
+  guidance: string | null
+}
+
+export interface RoadmapStageResponse {
+  /** 단계 번호 1~5 */
+  stage: number
+  title: string
+  tasks: RoadmapTaskResponse[]
+}
+
+/**
+ * `GET /cases/roadmap` 응답(#178). AI 로드맵(`app/agent/roadmap.py` `Roadmap`)을 그대로 내보낸다.
+ * 화면이 쓰는 칸만 옮겼다(Case 번호·스냅샷 번호·`next_action` 등은 쓰지 않는다 — 오늘 할 일은 `GET /cases` 가 맡는다).
+ *
+ * 미지원 업종이면 `supported` 가 `false` 이고 `unsupported_reason` 에 안내 문구, 단계는 빈 목록이다.
+ * `current_stage` 는 해야 할 일이 남은 가장 앞 단계(#179). 폐업 정리를 마쳤거나 미지원이면 `null`.
+ * Case 가 없으면 404 다.
+ */
+export interface RoadmapResponse {
+  supported: boolean
+  unsupported_reason: string | null
+  stages: RoadmapStageResponse[]
+  current_stage: number | null
 }
 
 /** 폐업 사유. `BUSINESS_SLUMP` 사업 부진 · `PERSONAL` 개인 사정 · `OTHER` 기타 */

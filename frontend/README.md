@@ -53,6 +53,7 @@ Vite 가 읽지 않습니다. 고친 뒤에는 개발 서버를 다시 띄웁니
 | React Router | 라우팅. v7부터 `react-router-dom`이 아니라 `react-router` 한 패키지입니다 |
 | Fetch API | 통신 |
 | React 내장 | 상태관리 (`useState` / `useContext`) |
+| Motion (`motion`, 14.4.0 고정) | 시트 끌기·용수철, 버튼 누르기, 로드맵 펼치기. 화면 이동은 브라우저 View Transitions, 나머지 움직임은 CSS ([UI 가이드라인 "움직임"](docs/ui-guidelines.md)) |
 | Zustand | 화면 여러 장에 걸쳐 이어지는 답만 (`src/stores/`). 지금은 상황 진단 답 하나. 서버 데이터는 넣지 않습니다 |
 | Pretendard | 본문 글꼴. npm 패키지로 직접 배포 (`src/main.tsx`) |
 | 다음 우편번호 서비스 | 통합 폐업 신고의 가게 주소 찾기. 패키지가 아니라 공식 스크립트를 주소 찾기를 열 때만 받습니다 (`src/lib/postcode.ts`) |
@@ -77,15 +78,15 @@ Mobile-first 반응형, 기준 폭 375px.
 | `/cases/new` | 상황 진단 | Case가 없는 사용자만 본다. 질문 한 장씩(`?step=`), 답에 따라 질문이 생기고 빠진다. 마지막에 가입 요청을 보내고 저장하는 동안 "만드는 중" |
 | `/case` | 현재 Case (홈) | 하단 탭. 지금 할 일 하나, 또는 리본이 일하는 중인지. 폐업 정리를 마쳤으면(`case_status` `COMPLETED`, #167) 할 일 대신 완료 카드와 [전체 기록 보기] |
 | `/task` | 할 일 상세 | 할 일과 "이렇게 물어보세요" 목록. 폐업 정리를 마친 가게는 홈으로 보낸다 |
-| `/results` | 결과 입력 | 할 일의 결과를 글로 전달. 리본이 되물었으면 그 질문에 답하고, 더 알려주셔야 하는 실패면 다시 적는다. 보낸 뒤 판단이 끝날 때까지 처리 화면 |
+| `/results` | 결과 입력 | 할 일의 결과를 글로 전달. 리본이 되물었으면 그 질문에 답하고, 더 알려주셔야 하는 실패면 다시 적는다. 보내는 글은 2,000자까지(질문에 답할 때는 질문까지 묶은 전체, 넘으면 자르지 않고 보내기를 막음). 보낸 뒤 판단이 끝날 때까지 처리 화면 |
 | `/confirm` | 충돌 확인 | 기존 기록과 어긋날 때만 들른다. 고른 쪽을 보내고(`POST /cases/results/decision`, #136) 결과 입력과 같은 처리 중 화면으로 판단을 기다린다 |
-| `/replan` | 반영 결과 | 무엇이 바뀌었고 다음 할 일은 무엇인가. 주소의 판단 번호(`?history=`)로 다시 묻는다 |
+| `/replan` | 반영 결과 | 무엇이 바뀌었고, 로드맵에 새로 생긴 할 일(#182)과 다음 할 일은 무엇인가. 주소의 판단 번호(`?history=`)로 다시 묻는다 |
 | `/docs` | 서류함 | 하단 탭. 올린 서류 목록 · 올리기 시트 · 확인 필요 서류 고치기 · 빼기(서류 API #159). 올리기는 서버가 다 읽을 때까지 기다려 최대 110초(배포의 Vercel 120초 제한보다 먼저 끊음) |
 | `/docs/check` | 서류 점검 | 정산 서류 점검. 점검 직전 신청인 이름 · 실제 폐업일을 묻는다 |
 | `/docs/done` | 정산 제출 파일 | 점검을 통과했을 때만. [파일 받기]로 ZIP 을 받는다(Mock 에서는 꺼짐) |
 | `/log` | 작업 기록 | 하단 탭. 사장님 · 리본이 한 일을 최근 것부터(`GET /cases/logs`). 홈 띠도 여기서 리본 줄만 쓴다 |
-| `/roadmap` | 폐업 전체 순서 | 다섯 단계와 할 일 상태. 홈 단계 카드로 들어온다. **로드맵 조회 API 전이라 실서버에서는 준비 중** |
-| `/roadmap/:taskId` | 할 일 | 할 일마다 체크 · 첨부 · 철거비 심사 결과 · 통합 폐업 신고(폐업일 · 사유 · 주소) · 보증금 · 결과 알려주기 중 하나를 연다. 저장은 실서버 API(#149 · #168). 통합 폐업 신고 · 보증금은 저장해 둔 값(`GET /cases`)으로 채워 연다 |
+| `/roadmap` | 폐업 전체 순서 | 다섯 단계와 할 일 상태(`GET /cases/roadmap`, #178). 지금 단계(#179)만 펼친다. 홈 단계 카드로 들어온다 |
+| `/roadmap/:taskId` | 할 일 | 로드맵에서 그 할 일을 찾아 체크 · 첨부 · 철거비 심사 결과 · 통합 폐업 신고(폐업일 · 사유 · 주소) · 보증금 · 결과 알려주기 중 하나를 연다. 저장은 실서버 API(#149 · #168). 통합 폐업 신고 · 보증금은 저장해 둔 값(`GET /cases`)으로 채워 연다. 서버가 "확인 필요"로 준 체크 항목은 [다 했어요]를 꺼 둔다(#181) |
 | `/notifications` | 알림 | 탭 화면의 종 버튼으로 들어온다. 아직 빈 상태 |
 
 로그인 화면 둘을 뺀 전부가 인증 가드 아래에 있습니다. 로그인하지 않고 열면 `/login`으로 갑니다.
@@ -106,7 +107,7 @@ Mobile-first 반응형, 기준 폭 375px.
 
 **Case 가 있는지는 서버에 물어봅니다.** `/` · `/cases/new` · `/case` · `/task` 가 들어올 때마다
 `GET /cases` 를, `/results` 는 `GET /cases/results` 를, `/replan` 은 `GET /cases/results/status` 를, `/log` 와 홈 띠는
-`GET /cases/logs` 를, `/docs` · `/docs/check` · `/docs/done` 은 `GET /cases/documents` 를 부릅니다. 앞 화면에서 받은 값을 넘겨받지 않는 것은, 그 값이 히스토리에 남아
+`GET /cases/logs` 를, `/roadmap` · `/roadmap/:taskId` 와 홈 단계 카드는 `GET /cases/roadmap` 을, `/docs` · `/docs/check` · `/docs/done` 은 `GET /cases/documents` 를 부릅니다. 앞 화면에서 받은 값을 넘겨받지 않는 것은, 그 값이 히스토리에 남아
 오래된 Case 가 "지금 상황"인 척 다시 뜨기 때문입니다.
 
 로그인 토큰은 `sessionStorage`에 둡니다. 탭을 닫으면 풀립니다 — 가게나 공용 PC에서 쓰는
@@ -183,12 +184,12 @@ PR 브랜치마다 Preview 주소가 달라 등록할 수 없어서, **리뷰어
 /results?mock=too-long         판단이 오래 걸림
 /results?mock=unrecognized     판단 결과를 읽지 못함
 /results?mock=judgment-failed-detail  홈의 "다시 알려주기"에서 온 경우 (더 알려주셔야 하는 실패)
-/replan?mock=no-change      바뀐 것 없음
+/replan?mock=no-change      바뀐 것 없음 (다른 키는 바뀐 내용 · 새로 생긴 할 일 3개)
 /log?mock=logs-empty        기록이 아직 없음 (다른 키는 예시 기록)
 /docs?mock=docs             서류 목록 · 올리기 · 확인 필요 서류
 /docs?mock=docs-issues      점검에서 빠진 서류가 나온 상태
 /docs?mock=docs-complete    점검을 통과해 제출 파일을 볼 수 있는 상태
-/roadmap?mock=roadmap       폐업 전체 순서 (2단계 진행 중). 할 일을 누르면 할 일 화면
+/roadmap?mock=roadmap       폐업 전체 순서 (2단계 진행 중). 할 일을 누르면 할 일 화면. 4단계 정산 항목은 "확인 필요"
 /roadmap?mock=roadmap-unsupported  미지원 업종 안내
 ```
 

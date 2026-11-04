@@ -12,6 +12,7 @@ from datetime import datetime
 
 from sqlmodel import Session
 
+from app.agent.roadmap import build_roadmap
 from app.agent.schemas import (
     CaseFieldKey,
     ConflictOutcome,
@@ -39,6 +40,7 @@ from app.be.models.evidence import ConflictReference, DecisionRecord, Evidence, 
 from app.be.models.mixins import KST, kst_now
 from app.be.models.procedure_step import CaseProcedureStepHistory
 from app.be.models.support_item import SupportMatch
+from app.be.services import roadmap as roadmap_service
 from app.be.services.case_snapshot import UNKNOWN_SENTINEL_FIELDS
 
 logger = logging.getLogger(__name__)
@@ -125,12 +127,33 @@ def save_reviewed_plan(
     # 한다 — 값만 들어가고 충돌이 남으면 같은 것을 또 묻고, 충돌만 닫히고 값이 빠지면 고른
     # 내용이 사라진다.
     _resolve_conflicts(session, history, resolved_conflicts)
+    history.roadmap_task_ids = _roadmap_task_ids(session, history.case_id)
 
     # TODO: grounded_claims(확인이 필요한 문장 표시)와 snapshot/known_procedure_steps(판단 당시
     # 입력)는 아직 담을 화면·테이블이 없어 저장하지 않는다.
     session.commit()
     session.refresh(record)
     return record
+
+
+def _roadmap_task_ids(session: Session, case_id: int) -> list[str] | None:
+    """방금 반영한 값으로 로드맵을 계산해 해야 할 일인 항목만 남긴다. 결과 화면의 "새로 생긴 할 일" 재료.
+
+    로드맵 계산이 실패해도 판단 저장은 막지 않는다. 그때는 NULL이고 결과 화면은 그 칸을 비운다.
+    """
+
+    session.flush()
+    try:
+        roadmap = build_roadmap(roadmap_service.build_roadmap_input(session, case_crud.get_case_by_id(session, case_id)))
+    except Exception:  # noqa: BLE001 - 화면용 부가 정보라 판단 저장을 실패시키지 않는다
+        logger.exception("Case %s 로드맵 계산 실패, 새로 생긴 할 일을 비운다", case_id)
+        return None
+    return [
+        task.task_id
+        for stage in roadmap.stages
+        for task in stage.tasks
+        if task.status not in {"NOT_APPLICABLE", "NEEDS_CONFIRMATION"}
+    ]
 
 
 def _save_blockers(session: Session, history: CaseHistory, outcome: ReviewedPlanOutcome) -> Blocker:

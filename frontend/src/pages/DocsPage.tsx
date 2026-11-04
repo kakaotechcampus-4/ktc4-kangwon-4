@@ -18,6 +18,7 @@ import { EmptyState } from '../components/ui/EmptyState'
 import { HammerLoader } from '../components/ui/HammerLoader'
 import { InfoBox } from '../components/ui/InfoBox'
 import { type DocumentAction, useDocuments } from '../hooks/useDocuments'
+import { useEntersForward } from '../lib/viewTransition'
 import type { DocumentCheckView, DocumentView } from '../types/view'
 
 /**
@@ -32,6 +33,7 @@ import type { DocumentCheckView, DocumentView } from '../types/view'
  */
 export function DocsPage() {
   const navigate = useNavigate()
+  const rise = useEntersForward()
   const { search } = useLocation()
   const { query, reload, action, upload, remove, confirm } = useDocuments()
   /** 종류·값을 확인하고 있는 서류 */
@@ -91,7 +93,7 @@ export function DocsPage() {
       ) : (
         <>
           <p className="text-15 text-fg-neutral-muted">서류 {documents.length}개가 모였어요.</p>
-          <ul className="flex flex-col">
+          <ul className={`flex flex-col ${rise ? 'rise-children' : ''}`}>
             {documents.map((document) => (
               <DocumentRow
                 key={document.id}
@@ -123,10 +125,10 @@ export function DocsPage() {
           서류가 없으면 점검할 것이 없어 두지 않는다
         */}
         {check?.status === 'COMPLETE' ? (
-          <Button onClick={() => navigate({ pathname: '/docs/done', search })}>정산 제출 파일 보기</Button>
+          <Button onClick={() => navigate({ pathname: '/docs/done', search }, { viewTransition: true })}>정산 제출 파일 보기</Button>
         ) : (
           documents.length > 0 && (
-            <Button disabled={action === 'UPLOADING'} onClick={() => navigate({ pathname: '/docs/check', search })}>
+            <Button disabled={action === 'UPLOADING'} onClick={() => navigate({ pathname: '/docs/check', search }, { viewTransition: true })}>
               정산 서류 점검하기
             </Button>
           )
@@ -463,7 +465,7 @@ function UploadSheet({
 /** 고르기 한 줄. `<label>` 이 숨긴 파일 입력을 감싸, 줄을 누르면 파일 고르기가 열린다 */
 function PickOption({ icon, label, children }: { icon: ReactNode; label: string; children: ReactNode }) {
   return (
-    <label className="flex min-h-14 cursor-pointer items-center gap-3 rounded-xl px-1 text-17 font-medium active:bg-bg-transparent-pressed">
+    <label className="press-scale flex min-h-14 cursor-pointer items-center gap-3 rounded-xl px-1 text-17 font-medium active:bg-bg-transparent-pressed">
       <span aria-hidden="true" className="text-fg-neutral-muted">
         {icon}
       </span>

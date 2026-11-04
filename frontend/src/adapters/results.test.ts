@@ -285,6 +285,7 @@ function judged(overrides: Partial<CaseResultsSubmitResponse>): CaseResultsSubmi
     conflicts: null,
     recovery_action_code: null,
     requested_field_paths: null,
+    new_tasks: null,
     ...overrides,
   }
 }
@@ -311,8 +312,52 @@ describe('toSubmitOutcome', () => {
         ],
         blocker: { title: '철거 전에 지원 조건을 확인해야 합니다.' },
         nextAction: { title: '임대인에게 원상복구 범위 묻기', reason: '', questions: [] },
+        newTasks: [],
       },
     })
+  })
+
+  /** 시안 "할 일 3개가 새로 생겼어요"(#182). 로드맵 순서 그대로 둔다 */
+  it('새로 생긴 할 일을 서버가 준 순서대로 싣는다', () => {
+    const outcome = toSubmitOutcome(
+      judged({
+        ...REPLANNED,
+        new_tasks: [
+          { task_id: 'support_application', title: '소상공인24 사전 신청' },
+          { task_id: 'before_photo', title: '철거 전 사진' },
+        ],
+      }),
+    )
+
+    expect(outcome).toMatchObject({
+      kind: 'REPLAN',
+      view: {
+        newTasks: [
+          { id: 'support_application', title: '소상공인24 사전 신청' },
+          { id: 'before_photo', title: '철거 전 사진' },
+        ],
+      },
+    })
+  })
+
+  /** 그사이 알려 준 심사 결과로 할 일이 늘었을 수 있다. 바뀐 게 없어도 오는 대로 싣는다(현석님 #182) */
+  it('바뀐 것이 없어도 새로 생긴 할 일은 싣는다', () => {
+    const outcome = toSubmitOutcome(
+      judged({ ...REPLANNED, result: 'NO_CHANGE', changes: [], new_tasks: [{ task_id: 'support_application', title: '소상공인24 사전 신청' }] }),
+    )
+
+    expect(outcome).toMatchObject({ kind: 'REPLAN', view: { newTasks: [{ id: 'support_application' }] } })
+  })
+
+  /** 덤인 칸 하나 때문에 멀쩡한 반영 결과를 못 보여주면 더 큰 손해다 */
+  it('새로 생긴 할 일을 읽지 못해도 반영 결과는 보여주고, 빈 줄만 뺀다', () => {
+    const broken = toSubmitOutcome(judged({ ...REPLANNED, new_tasks: 'three' as unknown as null }))
+    expect(broken).toMatchObject({ kind: 'REPLAN', view: { newTasks: [] } })
+
+    const partly = toSubmitOutcome(
+      judged({ ...REPLANNED, new_tasks: [{ task_id: '', title: '이름 없음' }, { task_id: 'before_photo', title: '철거 전 사진' }] }),
+    )
+    expect(partly).toMatchObject({ kind: 'REPLAN', view: { newTasks: [{ id: 'before_photo', title: '철거 전 사진' }] } })
   })
 
   it('바뀐 것이 없어도 재계획으로 보내고 변경 목록은 비운다', () => {

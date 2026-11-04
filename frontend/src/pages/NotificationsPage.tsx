@@ -10,7 +10,7 @@ import { TopBar } from '../components/ui/TopBar'
  */
 export function NotificationsPage() {
   return (
-    <div className="mx-auto flex min-h-dvh max-w-[402px] flex-col bg-bg-layer-default">
+    <div className="screen-frame mx-auto flex min-h-dvh max-w-[402px] flex-col bg-bg-layer-default">
       <TopBar title="알림" />
       <main className="flex flex-1 flex-col">
         <EmptyState

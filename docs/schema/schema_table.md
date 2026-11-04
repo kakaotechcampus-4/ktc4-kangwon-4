@@ -126,6 +126,18 @@ CASE의 필드 단위 변경 이력 (감사 추적용). `CASE_HISTORY`(발화·�
 | completed | BOOLEAN | | NOT NULL | `true` | `true` 체크함 / `false` 체크를 풂 |
 | created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-10-30 10:00:00` | 체크하거나 푼 시각 |
 
+### CASE_DOCUMENT_HISTORY
+
+서류를 올리고 점검한 이력. 한 줄씩 쌓고 지우지 않는다. 기록 탭이 읽는다. 서류 목록 자체는 서류 폴더의 JSON 파일(#159)에 있는데, 거기에는 올린 시각이 없고 서류를 빼면 줄이 사라져서 기록용으로 따로 남긴다. 빼기·확인은 남기지 않는다.
+
+| 컬럼 | 타입 | 키 | 제약조건 | 예시 값 | 설명 |
+|---|---|---|---|---|---|
+| id | BIGINT | PK | NOT NULL, AUTO_INCREMENT | 1 | |
+| case_id | BIGINT | FK | NOT NULL | 1 | |
+| action | ENUM | | NOT NULL | `UPLOADED` | `UPLOADED` 서류를 올림 / `CHECKED` 정산 서류 점검을 통과함(`COMPLETE`일 때만) |
+| document_kind | VARCHAR(30) | | NULLABLE | `"TRANSFER"` | 올린 순간의 서류 종류(문서 Tool의 종류 코드). 나중에 종류를 고쳐도 바꾸지 않는다. 점검이면 NULL |
+| created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-11-04 10:00:00` | 올리거나 점검한 시각 |
+
 ## 2. 판단 로그 & 블로커
 
 에이전트가 사용자 발화나 배치 작업을 처리하면서 내린 판단을 기록하고,
@@ -160,6 +172,7 @@ CASE에 대한 발화·이벤트 원본 이력.
 | next_action_questions_to_ask | JSON | | NULLABLE | `["원상복구 범위가 어디까지인지 확인해 주세요"]` | 사용자가 임대인·기관에 물어볼 질문 목록. 다음 행동이 없으면 NULL |
 | next_action_evidence_refs | JSON | | NULLABLE | `["procedure:reviewed:NTS_CLOSURE"]` | 다음 행동의 근거 evidence_id 목록. 다음 행동이 없으면 NULL |
 | questions_for_user | JSON | | NULLABLE | `["확인한 원상복구 범위가 있으면 알려주세요."]` | 행동을 정하기 전 서비스가 사용자에게 되묻는 질문 목록. 없으면 NULL. `next_action_questions_to_ask`(사용자가 임대인·기관에 물어볼 말)와 다른 값이다 |
+| roadmap_task_ids | JSON | | NULLABLE | `["intake", "dispose_stock", "before_photo"]` | 이 판단 직후 로드맵에서 해야 할 일인 항목(해당 없음·확인 필요가 아닌 것)의 `task_id` 목록. 직전 판단과 비교해 결과 화면의 "새로 생긴 할 일"(`GET /cases/results/status`의 `new_tasks`)을 만든다. 검수를 통과한 판단만 채우고, 충돌·실패로 끝났거나 계산에 실패하면 NULL |
 | failure_code | VARCHAR | | NULLABLE | `"LOOP_LIMIT_REACHED"` | Agent가 돌려준 실패 종류. Agent가 값을 늘려도 따라 고치지 않도록 ENUM이 아닌 VARCHAR. 실패가 아니거나 Agent가 결과를 내기 전에 끊겼으면 NULL |
 | recovery_action_code | ENUM | | NULLABLE | `RETRY` | 판단이 실패했을 때 화면이 안내할 다음 행동 — `RETRY` / `RESUBMIT_INPUT` / `CONTACT_SUPPORT` / `NONE`. 실패가 아니면 NULL |
 | requested_field_paths | JSON | | NULLABLE | `["restoration_scope"]` | 판단을 멈추게 한 CASE 필드 목록. 실패가 아니면 NULL |

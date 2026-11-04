@@ -357,6 +357,8 @@ def test_reviewed_staff_facts_keep_internal_context_and_save_only_case_fields(mo
     monkeypatch.setattr(decision_record, "_save_evidence_records", Mock())
     monkeypatch.setattr(decision_record.case_field_history_crud, "create_case_field_history", fact_writer)
     monkeypatch.setattr(decision_record.evidence_crud, "create_decision_record", record_writer)
+    # 로드맵 계산은 test_result_new_tasks.py가 실제 DB로 본다. 여기서는 판단 저장이 그 값을 남기는지만 본다
+    monkeypatch.setattr(decision_record, "_roadmap_task_ids", lambda *_: ["intake"])
     if stored_count is not None:
         with pytest.raises(decision_record.StaleJudgmentError, match="employee_count"):
             decision_record.save_reviewed_plan(session, history, outcome)
@@ -374,6 +376,7 @@ def test_reviewed_staff_facts_keep_internal_context_and_save_only_case_fields(mo
         assert record_writer.call_args.args[1].subject_digest == outcome.review_subject.subject_digest
         session.commit.assert_called_once()
         assert history.judgment_status == "DONE"
+        assert history.roadmap_task_ids == ["intake"]
     outcome.assert_integrity()
     assert len(outcome.review_subject.source_results[1].output.fact_candidates) == 6
     assert len(outcome.review_subject.supervisor_draft.mutations.fact_changes) == 1

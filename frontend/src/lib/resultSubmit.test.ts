@@ -46,6 +46,7 @@ function result(overrides: Partial<CaseResultsSubmitResponse>): CaseResultsSubmi
     conflicts: null,
     recovery_action_code: null,
     requested_field_paths: null,
+    new_tasks: null,
     ...overrides,
   }
 }

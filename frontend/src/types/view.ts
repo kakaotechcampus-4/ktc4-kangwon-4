@@ -314,11 +314,15 @@ export interface FactChange {
  * `nextAction`은 꼭 있다. 다음 할 일이 없는 반영 응답은 어댑터가 읽지 못한 응답으로 돌려서
  * 이 화면까지 오지 않는다(`toSubmitOutcome`). 폐업을 다 마쳐 할 일이 없어지는 날이 오면
  * 그때는 이 화면이 아니라 완료 화면으로 보낸다.
+ *
+ * `newTasks` 는 이번 판단으로 새로 해야 할 일이 된 로드맵 할 일이다(로드맵 순서). 비교할 수 없거나 없으면
+ * 빈 목록이다 — 사장님에게는 둘 다 "새로 생긴 것 없음"이다.
  */
 export interface ReplanView {
   changes: FactChange[]
   blocker: Blocker | null
   nextAction: NextAction
+  newTasks: { id: string; title: string }[]
 }
 
 /**
@@ -407,8 +411,10 @@ export interface LogEntry {
   key: string
   actor: LogActor
   text: string
-  /** 덧붙이는 한 줄. 정한 할 일 제목이나 사장님이 알려 준 심사 결과. 없으면 그리지 않는다 */
+  /** 덧붙이는 한 줄. 정한 할 일 제목, 사장님이 알려 준 심사 결과, 마친 할 일 이름 등. 없으면 그리지 않는다 */
   detail?: string
+  /** 체크 기록(`CHECKLIST_*`)이면 어떤 할 일인지. 로드맵 이름을 붙이는 데 쓴다(`withTaskTitles`) */
+  taskId?: string
   /** `10.17` 처럼 월.일. 서버가 준 날짜 글자를 그대로 잘라 쓴다 */
   date: string
 }

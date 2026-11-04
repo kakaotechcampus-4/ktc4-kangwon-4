@@ -18,9 +18,11 @@ from app.agent.document_tool.documents import DocumentError
 from app.agent.document_tool.models import DocumentContext, DocumentFieldName, DocumentKind
 from app.agent.document_tool.tool import DocumentTool
 from app.be.crud import case as case_crud
+from app.be.crud import case_document_history as case_document_history_crud
 from app.be.crud import case_history as case_history_crud
 from app.be.crud import conflict_reference as conflict_reference_crud
 from app.be.models.case import Case
+from app.be.models.case_document_history import CaseDocumentHistory
 from app.be.models.case_history import CaseHistory
 from app.common.agent_dto import document_replan_text
 
@@ -68,18 +70,30 @@ def _rejected(error: DocumentError) -> HTTPException:
 
 
 async def upload_document(
-    tool: DocumentTool, directory: Path, case: Case, filename: str, content: bytes, kind: DocumentKind | None,
+    session: Session, tool: DocumentTool, directory: Path, case: Case,
+    filename: str, content: bytes, kind: DocumentKind | None,
 ) -> DocumentContext:
     if not content or len(content) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=422, detail="20MB 이하의 파일을 올려 주세요.")
+    context = load_context(directory, case)
     try:
-        updated = await tool.add_document(load_context(directory, case), filename, content, kind_hint=kind)
+        updated = await tool.add_document(context, filename, content, kind_hint=kind)
     except DocumentError as error:
         raise _rejected(error) from None
     except Exception:  # noqa: BLE001 - 모델·OCR 실패. 제공자 응답 본문을 사장님에게 보이지 않는다
         logger.exception("서류 처리 실패")
         raise HTTPException(status_code=502, detail="서류를 읽지 못했어요. 잠시 뒤 다시 올려 주세요.") from None
     save_context(directory, updated)
+
+    # 같은 파일을 다시 올리면 도구가 같은 서류로 보고 목록에 더하지 않는다. 새로 생긴 서류만 기록한다.
+    before = {document.document_id for document in context.documents}
+    for document in updated.documents:
+        if document.document_id not in before:
+            case_document_history_crud.create_case_document_history(
+                session,
+                CaseDocumentHistory(case_id=case.id, action="UPLOADED", document_kind=document.analysis.kind),
+            )
+    session.commit()
     return updated
 
 
@@ -107,7 +121,7 @@ def remove_document(tool: DocumentTool, directory: Path, case: Case, document_id
 
 
 def check_documents(
-    tool: DocumentTool, directory: Path, case: Case, applicant_name: str, closure_date: date | None,
+    session: Session, tool: DocumentTool, directory: Path, case: Case, applicant_name: str, closure_date: date | None,
 ) -> DocumentContext:
     context = load_context(directory, case)
     # 이체확인증의 보낸 사람과 맞춰 볼 신청인 이름은 서비스가 받는 칸이 없어 점검 직전에 사장님께 묻는다.
@@ -122,6 +136,15 @@ def check_documents(
     except DocumentError as error:
         raise _rejected(error) from None
     save_context(directory, updated)
+
+    # 기록 탭 문구가 "점검하고 제출 파일을 만들었어요"라 통과한 점검만 남긴다.
+    # 서류를 바꾸지 않고 다시 눌러 통과한 것은 남기지 않는다. 서류가 바뀌면 지난 점검이 지워진다.
+    passed_before = context.document_check is not None and context.document_check.status == "COMPLETE"
+    if not passed_before and updated.document_check is not None and updated.document_check.status == "COMPLETE":
+        case_document_history_crud.create_case_document_history(
+            session, CaseDocumentHistory(case_id=case.id, action="CHECKED"),
+        )
+        session.commit()
     return updated
 
 

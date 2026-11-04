@@ -231,6 +231,7 @@ function judgedBody(overrides: Partial<CaseResultsSubmitResponse>): CaseResultsS
     conflicts: null,
     recovery_action_code: null,
     requested_field_paths: null,
+    new_tasks: null,
     ...overrides,
   }
 }

@@ -1,10 +1,12 @@
 import { IconClockLine, IconPerson2Fill, IconSparkle2Fill } from '@karrotmarket/react-monochrome-icon'
 
-import { ACTOR_LABEL } from '../adapters/logs'
+import { ACTOR_LABEL, withTaskTitles } from '../adapters/logs'
 import { Button } from '../components/ui/Button'
 import { EmptyState } from '../components/ui/EmptyState'
 import { HammerLoader } from '../components/ui/HammerLoader'
 import { useLogs } from '../hooks/useLogs'
+import { useRoadmap } from '../hooks/useRoadmap'
+import { useEntersForward } from '../lib/viewTransition'
 
 /**
  * 작업 기록 (시안 M08). 리본과 사장님이 한 일이 최근 것부터 쌓인다.
@@ -14,6 +16,9 @@ import { useLogs } from '../hooks/useLogs'
  */
 export function LogPage() {
   const { query, reload } = useLogs()
+  // 체크 기록에 할 일 이름을 붙이려고 로드맵도 묻는다. 못 불러와도 기록은 그대로 보여준다
+  const { query: roadmap } = useRoadmap()
+  const rise = useEntersForward()
 
   if (query.status === 'LOADING') {
     return (
@@ -47,8 +52,8 @@ export function LogPage() {
   return (
     <div className="flex flex-col px-4 pt-2 pb-6">
       <p className="pb-2 text-15 text-fg-neutral-muted">최근 일부터 보여드려요.</p>
-      <ul className="flex flex-col">
-        {query.entries.map((entry) => (
+      <ul className={`flex flex-col ${rise ? 'rise-children' : ''}`}>
+        {withTaskTitles(query.entries, roadmap.status === 'READY' ? roadmap.view : null).map((entry) => (
           <li key={entry.key} className="flex items-center gap-3 py-3.5">
             <span
               aria-hidden="true"

@@ -1,6 +1,7 @@
 import { Navigate, Outlet, useLocation } from 'react-router'
 
 import { isLoggedIn } from '../lib/auth'
+import { useNavigationDirection } from '../lib/viewTransition'
 
 /**
  * 로그인한 사용자만 지나갈 수 있는 문.
@@ -13,9 +14,12 @@ import { isLoggedIn } from '../lib/auth'
  *
  * TODO(API): 연동하면 보호된 요청이 401로 돌아올 때도 이 화면으로 보내야 한다.
  * 토큰이 중간에 만료되는 경우가 그렇다.
+ *
+ * 화면 이동 방향도 여기서 한 번 적는다(`useNavigationDirection`). 움직이는 화면이 모두 이 아래에 있다.
  */
 export function RequireAuth() {
   const { search } = useLocation()
+  useNavigationDirection()
 
   if (!isLoggedIn(search)) return <Navigate to={{ pathname: '/login', search }} replace />
 

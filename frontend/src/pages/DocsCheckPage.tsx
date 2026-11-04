@@ -13,6 +13,7 @@ import { InfoBox } from '../components/ui/InfoBox'
 import { ProcessSteps, type StepStatus } from '../components/ui/ProcessSteps'
 import { TopBar } from '../components/ui/TopBar'
 import { useDocuments } from '../hooks/useDocuments'
+import { useEntersForward } from '../lib/viewTransition'
 import type { DocumentCheckView } from '../types/view'
 
 /** 서버 점검 단계 상태 → 단계 줄 모양. 확인 필요·멈춤은 끝난 것이 아니라 "기다림"으로 둔다 */
@@ -37,6 +38,8 @@ const STEP_STATUS: Record<DocumentCheckView['steps'][number]['status'], StepStat
  */
 export function DocsCheckPage() {
   const navigate = useNavigate()
+  // 점검 결과의 줄들이 차례로 올라온다. 뒤로 돌아와 이미 결과가 있으면 올리지 않는다
+  const rise = useEntersForward() ? 'rise-children' : ''
   // ?mock= 을 다음 화면에도 이어 준다. 빠지면 Mock 으로 보던 흐름이 실서버 화면으로 바뀐다
   const { search } = useLocation()
   const { query, reload, checking, runCheck } = useDocuments()
@@ -133,14 +136,14 @@ export function DocsCheckPage() {
       return (
         <CheckFrame>
           <Header
-            icon={<IconCheckmarkCircleFill size={64} className="text-fg-brand" aria-hidden="true" />}
+            icon={<IconCheckmarkCircleFill size={64} className="text-fg-brand motion-safe:animate-pop" aria-hidden="true" />}
             title="서류 점검을 마쳤어요"
             sub="남은 확인 사항이 없어요."
           />
-          <main className="flex flex-col gap-6 px-4 pb-8">
+          <main className={`flex flex-col gap-6 px-4 pb-8 ${rise}`}>
             {sendNotice}
             <ProcessSteps steps={steps} />
-            <Button onClick={() => navigate({ pathname: '/docs/done', search })}>결과 보기</Button>
+            <Button onClick={() => navigate({ pathname: '/docs/done', search }, { viewTransition: true })}>결과 보기</Button>
           </main>
         </CheckFrame>
       )
@@ -153,7 +156,7 @@ export function DocsCheckPage() {
             title={`확인하실 일이 ${check.issues.length}개 있어요`}
             sub="서류를 더하거나 고친 뒤 다시 점검해 주세요."
           />
-          <main className="flex flex-col gap-6 px-4 pb-8">
+          <main className={`flex flex-col gap-6 px-4 pb-8 ${rise}`}>
             {sendNotice}
             <ProcessSteps steps={steps} />
             <InfoBox tone="critical" title="점검에서 찾은 것">
@@ -182,7 +185,7 @@ export function DocsCheckPage() {
             title="점검이 중간에 멈췄어요"
             sub="서류함은 그대로예요. 다시 점검해 주세요."
           />
-          <main className="flex flex-col gap-6 px-4 pb-8">
+          <main className={`flex flex-col gap-6 px-4 pb-8 ${rise}`}>
             {sendNotice}
             <ProcessSteps steps={steps} />
             <Button onClick={startCheck}>다시 점검하기</Button>
@@ -275,7 +278,7 @@ export function ApplicantSheet({
 /** 탭 없는 화면의 틀. 뒤로 버튼과 화면 이름을 둔다 */
 function CheckFrame({ children }: { children: ReactNode }) {
   return (
-    <div className="mx-auto flex min-h-dvh max-w-[402px] flex-col bg-bg-layer-default">
+    <div className="screen-frame mx-auto flex min-h-dvh max-w-[402px] flex-col bg-bg-layer-default">
       <TopBar title="AI 서류 점검" />
       {children}
     </div>

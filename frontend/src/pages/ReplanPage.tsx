@@ -1,5 +1,5 @@
-import { IconCheckmarkCircleFill } from '@karrotmarket/react-monochrome-icon'
-import { type ReactNode, useEffect, useState } from 'react'
+import { IconCheckmarkCircleFill, IconPlusCircleLine } from '@karrotmarket/react-monochrome-icon'
+import { type ReactNode, useEffect, useId, useState } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router'
 
 import { toResultSteps, toSubmitOutcome } from '../adapters/results'
@@ -173,8 +173,12 @@ function ServerReplan({ historyId, decided }: { historyId: number; decided: bool
  * 처리 중 화면과 같은 단계 줄을 모두 끝난 모양으로 다시 보여준다. 보내고 기다리던 화면에서
  * 이어지는 것으로 읽히게 하려는 것이다.
  *
- * 시안의 "새로 생긴 할 일 3개"는 서버에 없다. 서버는 바뀐 칸과 다음 할 일 하나를 주므로
- * 그 둘을 같은 회색 상자로 보여준다. 막힌 것(Blocker)은 홈과 같은 기준으로 그리지 않는다.
+ * 서버가 준 바뀐 칸 · 새로 생긴 할 일(#182) · 다음 할 일 하나를 같은 회색 상자로 차례로 보여준다.
+ * 막힌 것(Blocker)은 홈과 같은 기준으로 그리지 않는다.
+ *
+ * **새로 생긴 할 일은 시안처럼 목록만 둔다(누르는 줄이 아니다).** 이 화면의 일은 이해한 내용이 맞는지
+ * [맞아요]로 확인하는 것이라, 할 일로 가는 길을 여기서 열지 않는다. 로드맵에서 이어서 하면 된다.
+ * 바뀐 것이 없어도(`NO_CHANGE`) 오면 보여준다 — 그사이 알려 준 심사 결과로 늘었을 수 있다(#182).
  *
  * 바뀐 칸이 있으면 시안의 "이렇게 이해했어요"처럼 AI가 이해한 내용으로 보여주고 맞는지 묻는다.
  * `UPDATED` 는 서버가 이미 반영한 결과라 "반영하기 전 확인"이 아니다 — 제목도 반영했다고 쓴다.
@@ -188,7 +192,8 @@ function ServerReplan({ historyId, decided }: { historyId: number; decided: bool
  */
 function Replanned({ view, search, decided }: { view: ReplanView; search: string; decided: boolean }) {
   const navigate = useNavigate()
-  const { changes, nextAction } = view
+  const { changes, nextAction, newTasks } = view
+  const newTasksId = useId()
   const changed = changes.length > 0
 
   return (
@@ -233,6 +238,25 @@ function Replanned({ view, search, decided }: { view: ReplanView; search: string
           </section>
         )}
 
+        {newTasks.length > 0 && (
+          <section
+            aria-labelledby={newTasksId}
+            className="flex flex-col gap-3 rounded-2xl bg-bg-layer-default-pressed px-4.5 py-4"
+          >
+            <h2 id={newTasksId} className="text-15 font-bold text-fg-neutral-muted">
+              새로 생긴 할 일
+            </h2>
+            <ul className="flex flex-col gap-2.5">
+              {newTasks.map((task) => (
+                <li key={task.id} className="flex items-center gap-2 text-17 font-medium">
+                  <IconPlusCircleLine size={20} aria-hidden="true" className="shrink-0 text-fg-brand" />
+                  {task.title}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
         <section className="flex flex-col gap-1 rounded-2xl bg-bg-layer-default-pressed p-4">
           <h2 className="text-15 font-bold text-fg-neutral-muted">다음 할 일</h2>
           <p className="text-18 font-bold">{nextAction.title}</p>
@@ -242,7 +266,7 @@ function Replanned({ view, search, decided }: { view: ReplanView; search: string
         {changed && !decided ? (
           <div className="flex flex-col gap-3">
             <Button onClick={() => navigate({ pathname: '/case', search })}>맞아요</Button>
-            <Button variant="outline" onClick={() => navigate({ pathname: '/results', search: withFix(search) })}>
+            <Button variant="outline" onClick={() => navigate({ pathname: '/results', search: withFix(search) }, { viewTransition: true })}>
               다르게 이해했어요
             </Button>
           </div>
@@ -264,7 +288,7 @@ function withFix(search: string): string {
 /** 탭 없는 화면의 틀. 시안처럼 머리에 제목을 두지 않고 화면 안의 큰 제목이 맡는다 */
 function ReplanFrame({ children }: { children: ReactNode }) {
   return (
-    <div className="mx-auto flex min-h-dvh max-w-[402px] flex-col bg-bg-layer-default">
+    <div className="screen-frame mx-auto flex min-h-dvh max-w-[402px] flex-col bg-bg-layer-default">
       <TopBar />
       {children}
     </div>
