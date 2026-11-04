@@ -27,6 +27,8 @@ from app.common.agent_dto import document_replan_text
 logger = logging.getLogger(__name__)
 
 CONTEXT_FILE = "case_documents.json"
+# 마지막으로 판단에 넘긴 서류. 지금 서류와 비교해 판단에 아직 안 넘긴 원상복구 조항이 있는지 본다.
+JUDGED_CONTEXT_FILE = "judged_documents.json"
 MAX_UPLOAD_BYTES = 20_000_000
 
 
@@ -52,8 +54,8 @@ def load_context(directory: Path, case: Case) -> DocumentContext:
     return context
 
 
-def save_context(directory: Path, context: DocumentContext) -> None:
-    path = directory / str(context.case_id) / CONTEXT_FILE
+def save_context(directory: Path, context: DocumentContext, filename: str = CONTEXT_FILE) -> None:
+    path = directory / str(context.case_id) / filename
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     pending = path.with_suffix(".tmp")
     pending.write_text(context.model_dump_json(), encoding="utf-8")
@@ -123,28 +125,41 @@ def check_documents(
     return updated
 
 
-def queue_document_judgment(
-    session: Session, member_id: int, before: DocumentContext, after: DocumentContext,
-) -> int | None:
-    """서류가 바뀌어 다시 판단해야 하면 판단 이력을 PENDING으로 남기고 그 번호를 돌려준다.
+def queue_document_judgment(session: Session, directory: Path, case: Case) -> int | None:
+    """판단에 아직 안 넘긴 원상복구 조항이 있으면 판단 이력을 PENDING으로 남기고 그 번호를 돌려준다.
 
-    원상복구 조항이 새로 생기거나 바뀐 때만 판단한다(document_replan_text). 같은 조항의
-    재업로드·금액 서류 추가·서류 빼기는 None이라 판단하지 않는다.
-    판단을 부르는 일은 라우터가 응답 뒤에 한다. 결과는 홈(GET /cases)이 PENDING을 보고 다시 묻는다.
+    지금 서류를 "마지막으로 판단에 넘긴 서류"(JUDGED_CONTEXT_FILE)와 비교한다(document_replan_text).
+    같은 조항의 재업로드·금액 서류 추가·서류 빼기는 None이라 판단하지 않는다.
+    판단할 수 없는 상태라 건너뛰면 기준을 옮기지 않으므로, 진행 중인 판단이나 충돌 확인이
+    끝날 때 queue_owed_document_judgment가 같은 비교로 다시 판단을 넣는다.
+    판단을 부르는 일은 호출한 쪽이 한다. 결과는 홈(GET /cases)이 PENDING을 보고 다시 묻는다.
     """
 
-    text = document_replan_text(before, after)
-    if text is None:
+    # 판단할 조항이 없으면 DB를 건드리지 않는다. 금액 서류만 올릴 때마다 Case를 잠그지 않게 한다.
+    if _pending_replan_text(directory, case) is None:
         return None
+    member_id = case.member_id
+
+    # 라우터는 서류 처리(OCR)를 기다리기 전에 Case를 읽는다. MySQL은 한 트랜잭션 안에서 처음
+    # 읽은 시점을 계속 보여 주고, 이미 읽은 Case 객체도 저절로 다시 읽지 않는다. 그 사이 다른
+    # 요청이 PENDING을 넣거나 Case를 완료로 바꿔도 못 보므로, 여기서 트랜잭션을 끝내고 새로 잠근다.
+    # (commit하면 세션이 들고 있던 객체도 버려져 잠금 조회가 최신 값을 읽는다.)
+    session.commit()
 
     # 결과 제출(case.submit_case_results)과 같은 이유로 Case를 잠그고 확인한다.
     # 같은 Case에 PENDING이 둘 생기면 판단이 서로의 결과를 덮는다.
     case = case_crud.lock_case_by_member_id(session, member_id)
     blocked = _judgment_blocked_reason(session, case)
     if blocked is not None:
-        # 서류 저장은 이미 끝났으므로 요청을 실패시키지 않고 판단만 건너뛴다.
-        # TODO: 건너뛴 사실을 사장님께 알릴 방법(응답 칸·기록)은 발표 뒤 팀과 정한다.
-        logger.warning("Case %s 서류 재판단 건너뜀: %s", case.id if case else None, blocked)
+        logger.info("Case %s 서류 재판단 미룸: %s", case.id if case else None, blocked)
+        session.rollback()
+        return None
+
+    # 잠근 뒤 다시 본다. 기다리는 사이 다른 요청이 같은 서류로 판단을 넣었으면 기준이 옮겨져 있다.
+    context = load_context(directory, case)
+    text = _pending_replan_text(directory, case, context)
+    if text is None:
+        session.rollback()
         return None
 
     history = case_history_crud.create_case_history(
@@ -152,7 +167,37 @@ def queue_document_judgment(
         CaseHistory(case_id=case.id, raw_input=text, source="DOCUMENT_SUBMITTED", judgment_status="PENDING"),
     )
     session.commit()
+    # 판단을 넣은 뒤에 기준을 옮긴다. 이 저장이 실패해도 서류가 빠지지는 않고,
+    # 이 판단이 끝난 뒤 같은 서류로 한 번 더 판단할 뿐이다.
+    save_context(directory, context, JUDGED_CONTEXT_FILE)
     return history.id
+
+
+def queue_owed_document_judgment(session: Session, directory: Path, case_history_id: int) -> int | None:
+    """판단(case_history_id)이 끝난 뒤, 그동안 판단에 못 넘긴 서류가 있으면 판단을 넣는다.
+
+    판단 중이거나 충돌 확인을 기다리는 동안 올린 서류는 저장만 되고 판단은 미뤄진다.
+    그 서류가 빠지지 않게 판단·충돌 확인이 끝날 때마다 여기를 부른다(#173 리뷰).
+    """
+
+    history = case_history_crud.get_case_history_by_id(session, case_history_id)
+    case = case_crud.get_case_by_id(session, history.case_id) if history is not None else None
+    if case is None:
+        return None
+    return queue_document_judgment(session, directory, case)
+
+
+def _pending_replan_text(directory: Path, case: Case, context: DocumentContext | None = None) -> str | None:
+    """판단에 아직 안 넘긴 원상복구 조항이 있으면 판단 글, 없으면 None."""
+
+    current = context if context is not None else load_context(directory, case)
+    return document_replan_text(_load_judged_context(directory, case), current)
+
+
+def _load_judged_context(directory: Path, case: Case) -> DocumentContext | None:
+    # 없으면 서류로 판단한 적이 없다는 뜻이라, 지금 서류의 조항을 전부 새 값으로 본다
+    path = directory / str(document_case_id(case)) / JUDGED_CONTEXT_FILE
+    return DocumentContext.model_validate_json(path.read_bytes()) if path.is_file() else None
 
 
 def _judgment_blocked_reason(session: Session, case: Case | None) -> str | None:

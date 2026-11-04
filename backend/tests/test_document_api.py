@@ -21,6 +21,7 @@ from app.be.crud import conflict_reference as conflict_reference_crud
 from app.be.db import get_db
 from app.be.dependencies.auth import get_current_member_id
 from app.be.routers import document as document_router
+from app.be.services import document as document_service
 from app.be.services import judgment as judgment_service
 from app.main import app
 from document_fixtures import DocumentClient, document_pdf
@@ -41,9 +42,9 @@ OWNER = {"applicant_name": "김리본", "closure_date": "2026-10-31"}
 def api(tmp_path, monkeypatch):
     client_model = DocumentClient()
     cases = {
-        1: SimpleNamespace(id=1, created_at=datetime(2026, 11, 3, 9), store_name="봄날개인카페",
+        1: SimpleNamespace(id=1, member_id=1, created_at=datetime(2026, 11, 3, 9), store_name="봄날개인카페",
                            planned_closure_date=date(2026, 10, 31)),
-        2: SimpleNamespace(id=2, created_at=datetime(2026, 11, 3, 10), store_name="다른가게",
+        2: SimpleNamespace(id=2, member_id=2, created_at=datetime(2026, 11, 3, 10), store_name="다른가게",
                            planned_closure_date=None),
     }
     member = {"id": 1}
@@ -168,7 +169,7 @@ LEASE_CLAUSE = {"restoration_clause": "임차인은 계약 종료 시 원상복�
 
 
 @pytest.fixture
-def judged(api, monkeypatch):
+def judged(api, monkeypatch, tmp_path):
     """판단 이력 저장과 판단 실행을 가로채, 무엇이 남고 무엇이 불렸는지 돌려준다."""
 
     histories, runs = [], []
@@ -179,8 +180,12 @@ def judged(api, monkeypatch):
         histories.append(history)
         return history
 
-    monkeypatch.setattr(case_crud, "lock_case_by_member_id", lambda _session, member_id: SimpleNamespace(
-        id=member_id, case_status=state["case_status"]))
+    def lock_case(session, member_id):
+        # 잠금 조회도 api의 가짜 Case를 돌려준다. 서류 폴더 이름이 Case 번호·가입 시각으로 정해진다
+        case = case_crud.get_case_by_member_id(session, member_id)
+        return SimpleNamespace(**vars(case), case_status=state["case_status"])
+
+    monkeypatch.setattr(case_crud, "lock_case_by_member_id", lock_case)
     monkeypatch.setattr(conflict_reference_crud, "get_pending_conflicts_by_case_id",
                         lambda _session, _case_id: state["conflicts"])
     monkeypatch.setattr(case_history_crud, "get_latest_user_driven_case_history",
@@ -193,7 +198,8 @@ def judged(api, monkeypatch):
     monkeypatch.setattr(judgment_service, "run_judgment_in_background", fake_run)
     app.dependency_overrides[get_db] = lambda: MagicMock()
     client, _, client_model = api
-    return SimpleNamespace(client=client, model=client_model, histories=histories, runs=runs, state=state)
+    return SimpleNamespace(client=client, model=client_model, histories=histories, runs=runs, state=state,
+                           directory=tmp_path / "vault")
 
 
 def test_new_restoration_clause_starts_document_judgment(judged):
@@ -235,3 +241,24 @@ def test_document_is_saved_but_judgment_is_skipped_when_case_cannot_be_judged(ju
     response = upload(judged.client, DocumentKind.LEASE, LEASE_CLAUSE)
     assert response.status_code == 200 and len(response.json()["documents"]) == 1
     assert judged.histories == [] and judged.runs == []
+
+
+@pytest.mark.parametrize("blocked", [{"latest_status": "PENDING"}, {"conflicts": [object()]}])
+def test_document_skipped_while_blocked_is_judged_once_the_block_ends(judged, monkeypatch, blocked):
+    # 판단 중·충돌 확인 대기 중에 올린 조항은 저장만 된다. 같은 서류를 다시 올려도 그 사이엔 판단하지 않는다
+    judged.state.update(blocked)
+    upload(judged.client, DocumentKind.LEASE, LEASE_CLAUSE)
+    upload(judged.client, DocumentKind.LEASE, LEASE_CLAUSE)
+    assert judged.histories == []
+
+    # 앞 판단(7번)·충돌 확인이 끝나면 미뤄 둔 조항으로 한 번 판단하고, 그다음엔 멈춘다
+    judged.state.update({"latest_status": "DONE", "conflicts": []})
+    monkeypatch.setattr(case_history_crud, "get_case_history_by_id",
+                        lambda _session, _history_id: SimpleNamespace(case_id=1))
+    monkeypatch.setattr(case_crud, "get_case_by_id", lambda session, _case_id: case_crud.get_case_by_member_id(session, 1))
+    queued = document_service.queue_owed_document_judgment(MagicMock(), judged.directory, 7)
+
+    [history] = judged.histories
+    assert queued == history.id and history.source == "DOCUMENT_SUBMITTED"
+    assert "원상복구 조항: 임차인은 계약 종료 시 원상복구한다" in history.raw_input
+    assert document_service.queue_owed_document_judgment(MagicMock(), judged.directory, history.id) is None

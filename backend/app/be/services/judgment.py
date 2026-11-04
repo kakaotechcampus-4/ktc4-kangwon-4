@@ -18,6 +18,7 @@ from app.be.models.evidence import DecisionRecord
 from app.be.services import agent_runtime as agent_runtime_service
 from app.be.services import case_snapshot as case_snapshot_service
 from app.be.services import decision_record as decision_record_service
+from app.be.services import document as document_service
 from app.be.services import reviewed_procedure as reviewed_procedure_service
 from app.common.agent_dto import AgentGraphOutput
 from app.common.agent_service import build_planning_input, run_case_planning
@@ -44,6 +45,27 @@ async def run_judgment_in_background(case_history_id: int) -> None:
                 decision_record_service.mark_judgment_failed(session, case_history_id, error)
         except Exception:
             logger.exception("case_history %s 판단 실패 상태 기록도 실패", case_history_id)
+    await judge_owed_documents(case_history_id)
+
+
+async def judge_owed_documents(case_history_id: int) -> None:
+    """판단(case_history_id)이 끝난 뒤, 그동안 판단에 못 넘긴 서류가 있으면 이어서 판단한다.
+
+    판단 중이거나 충돌 확인을 기다리는 동안 올린 서류는 저장만 되고 판단은 미뤄진다(#173 리뷰).
+    성공·실패 모두 부른다. 끝난 판단과 상관없이 서류는 새로 받은 입력이기 때문이다.
+    이어서 돈 판단이 끝나면 여기를 또 부르지만, 그때는 판단에 넘긴 서류와 지금 서류가 같아 멈춘다.
+    """
+
+    try:
+        with Session(get_engine()) as session:
+            next_history_id = document_service.queue_owed_document_judgment(
+                session, document_service.document_directory(), case_history_id
+            )
+    except Exception:
+        logger.exception("case_history %s 뒤 서류 재판단 확인 실패", case_history_id)
+        return
+    if next_history_id is not None:
+        await run_judgment_in_background(next_history_id)
 
 
 class UnknownJudgmentTriggerError(ValueError):

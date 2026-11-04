@@ -14,6 +14,7 @@ from fastapi import HTTPException
 from sqlmodel import Session, SQLModel, create_engine, select
 from testcontainers.community.mysql import MySqlContainer
 
+from app.be.crud import case as case_crud
 from app.be.crud import case_history as case_history_crud
 from app.be.crud.case_history import get_case_created_history
 from app.be.crud.member import create_member
@@ -24,6 +25,8 @@ from app.be.schemas.case import (
     CaseCreateRequest,
     CaseResultsSubmitRequest,
 )
+from app.be.models.case import Case
+from app.be.services import document as document_service
 from app.be.services import procedure_registry
 from app.be.services.case import create_case, submit_case_conflicts_decision, submit_case_results
 
@@ -193,3 +196,44 @@ def test_two_decisions_at_the_same_time_accept_only_one(
         ).all()
 
     assert len(pending) == 1
+
+
+@pytest.mark.parametrize("meanwhile", ["nothing", "result_submitted", "case_completed"])
+def test_document_judgment_sees_what_happened_while_the_document_was_read(
+    mysql_engine, case_ready_for_a_result, monkeypatch, tmp_path, meanwhile
+):
+    """서류 API는 OCR을 기다리기 전에 Case를 읽는다. 그 사이 바뀐 상태를 못 보면 판단이 겹친다(#173 리뷰).
+
+    MySQL은 한 트랜잭션 안에서 처음 읽은 시점을 계속 보여 주므로, 흉내 낸 DB로는 재현되지 않는다.
+    """
+
+    member_id, case_history_id, case_id = case_ready_for_a_result
+    # 서류 내용은 이 검사의 관심사가 아니다. 판단할 조항이 늘 있다고 둔다
+    monkeypatch.setattr(document_service, "_pending_replan_text", lambda *_args: "원상복구 조항: 전부 원래대로")
+
+    with Session(mysql_engine) as upload_session:
+        # ① 서류 API가 Case를 먼저 읽고(라우터 _current_case) 서류 처리를 기다린다
+        case = case_crud.get_case_by_member_id(upload_session, member_id)
+        assert case.case_status == "IN_PROGRESS"
+
+        # ② 그 사이 다른 요청이 결과를 제출하거나 폐업 정리를 마친다
+        with Session(mysql_engine) as other:
+            if meanwhile == "result_submitted":
+                submit_case_results(other, member_id, CaseResultsSubmitRequest(
+                    raw_input="철거해야 한대요", case_history_id=case_history_id,
+                ))
+            elif meanwhile == "case_completed":
+                other.get(Case, case_id).case_status = "COMPLETED"
+                other.commit()
+
+        # ③ 서류 처리가 끝나 판단을 넣으려 한다
+        queued = document_service.queue_document_judgment(upload_session, tmp_path, case)
+
+    with Session(mysql_engine) as session:
+        pending = session.exec(select(CaseHistory.source).where(
+            CaseHistory.case_id == case_id, CaseHistory.judgment_status == "PENDING",
+        )).all()
+
+    expected = {"nothing": ["DOCUMENT_SUBMITTED"], "result_submitted": ["USER_INPUT"], "case_completed": []}
+    assert sorted(pending) == expected[meanwhile]
+    assert (queued is not None) == (meanwhile == "nothing")
