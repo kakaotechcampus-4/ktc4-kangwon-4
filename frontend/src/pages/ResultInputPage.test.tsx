@@ -586,6 +586,23 @@ describe('ResultInputPage — 서버', () => {
       expect(screen.getByRole('button', { name: '다시 보내기' })).toBeEnabled()
     })
 
+    /** 실패 뒤 글을 더 적어 2,000자를 넘기면 안내의 [다시 보내기]도 막는다. 그 버튼으로 새 나가면 서버가 422 로 거절한다 */
+    it('보내지 못한 뒤 글이 2,000자를 넘으면 다시 보내기도 막고 보내지 않는다', async () => {
+      const fetchMock = serve({ entry: [READY], submit: [status(500)] })
+      renderFlow()
+      await advance()
+      submit('임대인이 철거하래요')
+      await advance()
+
+      fireEvent.change(screen.getByRole('textbox'), { target: { value: '가'.repeat(2_001) } })
+      const retry = screen.getByRole('button', { name: '다시 보내기' })
+      expect(retry).toBeDisabled()
+      const sent = fetchMock.mock.calls.length
+      fireEvent.click(retry)
+      await advance()
+      expect(fetchMock.mock.calls.length).toBe(sent)
+    })
+
     /** 이 화면이 아는 판단이 낡았다. 같은 글을 또 보내도 같은 답이 온다 */
     it('지금 받을 수 없다는 답이면 다시 보내기 대신 현재 상황으로 안내한다', async () => {
       serve({ entry: [READY], submit: [status(409)] })

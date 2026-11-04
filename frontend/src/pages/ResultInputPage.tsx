@@ -207,7 +207,10 @@ export function ResultInputPage() {
     state.kind === 'WAITED_TOO_LONG' ||
     state.kind === 'UNRECOGNIZED' ||
     (state.kind === 'FAILED' && (state.notice.kind === 'SERVICE_SIDE' || state.notice.kind === 'NO_RECOVERY'))
-  const canRetry = draft.length > 0
+  // 너무 긴 글은 자르지 않고 보내기를 막는다. 소리 없이 잘라 보내면 사장님이 적은 뒷부분이 사라진다.
+  // 아래 [보내기]와 실패 안내의 [다시 보내기]가 같은 조건을 쓴다
+  const tooLong = draft.length > MAX_RESULT_LENGTH
+  const canRetry = draft.length > 0 && !tooLong
   const goToCase = { label: '지금 상황 보기', onClick: () => navigate({ pathname: '/case', search }) }
   const notice = stayNotice(state, {
     retry: { label: '다시 보내기', onClick: handleSubmit, disabled: !canRetry },
@@ -269,8 +272,8 @@ export function ResultInputPage() {
   }
 
   async function handleSubmit() {
-    // "다시 보내기" 버튼도 이 함수를 부른다. 폼에만 검증을 두면 그 경로로 빈 입력이 나간다
-    if (draft.length === 0 || entry.status !== 'READY') return
+    // "다시 보내기" 버튼도 이 함수를 부른다. 폼에만 검증을 두면 그 경로로 빈 입력·너무 긴 글이 나간다
+    if (draft.length === 0 || tooLong || entry.status !== 'READY') return
 
     // Mock 은 접수 단계가 없다. 보내는 순간 받은 것으로 둔다
     setState({ kind: 'PENDING', accepted: usesMock })
@@ -369,8 +372,6 @@ export function ResultInputPage() {
     )
   }
 
-  // 너무 긴 글은 자르지 않고 보내기를 막는다. 소리 없이 잘라 보내면 사장님이 적은 뒷부분이 사라진다
-  const tooLong = draft.length > MAX_RESULT_LENGTH
   const canSubmit = !formLocked && draft.length > 0 && !tooLong
   const answeredCount = questions
     ? questions.filter((question) => (answers[question] ?? '').trim() !== '').length
