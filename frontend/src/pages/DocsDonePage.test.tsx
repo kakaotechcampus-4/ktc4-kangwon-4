@@ -1,9 +1,11 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { createMemoryRouter, RouterProvider } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { REQUEST_TIMEOUT_MS } from '../lib/api'
+import { UPLOAD_TIMEOUT_MS } from '../lib/documentsApi'
 import { DocsDonePage } from './DocsDonePage'
-import { completeCheck, issuesCheck, json, serve, serverDocument, serverList, status } from './docsTestServer'
+import { completeCheck, hanging, issuesCheck, json, serve, serverDocument, serverList, status } from './docsTestServer'
 
 function renderAt(path: string) {
   const router = createMemoryRouter(
@@ -23,6 +25,7 @@ function renderAt(path: string) {
  */
 describe('DocsDonePage', () => {
   afterEach(() => {
+    vi.useRealTimers()
     vi.unstubAllGlobals()
   })
 
@@ -44,6 +47,28 @@ describe('DocsDonePage', () => {
     await vi.waitFor(() => expect(calls()).toHaveLength(2))
     expect(calls()[1].url).toMatch(/\/cases\/documents\/settlement\.zip$/)
     await vi.waitFor(() => expect(URL.createObjectURL).toHaveBeenCalled())
+  })
+
+  /** ZIP 에는 사진·내역서가 여러 장 들어 크다. 다른 요청의 15초에 끊으면 휴대폰에서는 받을 수 없다 */
+  it('제출 파일은 다른 요청의 제한 시간이 지나도 계속 받는다', async () => {
+    vi.useFakeTimers()
+    serve(json(serverList([serverDocument()], completeCheck)), hanging)
+    renderAt('/docs/done')
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: '파일 받기' }))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS + 1_000)
+    })
+    expect(screen.getByRole('button', { name: '받는 중이에요' })).toBeInTheDocument()
+    expect(screen.queryByText('파일을 받지 못했어요.')).not.toBeInTheDocument()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(UPLOAD_TIMEOUT_MS - REQUEST_TIMEOUT_MS)
+    })
+    expect(screen.getByText('파일을 받지 못했어요.')).toBeInTheDocument()
   })
 
   /** 그사이 서류가 바뀌면 서버가 422 로 막는다. 아무 말 없이 끝나면 받은 줄 안다 */
