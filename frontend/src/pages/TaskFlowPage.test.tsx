@@ -226,6 +226,21 @@ describe('SupportResultFlow — 서버', () => {
     expect(screen.getByRole('button', { name: '기록하기' })).toBeDisabled()
   })
 
+  /** 거절은 "이 값은 받지 않는다"는 뜻이다. 다른 답을 골라도 버튼이 꺼져 있으면 화면을 나갔다 와야 한다 */
+  it('거절된 뒤 다른 답을 고르면 다시 기록할 수 있다', async () => {
+    serve(status(422))
+    renderFlow(<SupportResultFlow task={supportTask} />)
+    fireEvent.click(screen.getByRole('radio', { name: '승인됐어요' }))
+    fireEvent.click(screen.getByRole('button', { name: '기록하기' }))
+    expect(await screen.findByText('이 할 일은 지금 기록할 수 없어요.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '기록하기' })).toBeDisabled()
+
+    fireEvent.click(screen.getByRole('radio', { name: '아직 몰라요' }))
+
+    expect(screen.getByRole('button', { name: '기록하기' })).toBeEnabled()
+    expect(screen.queryByText('이 할 일은 지금 기록할 수 없어요.')).not.toBeInTheDocument()
+  })
+
   /** "아직 몰라요"는 키를 빼지 않고 null 로 보낸다. 빠지면 서버가 422 로 막는다 */
   it('아직 몰라요를 null 로 보내고 저장된 결과를 알린다', async () => {
     const fetchMock = serve(json({ approved: null }))
@@ -340,6 +355,23 @@ describe('ClosureReportFlow', () => {
     expect(screen.getByText('서울 마포구 망원로 52 (망원동)')).toBeInTheDocument()
     expect(screen.getByLabelText('상세 주소 (선택)')).toHaveValue('1층')
     expect(screen.getByRole('button', { name: '다시 저장하기' })).toBeEnabled()
+  })
+
+  /** 폐업일을 받지 않으면(422) 고친 날짜로 다시 저장할 수 있어야 한다 */
+  it('거절된 뒤 칸을 고치면 다시 저장할 수 있다', async () => {
+    serve(status(422))
+    renderFlow(
+      <ClosureReportFlow
+        task={closureTask}
+        initial={{ closureDate: '2026-10-31', closureReason: 'PERSONAL', roadAddress: '서울 마포구 망원로 52 (망원동)', addressDetail: null }}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: '다시 저장하기' }))
+    expect(await screen.findByText('이 할 일은 지금 기록할 수 없어요.')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('폐업일'), { target: { value: '2026-11-30' } })
+
+    expect(screen.getByRole('button', { name: '저장하기' })).toBeEnabled()
   })
 
   /** 저장한 뒤 고친 칸은 아직 서버에 없다. "저장했어요"가 남으면 고친 내용까지 저장된 줄 알고 떠난다 */

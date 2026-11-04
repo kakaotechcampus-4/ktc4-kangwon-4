@@ -102,6 +102,16 @@ function WithSavedCase({ task, children }: { task: RoadmapTaskView; children: (v
   return children(query.status === 'READY' ? query.view : null)
 }
 
+/**
+ * 입력을 고쳤을 때의 저장 상태. 거절(`REJECTED`)만 풀고 나머지는 그대로 둔다.
+ *
+ * 거절은 "이 값은 받지 않는다"는 뜻이라, 값을 고치면 다시 보내 볼 수 있어야 한다. 입력이 없는 체크 장면은
+ * 고칠 것이 없어 거절을 풀지 않는다.
+ */
+function retryAfterEdit(current: SaveState): SaveState {
+  return current === 'REJECTED' ? 'IDLE' : current
+}
+
 /** 저장 실패를 화면 상태로. 401 은 로그인으로 보낸다 */
 function useSaveErrors() {
   const navigate = useNavigate()
@@ -230,7 +240,11 @@ export function SupportResultFlow({ task }: { task: RoadmapTaskView }) {
             type="button"
             role="radio"
             aria-checked={picked === index}
-            onClick={() => setPicked(index)}
+            onClick={() => {
+              setPicked(index)
+              // 다른 답을 고르면 거절을 푼다. 고른 값은 받을 수 있는데 버튼이 꺼진 채로 남지 않게
+              setSave(retryAfterEdit)
+            }}
             className={`flex min-h-14 cursor-pointer items-center rounded-14 px-4 text-17 font-medium ring-inset ${
               picked === index ? 'bg-bg-brand-weak ring-2 ring-stroke-brand-solid' : 'ring-1 ring-stroke-neutral-weak'
             }`}
@@ -350,7 +364,11 @@ export function DepositFlow({ task, initial = null }: { task: RoadmapTaskView; i
             type="button"
             role="radio"
             aria-checked={picked === option.value}
-            onClick={() => setPicked(option.value)}
+            onClick={() => {
+              setPicked(option.value)
+              // 보증금 결과를 다시 고르면 거절을 푼다. 체크만 남은 경우(`checkPending`)는 고른 값과 상관없어 그대로 둔다
+              if (!checkPending) setSave(retryAfterEdit)
+            }}
             className={`flex min-h-14 cursor-pointer items-center rounded-14 px-4 text-17 font-medium ring-inset ${
               picked === option.value ? 'bg-bg-brand-weak ring-2 ring-stroke-brand-solid' : 'ring-1 ring-stroke-neutral-weak'
             }`}
@@ -431,12 +449,15 @@ export function ClosureReportFlow({ task, initial = null }: { task: RoadmapTaskV
 
   /*
     칸을 고치면 "저장했어요"를 내린다. 저장한 뒤 날짜나 주소를 고치고 [결과 알려주기]로 떠나면, 사장님은
-    고친 내용까지 저장된 줄 안다. 서버에는 고치기 전 값이 남아 있다
+    고친 내용까지 저장된 줄 안다. 서버에는 고치기 전 값이 남아 있다.
+    서버가 거절한 것(`REJECTED`)도 푼다 — 고친 값은 받을 수 있는데 [저장하기]가 꺼진 채로 남으면 화면을
+    나갔다 와야 한다
   */
   const edited =
     <T,>(set: (value: T) => void) =>
     (value: T) => {
       setSaved(false)
+      setSave(retryAfterEdit)
       set(value)
     }
 
