@@ -55,6 +55,12 @@ export const updatedReplan: ReplanView = {
       '철거가 필요하다고 확인되어 점포철거비 지원이 검토 대상이 되었습니다. 신청 조건에 철거 전 증빙이 포함될 수 있습니다.',
     questions: ['신청하려면 어떤 서류가 필요한가요?', '철거 전에 받아둬야 할 것이 있나요?'],
   },
+  // 철거가 필요하다고 정해지면 로드맵의 철거비 할 일이 "확인 필요"에서 해야 할 일로 바뀐다(#182). 제목은 AI 로드맵 그대로
+  newTasks: [
+    { id: 'support_application', title: '소상공인24 사전 신청' },
+    { id: 'choose_contractor', title: '철거 업체 정하기' },
+    { id: 'before_photo', title: '철거 전 사진' },
+  ],
 }
 
 /**
@@ -66,6 +72,7 @@ export const noChangeReplan: ReplanView = {
   changes: [],
   blocker: updatedReplan.blocker,
   nextAction: updatedReplan.nextAction,
+  newTasks: [],
 }
 
 /**
@@ -81,6 +88,7 @@ export const keptReplan: ReplanView = {
     description: '이 내용이 확인되면 다음 순서를 바로 알려드릴 수 있어요.',
   },
   nextAction: resultInput.nextAction,
+  newTasks: [],
 }
 
 /**
@@ -101,6 +109,8 @@ export const confirmedReplan: ReplanView = {
   ],
   blocker: updatedReplan.blocker,
   nextAction: updatedReplan.nextAction,
+  // 철거가 필요하다고 고르셨으니 정상 반영과 같은 할 일이 생긴다
+  newTasks: updatedReplan.newTasks,
 }
 
 /** ④ — 기존 기록과 어긋나 사용자에게 되묻는 상태 */

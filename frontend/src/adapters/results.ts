@@ -12,6 +12,7 @@ import type {
   ConflictItem,
   ConflictSide,
   FactChange,
+  ReplanView,
   ResultsEntry,
   SubmitOutcome,
 } from '../types/view'
@@ -268,7 +269,10 @@ export function toSubmitOutcome(body: CaseResultsSubmitResponse | null): SubmitO
       const nextAction = toNextAction(body.next_action)
       if (changes === null || !isReadableText(body.blocker) || nextAction === null) return UNRECOGNIZED
 
-      return { kind: 'REPLAN', view: { changes, blocker: { title: body.blocker }, nextAction } }
+      return {
+        kind: 'REPLAN',
+        view: { changes, blocker: { title: body.blocker }, nextAction, newTasks: toNewTasks(body.new_tasks) },
+      }
     }
 
     case 'NEEDS_MORE_INFO': {
@@ -290,6 +294,20 @@ export function toSubmitOutcome(body: CaseResultsSubmitResponse | null): SubmitO
     default:
       return UNRECOGNIZED
   }
+}
+
+/**
+ * 새로 생긴 할 일(#182). 목록이 아니면(`null` 포함) 빈 목록이다.
+ *
+ * **이것 때문에 응답 전체를 읽지 못한 것으로 돌리지 않는다.** 바뀐 내용·다음 할 일이 멀쩡한데 덤인 이
+ * 칸 하나로 반영 결과를 못 보여주면 더 큰 손해다. 번호나 제목이 빈 줄은 그 줄만 뺀다.
+ */
+function toNewTasks(value: unknown): ReplanView['newTasks'] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((item: unknown) => {
+    const row = item as Partial<Record<'task_id' | 'title', unknown>> | null
+    return isReadableText(row?.task_id) && isReadableText(row?.title) ? [{ id: row.task_id, title: row.title }] : []
+  })
 }
 
 /** 리본이 되물은 질문 하나와 사장님이 적은 답 */

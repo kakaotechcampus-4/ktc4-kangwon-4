@@ -316,7 +316,7 @@ export type ResultsSubmitResult =
  * `GET /cases/results/status?case_history_id=` 응답.
  *
  * 상태마다 채워지는 칸이 다르다. 안 쓰는 칸은 `null` 로 온다.
- *   UPDATED · NO_CHANGE  changes · blocker · next_action (NO_CHANGE 는 changes 가 빈 목록)
+ *   UPDATED · NO_CHANGE  changes · blocker · next_action · new_tasks (NO_CHANGE 는 changes 가 빈 목록)
  *   NEEDS_MORE_INFO      questions_for_user
  *   CONFLICT             raw_input · conflicts
  *   FAILED               recovery_action_code · requested_field_paths
@@ -334,6 +334,18 @@ export interface CaseResultsSubmitResponse {
   conflicts: ConflictItemResponse[] | null
   recovery_action_code: RecoveryActionCode | null
   requested_field_paths: string[] | null
+  /**
+   * 이번 판단으로 해야 할 일이 된 로드맵 할 일(#182, 시안 "할 일 3개가 새로 생겼어요"). 로드맵 순서다.
+   * 직전 판단과 비교할 수 없으면 `null`, 새로 생긴 게 없으면 빈 목록. `NO_CHANGE` 에도 온다 —
+   * 그사이 알려 준 심사 결과로 할 일이 늘었을 수 있다(현석님 #182)
+   */
+  new_tasks: NewTaskResponse[] | null
+}
+
+/** 새로 생긴 할 일 하나. 번호는 로드맵 할 일 번호(`task_id`)와 같다 */
+export interface NewTaskResponse {
+  task_id: string
+  title: string
 }
 
 /** 기록을 남긴 쪽. `OWNER` 사장님, `RIBBON` 리본 */

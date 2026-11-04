@@ -314,11 +314,15 @@ export interface FactChange {
  * `nextAction`은 꼭 있다. 다음 할 일이 없는 반영 응답은 어댑터가 읽지 못한 응답으로 돌려서
  * 이 화면까지 오지 않는다(`toSubmitOutcome`). 폐업을 다 마쳐 할 일이 없어지는 날이 오면
  * 그때는 이 화면이 아니라 완료 화면으로 보낸다.
+ *
+ * `newTasks` 는 이번 판단으로 새로 해야 할 일이 된 로드맵 할 일이다(로드맵 순서). 비교할 수 없거나 없으면
+ * 빈 목록이다 — 사장님에게는 둘 다 "새로 생긴 것 없음"이다.
  */
 export interface ReplanView {
   changes: FactChange[]
   blocker: Blocker | null
   nextAction: NextAction
+  newTasks: { id: string; title: string }[]
 }
 
 /**
