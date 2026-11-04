@@ -135,6 +135,13 @@ describe('toLogEntries', () => {
     ])
   })
 
+  /** 서류로 계약 내용이 바뀌어 다시 판단했다(#173). "서류를 올리셨어요"와 같은 말을 되풀이하지 않는다 */
+  it('서류로 계약 내용이 바뀐 것은 사장님 줄로 적는다', () => {
+    expect(toLogEntries(logsOf(log('OWNER', 'DOCUMENT_SUBMITTED')))).toEqual([
+      { key: '0-DOCUMENT_SUBMITTED', actor: 'OWNER', text: '올린 서류로 계약 내용이 바뀌었어요', date: '10.17' },
+    ])
+  })
+
   it('서류 점검 통과는 리본이 한 일로 적는다', () => {
     expect(toLogEntries(logsOf(log('RIBBON', 'DOCUMENTS_CHECKED')))).toEqual([
       { key: '0-DOCUMENTS_CHECKED', actor: 'RIBBON', text: '서류를 점검하고 제출 파일을 만들었어요', date: '10.17' },
