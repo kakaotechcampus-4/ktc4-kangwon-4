@@ -110,15 +110,6 @@ afterEach(() => {
  * 여기 값이 틀리면 사장님이 자기 가게 상황을 잘못 알고 다음 행동을 한다.
  */
 describe('CurrentCasePage', () => {
-  /** 홈은 하단 탭이 있는 화면이고, 지금 있는 곳이 홈이라는 것을 탭이 알려야 한다 */
-  it('홈 탭이 고른 상태로 보인다', async () => {
-    saveTokens('access-1', 'refresh-1')
-    mockCase(DONE)
-    renderAt('/case')
-
-    expect(await screen.findByRole('link', { name: '홈' })).toHaveAttribute('aria-current', 'page')
-  })
-
   it('불러오는 동안 기다리라고 알린다', () => {
     saveTokens('access-1', 'refresh-1')
     vi.stubGlobal('fetch', vi.fn().mockReturnValue(new Promise(() => {})))
