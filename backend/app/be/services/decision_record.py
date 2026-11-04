@@ -322,10 +322,12 @@ def _assert_changes_are_current(session: Session, history: CaseHistory, mutation
             raise ValueError(
                 f"case {history.case_id} has no procedure step {change.procedure_step.step_code}"
             )
-        if step.status != change.before_status.value:
+        before = (change.before_status.value, change.before_requirements_confirmed, change.before_submitted)
+        current = (step.status, step.requirements_confirmed, step.submitted)
+        if current != before:
             raise StaleJudgmentError(
                 f"case {case.id}의 절차 {change.procedure_step.step_code}: 판단이 본 상태는 "
-                f"{change.before_status.value}인데 지금은 {step.status}"
+                f"{before}인데 지금은 {current} (진행 상태, 준비사항 확인, 신고 제출)"
             )
 
 
@@ -446,6 +448,8 @@ def _apply_procedure_progress_changes(
             )
         previous = step.status
         step.status = change.proposed_status.value
+        step.requirements_confirmed = change.proposed_requirements_confirmed
+        step.submitted = change.proposed_submitted
         # 완료된 절차는 근거 없이 스냅샷에 담을 수 없다(ProcedureProgress.completed_requires_evidence).
         # 다음 판단에 그대로 넘겨야 해서 어느 근거로 옮겼는지 함께 남긴다.
         step.evidence_refs = list(change.execution_evidence_refs)

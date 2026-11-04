@@ -206,6 +206,8 @@ def _build_procedure_progress(step: CaseProcedureStep) -> ProcedureProgress:
     return ProcedureProgress(
         procedure_step=ProcedureStepRef(procedure_step_id=step.procedure_step_id, step_code=step.procedure_step.step_code),
         status=ProcedureProgressStatus(step.status),
+        requirements_confirmed=step.requirements_confirmed,
+        submitted=step.submitted,
         evidence_refs=list(step.evidence_refs or []),
         updated_at=step.updated_at.replace(tzinfo=KST),
     )
