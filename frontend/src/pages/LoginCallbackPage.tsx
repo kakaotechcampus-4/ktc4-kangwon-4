@@ -1,7 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router'
+import { IconExclamationmarkCircleLine } from '@karrotmarket/react-monochrome-icon'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router'
 
-import { AppShell } from '../components/AppShell'
+import { Button } from '../components/ui/Button'
+import { EmptyState } from '../components/ui/EmptyState'
+import { HammerLoader } from '../components/ui/HammerLoader'
 import { postLogin } from '../lib/api'
 import { saveTokens } from '../lib/auth'
 
@@ -56,29 +59,27 @@ export function LoginCallbackPage() {
 
   if (failed || code === null) {
     return (
-      <AppShell title="로그인하지 못했습니다">
-        <section className="rounded-2xl bg-white p-5">
-          <p className="text-base leading-relaxed text-gray-600">
-            로그인이 완료되지 않았습니다. 잠시 후 다시 시도해 주세요.
-          </p>
-        </section>
-
-        <Link
-          to="/login"
-          replace
-          className="flex min-h-13 w-full items-center justify-center rounded-xl bg-gray-900 text-base font-bold text-white"
-        >
-          다시 로그인하기
-        </Link>
-      </AppShell>
+      <CallbackFrame>
+        <EmptyState
+          icon={<IconExclamationmarkCircleLine size={32} />}
+          title="로그인하지 못했습니다"
+          description="로그인이 완료되지 않았습니다. 잠시 후 다시 시도해 주세요."
+          action={<Button onClick={() => navigate('/login', { replace: true })}>다시 로그인하기</Button>}
+        />
+      </CallbackFrame>
     )
   }
 
   return (
-    <AppShell title="로그인 중입니다">
-      <section className="rounded-2xl bg-white p-5" role="status" aria-live="polite">
-        <p className="text-base leading-relaxed text-gray-600">잠시만 기다려 주세요.</p>
-      </section>
-    </AppShell>
+    <CallbackFrame>
+      <div className="flex flex-1 items-center justify-center">
+        <HammerLoader size={48} label="로그인하는 중" />
+      </div>
+    </CallbackFrame>
   )
+}
+
+/** 다른 화면과 같은 가운데 402px 틀. 뒤로 갈 곳이 없어(로그인 도중) 위 막대는 두지 않는다 */
+function CallbackFrame({ children }: { children: ReactNode }) {
+  return <div className="screen-frame mx-auto flex min-h-dvh max-w-[402px] flex-col bg-bg-layer-default">{children}</div>
 }
