@@ -75,7 +75,8 @@ describe('toLogEntries', () => {
   it('모르는 사건과 날짜를 못 읽는 줄만 뺀다', () => {
     const entries = toLogEntries(
       logsOf(
-        log('OWNER', 'DOCUMENT_UPLOADED'),
+        // 서버가 늘린 사건을 FE가 아직 모를 때(이 이름은 지어낸 것)
+        log('OWNER', 'STORE_RENAMED'),
         log('RIBBON', 'CONFLICT_FOUND', { occurred_at: '어제' }),
         log('RIBBON', 'CONFLICT_FOUND'),
       ),
@@ -116,5 +117,26 @@ describe('toLogEntries', () => {
 
   it('할 일 추가를 사장님이 했다고 오면 그 줄을 뺀다', () => {
     expect(toLogEntries(logsOf(log('OWNER', 'ROADMAP_TASKS_ADDED', { detail: '3' })))).toEqual([])
+  })
+
+  /** 서류함과 같은 이름으로 적는다(#174). 모르는 종류 코드를 영어로 보이지 않는다 */
+  it('올린 서류는 종류 이름을 아래 줄에 붙이고, 모르는 종류면 붙이지 않는다', () => {
+    expect(
+      toLogEntries(
+        logsOf(
+          log('OWNER', 'DOCUMENT_UPLOADED', { detail: 'TRANSFER' }),
+          log('OWNER', 'DOCUMENT_UPLOADED', { detail: 'MYSTERY' }),
+        ),
+      ),
+    ).toEqual([
+      { key: '0-DOCUMENT_UPLOADED', actor: 'OWNER', text: '서류를 올리셨어요', detail: '이체확인증', date: '10.17' },
+      { key: '1-DOCUMENT_UPLOADED', actor: 'OWNER', text: '서류를 올리셨어요', date: '10.17' },
+    ])
+  })
+
+  it('서류 점검 통과는 리본이 한 일로 적는다', () => {
+    expect(toLogEntries(logsOf(log('RIBBON', 'DOCUMENTS_CHECKED')))).toEqual([
+      { key: '0-DOCUMENTS_CHECKED', actor: 'RIBBON', text: '서류를 점검하고 제출 파일을 만들었어요', date: '10.17' },
+    ])
   })
 })

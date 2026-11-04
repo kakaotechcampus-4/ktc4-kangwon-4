@@ -370,6 +370,8 @@ export type CaseLogEvent =
   | 'CONFLICT_FOUND'
   | 'JUDGMENT_FAILED'
   | 'ROADMAP_TASKS_ADDED'
+  | 'DOCUMENT_UPLOADED'
+  | 'DOCUMENTS_CHECKED'
 
 /** 기록 한 줄 */
 export interface CaseLogItem {
@@ -381,7 +383,8 @@ export interface CaseLogItem {
   task_id: string | null
   /**
    * 문구에 쓸 값. `NEXT_ACTION_DECIDED` 는 정한 할 일 제목, `ROADMAP_TASKS_ADDED` 는 이번 판단으로
-   * 새로 생긴 할 일 개수 글자(예: `"3"`, #184), `SUPPORT_RESULT_REPORTED` 는 `APPROVED` / `REJECTED` / `UNKNOWN`.
+   * 새로 생긴 할 일 개수 글자(예: `"3"`, #184), `DOCUMENT_UPLOADED` 는 올린 서류 종류 코드(예: `TRANSFER`, #174),
+   * `SUPPORT_RESULT_REPORTED` 는 `APPROVED` / `REJECTED` / `UNKNOWN`.
    * 그 밖에는 `null`
    */
   detail: string | null

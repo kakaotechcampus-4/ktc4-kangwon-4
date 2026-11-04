@@ -1,4 +1,5 @@
 import type { CaseLogResponse } from '../types/api'
+import { DOCUMENT_KINDS } from './documents'
 import type { LogActor, LogEntry } from '../types/view'
 
 /**
@@ -21,6 +22,8 @@ const EVENT_TEXT: Record<string, { actor: LogActor; text: string }> = {
   CHECKLIST_COMPLETED: { actor: 'OWNER', text: '할 일 하나를 마치셨어요' },
   CHECKLIST_UNCHECKED: { actor: 'OWNER', text: '마친 할 일 하나를 되돌리셨어요' },
   SUPPORT_RESULT_REPORTED: { actor: 'OWNER', text: '점포철거비 1차 심사 결과를 알려주셨어요' },
+  // 어떤 서류인지는 아래 줄에 서류함과 같은 이름으로 붙인다(`toDetail`)
+  DOCUMENT_UPLOADED: { actor: 'OWNER', text: '서류를 올리셨어요' },
   NEXT_ACTION_DECIDED: { actor: 'RIBBON', text: '다음 할 일을 정했어요' },
   MORE_INFO_REQUESTED: { actor: 'RIBBON', text: '더 여쭤볼 것을 정리했어요' },
   CONFLICT_FOUND: { actor: 'RIBBON', text: '기록과 다른 부분을 찾았어요' },
@@ -30,6 +33,8 @@ const EVENT_TEXT: Record<string, { actor: LogActor; text: string }> = {
    * 추가했어요"인데, 충돌에서 고른 뒤의 판단에도 이 줄이 생겨 "답변대로"는 뺀다(11/04 #184 리뷰)
    */
   ROADMAP_TASKS_ADDED: { actor: 'RIBBON', text: '할 일을 새로 추가했어요' },
+  // 서버는 정산 서류 점검을 통과했을 때만 남긴다(#174). 통과하면 제출 파일(ZIP)이 만들어진다
+  DOCUMENTS_CHECKED: { actor: 'RIBBON', text: '서류를 점검하고 제출 파일을 만들었어요' },
 }
 
 /** 철거비 심사 결과(`detail`) → 덧붙이는 한 줄. 사장님이 알려 준 값이지 리본의 판단이 아니다 */
@@ -62,18 +67,20 @@ function toText(event: string, detail: unknown, text: string): string {
   return text
 }
 
-/** 줄 아래 덧붙일 한 줄. 정한 할 일 제목, 심사 결과. 없거나 모르는 값이면 붙이지 않는다 */
+/** 줄 아래 덧붙일 한 줄. 정한 할 일 제목, 심사 결과, 올린 서류 종류. 없거나 모르는 값이면 붙이지 않는다 */
 function toDetail(event: string, detail: unknown): string | undefined {
   if (typeof detail !== 'string' || detail.length === 0) return undefined
   if (event === 'NEXT_ACTION_DECIDED') return detail
   if (event === 'SUPPORT_RESULT_REPORTED') return SUPPORT_RESULT_DETAIL[detail]
+  // 서류함과 같은 이름을 쓴다. 모르는 종류면 코드(영어)를 보이지 않고 붙이지 않는다
+  if (event === 'DOCUMENT_UPLOADED') return DOCUMENT_KINDS.find((item) => item.kind === detail)?.label
   return undefined
 }
 
 /**
  * 기록 목록을 화면 줄로. 목록 모양이 아니면 `null`(화면이 "불러오지 못했어요"로 그린다).
  *
- * **모르는 코드는 그 줄만 뺀다.** 서버가 사건을 늘려도(#159 서류 기록 예정) FE가 따라오기
+ * **모르는 코드는 그 줄만 뺀다.** 서버가 사건을 늘려도(#174 서류 기록처럼) FE가 따라오기
  * 전까지 코드가 영어로 뜨거나 목록 전체가 사라지면 안 된다. 날짜를 못 읽는 줄도 같다.
  *
  * 누가 했는지는 서버 `actor` 를 그대로 쓰되, 코드와 어긋나면 그 줄을 뺀다 — 사장님이 한 일을
