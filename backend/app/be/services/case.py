@@ -40,9 +40,10 @@ from app.be.schemas.case import (
     NextActionResponse,
 )
 from app.agent.procedure_tool.store import ReviewedProcedureStore
-from app.agent.roadmap import TASKS as ROADMAP_TASKS
+from app.agent.roadmap import TASKS as ROADMAP_TASKS, record_checklist
 from app.be.services import procedure_registry
 from app.be.services import reviewed_procedure as reviewed_procedure_service
+from app.be.services import roadmap as roadmap_service
 from app.be.services.unmasking import build_restorer
 
 logger = logging.getLogger(__name__)
@@ -605,8 +606,9 @@ def update_case_checklist(
 ) -> CaseChecklistResponse:
     """로드맵 항목을 사장님이 체크하거나 푼다. 같은 요청을 두 번 보내도 결과가 같다.
 
-    "이 가게에 해당하는 항목인지"는 여기서 보지 않는다. AI 로드맵(record_checklist)이 Case
-    스냅샷과 절차 목록으로 판단하는 일이라, 로드맵 조회 API를 만들 때 함께 붙인다.
+    체크할 때는 이 가게에 해당하는 항목인지 AI 로드맵(record_checklist)에 묻는다. "해당 없음"과
+    "확인 필요"(예: 철거 필요 여부를 아직 모를 때의 철거비 항목)는 422로 거절한다(승준님 #149).
+    푸는 것은 묻지 않는다 — 잘못 눌린 체크를 못 푸는 일이 없어야 한다.
     """
 
     # 같은 항목 체크가 동시에 두 번 오면 둘 다 "없음"을 보고 만들려다 unique에 걸린다. 줄을 세운다.
@@ -620,6 +622,12 @@ def update_case_checklist(
         return CaseChecklistResponse(task_id=task_id, completed=completed)
 
     if completed:
+        # 입력 만들기는 try 밖에 둔다. 여기서 나는 오류는 사장님 요청이 아니라 데이터 문제라 422로 덮지 않는다.
+        roadmap_input = roadmap_service.build_roadmap_input(session, case)
+        try:
+            record_checklist(roadmap_input, task_id, completed=True)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="지금은 체크할 수 없는 항목입니다.") from None
         case_checklist_crud.create_case_checklist(session, CaseChecklist(case_id=case.id, task_id=task_id))
     else:
         case_checklist_crud.delete_case_checklist(session, checklist)
