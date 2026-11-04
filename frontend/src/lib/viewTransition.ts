@@ -1,4 +1,4 @@
-import { useLayoutEffect } from 'react'
+import { useLayoutEffect, useState } from 'react'
 import { useNavigationType } from 'react-router'
 
 /**
@@ -19,4 +19,19 @@ export function useNavigationDirection() {
   useLayoutEffect(() => {
     document.documentElement.dataset.nav = type === 'POP' ? 'back' : 'forward'
   }, [type])
+}
+
+/**
+ * 이 화면에 앞으로 들어왔는지. 내용을 차례로 올리는 움직임(`rise-children`)을 붙일지 정한다.
+ *
+ * 뒤로 돌아온 화면은 화면 이동 움직임(밀려 나감)으로 이미 움직이고 있어서, 내용까지 올라오면 두 겹이
+ * 된다. 새로고침·주소로 바로 연 것도 뒤로 가기와 같은 종류(`POP`)라 올리지 않는다.
+ *
+ * 화면이 처음 그려질 때 한 번만 정한다. 화면이 떠 있는 동안 값이 바뀌면 이미 보이는 내용이 다시
+ * 사라졌다 올라온다.
+ */
+export function useEntersForward(): boolean {
+  const type = useNavigationType()
+  const [forward] = useState(type !== 'POP')
+  return forward
 }

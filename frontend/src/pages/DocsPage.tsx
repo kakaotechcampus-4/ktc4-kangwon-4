@@ -18,6 +18,7 @@ import { EmptyState } from '../components/ui/EmptyState'
 import { HammerLoader } from '../components/ui/HammerLoader'
 import { InfoBox } from '../components/ui/InfoBox'
 import { type DocumentAction, useDocuments } from '../hooks/useDocuments'
+import { useEntersForward } from '../lib/viewTransition'
 import type { DocumentCheckView, DocumentView } from '../types/view'
 
 /**
@@ -32,6 +33,7 @@ import type { DocumentCheckView, DocumentView } from '../types/view'
  */
 export function DocsPage() {
   const navigate = useNavigate()
+  const rise = useEntersForward()
   const { search } = useLocation()
   const { query, reload, action, upload, remove, confirm } = useDocuments()
   /** 종류·값을 확인하고 있는 서류 */
@@ -91,7 +93,7 @@ export function DocsPage() {
       ) : (
         <>
           <p className="text-15 text-fg-neutral-muted">서류 {documents.length}개가 모였어요.</p>
-          <ul className="flex flex-col">
+          <ul className={`flex flex-col ${rise ? 'rise-children' : ''}`}>
             {documents.map((document) => (
               <DocumentRow
                 key={document.id}

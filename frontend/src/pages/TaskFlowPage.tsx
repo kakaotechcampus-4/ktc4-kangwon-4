@@ -139,7 +139,7 @@ export function CheckFlow({ task, attach = false }: { task: RoadmapTaskView; att
       )}
       {checked && save !== 'SAVING' && (
         <p className="flex items-center gap-2 text-17 font-bold">
-          <IconCheckmarkCircleFill size={22} className="text-fg-brand" aria-hidden="true" />
+          <IconCheckmarkCircleFill size={22} className="text-fg-brand motion-safe:animate-pop" aria-hidden="true" />
           마치셨다고 기록했어요
         </p>
       )}
@@ -216,7 +216,7 @@ export function SupportResultFlow({ task }: { task: RoadmapTaskView }) {
       </div>
       {savedLabel && save !== 'SAVING' && (
         <p className="flex items-center gap-2 text-17 font-bold">
-          <IconCheckmarkCircleFill size={22} className="text-fg-brand" aria-hidden="true" />
+          <IconCheckmarkCircleFill size={22} className="text-fg-brand motion-safe:animate-pop" aria-hidden="true" />
           &ldquo;{savedLabel}&rdquo;로 기록했어요
         </p>
       )}
@@ -337,7 +337,7 @@ export function DepositFlow({ task, initial = null }: { task: RoadmapTaskView; i
 
       {savedLabel && save !== 'SAVING' && !checkPending && (
         <p className="flex items-center gap-2 text-17 font-bold">
-          <IconCheckmarkCircleFill size={22} className="text-fg-brand" aria-hidden="true" />
+          <IconCheckmarkCircleFill size={22} className="text-fg-brand motion-safe:animate-pop" aria-hidden="true" />
           &ldquo;{savedLabel}&rdquo;로 기록했어요
         </p>
       )}
@@ -486,7 +486,7 @@ export function ClosureReportFlow({ task, initial = null }: { task: RoadmapTaskV
       {saved && save !== 'SAVING' && (
         <>
           <p className="flex items-center gap-2 text-17 font-bold">
-            <IconCheckmarkCircleFill size={22} className="text-fg-brand" aria-hidden="true" />
+            <IconCheckmarkCircleFill size={22} className="text-fg-brand motion-safe:animate-pop" aria-hidden="true" />
             신고 정보를 저장했어요
           </p>
           <InfoBox

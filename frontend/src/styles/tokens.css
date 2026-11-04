@@ -209,6 +209,36 @@
     }
   }
 
+  /*
+   * 목록 줄·카드가 조금 아래에서 흐리게 올라온다(`animate-rise`). 한 줄씩 늦게 시작하는 것은
+   * `index.css` 의 `rise-children` 이 정한다. `backwards` 라 늦게 시작하는 줄도 기다리는 동안 숨어 있다
+   */
+  --animate-rise: rise 0.4s var(--ease-out-soft) backwards;
+
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+  }
+
+  /*
+   * 끝난 것을 알리는 체크가 작게 나타나 살짝 넘쳤다 제 크기로 돌아온다(`animate-pop`, 용수철 흉내).
+   * 홈 완료 카드·처리 단계의 "끝남"·저장 뒤 "기록했어요"에 쓴다
+   */
+  --animate-pop: pop 0.45s var(--ease-out-soft) backwards;
+
+  @keyframes pop {
+    0% {
+      opacity: 0;
+      transform: scale(0.6);
+    }
+    60% {
+      opacity: 1;
+      transform: scale(1.1);
+    }
+  }
+
   /* 소개 화면의 그림이 조금 작은 데서 커지며 들어온다(`animate-picture-in`) */
   --animate-picture-in: picture-in 0.35s var(--ease-out-soft);
 

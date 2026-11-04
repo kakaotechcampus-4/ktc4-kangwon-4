@@ -119,6 +119,45 @@ html[data-nav='back']::view-transition-new(screen) {
   }
 }
 
+/*
+ * 바로 아래 칸들이 한 칸에 40ms씩 늦게 차례로 올라온다(토스식). 앞 8칸까지만 늦추고 그 뒤는 8번째와
+ * 같이 올라온다 — 긴 목록 끝이 한참 뒤에 나타나지 않게. 칸마다 순번을 넘기지 않아도 된다.
+ * 앞으로 들어온 화면에만 붙인다(`useEntersForward`). 뒤로 돌아온 화면은 이미 밀려 들어오는 중이다
+ */
+@utility rise-children {
+  & > * {
+    animation: var(--animate-rise);
+  }
+
+  & > :nth-child(2) {
+    animation-delay: 40ms;
+  }
+  & > :nth-child(3) {
+    animation-delay: 80ms;
+  }
+  & > :nth-child(4) {
+    animation-delay: 120ms;
+  }
+  & > :nth-child(5) {
+    animation-delay: 160ms;
+  }
+  & > :nth-child(6) {
+    animation-delay: 200ms;
+  }
+  & > :nth-child(7) {
+    animation-delay: 240ms;
+  }
+  & > :nth-child(n + 8) {
+    animation-delay: 280ms;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    & > * {
+      animation: none;
+    }
+  }
+}
+
 /* "동작 줄이기"를 켠 사장님에게는 화면을 움직이지 않고 바로 바꾼다 */
 @media (prefers-reduced-motion: reduce) {
   ::view-transition-group(screen),

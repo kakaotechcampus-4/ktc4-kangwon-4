@@ -1,8 +1,8 @@
-import { act, render } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import { Outlet, RouterProvider, createMemoryRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
 
-import { useNavigationDirection } from './viewTransition'
+import { useEntersForward, useNavigationDirection } from './viewTransition'
 
 function Root() {
   useNavigationDirection()
@@ -48,5 +48,33 @@ describe('useNavigationDirection', () => {
 
     await act(() => router.navigate('/task'))
     expect(document.documentElement.dataset.nav).toBe('forward')
+  })
+})
+
+function Entered() {
+  return <p>{useEntersForward() ? '앞으로 들어옴' : '뒤로 돌아옴'}</p>
+}
+
+/**
+ * 뒤로 돌아온 화면은 밀려 나가는 움직임 중이라, 내용까지 올라오면 움직임이 두 겹이 된다.
+ * 앞으로 들어온 화면에서만 내용을 올린다
+ */
+describe('useEntersForward', () => {
+  it('앞으로 들어온 화면은 true, 뒤로 돌아온 화면은 false', async () => {
+    const router = createMemoryRouter(
+      [
+        { path: '/case', element: <Entered /> },
+        { path: '/task', element: <p>할 일</p> },
+      ],
+      { initialEntries: ['/task'] },
+    )
+    render(<RouterProvider router={router} />)
+
+    await act(() => router.navigate('/case'))
+    expect(screen.getByText('앞으로 들어옴')).toBeInTheDocument()
+
+    await act(() => router.navigate('/task'))
+    await act(() => router.navigate(-1))
+    expect(screen.getByText('뒤로 돌아옴')).toBeInTheDocument()
   })
 })
