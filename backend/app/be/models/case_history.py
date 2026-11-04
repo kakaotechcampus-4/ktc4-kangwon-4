@@ -72,6 +72,15 @@ class CaseHistory(CreatedAtMixin, table=True):
         sa_column=Column(JSON, nullable=True),
         description="행동을 정하기 전 서비스가 사용자에게 되묻는 질문 목록. 없으면 NULL",
     )
+    roadmap_task_ids: list | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+        description=(
+            "이 판단 직후 로드맵에서 해야 할 일인 항목(해당 없음·확인 필요가 아닌 것)의 task_id 목록. "
+            "직전 판단과 비교해 결과 화면의 \"새로 생긴 할 일\"을 만든다. "
+            "검수를 통과한 판단만 채우고, 충돌·실패로 끝났거나 계산에 실패하면 NULL"
+        ),
+    )
     failure_code: str | None = Field(
         default=None,
         sa_column=Column(String(100), nullable=True),

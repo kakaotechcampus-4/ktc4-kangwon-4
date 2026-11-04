@@ -36,10 +36,11 @@ from app.be.schemas.case import (
     CaseResultsSubmitResponse,
     ConflictItemResponse,
     FieldChangeResponse,
+    NewTaskResponse,
     NextActionResponse,
 )
 from app.agent.procedure_tool.store import ReviewedProcedureStore
-from app.agent.roadmap import record_checklist
+from app.agent.roadmap import TASKS as ROADMAP_TASKS, record_checklist
 from app.be.services import procedure_registry
 from app.be.services import reviewed_procedure as reviewed_procedure_service
 from app.be.services import roadmap as roadmap_service
@@ -554,7 +555,39 @@ def get_case_results_submit_status(
             reason=latest_history.next_action_reason,
             questions_to_ask=latest_history.next_action_questions_to_ask or [],
         ),
+        new_tasks=_new_tasks(session, case.id, latest_history),
     )
+
+
+# 제목은 AI 로드맵의 할 일 표에서 가져온다. 판단 때 같이 저장하지 않는 것은 제목이 바뀌어도 화면이 따라가게 하려는 것이다.
+_ROADMAP_TASK_TITLES = {task_id: title for _, task_id, title, _, _ in ROADMAP_TASKS}
+
+
+def _new_tasks(session: Session, case_id: int, history: CaseHistory) -> list[NewTaskResponse] | None:
+    """직전 판단 뒤에는 해야 할 일이 아니었는데 이번 판단 뒤에 해야 할 일이 된 로드맵 항목.
+
+    판단마다 그 직후의 목록을 남겨 두고(decision_record._roadmap_task_ids) 둘을 뺀다.
+    어느 한쪽이라도 목록이 없으면(예전 이력, 계산 실패) 비교할 수 없어 None이다.
+    """
+
+    if history.roadmap_task_ids is None:
+        return None
+    previous = max(
+        (
+            row for row in case_history_crud.get_case_histories_by_case_id(session, case_id)
+            if row.id < history.id and row.roadmap_task_ids is not None
+        ),
+        key=lambda row: row.id,
+        default=None,
+    )
+    if previous is None:
+        return None
+    before = set(previous.roadmap_task_ids)
+    return [
+        NewTaskResponse(task_id=task_id, title=_ROADMAP_TASK_TITLES.get(task_id, task_id))
+        for task_id in history.roadmap_task_ids
+        if task_id not in before
+    ]
 
 
 # 이 항목을 체크하면 폐업 정리를 마친 것으로 본다(시안 closed 화면).

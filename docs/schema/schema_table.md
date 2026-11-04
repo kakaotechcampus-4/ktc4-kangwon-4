@@ -160,6 +160,7 @@ CASE에 대한 발화·이벤트 원본 이력.
 | next_action_questions_to_ask | JSON | | NULLABLE | `["원상복구 범위가 어디까지인지 확인해 주세요"]` | 사용자가 임대인·기관에 물어볼 질문 목록. 다음 행동이 없으면 NULL |
 | next_action_evidence_refs | JSON | | NULLABLE | `["procedure:reviewed:NTS_CLOSURE"]` | 다음 행동의 근거 evidence_id 목록. 다음 행동이 없으면 NULL |
 | questions_for_user | JSON | | NULLABLE | `["확인한 원상복구 범위가 있으면 알려주세요."]` | 행동을 정하기 전 서비스가 사용자에게 되묻는 질문 목록. 없으면 NULL. `next_action_questions_to_ask`(사용자가 임대인·기관에 물어볼 말)와 다른 값이다 |
+| roadmap_task_ids | JSON | | NULLABLE | `["intake", "dispose_stock", "before_photo"]` | 이 판단 직후 로드맵에서 해야 할 일인 항목(해당 없음·확인 필요가 아닌 것)의 `task_id` 목록. 직전 판단과 비교해 결과 화면의 "새로 생긴 할 일"(`GET /cases/results/status`의 `new_tasks`)을 만든다. 검수를 통과한 판단만 채우고, 충돌·실패로 끝났거나 계산에 실패하면 NULL |
 | failure_code | VARCHAR | | NULLABLE | `"LOOP_LIMIT_REACHED"` | Agent가 돌려준 실패 종류. Agent가 값을 늘려도 따라 고치지 않도록 ENUM이 아닌 VARCHAR. 실패가 아니거나 Agent가 결과를 내기 전에 끊겼으면 NULL |
 | recovery_action_code | ENUM | | NULLABLE | `RETRY` | 판단이 실패했을 때 화면이 안내할 다음 행동 — `RETRY` / `RESUBMIT_INPUT` / `CONTACT_SUPPORT` / `NONE`. 실패가 아니면 NULL |
 | requested_field_paths | JSON | | NULLABLE | `["restoration_scope"]` | 판단을 멈추게 한 CASE 필드 목록. 실패가 아니면 NULL |
