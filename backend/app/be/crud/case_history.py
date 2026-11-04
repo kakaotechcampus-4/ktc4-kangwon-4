@@ -62,3 +62,21 @@ def get_latest_case_history_by_sources(session: Session, case_id: int, sources: 
         .order_by(CaseHistory.created_at.desc(), CaseHistory.id.desc())
         .limit(1)
     ).first()
+
+
+def get_case_history_with_roadmap_before(session: Session, case_id: int, case_history_id: int) -> CaseHistory | None:
+    """`case_history_id`보다 앞에서 로드맵 할 일을 적어 둔 가장 최근 판단. 없으면 None.
+
+    결과 화면이 "이번에 새로 생긴 할 일"을 보여주려면 견줄 직전 로드맵이 필요하다. 할 일을
+    적지 못한 판단(실패·충돌)은 건너뛰고 적힌 것 중 가장 가까운 것을 고른다 — 그 사이에
+    실패가 끼어도 "직전에 보던 로드맵"은 그대로이기 때문이다.
+    """
+
+    return session.exec(
+        select(CaseHistory)
+        .where(CaseHistory.case_id == case_id)
+        .where(CaseHistory.id < case_history_id)
+        .where(CaseHistory.roadmap_task_status.is_not(None))
+        .order_by(CaseHistory.id.desc())
+        .limit(1)
+    ).first()

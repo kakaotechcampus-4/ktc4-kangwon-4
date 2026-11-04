@@ -34,6 +34,20 @@ class CaseHistory(CreatedAtMixin, table=True):
             " 내용이 사라진다. 충돌을 낸 판단에만 값이 있고, 그 전 이력은 NULL이다."
         ),
     )
+    roadmap_task_status: dict | None = Field(
+        default=None,
+        # none_as_null: 값이 없을 때 JSON 글자 "null"이 아니라 진짜 NULL로 넣는다. 그래야
+        # "적어 둔 것 중 가장 가까운 판단"을 질의에서 고를 수 있다(crud.case_history).
+        sa_column=Column(JSON(none_as_null=True), nullable=True),
+        description=(
+            "이 판단이 끝난 시점의 로드맵 할 일 전체({task_id: {status, title}})."
+            " 결과 화면이 \"이번에 새로 생긴 할 일\"을 보여주려면 판단 전 로드맵이 필요한데,"
+            " 로드맵은 그때그때 계산해 내보내는 값이라 지나간 것을 되살릴 길이 없다."
+            " 그래서 판단마다 한 벌 적어 두고 직전 것과 견준다. 제목까지 적는 것은 결과 화면이"
+            " 로드맵을 따로 부르지 않아 할 일 이름을 구할 데가 없어서다."
+            " 로드맵을 못 만든 판단은 NULL이고, 그때는 견줄 것이 없어 아무것도 안 보여준다."
+        ),
+    )
     source: str = Field(
         sa_column=Column(
             Enum("USER_INPUT", "SYSTEM_BATCH", "CASE_CREATED", "CONFLICT_DECISION", name="case_history_source_enum"),

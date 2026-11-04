@@ -25,6 +25,7 @@ from app.agent.schemas import (
     SupportMatchUpdateCandidate,
 )
 from app.be.crud import blocker as blocker_crud
+from app.agent.roadmap import build_roadmap
 from app.be.crud import case as case_crud
 from app.be.crud import case_field_history as case_field_history_crud
 from app.be.crud import case_history as case_history_crud
@@ -135,11 +136,42 @@ def save_reviewed_plan(
     # 내용이 사라진다.
     _resolve_conflicts(session, history, resolved_conflicts)
 
+    history.roadmap_task_status = _roadmap_task_status(session, history.case_id)
+
     # TODO: grounded_claims(확인이 필요한 문장 표시)와 snapshot/known_procedure_steps(판단 당시
     # 입력)는 아직 담을 화면·테이블이 없어 저장하지 않는다.
     session.commit()
     session.refresh(record)
     return record
+
+
+def _roadmap_task_status(session: Session, case_id: int) -> dict[str, dict[str, str]] | None:
+    """이 판단이 끝난 시점의 할 일 상태와 제목. 못 만들면 None.
+
+    결과 화면이 "이번에 새로 생긴 할 일"을 보여주려면 판단 전 로드맵이 있어야 하는데,
+    로드맵은 그때그때 계산해 내보내는 값이라 지나간 것을 되살릴 길이 없다. 그래서 판단마다
+    한 벌 적어 둔다(case_history.roadmap_task_status).
+
+    **여기서 터져도 판단 저장을 되돌리지 않는다.** 화면에 한 줄 더 보여주려는 것이라,
+    그것 때문에 검수를 통과한 판단을 통째로 잃으면 안 된다.
+    """
+
+    # 같은 트랜잭션 안에서 위 변경을 반영한 Case를 읽어야 해서 여기서 부른다.
+    from app.be.services import roadmap as roadmap_service
+
+    case = case_crud.get_case_by_id(session, case_id)
+    if case is None:
+        return None
+    try:
+        roadmap = build_roadmap(roadmap_service.build_roadmap_input(session, case))
+    except Exception:
+        logger.exception("case %s 로드맵 할 일 상태를 적지 못했다", case_id)
+        return None
+    return {
+        task.task_id: {"status": task.status, "title": task.title}
+        for stage in roadmap.stages
+        for task in stage.tasks
+    }
 
 
 def save_conflict(

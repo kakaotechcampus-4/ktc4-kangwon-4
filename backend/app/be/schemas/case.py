@@ -186,9 +186,19 @@ class CaseConflictsDecisionRequest(BaseModel):
     decisions: list[CaseConflictsDecisionItem]
 
 
+class NewRoadmapTaskResponse(BaseModel):
+    """이번 판단으로 새로 할 수 있게 된 로드맵 할 일. 시안 M05c "할 일 3개가 새로 생겼어요"."""
+
+    task_id: str
+    title: str
+
+
 class CaseResultsSubmitResponse(BaseModel):
     result: ResultsSubmitResult
     changes: list[FieldChangeResponse] | None = None
+    # 직전 판단에는 "해당 없음"·"확인 필요"였다가 이번에 할 수 있게 된 것만 담는다. 견줄
+    # 직전 판단이 없으면(가입 첫 판단 등) 빈 목록이다.
+    new_roadmap_tasks: list[NewRoadmapTaskResponse] | None = None
     blocker: str | None = None
     next_action: NextActionResponse | None = None
     questions_for_user: list[str] | None = None

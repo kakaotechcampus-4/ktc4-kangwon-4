@@ -36,6 +36,7 @@ from app.be.schemas.case import (
     CaseResultsSubmitResponse,
     ConflictItemResponse,
     FieldChangeResponse,
+    NewRoadmapTaskResponse,
     NextActionResponse,
 )
 from app.agent.procedure_tool.store import ReviewedProcedureStore
@@ -546,6 +547,7 @@ def get_case_results_submit_status(
     return CaseResultsSubmitResponse(
         result="UPDATED" if changes else "NO_CHANGE",
         changes=changes,
+        new_roadmap_tasks=_new_roadmap_tasks(session, case.id, latest_history),
         blocker=latest_history.priority_blocker.description,
         next_action=NextActionResponse(
             title=latest_history.next_action,
@@ -553,6 +555,38 @@ def get_case_results_submit_status(
             questions_to_ask=latest_history.next_action_questions_to_ask or [],
         ),
     )
+
+
+# 할 수 있게 되기 전의 상태. 해당하지 않거나(NOT_APPLICABLE) 해당 여부를 아직 모르는
+# 것(NEEDS_CONFIRMATION)이라, 사장님에게는 "아직 내 일이 아닌" 할 일이다.
+_NOT_YET_MINE = {"NOT_APPLICABLE", "NEEDS_CONFIRMATION"}
+
+
+def _new_roadmap_tasks(
+    session: Session, case_id: int, history: CaseHistory
+) -> list[NewRoadmapTaskResponse]:
+    """이번 판단으로 새로 할 수 있게 된 할 일(시안 M05c "할 일 3개가 새로 생겼어요").
+
+    판단마다 적어 둔 할 일 상태를 직전 것과 견준다(case_history.roadmap_task_status).
+    "아직 내 일이 아니던 것"이 할 수 있는 것으로 바뀐 것만 고른다 — 이미 할 수 있던 일이
+    끝났거나 사라진 것은 새로 생긴 것이 아니다.
+
+    견줄 직전 판단이 없으면(가입 첫 판단) 빈 목록이다.
+    """
+
+    after = history.roadmap_task_status
+    if not after:
+        return []
+    # 견줄 직전 판단이 없으면(가입 첫 판단) before가 비고, 그러면 아무것도 안 고른다 —
+    # 로드맵 전체가 처음 생기는 것이라 "새로 생겼다"고 할 것이 26개 전부가 되기 때문이다.
+    previous = case_history_crud.get_case_history_with_roadmap_before(session, case_id, history.id)
+    before = (previous.roadmap_task_status if previous else None) or {}
+    return [
+        NewRoadmapTaskResponse(task_id=task_id, title=task["title"])
+        for task_id, task in after.items()
+        if task["status"] not in _NOT_YET_MINE
+        and before.get(task_id, {}).get("status") in _NOT_YET_MINE
+    ]
 
 
 # 이 항목을 체크하면 폐업 정리를 마친 것으로 본다(시안 closed 화면).
