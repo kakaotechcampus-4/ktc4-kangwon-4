@@ -7,6 +7,7 @@
 
 import pytest
 from fastapi import HTTPException
+from pydantic import ValidationError
 from sqlmodel import Session
 
 from app.be.models.case_history import CaseHistory
@@ -188,3 +189,11 @@ def test_status_stops_on_a_conflict_without_any_open_conflict(case_engine, case_
     conflicted = case_world.add_history(case_id, "USER_INPUT", "CONFLICT")
 
     assert error_of(lambda: status(case_engine, member_id, conflicted))[0] == 500
+
+
+def test_results_text_is_limited_to_2000_characters():
+    """묶은 글 전체를 2,000자로 센다. 넘으면 FastAPI가 422를 준다(제한이 없을 땐 TEXT 칸을 넘어 500)."""
+
+    CaseResultsSubmitRequest(raw_input="가" * 2000, case_history_id=1)
+    with pytest.raises(ValidationError):
+        CaseResultsSubmitRequest(raw_input="가" * 2001, case_history_id=1)

@@ -169,7 +169,9 @@ class CaseResultsEntryResponse(BaseModel):
 
 
 class CaseResultsSubmitRequest(BaseModel):
-    raw_input: str
+    # 되물은 질문에 답하는 화면은 칸 여러 개를 FE가 한 글로 묶어 보낸다. 그래서 묶은 글 전체로 센다(시우님).
+    # 제한이 없으면 한글 약 2만 자에서 TEXT 칸을 넘어 500이 났다. FE 입력창도 같은 숫자로 막는다.
+    raw_input: str = Field(max_length=2000)
     case_history_id: int
 
 
