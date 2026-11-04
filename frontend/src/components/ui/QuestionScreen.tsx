@@ -244,7 +244,7 @@ export function QuestionScreen({
   )
 
   return (
-    <div className="mx-auto flex h-dvh max-w-[402px] flex-col bg-bg-layer-default">
+    <div className="screen-frame mx-auto flex h-dvh max-w-[402px] flex-col bg-bg-layer-default">
       <header className="flex h-14 shrink-0 items-center pr-4 pl-1">
         {onBack ? (
           <button

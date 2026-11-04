@@ -123,10 +123,10 @@ export function DocsPage() {
           서류가 없으면 점검할 것이 없어 두지 않는다
         */}
         {check?.status === 'COMPLETE' ? (
-          <Button onClick={() => navigate({ pathname: '/docs/done', search })}>정산 제출 파일 보기</Button>
+          <Button onClick={() => navigate({ pathname: '/docs/done', search }, { viewTransition: true })}>정산 제출 파일 보기</Button>
         ) : (
           documents.length > 0 && (
-            <Button disabled={action === 'UPLOADING'} onClick={() => navigate({ pathname: '/docs/check', search })}>
+            <Button disabled={action === 'UPLOADING'} onClick={() => navigate({ pathname: '/docs/check', search }, { viewTransition: true })}>
               정산 서류 점검하기
             </Button>
           )

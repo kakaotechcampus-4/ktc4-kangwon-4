@@ -33,6 +33,7 @@ export function HomeStageCard({ stage = null, completed = false }: HomeStageCard
   return (
     <Link
       to={{ pathname: '/roadmap', search }}
+      viewTransition
       className="flex shrink-0 flex-col gap-3 rounded-2xl bg-bg-layer-default px-5 py-4.5 shadow-card active:bg-bg-layer-default-pressed"
     >
       <span className="flex items-center gap-1">

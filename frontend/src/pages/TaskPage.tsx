@@ -96,7 +96,7 @@ export function TaskPage() {
 
         {/* 버튼은 내용 바로 아래에 둔다. 화면 맨 아래에 붙이면 내용이 짧을 때 가운데가 텅 빈다 */}
         <div className="flex flex-col gap-1">
-          <Button onClick={() => navigate({ pathname: '/results', search })}>
+          <Button onClick={() => navigate({ pathname: '/results', search }, { viewTransition: true })}>
             {hasQuestions ? '답을 들었어요' : '결과 알려주기'}
           </Button>
           {hasQuestions && (
@@ -117,7 +117,7 @@ export function TaskPage() {
 /** 탭 없는 화면의 틀. 뒤로 버튼만 두고 제목은 화면 안의 할 일 제목이 맡는다 */
 function TaskFrame({ children }: { children: ReactNode }) {
   return (
-    <div className="mx-auto flex min-h-dvh max-w-[402px] flex-col bg-bg-layer-default">
+    <div className="screen-frame mx-auto flex min-h-dvh max-w-[402px] flex-col bg-bg-layer-default">
       <TopBar />
       {children}
     </div>

@@ -10,3 +10,101 @@
     overflow-wrap: break-word;
   }
 }
+
+/*
+ * 화면 이동 (iOS 방식으로 겹쳐 밀기).
+ *
+ * 브라우저의 화면 전환 기능(View Transitions)이 바뀌기 전 화면(old)과 바뀐 뒤 화면(new)을 사진처럼
+ * 찍어 두고, 그 두 장을 아래 움직임으로 옮긴다. 라우터 이동에 `viewTransition` 을 켠 곳에서만 돈다.
+ *
+ * - 앞으로(`data-nav="forward"`): 새 화면이 오른쪽에서 들어오고, 이전 화면은 왼쪽으로 1/4만 밀리며 어두워진다
+ * - 뒤로(`data-nav="back"`): 지금 화면이 오른쪽으로 빠지고, 아래 깔린 화면이 제자리로 오며 밝아진다
+ *
+ * 방향은 `lib/viewTransition.ts` 가 적는다. 이 기능이 없는 브라우저는 움직임 없이 바로 바뀐다.
+ *
+ * 움직이는 것은 페이지 전체가 아니라 가운데 화면 틀(`screen-frame`)뿐이다. 데스크톱에서 페이지 전체를
+ * 밀면 양옆 회색 바탕까지 같이 밀려 거슬린다(11/04 시우님 확인). 화면 틀마다 같은 이름(`screen`)을
+ * 붙여 두면 브라우저가 그 틀만 따로 찍어 옮기고, 나머지(회색 바탕)는 그대로 둔다. 틀 밖으로 나간
+ * 부분은 잘라서 가운데 칸 안에서만 밀리게 한다. 휴대폰에서는 틀이 화면 전체라 차이가 없다.
+ *
+ * 한 화면에 이 이름이 둘 있으면 브라우저가 전환을 건너뛴다. 화면 틀은 화면마다 하나만 둔다.
+ */
+@utility screen-frame {
+  view-transition-name: screen;
+}
+
+/* 회색 바탕은 앞뒤가 같다. 흐려지며 바뀌는 기본 움직임을 끈다 */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+}
+
+::view-transition-group(screen) {
+  overflow: clip;
+  animation-duration: 0.35s;
+  animation-timing-function: var(--ease-out-soft);
+}
+
+/* 기본 움직임(두 장이 겹쳐 흐려지기)은 쓰지 않으므로 겹쳐 밝아지는 섞기(`mix-blend-mode`)도 끈다 */
+::view-transition-old(screen),
+::view-transition-new(screen) {
+  animation-duration: 0.35s;
+  animation-timing-function: var(--ease-out-soft);
+  animation-fill-mode: both;
+  mix-blend-mode: normal;
+}
+
+html[data-nav='forward']::view-transition-old(screen) {
+  animation-name: screen-under-out;
+}
+
+html[data-nav='forward']::view-transition-new(screen) {
+  animation-name: screen-push-in;
+  box-shadow: -8px 0 24px #0000001f;
+}
+
+/* 뒤로 갈 때는 빠지는 화면(old)이 위에 있어야 한다. 기본은 new 가 위다 */
+html[data-nav='back']::view-transition-old(screen) {
+  z-index: 1;
+  animation-name: screen-push-out;
+  box-shadow: -8px 0 24px #0000001f;
+}
+
+html[data-nav='back']::view-transition-new(screen) {
+  animation-name: screen-under-in;
+}
+
+@keyframes screen-push-in {
+  from {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes screen-push-out {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes screen-under-out {
+  to {
+    transform: translateX(-25%);
+    filter: brightness(0.88);
+  }
+}
+
+@keyframes screen-under-in {
+  from {
+    transform: translateX(-25%);
+    filter: brightness(0.88);
+  }
+}
+
+/* "동작 줄이기"를 켠 사장님에게는 화면을 움직이지 않고 바로 바꾼다 */
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(screen),
+  ::view-transition-old(screen),
+  ::view-transition-new(screen) {
+    animation: none;
+  }
+}

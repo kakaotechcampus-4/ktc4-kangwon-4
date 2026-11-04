@@ -372,7 +372,7 @@ function ChoiceButton({ caption, value, pressed, onClick }: ChoiceButtonProps) {
 /** 탭 없는 화면의 틀. 뒤로 버튼만 두고 제목은 화면 안의 큰 제목이 맡는다 */
 function ConfirmFrame({ children }: { children: ReactNode }) {
   return (
-    <div className="mx-auto flex min-h-dvh max-w-[402px] flex-col bg-bg-layer-default">
+    <div className="screen-frame mx-auto flex min-h-dvh max-w-[402px] flex-col bg-bg-layer-default">
       <TopBar />
       {children}
     </div>

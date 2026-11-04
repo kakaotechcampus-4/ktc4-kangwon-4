@@ -44,7 +44,7 @@ export function DocsDonePage() {
 
   if (query.status === 'LOADING') {
     return (
-      <div className="mx-auto flex min-h-dvh max-w-[402px] items-center justify-center bg-bg-layer-default">
+      <div className="screen-frame mx-auto flex min-h-dvh max-w-[402px] items-center justify-center bg-bg-layer-default">
         <HammerLoader size={48} label="정산 파일을 확인하는 중" />
       </div>
     )
@@ -52,7 +52,7 @@ export function DocsDonePage() {
 
   if (query.status === 'LOAD_FAILED') {
     return (
-      <div className="mx-auto flex min-h-dvh max-w-[402px] flex-col justify-center bg-bg-layer-default px-4">
+      <div className="screen-frame mx-auto flex min-h-dvh max-w-[402px] flex-col justify-center bg-bg-layer-default px-4">
         <InfoBox title="정산 파일을 확인하지 못했어요." action={{ label: '다시 불러오기', onClick: reload }}>
           연결 상태를 확인하고 다시 불러와 주세요.
         </InfoBox>
@@ -67,7 +67,7 @@ export function DocsDonePage() {
   const count = query.view.documents.length
 
   return (
-    <div className="mx-auto flex min-h-dvh max-w-[402px] flex-col bg-bg-layer-default">
+    <div className="screen-frame mx-auto flex min-h-dvh max-w-[402px] flex-col bg-bg-layer-default">
       <header className="flex h-14 shrink-0 items-center px-1">
         <button
           type="button"

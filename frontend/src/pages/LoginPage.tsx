@@ -47,7 +47,7 @@ export function LoginPage() {
   }
 
   return (
-    <div className="mx-auto flex h-dvh max-w-[402px] flex-col bg-bg-layer-default">
+    <div className="screen-frame mx-auto flex h-dvh max-w-[402px] flex-col bg-bg-layer-default">
       <IntroCarousel />
 
       <div className="flex shrink-0 flex-col gap-2 px-4 pt-3 pb-8.5">

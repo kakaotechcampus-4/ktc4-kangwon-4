@@ -381,7 +381,7 @@ function TaskButton({ hasQuestions, locked }: { hasQuestions: boolean; locked: b
 
   return (
     <>
-      <Button size="lg" disabled={locked} onClick={() => navigate({ pathname: '/task', search })}>
+      <Button size="lg" disabled={locked} onClick={() => navigate({ pathname: '/task', search }, { viewTransition: true })}>
         {hasQuestions ? '물어볼 내용 보기' : '자세히 보기'}
       </Button>
       {locked && (
@@ -405,7 +405,7 @@ function AnswerButton({ locked, label = '답하러 가기' }: { locked: boolean;
 
   return (
     <>
-      <Button size="lg" disabled={locked} onClick={() => navigate({ pathname: '/results', search })}>
+      <Button size="lg" disabled={locked} onClick={() => navigate({ pathname: '/results', search }, { viewTransition: true })}>
         {label}
       </Button>
       {locked && (

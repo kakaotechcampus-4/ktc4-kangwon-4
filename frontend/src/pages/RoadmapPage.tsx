@@ -154,6 +154,7 @@ function StageRow({ stage, current, last }: { stage: RoadmapStageView; current: 
                   ) : (
                     <Link
                       to={{ pathname: `/roadmap/${task.id}`, search }}
+                      viewTransition
                       className={`${rowStyle} active:bg-bg-transparent-pressed`}
                     >
                       {content}
@@ -172,7 +173,7 @@ function StageRow({ stage, current, last }: { stage: RoadmapStageView; current: 
 /** 탭 없는 화면의 틀. 뒤로 버튼과 화면 이름을 둔다 */
 function RoadmapFrame({ children }: { children: ReactNode }) {
   return (
-    <div className="mx-auto flex min-h-dvh max-w-[402px] flex-col bg-bg-layer-default">
+    <div className="screen-frame mx-auto flex min-h-dvh max-w-[402px] flex-col bg-bg-layer-default">
       <TopBar title="폐업 전체 순서" />
       <main className="flex flex-col gap-4 px-4 pt-2 pb-8">{children}</main>
     </div>

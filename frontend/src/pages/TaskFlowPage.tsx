@@ -242,7 +242,7 @@ function ReportResultFlow({ task }: { task: RoadmapTaskView }) {
       <TaskHeader task={task} />
       <InfoBox>이 일은 하신 결과를 알려 주시면 리본이 확인해 다음 순서를 정해요.</InfoBox>
       <div className="mt-auto">
-        <Button onClick={() => navigate({ pathname: '/results', search })}>결과 알려주기</Button>
+        <Button onClick={() => navigate({ pathname: '/results', search }, { viewTransition: true })}>결과 알려주기</Button>
       </div>
     </TaskFrame>
   )
@@ -501,7 +501,7 @@ export function ClosureReportFlow({ task, initial = null }: { task: RoadmapTaskV
 
       <div className="mt-auto flex flex-col gap-2">
         {saved && (
-          <Button variant="outline" onClick={() => navigate({ pathname: '/results', search })}>
+          <Button variant="outline" onClick={() => navigate({ pathname: '/results', search }, { viewTransition: true })}>
             결과 알려주기
           </Button>
         )}
@@ -630,7 +630,7 @@ function SaveNotice({ save }: { save: SaveState }) {
 /** 탭 없는 화면의 틀 */
 function TaskFrame({ children }: { children: ReactNode }) {
   return (
-    <div className="mx-auto flex min-h-dvh max-w-[402px] flex-col bg-bg-layer-default">
+    <div className="screen-frame mx-auto flex min-h-dvh max-w-[402px] flex-col bg-bg-layer-default">
       <TopBar title="할 일" />
       <main className="flex flex-1 flex-col gap-5 px-4 pt-2 pb-8">{children}</main>
     </div>

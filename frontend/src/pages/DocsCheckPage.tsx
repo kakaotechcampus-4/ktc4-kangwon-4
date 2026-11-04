@@ -140,7 +140,7 @@ export function DocsCheckPage() {
           <main className="flex flex-col gap-6 px-4 pb-8">
             {sendNotice}
             <ProcessSteps steps={steps} />
-            <Button onClick={() => navigate({ pathname: '/docs/done', search })}>결과 보기</Button>
+            <Button onClick={() => navigate({ pathname: '/docs/done', search }, { viewTransition: true })}>결과 보기</Button>
           </main>
         </CheckFrame>
       )
@@ -275,7 +275,7 @@ export function ApplicantSheet({
 /** 탭 없는 화면의 틀. 뒤로 버튼과 화면 이름을 둔다 */
 function CheckFrame({ children }: { children: ReactNode }) {
   return (
-    <div className="mx-auto flex min-h-dvh max-w-[402px] flex-col bg-bg-layer-default">
+    <div className="screen-frame mx-auto flex min-h-dvh max-w-[402px] flex-col bg-bg-layer-default">
       <TopBar title="AI 서류 점검" />
       {children}
     </div>
