@@ -31,6 +31,7 @@ from app.agent.procedure_tool.rules import (
     business_type_code,
     employment_history_conflicts,
 )
+from app.agent.info_agent.procedure_digests import digest_draft_fields, load_digests
 from app.agent.projection import ensure_projection_has_no_obvious_sensitive_text
 from app.agent.prompts import info_messages
 from app.agent.schemas import (
@@ -246,6 +247,29 @@ class InfoAnalysisAgent:
         self._uuid = uuid_factory
         self._parser_version = parser_version
         self._max_local_attempts = max_local_attempts
+
+    def analyze_from_digests(self, request: InfoAnalysisInput) -> InfoAnalysisResult | None:
+        """읽을 글이 없는 판단(첫 판단)에서 모델 대신 검수 정리본으로 결과를 만든다.
+
+        모델 결과와 같은 검사(_materialize: 원문 인용·근거·절차 범위)를 그대로 거친다.
+        정리본으로 다 채울 수 없거나 검사에 걸리면 None이고, 그때는 analyze()가 모델을 부른다.
+        """
+
+        digests = load_digests()
+        if digests is None or request.conflict_confirmation is not None:
+            return None
+        procedure_bindings = resolve_procedure_bindings(
+            request.known_procedure_steps, self._procedure_bindings
+        )
+        fields = digest_draft_fields(
+            request, digests, self._analysis_step_codes(request, procedure_bindings)
+        )
+        if fields is None:
+            return None
+        try:
+            return self._materialize(request, InfoAnalysisDraft.model_validate(fields), procedure_bindings)
+        except (GuardrailViolation, ValueError):
+            return None
 
     async def analyze(self, request: InfoAnalysisInput) -> InfoAnalysisResult:
         procedure_bindings = resolve_procedure_bindings(

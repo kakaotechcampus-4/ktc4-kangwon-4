@@ -125,6 +125,9 @@ class AgentGraph:
         if max_review_revisions < 0 or max_review_revisions > 2:
             raise ValueError("max_review_revisions must be between 0 and 2")
         self._info_agent = info_agent
+        # 첫 판단은 읽을 글이 없어 검수 정리본으로 Info 결과를 만든다(info_agent/procedure_digests.py).
+        # 클래스에 정의된 경우만 쓴다. 모의 객체(AsyncMock)는 없는 메서드도 만들어 내서 인스턴스로 보면 안 된다.
+        self._info_from_digests = getattr(type(info_agent), "analyze_from_digests", None)
         self._procedure_tool = procedure_tool
         self._support_agent = support_agent
         self._supervisor = supervisor
@@ -360,7 +363,18 @@ class AgentGraph:
         try:
             self._check_deadline()
             self._record_rework_start(meta)
-            output = await self._info_agent.analyze(component_input)
+            output = None
+            if (
+                self._info_from_digests is not None
+                and getattr(request.trigger, "trigger_type", None) == "CASE_CREATED"
+                and retained is None
+                and not confirmed_overlays
+                # Review가 Info를 다시 보라고 했으면 같은 정리본을 또 내지 않고 모델에게 맡긴다
+                and not state.get("review_feedback")
+            ):
+                output = self._info_from_digests(self._info_agent, component_input)
+            if output is None:
+                output = await self._info_agent.analyze(component_input)
             if retained is not None:
                 if output.fact_candidates or output.procedure_progress_observations or output.conflicts:
                     raise ValueError("confirmation analysis cannot extract fresh facts or progress")
