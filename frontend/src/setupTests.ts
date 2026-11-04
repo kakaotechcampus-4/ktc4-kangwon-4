@@ -7,6 +7,7 @@
 import '@testing-library/jest-dom/vitest'
 
 import { cleanup } from '@testing-library/react'
+import { MotionGlobalConfig } from 'motion/react'
 import { afterEach } from 'vitest'
 
 import { useDiagnosisStore } from './stores/useDiagnosisStore'
@@ -28,6 +29,14 @@ if (typeof HTMLDialogElement !== 'undefined' && !HTMLDialogElement.prototype.sho
     this.dispatchEvent(new Event('close'))
   }
 }
+
+/**
+ * 테스트는 움직임을 보지 않는다. Motion 움직임은 기다리지 않고 바로 끝낸다.
+ *
+ * 움직임이 끝난 뒤에 일어나는 일(시트가 내려간 뒤 닫히기)은 그래도 한 박자 뒤에 일어나서,
+ * 테스트는 `waitFor` 로 기다린다. 움직임 자체는 브라우저에서 눈으로 확인한다.
+ */
+MotionGlobalConfig.skipAnimations = true
 
 /**
  * 렌더한 화면을 테스트마다 걷어낸다.
