@@ -1,5 +1,5 @@
 import { IconCheckmarkFatFill, IconChevronLeftLine, IconPlusLine } from '@karrotmarket/react-monochrome-icon'
-import { useId, type ReactNode } from 'react'
+import { useId, useState, type ReactNode } from 'react'
 
 import { Button } from './Button'
 
@@ -209,6 +209,10 @@ function Choices({ input, labelledBy }: { input: QuestionInput; labelledBy: stri
  * 그래서 원상복구 질문은 "찾아볼 곳" 상자가 보기 **위**에 온다.
  *
  * 뒤로 버튼은 시안의 44px 대신 48px다(`TopBar`와 같은 이유, UI 가이드라인).
+ *
+ * 질문이 바뀌면 내용이 옆에서 조금 밀려 들어온다. 번호가 커졌으면 오른쪽에서(앞으로), 작아졌으면
+ * 왼쪽에서(뒤로) 온다. [이전]·뒤로 버튼·브라우저 뒤로 가기를 따로 가르지 않고 번호로만 본다.
+ * 처음 연 질문은 움직이지 않는다 — 새로고침이나 주소로 들어왔을 때 옆에서 날아오면 이상하다.
  */
 export function QuestionScreen({
   position,
@@ -225,6 +229,21 @@ export function QuestionScreen({
 }: QuestionScreenProps) {
   const titleId = useId()
   const optionsFirst = input.type === 'list' || input.type === 'grid'
+
+  // 앞에 그린 질문 번호를 들고 있다가, 번호가 바뀐 그 그리기에서 방향을 정한다
+  const [shown, setShown] = useState<{ at: number; enter: 'forward' | 'back' | null }>({
+    at: position.current,
+    enter: null,
+  })
+  if (shown.at !== position.current) {
+    setShown({ at: position.current, enter: position.current > shown.at ? 'forward' : 'back' })
+  }
+  const enter =
+    shown.enter === 'forward'
+      ? 'motion-safe:animate-step-forward'
+      : shown.enter === 'back'
+        ? 'motion-safe:animate-step-back'
+        : ''
 
   const boxNode: ReactNode = box && (
     <div className="flex flex-col gap-4 rounded-2xl bg-bg-neutral-weak p-5">
@@ -265,8 +284,12 @@ export function QuestionScreen({
         </span>
       </header>
 
-      <main className="flex min-h-0 flex-1 flex-col gap-8 overflow-y-auto px-5 pt-4 pb-4">
-        {notice}
+      {/* 질문마다 새로 그려야 움직임이 처음부터 다시 돈다. 스크롤도 맨 위로 돌아간다 */}
+      <main
+        key={position.current}
+        className={`flex min-h-0 flex-1 flex-col gap-8 overflow-y-auto px-5 pt-4 pb-4 ${enter}`}
+      >
+        {notice && <div className="motion-safe:animate-fade-in-short">{notice}</div>}
         <div>
           <h1 id={titleId} className="text-26 font-bold whitespace-pre-line">
             {title.pre}
