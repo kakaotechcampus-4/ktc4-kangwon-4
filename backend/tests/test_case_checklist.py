@@ -240,3 +240,65 @@ def test_a_closed_case_takes_no_more_results_or_decisions(mysql_engine, member_i
             assert error.value.status_code == 409
             assert error.value.detail == "폐업 정리를 마친 Case입니다."
             session.rollback()
+
+
+def signed_up(engine, **overrides) -> int:
+    fields = dict(business_type="CAFE", franchise_status=False, employee_count=2, lease_status="LEASED_PAID")
+    fields.update(overrides)
+    with Session(engine) as session:
+        member = create_member(session, oauth_id=str(uuid4()), nickname="합성 사용자")
+        create_case(session, member.id, CaseCreateRequest(**fields))
+        return member.id
+
+
+def rejected(engine, member_id: int, task_id: str) -> int:
+    with pytest.raises(HTTPException) as error:
+        check(engine, member_id, task_id, True)
+    return error.value.status_code
+
+
+def test_a_task_that_does_not_apply_to_this_store_is_rejected(mysql_engine):
+    """대출이 없다고 한 가게에 "은행 상환 조건 확인"은 해당 없음이다(승준님 #149)."""
+
+    member_id = signed_up(mysql_engine, has_business_loan=False)
+
+    assert rejected(mysql_engine, member_id, "check_loan") == 422
+    assert checked_tasks(mysql_engine, member_id) == []
+    assert history_of(mysql_engine, member_id) == []
+
+
+def test_the_same_task_is_accepted_when_it_applies(mysql_engine):
+    member_id = signed_up(mysql_engine, has_business_loan=True)
+
+    check(mysql_engine, member_id, "check_loan", True)
+
+    assert checked_tasks(mysql_engine, member_id) == ["check_loan"]
+
+
+def test_a_demolition_task_waits_until_demolition_is_known(mysql_engine, member_id):
+    """가입 직후엔 철거 필요 여부를 몰라서 철거비 항목은 "확인 필요"다. AI가 정한 뒤에 체크한다."""
+
+    assert rejected(mysql_engine, member_id, "before_photo") == 422
+    assert checked_tasks(mysql_engine, member_id) == []
+
+
+def test_an_unsupported_store_cannot_check_anything(mysql_engine):
+    """프랜차이즈 카페는 로드맵이 없다(supported=false). 체크할 항목도 없다."""
+
+    member_id = signed_up(mysql_engine, franchise_status=True)
+
+    assert rejected(mysql_engine, member_id, "dispose_stock") == 422
+
+
+def test_unchecking_is_always_allowed(mysql_engine):
+    """잘못 들어간 체크를 못 푸는 일이 없어야 한다. 해당 없는 항목이 저장돼 있어도 풀린다."""
+
+    member_id = signed_up(mysql_engine, has_business_loan=False)
+    with Session(mysql_engine) as session:
+        case = get_case_by_member_id(session, member_id)
+        session.add(CaseChecklist(case_id=case.id, task_id="check_loan"))
+        session.commit()
+
+    check(mysql_engine, member_id, "check_loan", False)
+
+    assert checked_tasks(mysql_engine, member_id) == []
