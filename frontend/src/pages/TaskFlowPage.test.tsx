@@ -341,6 +341,23 @@ describe('ClosureReportFlow', () => {
     expect(screen.getByLabelText('상세 주소 (선택)')).toHaveValue('1층')
     expect(screen.getByRole('button', { name: '다시 저장하기' })).toBeEnabled()
   })
+
+  /** 저장한 뒤 고친 칸은 아직 서버에 없다. "저장했어요"가 남으면 고친 내용까지 저장된 줄 알고 떠난다 */
+  it('저장한 뒤 칸을 고치면 저장했다는 안내와 결과 알려주기를 내린다', () => {
+    renderFlow(
+      <ClosureReportFlow
+        task={closureTask}
+        initial={{ closureDate: '2026-10-31', closureReason: 'PERSONAL', roadAddress: '서울 마포구 망원로 52 (망원동)', addressDetail: null }}
+      />,
+    )
+    expect(screen.getByText('신고 정보를 저장했어요')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('폐업일'), { target: { value: '2026-11-30' } })
+
+    expect(screen.queryByText('신고 정보를 저장했어요')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '결과 알려주기' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '저장하기' })).toBeEnabled()
+  })
 })
 
 const depositTask: RoadmapTaskView = { id: 'deposit_settlement', title: '보증금 정산 기록', kind: 'CHECKLIST', status: 'NOT_STARTED' }

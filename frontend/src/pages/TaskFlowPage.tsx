@@ -429,6 +429,17 @@ export function ClosureReportFlow({ task, initial = null }: { task: RoadmapTaskV
   const dateId = useId()
   const detailId = useId()
 
+  /*
+    칸을 고치면 "저장했어요"를 내린다. 저장한 뒤 날짜나 주소를 고치고 [결과 알려주기]로 떠나면, 사장님은
+    고친 내용까지 저장된 줄 안다. 서버에는 고치기 전 값이 남아 있다
+  */
+  const edited =
+    <T,>(set: (value: T) => void) =>
+    (value: T) => {
+      setSaved(false)
+      set(value)
+    }
+
   const ready = closureDate !== '' && reason !== null && roadAddress !== ''
 
   async function submit() {
@@ -462,7 +473,7 @@ export function ClosureReportFlow({ task, initial = null }: { task: RoadmapTaskV
           id={dateId}
           type="date"
           value={closureDate}
-          onChange={(event) => setClosureDate(event.target.value)}
+          onChange={(event) => edited(setClosureDate)(event.target.value)}
           className="h-13 rounded-xl px-3 text-17 ring-1 ring-stroke-neutral-weak ring-inset"
         />
       </div>
@@ -478,7 +489,7 @@ export function ClosureReportFlow({ task, initial = null }: { task: RoadmapTaskV
               type="button"
               role="radio"
               aria-checked={reason === option.value}
-              onClick={() => setReason(option.value)}
+              onClick={() => edited(setReason)(option.value)}
               className={`h-12 flex-1 cursor-pointer rounded-full text-16 font-medium ring-inset ${
                 reason === option.value ? 'bg-bg-brand-weak ring-2 ring-stroke-brand-solid' : 'ring-1 ring-stroke-neutral-weak'
               }`}
@@ -503,7 +514,7 @@ export function ClosureReportFlow({ task, initial = null }: { task: RoadmapTaskV
           value={detail}
           maxLength={100}
           placeholder="예: 1층"
-          onChange={(event) => setDetail(event.target.value)}
+          onChange={(event) => edited(setDetail)(event.target.value)}
           className="h-13 rounded-xl px-3 text-17 ring-1 ring-stroke-neutral-weak ring-inset"
         />
       </div>
@@ -540,7 +551,7 @@ export function ClosureReportFlow({ task, initial = null }: { task: RoadmapTaskV
         onClose={() => setFinding(false)}
         onSelect={(address) => {
           setFinding(false)
-          setRoadAddress(address)
+          edited(setRoadAddress)(address)
         }}
       />
     </TaskFrame>
