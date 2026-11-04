@@ -190,3 +190,45 @@ def test_the_judgment_snapshot_still_refuses_a_finished_case(mysql_engine):
         case = get_case_by_member_id(session, member_id)
         with pytest.raises(ValidationError):
             case_snapshot_service.build_case_snapshot(session, case.id)
+
+
+def task_status(roadmap, task_id: str) -> str:
+    return next(
+        task.status for stage in roadmap.stages for task in stage.tasks if task.task_id == task_id
+    )
+
+
+def test_a_passed_document_check_shows_up_as_done(mysql_engine, tmp_path, monkeypatch):
+    """서류 점검을 통과하면 4단계 "AI 서류 점검"이 완료로 온다(현석님 #178).
+
+    이 항목은 체크가 아니라 서류 점검 결과로만 상태가 정해진다. 점검 결과를 안 넘기면
+    사장님이 통과해도 "확인 필요"로 남고, 그러면 지금 단계(#179)가 4단계에 멈춘다.
+    """
+
+    from app.agent.document_tool.checks import document_digest
+    from app.agent.document_tool.models import DocumentCheck, DocumentContext
+    from app.be.crud.case import get_case_by_member_id
+    from app.be.services import document as document_service
+
+    monkeypatch.setattr(document_service, "document_directory", lambda: tmp_path)
+    member_id = new_case(mysql_engine)
+    with Session(mysql_engine) as session:
+        # 이 항목은 정산 단계라 철거가 필요하고 지원 승인까지 나와야 해당된다. 그 전에는
+        # 해당 여부를 몰라 "확인 필요"로 나와서, 점검 결과를 넘기는지 알 수 없다.
+        case = get_case_by_member_id(session, member_id)
+        case.demolition_required = "REQUIRED"
+        case.support_approved = True
+        session.commit()
+
+    # 점검 전: 해당되지만 아직 통과한 점검이 없다.
+    assert task_status(roadmap_of(mysql_engine, member_id), "document_check") == "NOT_STARTED"
+
+    with Session(mysql_engine) as session:
+        case = get_case_by_member_id(session, member_id)
+        context = DocumentContext(case_id=document_service.document_case_id(case))
+        context.document_check = DocumentCheck(
+            status="COMPLETE", steps=[], issues=[], document_digest=document_digest(context),
+        )
+        document_service.save_context(tmp_path, context)
+
+    assert task_status(roadmap_of(mysql_engine, member_id), "document_check") == "COMPLETED"

@@ -17,6 +17,7 @@ from app.be.crud import case_checklist as case_checklist_crud
 from app.be.models.case import Case
 from app.be.services import agent_runtime as agent_runtime_service
 from app.be.services import case_snapshot as case_snapshot_service
+from app.be.services import document as document_service
 
 __all__ = ["build_roadmap_input", "get_case_roadmap"]
 
@@ -44,12 +45,14 @@ def build_roadmap_input(session: Session, case: Case) -> RoadmapInput:
             for row in case_checklist_crud.get_case_checklists_by_case_id(session, case.id)
         }
         & CHECKLIST_IDS,
-        # 검수를 통과한 판단만 다음 할 일을 정할 수 있다. 그것을 꺼내 오는 길은 아직 없어서
-        # next_action·next_task_id·questions_for_user가 비어 나간다.
-        # TODO: 검수 통과 판단을 되살리는 경로가 생기면 여기에 넘긴다.
+        # 오늘 할 일과 되묻는 질문은 GET /cases가 맡는다. 화면도 그쪽을 읽는다
+        # (frontend/src/adapters/case.ts). 같은 것을 두 API로 나누지 않으려고 비워 둔다.
+        # 그래서 로드맵의 next_action·next_task_id·questions_for_user는 늘 비어 나간다(현석님 #178).
         reviewed_plan=None,
-        # TODO: 서류 점검 결과(#159)가 들어오면 여기에 넘긴다.
-        documents=None,
+        # 서류 점검 결과. 4단계 "AI 서류 점검"은 체크가 아니라 이 값으로만 상태가 정해져서
+        # (agent/roadmap.py의 document_check), 안 넘기면 사장님이 점검을 통과해도 계속
+        # "시작 전"으로 남는다. 서류를 안 올린 Case는 빈 목록이라 넘겨도 결과가 같다.
+        documents=document_service.load_context(document_service.document_directory(), case),
     )
 
 
