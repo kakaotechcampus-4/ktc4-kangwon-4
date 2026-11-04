@@ -44,76 +44,12 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+/** Mock 은 Preview 에서 화면을 보려고 둔다. 서버를 부르지 않고 한 바퀴 도는지만 본다(화면당 하나) */
 describe('ResultInputPage — Mock', () => {
-  /** 눌러도 아무 일이 없는 버튼은 고장으로 읽힌다. 적기 전에는 꺼 둔다 */
-  it('아무것도 적지 않으면 보내기가 꺼져 있다', async () => {
-    renderFlow('/results?mock=updated')
-
-    expect(await screen.findByRole('button', { name: '보내기' })).toBeDisabled()
-    fireEvent.change(screen.getByLabelText('어떻게 됐나요?'), { target: { value: '   ' } })
-    expect(screen.getByRole('button', { name: '보내기' })).toBeDisabled()
-  })
-
-  /**
-   * 서버는 2,000자를 넘는 글을 받지 않는다(BE 422). 소리 없이 잘라 보내지 않고, 넘으면 보내기를 막고 줄여 달라고 한다.
-   * 평소 답은 수십 자라 1,800자 전에는 숫자를 띄우지 않는다
-   */
-  it('글이 1,800자를 넘으면 글자 수를, 2,000자를 넘으면 줄여 달라는 안내와 함께 보내기를 막는다', async () => {
-    renderFlow('/results?mock=updated')
-    const box = await screen.findByLabelText('어떻게 됐나요?')
-
-    fireEvent.change(box, { target: { value: '가'.repeat(1_800) } })
-    expect(screen.queryByText(/\/ 2,000자/)).not.toBeInTheDocument()
-
-    fireEvent.change(box, { target: { value: '가'.repeat(1_900) } })
-    expect(screen.getByText('1,900 / 2,000자')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '보내기' })).toBeEnabled()
-
-    fireEvent.change(box, { target: { value: '가'.repeat(2_001) } })
-    expect(screen.getByText('2,000자까지 보낼 수 있어요. 조금 줄여 주세요.')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '보내기' })).toBeDisabled()
-  })
-
-  /** 되물은 질문에 답할 때는 질문을 붙여 보낸다. 칸 하나가 아니라 보내는 글 전체로 센다(승준님) */
-  it('질문에 답할 때는 물어본 질문까지 묶은 글 전체로 센다', async () => {
-    renderFlow('/results?mock=more-info')
-    const [first] = await screen.findAllByRole('textbox')
-
-    fireEvent.change(first, { target: { value: '가'.repeat(1_990) } })
-
-    expect(screen.getByText(/물어본 질문까지 함께 세요/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '보내기' })).toBeDisabled()
-  })
-
-  /** 판단은 길면 2분 걸린다. 그동안 눌리는 폼이 그대로 있으면 같은 글을 또 보내게 된다 */
-  it('보내는 동안은 폼 대신 처리 화면을 보여준다', async () => {
+  it('?mock= 이면 서버를 부르지 않고 보내고, 응답이 오면 재계획 화면으로 간다', async () => {
     vi.useFakeTimers()
-    renderFlow('/results?mock=updated')
-
-    submit('임대인이 철거하래요')
-    await advance()
-
-    expect(screen.getByRole('heading', { name: '답변을 정리하고 있어요' })).toBeInTheDocument()
-    expect(screen.getByRole('status')).toBeInTheDocument()
-    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '보내기' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '처리 중이에요' })).toBeDisabled()
-  })
-
-  /** 판단은 몇 분이 걸릴 수 있다. 떠나면 결과가 사라지는 줄 알면 그동안 화면에 묶인다 */
-  it('기다리는 동안 화면을 떠나도 된다고 알린다', async () => {
-    vi.useFakeTimers()
-    renderFlow('/results?mock=updated')
-
-    submit('임대인이 철거하래요')
-    await advance()
-
-    expect(screen.getByText('화면을 떠나셔도 계속 처리돼요. 끝나면 홈에서 보실 수 있어요.')).toBeInTheDocument()
-  })
-
-  /** 기다린 사람은 결과 화면으로 간다 — 아래 테스트가 이동 자체를 막아버리지 않았는지 함께 본다 */
-  it('응답이 오면 재계획 화면으로 이동한다', async () => {
-    vi.useFakeTimers()
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
     const router = renderFlow('/results?mock=updated')
 
     submit('임대인이 철거하래요')
@@ -122,31 +58,7 @@ describe('ResultInputPage — Mock', () => {
     })
 
     expect(router.state.location.pathname).toBe('/replan')
-  })
-
-  /**
-   * 응답을 기다리는 동안 사용자가 뒤로 갈 수 있다. 그때 이동을 그대로 실행하면
-   * 일부러 빠져나온 화면으로 몇 초 뒤에 끌려간다 — 사용자에게는 고장으로 읽힌다.
-   *
-   * 화면이 아직 붙어 있는지 확인하는 한 줄로 막고 있어서, 파일을 옮기거나 고치는
-   * 과정에서 조용히 사라지기 쉽다. 사라져도 기다리다 뒤로 가보지 않으면 모른다.
-   */
-  it('대기 중에 화면을 떠나면 이동하지 않는다', async () => {
-    vi.useFakeTimers()
-    const router = renderFlow('/results?mock=updated')
-
-    submit('임대인이 철거하래요')
-
-    await act(async () => {
-      await router.navigate(-1)
-    })
-    expect(router.state.location.pathname).toBe('/case')
-
-    await act(async () => {
-      vi.runAllTimers()
-    })
-
-    expect(router.state.location.pathname).toBe('/case')
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })
 
@@ -229,7 +141,7 @@ const INTERVAL_MS = 10_000
 /**
  * 서버를 부르는 경로. 들어올 때 지금 판단을 묻고, 보낸 뒤 판단이 끝날 때까지 기다린다.
  *
- * 앞의 Mock 테스트로는 이 경로가 하나도 지나가지 않는다 — Mock 은 서버를 아예 부르지 않는다.
+ * 화면 테스트는 이 경로로 본다. Mock 은 서버를 아예 부르지 않아 위에 폴백 하나만 둔다.
  */
 describe('ResultInputPage — 서버', () => {
   beforeEach(() => {
@@ -515,6 +427,74 @@ describe('ResultInputPage — 서버', () => {
       await advance()
 
       expect(screen.getByRole('textbox')).toBeEnabled()
+    })
+  })
+
+  describe('쓰는 동안', () => {
+    /** 눌러도 아무 일이 없는 버튼은 고장으로 읽힌다. 적기 전에는 꺼 둔다 */
+    it('아무것도 적지 않으면 보내기가 꺼져 있다', async () => {
+      serve({ entry: [READY] })
+      renderFlow()
+      await advance()
+
+      expect(screen.getByRole('button', { name: '보내기' })).toBeDisabled()
+      fireEvent.change(screen.getByLabelText('어떻게 됐나요?'), { target: { value: '   ' } })
+      expect(screen.getByRole('button', { name: '보내기' })).toBeDisabled()
+    })
+
+    /**
+     * 서버는 2,000자를 넘는 글을 받지 않는다(BE 422). 소리 없이 잘라 보내지 않고, 넘으면 보내기를 막고 줄여 달라고 한다.
+     * 평소 답은 수십 자라 1,800자 전에는 숫자를 띄우지 않는다
+     */
+    it('글이 1,800자를 넘으면 글자 수를, 2,000자를 넘으면 줄여 달라는 안내와 함께 보내기를 막는다', async () => {
+      serve({ entry: [READY] })
+      renderFlow()
+      await advance()
+      const box = screen.getByLabelText('어떻게 됐나요?')
+
+      fireEvent.change(box, { target: { value: '가'.repeat(1_800) } })
+      expect(screen.queryByText(/\/ 2,000자/)).not.toBeInTheDocument()
+
+      fireEvent.change(box, { target: { value: '가'.repeat(1_900) } })
+      expect(screen.getByText('1,900 / 2,000자')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '보내기' })).toBeEnabled()
+
+      fireEvent.change(box, { target: { value: '가'.repeat(2_001) } })
+      expect(screen.getByText('2,000자까지 보낼 수 있어요. 조금 줄여 주세요.')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '보내기' })).toBeDisabled()
+    })
+
+    /** 되물은 질문에 답할 때는 질문을 붙여 보낸다. 칸 하나가 아니라 보내는 글 전체로 센다(승준님) */
+    it('질문에 답할 때는 물어본 질문까지 묶은 글 전체로 센다', async () => {
+      serve({
+        entry: [json(entryBody({ judgment_status: 'NEEDS_MORE_INFO', next_action: null, questions_for_user: ['직원이 몇 명인가요?'] }))],
+      })
+      renderFlow()
+      await advance()
+
+      fireEvent.change(screen.getByLabelText('직원이 몇 명인가요?'), { target: { value: '가'.repeat(1_990) } })
+
+      expect(screen.getByText(/물어본 질문까지 함께 세요/)).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '보내기' })).toBeDisabled()
+    })
+  })
+
+  describe('기다리는 동안', () => {
+    /** 판단은 길면 2분 걸린다. 그동안 눌리는 폼이 그대로 있으면 같은 글을 또 보내게 된다 */
+    it('폼 대신 처리 화면을 보여주고, 떠나도 된다고 알린다', async () => {
+      serve({ entry: [READY], submit: [ACCEPTED], judged: [json(judgedBody({ result: 'PENDING' }))] })
+      renderFlow()
+      await advance()
+
+      submit('임대인이 철거하래요')
+      await advance()
+
+      expect(screen.getByRole('heading', { name: '답변을 정리하고 있어요' })).toBeInTheDocument()
+      expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: '보내기' })).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '처리 중이에요' })).toBeDisabled()
+      // 판단은 몇 분이 걸릴 수 있다. 떠나면 결과가 사라지는 줄 알면 그동안 화면에 묶인다
+      expect(screen.getByText('화면을 떠나셔도 계속 처리돼요. 끝나면 홈에서 보실 수 있어요.')).toBeInTheDocument()
     })
   })
 

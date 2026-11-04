@@ -2,9 +2,9 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { createMemoryRouter, RouterProvider } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { MOCK_UPLOAD_MS } from '../mocks/documents'
+import type { DocumentListResponse } from '../types/api'
 import { ApplicantSheet, DocsCheckPage } from './DocsCheckPage'
-import { issuesCheck, json, serve, serverDocument, serverList, status } from './docsTestServer'
+import { completeCheck, issuesCheck, json, serve, serverDocument, serverList, status } from './docsTestServer'
 
 function renderAt(path: string) {
   const router = createMemoryRouter(
@@ -25,7 +25,6 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-/** 서류 API(#159) 머지 전이다. 점검할 곳이 없는데 점검 버튼이 눌리면 고장으로 읽힌다 */
 /** 서류 API(#159). 점검은 서버가 하고, 화면은 보낸 이름·날짜와 서버 결과만 옮긴다 */
 describe('DocsCheckPage — 서버', () => {
   afterEach(() => {
@@ -67,12 +66,28 @@ describe('DocsCheckPage — 서버', () => {
   })
 })
 
-describe('DocsCheckPage — Mock', () => {
-  /** 신청인 이름 없이 점검하면 이체확인증을 맞춰 볼 수 없어 서버가 끝내지 않는다(#159) */
-  it('점검 전에 이름을 묻고, 이름을 적어야 점검한다', () => {
-    renderAt('/docs/check?mock=docs')
+/** 점검 결과. 끝난 단계와 확인이 필요한 단계를 하나씩 둔다(Mock 은 시연용이라 바뀌어 테스트가 따로 들고 있는다) */
+const PARTLY_CHECKED: DocumentListResponse['check'] = {
+  status: 'ISSUES',
+  steps: [
+    { name: '서류 종류 나누기', status: 'DONE' },
+    { name: '빠진 서류 찾기', status: 'NEEDS_CONFIRMATION' },
+  ],
+  issues: [{ code: 'MISSING_TRANSFER', document_ids: [], message: '정산 점검 목록에서 빠진 서류: 이체확인증' }],
+  checked_at: '2026-11-04T10:00:00+09:00',
+}
 
-    fireEvent.click(screen.getByRole('button', { name: '점검 시작하기' }))
+describe('DocsCheckPage — 점검 흐름', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  /** 신청인 이름 없이 점검하면 이체확인증을 맞춰 볼 수 없어 서버가 끝내지 않는다(#159) */
+  it('점검 전에 이름을 묻고, 이름을 적어야 점검한다', async () => {
+    serve(json(serverList([serverDocument()])))
+    renderAt('/docs/check')
+
+    fireEvent.click(await screen.findByRole('button', { name: '점검 시작하기' }))
     const ask = sheet()!
     const submit = within(ask).getByRole('button', { name: '점검하기' })
     expect(submit).toBeDisabled()
@@ -84,36 +99,49 @@ describe('DocsCheckPage — Mock', () => {
     expect(submit).toBeEnabled()
   })
 
-  it('점검하는 동안 기다리게 하고, 서버가 찾은 것을 그대로 보여준다', async () => {
-    vi.useFakeTimers()
-    renderAt('/docs/check?mock=docs')
+  it('점검하는 동안 다시 누르지 못하게 하고, 끝나면 서버가 준 단계 상태를 그대로 보여준다', async () => {
+    let finish: (response: Response) => void = () => {}
+    serve(json(serverList([serverDocument()])), () => new Promise<Response>((resolve) => (finish = resolve)))
+    renderAt('/docs/check')
 
-    fireEvent.click(screen.getByRole('button', { name: '점검 시작하기' }))
+    fireEvent.click(await screen.findByRole('button', { name: '점검 시작하기' }))
     fireEvent.change(within(sheet()!).getByLabelText('신청인 이름'), { target: { value: '김리본' } })
     fireEvent.click(within(sheet()!).getByRole('button', { name: '점검하기' }))
 
-    expect(screen.getByRole('button', { name: '점검 중이에요' })).toBeDisabled()
+    expect(await screen.findByRole('button', { name: '점검 중이에요' })).toBeDisabled()
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(MOCK_UPLOAD_MS)
+      finish(new Response(JSON.stringify(serverList([serverDocument()], PARTLY_CHECKED))))
     })
-    // 확인이 필요한 서류가 남은 Mock 이라 확인할 것이 나온다. 문구는 서버(여기서는 Mock)가 쓴 그대로다
-    expect(screen.getByText('정산 점검 목록에서 빠진 서류: 이체확인증')).toBeInTheDocument()
+    expect(await screen.findByText('정산 점검 목록에서 빠진 서류: 이체확인증')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '다시 점검하기' })).toBeInTheDocument()
     // 확인이 필요한 단계를 "완료"로 그리면 점검이 끝난 줄 안다
     expect(screen.getByText('빠진 서류 찾기').closest('li')).not.toHaveTextContent('완료')
     expect(screen.getByText('서류 종류 나누기').closest('li')).toHaveTextContent('완료')
   })
 
-  /** 통과한 점검이 있으면 제출 파일로 간다. Mock 표시는 다음 화면에도 이어진다 */
-  it('점검을 통과했으면 결과 보기로 정산 파일 화면에 간다', () => {
-    const router = renderAt('/docs/check?mock=docs-complete')
+  /** 통과한 점검이 있으면 제출 파일로 간다 */
+  it('점검을 통과했으면 결과 보기로 정산 파일 화면에 간다', async () => {
+    serve(json(serverList([serverDocument()], completeCheck)))
+    const router = renderAt('/docs/check')
 
-    expect(screen.getByRole('heading', { name: '서류 점검을 마쳤어요' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '서류 점검을 마쳤어요' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '결과 보기' }))
 
     expect(router.state.location.pathname).toBe('/docs/done')
+  })
+})
+
+/** Mock 은 Preview 에서 화면을 보려고 둔다. 서버를 부르지 않고 그려지는지, 다음 화면에 Mock 표시를 잇는지만 본다 */
+describe('DocsCheckPage — Mock', () => {
+  it('?mock= 이면 서버를 부르지 않고 그리고, 다음 화면에 Mock 표시를 잇는다', () => {
+    const { fetchMock } = serve(json(serverList([])))
+    const router = renderAt('/docs/check?mock=docs-complete')
+
+    fireEvent.click(screen.getByRole('button', { name: '결과 보기' }))
+
     expect(router.state.location.search).toBe('?mock=docs-complete')
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })
 
