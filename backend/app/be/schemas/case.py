@@ -186,6 +186,12 @@ class CaseConflictsDecisionRequest(BaseModel):
     decisions: list[CaseConflictsDecisionItem]
 
 
+class NewTaskResponse(BaseModel):
+    # 체크 항목만이 아니라 공식 절차 항목(restoration 등)도 올 수 있어 ChecklistTaskId로 좁히지 않는다
+    task_id: str
+    title: str
+
+
 class CaseResultsSubmitResponse(BaseModel):
     result: ResultsSubmitResult
     changes: list[FieldChangeResponse] | None = None
@@ -197,6 +203,9 @@ class CaseResultsSubmitResponse(BaseModel):
     recovery_action_code: RecoveryActionCode | None = None
     retryable: bool | None = None
     requested_field_paths: list[str] | None = None
+    # 이번 판단으로 해야 할 일이 된 로드맵 항목(시안 "할 일 3개가 새로 생겼어요"). DONE일 때만 채운다.
+    # 비교할 직전 판단 기록이 없으면 null이고, 새로 생긴 게 없으면 []다.
+    new_tasks: list[NewTaskResponse] | None = None
 
 
 class CaseChecklistUpdateRequest(BaseModel):
