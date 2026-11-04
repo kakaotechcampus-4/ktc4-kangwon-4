@@ -28,3 +28,12 @@ def create_case_checklist_history(session: Session, history: CaseChecklistHistor
 
 def get_case_checklist_histories_by_case_id(session: Session, case_id: int) -> list[CaseChecklistHistory]:
     return session.exec(select(CaseChecklistHistory).where(CaseChecklistHistory.case_id == case_id)).all()
+
+
+def get_case_checklists_by_case_id(session: Session, case_id: int) -> list[CaseChecklist]:
+    """사장님이 지금 체크해 둔 항목 전부. 없으면 빈 리스트.
+
+    체크를 풀면 줄을 지우므로, 여기 있는 것이 곧 지금 체크된 것이다.
+    """
+
+    return session.exec(select(CaseChecklist).where(CaseChecklist.case_id == case_id)).all()
