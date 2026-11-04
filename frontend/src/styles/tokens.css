@@ -162,4 +162,60 @@
       width: 100%;
     }
   }
+
+  /*
+   * 화면 움직임의 곡선. 시간은 쓰는 곳에 적고, 곡선만 여기서 맞춘다.
+   *
+   * - `out-soft` 시안의 화면 밀기 곡선. 빠르게 나와서 천천히 멈춘다. 화면 이동·장면 페이드·펼치기에 쓴다
+   * - `sheet`    iOS 시트 곡선. 끝이 더 길게 미끄러진다. 아래 시트에 쓴다
+   */
+  --ease-out-soft: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-sheet: cubic-bezier(0.32, 0.72, 0, 1);
+
+  /*
+   * 홈 단계 막대가 차오르는 시간. 시우님이 눈으로 보고 다시 정하기로 한 값이라(11/04) 한곳에 둔다
+   */
+  --duration-stage-fill: 0.8s;
+
+  /* 내용이 새로 나타날 때 흐리게 들어온다(`animate-fade-in`). 홈 띠 넘김, 소개 화면 글 */
+  --animate-fade-in: fade-in 0.3s var(--ease-out-soft);
+  /* 도움말·오류 한 줄처럼 작은 것은 더 짧게 들어온다(`animate-fade-in-short`) */
+  --animate-fade-in-short: fade-in 0.2s var(--ease-out-soft);
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+  }
+
+  /*
+   * 상황 진단 질문을 넘길 때. 앞으로 가면 오른쪽에서, [이전]이면 왼쪽에서 조금 밀려 들어온다
+   * (`animate-step-forward` · `animate-step-back`). 화면 전체가 아니라 질문만 움직인다
+   */
+  --animate-step-forward: step-forward 0.3s var(--ease-out-soft);
+  --animate-step-back: step-back 0.3s var(--ease-out-soft);
+
+  @keyframes step-forward {
+    from {
+      opacity: 0;
+      transform: translateX(16px);
+    }
+  }
+
+  @keyframes step-back {
+    from {
+      opacity: 0;
+      transform: translateX(-16px);
+    }
+  }
+
+  /* 소개 화면의 그림이 조금 작은 데서 커지며 들어온다(`animate-picture-in`) */
+  --animate-picture-in: picture-in 0.35s var(--ease-out-soft);
+
+  @keyframes picture-in {
+    from {
+      opacity: 0;
+      transform: scale(0.96);
+    }
+  }
 }
