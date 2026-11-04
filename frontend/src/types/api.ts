@@ -401,6 +401,48 @@ export interface CaseSupportApprovalResponse {
   approved: boolean | null
 }
 
+/** 로드맵 할 일 상태(AI 로드맵 `TaskStatus`). 이것이 다가 아닐 수 있어 모르는 값은 어댑터가 뺀다 */
+export type RoadmapTaskStatusCode = 'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETED' | 'NOT_APPLICABLE' | 'NEEDS_CONFIRMATION'
+
+/** 로드맵 할 일 종류. `CHECKLIST` 체크 항목 · `PROCEDURE` 공식 절차 · `DOCUMENT_CHECK` 서류 점검 · `CASE_FACT` 가게 정보 */
+export type RoadmapTaskKindCode = 'CHECKLIST' | 'PROCEDURE' | 'DOCUMENT_CHECK' | 'CASE_FACT'
+
+/**
+ * 로드맵 할 일 한 줄. 서버는 이 밖에 절차 번호(`procedure_steps`)·설명 출처(`guidance_source`)도 주지만
+ * 화면이 쓰지 않아 옮기지 않는다
+ */
+export interface RoadmapTaskResponse {
+  /** 할 일 번호(`dispose_stock` 등). 체크 저장 `PUT /cases/checklists/{task_id}` 의 그 번호다 */
+  task_id: string
+  title: string
+  kind: RoadmapTaskKindCode
+  status: RoadmapTaskStatusCode
+  /** 검수한 설명. 없으면 `null` */
+  guidance: string | null
+}
+
+export interface RoadmapStageResponse {
+  /** 단계 번호 1~5 */
+  stage: number
+  title: string
+  tasks: RoadmapTaskResponse[]
+}
+
+/**
+ * `GET /cases/roadmap` 응답(#178). AI 로드맵(`app/agent/roadmap.py` `Roadmap`)을 그대로 내보낸다.
+ * 화면이 쓰는 칸만 옮겼다(Case 번호·스냅샷 번호·`next_action` 등은 쓰지 않는다 — 오늘 할 일은 `GET /cases` 가 맡는다).
+ *
+ * 미지원 업종이면 `supported` 가 `false` 이고 `unsupported_reason` 에 안내 문구, 단계는 빈 목록이다.
+ * `current_stage` 는 해야 할 일이 남은 가장 앞 단계(#179). 폐업 정리를 마쳤거나 미지원이면 `null`.
+ * Case 가 없으면 404 다.
+ */
+export interface RoadmapResponse {
+  supported: boolean
+  unsupported_reason: string | null
+  stages: RoadmapStageResponse[]
+  current_stage: number | null
+}
+
 /** 폐업 사유. `BUSINESS_SLUMP` 사업 부진 · `PERSONAL` 개인 사정 · `OTHER` 기타 */
 export type ClosureReason = 'BUSINESS_SLUMP' | 'PERSONAL' | 'OTHER'
 
