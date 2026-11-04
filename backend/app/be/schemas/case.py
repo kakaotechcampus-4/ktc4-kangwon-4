@@ -29,11 +29,13 @@ CaseLogEvent = Literal[
     "CHECKLIST_COMPLETED",
     "CHECKLIST_UNCHECKED",
     "SUPPORT_RESULT_REPORTED",
+    "DOCUMENT_UPLOADED",
     # 리본이 한 일
     "NEXT_ACTION_DECIDED",
     "MORE_INFO_REQUESTED",
     "CONFLICT_FOUND",
     "JUDGMENT_FAILED",
+    "DOCUMENTS_CHECKED",
     "ROADMAP_TASKS_ADDED",
 ]
 
@@ -234,7 +236,8 @@ class CaseLogItem(BaseModel):
     task_id: ChecklistTaskId | None
     # 문구를 만들 때 쓸 값. NEXT_ACTION_DECIDED는 정한 할 일 제목,
     # ROADMAP_TASKS_ADDED는 이번 판단으로 새로 생긴 할 일 개수(예: "3"),
-    # SUPPORT_RESULT_REPORTED는 APPROVED/REJECTED/UNKNOWN. 그 밖에는 null
+    # SUPPORT_RESULT_REPORTED는 APPROVED/REJECTED/UNKNOWN, DOCUMENT_UPLOADED는 올린 서류 종류(예: TRANSFER).
+    # 그 밖에는 null
     detail: str | None
 
 

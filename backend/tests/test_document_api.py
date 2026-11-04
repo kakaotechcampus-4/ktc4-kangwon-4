@@ -6,10 +6,12 @@ DB와 모델은 부르지 않는다. Case는 가짜 객체로, 모델은 documen
 import io
 from datetime import date, datetime
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 from zipfile import ZipFile
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlmodel import Session
 
 from app.agent.document_tool.documents import DocumentService
 from app.agent.document_tool.models import DocumentKind
@@ -49,7 +51,8 @@ def api(tmp_path, monkeypatch):
                                            submission_policy="RRN_BACK_ONLY"))
 
     def fake_db():
-        yield None
+        # 서류 기록(case_document_history) 저장은 test_case_document_log.py가 실제 MySQL로 본다
+        yield MagicMock(spec=Session)
 
     monkeypatch.setattr(case_crud, "get_case_by_member_id", lambda _session, member_id: cases.get(member_id))
     app.dependency_overrides.update({

@@ -66,7 +66,7 @@ async def upload_document(
     case = _current_case(session, member_id)
     content = await file.read(document_service.MAX_UPLOAD_BYTES + 1)
     context = await document_service.upload_document(
-        tool, directory, case, file.filename or "document", content, kind,
+        session, tool, directory, case, file.filename or "document", content, kind,
     )
     return document_list_response(context)
 
@@ -110,7 +110,7 @@ def check_documents(
     # 점검은 규칙만 돌고 모델을 부르지 않는다(checks.check_settlement)
     case = _current_case(session, member_id)
     context = document_service.check_documents(
-        tool, directory, case, check_request.applicant_name, check_request.closure_date,
+        session, tool, directory, case, check_request.applicant_name, check_request.closure_date,
     )
     return document_list_response(context)
 
