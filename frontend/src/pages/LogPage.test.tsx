@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { createMemoryRouter, RouterProvider } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { saveTokens } from '../lib/auth'
 import type { CaseLogItem } from '../types/api'
 import { LogPage } from './LogPage'
 
@@ -41,6 +42,36 @@ const item = (overrides: Partial<CaseLogItem>): CaseLogItem => ({
 
 afterEach(() => {
   vi.unstubAllGlobals()
+})
+
+/** 체크 기록은 서버가 번호만 준다. 기록 탭이 로드맵을 따로 물어 그 이름을 붙인다 */
+describe('LogPage — 할 일 이름', () => {
+  it('마친 할 일 아래에 로드맵의 할 일 이름을 붙인다', async () => {
+    saveTokens('access-1', 'refresh-1')
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) =>
+        url.includes('/cases/roadmap')
+          ? json({
+              supported: true,
+              unsupported_reason: null,
+              current_stage: 3,
+              stages: [
+                {
+                  stage: 3,
+                  title: '영업 마무리·폐업 신고',
+                  tasks: [{ task_id: 'dispose_stock', title: '재고·장비 처분', kind: 'CHECKLIST', status: 'COMPLETED', guidance: null }],
+                },
+              ],
+            })()
+          : json({ logs: [item({ actor: 'OWNER', event: 'CHECKLIST_COMPLETED', task_id: 'dispose_stock', detail: null })] })(),
+      ),
+    )
+    renderAt('/log')
+
+    expect(await screen.findByText('재고·장비 처분')).toBeInTheDocument()
+    expect(screen.getByText('할 일 하나를 마치셨어요')).toBeInTheDocument()
+  })
 })
 
 /**

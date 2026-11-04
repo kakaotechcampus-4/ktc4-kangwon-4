@@ -411,8 +411,10 @@ export interface LogEntry {
   key: string
   actor: LogActor
   text: string
-  /** 덧붙이는 한 줄. 정한 할 일 제목이나 사장님이 알려 준 심사 결과. 없으면 그리지 않는다 */
+  /** 덧붙이는 한 줄. 정한 할 일 제목, 사장님이 알려 준 심사 결과, 마친 할 일 이름 등. 없으면 그리지 않는다 */
   detail?: string
+  /** 체크 기록(`CHECKLIST_*`)이면 어떤 할 일인지. 로드맵 이름을 붙이는 데 쓴다(`withTaskTitles`) */
+  taskId?: string
   /** `10.17` 처럼 월.일. 서버가 준 날짜 글자를 그대로 잘라 쓴다 */
   date: string
 }

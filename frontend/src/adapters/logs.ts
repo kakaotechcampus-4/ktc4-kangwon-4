@@ -1,6 +1,6 @@
 import type { CaseLogResponse } from '../types/api'
 import { DOCUMENT_KINDS } from './documents'
-import type { LogActor, LogEntry } from '../types/view'
+import type { LogActor, LogEntry, RoadmapView } from '../types/view'
 
 /**
  * 기록 조회(`GET /cases/logs`, #143)를 기록 탭 모양으로 바꾼다.
@@ -15,9 +15,8 @@ const EVENT_TEXT: Record<string, { actor: LogActor; text: string }> = {
   RESULT_SUBMITTED: { actor: 'OWNER', text: '할 일 결과를 알려주셨어요' },
   CONFLICT_DECIDED: { actor: 'OWNER', text: '기록과 다른 부분에서 맞는 쪽을 고르셨어요' },
   /*
-   * 어떤 할 일인지는 적지 않는다. 서버는 항목 번호(`task_id`)만 주고 이름은 로드맵이 따로
-   * 내려주는데, 이름을 FE가 따로 들고 있으면 로드맵과 어긋날 수 있다(11/03 시우님).
-   * TODO(로드맵 조회 API): 로드맵 이름을 받게 되면 "재고·장비 처분을 마치셨어요"처럼 적는다
+   * 어떤 할 일인지는 서버가 번호(`task_id`)만 준다. 이름은 FE가 따로 들고 있지 않고, 로드맵이 준 이름을
+   * 아래 줄에 붙인다(`withTaskTitles`) — 따로 들고 있으면 로드맵과 어긋날 수 있다(11/03 시우님)
    */
   CHECKLIST_COMPLETED: { actor: 'OWNER', text: '할 일 하나를 마치셨어요' },
   CHECKLIST_UNCHECKED: { actor: 'OWNER', text: '마친 할 일 하나를 되돌리셨어요' },
@@ -94,7 +93,7 @@ export function toLogEntries(body: CaseLogResponse | null): LogEntry[] | null {
 
   const entries: LogEntry[] = []
   logs.forEach((item: unknown, index) => {
-    const row = item as Partial<Record<'actor' | 'event' | 'occurred_at' | 'detail', unknown>> | null
+    const row = item as Partial<Record<'actor' | 'event' | 'occurred_at' | 'detail' | 'task_id', unknown>> | null
     const event = typeof row?.event === 'string' ? row.event : ''
     const known = EVENT_TEXT[event]
     const date = toDateLabel(row?.occurred_at)
@@ -105,8 +104,26 @@ export function toLogEntries(body: CaseLogResponse | null): LogEntry[] | null {
       actor: known.actor,
       text: toText(event, row?.detail, known.text),
       detail: toDetail(event, row?.detail),
+      ...(event.startsWith('CHECKLIST_') && typeof row?.task_id === 'string' && row.task_id.length > 0
+        ? { taskId: row.task_id }
+        : {}),
       date,
     })
   })
   return entries
+}
+
+/**
+ * 체크 기록에 로드맵의 할 일 이름을 아래 줄로 붙인다("할 일 하나를 마치셨어요" · "재고·장비 처분").
+ *
+ * 이름은 로드맵이 준 것만 쓴다. 로드맵을 못 불러왔거나 그 번호가 로드맵에 없으면(할 일 목록이 바뀐 뒤 등)
+ * 붙이지 않고 지금 문구 그대로 둔다 — 번호(영어)를 보이거나 줄을 빼지 않는다.
+ */
+export function withTaskTitles(entries: LogEntry[], roadmap: RoadmapView | null): LogEntry[] {
+  if (!roadmap) return entries
+  const titles = new Map(roadmap.stages.flatMap((stage) => stage.tasks).map((task) => [task.id, task.title]))
+  return entries.map((entry) => {
+    const title = entry.taskId ? titles.get(entry.taskId) : undefined
+    return title && !entry.detail ? { ...entry, detail: title } : entry
+  })
 }

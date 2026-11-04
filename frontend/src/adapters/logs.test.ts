@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import type { CaseLogItem, CaseLogResponse } from '../types/api'
-import { toLogEntries } from './logs'
+import { toLogEntries, withTaskTitles } from './logs'
+import type { RoadmapView } from '../types/view'
 
 /** 서버 기록 한 줄. 테스트가 보려는 칸만 바꾼다. 서버가 모르는 코드를 보내는 경우도 만들 수 있게 넓게 받는다 */
 const log = (actor: string, event: string, overrides: Partial<Record<keyof CaseLogItem, unknown>> = {}) =>
@@ -138,5 +139,32 @@ describe('toLogEntries', () => {
     expect(toLogEntries(logsOf(log('RIBBON', 'DOCUMENTS_CHECKED')))).toEqual([
       { key: '0-DOCUMENTS_CHECKED', actor: 'RIBBON', text: '서류를 점검하고 제출 파일을 만들었어요', date: '10.17' },
     ])
+  })
+})
+
+/** 체크 기록은 번호만 온다. 이름은 로드맵이 준 것을 붙인다(FE가 따로 들고 있으면 로드맵과 어긋난다) */
+describe('withTaskTitles', () => {
+  const roadmap: RoadmapView = {
+    supported: true,
+    unsupportedReason: null,
+    currentStage: 3,
+    stages: [{ stage: 3, title: '영업 마무리·폐업 신고', tasks: [{ id: 'dispose_stock', title: '재고·장비 처분', kind: 'CHECKLIST', status: 'COMPLETED' }] }],
+  }
+
+  it('체크 기록에 로드맵의 할 일 이름을 아래 줄로 붙인다', () => {
+    const entries = toLogEntries(logsOf(log('OWNER', 'CHECKLIST_COMPLETED', { task_id: 'dispose_stock' })))!
+
+    expect(withTaskTitles(entries, roadmap)).toEqual([
+      { key: '0-CHECKLIST_COMPLETED', actor: 'OWNER', text: '할 일 하나를 마치셨어요', detail: '재고·장비 처분', taskId: 'dispose_stock', date: '10.17' },
+    ])
+  })
+
+  /** 번호(영어)를 보이거나 줄을 빼면 안 된다. 이름을 모르면 지금 문구 그대로 둔다 */
+  it('로드맵을 못 불러왔거나 로드맵에 없는 번호면 이름 없이 둔다', () => {
+    const entries = toLogEntries(logsOf(log('OWNER', 'CHECKLIST_UNCHECKED', { task_id: 'old_task' })))!
+
+    expect(withTaskTitles(entries, roadmap)[0].detail).toBeUndefined()
+    expect(withTaskTitles(entries, null)[0].detail).toBeUndefined()
+    expect(withTaskTitles(entries, roadmap)[0].text).toBe('마친 할 일 하나를 되돌리셨어요')
   })
 })
