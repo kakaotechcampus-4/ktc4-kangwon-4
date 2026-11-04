@@ -55,9 +55,14 @@ export function TaskPage() {
     )
   }
 
-  // 할 일이 없는 상태(판단 중·추가 질문·실패 등)는 홈이 안내한다. 여기서 같은 안내를 또 만들지 않는다
-  const { judgment } = query.view
-  if (judgment.status !== 'DONE') return <Navigate to={{ pathname: '/case', search }} replace />
+  /*
+    할 일이 없는 상태(판단 중·추가 질문·실패 등)는 홈이 안내한다. 여기서 같은 안내를 또 만들지 않는다.
+
+    폐업 정리를 마친 가게도 홈으로 보낸다. 마지막 판단 기록은 남아 있어 할 일이 그려지지만, 그 결과를
+    보내면 서버가 409 로 막는다(#167). 홈이 완료 화면을 보여준다.
+  */
+  const { judgment, completed } = query.view
+  if (completed || judgment.status !== 'DONE') return <Navigate to={{ pathname: '/case', search }} replace />
 
   const { title, reason, questions = [] } = judgment.nextAction
   const hasQuestions = questions.length > 0

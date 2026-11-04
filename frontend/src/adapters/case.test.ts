@@ -9,15 +9,27 @@ import { toCaseCreateRequest, toCurrentCaseView, toFacts } from './case'
 const SERVER_CASE: CaseResponse = {
   id: 1,
   member_id: 42,
+  store_name: null,
   business_type: '카페',
   franchise_status: false,
   employee_count: 2,
+  has_business_loan: false,
+  has_service_contracts: false,
   lease_status: 'LEASED_PAID',
+  restoration_clause: 'UNKNOWN',
   restoration_status: 'UNKNOWN',
   restoration_scope: 'UNKNOWN',
   restoration_scope_detail: null,
   demolition_required: 'UNKNOWN',
   planned_closure_date: '2026-12-31',
+  planned_closure_month: null,
+  case_status: 'IN_PROGRESS',
+  completed_at: null,
+  closure_date: null,
+  closure_reason: null,
+  road_address: null,
+  address_detail: null,
+  deposit_return_result: null,
 }
 
 function factFor(serverCase: CaseResponse, key: string) {
@@ -147,6 +159,77 @@ const NEXT_ACTION = {
   reason: '철거가 필요한지 판단하려면 원상복구 범위를 먼저 알아야 합니다.',
   questions_to_ask: ['어디까지 원래대로 돌려놔야 하나요?', '철거까지 해야 하나요?'],
 }
+
+/**
+ * 폐업 신고·보증금 화면을 채워 열 값(#168). 서버가 폐업일·사유·도로명 주소를 한 번에 저장하므로,
+ * 셋 중 하나라도 없으면 저장된 적 없는 조합이라 빈 칸에서 열어야 한다.
+ */
+describe('toCurrentCaseView 저장해 둔 폐업 신고·보증금', () => {
+  const SAVED = {
+    ...SERVER_CASE,
+    closure_date: '2026-10-31',
+    closure_reason: 'PERSONAL',
+    road_address: '서울 마포구 망원로 52 (망원동)',
+    address_detail: '1층',
+    deposit_return_result: 'PARTIAL',
+  } satisfies CaseResponse
+  const viewOf = (serverCase: CaseResponse) => toCurrentCaseView(envelopeOf({ judgment_status: 'PENDING' }), serverCase)
+
+  it('저장 전이면 둘 다 비운다', () => {
+    const view = viewOf(SERVER_CASE)
+    expect(view.closureReport).toBeNull()
+    expect(view.depositReturn).toBeNull()
+  })
+
+  it('저장해 둔 값을 화면 모양으로 옮긴다', () => {
+    const view = viewOf(SAVED)
+    expect(view.closureReport).toEqual({
+      closureDate: '2026-10-31',
+      closureReason: 'PERSONAL',
+      roadAddress: '서울 마포구 망원로 52 (망원동)',
+      addressDetail: '1층',
+    })
+    expect(view.depositReturn).toBe('PARTIAL')
+  })
+
+  it.each(['closure_date', 'closure_reason', 'road_address'] as const)('%s 가 없으면 신고 정보를 비운다', (field) => {
+    expect(viewOf({ ...SAVED, [field]: null }).closureReport).toBeNull()
+  })
+
+  it('상세 주소는 비어 있어도 신고 정보로 본다', () => {
+    expect(viewOf({ ...SAVED, address_detail: null }).closureReport?.addressDetail).toBeNull()
+  })
+
+  it('모르는 값이면 고른 것이 없는 것으로 둔다', () => {
+    const view = viewOf({ ...SAVED, closure_reason: 'RETIRED', deposit_return_result: 'MAYBE' } as unknown as CaseResponse)
+    expect(view.closureReport).toBeNull()
+    expect(view.depositReturn).toBeNull()
+  })
+})
+
+/**
+ * 폐업 완료(#167). 서버가 `case_status` 를 `COMPLETED` 로 바꿨을 때만 완료다. 진행 중인 가게에 완료
+ * 화면을 띄우면 [결과 알려주기]가 사라져 사장님이 할 일을 놓친다.
+ */
+describe('toCurrentCaseView 폐업 완료', () => {
+  const viewOf = (serverCase: CaseResponse) => toCurrentCaseView(envelopeOf({ judgment_status: 'DONE' }), serverCase)
+
+  it('완료면 완료로 본다', () => {
+    expect(viewOf({ ...SERVER_CASE, case_status: 'COMPLETED', completed_at: '2026-11-04T10:00:00' }).completed).toBe(true)
+  })
+
+  it('완료 시각이 비어 와도 상태가 완료면 완료로 본다', () => {
+    expect(viewOf({ ...SERVER_CASE, case_status: 'COMPLETED', completed_at: null }).completed).toBe(true)
+  })
+
+  it('진행 중이면 완료가 아니다', () => {
+    expect(viewOf(SERVER_CASE).completed).toBe(false)
+  })
+
+  it('모르는 상태면 완료로 보지 않는다', () => {
+    expect(viewOf({ ...SERVER_CASE, case_status: 'CLOSED' } as unknown as CaseResponse).completed).toBe(false)
+  })
+})
 
 describe('toCurrentCaseView', () => {
   it('가게 정보는 판단 상태와 무관하게 담는다', () => {

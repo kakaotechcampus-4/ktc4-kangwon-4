@@ -116,4 +116,14 @@ describe('TaskPage', () => {
 
     expect(await screen.findByText('홈 화면')).toBeInTheDocument()
   })
+
+  /** 주소로 바로 들어와도 마친 가게에 할 일을 열지 않는다. 결과를 보내면 409 다(#167) */
+  it('폐업 정리를 마쳤으면 남은 할 일이 있어도 홈으로 보낸다', async () => {
+    saveTokens('access-1', 'refresh-1')
+    mockCase({ ...done(['철거까지 해야 하나요?']), case: { ...SERVER_CASE, case_status: 'COMPLETED' } })
+    renderAt('/task')
+
+    expect(await screen.findByText('홈 화면')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '임대인에게 원상복구 범위를 확인하세요.' })).not.toBeInTheDocument()
+  })
 })

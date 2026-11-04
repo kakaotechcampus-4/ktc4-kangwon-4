@@ -6,6 +6,7 @@ import { BottomSheet } from '../components/ui/BottomSheet'
 import { Button } from '../components/ui/Button'
 import { InfoBox } from '../components/ui/InfoBox'
 import { TopBar } from '../components/ui/TopBar'
+import { useCase } from '../hooks/useCase'
 import { useRoadmap } from '../hooks/useRoadmap'
 import { ApiError, UnauthorizedError } from '../lib/api'
 import { usesMockData } from '../lib/auth'
@@ -13,7 +14,7 @@ import { embedPostcode, loadPostcode, toRoadAddress } from '../lib/postcode'
 import { saveChecklist, saveClosureReport, saveDepositReturn, saveSupportApproval } from '../lib/roadmapActions'
 import { taskFlowOf } from '../lib/taskFlows'
 import type { ClosureReason, DepositReturnResult } from '../types/api'
-import type { RoadmapTaskView } from '../types/view'
+import type { ClosureReportView, CurrentCaseView, RoadmapTaskView } from '../types/view'
 
 /** 저장 상태. 저장이 끝나기 전에는 화면의 체크·결과를 바꾸지 않는다(FE 규칙 2) */
 type SaveState = 'IDLE' | 'SAVING' | 'FAILED' | 'REJECTED'
@@ -54,12 +55,35 @@ export function TaskFlowPage() {
     case 'REPORT_RESULT':
       return <ReportResultFlow task={task} />
     case 'CLOSURE_REPORT':
-      return <ClosureReportFlow task={task} />
+      return <WithSavedCase task={task}>{(view) => <ClosureReportFlow task={task} initial={view?.closureReport ?? null} />}</WithSavedCase>
     case 'DEPOSIT':
-      return <DepositFlow task={task} />
+      return <WithSavedCase task={task}>{(view) => <DepositFlow task={task} initial={view?.depositReturn ?? null} />}</WithSavedCase>
     case 'INFO':
       return <InfoFlow task={task} />
   }
+}
+
+/**
+ * 저장해 둔 값(`GET /cases`)을 받은 뒤에 장면을 연다. 폐업 신고·보증금처럼 다시 열 수 있는 장면이
+ * 쓴다 — 칸의 처음 값은 장면이 처음 그려질 때 한 번만 정해져서, 받기 전에 열면 빈 칸으로 굳는다.
+ *
+ * 받지 못했으면(불러오기 실패·Case 없음) 빈 칸에서 연다. 다시 저장하면 덮어쓰니, 저장된 값을 몰라도
+ * 사장님이 할 일은 막히지 않는다.
+ */
+function WithSavedCase({ task, children }: { task: RoadmapTaskView; children: (view: CurrentCaseView | null) => ReactNode }) {
+  const { query } = useCase()
+
+  if (query.status === 'LOADING') {
+    return (
+      <TaskFrame>
+        <TaskHeader task={task} />
+        <p role="status" className="sr-only">
+          저장해 둔 내용을 불러오고 있어요
+        </p>
+      </TaskFrame>
+    )
+  }
+  return children(query.status === 'READY' ? query.view : null)
 }
 
 /** 저장 실패를 화면 상태로. 401 은 로그인으로 보낸다 */
@@ -239,13 +263,16 @@ const DEPOSIT_OPTIONS: { value: DepositReturnResult; label: string }[] = [
  *
  * 시안은 "아직 못 받았어요"에 법률 상담 안내를 다는데 넣지 않는다. 무엇을 해야 할지는 판단이 정한다
  * (FE 규칙 1). 리본은 기록만 하고 판단하지 않는다는 시안 문구는 그대로 둔다.
+ *
+ * 기록해 둔 결과(`initial`)가 있으면 그것을 골라 둔 채 "~로 기록했어요"로 연다. 서버에 저장된 값이라
+ * 미리 칠하는 것이 아니다(FE 규칙 2).
  */
-export function DepositFlow({ task }: { task: RoadmapTaskView }) {
+export function DepositFlow({ task, initial = null }: { task: RoadmapTaskView; initial?: DepositReturnResult | null }) {
   const { search } = useLocation()
   const usesMock = usesMockData(search)
   const toSaveState = useSaveErrors()
-  const [picked, setPicked] = useState<DepositReturnResult | null>(null)
-  const [saved, setSaved] = useState<DepositReturnResult | null>(null)
+  const [picked, setPicked] = useState<DepositReturnResult | null>(initial)
+  const [saved, setSaved] = useState<DepositReturnResult | null>(initial)
   /** 결과는 저장했는데 체크를 못 했다. 체크만 다시 보낸다 */
   const [checkPending, setCheckPending] = useState(false)
   const [save, setSave] = useState<SaveState>('IDLE')
@@ -359,21 +386,21 @@ const CLOSURE_REASONS: { value: ClosureReason; label: string }[] = [
  * 저장한 뒤에는 접수증을 서류함에 올리고 결과를 알려 달라고 안내한다. 통합 폐업 신고는 공식
  * 절차라 끝났는지는 판단이 정한다.
  *
- * TODO: 저장해 둔 값으로 칸을 채워 연다(`GET /cases` 의 `case.closure_date` 등, #168). 지금은 빈 칸에서
- * 시작하고, 다시 저장하면 덮어쓴다.
+ * 저장해 둔 값(`initial`, `GET /cases` 의 #168 칸)이 있으면 칸을 채우고 저장한 뒤 모양으로 연다.
+ * 고쳐서 다시 저장하면 덮어쓴다.
  */
-export function ClosureReportFlow({ task }: { task: RoadmapTaskView }) {
+export function ClosureReportFlow({ task, initial = null }: { task: RoadmapTaskView; initial?: ClosureReportView | null }) {
   const navigate = useNavigate()
   const { search } = useLocation()
   const usesMock = usesMockData(search)
   const toSaveState = useSaveErrors()
-  const [closureDate, setClosureDate] = useState('')
-  const [reason, setReason] = useState<ClosureReason | null>(null)
-  const [roadAddress, setRoadAddress] = useState('')
-  const [detail, setDetail] = useState('')
+  const [closureDate, setClosureDate] = useState(initial?.closureDate ?? '')
+  const [reason, setReason] = useState<ClosureReason | null>(initial?.closureReason ?? null)
+  const [roadAddress, setRoadAddress] = useState(initial?.roadAddress ?? '')
+  const [detail, setDetail] = useState(initial?.addressDetail ?? '')
   const [finding, setFinding] = useState(false)
   const [save, setSave] = useState<SaveState>('IDLE')
-  const [saved, setSaved] = useState(false)
+  const [saved, setSaved] = useState(initial !== null)
   const dateId = useId()
   const detailId = useId()
 

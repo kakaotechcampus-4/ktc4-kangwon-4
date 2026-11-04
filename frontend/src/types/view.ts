@@ -5,6 +5,9 @@
  * 컴포넌트는 이 타입만 받는다 — 그래야 서버 응답 형태가 바뀌어도 어댑터만 고치면 된다.
  */
 
+// 폐업 사유·보증금 결과는 서버 값을 그대로 고르는 보기라, 같은 값을 여기 한 벌 더 적지 않는다
+import type { ClosureReason, DepositReturnResult } from './api'
+
 /** fact 하나의 확인 상태 */
 export type FactStatus =
   /** 값이 확정됨 */
@@ -142,6 +145,27 @@ export interface CurrentCaseView {
   /** 확인된 것과 미확인을 모두 담는다. 서버가 정한 순서를 그대로 쓴다 */
   facts: Fact[]
   judgment: JudgmentView
+  /**
+   * 폐업 정리를 모두 마쳤는지. 서버가 `case_status` 를 `COMPLETED` 로 바꿨을 때만 `true` 다(#167).
+   *
+   * 판단(`judgment`)과는 다른 축이다. 완료돼도 마지막 판단 기록은 남아 있고, 완료를 풀면(부가세 체크를
+   * 풀면) 그 판단이 다시 지금 할 일이 된다.
+   */
+  completed: boolean
+  /** 저장해 둔 통합 폐업 신고 정보. 저장 전이면 `null`. 신고 화면을 이 값으로 채워 연다 */
+  closureReport: ClosureReportView | null
+  /** 기록해 둔 보증금 결과. 기록 전이면 `null`. 보증금 화면을 이 값으로 골라 둔 채 연다 */
+  depositReturn: DepositReturnResult | null
+}
+
+/** 통합 폐업 신고에 적을 값(#168). 서버가 폐업일·사유·도로명 주소를 한 번에 저장한다 */
+export interface ClosureReportView {
+  /** `YYYY-MM-DD`. 날짜 고르기 칸에 그대로 넣는다 */
+  closureDate: string
+  closureReason: ClosureReason
+  roadAddress: string
+  /** 상세 주소는 비워도 된다(단독 건물 등) */
+  addressDetail: string | null
 }
 
 /**

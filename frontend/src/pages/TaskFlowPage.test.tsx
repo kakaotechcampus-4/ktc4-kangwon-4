@@ -277,6 +277,22 @@ describe('ClosureReportFlow', () => {
     expect(screen.queryByText('신고 정보를 저장했어요')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '저장하기' })).toBeDisabled()
   })
+
+  /** 다시 열 때 빈 칸이면 사장님은 저장이 안 된 줄 알고 처음부터 다시 적는다(#170 현석님) */
+  it('저장해 둔 값이 있으면 칸을 채우고 저장한 뒤 모양으로 연다', () => {
+    renderFlow(
+      <ClosureReportFlow
+        task={closureTask}
+        initial={{ closureDate: '2026-10-31', closureReason: 'PERSONAL', roadAddress: '서울 마포구 망원로 52 (망원동)', addressDetail: '1층' }}
+      />,
+    )
+
+    expect(screen.getByLabelText('폐업일')).toHaveValue('2026-10-31')
+    expect(screen.getByRole('radio', { name: '개인 사정' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByText('서울 마포구 망원로 52 (망원동)')).toBeInTheDocument()
+    expect(screen.getByLabelText('상세 주소 (선택)')).toHaveValue('1층')
+    expect(screen.getByRole('button', { name: '다시 저장하기' })).toBeEnabled()
+  })
 })
 
 const depositTask: RoadmapTaskView = { id: 'deposit_settlement', title: '보증금 정산 기록', kind: 'CHECKLIST', status: 'NOT_STARTED' }
@@ -352,5 +368,15 @@ describe('DepositFlow', () => {
     const urls = urlsOf(fetchMock)
     expect(urls.filter((url) => url.includes('/cases/deposit-return'))).toHaveLength(1)
     expect(urls.filter((url) => url.includes('/cases/checklists/'))).toHaveLength(2)
+  })
+
+  it('기록해 둔 결과가 있으면 골라 둔 채 기록했다고 연다', () => {
+    const fetchMock = serveByUrl({ deposit: [], checklist: [] })
+    renderFlow(<DepositFlow task={depositTask} initial="FULL" />)
+
+    expect(screen.getByRole('radio', { name: '다 받았어요' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByText(/다 받았어요.*로 기록했어요/)).toBeInTheDocument()
+    // 여는 것만으로는 아무것도 보내지 않는다
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })
