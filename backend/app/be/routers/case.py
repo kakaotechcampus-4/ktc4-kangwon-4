@@ -23,9 +23,11 @@ from app.be.schemas.case import (
     CaseSupportApprovalResponse,
     ChecklistTaskId,
 )
+from app.agent.roadmap import Roadmap
 from app.be.services import case as case_service
 from app.be.services import conflict_decision as conflict_decision_service
 from app.be.services import judgment as judgment_service
+from app.be.services import roadmap as roadmap_service
 
 router = APIRouter()
 
@@ -119,6 +121,14 @@ def get_case_results_submit_status(
     session: Session = Depends(get_db),
 ):
     return case_service.get_case_results_submit_status(session, member_id, case_history_id)
+
+
+@router.get("/cases/roadmap", response_model=Roadmap)
+def get_case_roadmap(
+    member_id: int = Depends(get_current_member_id),
+    session: Session = Depends(get_db),
+):
+    return roadmap_service.get_case_roadmap(session, member_id)
 
 
 @router.put("/cases/checklists/{task_id}", response_model=CaseChecklistResponse)
