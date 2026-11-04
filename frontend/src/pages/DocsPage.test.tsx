@@ -127,6 +127,22 @@ describe('DocsPage — 서버', () => {
     expect(screen.getByText('읽는 데 시간이 오래 걸려 기다림이 끊겼어요.')).toBeInTheDocument()
   })
 
+  /** 올리기는 수십 초 걸린다. 그사이 다른 서류를 뺐다고 "올리는 중"이 사라지면, 다시 고른 파일이 말없이 버려진다 */
+  it('올리는 중에 다른 서류를 빼도 올리는 중 표시와 잠금을 지우지 않는다', async () => {
+    serve(json(serverList([serverDocument()])), hanging, json(serverList([])))
+    renderAt('/docs')
+    await screen.findByText('transfer.pdf')
+
+    pick(new File(['%PDF'], 'scan.pdf', { type: 'application/pdf' }))
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('서류를 읽는 중'))
+    fireEvent.click(screen.getByRole('button', { name: '이체확인증 빼기' }))
+    fireEvent.click(within(screen.getByRole('dialog', { name: '이 서류를 뺄까요?' })).getByRole('button', { name: '빼기' }))
+    await waitFor(() => expect(screen.queryByText('transfer.pdf')).not.toBeInTheDocument())
+
+    expect(screen.getByRole('status')).toHaveTextContent('서류를 읽는 중')
+    expect(uploadButton()).toBeDisabled()
+  })
+
   it('빼기를 확인하면 DELETE 를 보내고 서버가 돌려준 목록을 그린다', async () => {
     const { calls } = serve(json(serverList([serverDocument()])), json(serverList([])))
     renderAt('/docs')
