@@ -1,6 +1,16 @@
 from datetime import datetime
 
-from sqlalchemy import JSON, BigInteger, Column, DateTime, Enum, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    Column,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Text,
+    UniqueConstraint,
+)
 from sqlmodel import Field, Relationship
 
 from app.be.models.mixins import CreatedAtMixin, TimestampMixin
@@ -52,6 +62,14 @@ class CaseProcedureStep(TimestampMixin, table=True):
             server_default="NOT_STARTED",
             nullable=False,
         ),
+    )
+    requirements_confirmed: bool = Field(
+        default=False, sa_column=Column(Boolean, nullable=False, server_default="0"),
+        description="이 절차의 신고 방법과 준비사항을 확인했는지",
+    )
+    submitted: bool = Field(
+        default=False, sa_column=Column(Boolean, nullable=False, server_default="0"),
+        description="담당 기관에 신고를 제출했는지. 처리 완료와 구분한다",
     )
     evidence_refs: list | None = Field(
         default=None,

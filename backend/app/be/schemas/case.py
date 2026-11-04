@@ -36,6 +36,7 @@ CaseLogEvent = Literal[
     "CONFLICT_FOUND",
     "JUDGMENT_FAILED",
     "DOCUMENTS_CHECKED",
+    "ROADMAP_TASKS_ADDED",
 ]
 
 
@@ -188,6 +189,12 @@ class CaseConflictsDecisionRequest(BaseModel):
     decisions: list[CaseConflictsDecisionItem]
 
 
+class NewTaskResponse(BaseModel):
+    # 체크 항목만이 아니라 공식 절차 항목(restoration 등)도 올 수 있어 ChecklistTaskId로 좁히지 않는다
+    task_id: str
+    title: str
+
+
 class CaseResultsSubmitResponse(BaseModel):
     result: ResultsSubmitResult
     changes: list[FieldChangeResponse] | None = None
@@ -199,6 +206,9 @@ class CaseResultsSubmitResponse(BaseModel):
     recovery_action_code: RecoveryActionCode | None = None
     retryable: bool | None = None
     requested_field_paths: list[str] | None = None
+    # 이번 판단으로 해야 할 일이 된 로드맵 항목(시안 "할 일 3개가 새로 생겼어요"). DONE일 때만 채운다.
+    # 비교할 직전 판단 기록이 없으면 null이고, 새로 생긴 게 없으면 []다.
+    new_tasks: list[NewTaskResponse] | None = None
 
 
 class CaseChecklistUpdateRequest(BaseModel):
@@ -225,6 +235,7 @@ class CaseLogItem(BaseModel):
     # 체크 기록(CHECKLIST_*)일 때 어떤 항목인지. 그 밖에는 null
     task_id: ChecklistTaskId | None
     # 문구를 만들 때 쓸 값. NEXT_ACTION_DECIDED는 정한 할 일 제목,
+    # ROADMAP_TASKS_ADDED는 이번 판단으로 새로 생긴 할 일 개수(예: "3"),
     # SUPPORT_RESULT_REPORTED는 APPROVED/REJECTED/UNKNOWN, DOCUMENT_UPLOADED는 올린 서류 종류(예: TRANSFER).
     # 그 밖에는 null
     detail: str | None

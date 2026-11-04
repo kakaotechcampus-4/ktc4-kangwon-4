@@ -3,10 +3,11 @@ from uuid import UUID, uuid4
 
 from sqlmodel import Session
 
+from app.agent.roadmap import CompletedRoadmapSnapshot
 from app.agent.schemas import (
     CASE_FIELD_SPECS,
-    CaseFact,
     AgentFieldKey,
+    CaseFact,
     CaseFieldKey,
     CaseSnapshot,
     CaseStatus,
@@ -20,6 +21,7 @@ from app.agent.schemas import (
     ProcedureStepRef,
     RedactedInput,
 )
+from app.be.crud import blocker as blocker_crud
 from app.be.crud import case as case_crud
 from app.be.crud import case_field_history as case_field_history_crud
 from app.be.crud import case_history as case_history_crud
@@ -89,6 +91,30 @@ def build_case_snapshot(
     (schemas.CaseSnapshot.snapshot_id 설명, #114에서 확정).
     """
 
+    return CaseSnapshot.model_validate(_snapshot_fields(session, case_id, snapshot_id))
+
+
+def build_roadmap_snapshot(session: Session, case_id: int) -> CaseSnapshot | CompletedRoadmapSnapshot:
+    """로드맵에 넘길 Case 상태. 폐업 정리를 마친 Case도 만든다.
+
+    위 build_case_snapshot은 진행 중인 Case만 만든다 — CaseSnapshot.case_status가
+    IN_PROGRESS만 받고, 그게 "AI는 진행 중인 Case만 판단한다"를 지키는 자리다. 로드맵은
+    모델을 부르지 않고 계산만 하는 읽기라 그 제한을 받을 이유가 없어서, 완료된 Case는
+    AI가 그 용도로 만들어 둔 모양으로 넘긴다(현석님 #167).
+    """
+
+    fields = _snapshot_fields(session, case_id, None)
+    model = (
+        CompletedRoadmapSnapshot
+        if fields["case_status"] == CaseStatus.COMPLETED
+        else CaseSnapshot
+    )
+    return model.model_validate(fields)
+
+
+def _snapshot_fields(session: Session, case_id: int, snapshot_id: UUID | None) -> dict:
+    """두 모양이 같은 값을 쓰도록, 읽어 오는 일만 한곳에 둔다."""
+
     case = case_crud.get_case_by_id(session, case_id)
     if case is None:
         raise ValueError(f"case {case_id} not found")
@@ -96,13 +122,17 @@ def build_case_snapshot(
     evidences = evidence_crud.get_evidence_by_case_id(session, case_id)
     case_procedure_steps = procedure_step_crud.get_case_procedure_steps_by_case_id(session, case_id)
 
-    return CaseSnapshot(
+    return dict(
         snapshot_id=snapshot_id or uuid4(),
         case_id=case.id,
         case_status=CaseStatus(case.case_status),
         facts=_build_facts(session, case, evidences),
         procedure_progress=[_build_procedure_progress(step) for step in case_procedure_steps],
         evidence_records=_build_evidence_records(session, case.id, evidences),
+        active_blocker_candidate_ids=sorted({
+            row.candidate_id for row in blocker_crud.get_active_blockers_by_case_id(session, case.id)
+            if row.candidate_id is not None
+        }),
         captured_at=datetime.now(KST),
     )
 
@@ -181,6 +211,8 @@ def _build_procedure_progress(step: CaseProcedureStep) -> ProcedureProgress:
     return ProcedureProgress(
         procedure_step=ProcedureStepRef(procedure_step_id=step.procedure_step_id, step_code=step.procedure_step.step_code),
         status=ProcedureProgressStatus(step.status),
+        requirements_confirmed=step.requirements_confirmed,
+        submitted=step.submitted,
         evidence_refs=list(step.evidence_refs or []),
         updated_at=step.updated_at.replace(tzinfo=KST),
     )

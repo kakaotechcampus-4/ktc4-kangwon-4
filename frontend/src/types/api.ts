@@ -34,7 +34,7 @@ export type RestorationClause = 'EXISTS' | 'NOT_EXISTS' | 'UNKNOWN'
  * "아직 모른다"와 "없다"가 서버에서 같아진다.
  */
 export interface CaseCreateRequest {
-  /** 화면 표시용. 진단에서 묻지 않아 지금은 늘 `null` */
+  /** 가게 이름. 진단에서 묻지 않아 지금은 늘 `null`. 서류 점검이 쓰는 값이다(아래 `CaseResponse`) */
   store_name: string | null
   business_type: string
   franchise_status: boolean
@@ -59,43 +59,63 @@ export interface CaseCreateRequest {
 }
 
 /**
- * Case 를 이루는 값들. 두 응답이 공통으로 담는 부분이다.
+ * `GET /cases` 안에 담겨 오는 Case. 서버 `CaseGetDetailResponse` 와 같다.
  *
  * 화면이 실제로 읽는 것은 여기까지다 — `adapters/case.ts` 가 이 모양만 보면 된다.
  */
-interface CaseFields {
+export interface CaseResponse {
   id: number
   member_id: number
+  /**
+   * 가게 이름. 진단에서 묻지 않아 지금은 늘 `null` 이다(#156).
+   * 서류 점검이 이 값을 서류의 "공급받는 자"와 맞춰 보므로, 비어 있으면 그 확인을 하지 못한다
+   * (#160 `BUYER_UNCONFIRMED`). 점검 때 따로 받을지는 아직 정하지 않았다(#175 현종님).
+   */
+  store_name: string | null
   business_type: string
   franchise_status: boolean
   employee_count: number | null
+  has_business_loan: boolean | null
+  has_service_contracts: boolean | null
   lease_status: LeaseStatus
+  restoration_clause: RestorationClause
   restoration_status: RestorationStatus
   restoration_scope: RestorationScope
   restoration_scope_detail: string | null
   demolition_required: DemolitionRequired
   /** `YYYY-MM-DD` */
   planned_closure_date: string | null
+  /** 폐업 예상 달 `YYYY-MM`. 가입 때 "이번 달"·"다음 달"을 고르면 온다(#153) */
+  planned_closure_month: string | null
+  /** 부가세 신고를 체크하면 `COMPLETED`, 풀면 다시 `IN_PROGRESS`(#167) */
+  case_status: CaseStatus
+  /** `COMPLETED` 가 된 시각. 진행 중이면 `null`(#167) */
+  completed_at: string | null
+  /**
+   * 통합 폐업 신고에 적을 값(#168 `PUT /cases/closure-report`). 저장 전에는 모두 `null` 이다.
+   * 폐업일은 가입 때의 예상 달과 다른, 신고할 실제 날짜다. `YYYY-MM-DD`
+   */
+  closure_date: string | null
+  closure_reason: ClosureReason | null
+  road_address: string | null
+  address_detail: string | null
+  /** 보증금 돌려받았는지(#168 `PUT /cases/deposit-return`). 기록 전에는 `null` */
+  deposit_return_result: DepositReturnResult | null
 }
 
 /**
- * `GET /cases` 안에 담겨 오는 Case.
- *
- * 서버가 조회용과 생성용 응답을 나눴다. 조회 쪽에는 진행 상태와 시각이 빠져 있다.
- * 하나로 합쳐두면 실제로는 안 오는 필드를 있는 것처럼 적게 되고, 그 필드를 쓰는
- * 코드가 생기면 `undefined` 를 값으로 다루게 된다.
- */
-export type CaseResponse = CaseFields
-
-/**
- * `POST /cases` 응답. 조회보다 네 개가 더 온다.
+ * `POST /cases` 응답. 조회 모양에 만든·바꾼 시각이 더 온다.
  *
  * 지금은 생성 직후 `/case` 로 옮겨 가며 다시 조회하므로 FE 가 읽는 값이 없다.
  * 그래도 모양은 적어둔다 — 서버가 무엇을 주는지가 이 파일의 일이다.
+ *
+ * 저장 전 칸(폐업 신고·보증금)은 가입 응답에는 없다. 그래서 조회 모양에서 빼고 시각을 더한다.
  */
-export interface CaseCreateResponse extends CaseFields {
-  case_status: CaseStatus
-  completed_at: string | null
+export interface CaseCreateResponse
+  extends Omit<
+    CaseResponse,
+    'closure_date' | 'closure_reason' | 'road_address' | 'address_detail' | 'deposit_return_result'
+  > {
   created_at: string
   updated_at: string
 }
@@ -314,4 +334,186 @@ export interface CaseResultsSubmitResponse {
   conflicts: ConflictItemResponse[] | null
   recovery_action_code: RecoveryActionCode | null
   requested_field_paths: string[] | null
+}
+
+/** 기록을 남긴 쪽. `OWNER` 사장님, `RIBBON` 리본 */
+export type CaseLogActor = 'OWNER' | 'RIBBON'
+
+/**
+ * 기록 사건 코드(#143). 문구는 서버가 주지 않고 FE가 코드로 만든다.
+ *
+ *   사장님  CASE_CREATED · RESULT_SUBMITTED · CONFLICT_DECIDED
+ *           CHECKLIST_COMPLETED · CHECKLIST_UNCHECKED · SUPPORT_RESULT_REPORTED
+ *   리본    NEXT_ACTION_DECIDED · MORE_INFO_REQUESTED · CONFLICT_FOUND · JUDGMENT_FAILED
+ */
+export type CaseLogEvent =
+  | 'CASE_CREATED'
+  | 'RESULT_SUBMITTED'
+  | 'CONFLICT_DECIDED'
+  | 'CHECKLIST_COMPLETED'
+  | 'CHECKLIST_UNCHECKED'
+  | 'SUPPORT_RESULT_REPORTED'
+  | 'NEXT_ACTION_DECIDED'
+  | 'MORE_INFO_REQUESTED'
+  | 'CONFLICT_FOUND'
+  | 'JUDGMENT_FAILED'
+
+/** 기록 한 줄 */
+export interface CaseLogItem {
+  actor: CaseLogActor
+  event: CaseLogEvent
+  /** 한국 시각, 시간대(`+09:00`)가 붙어 온다 */
+  occurred_at: string
+  /** 체크 기록(`CHECKLIST_*`)일 때 어떤 항목인지. 그 밖에는 `null` */
+  task_id: string | null
+  /**
+   * 문구에 쓸 값. `NEXT_ACTION_DECIDED` 는 정한 할 일 제목,
+   * `SUPPORT_RESULT_REPORTED` 는 `APPROVED` / `REJECTED` / `UNKNOWN`. 그 밖에는 `null`
+   */
+  detail: string | null
+}
+
+/** `GET /cases/logs` 응답. 최근 것부터. Case 가 없으면 404 */
+export interface CaseLogResponse {
+  logs: CaseLogItem[]
+}
+
+/** `PUT /cases/checklists/{task_id}` 로 보내는 것. 같은 값을 두 번 보내도 결과는 같다 */
+export interface CaseChecklistUpdateRequest {
+  completed: boolean
+}
+
+/** 체크 저장 응답. 저장된 상태가 그대로 돌아온다. 할 일 상태(완료 등)는 로드맵이 다시 계산한다 */
+export interface CaseChecklistResponse {
+  task_id: string
+  completed: boolean
+}
+
+/**
+ * `PUT /cases/support-approval` 로 보내는 것. 점포철거비 1차 적격심사 결과를 사장님이 알려 준다.
+ * `true` 승인 · `false` 안 됨 · `null` 아직 모름. **키는 꼭 보낸다** — 빠지면 422 다
+ */
+export interface CaseSupportApprovalRequest {
+  approved: boolean | null
+}
+
+export interface CaseSupportApprovalResponse {
+  approved: boolean | null
+}
+
+/** 폐업 사유. `BUSINESS_SLUMP` 사업 부진 · `PERSONAL` 개인 사정 · `OTHER` 기타 */
+export type ClosureReason = 'BUSINESS_SLUMP' | 'PERSONAL' | 'OTHER'
+
+/**
+ * `PUT /cases/closure-report` 로 보내는 것(#168). 통합 폐업 신고의 "폐업 정보 · 가게 주소" 두 장을 한 번에.
+ *
+ * 다시 보내면 덮어쓴다. AI 판단에는 넘어가지 않는다(신고 요약에 보여주는 값). 가입 때 받은 예상일
+ * (`planned_closure_date`)과 다른 칸이다 — 이쪽은 신고할 **실제 폐업일**이다.
+ */
+export interface CaseClosureReportRequest {
+  /** `YYYY-MM-DD` */
+  closure_date: string
+  closure_reason: ClosureReason
+  /** 도로명 주소. 1~200자 */
+  road_address: string
+  /** 상세 주소. 100자까지, 없으면 `null` */
+  address_detail: string | null
+}
+
+export type CaseClosureReportResponse = CaseClosureReportRequest
+
+/** 보증금을 돌려받았는지. `FULL` 다 받음 · `PARTIAL` 일부 빼고 받음 · `NONE` 아직 못 받음 */
+export type DepositReturnResult = 'FULL' | 'PARTIAL' | 'NONE'
+
+/** `PUT /cases/deposit-return` 로 보내는 것과 그 응답(#168) */
+export interface CaseDepositReturnRequest {
+  result: DepositReturnResult
+}
+
+export type CaseDepositReturnResponse = CaseDepositReturnRequest
+
+/** 서류 종류(#128 문서 Tool `DocumentKind`). `UNKNOWN` 은 종류를 모르는 서류 */
+export type DocumentKind =
+  | 'LEASE'
+  | 'BUSINESS_REGISTRATION'
+  | 'BUSINESS_LICENSE'
+  | 'CONSTRUCTION_STATEMENT'
+  | 'TAX_INVOICE'
+  | 'BEFORE_PHOTO'
+  | 'AFTER_PHOTO'
+  | 'TRANSFER'
+  | 'CLOSURE_CERTIFICATE'
+  | 'BANK_COPY'
+  | 'CLOSURE_RECEIPT'
+  | 'CARD_SALES'
+  | 'CASH_SALES'
+  | 'PURCHASE_INVOICE'
+  | 'DEPOSIT_STATEMENT'
+  | 'UNKNOWN'
+
+/** 서류에서 꺼낸 값 이름(#128 `DocumentFieldName`) */
+export type DocumentFieldName =
+  | 'business_name'
+  | 'supplier'
+  | 'buyer'
+  | 'sender'
+  | 'recipient'
+  | 'account_holder'
+  | 'amount'
+  | 'supply_amount'
+  | 'tax_amount'
+  | 'date'
+  | 'closure_date'
+  | 'restoration_clause'
+
+/** 서류 한 장(#159). 종류 이름·확인 필요 여부는 서버가 정해서 준다 */
+export interface DocumentResponse {
+  document_id: string
+  filename: string
+  kind: DocumentKind
+  kind_label: string
+  /** 종류를 모르거나 사진·글자 인식처럼 확신하지 못한 서류. 사장님이 확인해야 점검이 끝난다 */
+  needs_confirmation: boolean
+  fields: { name: DocumentFieldName; value: string; page: number }[]
+  /** 사장님이 확인한 값. 확인 전이면 `null` */
+  confirmed_fields: Partial<Record<DocumentFieldName, string>> | null
+}
+
+/**
+ * 정산 서류 점검 결과(#159).
+ *
+ * `status` 는 서버 응답에 글자(`str`)로 열려 있어 그대로 적는다. 문서 Tool 이 내는 값은
+ * `COMPLETE` · `ISSUES` · `ERROR` 셋이고(#159 승준님), 그 밖의 값은 어댑터가 읽지 못한 것으로 둔다.
+ */
+export interface DocumentCheckResponse {
+  status: string
+  steps: { name: string; status: 'WAITING' | 'RUNNING' | 'DONE' | 'NEEDS_CONFIRMATION' | 'ERROR' }[]
+  issues: { code: string; document_ids: string[]; message: string }[]
+  checked_at: string
+}
+
+/**
+ * 서류 목록(`GET /cases/documents`). 올리기·확인·빼기·점검도 모두 이 모양을 돌려준다.
+ * 서류를 더하거나 빼거나 확인하면 지난 점검은 지워진다(`check: null`).
+ */
+export interface DocumentListResponse {
+  documents: DocumentResponse[]
+  check: DocumentCheckResponse | null
+}
+
+/** `POST /cases/documents/{id}/confirm` — 사장님이 확인한 종류와 값 전부 */
+export interface DocumentConfirmRequest {
+  kind: DocumentKind
+  confirmed_fields: Partial<Record<DocumentFieldName, string>>
+}
+
+/**
+ * `POST /cases/documents/check`. 이름은 이체확인증의 보낸 사람과, 폐업일은 폐업사실증명원과 맞춰 본다.
+ * 폐업일을 비우면 예정일로 대신하지 않고 "폐업일 미확인"으로 점검이 끝나지 않는다
+ */
+export interface DocumentCheckRequest {
+  /** 1~50자 */
+  applicant_name: string
+  /** `YYYY-MM-DD` */
+  closure_date: string | null
 }

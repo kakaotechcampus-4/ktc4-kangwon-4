@@ -46,8 +46,17 @@ function response(body: unknown, status = 200) {
   return new Response(status === 200 ? JSON.stringify(body) : null, { status })
 }
 
+/**
+ * 홈은 Case 와 기록(띠)을 함께 부른다. 기록은 이 파일이 보는 것이 아니라 늘 빈 목록으로 답한다.
+ * 띠가 채워지는 것은 `HomeBanner`·`LogPage` 테스트가 본다
+ */
+const isLogs = (url: string) => url.includes('/cases/logs')
+
 function mockCase(body: unknown, status = 200) {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response(body, status)))
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string) => (isLogs(url) ? response({ logs: [] }) : response(body, status))),
+  )
 }
 
 /** 처음엔 받아오고 그 뒤로는 실패한다. 갱신만 실패한 상태를 만들 때 쓴다 */
@@ -55,10 +64,11 @@ function mockThenFail(body: unknown) {
   let called = false
   vi.stubGlobal(
     'fetch',
-    vi.fn().mockImplementation(() => {
+    vi.fn(async (url: string) => {
+      if (isLogs(url)) return response({ logs: [] })
       const first = !called
       called = true
-      return Promise.resolve(first ? response(body) : response(null, 500))
+      return first ? response(body) : response(null, 500)
     }),
   )
 }
@@ -419,7 +429,54 @@ describe('CurrentCasePage', () => {
     })
   })
 
+  /**
+   * 폐업 정리를 마친 가게(#167). 완료돼도 마지막 판단 기록이 남아 있어서, 판단부터 보면 이미 마친
+   * 가게에 할 일과 [결과 알려주기]가 다시 뜨고 누르면 409 다.
+   */
+  describe('폐업을 마쳤을 때', () => {
+    const COMPLETED_CASE = { ...SERVER_CASE, case_status: 'COMPLETED', completed_at: '2026-11-04T10:00:00' } as CaseResponse
+
+    it('할 일 대신 마쳤다고 알린다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      mockCase({ ...DONE, case: COMPLETED_CASE })
+      renderAt('/case')
+
+      expect(await screen.findByRole('heading', { level: 1, name: '폐업 정리를 모두 마쳤어요' })).toBeInTheDocument()
+      expect(screen.getByRole('heading', { level: 2, name: '수고 많으셨어요, 사장님' })).toBeInTheDocument()
+      expect(screen.queryByRole('heading', { level: 2, name: '임대인에게 원상복구 범위를 확인하세요.' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: '물어볼 내용 보기' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: '상태 다시 확인' })).not.toBeInTheDocument()
+    })
+
+    /** 되물을 것이 남은 판단이어도, 완료된 가게는 답을 받지 않는다(409) */
+    it('남은 판단이 질문이어도 답하러 가기를 달지 않는다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      mockCase(envelope({ case: COMPLETED_CASE, judgment_status: 'NEEDS_MORE_INFO', questions_for_user: ['철거까지 해야 하나요?'] }))
+      renderAt('/case')
+
+      expect(await screen.findByRole('heading', { level: 1, name: '폐업 정리를 모두 마쳤어요' })).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: '답하러 가기' })).not.toBeInTheDocument()
+    })
+
+    it('전체 기록 보기를 누르면 기록으로 간다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      mockCase({ ...DONE, case: COMPLETED_CASE })
+      renderAt('/case')
+
+      fireEvent.click(await screen.findByRole('button', { name: '전체 기록 보기' }))
+
+      expect(await screen.findByText('기록 화면')).toBeInTheDocument()
+    })
+  })
+
   describe('?mock=', () => {
+    it('completed 면 마친 화면을 보여준다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      renderAt('/case?mock=completed')
+
+      expect(await screen.findByRole('heading', { level: 1, name: '폐업 정리를 모두 마쳤어요' })).toBeInTheDocument()
+    })
+
     it('pending 이면 기다리는 화면을 보여준다', async () => {
       saveTokens('access-1', 'refresh-1')
       renderAt('/case?mock=pending')

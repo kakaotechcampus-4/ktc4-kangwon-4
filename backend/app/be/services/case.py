@@ -37,11 +37,14 @@ from app.be.schemas.case import (
     CaseResultsSubmitResponse,
     ConflictItemResponse,
     FieldChangeResponse,
+    NewTaskResponse,
     NextActionResponse,
 )
 from app.agent.procedure_tool.store import ReviewedProcedureStore
+from app.agent.roadmap import TASKS as ROADMAP_TASKS, record_checklist
 from app.be.services import procedure_registry
 from app.be.services import reviewed_procedure as reviewed_procedure_service
+from app.be.services import roadmap as roadmap_service
 from app.be.services.unmasking import build_restorer
 
 logger = logging.getLogger(__name__)
@@ -61,10 +64,8 @@ def _field_changes(session: Session, case_id: int, case_history_id: int) -> list
     return [
         FieldChangeResponse(
             field=row.canonical_field,
-            stored_value=restorer.restore(
-                row.before_value, restorer.source_of_previous(row.id), row.canonical_field
-            ),
-            new_value=restorer.restore(row.after_value, row.case_history_id, row.canonical_field),
+            stored_value=restorer.restore(row.before_value, restorer.source_of_previous(row.id)),
+            new_value=restorer.restore(row.after_value, row.case_history_id),
         )
         for row in rows
     ]
@@ -89,13 +90,9 @@ def _conflict_items(
             id=conflict.id,
             field=conflict.canonical_field,
             stored_value=restorer.restore(
-                conflict.committed_value,
-                restorer.source_of_current(conflict.canonical_field),
-                conflict.canonical_field,
+                conflict.committed_value, restorer.source_of_current(conflict.canonical_field)
             ),
-            proposed_value=restorer.restore(
-                conflict.proposed_value, conflict.case_history_id, conflict.canonical_field
-            ),
+            proposed_value=restorer.restore(conflict.proposed_value, conflict.case_history_id),
         )
         for conflict in conflicts
     ]
@@ -110,7 +107,7 @@ def _case_detail(session: Session, case: Case) -> CaseGetDetailResponse:
     )
     return detail.model_copy(
         update={
-            field: restorer.restore(getattr(detail, field), restorer.source_of_current(field), field)
+            field: restorer.restore(getattr(detail, field), restorer.source_of_current(field))
             for field in ("business_type", "restoration_scope_detail")
         }
     )
@@ -559,7 +556,46 @@ def get_case_results_submit_status(
             reason=latest_history.next_action_reason,
             questions_to_ask=latest_history.next_action_questions_to_ask or [],
         ),
+        new_tasks=_new_tasks(session, case.id, latest_history),
     )
+
+
+# 제목은 AI 로드맵의 할 일 표에서 가져온다. 판단 때 같이 저장하지 않는 것은 제목이 바뀌어도 화면이 따라가게 하려는 것이다.
+_ROADMAP_TASK_TITLES = {task_id: title for _, task_id, title, _, _ in ROADMAP_TASKS}
+
+
+def _new_tasks(session: Session, case_id: int, history: CaseHistory) -> list[NewTaskResponse] | None:
+    """직전 판단 뒤에는 해야 할 일이 아니었는데 이번 판단 뒤에 해야 할 일이 된 로드맵 항목.
+
+    판단마다 그 직후의 목록을 남겨 두고(decision_record._roadmap_task_ids) 둘을 뺀다.
+    어느 한쪽이라도 목록이 없으면(예전 이력, 계산 실패) 비교할 수 없어 None이다.
+    """
+
+    if history.roadmap_task_ids is None:
+        return None
+    previous = max(
+        (
+            row for row in case_history_crud.get_case_histories_by_case_id(session, case_id)
+            if row.id < history.id and row.roadmap_task_ids is not None
+        ),
+        key=lambda row: row.id,
+        default=None,
+    )
+    if previous is None:
+        return None
+    return [
+        NewTaskResponse(task_id=task_id, title=_ROADMAP_TASK_TITLES.get(task_id, task_id))
+        for task_id in _added_task_ids(previous.roadmap_task_ids, history.roadmap_task_ids)
+    ]
+
+
+def _added_task_ids(previous: list[str] | None, current: list[str] | None) -> list[str]:
+    """직전 판단 뒤에는 없었는데 이번 판단 뒤에 생긴 할 일. 둘 중 하나라도 목록이 없으면 비교하지 않는다."""
+
+    if previous is None or current is None:
+        return []
+    before = set(previous)
+    return [task_id for task_id in current if task_id not in before]
 
 
 # 이 항목을 체크하면 폐업 정리를 마친 것으로 본다(시안 closed 화면).
@@ -571,8 +607,9 @@ def update_case_checklist(
 ) -> CaseChecklistResponse:
     """로드맵 항목을 사장님이 체크하거나 푼다. 같은 요청을 두 번 보내도 결과가 같다.
 
-    "이 가게에 해당하는 항목인지"는 여기서 보지 않는다. AI 로드맵(record_checklist)이 Case
-    스냅샷과 절차 목록으로 판단하는 일이라, 로드맵 조회 API를 만들 때 함께 붙인다.
+    체크할 때는 이 가게에 해당하는 항목인지 AI 로드맵(record_checklist)에 묻는다. "해당 없음"과
+    "확인 필요"(예: 철거 필요 여부를 아직 모를 때의 철거비 항목)는 422로 거절한다(승준님 #149).
+    푸는 것은 묻지 않는다 — 잘못 눌린 체크를 못 푸는 일이 없어야 한다.
     """
 
     # 같은 항목 체크가 동시에 두 번 오면 둘 다 "없음"을 보고 만들려다 unique에 걸린다. 줄을 세운다.
@@ -586,6 +623,12 @@ def update_case_checklist(
         return CaseChecklistResponse(task_id=task_id, completed=completed)
 
     if completed:
+        # 입력 만들기는 try 밖에 둔다. 여기서 나는 오류는 사장님 요청이 아니라 데이터 문제라 422로 덮지 않는다.
+        roadmap_input = roadmap_service.build_roadmap_input(session, case)
+        try:
+            record_checklist(roadmap_input, task_id, completed=True)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="지금은 체크할 수 없는 항목입니다.") from None
         case_checklist_crud.create_case_checklist(session, CaseChecklist(case_id=case.id, task_id=task_id))
     else:
         case_checklist_crud.delete_case_checklist(session, checklist)
@@ -668,7 +711,12 @@ def get_case_logs(session: Session, member_id: int) -> CaseLogResponse:
         raise HTTPException(status_code=404, detail="Case를 찾을 수 없습니다.")
 
     logs = []
-    for history in case_history_crud.get_case_histories_by_case_id(session, case.id):
+    # 결과 화면의 "새로 생긴 할 일"(_new_tasks)과 같은 뺄셈. 판단 순서대로 돌며 목록이 남은 직전 판단과 비교한다.
+    previous_task_ids = None
+    for history in sorted(case_history_crud.get_case_histories_by_case_id(session, case.id), key=lambda row: row.id):
+        added = _added_task_ids(previous_task_ids, history.roadmap_task_ids)
+        if history.roadmap_task_ids is not None:
+            previous_task_ids = history.roadmap_task_ids
         owner_event = _LOG_OWNER_EVENTS.get(history.source)
         if owner_event is None:
             continue
@@ -678,6 +726,9 @@ def get_case_logs(session: Session, member_id: int) -> CaseLogResponse:
                 "RIBBON", _LOG_RIBBON_EVENTS[history.judgment_status], history.judged_at,
                 detail=history.next_action if history.judgment_status == "DONE" else None,
             ))
+        # 시안 "답변대로 할 일 3개를 추가했어요". 새로 생긴 게 있을 때만 남긴다.
+        if history.judged_at is not None and added:
+            logs.append(_log("RIBBON", "ROADMAP_TASKS_ADDED", history.judged_at, detail=str(len(added))))
 
     # 체크를 풀어도 체크했던 기록은 남는다(지금 상태가 아니라 이력을 읽는다).
     for checklist in case_checklist_crud.get_case_checklist_histories_by_case_id(session, case.id):

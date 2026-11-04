@@ -109,6 +109,38 @@ describe('request', () => {
     expect(getAccessToken()).toBeNull()
   })
 
+  /** 체크 저장(`PUT`)·서류 빼기(`DELETE`)가 이 길로 간다. 막혀 있으면 화면마다 `fetch`를 따로 부르게 된다 */
+  it('PUT·DELETE도 같은 헤더로 보낸다', async () => {
+    saveTokens('access-1', 'refresh-1')
+    const fetchMock = mockFetch(jsonResponse({}))
+
+    await request('/cases/checklists/dispose_stock', { method: 'PUT', body: { completed: true } })
+    await request('/cases/documents/1', { method: 'DELETE' })
+
+    const [, put] = fetchMock.mock.calls[0] as [string, RequestInit]
+    const [, remove] = fetchMock.mock.calls[1] as [string, RequestInit]
+    expect(put.method).toBe('PUT')
+    expect(JSON.parse(put.body as string)).toEqual({ completed: true })
+    expect(new Headers(remove.headers).get('Access-Token')).toBe('access-1')
+    expect(remove.method).toBe('DELETE')
+  })
+
+  /**
+   * 파일은 JSON으로 바꾸면 빈 객체가 된다. `Content-Type`을 직접 적어도 깨진다 —
+   * 경계 문자열이 빠져서 서버가 파일을 찾지 못한다
+   */
+  it('파일 묶음은 그대로 보내고 Content-Type 은 브라우저에 맡긴다', async () => {
+    const fetchMock = mockFetch(jsonResponse({}))
+    const form = new FormData()
+    form.append('file', new Blob(['%PDF']), 'transfer.pdf')
+
+    await request('/cases/documents', { method: 'POST', body: form })
+
+    const { init, headers } = calledWith(fetchMock)
+    expect(init.body).toBe(form)
+    expect(headers.has('Content-Type')).toBe(false)
+  })
+
   it('다른 실패 응답은 상태 코드를 담아 던진다', async () => {
     mockFetch(new Response(null, { status: 409 }))
 
@@ -147,6 +179,25 @@ describe('request', () => {
       const settled = expect(pending).rejects.toBeInstanceOf(TimeoutError)
       await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS)
 
+      await settled
+    })
+
+    /** 서류 올리기는 서버가 다 읽을 때까지 붙잡고 있어 수십 초가 걸린다. 기본값으로 끊으면 매번 실패한다 */
+    it('요청마다 제한 시간을 늘릴 수 있다', async () => {
+      vi.useFakeTimers()
+      hangingFetch()
+
+      const pending = request('/cases/documents', { method: 'POST', timeoutMs: REQUEST_TIMEOUT_MS * 4 })
+      let failed = false
+      pending.catch(() => {
+        failed = true
+      })
+
+      await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS)
+      expect(failed).toBe(false)
+
+      const settled = expect(pending).rejects.toBeInstanceOf(TimeoutError)
+      await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS * 3)
       await settled
     })
 

@@ -16,6 +16,8 @@
         └──[6. 근거·충돌·판단기록]      Agent 판단의 근거, 값 충돌, 판단·리뷰 결과
 ```
 
+> 서류함(올린 서류 목록·점검 결과)은 DB가 아니라 서류 폴더(`AGENT_DOCUMENT_DIR/<Case UUID>/case_documents.json`) 파일에 저장합니다(#159). 그래서 ERD에 서류함 테이블은 없습니다.
+
 > ⚠️ 6번 도메인은 Agent팀 ERD에 컬럼·타입·PK/FK/UK는 명시되어 있으나, NOT NULL/DEFAULT 등
 > 제약조건까지는 ERD에 안 나와 있어 기존 테이블 패턴을 참고해 추정했습니다 (표시: "⚠️ 추정").
 > 컬럼명·타입·키는 ERD 원본 기준으로 확정된 값입니다.
@@ -170,6 +172,7 @@ CASE에 대한 발화·이벤트 원본 이력.
 | next_action_questions_to_ask | JSON | | NULLABLE | `["원상복구 범위가 어디까지인지 확인해 주세요"]` | 사용자가 임대인·기관에 물어볼 질문 목록. 다음 행동이 없으면 NULL |
 | next_action_evidence_refs | JSON | | NULLABLE | `["procedure:reviewed:NTS_CLOSURE"]` | 다음 행동의 근거 evidence_id 목록. 다음 행동이 없으면 NULL |
 | questions_for_user | JSON | | NULLABLE | `["확인한 원상복구 범위가 있으면 알려주세요."]` | 행동을 정하기 전 서비스가 사용자에게 되묻는 질문 목록. 없으면 NULL. `next_action_questions_to_ask`(사용자가 임대인·기관에 물어볼 말)와 다른 값이다 |
+| roadmap_task_ids | JSON | | NULLABLE | `["intake", "dispose_stock", "before_photo"]` | 이 판단 직후 로드맵에서 해야 할 일인 항목(해당 없음·확인 필요가 아닌 것)의 `task_id` 목록. 직전 판단과 비교해 결과 화면의 "새로 생긴 할 일"(`GET /cases/results/status`의 `new_tasks`)을 만든다. 검수를 통과한 판단만 채우고, 충돌·실패로 끝났거나 계산에 실패하면 NULL |
 | failure_code | VARCHAR | | NULLABLE | `"LOOP_LIMIT_REACHED"` | Agent가 돌려준 실패 종류. Agent가 값을 늘려도 따라 고치지 않도록 ENUM이 아닌 VARCHAR. 실패가 아니거나 Agent가 결과를 내기 전에 끊겼으면 NULL |
 | recovery_action_code | ENUM | | NULLABLE | `RETRY` | 판단이 실패했을 때 화면이 안내할 다음 행동 — `RETRY` / `RESUBMIT_INPUT` / `CONTACT_SUPPORT` / `NONE`. 실패가 아니면 NULL |
 | requested_field_paths | JSON | | NULLABLE | `["restoration_scope"]` | 판단을 멈추게 한 CASE 필드 목록. 실패가 아니면 NULL |
@@ -377,6 +380,9 @@ CASE와 SUPPORT_ITEM 간 자격 비교 결과.
 Agent 판단의 근거 출처, CASE 필드 값 충돌 확인, Agent의 판단·리뷰 결과를 기록하는 도메인입니다.
 
 ```
+OFFICIAL_DOCUMENT (공식 자료 본문 한 벌, Case 무관)
+   │
+   ▼
 EVIDENCE ◄──┬── EVIDENCE_LINEAGE (근거 간 파생관계, N:M, EVIDENCE.id 참조)
             │
 CASE ──────┴── CONFLICT_REFERENCE (필드값 충돌 1회성 참조)
@@ -397,12 +403,28 @@ Agent 판단의 근거가 되는 출처 기록.
 | source_ref | VARCHAR | | NOT NULL ⚠️ 추정 | `"희망리턴패키지 공고문 §3"` | 출처 참조 |
 | source_version | VARCHAR | | NULLABLE | `"2026-08판"` | 출처 버전 (nullable) |
 | locator | VARCHAR | | NULLABLE ⚠️ 추정 | `"3페이지 2단락"` | 출처 내 위치 |
-| excerpt | TEXT | | NULLABLE ⚠️ 추정 | `"임차 매장만 지원 대상..."` | 발췌 내용 |
+| excerpt | TEXT | | NULLABLE ⚠️ 추정 | `"임차 매장만 지원 대상..."` | 발췌 내용. 공식 자료면 비어 있고 본문은 `OFFICIAL_DOCUMENT`에 있다 |
+| official_document_id | BIGINT | FK | NULLABLE | 1 | 공식 자료일 때 본문이 있는 `OFFICIAL_DOCUMENT.id`. 사장님 입력 등 그 밖의 근거는 NULL |
 | published_at | DATETIME | | NULLABLE | `NULL` | 원본 게시 시각 (nullable) |
 | retrieved_at | DATETIME | | NOT NULL ⚠️ 추정 | `2026-09-10 10:00:00` | 수집 시각 |
 | freshness_status | ENUM | | NOT NULL ⚠️ 추정 | `CURRENT` | `CURRENT` / `STALE` / `UNKNOWN` |
 | content_hash | VARCHAR | | NULLABLE | `"a1b2c3..."` | 내용 해시 (nullable, 변경 감지용) |
 | created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP ⚠️ 추정 | `2026-09-10 10:00:00` | (updated_at 없음 — ERD 확정) |
+
+### OFFICIAL_DOCUMENT
+
+공식 자료(국세청 안내문, 지원사업 공고 등) 본문. 같은 문서를 Case마다 `EVIDENCE`에 복사하지 않고 여기 한 벌만 두며, `EVIDENCE.official_document_id`가 가리킨다. 문서 한 건의 한 버전마다 한 줄이고, 한 번 적으면 고치지 않는다. 버전이 바뀌면 새 줄을 넣어서, 예전 Case는 예전 줄을 계속 가리킨다(그 Case가 무엇을 보고 판단했는지 남김).
+
+| 컬럼 | 타입 | 키 | 제약조건 | 예시 값 | 설명 |
+|---|---|---|---|---|---|
+| id | BIGINT | PK | NOT NULL, AUTO_INCREMENT | 1 | 내부 식별자 |
+| source_ref | VARCHAR(500) | UK(복합) | NOT NULL | `"https://www.nts.go.kr/..."` | 출처 참조(원문 URL) |
+| source_version | VARCHAR(100) | UK(복합) | NOT NULL | `"2026-08판"` | 출처 버전. `(source_ref, source_version)`이 같은 줄은 하나만 둔다 |
+| excerpt | TEXT | | NOT NULL | `"폐업신고는 사업장 관할 세무서에..."` | 본문 |
+| content_hash | VARCHAR(64) | | NOT NULL | `"a1b2c3..."` | 본문 해시. Case 쪽 값과 대조한다 |
+| published_at | DATETIME | | NULLABLE | `NULL` | 원본 게시 시각 |
+| retrieved_at | DATETIME | | NOT NULL | `2026-09-10 10:00:00` | 수집 시각 |
+| created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-09-10 10:00:00` | |
 
 ### EVIDENCE_LINEAGE
 
@@ -433,6 +455,7 @@ CASE 필드 값 충돌을 확인하기 위한 1회성 참조.
 | candidate_payload | JSON | | NULLABLE | `{"field_path": "employee_count", "committed_value": 2, ...}` | Agent가 보낸 충돌 후보 원본 전체. 위 칸들은 화면용이라 글자로 바꿔 숫자·참거짓·빈 값을 되돌릴 수 없는데, 확인할 때 Agent가 내용 다이제스트를 대조해 다르면 거절한다 |
 | status | ENUM | | NOT NULL, DEFAULT `PENDING` | `"PENDING"` | 결정 상태. `PENDING`=아직 결정 안 됨, `CONFIRMED`=새 값 채택, `REJECTED`=기존 값 유지 |
 | decided_at | DATETIME | | NULLABLE | `NULL` | 결정된 시각. 결정 전엔 NULL |
+| resolved_by_case_history_id | BIGINT | FK | NULLABLE | 9 | 이 충돌을 닫은 결정(CASE_HISTORY) — 위 `case_history_id`(충돌을 일으킨 제출)와 짝이다. 결정 이력에는 사장님이 쓴 글이 없어서, 그 결정이 바꾼 값의 가림 문구를 되돌릴 때 이 칸을 거쳐 제출의 원문을 찾는다 |
 | created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP ⚠️ 추정 | `2026-09-10 10:00:00` | |
 
 ### DECISION_RECORD

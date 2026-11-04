@@ -9,12 +9,15 @@ import type {
   CaseCreateRequest,
   CaseResponse,
   CasesEnvelope,
+  ClosureReason,
   DemolitionRequired,
+  DepositReturnResult,
   LeaseStatus,
   NextActionResponse,
   RestorationScope,
 } from '../types/api'
 import type {
+  ClosureReportView,
   CurrentCaseView,
   DiagnosisAnswers,
   DiagnosisBusiness,
@@ -293,9 +296,48 @@ function toJudgmentView(envelope: CasesEnvelope): JudgmentView {
   }
 }
 
-/** 현재 Case 화면이 필요한 전체 데이터 */
+const CLOSURE_REASONS: readonly ClosureReason[] = ['BUSINESS_SLUMP', 'PERSONAL', 'OTHER']
+const DEPOSIT_RETURN_RESULTS: readonly DepositReturnResult[] = ['FULL', 'PARTIAL', 'NONE']
+
+/**
+ * 저장해 둔 통합 폐업 신고 정보. 폐업일·사유·도로명 주소가 **다 있어야** 저장된 것으로 본다.
+ *
+ * 서버는 셋을 한 번에 받아 저장한다(#168). 하나라도 비어 있으면 저장 전이거나 모양이 어긋난
+ * 것이라, 일부만 채워 열지 않고 빈 칸에서 시작한다 — 반쯤 채운 칸은 사장님이 저장한 적 없는 조합이다.
+ */
+function toClosureReport(serverCase: CaseResponse): ClosureReportView | null {
+  const { closure_date, closure_reason, road_address, address_detail } = serverCase
+  if (!closure_date || !road_address || !closure_reason || !CLOSURE_REASONS.includes(closure_reason)) return null
+
+  return {
+    closureDate: closure_date,
+    closureReason: closure_reason,
+    roadAddress: road_address,
+    addressDetail: address_detail || null,
+  }
+}
+
+/** 기록해 둔 보증금 결과. 모르는 값이면 기록 전처럼 아무것도 골라 두지 않는다 */
+function toDepositReturn(serverCase: CaseResponse): DepositReturnResult | null {
+  const result = serverCase.deposit_return_result
+  return result && DEPOSIT_RETURN_RESULTS.includes(result) ? result : null
+}
+
+/**
+ * 현재 Case 화면이 필요한 전체 데이터
+ *
+ * 완료는 `case_status` 하나로 본다. `completed_at` 이 비어 와도 완료다 — 서버가 상태로 완료라고 했고,
+ * 화면은 그 시각을 쓰지 않는다. 반대로 `IN_PROGRESS` 나 우리가 모르는 값이면 진행 중이다. 진행 중인
+ * 가게에 완료 화면을 띄우면 [결과 알려주기]가 사라져 사장님이 할 일을 놓친다.
+ */
 export function toCurrentCaseView(envelope: CasesEnvelope, serverCase: CaseResponse): CurrentCaseView {
-  return { facts: toFacts(serverCase), judgment: toJudgmentView(envelope) }
+  return {
+    facts: toFacts(serverCase),
+    judgment: toJudgmentView(envelope),
+    completed: serverCase.case_status === 'COMPLETED',
+    closureReport: toClosureReport(serverCase),
+    depositReturn: toDepositReturn(serverCase),
+  }
 }
 
 /**

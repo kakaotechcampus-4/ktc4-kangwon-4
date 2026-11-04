@@ -1,4 +1,5 @@
 import {
+  IconCheckmarkCircleFill,
   IconExclamationmarkCircleFill,
   IconExclamationmarkCircleLine,
   IconPersonLine,
@@ -12,6 +13,8 @@ import { HomeBanner } from '../components/ui/HomeBanner'
 import { HomeStageCard } from '../components/ui/HomeStageCard'
 import { TaskCard } from '../components/ui/TaskCard'
 import { useCase } from '../hooks/useCase'
+import { useLogs } from '../hooks/useLogs'
+import { useRoadmap } from '../hooks/useRoadmap'
 import type { FailureNotice, JudgmentView } from '../types/view'
 
 /**
@@ -66,6 +69,20 @@ export function CurrentCasePage() {
   }
 
   const { view, stale } = query
+
+  /*
+    완료는 판단보다 먼저 본다. 완료돼도 마지막 판단 기록은 남아 있어서, 판단부터 보면 이미 마친 가게에
+    [결과 알려주기]가 다시 뜨고 누르면 409 다(#167).
+  */
+  if (view.completed) {
+    return (
+      <HomeFrame headline="폐업 정리를 모두 마쳤어요" completed>
+        {stale && <StaleNotice />}
+        <CompletedCard />
+      </HomeFrame>
+    )
+  }
+
   const card = judgmentCard(view.judgment, waitedTooLong)
   const recheck = (
     <Button variant="neutral" size={card.main ? 'md' : 'lg'} onClick={refresh} disabled={refreshing}>
@@ -75,16 +92,7 @@ export function CurrentCasePage() {
 
   return (
     <HomeFrame headline={card.headline}>
-      {/*
-        마지막으로 받은 내용을 그대로 두고 알리기만 한다. 지우면 사장님은 적어낸 것이
-        날아간 줄 알고, 조용히 두면 지난 판단을 지금 것으로 읽는다.
-      */}
-      {stale && (
-        <p role="status" className="rounded-14 bg-bg-neutral-weak px-4 py-3 text-15">
-          <strong className="font-bold">최신 상태를 확인하지 못했어요.</strong> 아래는 마지막으로
-          받은 내용이에요.
-        </p>
-      )}
+      {stale && <StaleNotice />}
 
       <TaskCard
         {...card.props}
@@ -99,17 +107,84 @@ export function CurrentCasePage() {
   )
 }
 
-/** 시안 홈의 뼈대: 리본이 해둔 일 띠 · 머리 문구 · 할 일 카드 · 단계 카드 */
-function HomeFrame({ headline, children }: { headline: string; children: ReactNode }) {
+/**
+ * 시안 홈의 뼈대: 리본이 해둔 일 띠 · 머리 문구 · 할 일 카드 · 단계 카드
+ *
+ * 띠는 기록 조회에서 리본이 한 일만 골라 채운다. 기록을 불러오지 못하면 띠만 빈 모양으로
+ * 두고 홈은 그대로 그린다 — 띠는 덧붙는 정보라 할 일 카드를 가리면 안 된다.
+ *
+ * 단계 카드는 로드맵의 지금 단계로 칠한다. 로드맵을 받지 못했으면 빈 막대로 둔다. 폐업 정리를 마쳤으면
+ * (`completed`) 막대를 다 채운다 — 서버가 완료라고 한 것을 보여줄 뿐이다.
+ */
+function HomeFrame({
+  headline,
+  completed = false,
+  children,
+}: {
+  headline: string
+  completed?: boolean
+  children: ReactNode
+}) {
+  const { query } = useLogs()
+  const ribbonItems = query.status === 'READY' ? query.entries.filter((entry) => entry.actor === 'RIBBON') : []
+  const roadmap = useRoadmap()
+  const currentStage =
+    roadmap.status === 'READY' ? roadmap.view.stages.find((stage) => stage.stage === roadmap.view.currentStage) : undefined
+
   return (
     <>
-      <HomeBanner />
+      <HomeBanner items={ribbonItems} />
       <div className="flex flex-1 flex-col gap-3 px-4 pt-6 pb-4">
         <h1 className="mb-1 text-24 font-bold text-pretty">{headline}</h1>
         {children}
-        <HomeStageCard />
+        <HomeStageCard
+          stage={currentStage ? { number: currentStage.stage, title: currentStage.title } : null}
+          completed={completed}
+        />
       </div>
     </>
+  )
+}
+
+/**
+ * 마지막으로 받은 내용을 그대로 두고 알리기만 한다. 지우면 사장님은 적어낸 것이
+ * 날아간 줄 알고, 조용히 두면 지난 판단을 지금 것으로 읽는다.
+ */
+function StaleNotice() {
+  return (
+    <p role="status" className="rounded-14 bg-bg-neutral-weak px-4 py-3 text-15">
+      <strong className="font-bold">최신 상태를 확인하지 못했어요.</strong> 아래는 마지막으로
+      받은 내용이에요.
+    </p>
+  )
+}
+
+/**
+ * 폐업 정리를 모두 마친 카드(시안 `closed`).
+ *
+ * 색은 시안대로 주황(`brand`)이다. 시안의 완료 색(`pos`)이 brand 와 같은 값이다.
+ * 시안의 "종합소득세는 다음 해 5월에 알려드릴게요"는 뺐다 — 알림 기능이 없어 지킬 수 없는 약속이고,
+ * 기한을 FE 가 적어 두게 된다(FE 규칙 7). 서류함에 서류가 남아 있다는 것만 알린다.
+ *
+ * 누를 것은 [전체 기록 보기] 하나다. 판단을 다시 물을 일이 없어 "상태 다시 확인"은 두지 않는다.
+ */
+function CompletedCard() {
+  const navigate = useNavigate()
+  const { search } = useLocation()
+
+  return (
+    <TaskCard
+      tone="brand"
+      icon={<IconCheckmarkCircleFill size={40} />}
+      badge="완료"
+      title="수고 많으셨어요, 사장님"
+      description="모든 서류는 서류함에 있어요."
+      actions={
+        <Button size="lg" onClick={() => navigate({ pathname: '/log', search })}>
+          전체 기록 보기
+        </Button>
+      }
+    />
   )
 }
 

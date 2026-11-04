@@ -6,6 +6,7 @@ import { request, UnauthorizedError } from '../lib/api'
 import { usesMockData } from '../lib/auth'
 import { readMockKey } from '../lib/mockSwitch'
 import {
+  completedCase,
   doneCase,
   judgmentConflictCase,
   judgmentFailedCase,
@@ -102,6 +103,8 @@ const MOCKS: Record<string, CurrentCaseView> = {
   // 같은 키를 여기 붙이면 `/case` 에서 할 일 카드가 안 떠 그 흐름이 첫 걸음에서 끊긴다
   'judgment-conflict': judgmentConflictCase,
   unrecognized: unrecognizedCase,
+  // 폐업 정리를 모두 마친 홈(시안 `closed`)
+  completed: completedCase,
 }
 
 function mockQuery(mockKey: string): CaseQuery {

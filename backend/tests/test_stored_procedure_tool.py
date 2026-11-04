@@ -6,10 +6,10 @@ from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
-from test_action_codes import StubModel, source, supervisor_request
-from test_info_replanning import Responses, finding, output
-
+from app.agent.action_catalog import PROCEDURE_LABELS
 from app.agent.info_agent.agent import InfoAnalysisAgent
+from app.agent.procedure_tool import cafe
+from app.agent.procedure_tool.cafe import build_cafe_reviewed_snapshot
 from app.agent.procedure_tool.store import ReviewedProcedureRecord
 from app.agent.procedure_tool.stored_tool import (
     ProcedureLookupInputError,
@@ -25,8 +25,43 @@ from app.agent.schemas import (
     ReviewSubject,
 )
 from app.agent.supervisor import SupervisorAgent
+from app.common.agent_data import load_reviewed_procedures
+from test_action_codes import StubModel, source, supervisor_request
+from test_info_replanning import Responses, finding, output
 
 NOW = datetime(2026, 10, 4, tzinfo=timezone.utc)
+
+
+def test_bundled_cafe_sources_match_the_reviewed_records():
+    snapshot = build_cafe_reviewed_snapshot()
+    store = load_reviewed_procedures()
+    assert store.snapshot_version == snapshot.snapshot_version
+    cafe_records = [record for record in store.records() if record.record_id != "DEMOLITION_SUPPORT_2026"]
+    assert cafe_records == snapshot.records
+    separately_reviewed = [record for record in store.records() if record.record_id == "DEMOLITION_SUPPORT_2026"]
+    assert len(separately_reviewed) == 1
+    assert separately_reviewed[0].reviewed_by == "healthy27"
+    assert separately_reviewed[0].reviewed_at == datetime(2026, 11, 3, 13, 10, 41, tzinfo=timezone.utc)
+    assert {code for record in store.records() for code in record.step_codes} == set(PROCEDURE_LABELS)
+    assert all(record.reviewed_by and record.reviewed_at for record in store.records())
+    assert {record.freshness(date(2026, 11, 3)) for record in store.records()} == {"CURRENT"}
+
+
+def test_new_cafe_source_is_unreviewed_until_its_own_approval(monkeypatch):
+    extra = {
+        **cafe._OFFICIAL_RECORDS[0],
+        "record_id": "SYNTHETIC_UNREVIEWED_SOURCE",
+        "canonical_url": "https://example.org/unreviewed",
+    }
+    extra.pop("reviewed_by", None)
+    extra.pop("reviewed_at", None)
+    monkeypatch.setattr(cafe, "_OFFICIAL_RECORDS", (*cafe._OFFICIAL_RECORDS, extra))
+
+    record = build_cafe_reviewed_snapshot().records[-1]
+
+    assert record.reviewed_by is None
+    assert record.reviewed_at is None
+    assert record.freshness(date(2026, 11, 3)) == "UNKNOWN"
 
 
 def lookup(*, evidence_changes=None, record_changes=None, missing=False, as_of=None,
