@@ -5,9 +5,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MAX_UPLOAD_BYTES } from '../hooks/useDocuments'
 import { REQUEST_TIMEOUT_MS } from '../lib/api'
 import { UPLOAD_TIMEOUT_MS } from '../lib/documentsApi'
-import { MOCK_UPLOAD_MS } from '../mocks/documents'
+import type { DocumentResponse } from '../types/api'
 import { ConfirmSheet, DocsPage } from './DocsPage'
-import { hanging, json, serve, serverDocument, serverList, status } from './docsTestServer'
+import { type Answer, completeCheck, hanging, issuesCheck, json, serve, serverDocument, serverList, status } from './docsTestServer'
 
 function renderAt(path: string) {
   render(
@@ -184,44 +184,74 @@ describe('DocsPage — 서버', () => {
   })
 })
 
-describe('DocsPage — Mock', () => {
-  it('올린 서류를 종류 이름과 상태 배지로 늘어놓는다', () => {
-    renderAt('/docs?mock=docs')
+/** 화면 테스트가 쓰는 서류들. Mock(`mocks/documents.ts`)은 시연용이라 바뀌므로 테스트가 따로 들고 있는다 */
+const STATEMENT = serverDocument({
+  document_id: 'doc-statement',
+  filename: 'statement.pdf',
+  kind: 'CONSTRUCTION_STATEMENT',
+  kind_label: '철거공사내역서',
+})
+const RECEIPT = serverDocument({
+  document_id: 'doc-receipt',
+  filename: 'IMG_0420.jpg',
+  kind: 'CLOSURE_RECEIPT',
+  kind_label: '폐업신고 접수증',
+  needs_confirmation: true,
+  fields: [{ name: 'date', value: '2026-10-31', page: 1 }],
+})
+const UNKNOWN = serverDocument({
+  document_id: 'doc-unknown',
+  filename: 'scan.pdf',
+  kind: 'UNKNOWN',
+  kind_label: '종류 확인 필요',
+  needs_confirmation: true,
+  fields: [],
+})
 
-    const rows = screen.getAllByRole('listitem')
-    expect(rows[0]).toHaveTextContent('철거공사내역서')
-    expect(rows[0]).toHaveTextContent('보관 중')
-    // 사진처럼 서버가 확신하지 못한 서류는 확인하러 가는 버튼이 배지 자리에 온다. 확인한 서류에는 없다
-    expect(screen.getByRole('button', { name: '철거 전 사진 확인하기' })).toBeInTheDocument()
+/** 서버가 이 서류들을 주는 서류함을 띄우고 그려질 때까지 기다린다. 뒤이은 요청의 답도 차례로 준다 */
+async function renderDocs(documents: DocumentResponse[], ...after: Answer[]) {
+  const server = serve(json(serverList(documents)), ...after)
+  renderAt('/docs')
+  await screen.findByText(documents[0].filename)
+  return server
+}
+
+describe('DocsPage — 서류 줄과 확인', () => {
+  it('올린 서류를 종류 이름과 상태 배지로 늘어놓는다', async () => {
+    await renderDocs([STATEMENT, RECEIPT])
+
+    const row = screen.getByText('statement.pdf').closest('li')
+    expect(row).toHaveTextContent('철거공사내역서')
+    expect(row).toHaveTextContent('보관 중')
+    // 서버가 확신하지 못한 서류는 확인하러 가는 버튼이 배지 자리에 온다. 확인한 서류에는 없다
+    expect(screen.getByRole('button', { name: '폐업신고 접수증 확인하기' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '철거공사내역서 확인하기' })).not.toBeInTheDocument()
   })
 
   /** 고친 값이 다음 점검에 쓰인다. 확인한 뒤에도 "확인하기"가 남으면 점검이 끝나지 않는 줄 안다 */
-  it('확인 시트에서 고친 값으로 확인하면 확인하기가 사라진다', () => {
-    renderAt('/docs?mock=docs')
+  it('확인 시트에서 서버가 꺼낸 값을 보여주고, 확인하면 확인하기가 사라진다', async () => {
+    await renderDocs([RECEIPT], json(serverList([{ ...RECEIPT, needs_confirmation: false }])))
 
     fireEvent.click(screen.getByRole('button', { name: '폐업신고 접수증 확인하기' }))
     const ask = screen.getByRole('dialog', { name: '서류 확인하기' })
-    // 서버가 꺼낸 값을 칸에 채워 보여준다
     const date = within(ask).getByLabelText('날짜')
     expect(date).toHaveValue('2026-10-31')
 
     fireEvent.change(date, { target: { value: '2026-11-01' } })
     fireEvent.click(within(ask).getByRole('button', { name: '맞아요, 확인했어요' }))
 
-    expect(screen.queryByRole('dialog', { name: '서류 확인하기' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '폐업신고 접수증 확인하기' })).not.toBeInTheDocument()
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: '폐업신고 접수증 확인하기' })).not.toBeInTheDocument(),
+    )
     expect(screen.getByText('IMG_0420.jpg').closest('li')).toHaveTextContent('보관 중')
   })
 
   /** 종류를 모르는 채로 확인하면 점검이 그 서류를 어디에도 넣지 못한다 */
   it('종류를 모르는 서류는 종류를 골라야 확인할 수 있다', async () => {
-    vi.useFakeTimers()
-    renderAt('/docs?mock=docs')
-    pick(new File(['%PDF'], 'scan.pdf', { type: 'application/pdf' }))
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(MOCK_UPLOAD_MS)
-    })
+    const { calls } = await renderDocs(
+      [UNKNOWN],
+      json(serverList([{ ...UNKNOWN, kind: 'TRANSFER', kind_label: '이체확인증', needs_confirmation: false }])),
+    )
 
     fireEvent.click(screen.getByRole('button', { name: '종류 확인 필요 확인하기' }))
     const ask = screen.getByRole('dialog', { name: '서류 확인하기' })
@@ -232,12 +262,13 @@ describe('DocsPage — Mock', () => {
     expect(submit).toBeEnabled()
     fireEvent.click(submit)
 
-    expect(screen.getByText('scan.pdf').closest('li')).toHaveTextContent('이체확인증')
+    await waitFor(() => expect(screen.getByText('scan.pdf').closest('li')).toHaveTextContent('이체확인증'))
+    expect(JSON.parse(calls()[1].body as string)).toMatchObject({ kind: 'TRANSFER' })
   })
 
   /** 빈 값으로 보내면 서버가 그것을 사장님이 확인한 값으로 남긴다 */
-  it('값을 비우면 확인할 수 없다', () => {
-    renderAt('/docs?mock=docs')
+  it('값을 비우면 확인할 수 없다', async () => {
+    await renderDocs([RECEIPT])
 
     fireEvent.click(screen.getByRole('button', { name: '폐업신고 접수증 확인하기' }))
     const ask = screen.getByRole('dialog', { name: '서류 확인하기' })
@@ -247,36 +278,27 @@ describe('DocsPage — Mock', () => {
   })
 
   /** 무엇이 빠졌는지는 서버 문구로만 말한다. FE가 필요한 서류 목록을 들고 있지 않는다 */
-  it('점검에서 빠진 서류가 나오면 서버 문구 그대로 알린다', () => {
-    renderAt('/docs?mock=docs-issues')
+  it('점검에서 빠진 서류가 나오면 서버 문구 그대로 알린다', async () => {
+    serve(json(serverList([STATEMENT], issuesCheck)))
+    renderAt('/docs')
 
-    expect(screen.getByText('정산 점검 목록에서 빠진 서류: 이체확인증')).toBeInTheDocument()
+    expect(await screen.findByText('정산 점검 목록에서 빠진 서류: 이체확인증')).toBeInTheDocument()
   })
 
-  it('시트에서 파일을 고르면 시트를 닫고, 읽는 동안 기다리라고 알린 뒤 서류가 늘어난다', async () => {
-    vi.useFakeTimers()
-    renderAt('/docs?mock=docs')
-    const before = screen.getAllByRole('listitem').length
+  it('시트에서 파일을 고르면 시트를 닫고, 읽는 동안 기다리라고 알리며 더 올리지 못하게 한다', async () => {
+    await renderDocs([STATEMENT], hanging)
 
     pick(new File(['%PDF'], '이체확인증.pdf', { type: 'application/pdf' }))
 
-    // 시트는 내려가는 움직임이 끝난 다음 순간에 닫힌다
-    await act(async () => {})
-    expect(sheet()).not.toBeInTheDocument()
+    await waitFor(() => expect(sheet()).not.toBeInTheDocument())
     expect(screen.getByRole('status')).toHaveTextContent('서류를 읽는 중')
     // 한 장을 읽는 동안 또 올리면 결과가 서로를 덮는다
     expect(uploadButton()).toBeDisabled()
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(MOCK_UPLOAD_MS)
-    })
-    expect(screen.getAllByRole('listitem')).toHaveLength(before + 1)
-    expect(screen.getByText('이체확인증.pdf')).toBeInTheDocument()
   })
 
   /** 서버가 20MB 넘는 파일을 거절한다. 수십 초 올린 뒤에 거절당하지 않게 고르는 순간 막는다 */
-  it('너무 큰 파일은 올리지 않고 바로 알린다', () => {
-    renderAt('/docs?mock=docs')
+  it('너무 큰 파일은 올리지 않고 바로 알린다', async () => {
+    const { calls } = await renderDocs([STATEMENT])
     const big = new File(['x'], '큰사진.jpg', { type: 'image/jpeg' })
     Object.defineProperty(big, 'size', { value: MAX_UPLOAD_BYTES + 1 })
 
@@ -284,34 +306,33 @@ describe('DocsPage — Mock', () => {
 
     expect(screen.getByText('파일이 너무 커요.')).toBeInTheDocument()
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    expect(calls()).toHaveLength(1)
   })
 
   /** 서버에서 지운 서류는 되돌릴 수 없다. 줄 끝 휴지통을 잘못 눌러도 바로 사라지면 안 된다 */
-  it('빼기 전에 한 번 묻고, 그대로 두면 남긴다', async () => {
-    renderAt('/docs?mock=docs')
-    const before = screen.getAllByRole('listitem').length
+  it('빼기 전에 한 번 묻고, 그대로 두면 남기고 보내지 않는다', async () => {
+    const { calls } = await renderDocs([STATEMENT, RECEIPT])
 
-    fireEvent.click(screen.getByRole('button', { name: '전자세금계산서 빼기' }))
+    fireEvent.click(screen.getByRole('button', { name: '철거공사내역서 빼기' }))
     const ask = screen.getByRole('dialog', { name: '이 서류를 뺄까요?' })
-    expect(ask).toHaveTextContent('전자세금계산서 · 전자세금계산서.pdf')
-    // 묻는 동안에는 아직 지우지 않았다
-    expect(screen.getAllByRole('listitem')).toHaveLength(before)
+    expect(ask).toHaveTextContent('철거공사내역서 · statement.pdf')
 
     fireEvent.click(within(ask).getByRole('button', { name: '그대로 두기' }))
 
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '이 서류를 뺄까요?' })).not.toBeInTheDocument())
-    expect(screen.getAllByRole('listitem')).toHaveLength(before)
+    expect(screen.getAllByRole('listitem')).toHaveLength(2)
+    expect(calls()).toHaveLength(1)
   })
+})
 
-  it('빼기를 한 번 더 누르면 목록에서 사라진다', () => {
+/** Mock 은 Preview 에서 화면을 보려고 둔다. 서버를 부르지 않고 예시 서류가 그려지는지만 본다(화면당 하나) */
+describe('DocsPage — Mock', () => {
+  it('?mock= 이면 서버를 부르지 않고 예시 서류를 그린다', () => {
+    const { fetchMock } = serve(json(serverList([])))
     renderAt('/docs?mock=docs')
-    const before = screen.getAllByRole('listitem').length
 
-    fireEvent.click(screen.getByRole('button', { name: '전자세금계산서 빼기' }))
-    fireEvent.click(within(screen.getByRole('dialog', { name: '이 서류를 뺄까요?' })).getByRole('button', { name: '빼기' }))
-
-    expect(screen.getAllByRole('listitem')).toHaveLength(before - 1)
-    expect(screen.queryByText('전자세금계산서.pdf')).not.toBeInTheDocument()
+    expect(screen.getAllByRole('listitem').length).toBeGreaterThan(0)
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })
 
@@ -371,14 +392,15 @@ describe('ConfirmSheet', () => {
 
 /** 주 버튼은 하나다. 점검을 통과했는데 다시 점검하러 보내면 제출 파일을 찾지 못한다 */
 describe('DocsPage — 다음 단계 버튼', () => {
-  it('서류가 있으면 점검하러 가고, 통과했으면 제출 파일을 보러 간다', () => {
-    renderAt('/docs?mock=docs')
+  it('서류가 있으면 점검하러 가고, 통과했으면 제출 파일을 보러 간다', async () => {
+    await renderDocs([STATEMENT])
     expect(screen.getByRole('button', { name: '정산 서류 점검하기' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '정산 제출 파일 보기' })).not.toBeInTheDocument()
 
     cleanup()
-    renderAt('/docs?mock=docs-complete')
-    expect(screen.getByRole('button', { name: '정산 제출 파일 보기' })).toBeInTheDocument()
+    serve(json(serverList([STATEMENT], completeCheck)))
+    renderAt('/docs')
+    expect(await screen.findByRole('button', { name: '정산 제출 파일 보기' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '정산 서류 점검하기' })).not.toBeInTheDocument()
   })
 })
