@@ -44,8 +44,8 @@ export class ApiError extends Error {
 /**
  * 인증이 통하지 않았을 때. BE가 헤더 누락·만료·위조·토큰 종류 불일치를 전부 401로 준다.
  *
- * TODO(API): 다음 PR에서 보호된 호출이 생기면 이 오류를 받아 `/login`으로 보낸다.
- * 지금은 로그인 요청 하나뿐이라 보낼 곳이 없다.
+ * 서버를 부르는 쪽(`useCase` · `useLogs` · `useRoadmap` 등)이 이 오류를 받으면 `/login`으로 보낸다.
+ * 못 쓰는 토큰은 여기서 먼저 지운다(`request` 의 `logOut`).
  */
 export class UnauthorizedError extends ApiError {
   constructor(message = '로그인이 필요합니다.') {

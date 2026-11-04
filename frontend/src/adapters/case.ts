@@ -382,8 +382,7 @@ const BUSINESS_REQUEST: Record<DiagnosisBusiness, { business_type: string; franc
 /**
  * 상황 진단 답을 가입 요청 모양으로 바꾼다.
  *
- * 시안의 답과 서버 칸이 1:1이 아니라서 여기서 한 번에 옮긴다. 옮기는 규칙은
- * 인계 문서 "상황 진단 임시 변환" 표와 같다.
+ * 시안의 답과 서버 칸이 1:1이 아니라서 여기서 한 번에 옮긴다. 옮기는 규칙은 아래와 같다.
  *
  * - 업종: 개인 카페 `CAFE`+`false`, 프랜차이즈 카페 `CAFE`+`true`, 다른 음식점 `RESTAURANT`+따로 받은 답
  * - 점포: 빌린 가게면 월세 답으로 `LEASED_PAID`/`LEASED_FREE`, 안 골랐으면 `OWNED`

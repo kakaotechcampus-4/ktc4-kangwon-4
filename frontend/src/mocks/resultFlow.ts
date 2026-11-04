@@ -199,10 +199,8 @@ const PENDING_MS = 7000
  * 선택을 필드별로 받지만 지금은 "전부 유지했는가"만 본다. 충돌이 둘 이상이고 선택이
  * 엇갈리면 화면이 실제 선택과 달라진다 — Mock이 1건만 내려주는 동안은 드러나지 않는다.
  *
- * TODO(API): POST /cases/{caseId}/results/confirm 호출로 바꾼다. 요청 본문은
- * `rawInput`과 `confirmedChanges: [{ field, value }]` 라, 여기 오는 STORED/INCOMING을
- * 실제 값으로 바꾸고 입력 문장을 함께 넘기는 변환이 그때 필요하다.
- * 실패 응답과 네트워크 오류 처리도 그때 함께 넣는다.
+ * Mock 전용이다. 실서버는 `POST /cases/results/decision`(#136 · #163)으로 고른 쪽을 보내고
+ * (`lib/resultSubmit.ts` `submitDecision`), 판단 결과를 기다린다.
  */
 export function simulateConfirm(choices: Record<string, ConflictSide>): Promise<ReplanView> {
   const sides = Object.values(choices)

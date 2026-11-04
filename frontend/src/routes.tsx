@@ -41,7 +41,7 @@ import { TaskPage } from './pages/TaskPage'
  *
  * 탭 밖에서 밀려 들어오는 화면이다. 뒤로 버튼으로 돌아간다.
  *
- *   /roadmap          폐업 전체 순서  홈 단계 카드로 들어온다. 로드맵 조회 API 전이라 실서버에서는 준비 중
+ *   /roadmap          폐업 전체 순서  홈 단계 카드로 들어온다 (GET /cases/roadmap)
  *   /roadmap/:taskId  할 일          할 일마다 체크·첨부·고르기 등을 연다 (lib/taskFlows.ts)
  *   /docs/check       서류 점검      정산 서류를 점검한다
  *   /docs/done        정산 제출 파일  점검을 통과했을 때만

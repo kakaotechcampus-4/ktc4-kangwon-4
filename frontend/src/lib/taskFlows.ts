@@ -7,8 +7,8 @@ import type { RoadmapTaskView } from '../types/view'
  *   ATTACH          서류를 서류함에 올리고 체크. 서류는 서류 API(#159), 체크는 위와 같다
  *   SUPPORT_RESULT  철거비 1차 적격심사 결과 고르기(#149)
  *   DOCUMENT_CHECK  서류 점검 화면(`/docs/check`)으로 보낸다
- *   CLOSURE_REPORT  폐업 정보·가게 주소(#168, 다음 커밋)
- *   DEPOSIT         보증금 돌려받았는지(#168, 다음 커밋)
+ *   CLOSURE_REPORT  폐업 정보·가게 주소(#168)
+ *   DEPOSIT         보증금 돌려받았는지(#168)
  *   REPORT_RESULT   공식 절차. 결과를 글로 알려주면 판단이 상태를 바꾼다(`/results`)
  *   INFO            사장님이 따로 할 것이 없다(가입 때 정한 것 등). 안내만
  */

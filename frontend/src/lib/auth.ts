@@ -80,8 +80,8 @@ export function logInWithMock(): void {
 /**
  * 가짜 세션인지.
  *
- * TODO(API): 다음 PR에서 Case를 서버에 물을 때, 가짜 세션이면 서버를 부르지 않고
- * Mock 데이터를 쓴다. 지금 그대로 보내면 서버가 401로 돌려보낸다.
+ * 가짜 세션이면 서버를 부르지 않고 Mock 데이터를 쓴다(아래 `usesMockData`). 그대로 보내면
+ * 서버에 없는 사용자라 401로 돌아온다.
  */
 export function isMockSession(): boolean {
   return accessToken.read() === MOCK_TOKEN

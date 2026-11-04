@@ -140,7 +140,7 @@ function questionOf(
           label: '찾아볼 곳',
           items: [
             { emoji: pageUrl, title: '임대차계약서 특약사항', description: '보통 계약서 마지막 장에 있어요' },
-            // TODO(서류함): 계약서를 올리는 서류함은 7번 PR에서 연결한다(11/03 시우님: 만들 예정이라 문구 유지)
+            // 계약서는 가입 뒤 서류함에 올린다(진단 안에서 올리는 길은 없다). 시안 문구를 그대로 둔다(11/03 시우님)
             { emoji: searchUrl, title: '모르시면 리본이 찾아요', description: '계약서 사진만 올려주시면 돼요' },
           ],
         },
