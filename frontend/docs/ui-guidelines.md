@@ -116,6 +116,48 @@ Tailwind 기본 크기(`text-sm`, `text-base` …)는 새 화면에서 쓰지 �
 간격은 Tailwind 기본 단위(4px)를 그대로 쓴다. 부품별 여백은 공통 부품을 만들 때 정한다.
 ---
 
+## 움직임
+
+시안(`index.dc.html`)의 시간·곡선을 기준으로, 토스·당근·iOS가 흔히 쓰는 방식을 더했다(8번 PR, 11/04).
+**기기에서 "동작 줄이기"를 켰으면 모두 멈춘다.** CSS는 `motion-safe:`·`@media (prefers-reduced-motion)`,
+Motion은 `MotionConfig reducedMotion="user"`(`App.tsx`)가 맡는다.
+
+### 무엇으로 움직이나
+
+| 움직임 | 도구 | 어디에 |
+|---|---|---|
+| 화면 이동 (새 화면이 오른쪽에서 밀려 들어오고, 뒤로 가면 밀려 나감. 뒤 화면은 1/4 밀리며 어두워짐) | 브라우저 View Transitions — 라우터 이동에 `viewTransition` 을 켠다. 방향은 `lib/viewTransition.ts` 가 `<html data-nav>` 에 적는다 | `index.css`. 움직이는 것은 화면 틀(`screen-frame`)뿐이라 데스크톱 양옆 회색은 그대로 |
+| 아래 시트 (용수철로 올라오고, 내려간 뒤 닫히고, 끌어 내려 닫기) | Motion 움직이는 값(`useMotionValue`) | `BottomSheet` |
+| 버튼 누르기 (0.97배, 용수철) | Motion `whileTap` | `Button` |
+| 로드맵 단계 펼치기·접기 (높이) | Motion `AnimatePresence` | `RoadmapPage` |
+| 그 밖의 페이드·차오르기·차례로 올라오기·튀어 오르기 | CSS (아래 토큰) | 각 화면 |
+
+**처음 화면에 보여야 하는 내용은 CSS로 움직인다.** Motion 기능 묶음은 첫 화면이 뜬 뒤 따로 받는다
+(`lib/motionFeatures.ts`). 그 전에 Motion이 숨겨 둔 내용은 묶음이 와야 보여서, 늦거나 못 받으면 비어 보인다.
+
+### 토큰 (`styles/tokens.css`)
+
+| 토큰 / 클래스 | 값 | 쓰는 곳 |
+|---|---|---|
+| `ease-out-soft` | `cubic-bezier(.2,.8,.2,1)` (시안 화면 밀기) | 화면 이동, 장면 페이드, 펼치기 |
+| `ease-sheet` | `cubic-bezier(.32,.72,0,1)` (iOS 시트) | 시트 내려가기 |
+| `--duration-stage-fill` | `.8s` | 홈 단계 막대 차오르기 |
+| `animate-fade-in` / `animate-fade-in-short` | `.3s` / `.2s` | 홈 띠·소개 글 / 도움말·오류 한 줄 |
+| `animate-step-forward` / `animate-step-back` | `.3s`, 16px | 상황 진단 질문 넘김 (번호가 커지면 오른쪽에서) |
+| `animate-picture-in` | `.35s`, 0.96배에서 | 소개 그림 |
+| `animate-rise` · `rise-children` | `.4s`, 8px 아래에서, 한 칸에 40ms씩 늦게 (8칸까지) | 탭 화면 목록·홈 카드·점검 결과. 앞으로 들어온 화면에만(`useEntersForward`) |
+| `animate-pop` | `.45s`, 0.6 → 1.1 → 1배 | 끝난 것을 알리는 체크 |
+| `press-scale` | 누르는 동안 0.98배, 150ms | 누르는 카드·줄·보기. 화면 끝까지 꽉 찬 띠에는 안 붙인다 |
+
+### 지킬 것
+
+- **뒤로 돌아온 화면의 내용은 다시 올리지 않는다.** 이미 밀려 나가는 움직임 중이라 두 겹이 된다
+- **한 화면에 `screen-frame` 은 하나만.** 둘이면 브라우저가 화면 이동 움직임을 건너뛴다
+- `replace` 이동과 `<Navigate>` 되돌리기, 탭 사이 이동에는 `viewTransition` 을 켜지 않는다. 밀어 넣을 새 화면이 아니라 길을 바로잡는 것이다
+- 테스트는 움직임을 보지 않는다(클래스 비교 금지). Motion 은 `setupTests.ts` 에서 바로 끝내고(`skipAnimations`), 움직임이 끝난 뒤의 일(시트 닫힘·접힌 목록 빠짐)은 `waitFor` 로 기다린다
+
+---
+
 ## 모바일 우선
 
 - **기준 폭 375px.** 이 폭에서 먼저 만들고 넓은 화면을 나중에 대응한다
