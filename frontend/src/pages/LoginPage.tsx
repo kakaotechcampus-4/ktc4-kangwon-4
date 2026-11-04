@@ -53,7 +53,8 @@ export function LoginPage() {
       <div className="flex shrink-0 flex-col gap-2 px-4 pt-3 pb-8.5">
         {/*
           카카오 로그인 버튼은 카카오 디자인 가이드를 따른다. 바탕 #FEE500, 심볼 #000000,
-          글자 검정 85%, 모서리 12px(`rounded-xl`)이라 공통 버튼(`Button`)을 쓰지 않는다.
+          글자 검정 85%(`#000000d9`), 모서리 12px(`rounded-xl`)이라 공통 버튼(`Button`)을 쓰지 않는다.
+          카카오 색은 우리 토큰이 아니라 값을 바로 적는다(Tailwind 기본 색은 꺼져 있다)
           폭을 넓힐 때는 심볼과 글자 크기는 두고 좌우 여백만 늘린다 — 심볼은 공식 버튼
           (46px 높이에 13px)의 비율대로 56px 높이에 16px로 둔다.
 
@@ -63,7 +64,7 @@ export function LoginPage() {
         <button
           type="button"
           onClick={handleKakaoLogin}
-          className="flex h-14 w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-[#FEE500] text-18 font-bold text-black/85"
+          className="flex h-14 w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-[#FEE500] text-18 font-bold text-[#000000d9]"
         >
           <img src={kakaoSymbolUrl} alt="" className="size-4" />
           카카오로 시작하기
