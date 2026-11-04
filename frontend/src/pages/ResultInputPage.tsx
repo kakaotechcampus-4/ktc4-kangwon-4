@@ -186,12 +186,18 @@ export function ResultInputPage() {
    * 보낼 글. 질문에 답할 때는 질문을 붙이고, 답하지 않은 질문은 뺀다.
    * 다시 알려주실 때도 요청한 항목을 질문 자리에 붙인다 — AI 는 무엇을 물었는지 모른다.
    * 요청한 항목이 비어 있으면 물은 것이 없어서 글만 보낸다.
+   *
+   * **방금 보낸 결과가 "이것을 더 알려 달라"로 실패했으면 그 항목을 붙인다.** 화면을 열 때의 안내(홈의
+   * "다시 알려주기")보다 지금 화면에 떠 있는 실패 안내가 최신이다. 처음 안내를 붙이면 물은 것과 답이 엇갈리고,
+   * 할 일의 결과를 보내다 실패한 경우는 물은 것 없이 나간다.
    */
   const resubmitNotice = entry.status === 'READY' && entry.ask.kind === 'RESUBMIT' ? entry.ask.notice : null
+  const latestDetail = state.kind === 'FAILED' && state.notice.kind === 'NEEDS_DETAIL' ? state.notice : null
+  const askedFields = latestDetail ?? resubmitNotice
   const draft = questions
     ? toAnswerInput(questions.map((question) => ({ question, answer: answers[question] ?? '' })))
-    : resubmitNotice && resubmitNotice.fields.length > 0
-      ? toAnswerInput([{ question: requestedFieldsText(resubmitNotice), answer: text }])
+    : askedFields && askedFields.fields.length > 0
+      ? toAnswerInput([{ question: requestedFieldsText(askedFields), answer: text }])
       : text.trim()
   const isPending = state.kind === 'PENDING'
   /*

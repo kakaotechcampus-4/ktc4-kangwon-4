@@ -340,6 +340,34 @@ describe('ResultInputPage — 서버', () => {
       ])
     })
 
+    /**
+     * 보낸 결과가 "이것을 더 알려 달라"(직원 수)로 실패했다. 이어서 적는 글에도 무엇을 물었는지 붙여야
+     * 한다 — AI 는 직전에 무엇을 물었는지 모른다. 처음 화면이 묻던 것(없음·다른 항목)을 붙이면 엇갈린다
+     */
+    it('보낸 뒤 더 알려 달라는 실패가 오면, 이어서 보내는 글에 방금 물은 항목을 붙인다', async () => {
+      const fetchMock = serve({
+        entry: [READY],
+        submit: [ACCEPTED, ACCEPTED],
+        judged: [
+          json(judgedBody({ result: 'FAILED', recovery_action_code: 'RESUBMIT_INPUT', requested_field_paths: ['employee_count'] })),
+          json(judgedBody({ result: 'PENDING' })),
+        ],
+      })
+      renderFlow()
+      await advance()
+      submit('임대인이 철거하래요')
+      await advance(INTERVAL_MS)
+
+      fireEvent.change(screen.getByRole('textbox'), { target: { value: '직원은 2명이에요' } })
+      fireEvent.click(screen.getByRole('button', { name: '보내기' }))
+      await advance()
+
+      expect(sentBodies(fetchMock)[1]).toEqual({
+        case_history_id: 13,
+        raw_input: '[리본이 물어본 것] 직원 수\n[사장님 답] 직원은 2명이에요',
+      })
+    })
+
     /** 무엇이 더 필요한지 서버가 말하지 않았으면 물은 것이 없다. 없는 질문을 만들어 붙이지 않는다 */
     it('요청한 항목이 없는 실패에서는 적은 글만 보낸다', async () => {
       const fetchMock = serve({
