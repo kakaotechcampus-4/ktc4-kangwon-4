@@ -442,6 +442,7 @@ CASE 필드 값 충돌을 확인하기 위한 1회성 참조.
 | candidate_payload | JSON | | NULLABLE | `{"field_path": "employee_count", "committed_value": 2, ...}` | Agent가 보낸 충돌 후보 원본 전체. 위 칸들은 화면용이라 글자로 바꿔 숫자·참거짓·빈 값을 되돌릴 수 없는데, 확인할 때 Agent가 내용 다이제스트를 대조해 다르면 거절한다 |
 | status | ENUM | | NOT NULL, DEFAULT `PENDING` | `"PENDING"` | 결정 상태. `PENDING`=아직 결정 안 됨, `CONFIRMED`=새 값 채택, `REJECTED`=기존 값 유지 |
 | decided_at | DATETIME | | NULLABLE | `NULL` | 결정된 시각. 결정 전엔 NULL |
+| resolved_by_case_history_id | BIGINT | FK | NULLABLE | 9 | 이 충돌을 닫은 결정(CASE_HISTORY) — 위 `case_history_id`(충돌을 일으킨 제출)와 짝이다. 결정 이력에는 사장님이 쓴 글이 없어서, 그 결정이 바꾼 값의 가림 문구를 되돌릴 때 이 칸을 거쳐 제출의 원문을 찾는다 |
 | created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP ⚠️ 추정 | `2026-09-10 10:00:00` | |
 
 ### DECISION_RECORD
