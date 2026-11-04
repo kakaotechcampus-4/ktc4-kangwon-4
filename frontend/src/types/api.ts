@@ -34,7 +34,7 @@ export type RestorationClause = 'EXISTS' | 'NOT_EXISTS' | 'UNKNOWN'
  * "아직 모른다"와 "없다"가 서버에서 같아진다.
  */
 export interface CaseCreateRequest {
-  /** 화면 표시용. 진단에서 묻지 않아 지금은 늘 `null` */
+  /** 가게 이름. 진단에서 묻지 않아 지금은 늘 `null`. 서류 점검이 쓰는 값이다(아래 `CaseResponse`) */
   store_name: string | null
   business_type: string
   franchise_status: boolean
@@ -66,7 +66,11 @@ export interface CaseCreateRequest {
 export interface CaseResponse {
   id: number
   member_id: number
-  /** 진단에서 묻지 않아 늘 `null` 로 보낸다(#156) */
+  /**
+   * 가게 이름. 진단에서 묻지 않아 지금은 늘 `null` 이다(#156).
+   * 서류 점검이 이 값을 서류의 "공급받는 자"와 맞춰 보므로, 비어 있으면 그 확인을 하지 못한다
+   * (#160 `BUYER_UNCONFIRMED`). 점검 때 따로 받을지는 아직 정하지 않았다(#175 현종님).
+   */
   store_name: string | null
   business_type: string
   franchise_status: boolean
