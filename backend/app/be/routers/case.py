@@ -19,6 +19,7 @@ from app.be.schemas.case import (
     CaseResultsSubmitAcceptedResponse,
     CaseResultsSubmitRequest,
     CaseResultsSubmitResponse,
+    CaseRetryResponse,
     CaseSupportApprovalRequest,
     CaseSupportApprovalResponse,
     ChecklistTaskId,
@@ -89,6 +90,21 @@ def submit_case_results(
     background_tasks.add_task(
         judgment_service.run_judgment_in_background, response.case_history_id
     )
+
+    return response
+
+
+@router.post("/cases/retry", response_model=CaseRetryResponse)
+def retry_case_judgment(
+    background_tasks: BackgroundTasks,
+    member_id: int = Depends(get_current_member_id),
+    session: Session = Depends(get_db),
+):
+    response = case_service.retry_case_judgment(session, member_id)
+
+    # 가입 때와 같은 이유로 뒤에서 돌린다(create_case 주석). 되돌린 그 이력을 다시 판단하고,
+    # 화면은 가입 때처럼 GET /cases로 다시 물어본다.
+    background_tasks.add_task(judgment_service.run_judgment_in_background, response.case_history_id)
 
     return response
 

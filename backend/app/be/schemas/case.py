@@ -181,6 +181,10 @@ class CaseResultsSubmitAcceptedResponse(BaseModel):
     case_history_id: int
 
 
+class CaseRetryResponse(BaseModel):
+    case_history_id: int
+
+
 class CaseConflictsDecisionItem(BaseModel):
     conflict_reference_id: int
     side: ConflictSide
