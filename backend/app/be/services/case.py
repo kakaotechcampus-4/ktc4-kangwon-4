@@ -421,14 +421,15 @@ def submit_case_results(
 
 
 def retry_case_judgment(session: Session, member_id: int) -> CaseRetryResponse:
-    """홈 실패 카드의 "다시 판단하기"(POST /cases/retry). 실패한 가입 판단을 같은 입력으로 다시 돌린다.
+    """홈 실패 카드의 "다시 판단하기"(POST /cases/retry). 실패한 가입·서류 판단을 같은 입력으로 다시 돌린다.
 
-    결과 알려주기·충돌 선택은 화면이 같은 내용을 다시 보내면 되지만, 가입 판단은 다시 가입할 수
-    없어서(Case는 회원당 하나) 이 길이 없으면 실패한 채 멈춘다.
+    결과 알려주기·충돌 선택은 화면이 같은 내용을 다시 보내면 되지만, 이 둘은 이 길이 없으면 실패한 채
+    멈춘다. 가입은 다시 할 수 없고(Case는 회원당 하나), 서류는 같은 걸 다시 올려도 판단에 넘긴 기준이
+    이미 옮겨져 있어 다시 판단하지 않는다(document.queue_document_judgment).
 
     새 이력을 만들지 않고 실패한 이력을 PENDING으로 되돌린다. 가입 이력은 Case당 하나라고 보고
     가입 근거를 찾는 곳(case_snapshot → get_case_created_history)이 있어서, 하나 더 만들면 그
-    조회가 깨진다. 실패 원인은 Langfuse 기록에 남는다.
+    조회가 깨진다. 입력은 이력에 그대로 있고, 실패 원인은 Langfuse 기록에 남는다.
     """
 
     # 두 번 눌러 판단이 둘 돌지 않게 Case를 잠그고 확인한다(submit_case_results와 같은 이유).
@@ -439,11 +440,11 @@ def retry_case_judgment(session: Session, member_id: int) -> CaseRetryResponse:
     history = case_history_crud.get_latest_user_driven_case_history(session, case.id)
     if (
         history is None
-        or history.source != "CASE_CREATED"
+        or history.source not in ("CASE_CREATED", "DOCUMENT_SUBMITTED")
         or history.judgment_status != "FAILED"
         or history.recovery_action_code != "RETRY"
     ):
-        raise HTTPException(status_code=409, detail="다시 판단할 수 있는 가입 판단이 없습니다.")
+        raise HTTPException(status_code=409, detail="다시 판단할 수 있는 판단이 없습니다.")
 
     history.judgment_status = "PENDING"
     history.judged_at = None

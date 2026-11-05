@@ -1,4 +1,4 @@
-"""실패한 가입 판단 다시 돌리기(POST /cases/retry). 진짜 MySQL이 필요하다(Docker).
+"""실패한 가입·서류 판단 다시 돌리기(POST /cases/retry). 진짜 MySQL이 필요하다(Docker).
 
 판단을 실제로 돌리지 않고, 가입 판단이 끝난 상태를 DB에 직접 만든다(case_world). 모델 호출은 없다.
 """
@@ -52,6 +52,18 @@ def test_a_failed_signup_judgment_goes_back_to_pending(case_world):
         assert history.judgment_status == "PENDING"
         assert (history.judged_at, history.failure_code, history.recovery_action_code, history.retryable,
                 history.requested_field_paths) == (None, None, None, None, None)
+
+
+def test_a_failed_document_judgment_goes_back_to_pending(case_world):
+    # 같은 서류를 다시 올려도 판단에 넘긴 기준이 이미 옮겨져 있어 다시 판단하지 않는다. 이 길뿐이다.
+    member_id, case_id, _ = case_world.sign_up()
+    history_id = case_world.add_history(case_id, "DOCUMENT_SUBMITTED", "FAILED")
+
+    response = _retry(case_world.engine, member_id)
+
+    assert response.case_history_id == history_id
+    with Session(case_world.engine) as session:
+        assert get_case_history_by_id(session, history_id).judgment_status == "PENDING"
 
 
 def test_a_finished_signup_judgment_is_not_retried(case_world):
