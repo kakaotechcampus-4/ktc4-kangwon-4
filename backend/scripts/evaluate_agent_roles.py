@@ -8,6 +8,8 @@ from copy import deepcopy
 from dataclasses import asdict, replace
 from pathlib import Path
 from time import perf_counter
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 from app.agent.info_agent import InfoAnalysisAgent
@@ -19,6 +21,7 @@ from app.agent.llm import (
     call_budget_scope,
 )
 from app.agent.review_tool import ReviewTool
+from app.agent.review_tool.models import ReviewProviderOutput
 from app.agent.run_scope import RunDeadline, run_deadline_scope
 from app.agent.schemas import (
     DiscoverSupportInput,
@@ -63,6 +66,30 @@ def baseline_row(checkpoint, dataset, case, repeat, config):
             copied["reused_from_report_sha256"] = checkpoint["original_report_sha256"]
             return copied
     return None
+
+
+async def record_review(subject, client, row):
+    """합성 평가에서 같은 초안의 모델 판단·코드 검사·최종 결과를 나눠 저장한다."""
+    row["review_subject"] = subject.model_dump(mode="json")
+    row["model_review_outputs"] = []
+    # 가짜 PASS에도 남는 문제는 코드 검사에서 찾은 것이다. 실제 모델 호출·사용량 기록은 없다.
+    code_client = SimpleNamespace(generate=AsyncMock(return_value=ReviewProviderOutput(
+        verdict="PASS", issues=[], missing_evidence=[], recommended_rework_targets=[],
+        resolution_reason="합성 평가에서 코드 검사만 확인하기 위한 가짜 PASS",
+    )))
+    code_result = await ReviewTool(code_client).review(subject)
+    row["code_review_result"] = code_result.model_dump(mode="json")
+
+    async def generate(*args, **kwargs):
+        output = await client.generate(*args, **kwargs)
+        row["model_review_outputs"].append(output.model_dump(mode="json"))
+        return output
+
+    result = await ReviewTool(SimpleNamespace(generate=generate)).review(subject)
+    # 기대 판정과의 비교가 실패해도 반려 상세와 원래 검수 대상을 잃지 않는다.
+    row["result"] = result.model_dump(mode="json")
+    row["review_results"].append({"verdict": result.verdict.value})
+    return result
 
 
 async def trial(dataset, case, config, prices, expected=None):
@@ -120,12 +147,11 @@ async def trial(dataset, case, config, prices, expected=None):
                     subject = ReviewSubject.model_validate(dataset["review_subject"])
                     original = subject.model_dump_json()
                     with observation_scope("REVIEW_TOOL", as_type="span"):
-                        result = await ReviewTool(reviewer).review(subject)
-                    row["result"] = result.model_dump(mode="json")
-                    row["review_results"].append({"verdict": result.verdict.value})
+                        result = await record_review(subject, reviewer, row)
                     row["checks"] = {"verdict": result.verdict.value == expected["verdict"],
-                                     "blocking_issue": any(i.severity == "BLOCKING" for i in result.issues),
                                      "input_unchanged": subject.model_dump_json() == original}
+                    if expected["verdict"] == "REVISE":
+                        row["checks"]["blocking_issue"] = any(i.severity == "BLOCKING" for i in result.issues)
                     assert all(row["checks"].values())
                 else:
                     request = SupervisorAgentInput.model_validate(dataset["supervisor_cases"][case])
@@ -141,8 +167,7 @@ async def trial(dataset, case, config, prices, expected=None):
                         source_results=request.source_results, supervisor_draft=draft,
                     )
                     with observation_scope("REVIEW_TOOL", as_type="span"):
-                        reviewed = await ReviewTool(reviewer).review(subject)
-                    row["review_results"].append({"verdict": reviewed.verdict.value})
+                        reviewed = await record_review(subject, reviewer, row)
                     decision = draft.decision.model_dump(mode="json")
                     action = decision.get("next_action")
                     code = action["action_code"] if action else None
@@ -155,7 +180,7 @@ async def trial(dataset, case, config, prices, expected=None):
                                      "input_unchanged": request.model_dump_json() == original}
                     assert all(row["checks"].values())
                 row["passed"] = True
-        except Exception as exc:  # noqa: BLE001 - never save provider bodies or generated prose
+        except Exception as exc:  # noqa: BLE001 - save error types, never exception messages/provider bodies
             row.update(passed=False, error_type=type(exc).__name__, error_code=getattr(exc, "code", None))
             if hasattr(exc, "fact_errors"):
                 row["fact_errors"] = list(exc.fact_errors)
@@ -185,7 +210,14 @@ async def accuracy_suite(args, dataset):
         elif case["role"] == "support":
             DiscoverSupportInput.model_validate(case["request"])
             ReviewedSupportCatalog.model_validate(case["catalog"])
-        elif case["role"] != "review":
+        elif case["role"] == "review":
+            if "request" in case:
+                if "changes" in case:
+                    raise ValueError("Fixed Review requests cannot also include changes")
+                ReviewSubject.model_validate(case["request"])
+            if case.get("expected", {}).get("verdict") not in {"PASS", "REVISE"}:
+                raise ValueError("Review cases require expected verdict PASS or REVISE")
+        else:
             SupervisorAgentInput.model_validate(dataset["supervisor_cases"][case["role"]])
     if args.validate_only:
         print(json.dumps({"validated_cases": len(cases), "model_calls": 0}))
@@ -198,7 +230,9 @@ async def accuracy_suite(args, dataset):
                 data[role + "_input"] = case["request"]
             if role == "support":
                 data["support_catalog"] = case["catalog"]
-            if role == "review":
+            if role == "review" and "request" in case:
+                data["review_subject"] = case["request"]
+            elif role == "review":
                 if seed is None:
                     raise ValueError("Review cases require a preceding Supervisor trial")
                 request = SupervisorAgentInput.model_validate(data["supervisor_cases"]["scope_unknown"])
@@ -215,7 +249,7 @@ async def accuracy_suite(args, dataset):
                     snapshot=request.case_snapshot, known_procedure_steps=request.known_procedure_steps,
                     source_results=request.source_results, supervisor_draft=draft,
                 ).model_dump(mode="json")
-            prefix = "INFO_" if role == "info" else "SUPERVISOR_" if role in data["supervisor_cases"] else ""
+            prefix = "INFO_" if role == "info" else "SUPERVISOR_" if role in data.get("supervisor_cases", {}) else ""
             config = LLMConfig.from_env(env_prefix=prefix)
             row = await trial(data, role, config, prices, case.get("expected"))
             if role == "scope_unknown" and row.get("supervisor_draft"):
