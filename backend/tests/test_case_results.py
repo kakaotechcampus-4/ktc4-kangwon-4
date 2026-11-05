@@ -99,6 +99,45 @@ def test_restoration_answer_is_persisted_with_its_literal_text(case_engine, case
         assert (saved.source, saved.judgment_status) == ("USER_INPUT", "PENDING")
 
 
+@pytest.mark.parametrize("changes", [
+    {}, {"restoration_answer": None},
+    {"restoration_answer": {"restoration_scope": "FULL", "demolition_required": "NOT_REQUIRED"}},
+    {"raw_input": "다른 입력"}, {"source": "DOCUMENT_SUBMITTED"},
+    {"recovery_action_code": "RESUBMIT_INPUT"}, {"retryable": False},
+])
+def test_retrying_a_restoration_answer_requires_the_same_accepted_retryable_input(
+    case_engine, case_world, changes,
+):
+    member_id, _, history_id = case_world.sign_up()
+    with Session(case_engine) as session:
+        session.get(CaseHistory, history_id).next_action_code = "CONFIRM_RESTORATION_SCOPE"
+        session.commit()
+        answer = {"restoration_scope": "PARTIAL", "demolition_required": "NOT_REQUIRED"}
+        accepted = submit_case_results(session, member_id, CaseResultsSubmitRequest(
+            case_history_id=history_id, restoration_answer=answer,
+        ))
+    with Session(case_engine) as session:
+        failed = session.get(CaseHistory, accepted.case_history_id)
+        failed.judgment_status = "FAILED"
+        failed.recovery_action_code = "RETRY"
+        failed.retryable = True
+        for field, value in changes.items():
+            setattr(failed, field, value)
+        session.commit()
+    with Session(case_engine) as session:
+        request = CaseResultsSubmitRequest(case_history_id=accepted.case_history_id, restoration_answer=answer)
+        if changes:
+            assert error_of(lambda: submit_case_results(session, member_id, request))[0] == 422
+            return
+        retried = submit_case_results(session, member_id, request)
+    with Session(case_engine) as session:
+        original = session.get(CaseHistory, accepted.case_history_id)
+        saved = session.get(CaseHistory, retried.case_history_id)
+        assert (original.judgment_status, saved.judgment_status) == ("FAILED", "PENDING")
+        assert saved.restoration_answer == original.restoration_answer == answer
+        assert saved.raw_input == original.raw_input == request.restoration_answer.to_input_text()
+
+
 @pytest.mark.parametrize("judgment_status,code", [
     ("DONE", None), ("DONE", "CONFIRM_RESTORATION_REQUIREMENTS"),
     ("NEEDS_MORE_INFO", "CONFIRM_RESTORATION_SCOPE"), ("FAILED", "CONFIRM_RESTORATION_SCOPE"),
