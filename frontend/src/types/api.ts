@@ -24,6 +24,13 @@ export type RestorationScope = 'UNKNOWN' | 'PARTIAL' | 'FULL' | 'NOT_REQUIRED'
 /** 철거 필요 여부 */
 export type DemolitionRequired = 'UNKNOWN' | 'REQUIRED' | 'NOT_REQUIRED'
 
+export interface RestorationAnswer {
+  restoration_scope: RestorationScope
+  demolition_required: DemolitionRequired
+}
+
+export type ResultInputKind = 'TEXT' | 'RESTORATION_ANSWER'
+
 /** 임대차계약서에 원상복구 조항이 있는지. 가입 때 사장님이 답한다 */
 export type RestorationClause = 'EXISTS' | 'NOT_EXISTS' | 'UNKNOWN'
 
@@ -249,6 +256,7 @@ export interface ConflictItemResponse {
  */
 export interface CaseResultsEntryResponse {
   judgment_status: JudgmentStatus
+  result_input_kind: ResultInputKind
   case_history_id: number | null
   raw_input: string | null
   conflicts: ConflictItemResponse[] | null
@@ -259,12 +267,10 @@ export interface CaseResultsEntryResponse {
 }
 
 /** `POST /cases/results` 로 보내는 것 */
-export interface CaseResultsSubmitRequest {
-  /** 사장님이 적은 글 그대로 */
-  raw_input: string
-  /** 이 결과가 어느 판단에 대한 것인지. `GET /cases/results` 에서 받은 번호다 */
-  case_history_id: number
-}
+export type CaseResultsSubmitRequest = { case_history_id: number } & (
+  | { raw_input: string; restoration_answer?: never }
+  | { restoration_answer: RestorationAnswer; raw_input?: never }
+)
 
 /**
  * 충돌 하나에 고른 쪽. 서버 말로 `PROPOSED` 는 이번에 말씀하신 것, `STORED` 는 지금 기록이다.
