@@ -123,6 +123,12 @@ class GroundedClaimSemantic(AgentSchema):
         return self
 
 
+# 선택형 답변으로 원상복구 "일부"를 고른 판단에서 구체 범위를 모르면 그 질문이 먼저다. 구체 범위를
+# 알아야 철거 증빙 등 다음 준비의 범위가 정해진다. 고를 것이 없으므로 모델을 부르지 않는다.
+# 그 질문에 자유글로 답한 다음 판단("아직 모름" 포함)은 기존처럼 모델이 고른다(같은 질문 반복 방지).
+_ASK_FIRST_CANDIDATE = "missing:restoration_scope_detail"
+
+
 class SupervisorModelOutput(AgentSchema):
     """Select a verified candidate; runtime owns its text, target and evidence."""
 
@@ -333,28 +339,37 @@ class SupervisorAgent:
                     }
                 )
             try:
-                model_output = await self._llm.generate(
-                    SupervisorModelOutput,
-                    messages,
-                    schema_name="reborn_supervisor_draft",
-                    # ponytail: no temperature=0 here -- the configured Supervisor
-                    # model (see SUPERVISOR_MODEL) rejects any non-default value
-                    # with HTTP 400 ("Only the default (1) value is supported"),
-                    # confirmed against the real provider 2026-09-23. `seed` was
-                    # tried too and does not help either -- confirmed against the
-                    # real provider 2026-09-23 with an identical prompt + seed
-                    # producing a different decision_type on replay. Supervisor
-                    # has no sampling-level determinism guarantee. Runtime reuse
-                    # separately checks the full request, evidence and configuration.
-                    enum_constraints={
-                        "action_code": [
-                            action["action_code"] for action in action_candidates
-                        ],
-                        "blocker_candidate_id": [
-                            item["candidate_id"] for item in blocker_candidates
-                        ] + [item["candidate_id"] for item in information_blockers],
-                    },
-                )
+                if getattr(request.trigger, "restoration_answer", None) is not None and any(
+                    item["candidate_id"] == _ASK_FIRST_CANDIDATE for item in information_blockers
+                ):
+                    model_output = SupervisorModelOutput(
+                        decision_type="NEEDS_MORE_INFO",
+                        blocker_candidate_id=_ASK_FIRST_CANDIDATE,
+                        action_code=None,
+                    )
+                else:
+                    model_output = await self._llm.generate(
+                        SupervisorModelOutput,
+                        messages,
+                        schema_name="reborn_supervisor_draft",
+                        # ponytail: no temperature=0 here -- the configured Supervisor
+                        # model (see SUPERVISOR_MODEL) rejects any non-default value
+                        # with HTTP 400 ("Only the default (1) value is supported"),
+                        # confirmed against the real provider 2026-09-23. `seed` was
+                        # tried too and does not help either -- confirmed against the
+                        # real provider 2026-09-23 with an identical prompt + seed
+                        # producing a different decision_type on replay. Supervisor
+                        # has no sampling-level determinism guarantee. Runtime reuse
+                        # separately checks the full request, evidence and configuration.
+                        enum_constraints={
+                            "action_code": [
+                                action["action_code"] for action in action_candidates
+                            ],
+                            "blocker_candidate_id": [
+                                item["candidate_id"] for item in blocker_candidates
+                            ] + [item["candidate_id"] for item in information_blockers],
+                        },
+                    )
                 semantic = self._candidate_semantic(
                     model_output,
                     blocker_candidates,
