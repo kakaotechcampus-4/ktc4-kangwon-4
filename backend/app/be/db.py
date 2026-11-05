@@ -36,6 +36,17 @@ def get_db() -> Generator[Session, None, None]:
         yield session
 
 
+def release_request_connection(session: Session) -> None:
+    """요청이 DB를 다 썼으면 커넥션을 지금 돌려준다.
+
+    요청에 딸린 세션은 응답 뒤 배경 작업까지 끝나야 정리된다. 판단은 AI를 50초 기다리므로,
+    그동안 이 요청이 잡은 커넥션 하나도 같이 묶여 있게 된다(승준님 #193). 응답에 쓸 값은
+    이미 다 읽었으니 여기서 먼저 돌려준다. 뒤이은 정리는 다시 닫아도 아무 일도 하지 않는다.
+    """
+
+    session.close()
+
+
 def reset_all_tables() -> None:
     try:
         SQLModel.metadata.drop_all(get_engine())

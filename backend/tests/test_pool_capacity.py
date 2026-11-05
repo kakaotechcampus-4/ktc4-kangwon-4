@@ -18,7 +18,7 @@ from sqlmodel import Session
 
 from app.be.services import case as case_service
 from app.be.services import judgment as judgment_service
-from tests.case_world import CaseWorld, case_engine, case_world  # noqa: F401
+from case_world import case_engine, case_world  # noqa: F401 — 픽스처
 
 MODEL_SECONDS = 50.0
 
