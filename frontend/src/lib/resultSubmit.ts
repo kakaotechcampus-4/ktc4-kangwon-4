@@ -21,11 +21,6 @@ import { ApiError, request, UnauthorizedError } from './api'
  */
 
 /**
- * 판단이 끝났는지 다시 묻는 간격. `useCase` 와 같은 값이다.
- *
- * 결과를 보낸 뒤의 판단도 `/case` 의 판단과 같은 AI 가 돌린다(실측 36~120초, BE #47).
- */
-/**
  * 결과로 보내는 글(`raw_input`)의 최대 글자 수. BE가 같은 숫자로 넘는 글을 422로 거절한다(11/04 현석님 제안,
  * 승준님 동의). 되물은 질문에 답할 때는 질문을 붙여 묶은 **보내는 글 전체**로 센다.
  *
@@ -37,7 +32,8 @@ export const MAX_RESULT_LENGTH = 2_000
 /** 이만큼 넘게 적으면 남은 글자를 보여준다. 그 전에는 숫자를 띄우지 않는다 — 평소 답은 수십 자다 */
 export const RESULT_LENGTH_HINT_FROM = 1_800
 
-const POLL_INTERVAL_MS = 10_000
+/** 완료된 결과를 더 빨리 반영하려고 3초마다 확인한다. `useCase` 와 같은 간격이다. */
+const POLL_INTERVAL_MS = 3_000
 
 /**
  * 기다리는 상한. `useCase` 와 같은 값이고 이유도 같다 — 판단 도중 서버가 다시 뜨면

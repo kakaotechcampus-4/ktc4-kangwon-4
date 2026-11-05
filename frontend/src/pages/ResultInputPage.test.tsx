@@ -137,7 +137,7 @@ function judgedBody(overrides: Partial<CaseResultsSubmitResponse>): CaseResultsS
 
 const READY = json(entryBody({}))
 const ACCEPTED = json({ case_history_id: 13 })
-const INTERVAL_MS = 10_000
+const INTERVAL_MS = 3_000
 
 /**
  * 서버를 부르는 경로. 들어올 때 지금 판단을 묻고, 보낸 뒤 판단이 끝날 때까지 기다린다.
