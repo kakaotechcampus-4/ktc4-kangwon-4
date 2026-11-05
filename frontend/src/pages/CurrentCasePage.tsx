@@ -5,16 +5,20 @@ import {
   IconPersonLine,
   IconSparkle2Fill,
 } from '@karrotmarket/react-monochrome-icon'
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router'
 
 import { Button } from '../components/ui/Button'
 import { HomeBanner } from '../components/ui/HomeBanner'
 import { HomeStageCard } from '../components/ui/HomeStageCard'
+import { InfoBox } from '../components/ui/InfoBox'
 import { TaskCard } from '../components/ui/TaskCard'
 import { useCase } from '../hooks/useCase'
 import { useLogs } from '../hooks/useLogs'
 import { useRoadmap } from '../hooks/useRoadmap'
+import { ApiError, UnauthorizedError } from '../lib/api'
+import { usesMockData } from '../lib/auth'
+import { retryJudgment } from '../lib/judgmentRetry'
 import { useEntersForward } from '../lib/viewTransition'
 import type { FailureNotice, JudgmentView } from '../types/view'
 
@@ -99,7 +103,7 @@ export function CurrentCasePage() {
         {...card.props}
         actions={
           <>
-            {card.main?.(stale)}
+            {card.main?.(stale, refresh)}
             {recheck}
           </>
         }
@@ -219,8 +223,10 @@ interface JudgmentCard {
   /**
    * 회색 "상태 다시 확인" 위에 놓을 주 버튼. `stale`이면 잠근다.
    * 없으면 "상태 다시 확인"이 카드의 큰 버튼이 된다.
+   *
+   * `refresh` 는 버튼이 서버에 무언가를 맡긴 뒤 지금 상황을 다시 묻는 데 쓴다(다시 판단하기).
    */
-  main?: (stale: boolean) => ReactNode
+  main?: (stale: boolean, refresh: () => void) => ReactNode
 }
 
 const CRITICAL_ICON = <IconExclamationmarkCircleFill size={40} />
@@ -328,24 +334,29 @@ function judgmentCard(judgment: JudgmentView, waitedTooLong: boolean): JudgmentC
       }
 
     /*
-      "잠시 후 다시" 라고 말하지 않는다. 실패한 Case 를 다시 판단시키는 수단이 아직 없어서
-      (#57) 몇 번을 눌러도 같은 실패가 돌아온다.
+      실패마다 풀 길이 다르다.
 
-      **사장님이 더 알려주셔야 풀리는 실패만** 결과 입력으로 보낸다. 같은 길로 다시 보내면
-      서버가 다시 판단한다. 나머지는 더 적어도 풀리지 않아 재조회 하나만 둔다.
+      - **사장님이 더 알려주셔야 풀리는 실패**는 결과 입력으로 보낸다. 같은 길로 다시 보내면 서버가 다시 판단한다
+      - **서버가 "다시 해볼 수 있다"고 한 실패**(`RETRY`)는 그 자리에서 다시 판단을 맡긴다(#196)
+      - 나머지는 다시 해도 풀리지 않아 재조회 하나만 둔다
     */
     case 'FAILED': {
       const { askOwner, title, description } = failureCard(judgment.notice)
-      return askOwner
-        ? {
-            headline: '확인하실 일이 있어요',
-            props: { tone: 'critical', icon: CRITICAL_ICON, badge: '확인 필요', title, description },
-            main: (stale) => <AnswerButton locked={stale} label="다시 알려주기" />,
-          }
-        : {
-            headline: '할 일 정리가 멈췄어요',
-            props: { tone: 'neutral', icon: NEUTRAL_ICON, badge: '판단 멈춤', title, description },
-          }
+      if (askOwner) {
+        return {
+          headline: '확인하실 일이 있어요',
+          props: { tone: 'critical', icon: CRITICAL_ICON, badge: '확인 필요', title, description },
+          main: (stale) => <AnswerButton locked={stale} label="다시 알려주기" />,
+        }
+      }
+      return {
+        headline: '할 일 정리가 멈췄어요',
+        props: { tone: 'neutral', icon: NEUTRAL_ICON, badge: '판단 멈춤', title, description },
+        main:
+          judgment.notice.kind === 'RETRY_AVAILABLE'
+            ? (stale, refresh) => <RetryButton locked={stale} onRetried={refresh} />
+            : undefined,
+      }
     }
 
     /*
@@ -422,6 +433,76 @@ function AnswerButton({ locked, label = '답하러 가기' }: { locked: boolean;
 }
 
 /**
+ * 서버가 "다시 해볼 수 있다"고 한 실패를 다시 판단해 달라고 맡기는 버튼(#196).
+ *
+ * 맡기고 나면 홈이 지금 상황을 다시 묻는다(`onRetried`). 서버가 받았으면 `PENDING` 이 와서
+ * "리본이 일하고 있어요"와 반복 조회가 가입 직후처럼 이어진다. 기다리는 자리를 따로 만들지 않는다.
+ *
+ * 서버가 거절해도(409) 다시 묻는다. 두 번 눌렀거나 그사이 상황이 바뀐 것이라 지금 상황을 그리면 된다.
+ * 다시 물어도 같은 실패 카드면 이 버튼이 그대로 남아 있어(같은 자리 같은 부품) 거절된 것을 기억한다.
+ * 결과 알려주기의 실패가 여기 해당한다 — 서버는 가입·서류 판단만 다시 돌린다.
+ *
+ * TODO(#196): 결과 알려주기 실패도 서버가 받기로 하면 거절 안내는 필요 없어진다. 현석님 답 대기.
+ * TODO(#55): 버튼·안내 문구는 제안 문구다. PM 답이 오면 바꾼다.
+ */
+function RetryButton({ locked, onRetried }: { locked: boolean; onRetried: () => void }) {
+  const navigate = useNavigate()
+  const { pathname, search } = useLocation()
+  const [state, setState] = useState<'IDLE' | 'SENDING' | 'SEND_FAILED' | 'REFUSED'>('IDLE')
+
+  async function handleRetry() {
+    // Mock 은 서버를 부르지 않는다. 받아들여진 다음 화면(판단 중)으로 바로 넘긴다
+    if (usesMockData(search)) {
+      const next = new URLSearchParams(search)
+      next.set('mock', 'pending')
+      navigate({ pathname, search: `?${next}` })
+      return
+    }
+
+    setState('SENDING')
+    try {
+      await retryJudgment()
+      setState('IDLE')
+      onRetried()
+    } catch (error: unknown) {
+      if (error instanceof UnauthorizedError) {
+        navigate('/login', { replace: true })
+        return
+      }
+      if (error instanceof ApiError && error.status === 409) {
+        setState('REFUSED')
+        onRetried()
+        return
+      }
+      // 404 는 Case 가 없다는 뜻이다. 다시 물으면 홈이 진단으로 보낸다
+      if (error instanceof ApiError && error.status === 404) {
+        setState('IDLE')
+        onRetried()
+        return
+      }
+      setState('SEND_FAILED')
+    }
+  }
+
+  return (
+    <>
+      {state === 'REFUSED' && <InfoBox tone="critical">이 실패는 여기서 다시 판단할 수 없어요.</InfoBox>}
+      {state === 'SEND_FAILED' && (
+        <InfoBox tone="critical">다시 판단을 요청하지 못했어요. 잠시 뒤 다시 눌러 주세요.</InfoBox>
+      )}
+      <Button size="lg" disabled={locked || state === 'SENDING' || state === 'REFUSED'} onClick={handleRetry}>
+        다시 판단하기
+      </Button>
+      {locked && (
+        <p className="text-center text-14 text-fg-neutral-muted">
+          최신 상태를 확인한 뒤에 누르실 수 있어요
+        </p>
+      )}
+    </>
+  )
+}
+
+/**
  * 다시 알아야 할 항목을 한 문장으로.
  *
  * **조사를 붙이지 않는다.** "업종을" 과 "범위를" 은 받침에 따라 갈리는데, 그걸 맞추는
@@ -454,13 +535,13 @@ function failureCard(notice: FailureNotice): {
   switch (notice.kind) {
     /*
       서버가 다시 해볼 수 있다고 분류했을 뿐, 원인이 일시적이라는 뜻은 아니다.
-      그래서 "잠시 후 다시" 도 "곧 됩니다" 도 쓰지 않는다.
+      그래서 "잠시 후 다시" 도 "곧 됩니다" 도 쓰지 않는다. 다시 맡기는 버튼은 카드가 단다(`RetryButton`)
     */
     case 'RETRY_AVAILABLE':
       return {
         askOwner: false,
         title: '다음 할 일을 정하지 못했어요',
-        description: '가게 정보는 그대로 있어요. 다시 판단해 드리는 기능을 준비하고 있습니다.',
+        description: '가게 정보는 그대로 있어요. 같은 내용으로 다시 판단해 드릴게요.',
       }
 
     /*
