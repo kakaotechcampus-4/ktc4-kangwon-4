@@ -8,6 +8,7 @@
 """
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -44,7 +45,15 @@ def held_while_waiting(case_engine, monkeypatch):  # noqa: F811
 
 
 @pytest.fixture
-def client(case_engine, member_id):  # noqa: F811
+def isolated_lifespan(case_engine, monkeypatch):  # noqa: F811
+    # get_db 교체는 startup에 적용되지 않는다. 같은 격리 DB를 쓰고 개발 DB 초기화를 막는다.
+    monkeypatch.setattr("app.main.get_engine", lambda: case_engine)
+    monkeypatch.setattr(judgment_service, "get_engine", lambda: case_engine)
+    monkeypatch.setattr("app.main.get_settings", lambda: SimpleNamespace(ENVIRONMENT="prod"))
+
+
+@pytest.fixture
+def client(case_engine, member_id, isolated_lifespan):  # noqa: F811
     """진짜 라우터·인증 의존성·BackgroundTasks를 그대로 타는 손님."""
 
     def db():
@@ -112,7 +121,7 @@ def test_a_real_post_also_leaves_no_connection_held(
 
 
 def test_signing_up_over_http_also_leaves_no_connection_held(
-    held_while_waiting, case_engine, monkeypatch  # noqa: F811
+    held_while_waiting, case_engine, isolated_lifespan  # noqa: F811
 ):
     from app.be.crud.member import create_member
 
