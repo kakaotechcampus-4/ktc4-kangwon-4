@@ -9,12 +9,11 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 import app.agent.runtime as runtime_module
+import pytest
+from app.agent.action_catalog import PROCEDURE_LABELS
 from app.agent.info_agent import agent as info_module
 from app.agent.info_agent import procedure_digests
-from app.agent.action_catalog import PROCEDURE_LABELS
 from scripts import evaluate_planning as ev
 
 REVIEWED = Path("app/common/reviewed-procedures.ko-KR.json")
@@ -102,6 +101,21 @@ def test_first_judgment_uses_the_digest_instead_of_the_info_model():
     assert [item.text for item in info.question_candidates] == ["원상복구해야 할 범위는 어디까지인가요?", "철거가 필요한가요?"]
     restoration = next(i for i in info.procedure_findings if i.procedure_step.step_code == "CONFIRM_RESTORATION_SCOPE")
     assert restoration.decision_authority == "LANDLORD" and restoration.required_actions
+
+
+@pytest.mark.parametrize("lease_status", ["OWNED", "LEASED_PAID", "LEASED_FREE"])
+def test_restoration_questions_follow_the_actual_cafe_applicability(lease_status):
+    from app.agent.procedure_tool.cafe import build_cafe_procedure_steps
+
+    registry = build_cafe_procedure_steps({code: i + 1 for i, code in enumerate(PROCEDURE_LABELS)})
+    case = dict(ev.CASES["benchmark_case1"], lease_status=lease_status)
+    with patch.dict(ev.CASES, {"lease_review": case}), \
+         patch.object(ev, "build_registry", lambda store: registry):
+        info, calls = info_result(case="lease_review")
+    assert calls == []
+    expected = [] if lease_status == "OWNED" else ["restoration_scope", "demolition_required"]
+    assert [item.field_path for item in info.missing_fields] == expected
+    assert [path for question in info.question_candidates for path in question.resolves_field_paths] == expected
 
 
 @pytest.mark.parametrize("digests", ["unreviewed", "changed_source"])
@@ -263,3 +277,62 @@ def test_review_sees_each_reviewed_source_text_once():
     procedure = next(item["output"] for item in sent["source_results"] if item["meta"]["component"] == "PROCEDURE_TOOL")
     assert procedure["documents"] and all(document["excerpt"] is None for document in procedure["documents"])
     assert any(item and item.get("excerpt") for item in sent["snapshot"]["evidence_records"])
+
+
+@pytest.mark.parametrize("mode", ["confirmed", "held", "conflict"])
+def test_new_employment_history_enables_prepared_settlement_only_after_guards(mode):
+    from types import SimpleNamespace
+
+    from app.agent.action_catalog import build_action_candidates
+    from app.agent.procedure_tool.cafe import build_cafe_procedure_steps
+    from app.agent.schemas import CaseFact, ProcedureProgress
+
+    store = ev.SnapshotStore(REVIEWED)
+    registry = build_cafe_procedure_steps({code: i + 1 for i, code in enumerate(PROCEDURE_LABELS)})
+    text = "직원을 고용한 적이 있습니다."
+    request = ev.attach_fixture_sources(ev.build_graph_input(ev.CASES["solo_dated"], result_text=text), store)
+    snapshot = request.case_snapshot
+    refs = [snapshot.evidence_records[0].evidence_id]
+    settlement = next(step.procedure_step for step in registry if step.procedure_step.step_code == "SETTLE_EMPLOYEE_PAYMENTS")
+    snapshot.procedure_progress.append(ProcedureProgress(
+        procedure_step=settlement, status="IN_PROGRESS", requirements_confirmed=True,
+        evidence_refs=refs, updated_at=snapshot.captured_at,
+    ))
+    if mode == "conflict":
+        snapshot.facts.append(CaseFact(
+            field_path="had_employees", value_type="BOOLEAN", value=False, status="CONFIRMED",
+            evidence_refs=refs, updated_at=snapshot.captured_at,
+        ))
+
+    class EmploymentModel(NoModel):
+        async def generate(self, response_model, messages, **kwargs):
+            return response_model.model_validate({
+                "completion_status": "COMPLETE", "facts": [{
+                    "operation": "SET", "field_path": "had_employees", "value_type": "BOOLEAN", "value": True,
+                    "source_text": text, "confidence_bps": 9000, "requires_confirmation": mode == "held",
+                    "reason_summary": "사용자가 고용 이력을 보고했습니다.",
+                }], "procedure_observations": [], "missing_fields": [], "uncertainties": [],
+            })
+
+    captured = {}
+    analyze = info_module.InfoAnalysisAgent.analyze
+
+    async def capture(agent, value):
+        captured["info"] = await analyze(agent, value)
+        return captured["info"]
+
+    with patch.object(ev, "build_graph_input", lambda *a, **k: request), \
+         patch.object(ev, "build_registry", lambda store: registry), \
+         patch.object(NoModel, "from_env", classmethod(lambda cls, *a, **k: EmploymentModel())), \
+         patch.object(info_module.InfoAnalysisAgent, "analyze", capture):
+        info_result(result_text=text)
+    info = captured["info"]
+    evidence = {item.evidence_id: item for item in [*snapshot.evidence_records, *info.evidence_records]}
+    actions = build_action_candidates(
+        [SimpleNamespace(output=info)], evidence, {step.procedure_step.step_code: step.procedure_step for step in registry},
+        procedure_progress=snapshot.procedure_progress,
+    )
+    assert ("SETTLE_EMPLOYEE_PAYMENTS" in {action["action_code"] for action in actions}) == (mode == "confirmed")
+    assert bool(info.conflicts) == (mode == "conflict")
+    if mode != "conflict":
+        assert next(fact for fact in info.fact_candidates if fact.field_path == "had_employees").requires_confirmation == (mode == "held")

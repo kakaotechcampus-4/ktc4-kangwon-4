@@ -21,18 +21,24 @@ from pydantic import (
 
 from app.agent.action_catalog import ProcedureBindings, resolve_procedure_bindings
 from app.agent.claim_safety import demolition_preparation_only
+from app.agent.enrichment import build_fact_overlays
 from app.agent.guardrails import (
     GuardrailViolation,
     ensure_no_sensitive_text,
     exact_span,
     resolve_evidence_aliases,
 )
+from app.agent.info_agent.procedure_digests import (
+    digest_draft_fields,
+    load_digests,
+    with_digest_findings,
+)
+from app.agent.llm import LLMResponseError
 from app.agent.procedure_tool.rules import (
     business_type_code,
     employment_history_conflicts,
+    procedure_applicability,
 )
-from app.agent.llm import LLMResponseError
-from app.agent.info_agent.procedure_digests import digest_draft_fields, load_digests, with_digest_findings
 from app.agent.projection import ensure_projection_has_no_obvious_sensitive_text
 from app.agent.prompts import info_fact_messages, info_messages
 from app.agent.schemas import (
@@ -439,7 +445,21 @@ class InfoAnalysisAgent:
                         evidence_by_alias,
                     )
                 )
-                return self._materialize(request, draft, procedure_bindings)
+                result = self._materialize(request, draft, procedure_bindings)
+                if digest_fields is not None:
+                    # 원문·충돌·확인 필요 검사를 통과한 새 사실로 적용 여부를 다시 계산한다.
+                    overlays = [*request.fact_overlays, *build_fact_overlays(
+                        request.case_snapshot, result, request.source_call_id,
+                    )]
+                    steps = {step.procedure_step.step_code: step for step in request.known_procedure_steps}
+                    evidence = {item.evidence_id: item for item in request.procedure_lookup_result.evidence_records}
+                    for finding in result.procedure_findings:
+                        code = finding.procedure_step.step_code
+                        if not demolition_preparation_only(code, [evidence[ref] for ref in finding.evidence_refs]):
+                            applies = procedure_applicability(steps[code], request.case_snapshot, overlays)
+                            finding.relevance = (ProcedureRelevance.RELEVANT if applies is True
+                                                 else ProcedureRelevance.POSSIBLY_RELEVANT)
+                return result
             except (GuardrailViolation, ValueError) as exc:
                 fact_errors = getattr(exc, "fact_errors", ())
                 omitted_procedure_codes = getattr(exc, "omitted_procedure_codes", ())
