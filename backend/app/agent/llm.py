@@ -541,8 +541,13 @@ class StructuredLLMClient:
         max_retries: int | None = None,
         temperature: float | None = None,
         enum_constraints: Mapping[str, Sequence[str]] | None = None,
+        max_completion_tokens: int | None = None,
     ) -> ResponseModelT:
         """Return a locally validated Pydantic model.
+
+        ``max_completion_tokens`` can only lower the configured output cap for this
+        call (e.g. a short extraction whose normal output is far below it), so a
+        runaway answer is cut early. It never raises the configured cost cap.
 
         Provider schema sanitization only affects the schema sent over HTTP.
         The original Pydantic model performs the final validation on every
@@ -557,12 +562,17 @@ class StructuredLLMClient:
                 f"max_retries must be between 0 and {_MAX_ALLOWED_RETRIES}"
             )
 
+        if max_completion_tokens is not None and (
+            type(max_completion_tokens) is not int or max_completion_tokens <= 0
+        ):
+            raise ValueError("max_completion_tokens must be a positive integer")
         payload = self._build_payload(
             response_model=response_model,
             messages=normalized_messages,
             schema_name=schema_name,
             temperature=temperature,
             enum_constraints=enum_constraints,
+            max_completion_tokens=max_completion_tokens,
         )
         total_attempts = retries + 1
         last_status_code: int | None = None
@@ -705,6 +715,7 @@ class StructuredLLMClient:
         schema_name: str | None,
         temperature: float | None,
         enum_constraints: Mapping[str, Sequence[str]] | None = None,
+        max_completion_tokens: int | None = None,
     ) -> dict[str, Any]:
         schema = sanitize_json_schema(
             response_model.model_json_schema(mode="validation")
@@ -727,8 +738,11 @@ class StructuredLLMClient:
         }
         if temperature is not None:
             payload["temperature"] = temperature
-        if self.config.max_completion_tokens is not None:
-            payload["max_completion_tokens"] = self.config.max_completion_tokens
+        limit = self.config.max_completion_tokens
+        if max_completion_tokens is not None:
+            limit = max_completion_tokens if limit is None else min(limit, max_completion_tokens)
+        if limit is not None:
+            payload["max_completion_tokens"] = limit
         if self.config.stream:
             payload["stream"] = True
         if self.config.reasoning_effort:

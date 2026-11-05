@@ -181,6 +181,10 @@ class ReviewTool:
             + "\n선택된 action_code의 의미와 제목·이유·질문을 대조하세요. "
             "확인 코드인데 신고서 제출 등 실행을 지시하는 경우처럼 의미가 다르면 "
             "CONTRACT_VIOLATION으로 반려하세요. 코드가 같아도 내용 검수는 생략하지 마세요."
+            "\n절차 문서(source_results의 documents)의 excerpt와 source_results의 evidence_records가 "
+            "null이면, 같은 evidence_id의 원문이 snapshot.evidence_records에 있어 중복을 뺀 것입니다. "
+            "원문은 evidence_ref·evidence_id로 snapshot.evidence_records에서 찾아 대조하고, "
+            "null이라는 이유만으로 근거가 없다고 보지 마세요."
         )
         base_messages[0]["content"] += (
             "\n- Every issue.target_path and missing_evidence.claim_path must be an "
@@ -739,16 +743,30 @@ def _review_prompt_projection(
         _prompt_evidence_record(evidence) if evidence.evidence_id in used_refs else None
         for evidence in subject.snapshot.evidence_records
     ]
+    # 검수 절차 원문은 Case 근거(snapshot)·절차 조회 근거·절차 문서 본문으로 같은 글이 세 번 들어가
+    # Review 입력의 약 40%를 차지했다(2026-11-05 측정). 같은 evidence_id·같은 내용이면 snapshot 쪽에만
+    # 두고 나머지는 null로 비운다. 모델에 보내는 모양만 줄이고, 코드 검사는 subject 전체로 한다.
+    shown = {
+        evidence.evidence_id: evidence
+        for evidence in subject.snapshot.evidence_records
+        if evidence.evidence_id in used_refs
+    }
     source_payloads: list[dict[str, Any]] = []
     for source, output_payload in zip(
         subject.source_results, source_output_payloads, strict=True
     ):
         output_payload["evidence_records"] = [
             _prompt_evidence_record(evidence)
-            if evidence.evidence_id in used_refs
+            if evidence.evidence_id in used_refs and shown.get(evidence.evidence_id) != evidence
             else None
             for evidence in source.output.evidence_records
         ]
+        for document, payload in zip(
+            getattr(source.output, "documents", ()), output_payload.get("documents") or (), strict=False
+        ):
+            evidence = shown.get(document.evidence_ref)
+            if evidence is not None and evidence.excerpt == document.excerpt:
+                payload["excerpt"] = None
         source_payloads.append(
             {
                 "meta": {

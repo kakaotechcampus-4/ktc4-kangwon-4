@@ -201,3 +201,65 @@ def test_asked_back_restoration_fields_become_question_blockers():
         info, _ = info_result(result_text=LANDLORD)
     [missing] = info.missing_fields
     assert missing.field_path == "restoration_scope_detail" and list(missing.blocks) == ["SUPERVISOR_DECISION"]
+
+
+def test_a_runaway_fact_answer_is_cut_early_and_asked_again():
+    # G01 실측: 값 꺼내기 출력이 16,000토큰 상한까지 반복되다 잘려 판단이 실패했다(101초).
+    # 값 꺼내기는 상한을 4,000으로 낮춰 일찍 끊고, 같은 요청을 한 번 더 보낸다
+    from app.agent.llm import LLMResponseError
+
+    class RunsAwayOnce(FactModel):
+        limits: list = []
+
+        async def generate(self, response_model, messages, **kwargs):
+            RunsAwayOnce.limits.append(kwargs.get("max_completion_tokens"))
+            if len(RunsAwayOnce.limits) == 1:
+                raise LLMResponseError("cut", code="OUTPUT_TOKEN_LIMIT", retryable=False, attempts=1)
+            return await super().generate(response_model, messages, **kwargs)
+
+    RunsAwayOnce.limits = []
+    with patch.object(NoModel, "from_env", classmethod(lambda cls, *a, **k: RunsAwayOnce())):
+        info, _ = info_result(result_text=LANDLORD)
+    assert RunsAwayOnce.limits == [4000, 4000]
+    assert {item.field_path for item in info.fact_candidates} == {"restoration_scope", "demolition_required"}
+
+
+def test_review_sees_each_reviewed_source_text_once():
+    # 같은 검수 원문이 Case 근거·절차 조회 근거·절차 문서 본문으로 세 번 들어가 Review 입력의 약 40%였다.
+    # 모델에 보내는 입력에는 snapshot 쪽 한 벌만 남기고, 나머지 자리는 null로 둔다
+    seen = {}
+
+    class CaptureReview(FactModel):
+        async def generate(self, response_model, messages, **kwargs):
+            name = kwargs.get("schema_name")
+            if name == "reborn_info_analysis":
+                return await super().generate(response_model, messages, **kwargs)
+            if name == "reborn_review_output":
+                seen["review"] = messages
+                return response_model.model_validate({"verdict": "PASS", "issues": [], "missing_evidence": [],
+                                                      "recommended_rework_targets": [], "resolution_reason": "stub"})
+            rows = json.loads(messages[1]["content"].removeprefix("INPUT_JSON="))["contract"]["blocker_candidates"]
+            return response_model.model_validate({"decision_type": "ACTION", "blocker_candidate_id": rows[0]["candidate_id"],
+                                                  "action_code": rows[0]["actions"][0]["action_code"]})
+
+    store = ev.SnapshotStore(REVIEWED)
+    request = ev.attach_fixture_sources(ev.build_graph_input(ev.CASES["benchmark_case1"], result_text=LANDLORD), store)
+    reviewed = digest_file() | {"reviewed_by": "test", "reviewed_at": "2026-11-05"}
+
+    async def run():
+        with patch.object(runtime_module.StructuredLLMClient, "from_env", classmethod(lambda cls, *a, **k: CaptureReview())), \
+             patch.object(info_module, "load_digests", lambda: reviewed):
+            runtime = await runtime_module.build_runtime(
+                known_procedure_steps=ev.build_registry(store), procedure_store=store, support_catalog=ev.load_catalog(None),
+            )
+            return await runtime.run_planning(request)
+
+    assert asyncio.run(run()).outcome_type == "REVIEWED_PLAN"
+    sent = json.loads(seen["review"][1]["content"].removeprefix("INPUT_JSON="))
+    blob = json.dumps(sent, ensure_ascii=False)
+    for record in records().values():
+        first_line = json.dumps(record["excerpt"][:40], ensure_ascii=False)[1:-1]
+        assert blob.count(first_line) <= 1, record["record_id"]
+    procedure = next(item["output"] for item in sent["source_results"] if item["meta"]["component"] == "PROCEDURE_TOOL")
+    assert procedure["documents"] and all(document["excerpt"] is None for document in procedure["documents"])
+    assert any(item and item.get("excerpt") for item in sent["snapshot"]["evidence_records"])
