@@ -217,6 +217,37 @@ def test_all_unsourced_summaries_are_reported_in_one_retry():
     assert len(result.procedure_findings) == 2
 
 
+@pytest.mark.parametrize("invalid_code", [TAX, "UNKNOWN_PROCEDURE"])
+def test_unknown_or_duplicate_procedure_retry_names_the_valid_codes_and_uniqueness_rule(invalid_code):
+    request = request_for_replanning()
+    original = request.model_dump_json()
+    valid = output([finding(TAX, "doc1"), finding(FOOD, "doc2")])
+    rejected = output([finding(TAX, "doc1"), finding(invalid_code, "doc1"), finding(FOOD, "doc2")])
+    client = Responses(rejected, valid)
+
+    result = asyncio.run(InfoAnalysisAgent(client, max_local_attempts=2).analyze(request))
+
+    assert len(client.messages) == 2
+    feedback = " ".join(item["content"] for item in client.messages[1] if item["role"] == "system")
+    assert "Return at most one finding per step_code" in feedback
+    assert "duplicate step_code values are forbidden" in feedback
+    assert "exact quotations from that step's allowed documents" in feedback
+    for step in request.known_procedure_steps:
+        assert step.procedure_step.step_code in feedback
+    assert [item.procedure_step.step_code for item in result.procedure_findings] == [TAX, FOOD]
+    assert all(item.summary.text == "합성 테스트 절차입니다." for item in result.procedure_findings)
+    assert request.model_dump_json() == original
+
+
+@pytest.mark.parametrize("invalid_code", [TAX, "UNKNOWN_PROCEDURE"])
+def test_repeated_unknown_or_duplicate_procedure_findings_still_fail(invalid_code):
+    rejected = output([finding(TAX, "doc1"), finding(invalid_code, "doc1"), finding(FOOD, "doc2")])
+    client = Responses(rejected, rejected)
+    with pytest.raises(InfoAnalysisGuardrailError):
+        asyncio.run(InfoAnalysisAgent(client, max_local_attempts=2).analyze(request_for_replanning()))
+    assert len(client.messages) == 2
+
+
 def test_procedure_names_with_digits_are_not_rejected_as_deadlines():
     tax = finding(TAX, "doc1")
     tax["summary"]["text"] = "4대보험 절차와 정부24에서 확인할 내용을 안내합니다."

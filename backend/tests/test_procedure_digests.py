@@ -9,12 +9,11 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 import app.agent.runtime as runtime_module
+import pytest
+from app.agent.action_catalog import PROCEDURE_LABELS
 from app.agent.info_agent import agent as info_module
 from app.agent.info_agent import procedure_digests
-from app.agent.action_catalog import PROCEDURE_LABELS
 from app.agent.schemas import AgentGraphInput, RestorationAnswer
 from scripts import evaluate_planning as ev
 
@@ -311,6 +310,65 @@ def test_landlord_answer_falls_back_to_the_full_analysis_without_a_trusted_diges
     # 이 가짜 모델은 절차 정리를 내지 않아 전체 분석 검사에 걸려 재시도까지 간다. 모양만 본다
     _, seen = landlord_answer_info(digests="unreviewed")
     assert seen and {call["schema"] for call in seen} == {"InfoProviderOutput"}
+
+
+@pytest.mark.parametrize("digests", ["reviewed", "unreviewed"])
+def test_fact_prompt_keeps_case_context_and_only_omits_procedure_rules_with_digests(digests):
+    captured = {}
+    analyze = info_module.InfoAnalysisAgent.analyze
+
+    async def capture(agent, request):
+        before = request.model_dump_json()
+        captured["full"] = agent._prompt_input(request)
+        try:
+            return await analyze(agent, request)
+        finally:
+            assert request.model_dump_json() == before
+
+    with patch.object(info_module.InfoAnalysisAgent, "analyze", capture):
+        _, calls = landlord_answer_info(digests=digests)
+    sent = json.loads(calls[0]["messages"][1]["content"].removeprefix("INPUT_JSON="))
+    expected = captured["full"]
+    if digests == "reviewed":
+        for key in ("procedure_analysis_step_codes", "procedure_evidence_by_step", "procedure_lookup"):
+            expected.pop(key)
+        keep = {"procedure_step", "step_name", "utterance_aliases", "deprecated_at"}
+        expected["known_procedure_steps"] = [
+            {key: value for key, value in step.items() if key in keep}
+            for step in expected["known_procedure_steps"]
+        ]
+    assert sent == expected
+
+
+@pytest.mark.parametrize("status,submitted", [("IN_PROGRESS", True), ("COMPLETED", True)])
+def test_fact_prompt_retains_submission_and_completion_reports(status, submitted):
+    text = "사업자등록 폐업신고서를 제출했습니다." if status == "IN_PROGRESS" else "사업자등록 폐업신고의 기관 처리 완료를 확인했습니다."
+    captured = {}
+    analyze = info_module.InfoAnalysisAgent.analyze
+
+    class ReportsProgress(FactModel):
+        async def generate(self, response_model, messages, **kwargs):
+            out = (await super().generate(response_model, messages, **kwargs)).model_dump(mode="python")
+            out["facts"] = []
+            out["procedure_observations"] = [{
+                "step_code": "FILE_TAX_BUSINESS_CLOSURE", "observed_status": status,
+                "source_text": text, "requirements_confirmed": True, "submitted": submitted,
+                "requires_confirmation": False, "reason_summary": "사용자의 신고 진행 보고",
+            }]
+            return response_model.model_validate(out)
+
+    async def capture(agent, request):
+        captured["result"] = await analyze(agent, request)
+        return captured["result"]
+
+    with patch.object(NoModel, "from_env", classmethod(lambda cls, *a, **k: ReportsProgress())), \
+         patch.object(info_module.InfoAnalysisAgent, "analyze", capture):
+        info_result(result_text=text)
+    [observation] = captured["result"].procedure_progress_observations
+    assert observation.procedure_step.step_code == "FILE_TAX_BUSINESS_CLOSURE"
+    assert observation.source_span.text == text
+    assert observation.observed_status == status and observation.submitted is submitted
+    assert observation.requires_confirmation is (status == "COMPLETED")
 
 
 def test_landlord_answer_asks_back_only_restoration_fields():
