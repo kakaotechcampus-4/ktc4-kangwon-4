@@ -38,6 +38,8 @@ class AgentGraphState(TypedDict, total=False):
     phase: GraphPhase
     source_results: list[ReviewSourceResult]
     fact_overlays: list[FactChangeCandidate]
+    # 이번 판단에서 Info 모델을 불렀는지. 첫 판단 정리본·선택형 답변은 False
+    info_used_model: bool
     current_draft: SupervisorDraft
     review_subject: ReviewSubject
     review_result: ReviewResult
