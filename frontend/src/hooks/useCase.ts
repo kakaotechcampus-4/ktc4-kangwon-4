@@ -73,10 +73,10 @@ class MalformedResponseError extends Error {}
 /**
  * 판단이 끝날 때까지 다시 물어보는 간격.
  *
- * AI 판단은 실측 36~120초다(BE #47). 1초마다 묻는 것은 근거가 없고, 1분마다 묻는 것은
- * 다 끝난 화면을 오래 들고 있게 된다.
+ * 판단이 끝난 뒤 화면에 반영되기까지의 대기를 줄이려고 3초마다 확인한다.
+ * 결과 제출 뒤 기다리는 `resultSubmit` 도 같은 간격을 쓴다.
  */
-const POLL_INTERVAL_MS = 10_000
+const POLL_INTERVAL_MS = 3_000
 
 /**
  * 판단이 끝나기를 기다리는 상한. 넘기면 자동으로 묻는 것을 멈춘다.
@@ -84,7 +84,7 @@ const POLL_INTERVAL_MS = 10_000
  * 판단은 길어도 7분이면 끝난다(#52). 그보다 짧게 끊으면 정상인데 실패처럼 보여서
  * 넉넉히 둔다. 그래도 상한이 필요한 것은 **끝나지 않는 경우가 있기 때문이다** —
  * 판단 도중 서버가 다시 뜨면 그 Case 는 계속 `PENDING` 으로 남는다(#40).
- * 그때 상한이 없으면 화면은 한 시간에 360번을 묻고도 그대로다.
+ * 그때 상한이 없으면 화면은 한 시간에 1,200번을 묻고도 그대로다.
  */
 const POLL_TIMEOUT_MS = 10 * 60 * 1000
 
@@ -251,7 +251,7 @@ export function useCase(): CaseQueryResult {
       // 멈춰 있던 화면도 여기서 회복할 기회를 얻는다
       if (resumed.current) return judging || refreshFailed ? 0 : null
 
-      // 갱신이 한 번 실패한 뒤에는 저절로 반복하지 않는다. 서버가 멎어 있으면 10초마다
+      // 갱신이 한 번 실패한 뒤에는 저절로 반복하지 않는다. 서버가 멎어 있으면 3초마다
       // 같은 실패를 쌓을 뿐이라, 사장님이 직접 누를 때까지 기다린다
       if (refreshFailed) return null
 

@@ -247,7 +247,7 @@ const UPDATED = json(
 )
 const failed = (code: CaseResultsSubmitResponse['recovery_action_code']) =>
   json(judgedBody({ result: 'FAILED', recovery_action_code: code }))
-const INTERVAL_MS = 10_000
+const INTERVAL_MS = 3_000
 
 /** 가짜 시계를 돌리고, 그 사이 끝난 요청과 그에 따른 렌더까지 반영한다 */
 async function advance(ms = 0) {
