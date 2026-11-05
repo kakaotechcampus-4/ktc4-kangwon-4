@@ -145,7 +145,13 @@ def with_digest_findings(fact_output: dict[str, Any], digest_fields: dict[str, A
     # 이 단계는 사장님 답 한 줄(임대인 답변·서류 글)을 읽는다. 답과 상관없는 진단 항목(보험 가입 이력·폐업 시기
     # 등)까지 "모름"으로 되묻게 두면, Review가 그 질문을 blocker 목록에도 요구해 매번 반려했다(2026-11-05 실측,
     # REVIEW_RETRY_EXHAUSTED). 그런 항목은 상황 진단에서 받는 값이라 여기서는 원상복구 칸만 되묻는다.
-    asked = [item for item in fact_output["missing_fields"] if item["field_path"] in _ANSWER_FIELDS]
+    # 이 단계의 모델은 절차를 조회하지 않으므로 되묻는 칸은 모두 "다음 할 일 판단을 막는 칸"이다.
+    # 그렇게 표시해야 코드가 그 칸으로 확인 질문 blocker(missing:*)를 만든다(blocker_candidates.missing_info_fields).
+    # 짧은 지시문에서 모델이 PROCEDURE_LOOKUP 등으로 적으면 질문만 있고 blocker가 없어 Review가 반려했다(G17 실측).
+    asked = [
+        item | {"blocks": [MissingFieldBlock.SUPERVISOR_DECISION]}
+        for item in fact_output["missing_fields"] if item["field_path"] in _ANSWER_FIELDS
+    ]
     handled = {item["field_path"] for item in [*fact_output["facts"], *asked]}
     added = [item for item in digest_fields["missing_fields"] if item["field_path"] not in handled]
     missing = [*asked, *added]

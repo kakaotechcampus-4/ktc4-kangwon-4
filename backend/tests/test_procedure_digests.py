@@ -185,3 +185,19 @@ def test_landlord_answer_asks_back_only_restoration_fields():
     with patch.object(NoModel, "from_env", classmethod(lambda cls, *a, **k: AsksEverything())):
         info, _ = info_result(result_text=LANDLORD)
     assert [item.field_path for item in info.missing_fields] == ["restoration_scope_detail"]
+
+
+def test_asked_back_restoration_fields_become_question_blockers():
+    # G17 실측: 값 꺼내기 모델이 되묻는 칸을 PROCEDURE_LOOKUP으로 적어 확인 질문 blocker가 안 생겼고, Review가 반려했다
+    class LooksUpProcedure(FactModel):
+        async def generate(self, response_model, messages, **kwargs):
+            out = (await super().generate(response_model, messages, **kwargs)).model_dump(mode="python")
+            out["missing_fields"] = [{"field_path": "restoration_scope_detail", "reason_summary": "세부 대상 미확인",
+                                      "blocks": ["PROCEDURE_LOOKUP"], "question": "어떤 부분을 원래대로 해야 하나요?"}]
+            out["completion_status"] = "NEEDS_USER_INPUT"
+            return response_model.model_validate(out)
+
+    with patch.object(NoModel, "from_env", classmethod(lambda cls, *a, **k: LooksUpProcedure())):
+        info, _ = info_result(result_text=LANDLORD)
+    [missing] = info.missing_fields
+    assert missing.field_path == "restoration_scope_detail" and list(missing.blocks) == ["SUPERVISOR_DECISION"]
