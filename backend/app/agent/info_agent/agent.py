@@ -31,6 +31,7 @@ from app.agent.procedure_tool.rules import (
     business_type_code,
     employment_history_conflicts,
 )
+from app.agent.llm import LLMResponseError
 from app.agent.info_agent.procedure_digests import digest_draft_fields, load_digests, with_digest_findings
 from app.agent.projection import ensure_projection_has_no_obvious_sensitive_text
 from app.agent.prompts import info_fact_messages, info_messages
@@ -211,6 +212,10 @@ class InfoProviderOutput(AgentSchema):
     procedure_findings: list[ProcedureFindingDraft]
     missing_fields: list[MissingFieldDraft]
     uncertainties: list[Uncertainty]
+
+
+# 값 꺼내기 모드의 출력 상한. 정상 출력 최대(약 2천 토큰)의 2배. 폭주를 101초가 아니라 약 25초에 끊는다.
+FACT_OUTPUT_TOKEN_LIMIT = 4000
 
 
 class InfoFactProviderOutput(AgentSchema):
@@ -399,22 +404,30 @@ class InfoAnalysisAgent:
                         ),
                     }
                 )
-            provider_output = await self._llm.generate(
-                InfoFactProviderOutput if digest_fields is not None else InfoProviderOutput,
-                messages,
-                schema_name="reborn_info_analysis",
-                # The provider cannot emit a reference we did not offer, so a
-                # made-up or mistyped one is never generated. Validation below
-                # is unchanged; this only stops the wasted generation.
-                enum_constraints={
-                    "evidence_refs": sorted(evidence_by_alias),
-                    # A finding may only bind to a step one of the supplied
-                    # documents actually covers. Offering the union here stops
-                    # the model naming a step no document supports; the
-                    # per-document check below still rejects a mismatched pair.
-                    "step_code": permitted_step_codes,
-                },
-            )
+            try:
+                provider_output = await self._llm.generate(
+                    InfoFactProviderOutput if digest_fields is not None else InfoProviderOutput,
+                    messages,
+                    schema_name="reborn_info_analysis",
+                    # The provider cannot emit a reference we did not offer, so a
+                    # made-up or mistyped one is never generated. Validation below
+                    # is unchanged; this only stops the wasted generation.
+                    enum_constraints={
+                        "evidence_refs": sorted(evidence_by_alias),
+                        # A finding may only bind to a step one of the supplied
+                        # documents actually covers. Offering the union here stops
+                        # the model naming a step no document supports; the
+                        # per-document check below still rejects a mismatched pair.
+                        "step_code": permitted_step_codes,
+                    },
+                    **({"max_completion_tokens": FACT_OUTPUT_TOKEN_LIMIT} if digest_fields is not None else {}),
+                )
+            except LLMResponseError as exc:
+                # 값 꺼내기 출력은 정상 868~1,960토큰이었다(2026-11-05 실측 14회). 상한에 닿으면 같은 글을
+                # 반복하는 폭주라(G01: 16,000토큰·101초) 일찍 끊고 같은 요청을 다시 보낸다.
+                if digest_fields is not None and exc.code == "OUTPUT_TOKEN_LIMIT" and attempt < self._max_local_attempts:
+                    continue
+                raise
             try:
                 if digest_fields is not None:
                     provider_output = with_digest_findings(provider_output.model_dump(mode="python"), digest_fields)

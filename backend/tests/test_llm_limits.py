@@ -141,7 +141,7 @@ def test_time_limits(tmp_path, seconds):
     assert resolve_run_deadline_seconds(**options) == (30 if seconds else 420)
 
 
-def generate(settings, handler, response_model=Answer, enum_constraints=None):
+def generate(settings, handler, response_model=Answer, enum_constraints=None, max_completion_tokens=None):
     async def run():
         async with StructuredLLMClient(
             settings, transport=httpx.MockTransport(handler)
@@ -149,6 +149,7 @@ def generate(settings, handler, response_model=Answer, enum_constraints=None):
             return await client.generate(
                 response_model, [{"role": "user", "content": "test"}],
                 enum_constraints=enum_constraints,
+                max_completion_tokens=max_completion_tokens,
             )
 
     return asyncio.run(run())
@@ -446,3 +447,16 @@ def test_enum_restrictions_preserve_shared_definitions_and_evidence_items():
     assert json.dumps(schema, sort_keys=True) == original
     with pytest.raises(ValueError, match="no supported values"):
         restrict_string_enums(schema, {"decision_type": ["UNSUPPORTED"]})
+
+
+@pytest.mark.parametrize(("configured", "requested", "sent"), [(16000, 4000, 4000), (None, 4000, 4000), (3000, 4000, 3000)])
+def test_a_call_can_only_lower_the_completion_limit(configured, requested, sent):
+    # 값 꺼내기처럼 출력이 짧은 호출은 상한을 낮춰 폭주를 일찍 끊는다. 설정된 비용 상한보다 높일 수는 없다
+    payloads = []
+
+    def handler(request):
+        payloads.append(json.loads(request.content))
+        return httpx.Response(200, json={"choices": [{"message": {"content": '{"ok":true}'}}]})
+
+    assert generate(config(max_completion_tokens=configured), handler, max_completion_tokens=requested).ok is True
+    assert payloads[0]["max_completion_tokens"] == sent
