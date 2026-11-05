@@ -4,6 +4,7 @@ import type {
   CaseResultsSubmitAcceptedResponse,
   CaseResultsSubmitRequest,
   CaseResultsSubmitResponse,
+  RestorationAnswer,
 } from '../types/api'
 import { ApiError, request, UnauthorizedError } from './api'
 
@@ -54,8 +55,10 @@ export async function fetchResultsEntry(): Promise<CaseResultsEntryResponse | nu
  * 판단 중이거나, 그사이 더 새로운 판단이 생겼다. 셋 다 화면이 아는 상황이 낡은 것이라
  * 구분하지 않고 `ApiError` 그대로 올린다.
  */
-export async function submitResult(historyId: number, rawInput: string): Promise<number> {
-  const body: CaseResultsSubmitRequest = { raw_input: rawInput, case_history_id: historyId }
+export async function submitResult(historyId: number, input: string | RestorationAnswer): Promise<number> {
+  const body: CaseResultsSubmitRequest = typeof input === 'string'
+    ? { raw_input: input, case_history_id: historyId }
+    : { restoration_answer: input, case_history_id: historyId }
   return readAcceptedId(await request('/cases/results', { method: 'POST', body }))
 }
 
