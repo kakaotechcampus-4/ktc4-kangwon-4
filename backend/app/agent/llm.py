@@ -26,7 +26,7 @@ import httpx
 from dotenv import dotenv_values
 from pydantic import BaseModel, ValidationError
 
-from app.agent.run_scope import current_deadline
+from app.agent.run_scope import RunDeadlineExceededError, current_deadline
 from app.agent.tracing import observation_scope, record_provider_usage
 
 ResponseModelT = TypeVar("ResponseModelT", bound=BaseModel)
@@ -761,11 +761,17 @@ class StructuredLLMClient:
     async def _backoff(self, attempt_index: int) -> None:
         delay = self.config.retry_backoff_seconds * (2**attempt_index)
         deadline = current_deadline()
+        expires_during_wait = False
         if deadline is not None:
             deadline.check()
-            delay = min(delay, deadline.remaining_seconds())
+            remaining = deadline.remaining_seconds()
+            expires_during_wait = delay >= remaining
+            delay = min(delay, remaining)
         if delay > 0:
             await self._sleep(delay)
+        # 짧게 자른 대기가 조금 일찍 끝나도, 원래 대기 뒤에는 재시도할 시간이 없다.
+        if expires_during_wait:
+            raise RunDeadlineExceededError()
         if deadline is not None:
             deadline.check()
 

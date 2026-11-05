@@ -99,7 +99,8 @@ def test_http_retry_and_refusal_record_unknown_and_known_usage_once_each():
 
 
 @pytest.mark.parametrize("remaining", [None, 5.0, 0.25, 0.0])
-def test_retry_wait_preserves_success_and_stops_at_the_run_deadline(monkeypatch, remaining):
+@pytest.mark.parametrize("wake_fraction", [1.0, 0.99])
+def test_retry_wait_preserves_success_and_stops_at_the_run_deadline(monkeypatch, remaining, wake_fraction):
     now, requests, waits = [0.0], [], []
     monkeypatch.setattr(RunDeadline, "remaining_seconds", lambda deadline: deadline.expires_at - now[0])
     budget = LLMCallBudget(3)
@@ -114,7 +115,7 @@ def test_retry_wait_preserves_success_and_stops_at_the_run_deadline(monkeypatch,
 
     async def sleep(delay):
         waits.append(delay)
-        now[0] += delay
+        now[0] += delay * wake_fraction
 
     expires = remaining is not None and remaining <= 2.0
 
