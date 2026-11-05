@@ -243,7 +243,8 @@ def test_restoration_answer_uses_supervisor_and_code_review_without_review_model
                 await runtime.aclose()
 
     outcome = asyncio.run(run())
-    assert calls == ["reborn_supervisor_draft"]
+    # "일부"면 구체 범위 질문이 먼저라 Supervisor 모델도 부르지 않는다
+    assert calls == ([] if scope == "PARTIAL" else ["reborn_supervisor_draft"])
     assert outcome.outcome_type == "REVIEWED_PLAN", outcome
     outcome.assert_integrity()
     assert outcome.review_subject.trigger.restoration_answer == answer
@@ -459,3 +460,41 @@ def test_code_only_review_still_blocks_a_draft_outside_the_reviewed_candidates()
     draft = draft.model_copy(update={"decision": draft.decision.model_copy(update={"next_action": action})})
     result = asyncio.run(ReviewTool(NoCalls()).review_code_only(subject(request, draft)))
     assert result.verdict == "REVISE"
+
+
+def test_a_free_text_reply_with_unknown_detail_still_lets_the_supervisor_choose():
+    # "구체 범위 먼저" 규칙은 선택형 답변에만 쓴다. 자유글 답변("아직 모름" 포함)은 모델이 고른다(같은 질문 반복 방지).
+    calls = []
+    store = ev.SnapshotStore(REVIEWED)
+    request = ev.attach_fixture_sources(ev.build_graph_input(ev.CASES["benchmark_case1"], result_text=LANDLORD), store)
+
+    class Model(FactModel):
+        async def generate(self, response_model, messages, **kwargs):
+            name = kwargs["schema_name"]
+            calls.append(name)
+            if name == "reborn_review_output":
+                return response_model.model_validate({"verdict": "PASS", "issues": [], "missing_evidence": [],
+                    "recommended_rework_targets": [], "resolution_reason": "합성 검수"})
+            if name == "reborn_supervisor_draft":
+                contract = json.loads(messages[1]["content"].removeprefix("INPUT_JSON="))["contract"]
+                assert any(item["candidate_id"] == "missing:restoration_scope_detail"
+                           for item in contract["information_blockers"])
+                return response_model.model_validate({"decision_type": "NEEDS_MORE_INFO",
+                    "blocker_candidate_id": "missing:restoration_scope_detail", "action_code": None})
+            out = (await super().generate(response_model, messages, **kwargs)).model_dump(mode="python")
+            out["missing_fields"] = [{"field_path": "restoration_scope_detail", "reason_summary": "세부 대상 미확인",
+                                      "blocks": ["SUPERVISOR_DECISION"], "question": "어떤 부분을 원래대로 해야 하나요?"}]
+            out["completion_status"] = "NEEDS_USER_INPUT"
+            return response_model.model_validate(out)
+
+    async def run():
+        with patch.object(runtime_module.StructuredLLMClient, "from_env", classmethod(lambda cls, *a, **k: Model())):
+            runtime = await runtime_module.build_runtime(known_procedure_steps=ev.build_registry(store),
+                procedure_store=store, support_catalog=ev.load_catalog(None))
+            try:
+                return await runtime.run_planning(request)
+            finally:
+                await runtime.aclose()
+
+    outcome = asyncio.run(run())
+    assert "reborn_supervisor_draft" in calls, (calls, outcome)
