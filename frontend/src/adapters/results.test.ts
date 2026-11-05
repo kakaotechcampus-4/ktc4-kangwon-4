@@ -169,6 +169,7 @@ describe('toDecisionRequest', () => {
 function entry(overrides: Partial<CaseResultsEntryResponse>): CaseResultsEntryResponse {
   return {
     judgment_status: 'DONE',
+    result_input_kind: 'TEXT',
     case_history_id: null,
     raw_input: null,
     conflicts: null,
@@ -183,11 +184,22 @@ function entry(overrides: Partial<CaseResultsEntryResponse>): CaseResultsEntryRe
 const NEXT_ACTION = { title: '임대인에게 원상복구 범위 묻기', reason: '', questions_to_ask: [] }
 
 describe('toResultsEntry', () => {
+  it('서버가 선택형 입력을 지정하면 그대로 화면에 전달한다', () => {
+    expect(toResultsEntry(entry({ case_history_id: 12, next_action: NEXT_ACTION, result_input_kind: 'RESTORATION_ANSWER' })))
+      .toMatchObject({ kind: 'READY', inputKind: 'RESTORATION_ANSWER' })
+  })
+
+  it.each([undefined, 'OTHER'])('입력 종류 %s 는 추측해서 표시하지 않는다', (kind) => {
+    const body = { ...entry({ case_history_id: 12, next_action: NEXT_ACTION }), result_input_kind: kind }
+    expect(toResultsEntry(body as CaseResultsEntryResponse)).toEqual({ kind: 'UNRECOGNIZED' })
+  })
+
   it('판단이 끝났으면 폼을 열 할 일과 판단 번호를 담는다', () => {
     expect(toResultsEntry(entry({ case_history_id: 12, next_action: NEXT_ACTION }))).toEqual({
       kind: 'READY',
       nextAction: { title: '임대인에게 원상복구 범위 묻기', reason: '', questions: [] },
       historyId: 12,
+      inputKind: 'TEXT',
     })
   })
 

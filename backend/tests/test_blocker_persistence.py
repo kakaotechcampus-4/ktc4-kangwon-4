@@ -119,6 +119,7 @@ def test_all_blockers_and_the_selected_priority_survive_a_new_session(mysql_engi
             row = next(row for row in stored if row.candidate_id == original.candidate_id)
             assert (row.description, row.blocker_evidence_refs) == (original.description, original.evidence_refs)
         history = session.get(CaseHistory, history_id)
+        assert history.next_action_code == decision.next_action.action_code
         assert history.priority_blocker.candidate_id == decision.blocker.candidate_id
         assert set(build_case_snapshot(session, case_id).active_blocker_candidate_ids) == {"procedure:1", "procedure:4"}
         # 기존 화면에는 선택한 한 개만 보여준다.

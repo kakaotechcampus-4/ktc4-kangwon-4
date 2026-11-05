@@ -295,10 +295,53 @@ class InfoAnalysisAgent:
             return None
         return digest_draft_fields(request, digests, self._analysis_step_codes(request, procedure_bindings))
 
+    def _analyze_restoration_answer(
+        self, request: InfoAnalysisInput, procedure_bindings: ProcedureBindings,
+    ) -> InfoAnalysisResult:
+        fields = self._digest_fields(request, procedure_bindings)
+        if fields is None:
+            # 선택형 입력은 모델이 다시 해석하지 않는다. 절차 근거가 낡으면 안전하게 실패한다.
+            raise InfoAnalysisGuardrailError("restoration answer requires current reviewed procedure digests")
+        answer = request.restoration_answer
+        facts, missing = [], []
+        questions = ("원상복구해야 할 범위는 어디까지인가요?", "철거가 필요한가요?")
+        for (field, value), text, question in zip(
+            answer.model_dump().items(), answer.to_input_text().splitlines(), questions, strict=True,
+        ):
+            if value == "UNKNOWN":
+                missing.append({
+                    "field_path": field, "reason_summary": "사용자가 아직 확인하지 못한 항목입니다.",
+                    "blocks": [MissingFieldBlock.SUPERVISOR_DECISION], "question": question,
+                })
+            else:
+                facts.append({
+                    "field_path": field, "operation": FactOperation.SET, "value_type": FactValueType.ENUM,
+                    "value": value, "source_text": text, "confidence_bps": 10_000,
+                    "requires_confirmation": False, "reason_summary": "사용자가 직접 고른 답변입니다.",
+                })
+        values = {item.field_path: item.value for item in request.case_snapshot.facts
+                  if item.status == FactStatus.CONFIRMED}
+        values.update({item.field_path: item.proposed_value for item in request.fact_overlays})
+        if answer.restoration_scope == "PARTIAL" and not values.get(AgentFieldKey.RESTORATION_SCOPE_DETAIL):
+            # '일부'는 구체적인 대상을 알려주지 않는다. 자유글 경로처럼 세부 범위를 되묻는다.
+            missing.append({
+                "field_path": AgentFieldKey.RESTORATION_SCOPE_DETAIL,
+                "reason_summary": "일부 원상복구의 구체적인 대상은 아직 확인되지 않았습니다.",
+                "blocks": [MissingFieldBlock.SUPERVISOR_DECISION],
+                "question": "원상복구가 필요한 부분은 구체적으로 어디인가요?",
+            })
+        draft = InfoAnalysisDraft.model_validate(with_digest_findings({
+            "completion_status": InfoCompletionStatus.NEEDS_USER_INPUT if missing else InfoCompletionStatus.COMPLETE,
+            "facts": facts, "procedure_observations": [], "missing_fields": missing, "uncertainties": [],
+        }, fields))
+        return self._materialize(request, draft, procedure_bindings)
+
     async def analyze(self, request: InfoAnalysisInput) -> InfoAnalysisResult:
         procedure_bindings = resolve_procedure_bindings(
             request.known_procedure_steps, self._procedure_bindings
         )
+        if request.restoration_answer is not None:
+            return self._analyze_restoration_answer(request, procedure_bindings)
         prompt_input = self._prompt_input(request, procedure_bindings)
         # 사장님 글이 있고 절차 정리를 정리본으로 채울 수 있으면, 모델에는 값 꺼내기만 맡긴다.
         # 절차 원문 9건과 절차 범위를 보내지 않아 입력·출력이 크게 준다(info_fact_messages).

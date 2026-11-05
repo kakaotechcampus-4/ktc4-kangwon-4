@@ -4,6 +4,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, model_validator
 
 from app.agent.roadmap import CHECKLIST_IDS
+from app.common.agent_dto import RestorationAnswer
 
 BusinessType = Literal["CAFE", "RESTAURANT"]
 LeaseStatus = Literal["LEASED_PAID", "LEASED_FREE", "OWNED"]
@@ -162,6 +163,7 @@ class ConflictItemResponse(BaseModel):
 
 class CaseResultsEntryResponse(BaseModel):
     judgment_status: JudgmentStatus
+    result_input_kind: Literal["TEXT", "RESTORATION_ANSWER"] = "TEXT"
     case_history_id: int | None = None
     raw_input: str | None = None
     conflicts: list[ConflictItemResponse] | None = None
@@ -173,8 +175,19 @@ class CaseResultsEntryResponse(BaseModel):
 
 
 class CaseResultsSubmitRequest(BaseModel):
-    raw_input: str
+    model_config = {"extra": "forbid"}
+
+    raw_input: str | None = Field(default=None, min_length=1, max_length=2000)
+    restoration_answer: RestorationAnswer | None = None
     case_history_id: int
+
+    @model_validator(mode="after")
+    def validate_input(self) -> "CaseResultsSubmitRequest":
+        if (self.raw_input is None) == (self.restoration_answer is None):
+            raise ValueError("raw_input과 restoration_answer는 하나만 보낸다")
+        if self.raw_input is not None and not self.raw_input.strip():
+            raise ValueError("raw_input은 빈 글일 수 없다")
+        return self
 
 
 class CaseResultsSubmitAcceptedResponse(BaseModel):
