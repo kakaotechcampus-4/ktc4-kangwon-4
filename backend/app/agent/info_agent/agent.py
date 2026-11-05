@@ -1061,7 +1061,13 @@ class InfoAnalysisAgent:
             known = known_steps.get(semantic.step_code)
             if known is None or semantic.step_code in seen_steps:
                 raise InfoAnalysisGuardrailError(
-                    "model returned an unknown or duplicate procedure step"
+                    "model returned an unknown or duplicate procedure step",
+                    procedure_source_errors=(
+                        "Use only step_code values from known_procedure_steps: "
+                        + ", ".join(sorted(known_steps))
+                        + ". Return at most one finding per step_code; duplicate step_code values are forbidden. "
+                        "Keep summaries and details as exact quotations from that step's allowed documents.",
+                    ),
                 )
             seen_steps.add(semantic.step_code)
             refs = set(semantic.evidence_refs)

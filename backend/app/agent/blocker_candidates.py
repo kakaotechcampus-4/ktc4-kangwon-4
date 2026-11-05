@@ -31,7 +31,9 @@ from app.agent.schemas import (
     InfoAnalysisResult,
     KnownProcedureStep,
     MutationSet,
+    ProcedureLookupResult,
     ReviewSourceResult,
+    canonical_digest,
 )
 from app.agent.schemas import AgentFieldKey as CaseFieldKey
 
@@ -133,15 +135,29 @@ def _completion_questions(snapshot, sources, mutations, bindings):
         if not isinstance(source.output, InfoAnalysisResult):
             continue
         findings = {item.procedure_step.step_code: item for item in source.output.procedure_findings}
+        lookup = next((
+            item.output for item in sources
+            if isinstance(item.output, ProcedureLookupResult)
+            and item.meta.call_id == source.output.based_on_procedure_lookup_call_id
+            and item.meta.run_id == source.meta.run_id
+            and item.meta.case_id == source.meta.case_id == snapshot.case_id
+            and item.output.based_on_snapshot_id == source.output.based_on_snapshot_id == snapshot.snapshot_id
+            and item.output_digest == source.output.based_on_procedure_lookup_digest == canonical_digest(item.output)
+        ), None)
         for observation in source.output.procedure_progress_observations:
             step = observation.procedure_step
             if observation.observed_status != "COMPLETED" or (step.procedure_step_id, step.step_code) in completed:
                 continue
             label = next((PROCEDURE_LABELS[code] for code, ref in bindings.items() if ref == step), "해당 절차")
             finding = findings.get(step.step_code)
+            # 승인된 사실 때문에 finding이 생략돼도, 같은 조회의 해당 절차 원문만 연결한다.
+            procedure_refs = finding.evidence_refs if finding is not None else [
+                document.evidence_ref for document in lookup.documents
+                if step.step_code in document.step_codes
+            ] if lookup is not None else []
             refs = list(dict.fromkeys([
                 *observation.source_evidence_refs,
-                *(finding.evidence_refs if finding else []),
+                *procedure_refs,
             ]))
             key = f"procedure:{step.procedure_step_id}"
             questions[key] = {
