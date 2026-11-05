@@ -760,8 +760,14 @@ class StructuredLLMClient:
 
     async def _backoff(self, attempt_index: int) -> None:
         delay = self.config.retry_backoff_seconds * (2**attempt_index)
+        deadline = current_deadline()
+        if deadline is not None:
+            deadline.check()
+            delay = min(delay, deadline.remaining_seconds())
         if delay > 0:
             await self._sleep(delay)
+        if deadline is not None:
+            deadline.check()
 
 
 def restrict_string_enums(

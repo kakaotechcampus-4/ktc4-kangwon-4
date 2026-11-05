@@ -7,6 +7,7 @@ from dataclasses import replace
 import httpx
 import pytest
 from app.agent.llm import (
+    LLMCallBudget,
     LLMConfig,
     LLMConfigurationError,
     LLMRequestError,
@@ -15,6 +16,11 @@ from app.agent.llm import (
     candidate_config,
     restrict_string_enums,
     sanitize_json_schema,
+)
+from app.agent.run_scope import (
+    RunDeadline,
+    RunDeadlineExceededError,
+    run_deadline_scope,
 )
 from app.agent.runtime import resolve_run_deadline_seconds
 from app.agent.supervisor.agent import SupervisorModelOutput
@@ -90,6 +96,70 @@ def test_http_retry_and_refusal_record_unknown_and_known_usage_once_each():
     assert calls[0].prompt_tokens is None and calls[0].status_code == 503
     assert calls[1].completion_tokens == 30 and calls[1].error_code == "OUTPUT_TOKEN_LIMIT"
     assert "private provider message" not in repr(calls)
+
+
+@pytest.mark.parametrize("remaining", [None, 5.0, 0.25, 0.0])
+def test_retry_wait_preserves_success_and_stops_at_the_run_deadline(monkeypatch, remaining):
+    now, requests, waits = [0.0], [], []
+    monkeypatch.setattr(RunDeadline, "remaining_seconds", lambda deadline: deadline.expires_at - now[0])
+    budget = LLMCallBudget(3)
+
+    def handler(request):
+        requests.append(request)
+        if len(requests) == 1:
+            if remaining is not None:
+                now[0] = 10.0 - remaining
+            return httpx.Response(503, json={"error": "synthetic unavailable"})
+        return httpx.Response(200, json={"choices": [{"message": {"content": '{"ok":true}'}}]})
+
+    async def sleep(delay):
+        waits.append(delay)
+        now[0] += delay
+
+    expires = remaining is not None and remaining <= 2.0
+
+    async def run():
+        with run_deadline_scope(RunDeadline(10.0) if remaining is not None else None), capture_usage() as calls:
+            async with StructuredLLMClient(
+                replace(config(), retry_backoff_seconds=2.0),
+                transport=httpx.MockTransport(handler), sleep=sleep, call_budget=budget,
+            ) as client:
+                if expires:
+                    with pytest.raises(RunDeadlineExceededError):
+                        await client.generate(Answer, [{"role": "user", "content": "test"}])
+                else:
+                    assert (await client.generate(Answer, [{"role": "user", "content": "test"}])).ok
+            return calls
+
+    calls = asyncio.run(run())
+    expected_wait = 2.0 if remaining is None else min(2.0, remaining)
+    assert waits == ([expected_wait] if expected_wait > 0 else [])
+    assert len(requests) == budget.spent == len(calls) == (1 if expires else 2)
+    assert calls[0].status == "ERROR" and calls[0].status_code == 503
+    if not expires:
+        assert calls[1].status == "SUCCESS"
+
+
+def test_cancellation_during_retry_wait_never_sends_another_request():
+    budget = LLMCallBudget(3)
+
+    async def cancel_wait(_delay):
+        raise asyncio.CancelledError
+
+    async def run():
+        with run_deadline_scope(RunDeadline.after(10)), capture_usage() as calls:
+            async with StructuredLLMClient(
+                replace(config(), retry_backoff_seconds=2.0),
+                transport=httpx.MockTransport(lambda _: httpx.Response(503)),
+                sleep=cancel_wait, call_budget=budget,
+            ) as client:
+                with pytest.raises(asyncio.CancelledError):
+                    await client.generate(Answer, [{"role": "user", "content": "test"}])
+            return calls
+
+    calls = asyncio.run(run())
+    assert len(calls) == budget.spent == 1
+    assert calls[0].status == "ERROR" and calls[0].status_code == 503
 
 
 def test_candidate_does_not_inherit_shared_credentials_model_or_effort(tmp_path):

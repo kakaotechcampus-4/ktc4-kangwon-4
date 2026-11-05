@@ -27,12 +27,16 @@ from app.agent.guardrails import (
     exact_span,
     resolve_evidence_aliases,
 )
+from app.agent.info_agent.procedure_digests import (
+    digest_draft_fields,
+    load_digests,
+    with_digest_findings,
+)
+from app.agent.llm import LLMResponseError
 from app.agent.procedure_tool.rules import (
     business_type_code,
     employment_history_conflicts,
 )
-from app.agent.llm import LLMResponseError
-from app.agent.info_agent.procedure_digests import digest_draft_fields, load_digests, with_digest_findings
 from app.agent.projection import ensure_projection_has_no_obvious_sensitive_text
 from app.agent.prompts import info_fact_messages, info_messages
 from app.agent.schemas import (
@@ -304,6 +308,11 @@ class InfoAnalysisAgent:
         if digest_fields is not None:
             for key in ("procedure_analysis_step_codes", "procedure_evidence_by_step", "procedure_lookup"):
                 prompt_input.pop(key, None)
+            # 값 추출에는 절차 이름과 사용자 표현만 필요하다. 적용 조건·선후관계는 원본으로 검사한다.
+            prompt_input["known_procedure_steps"] = [
+                step.model_dump(mode="json", include={"procedure_step", "step_name", "utterance_aliases", "deprecated_at"})
+                for step in request.known_procedure_steps
+            ]
         evidence_by_alias = {
             alias: evidence_id
             for evidence_id, alias in self._procedure_evidence_aliases(request).items()
