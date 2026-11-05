@@ -1,5 +1,5 @@
 {
-  "digest_version": "procedure-digests/2026-11-05-reviewed1",
+  "digest_version": "procedure-digests/2026-11-05-reviewed2",
   "based_on_snapshot_version": "cafe-official-sources/2026-11-04-reviewed1",
   "reviewed_by": "healthy27",
   "reviewed_at": "2026-11-05T00:00:00+09:00",
@@ -58,8 +58,8 @@
     "PERFORM_RESTORATION": {
       "decision_authority": "USER",
       "summary": {
-        "record_id": "DEMOLITION_SUPPORT_2026",
-        "text": "반드시 국세청에\n사업자등록이 되어있는 업체를 통해 철거해야 함(자력철거 시 지원불가)"
+        "record_id": "LEASE_RESTORATION_AND_RETURN",
+        "text": "이 경우 임차상가건물을 원래의 상태로 회복하여 반환해야 합니다"
       },
       "required_actions": [
         {

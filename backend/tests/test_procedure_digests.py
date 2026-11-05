@@ -168,3 +168,20 @@ def test_landlord_answer_falls_back_to_the_full_analysis_without_a_trusted_diges
     # 이 가짜 모델은 절차 정리를 내지 않아 전체 분석 검사에 걸려 재시도까지 간다. 모양만 본다
     _, seen = landlord_answer_info(digests="unreviewed")
     assert seen and {call["schema"] for call in seen} == {"InfoProviderOutput"}
+
+
+def test_landlord_answer_asks_back_only_restoration_fields():
+    # 실측에서 값 꺼내기 모델이 보험 가입 이력·폐업일·원상복구 진행 상태까지 "모름"으로 되물었고, Review가 그 질문을
+    # blocker에도 요구해 3번 모두 반려했다. 임대인 답변 단계에서는 원상복구 칸만 되묻는다
+    class AsksEverything(FactModel):
+        async def generate(self, response_model, messages, **kwargs):
+            out = (await super().generate(response_model, messages, **kwargs)).model_dump(mode="python")
+            ask = {"reason_summary": "확인 필요", "blocks": ["SUPERVISOR_DECISION"], "question": "확인해 주세요."}
+            out["missing_fields"] = [ask | {"field_path": field} for field in (
+                "restoration_status", "planned_closure_date", "pension_enrolled", "restoration_scope_detail")]
+            out["completion_status"] = "NEEDS_USER_INPUT"
+            return response_model.model_validate(out)
+
+    with patch.object(NoModel, "from_env", classmethod(lambda cls, *a, **k: AsksEverything())):
+        info, _ = info_result(result_text=LANDLORD)
+    assert [item.field_path for item in info.missing_fields] == ["restoration_scope_detail"]
