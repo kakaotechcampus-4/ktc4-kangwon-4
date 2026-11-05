@@ -205,9 +205,9 @@ def test_restoration_answer_fails_without_calling_a_model_when_digests_are_untru
     assert info is None and calls == []
 
 
-@pytest.mark.parametrize("review_available", [True, False])
 @pytest.mark.parametrize("scope", ["FULL", "PARTIAL"])
-def test_restoration_answer_still_requires_supervisor_and_independent_review(review_available, scope):
+def test_restoration_answer_uses_supervisor_and_code_review_without_review_model(scope):
+    # 선택형은 모델이 쓴 사실·문장이 없어 Review 모델 없이 코드 검사만 한다(graph review_code_only).
     from pydantic import ValidationError
     from app.agent.schemas import ReviewedPlanOutcome
 
@@ -222,12 +222,7 @@ def test_restoration_answer_still_requires_supervisor_and_independent_review(rev
         async def generate(self, response_model, messages, **kwargs):
             name = kwargs["schema_name"]
             calls.append(name)
-            assert name != "reborn_info_analysis", "선택형은 Info 모델을 호출하면 안 된다"
-            if name == "reborn_review_output":
-                if not review_available:
-                    raise RuntimeError("합성 Review 장애")
-                return response_model.model_validate({"verdict": "PASS", "issues": [], "missing_evidence": [],
-                    "recommended_rework_targets": [], "resolution_reason": "합성 검수"})
+            assert name not in {"reborn_info_analysis", "reborn_review_output"}, "선택형은 Info·Review 모델을 부르지 않는다"
             contract = json.loads(messages[1]["content"].removeprefix("INPUT_JSON="))["contract"]
             if scope == "PARTIAL":
                 assert any(item["candidate_id"] == "missing:restoration_scope_detail"
@@ -248,10 +243,7 @@ def test_restoration_answer_still_requires_supervisor_and_independent_review(rev
                 await runtime.aclose()
 
     outcome = asyncio.run(run())
-    assert len(calls) == 2 and calls[-1] == "reborn_review_output"
-    if not review_available:
-        assert outcome.outcome_type == "SAFE_FAILURE"
-        return
+    assert calls == ["reborn_supervisor_draft"]
     assert outcome.outcome_type == "REVIEWED_PLAN", outcome
     outcome.assert_integrity()
     assert outcome.review_subject.trigger.restoration_answer == answer
@@ -413,3 +405,57 @@ def test_review_sees_each_reviewed_source_text_once():
     procedure = next(item["output"] for item in sent["source_results"] if item["meta"]["component"] == "PROCEDURE_TOOL")
     assert procedure["documents"] and all(document["excerpt"] is None for document in procedure["documents"])
     assert any(item and item.get("excerpt") for item in sent["snapshot"]["evidence_records"])
+
+
+# ── 모델이 쓴 사실·문장이 없는 판단은 Review 모델 없이 코드 검사만 한다 ──
+
+def test_first_judgment_reviews_with_code_only_and_marks_the_trace():
+    calls, events = [], []
+    store = ev.SnapshotStore(REVIEWED)
+    request = ev.attach_fixture_sources(ev.build_graph_input(ev.CASES["benchmark_case1"]), store)
+
+    class FirstModel(NoModel):
+        async def generate(self, response_model, messages, **kwargs):
+            calls.append(kwargs["schema_name"])
+            assert kwargs["schema_name"] == "reborn_supervisor_draft", "첫 판단은 Supervisor만 부른다"
+            rows = json.loads(messages[1]["content"].removeprefix("INPUT_JSON="))["contract"]["blocker_candidates"]
+            return response_model.model_validate({"decision_type": "ACTION", "blocker_candidate_id": rows[0]["candidate_id"],
+                                                  "action_code": rows[0]["actions"][0]["action_code"]})
+
+    class Sink:
+        def emit(self, event):
+            events.append(event)
+
+    async def run():
+        with patch.object(runtime_module.StructuredLLMClient, "from_env", classmethod(lambda cls, *a, **k: FirstModel())), \
+             patch.object(runtime_module.LangfuseTraceSink, "from_env", lambda: Sink()):
+            runtime = await runtime_module.build_runtime(known_procedure_steps=ev.build_registry(store),
+                procedure_store=store, support_catalog=ev.load_catalog(None))
+            try:
+                return await runtime.run_planning(request)
+            finally:
+                await runtime.aclose()
+
+    outcome = asyncio.run(run())
+    assert outcome.outcome_type == "REVIEWED_PLAN", outcome
+    outcome.assert_integrity()
+    assert calls == ["reborn_supervisor_draft"]
+    assert [event.review_mode for event in events if event.component == "REVIEW_TOOL"] == ["CODE_ONLY"]
+
+
+def test_code_only_review_still_blocks_a_draft_outside_the_reviewed_candidates():
+    from app.agent.review_tool import ReviewTool
+    from app.agent.supervisor import SupervisorAgent
+    from test_action_codes import StubModel, supervisor_request
+    from test_blocker_candidates import subject
+
+    class NoCalls:
+        async def generate(self, *args, **kwargs):
+            raise AssertionError("코드 검사만 해야 한다")
+
+    request = supervisor_request()
+    draft = asyncio.run(SupervisorAgent(StubModel()).draft(request))
+    action = draft.decision.next_action.model_copy(update={"title": "오늘 바로 폐업 신고서를 제출하세요."})
+    draft = draft.model_copy(update={"decision": draft.decision.model_copy(update={"next_action": action})})
+    result = asyncio.run(ReviewTool(NoCalls()).review_code_only(subject(request, draft)))
+    assert result.verdict == "REVISE"

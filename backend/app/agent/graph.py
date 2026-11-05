@@ -374,6 +374,8 @@ class AgentGraph:
                 and not state.get("review_feedback")
             ):
                 output = self._info_from_digests(self._info_agent, component_input)
+            # 정리본으로 채웠거나 선택형 답변이면 Info 모델을 부르지 않는다(info_agent.analyze 참고)
+            used_model = output is None and component_input.restoration_answer is None
             if output is None:
                 output = await self._info_agent.analyze(component_input)
             if retained is not None:
@@ -407,6 +409,7 @@ class AgentGraph:
             "phase": "INFO_ANALYSIS",
             "source_results": [*state.get("source_results", []), source],
             "fact_overlays": overlays,
+            "info_used_model": used_model,
         }
 
     def _restore_procedure_completion(
@@ -680,7 +683,17 @@ class AgentGraph:
                 source_results=state["source_results"],
                 supervisor_draft=state["current_draft"],
             )
-            result = await self._review_tool.review(subject)
+            # 모델이 쓴 사실·문장이 없는 첫 회차 판단은 코드 검사만 한다. 화면 문장은 검수된
+            # 절차 자료에서 코드가 만들고, Supervisor는 코드 후보 중 고르기만 한다.
+            code_only = (
+                state.get("info_used_model") is False
+                and state.get("revision_count", 0) == 0
+                and getattr(type(self._review_tool), "review_code_only", None) is not None
+            )
+            if code_only:
+                result = await self._review_tool.review_code_only(subject)
+            else:
+                result = await self._review_tool.review(subject)
         except Exception as exc:  # noqa: BLE001 - graph must fail closed
             if "meta" in locals():
                 self._emit(meta, started, "ERROR", exc)
@@ -697,6 +710,7 @@ class AgentGraph:
             started,
             "SUCCESS",
             review_verdict="PASS" if result.verdict == ReviewVerdict.PASS else "REVISE",
+            review_mode="CODE_ONLY" if code_only else "MODEL",
         )
         update: dict[str, Any] = {
             "phase": "REVIEWING",
@@ -1106,6 +1120,7 @@ class AgentGraph:
         exc: Exception | None = None,
         *,
         review_verdict: Literal["PASS", "REVISE"] | None = None,
+        review_mode: Literal["MODEL", "CODE_ONLY"] | None = None,
     ) -> None:
         counters = _REVIEW_TRACE_COUNTERS.get()
         if counters is not None and review_verdict is not None:
@@ -1123,6 +1138,7 @@ class AgentGraph:
             latency_ms=max(0, int((time.monotonic() - started) * 1000)),
             attempt=meta.attempt,
             review_verdict=review_verdict,
+            review_mode=review_mode,
             model=model,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
