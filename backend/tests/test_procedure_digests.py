@@ -117,3 +117,87 @@ def test_falls_back_to_the_info_model_when_the_digest_cannot_be_trusted(digests)
 def test_a_result_report_still_reads_the_owner_text_with_the_info_model():
     _, calls = info_result(result_text="임대인이 철거해야 한다고 했어요.")
     assert calls == ["reborn_info_analysis"]
+
+
+# ── Turn 2: 사장님 글이 있으면 모델은 값만 꺼내고, 절차 정리는 정리본이 채운다(A-2) ──
+
+LANDLORD = "카운터랑 싱크대는 빼고, 간판도 떼야 한대요. 바닥 타일은 그대로 둬도 된대요."
+
+
+class FactModel(NoModel):
+    """임대인 답변에서 범위·철거 여부만 꺼내 돌려주는 모델. 무엇을 받았는지 남긴다."""
+
+    seen: list[dict] = []
+
+    async def generate(self, response_model, messages, **kwargs):
+        if kwargs.get("schema_name") != "reborn_info_analysis":
+            raise AssertionError("only Info is under test")
+        FactModel.seen.append({"schema": response_model.__name__, "messages": messages})
+        fact = {"operation": "SET", "value_type": "ENUM", "source_text": "카운터랑 싱크대는 빼고, 간판도 떼야 한대요.",
+                "confidence_bps": 9000, "requires_confirmation": False, "reason_summary": "임대인 답변"}
+        return response_model.model_validate({
+            "completion_status": "COMPLETE",
+            "facts": [fact | {"field_path": "restoration_scope", "value": "PARTIAL"},
+                      fact | {"field_path": "demolition_required", "value": "REQUIRED"}],
+            "procedure_observations": [], "missing_fields": [], "uncertainties": [],
+            **({} if response_model.__name__ == "InfoFactProviderOutput" else {"procedure_findings": []}),
+        })
+
+
+def landlord_answer_info(digests="reviewed"):
+    FactModel.seen = []
+    with patch.object(NoModel, "from_env", classmethod(lambda cls, *a, **k: FactModel())):
+        info, _ = info_result(result_text=LANDLORD, digests=digests)
+    return info, FactModel.seen
+
+
+def test_landlord_answer_sends_only_the_owner_text_to_the_model():
+    info, seen = landlord_answer_info()
+    [call] = seen
+    assert call["schema"] == "InfoFactProviderOutput"
+    prompt = json.dumps(call["messages"], ensure_ascii=False)
+    # 절차 원문을 보내지 않는다. 임대차 반환 원문 한 문장이 프롬프트에 없어야 한다
+    assert "임차인은 임대차계약이 종료하면" not in prompt and LANDLORD in prompt
+    assert {item.field_path for item in info.fact_candidates} == {"restoration_scope", "demolition_required"}
+    assert {item.procedure_step.step_code for item in info.procedure_findings} == set(digest_file()["steps"])
+    # 방금 답으로 정해진 범위·철거 여부는 다시 묻지 않는다
+    assert info.question_candidates == []
+
+
+def test_landlord_answer_falls_back_to_the_full_analysis_without_a_trusted_digest():
+    # 이 가짜 모델은 절차 정리를 내지 않아 전체 분석 검사에 걸려 재시도까지 간다. 모양만 본다
+    _, seen = landlord_answer_info(digests="unreviewed")
+    assert seen and {call["schema"] for call in seen} == {"InfoProviderOutput"}
+
+
+def test_landlord_answer_asks_back_only_restoration_fields():
+    # 실측에서 값 꺼내기 모델이 보험 가입 이력·폐업일·원상복구 진행 상태까지 "모름"으로 되물었고, Review가 그 질문을
+    # blocker에도 요구해 3번 모두 반려했다. 임대인 답변 단계에서는 원상복구 칸만 되묻는다
+    class AsksEverything(FactModel):
+        async def generate(self, response_model, messages, **kwargs):
+            out = (await super().generate(response_model, messages, **kwargs)).model_dump(mode="python")
+            ask = {"reason_summary": "확인 필요", "blocks": ["SUPERVISOR_DECISION"], "question": "확인해 주세요."}
+            out["missing_fields"] = [ask | {"field_path": field} for field in (
+                "restoration_status", "planned_closure_date", "pension_enrolled", "restoration_scope_detail")]
+            out["completion_status"] = "NEEDS_USER_INPUT"
+            return response_model.model_validate(out)
+
+    with patch.object(NoModel, "from_env", classmethod(lambda cls, *a, **k: AsksEverything())):
+        info, _ = info_result(result_text=LANDLORD)
+    assert [item.field_path for item in info.missing_fields] == ["restoration_scope_detail"]
+
+
+def test_asked_back_restoration_fields_become_question_blockers():
+    # G17 실측: 값 꺼내기 모델이 되묻는 칸을 PROCEDURE_LOOKUP으로 적어 확인 질문 blocker가 안 생겼고, Review가 반려했다
+    class LooksUpProcedure(FactModel):
+        async def generate(self, response_model, messages, **kwargs):
+            out = (await super().generate(response_model, messages, **kwargs)).model_dump(mode="python")
+            out["missing_fields"] = [{"field_path": "restoration_scope_detail", "reason_summary": "세부 대상 미확인",
+                                      "blocks": ["PROCEDURE_LOOKUP"], "question": "어떤 부분을 원래대로 해야 하나요?"}]
+            out["completion_status"] = "NEEDS_USER_INPUT"
+            return response_model.model_validate(out)
+
+    with patch.object(NoModel, "from_env", classmethod(lambda cls, *a, **k: LooksUpProcedure())):
+        info, _ = info_result(result_text=LANDLORD)
+    [missing] = info.missing_fields
+    assert missing.field_path == "restoration_scope_detail" and list(missing.blocks) == ["SUPERVISOR_DECISION"]

@@ -31,9 +31,9 @@ from app.agent.procedure_tool.rules import (
     business_type_code,
     employment_history_conflicts,
 )
-from app.agent.info_agent.procedure_digests import digest_draft_fields, load_digests
+from app.agent.info_agent.procedure_digests import digest_draft_fields, load_digests, with_digest_findings
 from app.agent.projection import ensure_projection_has_no_obvious_sensitive_text
-from app.agent.prompts import info_messages
+from app.agent.prompts import info_fact_messages, info_messages
 from app.agent.schemas import (
     CASE_FIELD_SPECS,
     REQUIRED_CASE_FIELDS,
@@ -213,6 +213,16 @@ class InfoProviderOutput(AgentSchema):
     uncertainties: list[Uncertainty]
 
 
+class InfoFactProviderOutput(AgentSchema):
+    """사장님 글에서 값만 꺼낼 때의 모델 출력. 절차 정리(procedure_findings)는 검수 정리본이 채운다."""
+
+    completion_status: InfoCompletionStatus
+    facts: list[ExtractedFactModelOutput]
+    procedure_observations: list[ProcedureObservationDraft]
+    missing_fields: list[MissingFieldDraft]
+    uncertainties: list[Uncertainty]
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -255,15 +265,12 @@ class InfoAnalysisAgent:
         정리본으로 다 채울 수 없거나 검사에 걸리면 None이고, 그때는 analyze()가 모델을 부른다.
         """
 
-        digests = load_digests()
-        if digests is None or request.conflict_confirmation is not None:
+        if request.conflict_confirmation is not None:
             return None
         procedure_bindings = resolve_procedure_bindings(
             request.known_procedure_steps, self._procedure_bindings
         )
-        fields = digest_draft_fields(
-            request, digests, self._analysis_step_codes(request, procedure_bindings)
-        )
+        fields = self._digest_fields(request, procedure_bindings)
         if fields is None:
             return None
         try:
@@ -271,11 +278,27 @@ class InfoAnalysisAgent:
         except (GuardrailViolation, ValueError):
             return None
 
+    def _digest_fields(self, request: InfoAnalysisInput, procedure_bindings: ProcedureBindings) -> dict[str, Any] | None:
+        digests = load_digests()
+        if digests is None:
+            return None
+        return digest_draft_fields(request, digests, self._analysis_step_codes(request, procedure_bindings))
+
     async def analyze(self, request: InfoAnalysisInput) -> InfoAnalysisResult:
         procedure_bindings = resolve_procedure_bindings(
             request.known_procedure_steps, self._procedure_bindings
         )
         prompt_input = self._prompt_input(request, procedure_bindings)
+        # 사장님 글이 있고 절차 정리를 정리본으로 채울 수 있으면, 모델에는 값 꺼내기만 맡긴다.
+        # 절차 원문 9건과 절차 범위를 보내지 않아 입력·출력이 크게 준다(info_fact_messages).
+        digest_fields = (
+            self._digest_fields(request, procedure_bindings)
+            if request.input is not None and request.conflict_confirmation is None
+            else None
+        )
+        if digest_fields is not None:
+            for key in ("procedure_analysis_step_codes", "procedure_evidence_by_step", "procedure_lookup"):
+                prompt_input.pop(key, None)
         evidence_by_alias = {
             alias: evidence_id
             for evidence_id, alias in self._procedure_evidence_aliases(request).items()
@@ -301,7 +324,7 @@ class InfoAnalysisAgent:
         rejected_observation_codes: tuple[str, ...] = ()
         fact_errors: tuple[str, ...] = ()
         for attempt in range(1, self._max_local_attempts + 1):
-            messages = info_messages(prompt_input)
+            messages = (info_fact_messages if digest_fields is not None else info_messages)(prompt_input)
             if attempt > 1:
                 if fact_errors:
                     messages.append(
@@ -377,7 +400,7 @@ class InfoAnalysisAgent:
                     }
                 )
             provider_output = await self._llm.generate(
-                InfoProviderOutput,
+                InfoFactProviderOutput if digest_fields is not None else InfoProviderOutput,
                 messages,
                 schema_name="reborn_info_analysis",
                 # The provider cannot emit a reference we did not offer, so a
@@ -393,6 +416,8 @@ class InfoAnalysisAgent:
                 },
             )
             try:
+                if digest_fields is not None:
+                    provider_output = with_digest_findings(provider_output.model_dump(mode="python"), digest_fields)
                 draft = InfoAnalysisDraft.model_validate(
                     resolve_evidence_aliases(
                         self._validated_draft(provider_output).model_dump(

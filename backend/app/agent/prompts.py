@@ -102,6 +102,36 @@ def info_messages(value: BaseModel | dict[str, Any]) -> list[dict[str, str]]:
     ]
 
 
+def info_fact_messages(value: BaseModel | dict[str, Any]) -> list[dict[str, str]]:
+    """사장님 글에서 값만 꺼낼 때의 Info 지시문. 절차 정리는 검수 정리본이 채운다(info_agent/procedure_digests.py).
+
+    임대인 답변 한 줄을 읽는데 절차 원문 9건을 함께 보내고 절차 8개를 다시 정리하게 하면,
+    출력 대부분이 절차 정리가 되어 호출 1번에 약 130초가 걸렸다(2026-11-04 측정).
+    규칙 문장은 info_messages에서 그대로 잘라 쓴다. 같은 규칙을 두 군데 적으면 한쪽만 고쳐지기 쉽다.
+    """
+
+    full = info_messages(value)[0]["content"]
+
+    def between(start: str, end: str) -> str:
+        return full[full.index(start):full.index(end)]
+
+    content = (
+        "당신은 RE:BORN 정보분석 구성요소입니다. 사용자 사실·진행 변경 후보만 추출하세요. "
+        "공식 절차 문서 정리는 검수된 자료로 따로 채우므로 하지 마세요. "
+        "지원사업의 자격·금액·현재 접수 가능 여부를 판단하거나 이를 위한 추가 질문을 만들지 마세요.\n\n"
+        + between("1. facts는", "3. 절차 분석은")
+        + "3. missing_fields 판단에는 fact_overlays를 snapshot 위에 적용하되 미확정 제안일 뿐, "
+        "snapshot 변경이나 확정 사실로 취급하지 마세요.\n\n"
+        + between("직원·보험 집계는", "9. 모르는")
+        + "9. 모르는 restoration_scope·demolition_required는 missing_fields와 질문으로 남기세요.\n\n"
+        + SAFETY_RULES
+    )
+    return [
+        {"role": "system", "content": content},
+        {"role": "user", "content": "INPUT_JSON=" + _json_payload(value)},
+    ]
+
+
 def support_messages(value: BaseModel | dict[str, Any]) -> list[dict[str, str]]:
     return [
         {
