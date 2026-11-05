@@ -268,14 +268,12 @@ class InfoAnalysisAgent:
         self._max_local_attempts = max_local_attempts
 
     def analyze_from_digests(self, request: InfoAnalysisInput) -> InfoAnalysisResult | None:
-        """읽을 글이 없는 판단(첫 판단)에서 모델 대신 검수 정리본으로 결과를 만든다.
+        """읽을 글이 없는 판단(첫 판단·충돌 확인 후 재판단)에서 모델 대신 검수 정리본으로 결과를 만든다.
 
         모델 결과와 같은 검사(_materialize: 원문 인용·근거·절차 범위)를 그대로 거친다.
         정리본으로 다 채울 수 없거나 검사에 걸리면 None이고, 그때는 analyze()가 모델을 부른다.
         """
 
-        if request.conflict_confirmation is not None:
-            return None
         procedure_bindings = resolve_procedure_bindings(
             request.known_procedure_steps, self._procedure_bindings
         )

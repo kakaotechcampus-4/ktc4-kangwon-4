@@ -367,15 +367,25 @@ class AgentGraph:
             output = None
             if (
                 self._info_from_digests is not None
-                and getattr(request.trigger, "trigger_type", None) == "CASE_CREATED"
-                and retained is None
-                and not confirmed_overlays
+                and (
+                    (
+                        getattr(request.trigger, "trigger_type", None) == "CASE_CREATED"
+                        and retained is None
+                        and not confirmed_overlays
+                    )
+                    # 충돌 확인 후 재판단은 읽을 새 글이 없다. 사실은 사용자 선택·보관된 결과로 오고, 절차 정리만 남아 정리본으로 채운다
+                    or getattr(request.trigger, "trigger_type", None) == "CONFLICT_CONFIRMED"
+                )
                 # Review가 Info를 다시 보라고 했으면 같은 정리본을 또 내지 않고 모델에게 맡긴다
                 and not state.get("review_feedback")
             ):
                 output = self._info_from_digests(self._info_agent, component_input)
             # 정리본으로 채웠거나 선택형 답변이면 Info 모델을 부르지 않는다(info_agent.analyze 참고)
-            used_model = output is None and component_input.restoration_answer is None
+            # 보관된 사실은 이전 판단에서 Info 모델이 글에서 꺼냈고 아직 Review를 거치지 않았다. Review 모델을 유지한다
+            used_model = (
+                (output is None and component_input.restoration_answer is None)
+                or retained is not None
+            )
             if output is None:
                 output = await self._info_agent.analyze(component_input)
             if retained is not None:
