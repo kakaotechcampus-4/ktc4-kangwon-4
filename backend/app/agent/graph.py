@@ -347,6 +347,7 @@ class AgentGraph:
             ))
         component_input = InfoAnalysisInput(
             input=trigger_input,
+            restoration_answer=getattr(request.trigger, "restoration_answer", None),
             case_snapshot=request.case_snapshot,
             fact_overlays=analysis_overlays,
             conflict_confirmation=(request.trigger if isinstance(request.trigger, ConflictConfirmedTrigger) else None),

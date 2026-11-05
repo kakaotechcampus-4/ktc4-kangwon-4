@@ -301,6 +301,9 @@ def get_case_results_entry(session: Session, member_id: int) -> CaseResultsEntry
     if latest_history.judgment_status == "DONE":
         return CaseResultsEntryResponse(
             judgment_status="DONE",
+            result_input_kind=(
+                "RESTORATION_ANSWER" if latest_history.next_action_code == "CONFIRM_RESTORATION_SCOPE" else "TEXT"
+            ),
             case_history_id=latest_history.id,
             next_action=(
                 NextActionResponse(
@@ -406,11 +409,20 @@ def submit_case_results(
     if submit_request.case_history_id != latest_history.id:
         raise HTTPException(status_code=409, detail="최신 판단에 대해 요청을 주지 않았습니다.")
 
+    answer = submit_request.restoration_answer
+    if answer is not None and (
+        latest_history.judgment_status != "DONE"
+        or latest_history.next_action_code != "CONFIRM_RESTORATION_SCOPE"
+        or latest_history.next_action is None
+    ):
+        raise HTTPException(status_code=422, detail="현재 할 일에는 선택형 원상복구 답변을 보낼 수 없습니다.")
+
     history = case_history_crud.create_case_history(
         session,
         CaseHistory(
             case_id=case.id,
-            raw_input=submit_request.raw_input,
+            raw_input=answer.to_input_text() if answer is not None else submit_request.raw_input,
+            restoration_answer=answer.model_dump(mode="json") if answer is not None else None,
             source="USER_INPUT",
             judgment_status="PENDING",
         ),
