@@ -1,5 +1,3 @@
-from datetime import datetime
-
 from sqlalchemy.orm import joinedload
 from sqlmodel import Session, select
 
@@ -67,14 +65,22 @@ def get_latest_case_history_by_sources(session: Session, case_id: int, sources: 
     ).first()
 
 
-def get_abandoned_pending_histories(session: Session, older_than: datetime) -> list[CaseHistory]:
-    """결과를 못 받은 채 남은 판단. 서버가 판단 도중에 꺼지면 이렇게 남는다.
+def get_pending_case_histories(session: Session) -> list[CaseHistory]:
+    """아직 결과를 못 받은 판단 전부."""
 
-    older_than보다 먼저 들어온 것만 고른다. 지금 돌고 있는 판단까지 끊지 않으려는 것이다.
+    return session.exec(
+        select(CaseHistory).where(CaseHistory.judgment_status == "PENDING")
+    ).all()
+
+
+def lock_pending_case_history(session: Session, case_history_id: int) -> CaseHistory | None:
+    """아직 결과를 못 받은 판단 한 건을 잠그고 읽는다. 그 사이 끝났으면 None.
+
+    잠그지 않고 쓰면, 읽은 뒤 쓰기 전에 끝난 판단의 정상 결과를 덮어쓴다(승준님 #194).
     """
 
     return session.exec(
-        select(CaseHistory).where(
-            CaseHistory.judgment_status == "PENDING", CaseHistory.created_at < older_than
-        )
-    ).all()
+        select(CaseHistory)
+        .where(CaseHistory.id == case_history_id, CaseHistory.judgment_status == "PENDING")
+        .with_for_update()
+    ).one_or_none()
