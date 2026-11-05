@@ -1,22 +1,11 @@
 """State, existing procedure constraints and independent Review bound choices."""
 
 import asyncio
+import hashlib
 import json
 from uuid import UUID
 
 import pytest
-from pydantic import ValidationError
-from test_action_codes import (
-    NOW,
-    REF,
-    StubModel,
-    evidence,
-    result_fixes_xfail,
-    source,
-    supervisor_request,
-    support_sources,
-)
-
 from app.agent.blocker_candidates import build_blocker_candidates, missing_info_fields
 from app.agent.llm import LLMRequestError, LLMResponseError
 from app.agent.review_tool import ReviewTool
@@ -29,12 +18,24 @@ from app.agent.schemas import (
     ProcedureDependency,
     ProcedureProgress,
     ProcedureProgressChangeCandidate,
+    ProcedureProgressObservation,
     ProcedureStepRef,
     QuestionCandidate,
     ReviewSubject,
     canonical_digest,
 )
 from app.agent.supervisor.agent import SupervisorAgent, SupervisorGuardrailError
+from pydantic import ValidationError
+from test_action_codes import (
+    NOW,
+    REF,
+    StubModel,
+    evidence,
+    result_fixes_xfail,
+    source,
+    supervisor_request,
+    support_sources,
+)
 
 RESTORATION = ProcedureStepRef(
     procedure_step_id=4, step_code="CONFIRM_RESTORATION_SCOPE"
@@ -131,6 +132,70 @@ def candidates(request, changes=None):
         changes or mutations(),
         evidence,
     )
+
+
+def completion_without_finding():
+    request = request_with_state(restoration_scope="FULL", demolition_required="REQUIRED")
+    text = "임대인에게 원상복구 범위 확인을 마쳤습니다."
+    request.trigger.input.redacted_text = text
+    fingerprint = hashlib.sha256(text.encode()).hexdigest()
+    record = evidence(evidence_id=f"input:{request.trigger.input.input_event_id}:0:{len(text)}:{fingerprint[:12]}",
+                      source_type="USER_INPUT", source_ref=request.trigger.input.input_event_id,
+                      excerpt=text, locator=f"text:0-{len(text)}", content_hash=fingerprint)
+    request.case_snapshot.evidence_records.append(record)
+    info = request.source_results[1].output.model_copy(deep=True)
+    info.procedure_findings = [item for item in info.procedure_findings if item.procedure_step != RESTORATION]
+    info.evidence_records.append(record)
+    info.procedure_progress_observations.append(ProcedureProgressObservation(
+        observation_id=UUID(int=990), procedure_step=RESTORATION, observed_status="COMPLETED",
+        source_span={"input_event_id": request.trigger.input.input_event_id, "text": text,
+                     "start_offset": 0, "end_offset": len(text)},
+        source_evidence_refs=[record.evidence_id], requires_confirmation=True,
+        reason_summary="사용자의 범위 확인 완료 보고",
+    ))
+    request.source_results[1] = source(info)
+    return request
+
+
+def test_completion_without_a_finding_keeps_its_own_lookup_source_through_review():
+    request = completion_without_finding()
+    original = request.model_dump_json()
+    draft = asyncio.run(SupervisorAgent(ChoiceModel(), max_local_attempts=1).draft(request))
+    [completion] = [item for item in draft.decision.blockers if item.candidate_id == "procedure:4"]
+    user_refs = request.source_results[1].output.procedure_progress_observations[0].source_evidence_refs
+    assert completion.evidence_refs == [*user_refs, REF]
+    assert draft.mutations.procedure_progress_changes == []
+    assert request.model_dump_json() == original
+    review = asyncio.run(ReviewTool(ChoiceModel(), max_output_attempts=1).review(subject(request, draft)))
+    assert review.verdict == "PASS"
+
+
+@pytest.mark.parametrize("unrelated", ["missing", "other_step", "other_call", "other_run", "other_case", "other_snapshot", "digest"])
+def test_completion_never_borrows_an_unrelated_official_lookup(unrelated):
+    request = completion_without_finding()
+    lookup, info = request.source_results
+    if unrelated == "missing":
+        request.source_results.remove(lookup)
+    elif unrelated == "other_step":
+        lookup.output.documents[0].step_codes.remove(RESTORATION.step_code)
+        request.source_results[0] = source(lookup.output, "PROCEDURE_TOOL", 5)
+        info.output.based_on_procedure_lookup_digest = canonical_digest(lookup.output)
+    elif unrelated == "other_call":
+        lookup.meta.call_id = UUID(int=999)
+    elif unrelated == "other_run":
+        lookup.meta.run_id = UUID(int=999)
+    elif unrelated == "other_case":
+        lookup.meta.case_id = 999
+    elif unrelated == "other_snapshot":
+        lookup.output.based_on_snapshot_id = UUID(int=999)
+    else:
+        info.output.based_on_procedure_lookup_digest = "sha256:" + "0" * 64
+    fields = missing_info_fields(request.case_snapshot, request.source_results, mutations(),
+                                 known_procedure_steps=request.known_procedure_steps)
+    assert fields["blockers"][0]["evidence_refs"] == info.output.procedure_progress_observations[0].source_evidence_refs
+    if unrelated == "other_step":
+        with pytest.raises(SupervisorGuardrailError):
+            asyncio.run(SupervisorAgent(ChoiceModel(), max_local_attempts=1).draft(request))
 
 
 @pytest.mark.parametrize(

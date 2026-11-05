@@ -219,9 +219,9 @@ def test_restoration_answer_fails_without_calling_a_model_when_digests_are_untru
     assert info is None and calls == []
 
 
-@pytest.mark.parametrize("review_available", [True, False])
 @pytest.mark.parametrize("scope", ["FULL", "PARTIAL"])
-def test_restoration_answer_still_requires_supervisor_and_independent_review(review_available, scope):
+def test_restoration_answer_uses_supervisor_and_code_review_without_review_model(scope):
+    # 선택형은 모델이 쓴 사실·문장이 없어 Review 모델 없이 코드 검사만 한다(graph review_code_only).
     from pydantic import ValidationError
     from app.agent.schemas import ReviewedPlanOutcome
 
@@ -236,12 +236,7 @@ def test_restoration_answer_still_requires_supervisor_and_independent_review(rev
         async def generate(self, response_model, messages, **kwargs):
             name = kwargs["schema_name"]
             calls.append(name)
-            assert name != "reborn_info_analysis", "선택형은 Info 모델을 호출하면 안 된다"
-            if name == "reborn_review_output":
-                if not review_available:
-                    raise RuntimeError("합성 Review 장애")
-                return response_model.model_validate({"verdict": "PASS", "issues": [], "missing_evidence": [],
-                    "recommended_rework_targets": [], "resolution_reason": "합성 검수"})
+            assert name not in {"reborn_info_analysis", "reborn_review_output"}, "선택형은 Info·Review 모델을 부르지 않는다"
             contract = json.loads(messages[1]["content"].removeprefix("INPUT_JSON="))["contract"]
             if scope == "PARTIAL":
                 assert any(item["candidate_id"] == "missing:restoration_scope_detail"
@@ -262,10 +257,8 @@ def test_restoration_answer_still_requires_supervisor_and_independent_review(rev
                 await runtime.aclose()
 
     outcome = asyncio.run(run())
-    assert len(calls) == 2 and calls[-1] == "reborn_review_output"
-    if not review_available:
-        assert outcome.outcome_type == "SAFE_FAILURE"
-        return
+    # "일부"면 구체 범위 질문이 먼저라 Supervisor 모델도 부르지 않는다
+    assert calls == ([] if scope == "PARTIAL" else ["reborn_supervisor_draft"])
     assert outcome.outcome_type == "REVIEWED_PLAN", outcome
     outcome.assert_integrity()
     assert outcome.review_subject.trigger.restoration_answer == answer
@@ -332,6 +325,65 @@ def test_landlord_answer_falls_back_to_the_full_analysis_without_a_trusted_diges
     # 이 가짜 모델은 절차 정리를 내지 않아 전체 분석 검사에 걸려 재시도까지 간다. 모양만 본다
     _, seen = landlord_answer_info(digests="unreviewed")
     assert seen and {call["schema"] for call in seen} == {"InfoProviderOutput"}
+
+
+@pytest.mark.parametrize("digests", ["reviewed", "unreviewed"])
+def test_fact_prompt_keeps_case_context_and_only_omits_procedure_rules_with_digests(digests):
+    captured = {}
+    analyze = info_module.InfoAnalysisAgent.analyze
+
+    async def capture(agent, request):
+        before = request.model_dump_json()
+        captured["full"] = agent._prompt_input(request)
+        try:
+            return await analyze(agent, request)
+        finally:
+            assert request.model_dump_json() == before
+
+    with patch.object(info_module.InfoAnalysisAgent, "analyze", capture):
+        _, calls = landlord_answer_info(digests=digests)
+    sent = json.loads(calls[0]["messages"][1]["content"].removeprefix("INPUT_JSON="))
+    expected = captured["full"]
+    if digests == "reviewed":
+        for key in ("procedure_analysis_step_codes", "procedure_evidence_by_step", "procedure_lookup"):
+            expected.pop(key)
+        keep = {"procedure_step", "step_name", "utterance_aliases", "deprecated_at"}
+        expected["known_procedure_steps"] = [
+            {key: value for key, value in step.items() if key in keep}
+            for step in expected["known_procedure_steps"]
+        ]
+    assert sent == expected
+
+
+@pytest.mark.parametrize("status,submitted", [("IN_PROGRESS", True), ("COMPLETED", True)])
+def test_fact_prompt_retains_submission_and_completion_reports(status, submitted):
+    text = "사업자등록 폐업신고서를 제출했습니다." if status == "IN_PROGRESS" else "사업자등록 폐업신고의 기관 처리 완료를 확인했습니다."
+    captured = {}
+    analyze = info_module.InfoAnalysisAgent.analyze
+
+    class ReportsProgress(FactModel):
+        async def generate(self, response_model, messages, **kwargs):
+            out = (await super().generate(response_model, messages, **kwargs)).model_dump(mode="python")
+            out["facts"] = []
+            out["procedure_observations"] = [{
+                "step_code": "FILE_TAX_BUSINESS_CLOSURE", "observed_status": status,
+                "source_text": text, "requirements_confirmed": True, "submitted": submitted,
+                "requires_confirmation": False, "reason_summary": "사용자의 신고 진행 보고",
+            }]
+            return response_model.model_validate(out)
+
+    async def capture(agent, request):
+        captured["result"] = await analyze(agent, request)
+        return captured["result"]
+
+    with patch.object(NoModel, "from_env", classmethod(lambda cls, *a, **k: ReportsProgress())), \
+         patch.object(info_module.InfoAnalysisAgent, "analyze", capture):
+        info_result(result_text=text)
+    [observation] = captured["result"].procedure_progress_observations
+    assert observation.procedure_step.step_code == "FILE_TAX_BUSINESS_CLOSURE"
+    assert observation.source_span.text == text
+    assert observation.observed_status == status and observation.submitted is submitted
+    assert observation.requires_confirmation is (status == "COMPLETED")
 
 
 def test_landlord_answer_asks_back_only_restoration_fields():
@@ -486,3 +538,95 @@ def test_new_employment_history_enables_prepared_settlement_only_after_guards(mo
     assert bool(info.conflicts) == (mode == "conflict")
     if mode != "conflict":
         assert next(fact for fact in info.fact_candidates if fact.field_path == "had_employees").requires_confirmation == (mode == "held")
+
+
+# ── 모델이 쓴 사실·문장이 없는 판단은 Review 모델 없이 코드 검사만 한다 ──
+
+def test_first_judgment_reviews_with_code_only_and_marks_the_trace():
+    calls, events = [], []
+    store = ev.SnapshotStore(REVIEWED)
+    request = ev.attach_fixture_sources(ev.build_graph_input(ev.CASES["benchmark_case1"]), store)
+
+    class FirstModel(NoModel):
+        async def generate(self, response_model, messages, **kwargs):
+            calls.append(kwargs["schema_name"])
+            assert kwargs["schema_name"] == "reborn_supervisor_draft", "첫 판단은 Supervisor만 부른다"
+            rows = json.loads(messages[1]["content"].removeprefix("INPUT_JSON="))["contract"]["blocker_candidates"]
+            return response_model.model_validate({"decision_type": "ACTION", "blocker_candidate_id": rows[0]["candidate_id"],
+                                                  "action_code": rows[0]["actions"][0]["action_code"]})
+
+    class Sink:
+        def emit(self, event):
+            events.append(event)
+
+    async def run():
+        with patch.object(runtime_module.StructuredLLMClient, "from_env", classmethod(lambda cls, *a, **k: FirstModel())), \
+             patch.object(runtime_module.LangfuseTraceSink, "from_env", lambda: Sink()):
+            runtime = await runtime_module.build_runtime(known_procedure_steps=ev.build_registry(store),
+                procedure_store=store, support_catalog=ev.load_catalog(None))
+            try:
+                return await runtime.run_planning(request)
+            finally:
+                await runtime.aclose()
+
+    outcome = asyncio.run(run())
+    assert outcome.outcome_type == "REVIEWED_PLAN", outcome
+    outcome.assert_integrity()
+    assert calls == ["reborn_supervisor_draft"]
+    assert [event.review_mode for event in events if event.component == "REVIEW_TOOL"] == ["CODE_ONLY"]
+
+
+def test_code_only_review_still_blocks_a_draft_outside_the_reviewed_candidates():
+    from app.agent.review_tool import ReviewTool
+    from app.agent.supervisor import SupervisorAgent
+    from test_action_codes import StubModel, supervisor_request
+    from test_blocker_candidates import subject
+
+    class NoCalls:
+        async def generate(self, *args, **kwargs):
+            raise AssertionError("코드 검사만 해야 한다")
+
+    request = supervisor_request()
+    draft = asyncio.run(SupervisorAgent(StubModel()).draft(request))
+    action = draft.decision.next_action.model_copy(update={"title": "오늘 바로 폐업 신고서를 제출하세요."})
+    draft = draft.model_copy(update={"decision": draft.decision.model_copy(update={"next_action": action})})
+    result = asyncio.run(ReviewTool(NoCalls()).review_code_only(subject(request, draft)))
+    assert result.verdict == "REVISE"
+
+
+def test_a_free_text_reply_with_unknown_detail_still_lets_the_supervisor_choose():
+    # "구체 범위 먼저" 규칙은 선택형 답변에만 쓴다. 자유글 답변("아직 모름" 포함)은 모델이 고른다(같은 질문 반복 방지).
+    calls = []
+    store = ev.SnapshotStore(REVIEWED)
+    request = ev.attach_fixture_sources(ev.build_graph_input(ev.CASES["benchmark_case1"], result_text=LANDLORD), store)
+
+    class Model(FactModel):
+        async def generate(self, response_model, messages, **kwargs):
+            name = kwargs["schema_name"]
+            calls.append(name)
+            if name == "reborn_review_output":
+                return response_model.model_validate({"verdict": "PASS", "issues": [], "missing_evidence": [],
+                    "recommended_rework_targets": [], "resolution_reason": "합성 검수"})
+            if name == "reborn_supervisor_draft":
+                contract = json.loads(messages[1]["content"].removeprefix("INPUT_JSON="))["contract"]
+                assert any(item["candidate_id"] == "missing:restoration_scope_detail"
+                           for item in contract["information_blockers"])
+                return response_model.model_validate({"decision_type": "NEEDS_MORE_INFO",
+                    "blocker_candidate_id": "missing:restoration_scope_detail", "action_code": None})
+            out = (await super().generate(response_model, messages, **kwargs)).model_dump(mode="python")
+            out["missing_fields"] = [{"field_path": "restoration_scope_detail", "reason_summary": "세부 대상 미확인",
+                                      "blocks": ["SUPERVISOR_DECISION"], "question": "어떤 부분을 원래대로 해야 하나요?"}]
+            out["completion_status"] = "NEEDS_USER_INPUT"
+            return response_model.model_validate(out)
+
+    async def run():
+        with patch.object(runtime_module.StructuredLLMClient, "from_env", classmethod(lambda cls, *a, **k: Model())):
+            runtime = await runtime_module.build_runtime(known_procedure_steps=ev.build_registry(store),
+                procedure_store=store, support_catalog=ev.load_catalog(None))
+            try:
+                return await runtime.run_planning(request)
+            finally:
+                await runtime.aclose()
+
+    outcome = asyncio.run(run())
+    assert "reborn_supervisor_draft" in calls, (calls, outcome)
