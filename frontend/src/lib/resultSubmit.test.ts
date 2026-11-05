@@ -4,7 +4,7 @@ import type { CaseResultsSubmitResponse } from '../types/api'
 import { ApiError, UnauthorizedError } from './api'
 import { fetchResultsEntry, submitDecision, submitResult, waitForResult } from './resultSubmit'
 
-const INTERVAL_MS = 10_000
+const INTERVAL_MS = 3_000
 const TIMEOUT_MS = 10 * 60 * 1000
 
 function json(body: unknown, status = 200) {
