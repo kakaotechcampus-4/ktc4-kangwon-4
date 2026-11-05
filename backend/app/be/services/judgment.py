@@ -7,6 +7,7 @@
 """
 
 import logging
+from datetime import timedelta
 from typing import Literal
 
 from sqlmodel import Session
@@ -15,6 +16,7 @@ from app.be.crud import case_history as case_history_crud
 from app.be.db import get_engine
 from app.be.models.case_history import CaseHistory
 from app.be.models.evidence import DecisionRecord
+from app.be.models.mixins import kst_now
 from app.be.services import agent_runtime as agent_runtime_service
 from app.be.services import case_snapshot as case_snapshot_service
 from app.be.services import decision_record as decision_record_service
@@ -153,3 +155,43 @@ async def run_judgment(
         return outcome, None
 
     return outcome, decision_record_service.save_reviewed_plan(session, history, outcome)
+
+
+class AbandonedJudgmentError(RuntimeError):
+    """서버가 판단 도중에 꺼져서 결과를 받지 못한 판단.
+
+    같은 입력으로 다시 하면 되는 종류라 "다시 시도"로 안내한다(retryable).
+    """
+
+    retryable = True
+
+
+# AI 한 번 도는 데 걸리는 상한이 7분이고 최대로 늘려도 10분이다(agent/runtime.py의
+# _DEFAULT_RUN_DEADLINE_SECONDS·_MAX_RUN_DEADLINE_SECONDS). 그래서 10분을 넘겨 PENDING인
+# 판단은 살아 있을 수가 없다. 돌고 있는 판단을 끊지 않으려고 넉넉히 잡는다.
+ABANDONED_AFTER = timedelta(minutes=10)
+
+
+def release_abandoned_judgments() -> int:
+    """결과를 못 받고 남은 판단을 실패로 바꾼다. 서버가 뜰 때 한 번 부른다.
+
+    판단은 웹 서버 안에서 돌기 때문에, 배포하거나 서버가 꺼지면 돌던 판단이 그대로 사라진다.
+    그 이력은 PENDING으로 남는데, Case는 "직전 제출을 아직 처리 중"이라며 새 제출을 409로
+    막는다(services/case.py). 풀어 주는 곳이 없어서 그 사장님은 영영 아무것도 못 한다.
+
+    그래서 결과 대신 실패를 남긴다. 화면은 "다시 시도"를 띄우고, 사장님은 같은 글을 한 번 더
+    보내면 된다. 자동으로 다시 돌리지는 않는다 — 서버가 왜 꺼졌는지 모르는 채로 모델을 다시
+    부르면, 꺼지는 원인이 그대로일 때 같은 일이 반복되고 비용만 나간다.
+    """
+
+    with Session(get_engine()) as session:
+        abandoned = case_history_crud.get_abandoned_pending_histories(
+            session, kst_now() - ABANDONED_AFTER
+        )
+    for history in abandoned:
+        logger.warning("case_history %s 판단이 결과 없이 남아 있어 실패로 바꾼다", history.id)
+        with Session(get_engine()) as session:
+            decision_record_service.mark_judgment_failed(
+                session, history.id, AbandonedJudgmentError()
+            )
+    return len(abandoned)

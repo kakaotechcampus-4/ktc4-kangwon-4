@@ -9,6 +9,7 @@ from app.be.routers.auth import router as auth_router
 from app.be.routers.case import router as case_router
 from app.be.routers.document import router as document_router
 from app.be.db import get_engine, reset_all_tables
+from app.be.services import judgment as judgment_service
 from app.be.services import procedure_registry
 from app.common.config import get_settings
 
@@ -23,6 +24,9 @@ async def lifespan(app: FastAPI):
     with Session(get_engine()) as session:
         procedure_registry.ensure_cafe_procedure_registry(session)
         session.commit()
+    # 지난번에 꺼질 때 돌고 있던 판단은 결과 없이 PENDING으로 남는다. 그대로 두면 그 사장님은
+    # 새 제출이 409로 막혀 영영 못 빠져나온다.
+    judgment_service.release_abandoned_judgments()
     yield
 
 
