@@ -652,6 +652,37 @@ def test_batch_review_failure_returns_no_changes_and_preserves_the_original_inpu
     assert request.model_dump_json() == before
 
 
+@pytest.mark.parametrize(("path", "target", "review_calls"), [
+    # 코드가 정한 전체 blockers 목록은 Supervisor 재작업으로 바뀌지 않으므로 바로 멈춘다
+    ("/supervisor_draft/decision/blockers", "SUPERVISOR", 1),
+    # 우선 blocker 선택은 Supervisor가 고칠 수 있어 기존처럼 다시 돌린다
+    ("/supervisor_draft/decision/blocker", "SUPERVISOR", 3),
+    # 목록 반려와 Supervisor가 고칠 수 있는 반려가 섞이면 기존처럼 다시 돌린다
+    (["/supervisor_draft/decision/blockers", "/supervisor_draft/decision/blocker"], "SUPERVISOR", 3),
+])
+def test_review_rejection_supervisor_cannot_fix_stops_without_rework(path, target, review_calls):
+    graph, request, _, _ = batch_conflict_graph()
+
+    async def reject(subject):
+        return ReviewResult(
+            reviewed_subject_id=subject.review_subject_id,
+            reviewed_subject_digest=subject.subject_digest, verdict="REVISE", missing_evidence=[],
+            issues=[{
+                "issue_code": "CONTRACT_VIOLATION", "category": "CONTRACT", "severity": "BLOCKING",
+                "target_component": target, "target_call_id": None, "target_path": item,
+                "reason_summary": "합성 검수 반려", "evidence_refs": [],
+            } for item in ([path] if isinstance(path, str) else path)],
+            recommended_rework_targets=[target], resolution_reason="합성 검수 반려",
+        )
+
+    graph._review_tool = AsyncMock()
+    graph._review_tool.review.side_effect = reject
+    outcome = asyncio.run(graph.run(request))
+    assert outcome.outcome_type == "SAFE_FAILURE"
+    assert outcome.failure_code == "REVIEW_RETRY_EXHAUSTED"
+    assert graph._review_tool.review.await_count == review_calls
+
+
 @pytest.mark.parametrize("invalid", ["missing", "duplicate", "unknown_ref", "numeric_boolean"])
 def test_batch_conflicts_require_one_strict_choice_per_original_candidate(invalid):
     _, request, _, _ = batch_conflict_graph()

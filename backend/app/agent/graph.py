@@ -705,7 +705,10 @@ class AgentGraph:
         }
         if result.verdict == ReviewVerdict.REVISE:
             revision_count = state.get("revision_count", 0)
-            if revision_count >= self._max_review_revisions:
+            if (
+                revision_count >= self._max_review_revisions
+                or self._supervisor_cannot_fix(result)
+            ):
                 # Keep the last Review's findings instead of dropping them.
                 # Without this the caller learns only that the run failed, not
                 # what would unblock it, and the reason for the verdict is gone.
@@ -933,6 +936,25 @@ class AgentGraph:
         if Component.INFO_AGENT in targets:
             return "info"
         return "supervisor"
+
+    @staticmethod
+    def _supervisor_cannot_fix(result: ReviewResult) -> bool:
+        """전체 blockers 목록 반려는 Supervisor를 다시 돌려도 고칠 수 없다.
+
+        목록은 Supervisor 모델을 부르기 전에 같은 입력으로 코드가 정하고, 초안은 그 목록과
+        정확히 같아야 통과한다(candidate_decision_violations). 재작업해도 같은 목록이 나와
+        같은 이유로 반려된다(Langfuse 재작업 4건 모두 3번 반려 후 실패).
+        """
+        blocking = [issue for issue in result.issues if issue.severity == "BLOCKING"]
+        return (
+            list(result.recommended_rework_targets) == [Component.SUPERVISOR]
+            and not result.missing_evidence
+            and bool(blocking)
+            and all(
+                issue.target_path == "/supervisor_draft/decision/blockers"
+                for issue in blocking
+            )
+        )
 
     @staticmethod
     def _earliest_rework_target(targets: Sequence[Component]) -> Component:
