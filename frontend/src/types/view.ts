@@ -201,13 +201,6 @@ export type ResultsEntry =
    */
   | { kind: 'RESUBMIT'; notice: Extract<FailureNotice, { kind: 'NEEDS_DETAIL' }>; historyId: number }
   /**
-   * 판단이 실패했는데 서버가 "다시 해볼 수 있다"(`RETRY`)고 했다. 결과를 처음부터 다시 받는다.
-   *
-   * 서버는 결과 알려주기 실패를 다시 돌려 주지 않아서(#196), 홈이 [결과 다시 알려주기]로 여기 보낸다.
-   * 쓴 글은 화면을 떠나면 남지 않아 다시 적어야 한다.
-   */
-  | { kind: 'RETELL'; historyId: number }
-  /**
    * 지금은 결과를 받을 때가 아니다 — 판단 중이거나, 더 적어도 풀리지 않는 실패다.
    *
    * 둘 다 `/case` 가 이미 안내하는 상태라 그쪽으로 보낸다. 여기서 같은 안내를 한 번 더

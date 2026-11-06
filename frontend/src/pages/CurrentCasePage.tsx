@@ -450,9 +450,9 @@ function AnswerButton({ locked, label = '답하러 가기' }: { locked: boolean;
  *
  * 서버가 거절해도(409) 다시 묻는다. 두 번 눌렀거나 그사이 상황이 바뀐 것이라 지금 상황을 그리면 된다.
  * 다시 물어도 같은 실패 카드면 이 버튼이 그대로 남아 있어(같은 자리 같은 부품) 거절된 것을 기억한다.
- * 결과 알려주기의 실패가 여기 해당한다 — 서버는 가입·서류 판단만 다시 돌린다. 그때는 [결과 다시 알려주기]로 바꾼다.
+ * 결과 알려주기의 실패가 여기 해당한다 — 서버는 가입·서류 판단만 다시 돌린다.
  *
- * TODO(#196): 서버가 결과 알려주기 실패를 받기 전까지 결과 입력으로 보낸다. 받기로 하면 이 갈래는 필요 없어진다.
+ * TODO(#196): 결과 알려주기 실패도 서버가 받기로 하면 거절 안내는 필요 없어진다. 현석님 답 대기.
  * TODO(#55): 버튼·안내 문구는 제안 문구다. PM 답이 오면 바꾼다.
  */
 function RetryButton({ locked, busy, onRetried, onSendingChange }: {
@@ -507,26 +507,13 @@ function RetryButton({ locked, busy, onRetried, onSendingChange }: {
     }
   }
 
-  /*
-    서버가 다시 돌리지 않는 실패다(결과 알려주기 · 충돌 선택). 다시 판단하기를 꺼 두기만 하면 막다른 길이라,
-    결과를 다시 알려주는 길로 보낸다(다물님 #210). 결과 입력은 이 실패의 판단 번호로 새 글을 받는다
-    (`toResultsEntry` 의 `RETELL`). 충돌 선택이 실패했으면 충돌이 남아 있어 결과 입력이 확인 화면으로 보낸다
-  */
-  if (state === 'REFUSED') {
-    return (
-      <>
-        <InfoBox>결과를 다시 알려주시면 다시 판단해 드려요.</InfoBox>
-        <AnswerButton locked={locked} label="결과 다시 알려주기" />
-      </>
-    )
-  }
-
   return (
     <>
+      {state === 'REFUSED' && <InfoBox tone="critical">이 실패는 여기서 다시 판단할 수 없어요.</InfoBox>}
       {state === 'SEND_FAILED' && (
         <InfoBox tone="critical">다시 판단을 요청하지 못했어요. 잠시 뒤 다시 눌러 주세요.</InfoBox>
       )}
-      <Button size="lg" disabled={locked || busy || state === 'SENDING'} onClick={handleRetry}>
+      <Button size="lg" disabled={locked || busy || state === 'SENDING' || state === 'REFUSED'} onClick={handleRetry}>
         다시 판단하기
       </Button>
       {locked && (

@@ -466,30 +466,16 @@ describe('CurrentCasePage', () => {
       expect(retryCalls(fetchMock)).toHaveLength(1)
     })
 
-    /**
-     * 결과 알려주기의 실패는 서버가 다시 돌리지 않는다(#196). 눌러도 아무 일 없는 버튼으로 두면 막다른 길이라,
-     * 결과를 다시 알려주는 길로 보낸다(다물님 #210)
-     */
-    it('거절됐는데 다시 물어도 같은 실패면 결과를 다시 알려주는 길로 보낸다', async () => {
+    /** 결과 알려주기의 실패는 서버가 다시 돌리지 않는다. 눌러도 아무 일 없는 버튼으로 두지 않는다 */
+    it('거절됐는데 다시 물어도 같은 실패면 그렇다고 알리고 버튼을 잠근다', async () => {
       saveTokens('access-1', 'refresh-1')
       serve({ cases: [RETRYABLE], retry: response(null, 409) })
       renderAt('/case')
 
       fireEvent.click(await retryButton())
-      fireEvent.click(await screen.findByRole('button', { name: '결과 다시 알려주기' }))
 
-      expect(await screen.findByText('결과 입력 화면')).toBeInTheDocument()
-    })
-
-    it('거절된 뒤에는 다시 판단하기를 두지 않는다', async () => {
-      saveTokens('access-1', 'refresh-1')
-      serve({ cases: [RETRYABLE], retry: response(null, 409) })
-      renderAt('/case')
-
-      fireEvent.click(await retryButton())
-      await screen.findByRole('button', { name: '결과 다시 알려주기' })
-
-      expect(screen.queryByRole('button', { name: '다시 판단하기' })).not.toBeInTheDocument()
+      expect(await screen.findByText('이 실패는 여기서 다시 판단할 수 없어요.')).toBeInTheDocument()
+      expect(await retryButton()).toBeDisabled()
     })
 
     /** 두 번 눌렀거나 그사이 다른 곳에서 맡겼다. 지금 상황을 그리면 된다 */

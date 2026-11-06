@@ -232,19 +232,14 @@ export function toResultsEntry(body: CaseResultsEntryResponse | null): ResultsEn
     }
 
     /*
-      다시 보내서 풀리는 실패만 여기서 받는다 — 더 알려주셔야 하는 것(`NEEDS_DETAIL`)과 다시 해볼 수 있는 것
-      (`RETRY`). 같은 길(`POST /cases/results`)로 보내면 서버가 그 번호 위에서 다시 판단한다.
-      그 밖의 실패는 다시 보내도 풀리지 않아(#57) `/case` 가 안내한다
-
-      TODO(#196): 가입 판단이 `RETRY` 로 실패한 사람이 주소로 들어와도 여기서 글 칸이 열린다. 서버가 판단
-      출처를 주지 않아 가를 수 없다. 홈은 [다시 판단하기]를 먼저 보여 주고, 거절될 때만 이리 보낸다
+      사장님이 더 알려주셔야 풀리는 실패만 여기서 받는다. 같은 길(`POST /cases/results`)로 다시
+      보내면 서버가 다시 판단한다. 그 밖의 실패는 더 적어도 풀리지 않아(#57) `/case` 가 안내한다
     */
     case 'FAILED': {
       const notice = toFailureNotice(body)
-      if (notice.kind !== 'NEEDS_DETAIL' && notice.kind !== 'RETRY_AVAILABLE') return { kind: 'ELSEWHERE' }
+      if (notice.kind !== 'NEEDS_DETAIL') return { kind: 'ELSEWHERE' }
       if (!Number.isInteger(body.case_history_id)) return { kind: 'UNRECOGNIZED' }
-      const historyId = body.case_history_id as number
-      return notice.kind === 'NEEDS_DETAIL' ? { kind: 'RESUBMIT', notice, historyId } : { kind: 'RETELL', historyId }
+      return { kind: 'RESUBMIT', notice, historyId: body.case_history_id as number }
     }
 
     case 'PENDING':
