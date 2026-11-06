@@ -252,10 +252,12 @@ export function ResultInputPage() {
   const tooLong = !usingChoices && draft.length > MAX_RESULT_LENGTH
   const canRetry = usingChoices ? selectionInput !== null : draft.length > 0 && !tooLong
   const goToCase = { label: '지금 상황 보기', onClick: () => navigate({ pathname: '/case', search }) }
-  const notice = stayNotice(state, {
-    retry: { label: '다시 보내기', onClick: handleSubmit, disabled: !canRetry },
-    goToCase,
-  })
+  const notice = stayNotice(
+    state,
+    { retry: { label: '다시 보내기', onClick: handleSubmit, disabled: !canRetry }, goToCase },
+    // 다시 보내기는 지금 화면의 입력(고른 것 · 적은 글)을 보낸다. 안내도 그것을 가리킨다
+    usingChoices ? '고르신 내용' : '적어 주신 내용',
+  )
 
   /**
    * 실제 서버에 보내고 판단을 기다린다. 화면을 떠났거나 다른 화면으로 보냈으면 `null`.
@@ -675,13 +677,14 @@ function requestedFieldsText({ fields, partial }: { fields: string[]; partial: b
 function failureNotice(
   notice: FailureNotice,
   { retry, goToCase }: { retry: NoticeAction; goToCase: NoticeAction },
+  yours: string,
 ): NoticeProps {
   switch (notice.kind) {
     case 'RETRY_AVAILABLE':
       return {
         tone: 'critical',
         title: '이번 결과로 다음 할 일을 정하지 못했어요.',
-        description: '적어 주신 내용은 그대로 있어요. 같은 내용으로 다시 보내실 수 있어요.',
+        description: `${yours}은 그대로 있어요. 같은 내용으로 다시 보내실 수 있어요.`,
         action: retry,
       }
 
@@ -694,7 +697,7 @@ function failureNotice(
       return {
         tone: 'critical',
         title: '서비스에서 확인이 필요한 문제가 생겼어요.',
-        description: '적어 주신 내용은 받았어요. 이 건은 저희 쪽에서 봐야 하는 문제예요.',
+        description: `${yours}은 받았어요. 이 건은 저희 쪽에서 봐야 하는 문제예요.`,
         action: goToCase,
       }
 
@@ -723,10 +726,14 @@ function failureNotice(
  *
  * 이 화면이 아는 판단이 낡았거나 끝을 못 본 경우는 `/case` 로 보낸다. 거기가 지금 판단을
  * 다시 묻고 기다리는 자리라, 같은 기다림을 여기 하나 더 만들지 않는다.
+ *
+ * `yours` 는 사장님이 보낸 것을 가리키는 말이다. 골라서 보냈는데 "적어 주신 내용"이라고 하면
+ * 무엇이 남아 있다는 것인지 헷갈린다(#197 후속).
  */
 function stayNotice(
   state: SubmitState,
   actions: { retry: NoticeAction; goToCase: NoticeAction },
+  yours: string,
 ): NoticeProps | null {
   switch (state.kind) {
     case 'IDLE':
@@ -735,13 +742,13 @@ function stayNotice(
       return null
 
     case 'FAILED':
-      return failureNotice(state.notice, actions)
+      return failureNotice(state.notice, actions, yours)
 
     case 'SEND_FAILED':
       return {
         tone: 'critical',
         title: '결과를 보내지 못했어요.',
-        description: '연결이 불안정했을 수 있어요. 적어 주신 내용은 그대로 있어요.',
+        description: `연결이 불안정했을 수 있어요. ${yours}은 그대로 있어요.`,
         action: actions.retry,
       }
 
@@ -749,7 +756,7 @@ function stayNotice(
       return {
         tone: 'critical',
         title: '이대로는 보낼 수 없어요.',
-        description: '적어 주신 내용은 그대로 있어요. 고친 뒤 다시 보내 주세요.',
+        description: `${yours}은 그대로 있어요. 고친 뒤 다시 보내 주세요.`,
       }
 
     case 'STALE':

@@ -229,6 +229,35 @@ describe('ResultInputPage — 서버', () => {
     expect(screen.getByRole('radio', { name: '일부만 원래대로 하면 된대요' })).toBeChecked()
   })
 
+  /** 골라서 보냈는데 "적어 주신 내용"이라고 하면 무엇이 남아 있다는 것인지 헷갈린다 */
+  it.each([
+    ['다음 할 일을 못 정함', { submit: [ACCEPTED], judged: [json(judgedBody({ result: 'FAILED', recovery_action_code: 'RETRY' }))] }],
+    ['보내지 못함', { submit: [status(500)] }],
+  ])('골라서 보내 실패하면(%s) 고른 내용이 남아 있다고 알린다', async (_name, responses) => {
+    serve({ entry: [json(entryBody({ result_input_kind: 'RESTORATION_ANSWER' }))], ...responses })
+    renderFlow()
+    await advance()
+    fireEvent.click(screen.getByRole('radio', { name: '전부 원래대로 해야 한대요' }))
+    fireEvent.click(screen.getByRole('radio', { name: '철거해야 한대요' }))
+    fireEvent.click(screen.getByRole('button', { name: '보내기' }))
+    await advance()
+    await advance(INTERVAL_MS)
+
+    expect(screen.getByText(/고르신 내용은 그대로 있어요/)).toBeInTheDocument()
+    expect(screen.queryByText(/적어 주신 내용/)).not.toBeInTheDocument()
+  })
+
+  it('글로 보내 실패하면 적은 내용이 남아 있다고 알린다', async () => {
+    serve({ entry: [READY], submit: [status(500)] })
+    renderFlow()
+    await advance()
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '임대인이 철거하래요' } })
+    fireEvent.click(screen.getByRole('button', { name: '보내기' }))
+    await advance()
+
+    expect(screen.getByText(/적어 주신 내용은 그대로 있어요/)).toBeInTheDocument()
+  })
+
   it('정정 화면은 서버가 선택형을 제공해도 직접 입력을 사용한다', async () => {
     serve({ entry: [json(entryBody({ result_input_kind: 'RESTORATION_ANSWER' }))] })
     renderFlow('/results?fix=1')
