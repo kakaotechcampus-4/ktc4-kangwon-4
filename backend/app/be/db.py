@@ -18,12 +18,33 @@ def get_engine() -> Engine:
     모델도 안 쓰는 테스트가 불러오기 단계에서 통째로 멈췄다.
     """
 
-    return create_engine(get_settings().DATABASE_URL)
+    return create_engine(
+        get_settings().DATABASE_URL,
+        # 기본값(5+10)은 판단이 겹칠 때 금방 바닥난다. 자리가 없으면 판단과 상관없는 조회·로그인도
+        # 함께 막혀서, 숨 쉴 자리를 둔다. TODO: 운영 DB가 받아주는 최대 커넥션 수를 확인하고 맞춘다.
+        pool_size=10,
+        max_overflow=20,
+        # 쉬는 동안 MySQL이 끊은 커넥션을 잡으면 첫 요청이 그대로 터진다. 쓰기 전에 한 번 찔러 보고,
+        # MySQL이 끊는 시각(기본 8시간)보다 일찍 우리가 먼저 바꾼다.
+        pool_pre_ping=True,
+        pool_recycle=3600,
+    )
 
 
 def get_db() -> Generator[Session, None, None]:
     with Session(get_engine()) as session:
         yield session
+
+
+def release_request_connection(session: Session) -> None:
+    """요청이 DB를 다 썼으면 커넥션을 지금 돌려준다.
+
+    요청에 딸린 세션은 응답 뒤 배경 작업까지 끝나야 정리된다. 판단은 AI를 50초 기다리므로,
+    그동안 이 요청이 잡은 커넥션 하나도 같이 묶여 있게 된다(승준님 #193). 응답에 쓸 값은
+    이미 다 읽었으니 여기서 먼저 돌려준다. 뒤이은 정리는 다시 닫아도 아무 일도 하지 않는다.
+    """
+
+    session.close()
 
 
 def reset_all_tables() -> None:

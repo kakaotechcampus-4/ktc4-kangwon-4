@@ -8,7 +8,7 @@
 import asyncio
 from datetime import datetime
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import BackgroundTasks
@@ -30,11 +30,12 @@ HISTORY_ID = 42
 SUBMITTED_AT = datetime(2026, 10, 20, 9, 0, 0)
 
 
-def history(source: str) -> SimpleNamespace:
+def history(source: str, restoration_answer=None) -> SimpleNamespace:
     return SimpleNamespace(
         id=HISTORY_ID,
         case_id=CASE_ID,
         raw_input="원상복구 끝냈어요",
+        restoration_answer=restoration_answer,
         source=source,
         created_at=SUBMITTED_AT,
     )
@@ -47,7 +48,7 @@ def trigger_of(monkeypatch):
     captured: dict[str, str] = {}
 
     def fake_build_planning_input(*, trigger_type, **_kwargs):
-        captured["trigger_type"] = trigger_type
+        captured.update(trigger_type=trigger_type, restoration_answer=_kwargs.get("restoration_answer"))
         return SimpleNamespace(trigger=trigger_type)
 
     async def fake_run_case_planning(*_args, **_kwargs):
@@ -62,23 +63,28 @@ def trigger_of(monkeypatch):
     monkeypatch.setattr(reviewed_procedure_service, "load_reviewed_procedures", lambda: None)
     monkeypatch.setattr(decision_record_service, "save_safe_failure", lambda *_a, **_k: None)
 
-    def run(source: str) -> str:
+    def run(source: str, answer=None) -> dict:
         monkeypatch.setattr(
-            case_history_crud, "get_case_history_by_id", lambda *_a: history(source)
+            case_history_crud, "get_case_history_by_id", lambda *_a: history(source, answer)
         )
         asyncio.run(judgment.run_judgment(MagicMock(spec=Session), HISTORY_ID))
-        return captured["trigger_type"]
+        return captured
 
     return run
 
 
 def test_signup_input_is_judged_as_a_new_case(trigger_of):
-    assert trigger_of("CASE_CREATED") == "CASE_CREATED"
+    assert trigger_of("CASE_CREATED")["trigger_type"] == "CASE_CREATED"
 
 
 def test_submitted_result_is_judged_as_a_result_report(trigger_of):
     # 이 값이 가입으로 넘어가면 AI가 사장님이 방금 알려준 진행 상황을 처음 받은 값으로 읽는다.
-    assert trigger_of("USER_INPUT") == "RESULT_SUBMITTED"
+    assert trigger_of("USER_INPUT")["trigger_type"] == "RESULT_SUBMITTED"
+
+
+def test_restoration_answer_survives_the_background_judgment_boundary(trigger_of):
+    answer = {"restoration_scope": "PARTIAL", "demolition_required": "NOT_REQUIRED"}
+    assert trigger_of("USER_INPUT", answer) == {"trigger_type": "RESULT_SUBMITTED", "restoration_answer": answer}
 
 
 def test_a_source_nobody_creates_stops_instead_of_guessing(trigger_of):
@@ -129,7 +135,7 @@ def test_submitting_a_result_schedules_the_judgment(monkeypatch):
 
 def test_document_input_is_judged_as_document(trigger_of):
     # 서류 글을 결과 보고로 넘기면 AI가 서류에서 꺼낸 값을 사장님이 직접 말한 진행 상황으로 읽는다(#137).
-    assert trigger_of("DOCUMENT_SUBMITTED") == "DOCUMENT_SUBMITTED"
+    assert trigger_of("DOCUMENT_SUBMITTED")["trigger_type"] == "DOCUMENT_SUBMITTED"
 
 
 def test_a_finished_judgment_goes_on_to_documents_that_waited(monkeypatch):
@@ -137,10 +143,12 @@ def test_a_finished_judgment_goes_on_to_documents_that_waited(monkeypatch):
     # 그 판단이 끝난 뒤에는 남은 서류가 없어 멈춘다(#173 리뷰).
     ran, owed = [], {HISTORY_ID: HISTORY_ID + 1}
 
-    async def fake_run_judgment(_session, case_history_id):
-        ran.append(case_history_id)
-
-    monkeypatch.setattr(judgment, "run_judgment", fake_run_judgment)
+    # 배경 실행은 읽기·AI 호출·저장을 세션을 끊어 가며 따로 부른다. 어느 입력을 판단했는지는
+    # 읽기 단계에서 센다.
+    monkeypatch.setattr(judgment, "_read_judgment_input",
+                        lambda _session, case_history_id: (ran.append(case_history_id), (None, []))[1])
+    monkeypatch.setattr(judgment, "_ask_agent", AsyncMock())
+    monkeypatch.setattr(judgment, "_save_judgment_outcome", MagicMock())
     monkeypatch.setattr(judgment, "Session", MagicMock())
     monkeypatch.setattr(judgment, "get_engine", MagicMock())
     monkeypatch.setattr(document_service, "queue_owed_document_judgment",

@@ -19,6 +19,7 @@ import {
 } from '../lib/resultSubmit'
 import { judgmentNeedsDetailCase, moreInfoCase } from '../mocks/currentCase'
 import { resultInput, simulateSubmit } from '../mocks/resultFlow'
+import type { RestorationAnswer, ResultInputKind } from '../types/api'
 import type { FailureNotice, NextAction, SubmitOutcome, SubmitState } from '../types/view'
 
 /**
@@ -31,7 +32,7 @@ import type { FailureNotice, NextAction, SubmitOutcome, SubmitState } from '../t
  * 둘 다 같은 길(`POST /cases/results`)로 보낸다. 다른 것은 화면에 띄울 물음과 보낼 글 모양뿐이다.
  */
 type Ask =
-  | { kind: 'RESULT'; nextAction: NextAction }
+  | { kind: 'RESULT'; nextAction: NextAction; inputKind: ResultInputKind }
   | { kind: 'ANSWER'; questions: string[] }
   | { kind: 'RESUBMIT'; notice: Extract<FailureNotice, { kind: 'NEEDS_DETAIL' }> }
 
@@ -56,7 +57,7 @@ function mockEntry(mockKey: string): EntryQuery {
       ? { kind: 'ANSWER', questions: moreInfoCase.judgment.questions }
       : mockKey === 'judgment-failed-detail' && failed.status === 'FAILED' && failed.notice.kind === 'NEEDS_DETAIL'
         ? { kind: 'RESUBMIT', notice: failed.notice }
-        : { kind: 'RESULT', nextAction: resultInput.nextAction }
+        : { kind: 'RESULT', nextAction: resultInput.nextAction, inputKind: 'TEXT' }
   return { status: 'READY', ask, historyId: 0 }
 }
 
@@ -85,6 +86,8 @@ export function ResultInputPage() {
   /** 다시 불러오기를 누를 때마다 올려 진입 조회를 다시 돌린다 */
   const [attempt, setAttempt] = useState(0)
   const [text, setText] = useState('')
+  const [restorationAnswer, setRestorationAnswer] = useState<Partial<RestorationAnswer>>({})
+  const [directInput, setDirectInput] = useState(false)
   /** 질문마다 적은 답. 질문 문장으로 찾는다 — 같은 질문을 다시 받으면 적었던 답이 그대로 남는다 */
   const [answers, setAnswers] = useState<Record<string, string>>({})
   /**
@@ -131,7 +134,7 @@ export function ResultInputPage() {
           case 'READY':
             setFetched({
               status: 'READY',
-              ask: { kind: 'RESULT', nextAction: entry.nextAction },
+              ask: { kind: 'RESULT', nextAction: entry.nextAction, inputKind: entry.inputKind },
               historyId: entry.historyId,
             })
             return
@@ -194,6 +197,12 @@ export function ResultInputPage() {
   const resubmitNotice = entry.status === 'READY' && entry.ask.kind === 'RESUBMIT' ? entry.ask.notice : null
   const latestDetail = state.kind === 'FAILED' && state.notice.kind === 'NEEDS_DETAIL' ? state.notice : null
   const askedFields = latestDetail ?? resubmitNotice
+  const canChoose = entry.status === 'READY' && entry.ask.kind === 'RESULT'
+    && entry.ask.inputKind === 'RESTORATION_ANSWER' && !correcting && questions === null && !askedFields
+  const usingChoices = canChoose && !directInput
+  const selectionInput: RestorationAnswer | null = restorationAnswer.restoration_scope && restorationAnswer.demolition_required
+    ? { restoration_scope: restorationAnswer.restoration_scope, demolition_required: restorationAnswer.demolition_required }
+    : null
   const draft = questions
     ? toAnswerInput(questions.map((question) => ({ question, answer: answers[question] ?? '' })))
     : askedFields && askedFields.fields.length > 0
@@ -215,8 +224,8 @@ export function ResultInputPage() {
     (state.kind === 'FAILED' && (state.notice.kind === 'SERVICE_SIDE' || state.notice.kind === 'NO_RECOVERY'))
   // 너무 긴 글은 자르지 않고 보내기를 막는다. 소리 없이 잘라 보내면 사장님이 적은 뒷부분이 사라진다.
   // 아래 [보내기]와 실패 안내의 [다시 보내기]가 같은 조건을 쓴다
-  const tooLong = draft.length > MAX_RESULT_LENGTH
-  const canRetry = draft.length > 0 && !tooLong
+  const tooLong = !usingChoices && draft.length > MAX_RESULT_LENGTH
+  const canRetry = usingChoices ? selectionInput !== null : draft.length > 0 && !tooLong
   const goToCase = { label: '지금 상황 보기', onClick: () => navigate({ pathname: '/case', search }) }
   const notice = stayNotice(state, {
     retry: { label: '다시 보내기', onClick: handleSubmit, disabled: !canRetry },
@@ -229,10 +238,10 @@ export function ResultInputPage() {
    * 보내기와 기다리기의 실패를 따로 받는다. 보내다 실패하면 서버가 받았는지조차 모르고,
    * 기다리다 실패하면 접수는 된 것이라 사장님에게 할 말이 다르다.
    */
-  async function submitToServer(historyId: number, rawInput: string): Promise<SubmitOutcome | null> {
+  async function submitToServer(historyId: number, input: string | RestorationAnswer): Promise<SubmitOutcome | null> {
     let acceptedId: number
     try {
-      acceptedId = await submitResult(historyId, rawInput)
+      acceptedId = await submitResult(historyId, input)
     } catch (error: unknown) {
       if (!alive.current) return null
       if (error instanceof UnauthorizedError) {
@@ -281,14 +290,14 @@ export function ResultInputPage() {
 
   async function handleSubmit() {
     // "다시 보내기" 버튼도 이 함수를 부른다. 폼에만 검증을 두면 그 경로로 빈 입력·너무 긴 글이 나간다
-    if (draft.length === 0 || tooLong || entry.status !== 'READY') return
+    if (!canRetry || formLocked || entry.status !== 'READY') return
 
     // Mock 은 접수 단계가 없다. 보내는 순간 받은 것으로 둔다
     setState({ kind: 'PENDING', accepted: usesMock })
 
     const outcome = usesMock
       ? await simulateSubmit(readMockKey(search), draft)
-      : await submitToServer(entry.historyId, draft)
+      : await submitToServer(entry.historyId, usingChoices && selectionInput ? selectionInput : draft)
     if (!alive.current || outcome === null) return
 
     switch (outcome.kind) {
@@ -380,7 +389,7 @@ export function ResultInputPage() {
     )
   }
 
-  const canSubmit = !formLocked && draft.length > 0 && !tooLong
+  const canSubmit = !formLocked && canRetry
   const answeredCount = questions
     ? questions.filter((question) => (answers[question] ?? '').trim() !== '').length
     : 0
@@ -449,7 +458,37 @@ export function ResultInputPage() {
             submitIfReady()
           }}
         >
-          {questions ? (
+          {usingChoices ? (
+            <>
+              <fieldset disabled={formLocked} className="flex flex-col gap-2">
+                <legend className="mb-2 text-17 font-bold">원상복구 범위</legend>
+                {([
+                  ['FULL', '전부 원래대로 해야 해요'], ['PARTIAL', '일부만 원상복구하면 돼요'],
+                  ['NOT_REQUIRED', '원상복구가 필요 없어요'], ['UNKNOWN', '범위는 아직 몰라요'],
+                ] as const).map(([value, label]) => (
+                  <label key={value} className="flex items-center gap-3 rounded-14 p-3 ring-1 ring-stroke-neutral-weak">
+                    <input type="radio" name="restoration_scope" value={value}
+                      checked={restorationAnswer.restoration_scope === value}
+                      onChange={() => setRestorationAnswer((current) => ({ ...current, restoration_scope: value }))} />
+                    {label}
+                  </label>
+                ))}
+              </fieldset>
+              <fieldset disabled={formLocked} className="flex flex-col gap-2">
+                <legend className="mb-2 text-17 font-bold">철거 필요 여부</legend>
+                {([
+                  ['REQUIRED', '철거가 필요해요'], ['NOT_REQUIRED', '철거가 필요 없어요'], ['UNKNOWN', '철거 여부는 아직 몰라요'],
+                ] as const).map(([value, label]) => (
+                  <label key={value} className="flex items-center gap-3 rounded-14 p-3 ring-1 ring-stroke-neutral-weak">
+                    <input type="radio" name="demolition_required" value={value}
+                      checked={restorationAnswer.demolition_required === value}
+                      onChange={() => setRestorationAnswer((current) => ({ ...current, demolition_required: value }))} />
+                    {label}
+                  </label>
+                ))}
+              </fieldset>
+            </>
+          ) : questions ? (
             // 질문이 여럿이면 하나만 답해도 보낼 수 있다. 모르는 것까지 적게 하면 지어낸 답이 들어간다
             questions.map((question, index) => (
               <div key={question} className="flex flex-col gap-2">
@@ -481,17 +520,17 @@ export function ResultInputPage() {
               onSubmitShortcut={submitIfReady}
             />
           )}
-          {/*
-            보기 버튼(시안의 "전부 원래대로 해야 한대요" 같은 것)은 서버가 할 일별 보기를
-            주지 않아 두지 않는다. 자리를 비워 두지 않고 글 칸 바로 아래에 보내기를 붙인다.
-            TODO(API): 할 일별 보기가 오면 글 칸 위에 둔다.
-          */}
+          {canChoose && (
+            <Button variant="outline" disabled={formLocked} onClick={() => setDirectInput((current) => !current)}>
+              {usingChoices ? '자세히 직접 적기' : '선택해서 답하기'}
+            </Button>
+          )}
           {/*
             질문이 여럿인데 일부만 답했다. 막지는 않는다 — 모르는 질문 때문에 아는 답까지 못 보내면 안 된다.
             대신 빠뜨린 것인지 한 번 보게 하고, 남은 질문은 서버가 다시 묻는다는 것을 알린다
           */}
           {partlyAnswered && <InfoBox>답하지 않은 질문은 비워 두셔도 돼요. 필요하면 다시 여쭤볼게요.</InfoBox>}
-          <LengthNotice length={draft.length} withQuestions={questions !== null} />
+          {!usingChoices && <LengthNotice length={draft.length} withQuestions={questions !== null} />}
           <Button type="submit" disabled={!canSubmit}>
             보내기
           </Button>

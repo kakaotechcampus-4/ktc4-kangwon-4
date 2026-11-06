@@ -4,7 +4,7 @@ import type { CaseResultsSubmitResponse } from '../types/api'
 import { ApiError, UnauthorizedError } from './api'
 import { fetchResultsEntry, submitDecision, submitResult, waitForResult } from './resultSubmit'
 
-const INTERVAL_MS = 10_000
+const INTERVAL_MS = 3_000
 const TIMEOUT_MS = 10 * 60 * 1000
 
 function json(body: unknown, status = 200) {
@@ -73,6 +73,13 @@ describe('fetchResultsEntry', () => {
 })
 
 describe('submitResult', () => {
+  it('선택형 답변은 자유글 없이 두 선택값과 판단 번호만 보낸다', async () => {
+    const fetchMock = mockFetchSequence(json({ case_history_id: 13 }))
+    const answer = { restoration_scope: 'PARTIAL', demolition_required: 'NOT_REQUIRED' } as const
+    await expect(submitResult(12, answer)).resolves.toBe(13)
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ case_history_id: 12, restoration_answer: answer })
+  })
+
   it('적은 글과 판단 번호를 보내고 접수 번호를 받는다', async () => {
     const fetchMock = mockFetchSequence(json({ case_history_id: 13 }))
 

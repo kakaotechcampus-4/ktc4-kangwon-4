@@ -18,10 +18,11 @@ from app.agent.schemas import (
     CaseSnapshot,
     ConflictCandidate,
     ConflictSelection,
+    KnownProcedureStep,
     RetainedInfoResult,
 )
 from app.be.models.evidence import DecisionRecord
-from app.common.agent_dto import AgentGraphOutput
+from app.common.agent_dto import AgentGraphInput, AgentGraphOutput
 from app.be.crud import case_history as case_history_crud
 from app.be.crud import conflict_reference as conflict_reference_crud
 from app.be.db import get_engine
@@ -59,8 +60,14 @@ async def run_conflict_decision_in_background(
     """
 
     try:
+        # 판단과 같은 이유로 세션을 끊는다(judgment.run_judgment_in_background).
         with Session(get_engine()) as session:
-            await run_conflict_decision(session, case_history_id, choices)
+            graph_input, known_procedure_steps = _read_decision_input(
+                session, case_history_id, choices
+            )
+        outcome = await _ask_agent(graph_input, known_procedure_steps)
+        with Session(get_engine()) as session:
+            _save_decision_outcome(session, case_history_id, outcome, choices)
     except Exception as error:
         logger.exception("case_history %s 충돌 결정 판단 실패", case_history_id)
         try:
@@ -81,6 +88,16 @@ async def run_conflict_decision(
     주고 AI는 자기 식별자(conflict_ref)를 받으므로, 보관한 행에서 꺼내 바꿔 넘긴다.
     """
 
+    graph_input, known_procedure_steps = _read_decision_input(session, case_history_id, choices)
+    outcome = await _ask_agent(graph_input, known_procedure_steps)
+    return outcome, _save_decision_outcome(session, case_history_id, outcome, choices)
+
+
+def _read_decision_input(
+    session: Session, case_history_id: int, choices: dict[int, str]
+) -> tuple[AgentGraphInput, list[KnownProcedureStep]]:
+    """AI에 넘길 것을 DB에서 전부 읽어 둔다. 여기까지 끝나면 세션을 닫아도 된다."""
+
     history = case_history_crud.get_case_history_by_id(session, case_history_id)
     if history is None:
         raise ValueError(f"case_history {case_history_id} not found")
@@ -89,7 +106,7 @@ async def run_conflict_decision(
         session, history.case_id, choices
     )
 
-    outcome = await run_case_planning(
+    return (
         build_conflict_input(
             # 보관한 번호를 그대로 쓴다. 새로 찍으면 AI가 전부 STALE로 거절한다.
             case_snapshot=case_snapshot_service.build_case_snapshot(
@@ -105,11 +122,32 @@ async def run_conflict_decision(
             # TODO: 프론트가 자기 쪽 이벤트 식별자를 보내주기로 하면 그 값을 넣는다. 아직 미협의.
             client_event_id=None,
         ),
-        known_procedure_steps=agent_runtime_service.build_known_procedure_steps(session),
+        agent_runtime_service.build_known_procedure_steps(session),
+    )
+
+
+async def _ask_agent(
+    graph_input: AgentGraphInput, known_procedure_steps: list[KnownProcedureStep]
+) -> AgentGraphOutput:
+    """AI 호출. 여기서는 DB를 쓰지 않는다 — 커넥션을 쥔 채로 기다리지 않게 하려고 떼어 뒀다."""
+
+    return await run_case_planning(
+        graph_input,
+        known_procedure_steps=known_procedure_steps,
         procedure_bindings=None,
         procedure_store=reviewed_procedure_service.load_reviewed_procedures(),
         support_catalog=agent_runtime_service.empty_support_catalog(),
     )
+
+
+def _save_decision_outcome(
+    session: Session, case_history_id: int, outcome: AgentGraphOutput, choices: dict[int, str]
+) -> DecisionRecord | None:
+    """결정 결과를 남긴다. 이력은 번호로 다시 읽는다 — 읽을 때 쓴 세션은 이미 닫혔을 수 있다."""
+
+    history = case_history_crud.get_case_history_by_id(session, case_history_id)
+    if history is None:
+        raise ValueError(f"case_history {case_history_id} not found")
 
     # 어디까지 반영할지는 결과에 따라 다르다(현석님 #108에서 정함).
     #
@@ -135,13 +173,13 @@ async def run_conflict_decision(
             "충돌만 닫는다", case_history_id, choices,
         )
         decision_record_service.save_conflict(session, history, outcome, resolved_conflicts=choices)
-        return outcome, None
+        return None
 
     if outcome.outcome_type == "SAFE_FAILURE":
         decision_record_service.save_safe_failure(session, history, outcome)
-        return outcome, None
+        return None
 
-    return outcome, decision_record_service.save_reviewed_plan(
+    return decision_record_service.save_reviewed_plan(
         session, history, outcome, resolved_conflicts=choices
     )
 

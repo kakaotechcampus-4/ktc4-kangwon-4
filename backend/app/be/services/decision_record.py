@@ -81,6 +81,7 @@ def save_reviewed_plan(
     # ("다음 행동이 없음"과 "행동은 있는데 질문이 0개"를 구분하기 위해 빈 배열을 쓰지 않는다).
     next_action = decision.next_action
     history.next_action = next_action.title if next_action else None
+    history.next_action_code = next_action.action_code if next_action else None
     history.next_action_reason = next_action.reason if next_action else None
     history.next_action_questions_to_ask = list(next_action.questions_to_ask) if next_action else None
     history.next_action_evidence_refs = list(next_action.evidence_refs) if next_action else None

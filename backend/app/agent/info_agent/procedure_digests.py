@@ -114,7 +114,12 @@ def digest_draft_fields(
         })
 
     missing_fields = []
-    if "CONFIRM_RESTORATION_SCOPE" in analysis_step_codes:
+    if (
+        "CONFIRM_RESTORATION_SCOPE" in analysis_step_codes
+        and procedure_applicability(
+            steps["CONFIRM_RESTORATION_SCOPE"], request.case_snapshot, request.fact_overlays,
+        ) is not False
+    ):
         known = {
             fact.field_path for fact in request.case_snapshot.facts
             if fact.status == FactStatus.CONFIRMED and fact.value is not None

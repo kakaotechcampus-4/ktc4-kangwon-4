@@ -26,6 +26,7 @@ from app.common.agent_dto import (
     ProcedureCompletionConfirmation,
     RedactedInput,
     ResultSubmittedTrigger,
+    RestorationAnswer,
 )
 
 __all__ = [
@@ -51,6 +52,7 @@ def build_planning_input(
     client_event_id: str | None = None,
     trace_id: str | None = None,
     procedure_completion_confirmation: ProcedureCompletionConfirmation | None = None,
+    restoration_answer: RestorationAnswer | None = None,
 ) -> AgentGraphInput:
     """Use the persisted input event's ID/time, not invented run-time values.
 
@@ -64,6 +66,10 @@ def build_planning_input(
         raise ValueError("input trigger must be CASE_CREATED, RESULT_SUBMITTED or DOCUMENT_SUBMITTED")
     ensure_no_sensitive_text([user_input.redacted_text])
     confirmation_fields = {}
+    if restoration_answer is not None:
+        if trigger_type != "RESULT_SUBMITTED":
+            raise ValueError("restoration answer requires RESULT_SUBMITTED")
+        confirmation_fields["restoration_answer"] = restoration_answer
     if procedure_completion_confirmation is not None:
         if trigger_type != "RESULT_SUBMITTED":
             raise ValueError("completion confirmation requires RESULT_SUBMITTED")
