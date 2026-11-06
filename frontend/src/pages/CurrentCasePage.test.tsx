@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { RouterProvider, createMemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -527,6 +527,52 @@ describe('CurrentCasePage', () => {
       fireEvent.click(await retryButton())
       expect(await retryButton()).toBeDisabled()
       expect(retryCalls(fetchMock)).toHaveLength(1)
+    })
+
+    it('맡기는 동안 수동 조회를 잠그고 접수 뒤 새 상태를 보여준다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      let resolveRetry!: (response: Response) => void
+      let resolveRefresh!: (response: Response) => void
+      const retryResponse = new Promise<Response>((resolve) => { resolveRetry = resolve })
+      const refreshResponse = new Promise<Response>((resolve) => { resolveRefresh = resolve })
+      let reads = 0
+      let accepted = false
+      vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+        if (isLogs(url)) return response({ logs: [] })
+        if (isRoadmap(url)) return response(null, 500)
+        if (url.includes('/cases/retry') && init?.method === 'POST') return retryResponse
+        reads += 1
+        if (reads === 1) return response(RETRYABLE)
+        if (!accepted) return refreshResponse
+        return response(PENDING)
+      }))
+      renderAt('/case')
+      fireEvent.click(await retryButton())
+      const recheck = await recheckButton()
+      expect(recheck).toBeDisabled()
+      fireEvent.click(recheck)
+      expect(reads).toBe(1)
+      await act(async () => {
+        accepted = true
+        resolveRetry(response({ case_history_id: 3 }))
+      })
+      await act(async () => { resolveRefresh(response(RETRYABLE)) })
+      expect(await screen.findByRole('heading', { level: 1, name: '지금은 리본이 일하고 있어요' })).toBeInTheDocument()
+    })
+
+    it.each([200, 401, 409, 500])('떠난 홈의 늦은 재판단 응답(%i)은 재조회·이동을 만들지 않는다', async (status) => {
+      saveTokens('access-1', 'refresh-1')
+      let resolveRetry!: (response: Response) => void
+      const retry = new Promise<Response>((resolve) => { resolveRetry = resolve })
+      const fetchMock = serve({ cases: [RETRYABLE], retry })
+      renderAt('/case')
+      fireEvent.click(await retryButton())
+      fireEvent.click(screen.getByRole('link', { name: /리본이 해둔 일/ }))
+      expect(await screen.findByText('기록 화면')).toBeInTheDocument()
+      await act(async () => { resolveRetry(response({ case_history_id: 3 }, status)) })
+      expect(screen.queryByText('로그인 화면')).not.toBeInTheDocument()
+      expect(screen.getByText('기록 화면')).toBeInTheDocument()
+      expect(fetchMock.mock.calls.filter(([url]) => url.endsWith('/cases'))).toHaveLength(1)
     })
 
     it('맡기지 못하면 알리고 다시 누를 수 있게 둔다', async () => {

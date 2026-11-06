@@ -5,7 +5,7 @@ import {
   IconPersonLine,
   IconSparkle2Fill,
 } from '@karrotmarket/react-monochrome-icon'
-import { useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router'
 
 import { Button } from '../components/ui/Button'
@@ -39,6 +39,7 @@ import type { FailureNotice, JudgmentView } from '../types/view'
 export function CurrentCasePage() {
   const { search } = useLocation()
   const { query, refresh, refreshing, waitedTooLong } = useCase()
+  const [retrying, setRetrying] = useState(false)
 
   /**
    * 아직 Case를 만들지 않은 사용자가 주소로 직접 들어온 경우다.
@@ -90,7 +91,7 @@ export function CurrentCasePage() {
 
   const card = judgmentCard(view.judgment, waitedTooLong)
   const recheck = (
-    <Button variant="neutral" size={card.main ? 'md' : 'lg'} onClick={refresh} disabled={refreshing}>
+    <Button variant="neutral" size={card.main ? 'md' : 'lg'} onClick={refresh} disabled={refreshing || retrying}>
       상태 다시 확인
     </Button>
   )
@@ -103,7 +104,7 @@ export function CurrentCasePage() {
         {...card.props}
         actions={
           <>
-            {card.main?.(stale, refresh, refreshing)}
+            {card.main?.(stale, refresh, refreshing, setRetrying)}
             {recheck}
           </>
         }
@@ -227,7 +228,7 @@ interface JudgmentCard {
    * `refresh` 는 버튼이 서버에 무언가를 맡긴 뒤 지금 상황을 다시 묻는 데 쓴다(다시 판단하기).
    * `refreshing` 이면 이미 묻는 중이라, 그 사이 맡기면 뒤따르는 `refresh` 가 무시된다(`useCase` 는 한 번에 하나만 묻는다).
    */
-  main?: (stale: boolean, refresh: () => void, refreshing: boolean) => ReactNode
+  main?: (stale: boolean, refresh: () => void, refreshing: boolean, onSendingChange: (sending: boolean) => void) => ReactNode
 }
 
 const CRITICAL_ICON = <IconExclamationmarkCircleFill size={40} />
@@ -355,7 +356,9 @@ function judgmentCard(judgment: JudgmentView, waitedTooLong: boolean): JudgmentC
         props: { tone: 'neutral', icon: NEUTRAL_ICON, badge: '판단 멈춤', title, description },
         main:
           judgment.notice.kind === 'RETRY_AVAILABLE'
-            ? (stale, refresh, refreshing) => <RetryButton locked={stale} busy={refreshing} onRetried={refresh} />
+            ? (stale, refresh, refreshing, onSendingChange) => (
+                <RetryButton locked={stale} busy={refreshing} onRetried={refresh} onSendingChange={onSendingChange} />
+              )
             : undefined,
       }
     }
@@ -452,10 +455,20 @@ function AnswerButton({ locked, label = '답하러 가기' }: { locked: boolean;
  * TODO(#196): 결과 알려주기 실패도 서버가 받기로 하면 거절 안내는 필요 없어진다. 현석님 답 대기.
  * TODO(#55): 버튼·안내 문구는 제안 문구다. PM 답이 오면 바꾼다.
  */
-function RetryButton({ locked, busy, onRetried }: { locked: boolean; busy: boolean; onRetried: () => void }) {
+function RetryButton({ locked, busy, onRetried, onSendingChange }: {
+  locked: boolean; busy: boolean; onRetried: () => void; onSendingChange: (sending: boolean) => void
+}) {
   const navigate = useNavigate()
   const { pathname, search } = useLocation()
   const [state, setState] = useState<'IDLE' | 'SENDING' | 'SEND_FAILED' | 'REFUSED'>('IDLE')
+  const alive = useRef(true)
+  useEffect(() => {
+    alive.current = true
+    return () => {
+      alive.current = false
+      onSendingChange(false)
+    }
+  }, [onSendingChange])
 
   async function handleRetry() {
     // Mock 은 서버를 부르지 않는다. 받아들여진 다음 화면(판단 중)으로 바로 넘긴다
@@ -467,11 +480,15 @@ function RetryButton({ locked, busy, onRetried }: { locked: boolean; busy: boole
     }
 
     setState('SENDING')
+    // 맡기는 동안 수동 조회도 막아, 접수 뒤 다시 묻기가 진행 중 조회에 묻히지 않게 한다.
+    onSendingChange(true)
     try {
       await retryJudgment()
+      if (!alive.current) return
       setState('IDLE')
       onRetried()
     } catch (error: unknown) {
+      if (!alive.current) return
       if (error instanceof UnauthorizedError) {
         navigate('/login', { replace: true })
         return
@@ -485,6 +502,8 @@ function RetryButton({ locked, busy, onRetried }: { locked: boolean; busy: boole
       // 서버가 받았는지 모른다. 알리되 다시 물어서, 받았으면 판단 중 화면이 이 안내를 덮게 한다
       setState(error instanceof ApiError && error.status === 404 ? 'IDLE' : 'SEND_FAILED')
       onRetried()
+    } finally {
+      if (alive.current) onSendingChange(false)
     }
   }
 
