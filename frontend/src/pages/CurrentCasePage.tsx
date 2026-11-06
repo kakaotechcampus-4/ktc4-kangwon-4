@@ -103,7 +103,7 @@ export function CurrentCasePage() {
         {...card.props}
         actions={
           <>
-            {card.main?.(stale, refresh)}
+            {card.main?.(stale, refresh, refreshing)}
             {recheck}
           </>
         }
@@ -225,8 +225,9 @@ interface JudgmentCard {
    * 없으면 "상태 다시 확인"이 카드의 큰 버튼이 된다.
    *
    * `refresh` 는 버튼이 서버에 무언가를 맡긴 뒤 지금 상황을 다시 묻는 데 쓴다(다시 판단하기).
+   * `refreshing` 이면 이미 묻는 중이라, 그 사이 맡기면 뒤따르는 `refresh` 가 무시된다(`useCase` 는 한 번에 하나만 묻는다).
    */
-  main?: (stale: boolean, refresh: () => void) => ReactNode
+  main?: (stale: boolean, refresh: () => void, refreshing: boolean) => ReactNode
 }
 
 const CRITICAL_ICON = <IconExclamationmarkCircleFill size={40} />
@@ -354,7 +355,7 @@ function judgmentCard(judgment: JudgmentView, waitedTooLong: boolean): JudgmentC
         props: { tone: 'neutral', icon: NEUTRAL_ICON, badge: '판단 멈춤', title, description },
         main:
           judgment.notice.kind === 'RETRY_AVAILABLE'
-            ? (stale, refresh) => <RetryButton locked={stale} onRetried={refresh} />
+            ? (stale, refresh, refreshing) => <RetryButton locked={stale} busy={refreshing} onRetried={refresh} />
             : undefined,
       }
     }
@@ -438,6 +439,12 @@ function AnswerButton({ locked, label = '답하러 가기' }: { locked: boolean;
  * 맡기고 나면 홈이 지금 상황을 다시 묻는다(`onRetried`). 서버가 받았으면 `PENDING` 이 와서
  * "리본이 일하고 있어요"와 반복 조회가 가입 직후처럼 이어진다. 기다리는 자리를 따로 만들지 않는다.
  *
+ * **401 말고는 어떻게 끝나든 다시 묻는다.** 응답만 끊겼거나 읽지 못했어도 서버는 이미 받았을 수 있다.
+ * 실패 카드는 저절로 다시 묻지 않아서, 여기서 묻지 않으면 판단이 도는 중에도 실패 카드가 남고 다시 누르면 409 다.
+ *
+ * 홈이 지금 상황을 묻는 중이면(`busy`) 누를 수 없다. 묻는 중에 맡기면 뒤따르는 다시 묻기가 무시되고(`useCase`),
+ * 맡긴 직후 다시 누르면 첫 요청이 이미 판단을 돌려 409 가 온다.
+ *
  * 서버가 거절해도(409) 다시 묻는다. 두 번 눌렀거나 그사이 상황이 바뀐 것이라 지금 상황을 그리면 된다.
  * 다시 물어도 같은 실패 카드면 이 버튼이 그대로 남아 있어(같은 자리 같은 부품) 거절된 것을 기억한다.
  * 결과 알려주기의 실패가 여기 해당한다 — 서버는 가입·서류 판단만 다시 돌린다.
@@ -445,7 +452,7 @@ function AnswerButton({ locked, label = '답하러 가기' }: { locked: boolean;
  * TODO(#196): 결과 알려주기 실패도 서버가 받기로 하면 거절 안내는 필요 없어진다. 현석님 답 대기.
  * TODO(#55): 버튼·안내 문구는 제안 문구다. PM 답이 오면 바꾼다.
  */
-function RetryButton({ locked, onRetried }: { locked: boolean; onRetried: () => void }) {
+function RetryButton({ locked, busy, onRetried }: { locked: boolean; busy: boolean; onRetried: () => void }) {
   const navigate = useNavigate()
   const { pathname, search } = useLocation()
   const [state, setState] = useState<'IDLE' | 'SENDING' | 'SEND_FAILED' | 'REFUSED'>('IDLE')
@@ -474,13 +481,10 @@ function RetryButton({ locked, onRetried }: { locked: boolean; onRetried: () => 
         onRetried()
         return
       }
-      // 404 는 Case 가 없다는 뜻이다. 다시 물으면 홈이 진단으로 보낸다
-      if (error instanceof ApiError && error.status === 404) {
-        setState('IDLE')
-        onRetried()
-        return
-      }
-      setState('SEND_FAILED')
+      // 404 는 Case 가 없다는 뜻이다. 다시 물으면 홈이 진단으로 보낸다. 그 밖(연결 실패 · 5xx · 읽지 못한 응답)은
+      // 서버가 받았는지 모른다. 알리되 다시 물어서, 받았으면 판단 중 화면이 이 안내를 덮게 한다
+      setState(error instanceof ApiError && error.status === 404 ? 'IDLE' : 'SEND_FAILED')
+      onRetried()
     }
   }
 
@@ -490,7 +494,7 @@ function RetryButton({ locked, onRetried }: { locked: boolean; onRetried: () => 
       {state === 'SEND_FAILED' && (
         <InfoBox tone="critical">다시 판단을 요청하지 못했어요. 잠시 뒤 다시 눌러 주세요.</InfoBox>
       )}
-      <Button size="lg" disabled={locked || state === 'SENDING' || state === 'REFUSED'} onClick={handleRetry}>
+      <Button size="lg" disabled={locked || busy || state === 'SENDING' || state === 'REFUSED'} onClick={handleRetry}>
         다시 판단하기
       </Button>
       {locked && (

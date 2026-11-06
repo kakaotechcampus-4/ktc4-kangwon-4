@@ -395,6 +395,7 @@ describe('CurrentCasePage', () => {
     const RETRYABLE = envelope({ judgment_status: 'FAILED', recovery_action_code: 'RETRY' })
     const PENDING = envelope({ judgment_status: 'PENDING' })
     const retryButton = () => screen.findByRole('button', { name: '다시 판단하기' })
+    const HANG = Symbol('답하지 않음')
 
     /**
      * `GET /cases` 는 차례대로 `cases` 를 돌려주고(마지막 것을 계속), `POST /cases/retry` 는 `retry` 로 답한다.
@@ -408,7 +409,8 @@ describe('CurrentCasePage', () => {
         if (url.includes('/cases/retry') && init?.method === 'POST') return retry
         const body = cases[Math.min(index, cases.length - 1)]
         index += 1
-        return response(body)
+        // `HANG` 이면 답하지 않는다. 묻는 중인 상태를 만들 때 쓴다
+        return body === HANG ? new Promise<Response>(() => {}) : response(body)
       })
       vi.stubGlobal('fetch', fetchMock)
       return fetchMock
@@ -485,6 +487,46 @@ describe('CurrentCasePage', () => {
       fireEvent.click(await retryButton())
 
       expect(await screen.findByRole('heading', { level: 1, name: '지금은 리본이 일하고 있어요' })).toBeInTheDocument()
+    })
+
+    /** 응답만 끊겼을 수 있다. 실패 카드는 저절로 다시 묻지 않아서, 묻지 않으면 판단 중에도 실패 카드가 남는다 */
+    it.each([
+      ['응답이 끊김', response(null, 500)],
+      ['받았다는데 번호를 못 읽음', response({})],
+    ])('%s 이어도 다시 물어, 서버가 받았으면 판단 중 화면을 그린다', async (_name, retry) => {
+      saveTokens('access-1', 'refresh-1')
+      serve({ cases: [RETRYABLE, PENDING], retry })
+      renderAt('/case')
+
+      fireEvent.click(await retryButton())
+
+      expect(await screen.findByRole('heading', { level: 1, name: '지금은 리본이 일하고 있어요' })).toBeInTheDocument()
+    })
+
+    /** 묻는 중에 맡기면 뒤따르는 다시 묻기가 무시되고, 맡긴 직후 또 누르면 409 다 */
+    it('지금 상황을 묻는 중에는 누를 수 없다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      const fetchMock = serve({ cases: [RETRYABLE, HANG], retry: response({ case_history_id: 3 }) })
+      renderAt('/case')
+
+      fireEvent.click(await recheckButton())
+
+      expect(await retryButton()).toBeDisabled()
+      fireEvent.click(await retryButton())
+      expect(retryCalls(fetchMock)).toHaveLength(0)
+    })
+
+    it('맡긴 뒤 다시 묻는 동안 또 누를 수 없다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      const fetchMock = serve({ cases: [RETRYABLE, HANG], retry: response({ case_history_id: 3 }) })
+      renderAt('/case')
+
+      fireEvent.click(await retryButton())
+      await vi.waitFor(() => expect(retryCalls(fetchMock)).toHaveLength(1))
+
+      fireEvent.click(await retryButton())
+      expect(await retryButton()).toBeDisabled()
+      expect(retryCalls(fetchMock)).toHaveLength(1)
     })
 
     it('맡기지 못하면 알리고 다시 누를 수 있게 둔다', async () => {
