@@ -21,7 +21,10 @@ def get_engine() -> Engine:
     return create_engine(
         get_settings().DATABASE_URL,
         # 기본값(5+10)은 판단이 겹칠 때 금방 바닥난다. 자리가 없으면 판단과 상관없는 조회·로그인도
-        # 함께 막혀서, 숨 쉴 자리를 둔다. TODO: 운영 DB가 받아주는 최대 커넥션 수를 확인하고 맞춘다.
+        # 함께 막혀서, 숨 쉴 자리를 둔다.
+        # 운영 DB의 max_connections는 151(MySQL 기본값)이고, 지금은 uvicorn 프로세스가 하나라
+        # (Dockerfile CMD에 --workers 없음) 최대 30은 충분히 안쪽이다(현석님 #193).
+        # 워커를 늘리면 30 × 워커 수가 151을 넘지 않는지 보면 된다 — 5개면 150이라 이미 빠듯하다.
         pool_size=10,
         max_overflow=20,
         # 쉬는 동안 MySQL이 끊은 커넥션을 잡으면 첫 요청이 그대로 터진다. 쓰기 전에 한 번 찔러 보고,

@@ -63,3 +63,24 @@ def get_latest_case_history_by_sources(session: Session, case_id: int, sources: 
         .order_by(CaseHistory.created_at.desc(), CaseHistory.id.desc())
         .limit(1)
     ).first()
+
+
+def get_pending_case_histories(session: Session) -> list[CaseHistory]:
+    """아직 결과를 못 받은 판단 전부."""
+
+    return session.exec(
+        select(CaseHistory).where(CaseHistory.judgment_status == "PENDING")
+    ).all()
+
+
+def lock_pending_case_history(session: Session, case_history_id: int) -> CaseHistory | None:
+    """아직 결과를 못 받은 판단 한 건을 잠그고 읽는다. 그 사이 끝났으면 None.
+
+    잠그지 않고 쓰면, 읽은 뒤 쓰기 전에 끝난 판단의 정상 결과를 덮어쓴다(승준님 #194).
+    """
+
+    return session.exec(
+        select(CaseHistory)
+        .where(CaseHistory.id == case_history_id, CaseHistory.judgment_status == "PENDING")
+        .with_for_update()
+    ).one_or_none()
