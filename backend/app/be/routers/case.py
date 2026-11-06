@@ -107,6 +107,7 @@ def retry_case_judgment(
 
     # 가입 때와 같은 이유로 뒤에서 돌린다(create_case 주석). 되돌린 그 이력을 다시 판단하고,
     # 화면은 가입 때처럼 GET /cases로 다시 물어본다.
+    db.release_request_connection(session)
     background_tasks.add_task(judgment_service.run_judgment_in_background, response.case_history_id)
 
     return response
