@@ -33,11 +33,25 @@ export class ApiError extends Error {
   // 생성자 인자에 `readonly`를 붙이는 축약형은 이 프로젝트의 `erasableSyntaxOnly`
   // 설정에서 막힌다. 타입만 지우면 실행되는 코드로 남아야 하기 때문이다
   readonly status: number
+  /** 서버가 오류 본문 `detail.code` 로 알려 준 이유. 없으면 null(지금은 서류 안전 검사만 보낸다) */
+  readonly code: string | null
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, code: string | null = null) {
     super(message)
     this.status = status
+    this.code = code
     this.name = 'ApiError'
+  }
+}
+
+/** 오류 응답 본문의 `detail.code`. 본문이 JSON 이 아니거나 코드가 없으면 null */
+async function errorCode(response: Response): Promise<string | null> {
+  try {
+    const body = (await response.json()) as { detail?: { code?: unknown } } | null
+    const code = body?.detail?.code
+    return typeof code === 'string' ? code : null
+  } catch {
+    return null
   }
 }
 
@@ -106,7 +120,7 @@ export async function request(path: string, options: RequestOptions = {}) {
     if (response.status === 401) endSession(renewed)
   }
 
-  if (!response.ok) throw new ApiError(response.status, `요청이 실패했습니다 (${response.status})`)
+  if (!response.ok) throw new ApiError(response.status, `요청이 실패했습니다 (${response.status})`, await errorCode(response))
 
   return response
 }
