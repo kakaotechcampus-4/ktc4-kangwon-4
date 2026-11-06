@@ -790,6 +790,120 @@ def test_only_a_first_round_without_model_text_skips_the_review_model(info_used_
     assert used == [expected]
 
 
+def _with_action(draft, **update):
+    action = draft.decision.next_action.model_copy(update=update)
+    return draft.model_copy(update={"decision": draft.decision.model_copy(update={"next_action": action})})
+
+
+def _claim_index(draft, path):
+    return next(index for index, claim in enumerate(draft.grounded_claims) if claim.target_path == path)
+
+
+def test_code_only_review_blocks_a_claim_that_no_longer_matches_the_visible_text():
+    request, draft = _confirm_case()
+    index = _claim_index(draft, REASON_PATH)
+    issues = _code_only_issues(request, _with_reason(draft, "근거 문장과 다른 화면 문장입니다."))
+    assert ("CONTRACT_VIOLATION", f"/supervisor_draft/grounded_claims/{index}/target_path") in issues
+
+
+@pytest.mark.parametrize("change", ["information_level", "no_caveat"])
+def test_code_only_review_blocks_a_definite_claim_on_unverified_evidence(change):
+    # 최신인지 모르는 근거의 문장은 "확인 필요" 수준이고 확인 문구가 있어야 한다(확인 안내 초안 자체는 통과)
+    from app.agent.supervisor import SupervisorAgent
+    from test_action_codes import StubModel, supervisor_request
+
+    request = _with_freshness(supervisor_request(), "STALE")
+    draft = asyncio.run(SupervisorAgent(StubModel()).draft(request))
+    index = _claim_index(draft, REASON_PATH)
+    claims = list(draft.grounded_claims)
+    if change == "information_level":
+        claims[index] = claims[index].model_copy(update={"assertion_level": "INFORMATION"})
+        expected = ("STALE_EVIDENCE", f"/supervisor_draft/grounded_claims/{index}")
+    else:
+        text = "사업자 폐업신고 준비사항입니다."
+        claims[index] = claims[index].model_copy(update={"text": text})
+        draft = _with_reason(draft, text)
+        expected = ("STALE_EVIDENCE", REASON_PATH)
+    assert expected in _code_only_issues(request, draft.model_copy(update={"grounded_claims": claims}))
+
+
+def _support_case(check_update=None, duplicate=False):
+    # Supervisor는 지원사업 행동을 코드 후보로 내지 않으므로, 절차 확인 초안의 행동만 지원사업으로 바꿔 Review를 시험한다
+    from app.agent.supervisor import SupervisorAgent
+    from test_action_codes import StubModel, evidence, source, support_sources, supervisor_request
+
+    request = supervisor_request().model_copy(deep=True)
+    request.case_snapshot.evidence_records.append(evidence(evidence_id="user-1", source_type="USER_INPUT"))
+    output = support_sources()[0].output
+    if check_update:
+        check = output.support_checks[0]
+        output = output.model_copy(update={"support_checks": [type(check).model_validate({**check.model_dump(), **check_update})]})
+    request.source_results += [source(output, call_id=call_id) for call_id in ([9, 10] if duplicate else [9])]
+    return request, asyncio.run(SupervisorAgent(StubModel()).draft(request))
+
+
+def _support_action(draft, program_id=1, **update):
+    from uuid import UUID
+    from app.agent.schemas import SupportActionTarget
+
+    target = SupportActionTarget.model_validate({"target_kind": "SUPPORT_PROGRAM", "support_program": {
+        "support_program_id": program_id, "wiki_uuid": UUID(int=6 if program_id == 1 else program_id)}})
+    return _with_action(draft, **{
+        "action_code": "CONFIRM_SUPPORT_PROGRAM_REQUIREMENTS", "target": target,
+        "title": "합성 지원사업 신청 조건을 확인해 주세요.", "reason": "합성 지원사업 조건 확인이 필요합니다.",
+        "questions_to_ask": ["합성 지원사업 신청 조건을 확인해 주시겠습니까?"], **update})
+
+
+@pytest.mark.parametrize("check_update,duplicate,change,expected", [
+    ({}, False, {"program_id": 99}, ("CONTRACT_VIOLATION", f"{ACTION_PATH}/target")),  # 분석에 없는 지원사업
+    ({}, True, {}, ("CONTRACT_VIOLATION", f"{ACTION_PATH}/target")),  # 같은 지원사업 분석이 둘
+    ({"match_status": "NOT_RELEVANT", "criteria": [{"criterion_code": "BUSINESS_TYPE", "case_value": "카페",
+      "required_values": ["제조업"], "status": "NOT_MET", "reason_summary": "업종 불일치",
+      "evidence_refs": ["synthetic-document"]}]}, False, {}, ("INFEASIBLE_ACTION", ACTION_PATH)),  # 관련 없다고 나온 지원사업
+    ({}, False, {"evidence_refs": ["user-1"]}, ("MISSING_EVIDENCE", f"{ACTION_PATH}/evidence_refs")),  # 분석 근거와 연결 없음
+    ({}, False, {"title": "합성 지원사업 확인 후 폐업 신고서를 내세요."}, ("PROCEDURE_CONFLICT", f"{ACTION_PATH}/target")),
+    ({}, False, {"questions_to_ask": []}, ("HUMAN_CONFIRMATION_OMITTED", ACTION_PATH)),  # 기관 확인 질문 없음
+])
+def test_code_only_review_blocks_an_unsafe_support_action(check_update, duplicate, change, expected):
+    plain_request, plain_draft = _support_case()
+    assert expected not in _code_only_issues(plain_request, _support_action(plain_draft))
+    request, draft = _support_case(check_update, duplicate)
+    assert expected in _code_only_issues(request, _support_action(draft, **change))
+
+
+def test_code_only_review_blocks_a_procedure_action_without_its_analysis():
+    request, draft = _confirm_case()
+    request = request.model_copy(deep=True)
+    other = request.known_procedure_steps[0].model_copy(deep=True, update={"step_name": "분석 안 된 절차"})
+    other.procedure_step = other.procedure_step.model_copy(update={"procedure_step_id": 2, "step_code": "OTHER_STEP"})
+    request.known_procedure_steps.append(other)
+    from app.agent.supervisor import SupervisorAgent
+    from test_action_codes import StubModel
+
+    draft = asyncio.run(SupervisorAgent(StubModel()).draft(request))
+    target = draft.decision.next_action.target.model_copy(update={"procedure_step": other.procedure_step})
+    assert ("PROCEDURE_CONFLICT", f"{ACTION_PATH}/target") in _code_only_issues(request, _with_action(draft, target=target))
+
+
+def test_code_only_review_blocks_a_procedure_action_with_evidence_outside_its_analysis():
+    from app.agent.supervisor import SupervisorAgent
+    from test_action_codes import StubModel, evidence
+
+    request, _ = _confirm_case()
+    request = request.model_copy(deep=True)
+    request.case_snapshot.evidence_records.append(evidence(evidence_id="user-1", source_type="USER_INPUT"))
+    draft = asyncio.run(SupervisorAgent(StubModel()).draft(request))
+    issues = _code_only_issues(request, _with_action(draft, evidence_refs=["user-1"]))
+    assert ("MISSING_EVIDENCE", f"{ACTION_PATH}/evidence_refs") in issues
+
+
+def test_code_only_review_blocks_a_procedure_action_that_also_names_a_support_program():
+    plain_request, draft = _support_case()
+    assert _code_only_issues(plain_request, draft) == set()
+    issues = _code_only_issues(plain_request, _with_action(draft, title="합성 지원사업과 함께 폐업 준비사항을 확인하세요."))
+    assert ("CONTRACT_VIOLATION", f"{ACTION_PATH}/target") in issues
+
+
 def test_a_free_text_reply_with_unknown_detail_still_lets_the_supervisor_choose():
     # "구체 범위 먼저" 규칙은 선택형 답변에만 쓴다. 자유글 답변("아직 모름" 포함)은 모델이 고른다(같은 질문 반복 방지).
     calls = []
