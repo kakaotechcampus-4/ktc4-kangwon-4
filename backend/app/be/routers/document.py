@@ -8,6 +8,7 @@ from sqlmodel import Session
 from app.agent.document_tool.models import DocumentKind
 from app.agent.document_tool.tool import DocumentTool, build_document_tool
 from app.be.crud import case as case_crud
+from app.be import db
 from app.be.db import get_db
 from app.be.dependencies.auth import get_current_member_id
 from app.be.models.case import Case
@@ -48,6 +49,7 @@ def _judge_if_changed(background_tasks: BackgroundTasks, session: Session, direc
     # 화면은 서류 목록을 바로 받고, 다음 할 일은 홈(GET /cases)이 PENDING을 보고 다시 묻는다.
     case_history_id = document_service.queue_document_judgment(session, directory, case)
     if case_history_id is not None:
+        db.release_request_connection(session)
         background_tasks.add_task(judgment_service.run_judgment_in_background, case_history_id)
 
 

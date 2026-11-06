@@ -8,7 +8,7 @@
 import asyncio
 from datetime import datetime
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import BackgroundTasks
@@ -143,10 +143,12 @@ def test_a_finished_judgment_goes_on_to_documents_that_waited(monkeypatch):
     # 그 판단이 끝난 뒤에는 남은 서류가 없어 멈춘다(#173 리뷰).
     ran, owed = [], {HISTORY_ID: HISTORY_ID + 1}
 
-    async def fake_run_judgment(_session, case_history_id):
-        ran.append(case_history_id)
-
-    monkeypatch.setattr(judgment, "run_judgment", fake_run_judgment)
+    # 배경 실행은 읽기·AI 호출·저장을 세션을 끊어 가며 따로 부른다. 어느 입력을 판단했는지는
+    # 읽기 단계에서 센다.
+    monkeypatch.setattr(judgment, "_read_judgment_input",
+                        lambda _session, case_history_id: (ran.append(case_history_id), (None, []))[1])
+    monkeypatch.setattr(judgment, "_ask_agent", AsyncMock())
+    monkeypatch.setattr(judgment, "_save_judgment_outcome", MagicMock())
     monkeypatch.setattr(judgment, "Session", MagicMock())
     monkeypatch.setattr(judgment, "get_engine", MagicMock())
     monkeypatch.setattr(document_service, "queue_owed_document_judgment",
