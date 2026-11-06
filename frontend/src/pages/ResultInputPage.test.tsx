@@ -60,6 +60,24 @@ describe('ResultInputPage — Mock', () => {
     expect(router.state.location.pathname).toBe('/replan')
     expect(fetchMock).not.toHaveBeenCalled()
   })
+
+  /** 골라서 답하는 화면(#197)은 서버가 정할 때만 열려서, Mock 키가 없으면 Preview 에서 볼 수 없다 */
+  it('?mock=result-choice 면 골라서 답하는 화면을 열고, 고른 뒤 보내면 재계획 화면으로 간다', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const router = renderFlow('/results?mock=result-choice')
+
+    fireEvent.click(screen.getByRole('radio', { name: '전부 원래대로 해야 한대요' }))
+    fireEvent.click(screen.getByRole('radio', { name: '철거해야 한대요' }))
+    fireEvent.click(screen.getByRole('button', { name: '보내기' }))
+    await act(async () => {
+      vi.runAllTimers()
+    })
+
+    expect(router.state.location.pathname).toBe('/replan')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
 })
 
 type Answer = () => Response
@@ -156,11 +174,11 @@ describe('ResultInputPage — 서버', () => {
     })
     renderFlow()
     await advance()
-    expect(screen.getAllByRole('radio').every((radio) => !(radio as HTMLInputElement).checked)).toBe(true)
+    for (const radio of screen.getAllByRole('radio')) expect(radio).not.toBeChecked()
     expect(screen.getByRole('button', { name: '보내기' })).toBeDisabled()
-    fireEvent.click(screen.getByRole('radio', { name: '일부만 원상복구하면 돼요' }))
+    fireEvent.click(screen.getByRole('radio', { name: '일부만 원래대로 하면 된대요' }))
     expect(screen.getByRole('button', { name: '보내기' })).toBeDisabled()
-    fireEvent.click(screen.getByRole('radio', { name: '철거가 필요 없어요' }))
+    fireEvent.click(screen.getByRole('radio', { name: '철거는 안 해도 된대요' }))
     expect(sentBodies(fetchMock)).toEqual([])
     fireEvent.click(screen.getByRole('button', { name: '보내기' }))
     await advance()
@@ -178,8 +196,8 @@ describe('ResultInputPage — 서버', () => {
     })
     const router = renderFlow()
     await advance()
-    fireEvent.click(screen.getByRole('radio', { name: '범위는 아직 몰라요' }))
-    fireEvent.click(screen.getByRole('radio', { name: '철거가 필요 없어요' }))
+    fireEvent.click(screen.getByRole('radio', { name: '범위는 아직 안 정해졌대요' }))
+    fireEvent.click(screen.getByRole('radio', { name: '철거는 안 해도 된대요' }))
     fireEvent.click(screen.getByRole('button', { name: '보내기' }))
     await advance()
     expect(sentBodies(fetchMock)[0]).toEqual({ case_history_id: 12, restoration_answer: {
@@ -196,19 +214,66 @@ describe('ResultInputPage — 서버', () => {
     })
     renderFlow()
     await advance()
-    fireEvent.click(screen.getByRole('radio', { name: '일부만 원상복구하면 돼요' }))
-    fireEvent.click(screen.getByRole('radio', { name: '철거 여부는 아직 몰라요' }))
-    fireEvent.click(screen.getByRole('button', { name: '자세히 직접 적기' }))
+    fireEvent.click(screen.getByRole('radio', { name: '일부만 원래대로 하면 된대요' }))
+    fireEvent.click(screen.getByRole('radio', { name: '철거는 아직 안 정해졌대요' }))
+    fireEvent.click(screen.getByRole('button', { name: '직접 쓸게요' }))
     fireEvent.change(screen.getByRole('textbox'), { target: { value: '간판만 떼면 된대요' } })
-    fireEvent.click(screen.getByRole('button', { name: '선택해서 답하기' }))
-    expect(screen.getByRole('radio', { name: '일부만 원상복구하면 돼요' })).toBeChecked()
-    expect(screen.getByRole('radio', { name: '철거 여부는 아직 몰라요' })).toBeChecked()
-    fireEvent.click(screen.getByRole('button', { name: '자세히 직접 적기' }))
+    fireEvent.click(screen.getByRole('button', { name: '골라서 답할게요' }))
+    expect(screen.getByRole('radio', { name: '일부만 원래대로 하면 된대요' })).toBeChecked()
+    expect(screen.getByRole('radio', { name: '철거는 아직 안 정해졌대요' })).toBeChecked()
+    fireEvent.click(screen.getByRole('button', { name: '직접 쓸게요' }))
     expect(screen.getByRole('textbox')).toHaveValue('간판만 떼면 된대요')
     fireEvent.click(screen.getByRole('button', { name: '보내기' }))
     await advance()
     expect(sentBodies(fetchMock)).toEqual([{ case_history_id: 12, raw_input: '간판만 떼면 된대요' }])
     expect(screen.getByRole('textbox')).toHaveValue('간판만 떼면 된대요')
+  })
+
+  /** 다시 보낼 수 없는 실패에서 보기만 바뀌면, 안내와 폼이 서로 다른 말을 한다 */
+  it('다시 보낼 수 없는 실패면 보기도 잠근다', async () => {
+    serve({
+      entry: [json(entryBody({ result_input_kind: 'RESTORATION_ANSWER' }))],
+      submit: [ACCEPTED], judged: [json(judgedBody({ result: 'FAILED', recovery_action_code: 'CONTACT_SUPPORT' }))],
+    })
+    renderFlow()
+    await advance()
+    fireEvent.click(screen.getByRole('radio', { name: '일부만 원래대로 하면 된대요' }))
+    fireEvent.click(screen.getByRole('radio', { name: '철거해야 한대요' }))
+    fireEvent.click(screen.getByRole('button', { name: '보내기' }))
+    await advance()
+    await advance(INTERVAL_MS)
+
+    for (const radio of screen.getAllByRole('radio')) expect(radio).toBeDisabled()
+    expect(screen.getByRole('radio', { name: '일부만 원래대로 하면 된대요' })).toBeChecked()
+  })
+
+  /** 골라서 보냈는데 "적어 주신 내용"이라고 하면 무엇이 남아 있다는 것인지 헷갈린다 */
+  it.each([
+    ['다음 할 일을 못 정함', { submit: [ACCEPTED], judged: [json(judgedBody({ result: 'FAILED', recovery_action_code: 'RETRY' }))] }],
+    ['보내지 못함', { submit: [status(500)] }],
+  ])('골라서 보내 실패하면(%s) 고른 내용이 남아 있다고 알린다', async (_name, responses) => {
+    serve({ entry: [json(entryBody({ result_input_kind: 'RESTORATION_ANSWER' }))], ...responses })
+    renderFlow()
+    await advance()
+    fireEvent.click(screen.getByRole('radio', { name: '전부 원래대로 해야 한대요' }))
+    fireEvent.click(screen.getByRole('radio', { name: '철거해야 한대요' }))
+    fireEvent.click(screen.getByRole('button', { name: '보내기' }))
+    await advance()
+    await advance(INTERVAL_MS)
+
+    expect(screen.getByText(/고르신 내용은 그대로 있어요/)).toBeInTheDocument()
+    expect(screen.queryByText(/적어 주신 내용/)).not.toBeInTheDocument()
+  })
+
+  it('글로 보내 실패하면 적은 내용이 남아 있다고 알린다', async () => {
+    serve({ entry: [READY], submit: [status(500)] })
+    renderFlow()
+    await advance()
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '임대인이 철거하래요' } })
+    fireEvent.click(screen.getByRole('button', { name: '보내기' }))
+    await advance()
+
+    expect(screen.getByText(/적어 주신 내용은 그대로 있어요/)).toBeInTheDocument()
   })
 
   it('정정 화면은 서버가 선택형을 제공해도 직접 입력을 사용한다', async () => {

@@ -77,6 +77,55 @@ function CheckDot({ on, size }: { on: boolean; size: 'sm' | 'md' }) {
   )
 }
 
+interface PillChoicesProps<T extends string> {
+  options: { value: T; label: string }[]
+  selected: T | null
+  onSelect: (value: T) => void
+  /** 이 보기 묶음의 제목 요소 id. 화면 낭독기가 무엇을 고르는 묶음인지 읽는다 */
+  labelledBy: string
+  /** 보내는 중처럼 고를 수 없을 때 */
+  disabled?: boolean
+  className?: string
+}
+
+/**
+ * 글자만 있는 세로 보기. 하나만 고른다 (진단의 원상복구 조항·폐업 시기, 결과 입력의 원상복구 답).
+ *
+ * 진단 질문 안에서만 쓰다가 결과 입력 화면의 선택 보기(#197)도 시안에서 같은 모양이라 꺼냈다.
+ * 값의 종류(`T`)를 받아서, 서버 값을 그대로 고르는 화면이 문자열을 다시 맞춰 볼 필요가 없게 한다.
+ */
+export function PillChoices<T extends string>({
+  options,
+  selected,
+  onSelect,
+  labelledBy,
+  disabled = false,
+  className = '',
+}: PillChoicesProps<T>) {
+  return (
+    <div role="radiogroup" aria-labelledby={labelledBy} className={`flex flex-col gap-2.5 ${className}`}>
+      {options.map((option) => {
+        const on = selected === option.value
+        return (
+          <button
+            key={option.value}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            disabled={disabled}
+            onClick={() => onSelect(option.value)}
+            className={`press-scale h-15 w-full shrink-0 cursor-pointer rounded-14 bg-bg-layer-default px-5 text-18 active:bg-bg-transparent-pressed disabled:cursor-not-allowed disabled:text-fg-disabled ${
+              on ? 'font-bold' : 'font-medium'
+            } ${ringOf(on)}`}
+          >
+            {option.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 /**
  * 하나만 고르는 보기는 `radio` 역할을, 여럿 고르는 보기는 누름 상태(`aria-pressed`)를 준다.
  * 겉모양이 같은 버튼이라도 화면 낭독기가 "몇 개 중 하나를 고른 것"인지 "켜고 끈 것"인지
@@ -141,25 +190,13 @@ function Choices({ input, labelledBy }: { input: QuestionInput; labelledBy: stri
 
   if (input.type === 'pills') {
     return (
-      <div role="radiogroup" aria-labelledby={labelledBy} className="-mt-2 flex flex-col gap-2.5">
-        {input.options.map((option) => {
-          const on = input.selected === option.value
-          return (
-            <button
-              key={option.value}
-              type="button"
-              role="radio"
-              aria-checked={on}
-              onClick={() => input.onSelect(option.value)}
-              className={`press-scale h-15 w-full shrink-0 cursor-pointer rounded-14 bg-bg-layer-default px-5 text-18 active:bg-bg-transparent-pressed ${
-                on ? 'font-bold' : 'font-medium'
-              } ${ringOf(on)}`}
-            >
-              {option.label}
-            </button>
-          )
-        })}
-      </div>
+      <PillChoices
+        options={input.options}
+        selected={input.selected}
+        onSelect={input.onSelect}
+        labelledBy={labelledBy}
+        className="-mt-2"
+      />
     )
   }
 

@@ -2,6 +2,9 @@
 
 정리본(app/common/procedure-digests.ko-KR.json)은 사람이 검수한 원문의 문장을 그대로 옮긴 것이라,
 글자 하나만 달라도 Info 검사(_materialize)가 거절한다. 그래서 파일 자체도 여기서 확인한다.
+
+Review 모델 없이 "코드 검사만" 하는 경로(#203)의 안전 검사 규칙 테스트도 여기 있다(ACTION_PATH 아래).
+규칙마다 어느 이슈 코드·위치에서 막았는지 보고, 막혀야 하는 초안과 통과해야 하는 초안을 짝으로 둔다.
 """
 
 import asyncio
@@ -201,12 +204,71 @@ def test_restoration_answer_preserves_old_facts_and_reports_both_conflicts():
     assert {item.field_path for item in info.conflicts} == {"restoration_scope", "demolition_required"}
 
 
-def test_restoration_answer_unknown_never_clears_confirmed_values():
+@pytest.mark.parametrize("scope", ["FULL", "PARTIAL"])
+@pytest.mark.parametrize("detail", [None, "카운터"])
+def test_restoration_answer_unknown_never_clears_confirmed_values(scope, detail):
     answer = RestorationAnswer(restoration_scope="UNKNOWN", demolition_required="UNKNOWN")
     info, calls = info_result(result_text=answer.to_input_text(), answer=answer,
-                              confirmed={"restoration_scope": "FULL", "demolition_required": "REQUIRED"})
+        confirmed={"restoration_scope": scope, "demolition_required": "REQUIRED",
+                   **({"restoration_scope_detail": detail} if detail is not None else {})})
     assert calls == [] and info.fact_candidates == [] and info.conflicts == []
-    assert len(info.question_candidates) == 2
+    assert [field for question in info.question_candidates for field in question.resolves_field_paths] == [
+        "restoration_scope", "demolition_required",
+    ]
+
+
+@pytest.mark.parametrize("original_scope", ["FULL", "PARTIAL"])
+@pytest.mark.parametrize("accepted", [True, False])
+@pytest.mark.parametrize("detail", [None, "카운터"])
+@pytest.mark.parametrize("lease_status", ["LEASED_PAID", "OWNED"])
+def test_scope_conflict_choice_rebuilds_only_the_missing_detail_question(original_scope, accepted, detail, lease_status):
+    from app.agent.procedure_tool.cafe import build_cafe_procedure_steps
+    from app.common.agent_service import build_conflict_input
+
+    selected_scope = "PARTIAL" if original_scope == "FULL" else "FULL"
+    answer = RestorationAnswer(restoration_scope=selected_scope, demolition_required="REQUIRED")
+    store = ev.SnapshotStore(REVIEWED)
+    registry = build_cafe_procedure_steps({code: i + 1 for i, code in enumerate(PROCEDURE_LABELS)})
+    request = ev.attach_fixture_sources(ev.build_graph_input(dict(ev.CASES["benchmark_case1"], lease_status=lease_status),
+        result_text=answer.to_input_text(), prior_facts={"restoration_scope": original_scope,
+        "demolition_required": "REQUIRED", "restoration_scope_detail": detail}), store)
+    request.trigger.restoration_answer = answer
+    original = request.model_dump_json()
+    captured = {}
+
+    async def stop(supervisor_input):
+        captured["info"] = next(source.output for source in supervisor_input.source_results
+                                if source.meta.component == "INFO_AGENT")
+        raise RuntimeError("stop after info")
+
+    async def run():
+        with patch.object(runtime_module.StructuredLLMClient, "from_env", NoModel.from_env), \
+             patch.object(ev, "build_registry", lambda store: registry):
+            runtime = await runtime_module.build_runtime(known_procedure_steps=ev.build_registry(store),
+                procedure_store=store, support_catalog=ev.load_catalog(None))
+            try:
+                first = await runtime.run_planning(request)
+                assert first.outcome_type == "CONFLICT", first
+                confirmed = build_conflict_input(case_snapshot=first.conflict_snapshot.model_copy(deep=True),
+                    conflicts=first.conflicts, conflict_snapshot=first.conflict_snapshot,
+                    retained_info_result=first.retained_info_result,
+                    selections=[{"conflict_ref": conflict.conflict_ref, "accepted": accepted} for conflict in first.conflicts],
+                    input_event_id="synthetic-detail-confirm", confirmed_at=request.case_snapshot.captured_at)
+                before = confirmed.model_dump_json()
+                runtime._graph._supervisor.draft = stop
+                await runtime.run_planning(confirmed)
+                assert confirmed.model_dump_json() == before
+            finally:
+                await runtime.aclose()
+
+    asyncio.run(run())
+    assert request.model_dump_json() == original
+    info = captured["info"]
+    effective_scope = selected_scope if accepted else original_scope
+    expected = ["restoration_scope_detail"] if lease_status != "OWNED" and effective_scope == "PARTIAL" and detail is None else []
+    assert [item.field_path for item in info.missing_fields] == expected
+    assert [field for question in info.question_candidates for field in question.resolves_field_paths] == expected
+    assert all(fact.field_path != "restoration_scope_detail" for fact in info.fact_candidates)
 
 
 @pytest.mark.parametrize("digests", ["unreviewed", "changed_source"])
@@ -219,17 +281,18 @@ def test_restoration_answer_fails_without_calling_a_model_when_digests_are_untru
     assert info is None and calls == []
 
 
-@pytest.mark.parametrize("scope", ["FULL", "PARTIAL"])
-def test_restoration_answer_uses_supervisor_and_code_review_without_review_model(scope):
+@pytest.mark.parametrize("scope,detail", [("FULL", None), ("PARTIAL", None), ("PARTIAL", "카운터")])
+def test_restoration_answer_uses_supervisor_and_code_review_without_review_model(scope, detail):
     # 선택형은 모델이 쓴 사실·문장이 없어 Review 모델 없이 코드 검사만 한다(graph review_code_only).
     from pydantic import ValidationError
     from app.agent.schemas import ReviewedPlanOutcome
 
     calls = []
     answer = RestorationAnswer(restoration_scope=scope, demolition_required="REQUIRED")
+    needs_detail = scope == "PARTIAL" and detail is None
     store = ev.SnapshotStore(REVIEWED)
     request = ev.attach_fixture_sources(ev.build_graph_input(ev.CASES["benchmark_case1"],
-                                        result_text=answer.to_input_text()), store)
+        result_text=answer.to_input_text(), prior_facts={"restoration_scope_detail": detail}), store)
     request.trigger.restoration_answer = answer
 
     class SelectionModel(NoModel):
@@ -238,7 +301,7 @@ def test_restoration_answer_uses_supervisor_and_code_review_without_review_model
             calls.append(name)
             assert name not in {"reborn_info_analysis", "reborn_review_output"}, "선택형은 Info·Review 모델을 부르지 않는다"
             contract = json.loads(messages[1]["content"].removeprefix("INPUT_JSON="))["contract"]
-            if scope == "PARTIAL":
+            if needs_detail:
                 assert any(item["candidate_id"] == "missing:restoration_scope_detail"
                            for item in contract["information_blockers"])
                 return response_model.model_validate({"decision_type": "NEEDS_MORE_INFO",
@@ -258,14 +321,16 @@ def test_restoration_answer_uses_supervisor_and_code_review_without_review_model
 
     outcome = asyncio.run(run())
     # "일부"면 구체 범위 질문이 먼저라 Supervisor 모델도 부르지 않는다
-    assert calls == ([] if scope == "PARTIAL" else ["reborn_supervisor_draft"])
+    assert calls == ([] if needs_detail else ["reborn_supervisor_draft"])
     assert outcome.outcome_type == "REVIEWED_PLAN", outcome
     outcome.assert_integrity()
     assert outcome.review_subject.trigger.restoration_answer == answer
-    if scope == "PARTIAL":
+    if needs_detail:
         decision = outcome.review_subject.supervisor_draft.decision
         assert decision.decision_type == "NEEDS_MORE_INFO" and decision.next_action is None
         assert list(decision.questions_for_user) == ["확인한 원상복구 범위의 구체적인 내용을 알려주세요."]
+    else:
+        assert outcome.review_subject.supervisor_draft.decision.questions_for_user == []
     tampered = outcome.model_dump(mode="json")
     # 원문까지 함께 바꿔도 이미 받은 검수 증거와 묶인 선택값은 바꿀 수 없다.
     trigger = tampered["review_subject"]["trigger"]
@@ -904,11 +969,13 @@ def test_code_only_review_blocks_a_procedure_action_that_also_names_a_support_pr
     assert ("CONTRACT_VIOLATION", f"{ACTION_PATH}/target") in issues
 
 
-def test_a_free_text_reply_with_unknown_detail_still_lets_the_supervisor_choose():
+@pytest.mark.parametrize("detail_state", ["unknown", "held", "conflict"])
+def test_a_free_text_reply_with_unknown_detail_still_lets_the_supervisor_choose(detail_state):
     # "구체 범위 먼저" 규칙은 선택형 답변에만 쓴다. 자유글 답변("아직 모름" 포함)은 모델이 고른다(같은 질문 반복 방지).
     calls = []
     store = ev.SnapshotStore(REVIEWED)
-    request = ev.attach_fixture_sources(ev.build_graph_input(ev.CASES["benchmark_case1"], result_text=LANDLORD), store)
+    request = ev.attach_fixture_sources(ev.build_graph_input(ev.CASES["benchmark_case1"], result_text=LANDLORD,
+        prior_facts={"restoration_scope_detail": "싱크대"} if detail_state == "conflict" else None), store)
 
     class Model(FactModel):
         async def generate(self, response_model, messages, **kwargs):
@@ -926,7 +993,13 @@ def test_a_free_text_reply_with_unknown_detail_still_lets_the_supervisor_choose(
             out = (await super().generate(response_model, messages, **kwargs)).model_dump(mode="python")
             out["missing_fields"] = [{"field_path": "restoration_scope_detail", "reason_summary": "세부 대상 미확인",
                                       "blocks": ["SUPERVISOR_DECISION"], "question": "어떤 부분을 원래대로 해야 하나요?"}]
-            out["completion_status"] = "NEEDS_USER_INPUT"
+            if detail_state in {"held", "conflict"}:
+                out["missing_fields"] = []
+                out["facts"].append({"operation": "SET", "field_path": "restoration_scope_detail",
+                    "value_type": "STRING", "value": "카운터", "source_text": LANDLORD,
+                    "confidence_bps": 7000, "requires_confirmation": detail_state == "held",
+                    "reason_summary": "세부 범위 확인 대기"})
+            out["completion_status"] = "NEEDS_USER_INPUT" if detail_state == "unknown" else "COMPLETE"
             return response_model.model_validate(out)
 
     async def run():
@@ -939,7 +1012,20 @@ def test_a_free_text_reply_with_unknown_detail_still_lets_the_supervisor_choose(
                 await runtime.aclose()
 
     outcome = asyncio.run(run())
+    if detail_state == "conflict":
+        assert outcome.outcome_type == "CONFLICT", outcome
+        [conflict] = outcome.conflicts
+        assert (conflict.field_path, conflict.committed_value, conflict.proposed_value) == (
+            "restoration_scope_detail", "싱크대", "카운터",
+        )
+        assert calls == ["reborn_info_analysis"]
+        assert next(fact.value for fact in request.case_snapshot.facts if fact.field_path == conflict.field_path) == "싱크대"
+        return
     assert "reborn_supervisor_draft" in calls, (calls, outcome)
+    assert outcome.outcome_type == "REVIEWED_PLAN", outcome
+    draft = outcome.review_subject.supervisor_draft
+    assert list(draft.decision.questions_for_user) == ["확인한 원상복구 범위의 구체적인 내용을 알려주세요."]
+    assert all(change.field_path != "restoration_scope_detail" for change in draft.mutations.fact_changes)
 
 
 @pytest.mark.parametrize("with_retained", [False, True])

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { RouterProvider, createMemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -92,6 +92,8 @@ function renderAt(path: string) {
       { path: '/cases/new', element: <p>상황 진단</p> },
       { path: '/task', element: <p>할 일 상세 화면</p> },
       { path: '/results', element: <p>결과 입력 화면</p> },
+      { path: '/login', element: <p>로그인 화면</p> },
+      { path: '/confirm', element: <p>충돌 확인 화면</p> },
     ],
     { initialEntries: [path] },
   )
@@ -321,16 +323,28 @@ describe('CurrentCasePage', () => {
     })
 
     /**
-     * 어긋난 목록을 받아올 API 가 아직 없다. 보내봐야 `/confirm` 이 빈손으로 열려
-     * `/` 로 튕긴다 — 눌리는데 아무 데도 못 가는 버튼이 없는 버튼보다 나쁘다.
+     * 확인 화면은 어긋난 목록을 넘겨받아야 열린다. 목록은 결과 입력이 `GET /cases/results` 로 받아 넘긴다.
+     * 충돌 선택이 실패한 뒤에도 서버는 `CONFLICT` 를 줘서, 이 길이 없으면 홈에서 풀 수 없다(#196)
      */
-    it('확인하러 가는 길은 아직 내보내지 않는다', async () => {
+    it('확인이 필요하면 확인하러 가기로 결과 입력에 보낸다', async () => {
       saveTokens('access-1', 'refresh-1')
       mockCase(envelope({ judgment_status: 'CONFLICT' }))
       renderAt('/case')
 
-      await screen.findByRole('heading', { level: 2, name: '확인이 필요한 내용이 있어요' })
-      expect(screen.queryByRole('link', { name: /확인/ })).not.toBeInTheDocument()
+      fireEvent.click(await screen.findByRole('button', { name: '확인하러 가기' }))
+
+      expect(await screen.findByText('결과 입력 화면')).toBeInTheDocument()
+    })
+
+    /** Mock 은 서버가 없어 결과 입력이 확인 화면으로 넘겨 주지 못한다. 확인 화면은 Mock 이면 예시 충돌로 열린다 */
+    it('Mock 에서는 확인하러 가기가 확인 화면으로 바로 간다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      vi.stubGlobal('fetch', vi.fn())
+      renderAt('/case?mock=judgment-conflict')
+
+      fireEvent.click(await screen.findByRole('button', { name: '확인하러 가기' }))
+
+      expect(await screen.findByText('충돌 확인 화면')).toBeInTheDocument()
     })
 
     /**
@@ -351,9 +365,8 @@ describe('CurrentCasePage', () => {
     /**
      * 할 일이 없다고 버튼까지 사라지면 사장님은 화면만 보다 나가게 된다.
      *
-     * 실패 네 갈래를 전부 적는다. **이유마다 다른 버튼을 만들지 않는다는 것**이 여기서
-     * 고정된다 — 지금은 재판단도 재입력도 보낼 곳이 없어서, 늘릴 수 있는 것은 "저장된
-     * 상태를 다시 읽기" 하나뿐이다.
+     * 실패 갈래를 전부 적는다. 주 버튼(다시 알려주기 · 다시 판단하기)이 있든 없든
+     * "저장된 상태를 다시 읽기"는 늘 남는다는 것이 여기서 고정된다.
      */
     it.each([
       ['PENDING', envelope({ judgment_status: 'PENDING' })],
@@ -384,6 +397,228 @@ describe('CurrentCasePage', () => {
       renderAt('/case')
 
       expect(await recheckButton()).toBeEnabled()
+    })
+  })
+
+  /**
+   * 서버가 "다시 해볼 수 있다"고 한 실패를 다시 판단해 달라고 맡긴다(#196, `POST /cases/retry`).
+   * 맡긴 뒤에는 지금 상황을 다시 물어 그대로 그린다 — 기다리는 자리를 따로 만들지 않는다.
+   */
+  describe('다시 판단하기', () => {
+    const RETRYABLE = envelope({ judgment_status: 'FAILED', recovery_action_code: 'RETRY' })
+    const PENDING = envelope({ judgment_status: 'PENDING' })
+    const retryButton = () => screen.findByRole('button', { name: '다시 판단하기' })
+    const HANG = Symbol('답하지 않음')
+
+    /**
+     * `GET /cases` 는 차례대로 `cases` 를 돌려주고(마지막 것을 계속), `POST /cases/retry` 는 `retry` 로 답한다.
+     * 기록·로드맵은 위 `mockCase` 와 같다
+     */
+    function serve({ cases, retry }: { cases: unknown[]; retry: Response | Promise<Response> }) {
+      let index = 0
+      const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+        if (isLogs(url)) return response({ logs: [] })
+        if (isRoadmap(url)) return response(null, 500)
+        if (url.includes('/cases/retry') && init?.method === 'POST') return retry
+        const body = cases[Math.min(index, cases.length - 1)]
+        index += 1
+        // `HANG` 이면 답하지 않는다. 묻는 중인 상태를 만들 때 쓴다
+        return body === HANG ? new Promise<Response>(() => {}) : response(body)
+      })
+      vi.stubGlobal('fetch', fetchMock)
+      return fetchMock
+    }
+
+    const retryCalls = (fetchMock: ReturnType<typeof serve>) =>
+      fetchMock.mock.calls.filter(([url]) => url.includes('/cases/retry'))
+
+    it('다시 해볼 수 있는 실패에만 버튼을 단다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      serve({ cases: [RETRYABLE], retry: response({ case_history_id: 3 }) })
+      renderAt('/case')
+
+      expect(await retryButton()).toBeEnabled()
+    })
+
+    it.each([
+      ['더 알아야 함', envelope({ judgment_status: 'FAILED', recovery_action_code: 'RESUBMIT_INPUT', requested_field_paths: [] })],
+      ['서비스가 볼 것', envelope({ judgment_status: 'FAILED', recovery_action_code: 'CONTACT_SUPPORT' })],
+      ['할 수 있는 것 없음', envelope({ judgment_status: 'FAILED', recovery_action_code: 'NONE' })],
+      ['이유를 모름', envelope({ judgment_status: 'FAILED' })],
+    ])('실패 · %s 에는 달지 않는다', async (_name, body) => {
+      saveTokens('access-1', 'refresh-1')
+      mockCase(body)
+      renderAt('/case')
+
+      await recheckButton()
+      expect(screen.queryByRole('button', { name: '다시 판단하기' })).not.toBeInTheDocument()
+    })
+
+    it('맡기면 다시 물어 판단 중 화면으로 바뀐다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      const fetchMock = serve({ cases: [RETRYABLE, PENDING], retry: response({ case_history_id: 3 }) })
+      renderAt('/case')
+
+      fireEvent.click(await retryButton())
+
+      expect(await screen.findByRole('heading', { level: 1, name: '지금은 리본이 일하고 있어요' })).toBeInTheDocument()
+      expect(retryCalls(fetchMock)).toHaveLength(1)
+    })
+
+    /** 두 번 맡기면 서버가 하나만 받고 나머지를 409 로 돌려준다. 화면이 먼저 막는다 */
+    it('맡기는 동안 버튼을 잠근다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      const fetchMock = serve({ cases: [RETRYABLE], retry: new Promise<Response>(() => {}) })
+      renderAt('/case')
+
+      const button = await retryButton()
+      fireEvent.click(button)
+      fireEvent.click(button)
+
+      expect(button).toBeDisabled()
+      expect(retryCalls(fetchMock)).toHaveLength(1)
+    })
+
+    /** 결과 알려주기의 실패는 서버가 다시 돌리지 않는다. 눌러도 아무 일 없는 버튼으로 두지 않는다 */
+    it('거절됐는데 다시 물어도 같은 실패면 그렇다고 알리고 버튼을 잠근다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      serve({ cases: [RETRYABLE], retry: response(null, 409) })
+      renderAt('/case')
+
+      fireEvent.click(await retryButton())
+
+      expect(await screen.findByText('이 실패는 여기서 다시 판단할 수 없어요.')).toBeInTheDocument()
+      expect(await retryButton()).toBeDisabled()
+    })
+
+    /** 두 번 눌렀거나 그사이 다른 곳에서 맡겼다. 지금 상황을 그리면 된다 */
+    it('거절됐어도 다시 물어 상황이 바뀌었으면 그 화면을 그린다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      serve({ cases: [RETRYABLE, PENDING], retry: response(null, 409) })
+      renderAt('/case')
+
+      fireEvent.click(await retryButton())
+
+      expect(await screen.findByRole('heading', { level: 1, name: '지금은 리본이 일하고 있어요' })).toBeInTheDocument()
+    })
+
+    /** 응답만 끊겼을 수 있다. 실패 카드는 저절로 다시 묻지 않아서, 묻지 않으면 판단 중에도 실패 카드가 남는다 */
+    it.each([
+      ['응답이 끊김', response(null, 500)],
+      ['받았다는데 번호를 못 읽음', response({})],
+    ])('%s 이어도 다시 물어, 서버가 받았으면 판단 중 화면을 그린다', async (_name, retry) => {
+      saveTokens('access-1', 'refresh-1')
+      serve({ cases: [RETRYABLE, PENDING], retry })
+      renderAt('/case')
+
+      fireEvent.click(await retryButton())
+
+      expect(await screen.findByRole('heading', { level: 1, name: '지금은 리본이 일하고 있어요' })).toBeInTheDocument()
+    })
+
+    /** 묻는 중에 맡기면 뒤따르는 다시 묻기가 무시되고, 맡긴 직후 또 누르면 409 다 */
+    it('지금 상황을 묻는 중에는 누를 수 없다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      const fetchMock = serve({ cases: [RETRYABLE, HANG], retry: response({ case_history_id: 3 }) })
+      renderAt('/case')
+
+      fireEvent.click(await recheckButton())
+
+      expect(await retryButton()).toBeDisabled()
+      fireEvent.click(await retryButton())
+      expect(retryCalls(fetchMock)).toHaveLength(0)
+    })
+
+    it('맡긴 뒤 다시 묻는 동안 또 누를 수 없다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      const fetchMock = serve({ cases: [RETRYABLE, HANG], retry: response({ case_history_id: 3 }) })
+      renderAt('/case')
+
+      fireEvent.click(await retryButton())
+      await vi.waitFor(() => expect(retryCalls(fetchMock)).toHaveLength(1))
+
+      fireEvent.click(await retryButton())
+      expect(await retryButton()).toBeDisabled()
+      expect(retryCalls(fetchMock)).toHaveLength(1)
+    })
+
+    it('맡기는 동안 수동 조회를 잠그고 접수 뒤 새 상태를 보여준다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      let resolveRetry!: (response: Response) => void
+      let resolveRefresh!: (response: Response) => void
+      const retryResponse = new Promise<Response>((resolve) => { resolveRetry = resolve })
+      const refreshResponse = new Promise<Response>((resolve) => { resolveRefresh = resolve })
+      let reads = 0
+      let accepted = false
+      vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+        if (isLogs(url)) return response({ logs: [] })
+        if (isRoadmap(url)) return response(null, 500)
+        if (url.includes('/cases/retry') && init?.method === 'POST') return retryResponse
+        reads += 1
+        if (reads === 1) return response(RETRYABLE)
+        if (!accepted) return refreshResponse
+        return response(PENDING)
+      }))
+      renderAt('/case')
+      fireEvent.click(await retryButton())
+      const recheck = await recheckButton()
+      expect(recheck).toBeDisabled()
+      fireEvent.click(recheck)
+      expect(reads).toBe(1)
+      await act(async () => {
+        accepted = true
+        resolveRetry(response({ case_history_id: 3 }))
+      })
+      await act(async () => { resolveRefresh(response(RETRYABLE)) })
+      expect(await screen.findByRole('heading', { level: 1, name: '지금은 리본이 일하고 있어요' })).toBeInTheDocument()
+    })
+
+    it.each([200, 401, 409, 500])('떠난 홈의 늦은 재판단 응답(%i)은 재조회·이동을 만들지 않는다', async (status) => {
+      saveTokens('access-1', 'refresh-1')
+      let resolveRetry!: (response: Response) => void
+      const retry = new Promise<Response>((resolve) => { resolveRetry = resolve })
+      const fetchMock = serve({ cases: [RETRYABLE], retry })
+      renderAt('/case')
+      fireEvent.click(await retryButton())
+      fireEvent.click(screen.getByRole('link', { name: /리본이 해둔 일/ }))
+      expect(await screen.findByText('기록 화면')).toBeInTheDocument()
+      await act(async () => { resolveRetry(response({ case_history_id: 3 }, status)) })
+      expect(screen.queryByText('로그인 화면')).not.toBeInTheDocument()
+      expect(screen.getByText('기록 화면')).toBeInTheDocument()
+      expect(fetchMock.mock.calls.filter(([url]) => url.endsWith('/cases'))).toHaveLength(1)
+    })
+
+    it('맡기지 못하면 알리고 다시 누를 수 있게 둔다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      serve({ cases: [RETRYABLE], retry: response(null, 500) })
+      renderAt('/case')
+
+      fireEvent.click(await retryButton())
+
+      expect(await screen.findByText(/다시 판단을 요청하지 못했어요/)).toBeInTheDocument()
+      expect(await retryButton()).toBeEnabled()
+    })
+
+    it('로그인이 풀렸으면 로그인으로 보낸다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      serve({ cases: [RETRYABLE], retry: response(null, 401) })
+      renderAt('/case')
+
+      fireEvent.click(await retryButton())
+
+      expect(await screen.findByText('로그인 화면')).toBeInTheDocument()
+    })
+
+    it('Mock 에서는 서버를 부르지 않고 판단 중 화면으로 넘어간다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      const fetchMock = vi.fn()
+      vi.stubGlobal('fetch', fetchMock)
+      renderAt('/case?mock=judgment-failed')
+
+      fireEvent.click(await retryButton())
+
+      expect(await screen.findByRole('heading', { level: 1, name: '지금은 리본이 일하고 있어요' })).toBeInTheDocument()
+      expect(fetchMock).not.toHaveBeenCalled()
     })
   })
 

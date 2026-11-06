@@ -1,4 +1,4 @@
-import { getAccessToken, logOut, verifyOAuthState } from './auth'
+import { getAccessToken, getRefreshToken, logOut, saveTokens, verifyOAuthState } from './auth'
 
 /**
  * 서버를 부르는 유일한 자리.
@@ -85,41 +85,152 @@ interface RequestOptions {
  * 네트워크 자체가 실패하면 `fetch`가 던지는 오류가 그대로 올라간다.
  * 서버가 준 답이 없다는 뜻이라 상태 코드로 감쌀 것이 없다.
  *
+ * **401이면 로그인 토큰을 새로 받아 한 번만 다시 보낸다.** 서버의 로그인 토큰은 30분짜리라
+ * (`JWT_ACCESS_TOKEN_EXPIRE_MINUTES`), 다시 받지 않으면 30분 뒤 첫 요청에서 로그인 화면으로 간다
+ * (#212). 다시 받을 수 없거나, 새 토큰으로 보내도 401이면 토큰을 지우고 `UnauthorizedError` 를 던진다 —
+ * 못 쓰는 토큰을 들고 있으면 다음 요청도 똑같이 막힌다.
+ *
+ * **기다리는 사이 로그인이 바뀌었으면 지금 로그인을 덮거나 지우지 않는다**(승준님 #210). 로그아웃했거나
+ * 새로 로그인했는데 옛 로그인의 늦은 응답이 토큰을 저장하거나 지우면, 끝낸 로그인이 되살아나거나 새 로그인이
+ * 풀린다. 그때는 토큰에 손대지 않고 `UnauthorizedError` 만 올린다. 화면은 로그인으로 보내고, 로그인 화면은
+ * 이미 로그인돼 있으면 진입 분기로 돌려보낸다(`LoginPage`). `ApiError(409)` 로 멈추지 않는 이유는 화면들이
+ * 409 를 그 API 의 뜻(거절됨 · 상황 바뀜)으로 읽어서다.
+ */
+export async function request(path: string, options: RequestOptions = {}) {
+  const sentWith = readTokens()
+  let response = await send(path, options, sentWith.access)
+
+  if (response.status === 401) {
+    const renewed = await renewedAfter(path, sentWith)
+    response = await send(path, options, renewed.access)
+    if (response.status === 401) endSession(renewed)
+  }
+
+  if (!response.ok) throw new ApiError(response.status, `요청이 실패했습니다 (${response.status})`)
+
+  return response
+}
+
+/**
+ * 한 번 보낸다. 다시 보낼 때도 같은 것을 새로 만들어 보낸다 — 제한 시간도 새로 센다.
+ *
  * 제한 시간을 넘기면 요청을 취소한다. **취소를 예약한 타이머는 지우지 않는다** —
  * 이 함수는 `Response`만 돌려주고 본문은 호출부가 나중에 읽는데, 응답을 받자마자 지우면
  * **헤더만 오고 본문이 멈추는 경우**를 못 막는다. 이미 끝난 요청을 취소하는 것은 아무 일도
  * 하지 않으므로, 정상 응답 뒤 하는 일 없는 타이머가 잠시 남는 대신 본문까지 보호한다.
  */
-export async function request(
+function send(
   path: string,
-  { method = 'GET', body, timeoutMs = REQUEST_TIMEOUT_MS }: RequestOptions = {},
+  { method = 'GET', body, timeoutMs = REQUEST_TIMEOUT_MS }: RequestOptions,
+  token: string | null,
+  extraHeaders: Record<string, string> = {},
 ) {
-  const token = getAccessToken()
   const isForm = body instanceof FormData
 
   const controller = new AbortController()
   setTimeout(() => controller.abort(new TimeoutError()), timeoutMs)
 
-  const response = await fetch(`${API_BASE}${path}`, {
+  return fetch(`${API_BASE}${path}`, {
     method,
     signal: controller.signal,
     headers: {
       ...(body === undefined || isForm ? {} : { 'Content-Type': 'application/json' }),
       // BE가 표준 Authorization 대신 커스텀 헤더를 쓴다
       ...(token === null ? {} : { 'Access-Token': token }),
+      ...extraHeaders,
     },
     body: body === undefined ? undefined : isForm ? body : JSON.stringify(body),
   })
+}
 
-  if (response.status === 401) {
-    // 못 쓰는 토큰을 들고 있으면 다음 요청도 똑같이 막힌다
-    logOut()
-    throw new UnauthorizedError()
+const REISSUE_PATH = '/reissue'
+
+/** 한 로그인의 토큰 한 쌍. 다시 받을 때마다 둘 다 바뀐다 */
+interface Tokens {
+  access: string | null
+  refresh: string | null
+}
+
+function readTokens(): Tokens {
+  return { access: getAccessToken(), refresh: getRefreshToken() }
+}
+
+function isCurrent(tokens: Tokens): boolean {
+  return tokens.access === getAccessToken() && tokens.refresh === getRefreshToken()
+}
+
+/**
+ * 이 토큰으로는 더 이어 갈 수 없다. 아직 이 토큰을 들고 있을 때만 지운다 — 그사이 로그아웃했거나 새로
+ * 로그인했으면 지금 것은 이 실패와 상관없다.
+ */
+function endSession(tokens: Tokens): never {
+  if (isCurrent(tokens)) logOut()
+  throw new UnauthorizedError()
+}
+
+/**
+ * 401을 받은 뒤 다시 보낼 토큰. 받을 수 없으면 `UnauthorizedError` 를 던진다.
+ *
+ * 보낸 사이 Refresh 토큰이 바뀌었으면 다른 요청이 이미 새로 받은 것이라 또 받지 않고 지금 것으로 다시
+ * 보낸다. 새로 로그인한 경우도 토큰만으로는 이와 가를 수 없어 같이 다시 보낸다. 비어 있으면 그사이
+ * 로그아웃한 것이다. 다시 받기 자신이 401이면 받을 길이 없다.
+ */
+async function renewedAfter(path: string, sentWith: Tokens): Promise<Tokens> {
+  if (path === REISSUE_PATH) endSession(sentWith)
+  const current = readTokens()
+  if (current.refresh !== sentWith.refresh) {
+    if (current.access === null) throw new UnauthorizedError()
+    return current
   }
+  return reissueTokens(sentWith)
+}
 
-  if (!response.ok) throw new ApiError(response.status, `요청이 실패했습니다 (${response.status})`)
+/**
+ * 지금 진행 중인 다시 받기와 그것을 시작한 토큰. 여럿이 동시에 401을 받아도 같은 토큰이면 다시 받기는
+ * 하나만 나간다. 토큰이 다르면(그사이 로그인이 바뀜) 따로 받는다.
+ */
+let reissuing: { from: string | null; promise: Promise<Tokens> } | null = null
 
-  return response
+/**
+ * 로그인 토큰을 새로 받는다(`POST /reissue`). 새 토큰을 돌려준다.
+ *
+ * **한 번에 하나만 보낸다.** 서버는 Refresh 토큰을 쓸 때마다 새것으로 바꾸고 마지막 하나만 기억한다.
+ * 동시에 둘이 보내면 뒤의 것은 이미 바뀐 옛 토큰을 보내 401이 되고, 사장님은 로그아웃된다.
+ *
+ * Refresh 토큰이 없으면(가짜 세션 · 로그아웃) 받지 않는다. 서버가 거절하거나 새 토큰을 읽지 못하면
+ * 이 로그인은 끝난 것이다(`endSession`). 연결 실패 · 5xx 는 토큰을 그대로 두고 오류를 올린다.
+ * 서버가 거절한 게 아니라 답을 못 받은 것이라, 지우면 잠깐 끊긴 연결로 로그아웃된다.
+ */
+function reissueTokens(tokens: Tokens): Promise<Tokens> {
+  if (reissuing !== null && reissuing.from === tokens.refresh) return reissuing.promise
+
+  const mine = {
+    from: tokens.refresh,
+    promise: renew(tokens).finally(() => {
+      // 옛 로그인의 다시 받기가 늦게 끝나도, 그 뒤 시작한 새 로그인의 다시 받기는 남겨 둔다
+      if (reissuing === mine) reissuing = null
+    }),
+  }
+  reissuing = mine
+  return mine.promise
+}
+
+async function renew(tokens: Tokens): Promise<Tokens> {
+  if (tokens.refresh === null) endSession(tokens)
+
+  const response = await send(REISSUE_PATH, { method: 'POST' }, null, { 'Refresh-Token': tokens.refresh })
+  // 기다리는 사이 로그아웃했거나 새로 로그인했다. 늦게 온 답으로 지금 로그인을 덮거나 지우지 않는다
+  if (!isCurrent(tokens)) throw new UnauthorizedError()
+  if (response.status === 401) endSession(tokens)
+  if (!response.ok) throw new ApiError(response.status, `로그인을 이어 가지 못했습니다 (${response.status})`)
+
+  const access = response.headers.get('Access-Token')
+  const nextRefresh = response.headers.get('Refresh-Token')
+  // 서버는 이미 Refresh 토큰을 바꿨다. 새 값을 못 읽으면 들고 있는 것은 더 쓸 수 없다
+  if (access === null || nextRefresh === null) endSession(tokens)
+
+  saveTokens(access, nextRefresh)
+  return { access, refresh: nextRefresh }
 }
 
 /**
