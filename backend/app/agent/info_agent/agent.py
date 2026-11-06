@@ -291,7 +291,36 @@ class InfoAnalysisAgent:
         digests = load_digests()
         if digests is None:
             return None
-        return digest_draft_fields(request, digests, self._analysis_step_codes(request, procedure_bindings))
+        fields = digest_draft_fields(request, digests, self._analysis_step_codes(request, procedure_bindings))
+        if fields is not None and request.conflict_confirmation is not None and any(
+            conflict.field_path == AgentFieldKey.RESTORATION_SCOPE
+            for conflict, _ in request.conflict_confirmation.choices()
+        ):
+            # 범위 충돌을 확인한 뒤에도, 실제로 선택한 값에 필요한 질문은 다시 만든다.
+            question = self._restoration_detail_question(request)
+            if question is not None:
+                fields["missing_fields"].append(question)
+                fields["completion_status"] = InfoCompletionStatus.NEEDS_USER_INPUT
+        return fields
+
+    @staticmethod
+    def _restoration_detail_question(request: InfoAnalysisInput, scope: str | None = None) -> dict[str, Any] | None:
+        step = next((item for item in request.known_procedure_steps
+                     if item.procedure_step.step_code == "CONFIRM_RESTORATION_SCOPE"), None)
+        if step is not None and procedure_applicability(step, request.case_snapshot, request.fact_overlays) is False:
+            return None
+        values = {item.field_path: item.value for item in request.case_snapshot.facts
+                  if item.status == FactStatus.CONFIRMED}
+        values.update({item.field_path: item.proposed_value for item in request.fact_overlays})
+        scope = values.get(AgentFieldKey.RESTORATION_SCOPE) if scope is None else scope
+        if scope != "PARTIAL" or values.get(AgentFieldKey.RESTORATION_SCOPE_DETAIL):
+            return None
+        return {
+            "field_path": AgentFieldKey.RESTORATION_SCOPE_DETAIL,
+            "reason_summary": "일부 원상복구의 구체적인 대상은 아직 확인되지 않았습니다.",
+            "blocks": [MissingFieldBlock.SUPERVISOR_DECISION],
+            "question": "원상복구가 필요한 부분은 구체적으로 어디인가요?",
+        }
 
     def _analyze_restoration_answer(
         self, request: InfoAnalysisInput, procedure_bindings: ProcedureBindings,
@@ -317,17 +346,9 @@ class InfoAnalysisAgent:
                     "value": value, "source_text": text, "confidence_bps": 10_000,
                     "requires_confirmation": False, "reason_summary": "사용자가 직접 고른 답변입니다.",
                 })
-        values = {item.field_path: item.value for item in request.case_snapshot.facts
-                  if item.status == FactStatus.CONFIRMED}
-        values.update({item.field_path: item.proposed_value for item in request.fact_overlays})
-        if answer.restoration_scope == "PARTIAL" and not values.get(AgentFieldKey.RESTORATION_SCOPE_DETAIL):
-            # '일부'는 구체적인 대상을 알려주지 않는다. 자유글 경로처럼 세부 범위를 되묻는다.
-            missing.append({
-                "field_path": AgentFieldKey.RESTORATION_SCOPE_DETAIL,
-                "reason_summary": "일부 원상복구의 구체적인 대상은 아직 확인되지 않았습니다.",
-                "blocks": [MissingFieldBlock.SUPERVISOR_DECISION],
-                "question": "원상복구가 필요한 부분은 구체적으로 어디인가요?",
-            })
+        question = self._restoration_detail_question(request, answer.restoration_scope)
+        if question is not None:
+            missing.append(question)
         draft = InfoAnalysisDraft.model_validate(with_digest_findings({
             "completion_status": InfoCompletionStatus.NEEDS_USER_INPUT if missing else InfoCompletionStatus.COMPLETE,
             "facts": facts, "procedure_observations": [], "missing_fields": missing, "uncertainties": [],
