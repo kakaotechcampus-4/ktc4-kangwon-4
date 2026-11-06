@@ -188,3 +188,49 @@ def _save_judgment_outcome(
         return None
 
     return decision_record_service.save_reviewed_plan(session, history, outcome)
+
+
+class AbandonedJudgmentError(RuntimeError):
+    """서버가 판단 도중에 꺼져서 결과를 받지 못한 판단.
+
+    같은 입력으로 다시 하면 되는 종류라 "다시 시도"로 안내한다(retryable).
+    """
+
+    retryable = True
+
+
+def release_abandoned_judgments() -> int:
+    """결과를 못 받고 남은 판단을 실패로 바꾼다. 서버가 뜰 때 한 번 부른다.
+
+    판단은 웹 서버 안에서 돌기 때문에, 배포하거나 서버가 꺼지면 돌던 판단이 그대로 사라진다.
+    그 이력은 PENDING으로 남는데, Case는 "직전 제출을 아직 처리 중"이라며 새 제출을 409로
+    막는다(services/case.py). 풀어 주는 곳이 없어서 그 사장님은 영영 아무것도 못 한다.
+
+    그래서 결과 대신 실패를 남긴다. 화면은 "다시 시도"를 띄우고, 사장님은 같은 글을 한 번 더
+    보내면 된다. 자동으로 다시 돌리지는 않는다 — 서버가 왜 꺼졌는지 모르는 채로 모델을 다시
+    부르면, 꺼지는 원인이 그대로일 때 같은 일이 반복되고 비용만 나간다.
+
+    **웹 서버 프로세스가 하나일 때만 맞다.** 판단은 그 프로세스 안에서 도니까, 프로세스가
+    막 떴다면 남아 있는 PENDING은 몇 분 전 것이든 전부 죽은 판단이다. 그래서 시간으로 거르지
+    않는다 — 거르면 꺼지기 3분 전에 들어온 판단이 다음 배포 때까지 안 풀린다(현석님·승준님 #194).
+
+    지금은 Dockerfile이 uvicorn을 --workers 없이 띄워 프로세스가 하나다. 워커나 서버를 늘리면
+    이 함수가 뜨는 프로세스마다 돌면서, 옆 프로세스에서 멀쩡히 돌고 있는 판단까지 실패로
+    바꾼다(다물님 #194). 늘릴 때는 판단을 웹 서버 밖으로 빼는 일과 같이 다시 봐야 한다.
+    """
+
+    with Session(get_engine()) as session:
+        pending_ids = [history.id for history in case_history_crud.get_pending_case_histories(session)]
+
+    released = 0
+    for case_history_id in pending_ids:
+        with Session(get_engine()) as session:
+            # 읽은 뒤 쓰기 전에 끝난 판단이 있을 수 있다. 그 정상 결과를 덮지 않는다.
+            if case_history_crud.lock_pending_case_history(session, case_history_id) is None:
+                continue
+            logger.warning("case_history %s 판단이 결과 없이 남아 있어 실패로 바꾼다", case_history_id)
+            decision_record_service.mark_judgment_failed(
+                session, case_history_id, AbandonedJudgmentError()
+            )
+            released += 1
+    return released
