@@ -1,4 +1,4 @@
-"""실패한 가입·서류 판단 다시 돌리기(POST /cases/retry). 진짜 MySQL이 필요하다(Docker).
+"""실패한 가입·결과 알려주기·서류 판단 다시 돌리기(POST /cases/retry). 진짜 MySQL이 필요하다(Docker).
 
 판단을 실제로 돌리지 않고, 가입 판단이 끝난 상태를 DB에 직접 만든다(case_world). 모델 호출은 없다.
 """
@@ -15,6 +15,7 @@ from app.be.schemas.case import CaseRetryResponse
 from app.be.services import case as case_service
 from app.be.services import judgment
 from app.be.services.case import retry_case_judgment
+from app.common.agent_dto import RestorationAnswer
 from case_world import case_engine, case_world  # noqa: F401
 
 
@@ -87,10 +88,31 @@ def test_only_failures_marked_retry_are_retried(case_world, recovery_action_code
     assert error.value.status_code == 409
 
 
-def test_a_failed_result_report_is_left_to_the_screen(case_world):
-    # 결과 알려주기 실패는 화면이 같은 글을 다시 보낸다(POST /cases/results). 여기서 돌리면 판단이 둘이 된다.
+def test_a_failed_result_report_keeps_its_input(case_world):
+    # 쓴 글은 화면에만 있어서 홈으로 나오면 사라진다(시우님 #196). 서버에 남은 입력으로 다시 판단한다.
     member_id, case_id, _ = case_world.sign_up()
-    case_world.add_history(case_id, "USER_INPUT", "FAILED")
+    history_id = case_world.add_history(case_id, "USER_INPUT", "FAILED")
+    answer = RestorationAnswer(restoration_scope="PARTIAL", demolition_required="NOT_REQUIRED")
+    with Session(case_world.engine) as session:
+        history = get_case_history_by_id(session, history_id)
+        history.raw_input = answer.to_input_text()
+        history.restoration_answer = answer.model_dump(mode="json")
+        session.commit()
+
+    response = _retry(case_world.engine, member_id)
+
+    assert response.case_history_id == history_id
+    with Session(case_world.engine) as session:
+        history = get_case_history_by_id(session, history_id)
+        assert history.judgment_status == "PENDING"
+        assert history.raw_input == answer.to_input_text()
+        assert history.restoration_answer == answer.model_dump(mode="json")
+
+
+def test_a_failed_conflict_decision_is_not_retried(case_world):
+    # 충돌 선택은 고른 값을 남기지 않아(#108) 같은 입력으로 다시 돌릴 수 없다.
+    member_id, case_id, _ = case_world.sign_up()
+    case_world.add_history(case_id, "CONFLICT_DECISION", "FAILED")
 
     with pytest.raises(HTTPException) as error:
         _retry(case_world.engine, member_id)
