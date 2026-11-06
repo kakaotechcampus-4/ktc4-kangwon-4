@@ -612,6 +612,79 @@ def test_code_only_review_still_blocks_a_draft_outside_the_reviewed_candidates()
     assert result.verdict == "REVISE"
 
 
+# 아래 테스트는 "반려됐다"만 보지 않고 어느 규칙(코드·위치)에 걸렸는지 본다. 한 초안이 여러 규칙에
+# 함께 걸리므로, verdict만 보면 규칙 하나를 지워도 테스트가 계속 통과한다(멘토 리뷰 #187).
+ACTION_PATH = "/supervisor_draft/decision/next_action"
+
+
+def _code_only_issues(request, draft):
+    from app.agent.review_tool import ReviewTool
+    from test_blocker_candidates import subject
+
+    result = asyncio.run(ReviewTool(NoModel()).review_code_only(subject(request, draft)))
+    return {(issue.issue_code, issue.target_path) for issue in result.issues}
+
+
+def _with_freshness(request, freshness):
+    # 근거만 바꾸면 출처 지문이 안 맞아 무결성 검사에서 먼저 막힌다. 처음부터 그 근거였던 것처럼 다시 만든다.
+    from test_action_codes import canonical_digest, source
+
+    request = request.model_copy(deep=True)
+    lookup, info = request.source_results[0].output, request.source_results[1].output
+    for record in [*lookup.evidence_records, *lookup.documents, *request.case_snapshot.evidence_records]:
+        record.freshness_status = freshness
+    info.based_on_procedure_lookup_digest = canonical_digest(lookup)
+    request.source_results[0], request.source_results[1] = source(lookup, "PROCEDURE_TOOL", 5), source(info)
+    return request
+
+
+@pytest.mark.parametrize("freshness", ["STALE", "UNKNOWN"])
+def test_code_only_review_blocks_an_execution_action_on_unverified_evidence(freshness):
+    from app.agent.schemas import ProcedureProgress
+    from app.agent.supervisor import SupervisorAgent
+    from test_action_codes import NOW, REF, TAX, StubModel, source, supervisor_request
+
+    request = supervisor_request().model_copy(deep=True)
+    finding = request.source_results[1].output.procedure_findings[0]
+    finding.requires_confirmation = False
+    request.source_results[1] = source(request.source_results[1].output)
+    request.case_snapshot.procedure_progress = [ProcedureProgress(procedure_step=finding.procedure_step,
+        status="IN_PROGRESS", requirements_confirmed=True, evidence_refs=[REF], updated_at=NOW)]
+    draft = asyncio.run(SupervisorAgent(StubModel(action_code=TAX)).draft(request))
+    assert draft.decision.next_action.action_code == TAX
+    assert _code_only_issues(request, draft) == set()  # 최신 근거면 실행 안내 통과
+    assert ("STALE_EVIDENCE", ACTION_PATH) in _code_only_issues(_with_freshness(request, freshness), draft)
+
+
+@pytest.mark.parametrize("freshness", ["STALE", "UNKNOWN"])
+def test_code_only_review_allows_a_confirmation_action_on_unverified_evidence(freshness):
+    # 최신인지 모르는 근거라도 "확인해 주세요" 행동은 막지 않는다(실행 지시만 막는다)
+    from app.agent.supervisor import SupervisorAgent
+    from test_action_codes import StubModel, supervisor_request
+
+    request = _with_freshness(supervisor_request(), freshness)
+    draft = asyncio.run(SupervisorAgent(StubModel()).draft(request))
+    assert draft.decision.next_action.questions_to_ask
+    assert _code_only_issues(request, draft) == set()
+
+
+@pytest.mark.parametrize("change", [{"questions_to_ask": []}, {"requires_human": False}])
+def test_code_only_review_blocks_a_procedure_that_needs_confirmation_without_asking(change):
+    from app.agent.supervisor import SupervisorAgent
+    from test_action_codes import StubModel, supervisor_request
+
+    request = supervisor_request()
+    draft = asyncio.run(SupervisorAgent(StubModel()).draft(request))
+    assert _code_only_issues(request, draft) == set()  # 확인 질문이 있으면 통과
+    decision = draft.decision
+    if "requires_human" in change:
+        decision = decision.model_copy(update=change)
+    else:
+        decision = decision.model_copy(update={"next_action": decision.next_action.model_copy(update=change)})
+    draft = draft.model_copy(update={"decision": decision})
+    assert ("HUMAN_CONFIRMATION_OMITTED", ACTION_PATH) in _code_only_issues(request, draft)
+
+
 def test_a_free_text_reply_with_unknown_detail_still_lets_the_supervisor_choose():
     # "구체 범위 먼저" 규칙은 선택형 답변에만 쓴다. 자유글 답변("아직 모름" 포함)은 모델이 고른다(같은 질문 반복 방지).
     calls = []
