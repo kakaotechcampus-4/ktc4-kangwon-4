@@ -1,4 +1,4 @@
-import { type ComponentProps, type ReactNode, useEffect, useRef, useState } from 'react'
+import { type ComponentProps, type ReactNode, useEffect, useId, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 
 import { toAnswerInput, toResultSteps, toResultsEntry, toSubmitOutcome } from '../adapters/results'
@@ -6,6 +6,7 @@ import { Button } from '../components/ui/Button'
 import { HammerLoader } from '../components/ui/HammerLoader'
 import { InfoBox } from '../components/ui/InfoBox'
 import { ProcessingScreen } from '../components/ui/ProcessingScreen'
+import { PillChoices } from '../components/ui/QuestionScreen'
 import { TopBar } from '../components/ui/TopBar'
 import { ApiError, UnauthorizedError } from '../lib/api'
 import { usesMockData } from '../lib/auth'
@@ -19,8 +20,30 @@ import {
 } from '../lib/resultSubmit'
 import { judgmentNeedsDetailCase, moreInfoCase } from '../mocks/currentCase'
 import { resultInput, simulateSubmit } from '../mocks/resultFlow'
-import type { RestorationAnswer, ResultInputKind } from '../types/api'
+import type { DemolitionRequired, RestorationAnswer, RestorationScope, ResultInputKind } from '../types/api'
 import type { FailureNotice, NextAction, SubmitOutcome, SubmitState } from '../types/view'
+
+/**
+ * 원상복구 답의 보기(#197). 값은 서버 값 그대로 보낸다.
+ *
+ * 말투는 시안(M05b "전부 원래대로 해야 한대요")처럼 **임대인에게 들은 말**로 쓴다. 화면이
+ * "임대인이 뭐라고 했나요?"를 묻는데 "~해요"로 답하면 사장님이 스스로 정하는 것처럼 읽힌다.
+ * 어느 쪽도 미리 골라 두지 않는다 — 고르지 않은 답이 들은 말로 들어간다.
+ *
+ * TODO(#55): 제안 문구다. PM 답이 오면 바꾼다.
+ */
+const SCOPE_OPTIONS: { value: RestorationScope; label: string }[] = [
+  { value: 'FULL', label: '전부 원래대로 해야 한대요' },
+  { value: 'PARTIAL', label: '일부만 원래대로 하면 된대요' },
+  { value: 'NOT_REQUIRED', label: '원상복구는 안 해도 된대요' },
+  { value: 'UNKNOWN', label: '범위는 아직 안 정해졌대요' },
+]
+
+const DEMOLITION_OPTIONS: { value: DemolitionRequired; label: string }[] = [
+  { value: 'REQUIRED', label: '철거해야 한대요' },
+  { value: 'NOT_REQUIRED', label: '철거는 안 해도 된대요' },
+  { value: 'UNKNOWN', label: '철거는 아직 안 정해졌대요' },
+]
 
 /**
  * 이 화면이 받는 것.
@@ -88,6 +111,8 @@ export function ResultInputPage() {
   const [text, setText] = useState('')
   const [restorationAnswer, setRestorationAnswer] = useState<Partial<RestorationAnswer>>({})
   const [directInput, setDirectInput] = useState(false)
+  const scopeTitleId = useId()
+  const demolitionTitleId = useId()
   /** 질문마다 적은 답. 질문 문장으로 찾는다 — 같은 질문을 다시 받으면 적었던 답이 그대로 남는다 */
   const [answers, setAnswers] = useState<Record<string, string>>({})
   /**
@@ -460,33 +485,26 @@ export function ResultInputPage() {
         >
           {usingChoices ? (
             <>
-              <fieldset disabled={formLocked} className="flex flex-col gap-2">
-                <legend className="mb-2 text-17 font-bold">원상복구 범위</legend>
-                {([
-                  ['FULL', '전부 원래대로 해야 해요'], ['PARTIAL', '일부만 원상복구하면 돼요'],
-                  ['NOT_REQUIRED', '원상복구가 필요 없어요'], ['UNKNOWN', '범위는 아직 몰라요'],
-                ] as const).map(([value, label]) => (
-                  <label key={value} className="flex items-center gap-3 rounded-14 p-3 ring-1 ring-stroke-neutral-weak">
-                    <input type="radio" name="restoration_scope" value={value}
-                      checked={restorationAnswer.restoration_scope === value}
-                      onChange={() => setRestorationAnswer((current) => ({ ...current, restoration_scope: value }))} />
-                    {label}
-                  </label>
-                ))}
-              </fieldset>
-              <fieldset disabled={formLocked} className="flex flex-col gap-2">
-                <legend className="mb-2 text-17 font-bold">철거 필요 여부</legend>
-                {([
-                  ['REQUIRED', '철거가 필요해요'], ['NOT_REQUIRED', '철거가 필요 없어요'], ['UNKNOWN', '철거 여부는 아직 몰라요'],
-                ] as const).map(([value, label]) => (
-                  <label key={value} className="flex items-center gap-3 rounded-14 p-3 ring-1 ring-stroke-neutral-weak">
-                    <input type="radio" name="demolition_required" value={value}
-                      checked={restorationAnswer.demolition_required === value}
-                      onChange={() => setRestorationAnswer((current) => ({ ...current, demolition_required: value }))} />
-                    {label}
-                  </label>
-                ))}
-              </fieldset>
+              <div className="flex flex-col gap-3">
+                <p id={scopeTitleId} className="text-17 font-bold">원상복구 범위</p>
+                <PillChoices
+                  options={SCOPE_OPTIONS}
+                  selected={restorationAnswer.restoration_scope ?? null}
+                  onSelect={(value) => setRestorationAnswer((current) => ({ ...current, restoration_scope: value }))}
+                  labelledBy={scopeTitleId}
+                  disabled={formLocked}
+                />
+              </div>
+              <div className="flex flex-col gap-3">
+                <p id={demolitionTitleId} className="text-17 font-bold">철거 필요 여부</p>
+                <PillChoices
+                  options={DEMOLITION_OPTIONS}
+                  selected={restorationAnswer.demolition_required ?? null}
+                  onSelect={(value) => setRestorationAnswer((current) => ({ ...current, demolition_required: value }))}
+                  labelledBy={demolitionTitleId}
+                  disabled={formLocked}
+                />
+              </div>
             </>
           ) : questions ? (
             // 질문이 여럿이면 하나만 답해도 보낼 수 있다. 모르는 것까지 적게 하면 지어낸 답이 들어간다
@@ -522,7 +540,7 @@ export function ResultInputPage() {
           )}
           {canChoose && (
             <Button variant="outline" disabled={formLocked} onClick={() => setDirectInput((current) => !current)}>
-              {usingChoices ? '자세히 직접 적기' : '선택해서 답하기'}
+              {usingChoices ? '직접 쓸게요' : '골라서 답할게요'}
             </Button>
           )}
           {/*
