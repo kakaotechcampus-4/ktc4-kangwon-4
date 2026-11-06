@@ -93,6 +93,7 @@ function renderAt(path: string) {
       { path: '/task', element: <p>할 일 상세 화면</p> },
       { path: '/results', element: <p>결과 입력 화면</p> },
       { path: '/login', element: <p>로그인 화면</p> },
+      { path: '/confirm', element: <p>충돌 확인 화면</p> },
     ],
     { initialEntries: [path] },
   )
@@ -322,16 +323,28 @@ describe('CurrentCasePage', () => {
     })
 
     /**
-     * 어긋난 목록을 받아올 API 가 아직 없다. 보내봐야 `/confirm` 이 빈손으로 열려
-     * `/` 로 튕긴다 — 눌리는데 아무 데도 못 가는 버튼이 없는 버튼보다 나쁘다.
+     * 확인 화면은 어긋난 목록을 넘겨받아야 열린다. 목록은 결과 입력이 `GET /cases/results` 로 받아 넘긴다.
+     * 충돌 선택이 실패한 뒤에도 서버는 `CONFLICT` 를 줘서, 이 길이 없으면 홈에서 풀 수 없다(#196)
      */
-    it('확인하러 가는 길은 아직 내보내지 않는다', async () => {
+    it('확인이 필요하면 확인하러 가기로 결과 입력에 보낸다', async () => {
       saveTokens('access-1', 'refresh-1')
       mockCase(envelope({ judgment_status: 'CONFLICT' }))
       renderAt('/case')
 
-      await screen.findByRole('heading', { level: 2, name: '확인이 필요한 내용이 있어요' })
-      expect(screen.queryByRole('link', { name: /확인/ })).not.toBeInTheDocument()
+      fireEvent.click(await screen.findByRole('button', { name: '확인하러 가기' }))
+
+      expect(await screen.findByText('결과 입력 화면')).toBeInTheDocument()
+    })
+
+    /** Mock 은 서버가 없어 결과 입력이 확인 화면으로 넘겨 주지 못한다. 확인 화면은 Mock 이면 예시 충돌로 열린다 */
+    it('Mock 에서는 확인하러 가기가 확인 화면으로 바로 간다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      vi.stubGlobal('fetch', vi.fn())
+      renderAt('/case?mock=judgment-conflict')
+
+      fireEvent.click(await screen.findByRole('button', { name: '확인하러 가기' }))
+
+      expect(await screen.findByText('충돌 확인 화면')).toBeInTheDocument()
     })
 
     /**

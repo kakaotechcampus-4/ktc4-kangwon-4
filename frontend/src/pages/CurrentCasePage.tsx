@@ -318,9 +318,12 @@ function judgmentCard(judgment: JudgmentView, waitedTooLong: boolean): JudgmentC
       }
 
     /*
-      어긋난 항목이 응답에 없어서(#66) 무엇과 무엇이 다른지는 아직 못 보여준다.
-      `/confirm` 으로 보내는 버튼은 달지 않는다. 어긋난 목록을 받아올 API 가 없어서
-      그 화면이 빈손으로 열리고 `/` 로 튕긴다 — 되지 않는 일을 버튼으로 약속하지 않는다.
+      어긋난 항목이 `GET /cases` 응답에 없어서(#66) 무엇과 무엇이 다른지는 여기서 못 보여준다.
+      [확인하러 가기]는 결과 입력(`/results`)으로 보낸다. 결과 입력은 `GET /cases/results` 로 어긋난 목록을
+      받아 확인 화면(`/confirm`)으로 넘긴다 — 확인 화면은 목록을 넘겨받아야 열려서 바로 갈 수 없다.
+
+      서버는 충돌 선택이 실패해도 충돌이 남아 있으면 `CONFLICT` 를 준다(#196). 이 버튼이 없으면 확인 화면을
+      떠난 뒤 홈에서 풀 길이 없다.
     */
     case 'CONFLICT':
       return {
@@ -330,9 +333,9 @@ function judgmentCard(judgment: JudgmentView, waitedTooLong: boolean): JudgmentC
           icon: CRITICAL_ICON,
           badge: '확인 필요',
           title: '확인이 필요한 내용이 있어요',
-          description:
-            '알려주신 내용이 저장된 기록과 달라서, 어느 쪽이 맞는지 여쭤봐야 해요. 확인하시는 화면을 준비하고 있습니다.',
+          description: '알려주신 내용이 저장된 기록과 달라서, 어느 쪽이 맞는지 여쭤봐야 해요.',
         },
+        main: (stale) => <AnswerButton locked={stale} label="확인하러 가기" mockPathname="/confirm" />,
       }
 
     /*
@@ -418,13 +421,23 @@ function TaskButton({ hasQuestions, locked }: { hasQuestions: boolean; locked: b
  *
  * 최신 상태를 확인하지 못했으면 잠근다 — 이미 지난 질문에 답하게 된다.
  */
-function AnswerButton({ locked, label = '답하러 가기' }: { locked: boolean; label?: string }) {
+function AnswerButton({
+  locked,
+  label = '답하러 가기',
+  mockPathname,
+}: {
+  locked: boolean
+  label?: string
+  /** Mock 은 서버가 없어 결과 입력이 다음 화면을 정해 주지 못한다. 그때 바로 갈 곳(충돌 확인) */
+  mockPathname?: string
+}) {
   const navigate = useNavigate()
   const { search } = useLocation()
+  const pathname = mockPathname !== undefined && usesMockData(search) ? mockPathname : '/results'
 
   return (
     <>
-      <Button size="lg" disabled={locked} onClick={() => navigate({ pathname: '/results', search }, { viewTransition: true })}>
+      <Button size="lg" disabled={locked} onClick={() => navigate({ pathname, search }, { viewTransition: true })}>
         {label}
       </Button>
       {locked && (
