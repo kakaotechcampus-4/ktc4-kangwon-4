@@ -6,6 +6,7 @@
 --   docker compose -f docker-compose.prod.yml exec -T mysql mysql --defaults-extra-file=/run/secrets/mysql_health_cnf --init-command="SET @member_id = 7" closure_agent < backend/sql/reset_member_case.sql
 -- 회원 번호 찾기: SELECT m.id, m.nickname, c.id AS case_id FROM members m LEFT JOIN `case` c ON c.member_id = m.id;
 -- 번호를 안 넘기면 @member_id가 비어 있어 아무것도 지우지 않는다.
+-- 끝에 지운 회원·Case 번호를 한 줄 보여 준다. case_id가 NULL이면 지운 게 없다(번호를 안 넘겼거나 Case가 없는 회원).
 --
 -- 한 트랜잭션이라 중간에 실패하면 아무것도 지워지지 않는다. Case가 없는 회원이면 아무 일도 없다.
 -- 올린 서류 파일(document_data 볼륨)은 지우지 않는다. 새 Case는 다른 폴더를 써서 섞이지 않는다.
@@ -37,5 +38,8 @@ DELETE FROM support_match WHERE case_id = @case_id;
 DELETE FROM blocker WHERE case_id = @case_id;
 DELETE FROM case_history WHERE case_id = @case_id;
 DELETE FROM `case` WHERE id = @case_id;
+
+-- 아무 말 없이 끝나면 지웠는지 번호가 안 넘어갔는지 구분이 안 된다(현종님 #224)
+SELECT @member_id AS member_id, @case_id AS case_id;
 
 COMMIT;

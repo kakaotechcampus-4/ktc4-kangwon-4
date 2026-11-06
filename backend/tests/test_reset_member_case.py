@@ -16,7 +16,7 @@ from case_world import case_engine, case_world  # noqa: F401
 RESET_SQL = Path(__file__).resolve().parents[1] / "sql" / "reset_member_case.sql"
 
 
-def _reset(engine, member_id: int | None) -> None:
+def _reset(engine, member_id: int | None) -> tuple:
     """운영에서 mysql 클라이언트로 넣는 것처럼 파일 전체를 한 번에 보낸다. 회원 번호는 --init-command처럼 접속할 때 넘긴다."""
 
     url = engine.url
@@ -28,13 +28,20 @@ def _reset(engine, member_id: int | None) -> None:
         # SQL 안의 START TRANSACTION이 없어도 검사가 통과해 버린다
         autocommit=True,
     )
+    shown = []
     try:
         with connection.cursor() as cursor:
             cursor.execute(RESET_SQL.read_text(encoding="utf-8"))
-            while cursor.nextset():
-                pass
+            while True:
+                if cursor.description:
+                    shown.extend(cursor.fetchall())
+                if not cursor.nextset():
+                    break
     finally:
         connection.close()
+    # 넣는 사람이 화면에서 보는 한 줄: (회원 번호, 지운 Case 번호)
+    (row,) = shown
+    return row
 
 
 def _fill_every_case_table(engine, case_id: int, history_id: int, support_item_id: int) -> None:
@@ -119,7 +126,7 @@ def test_reset_removes_only_that_members_case(case_world):
     # 모든 표에 행이 있어야 지웠는지 볼 수 있다
     assert all(_rows_of(case_world.engine, cases["demo"][1]).values()) and all(other_before.values())
 
-    _reset(case_world.engine, cases["demo"][0])
+    assert _reset(case_world.engine, cases["demo"][0]) == cases["demo"]
 
     assert not any(_rows_of(case_world.engine, cases["demo"][1]).values())
     assert _rows_of(case_world.engine, cases["other"][1]) == other_before
@@ -133,7 +140,8 @@ def test_reset_of_a_member_without_a_case_changes_nothing(case_world):
     _, case_id, _ = case_world.sign_up()
     before = _rows_of(case_world.engine, case_id)
 
-    _reset(case_world.engine, case_world.stranger())
+    stranger = case_world.stranger()
+    assert _reset(case_world.engine, stranger) == (stranger, None)
 
     assert _rows_of(case_world.engine, case_id) == before
 
@@ -143,7 +151,8 @@ def test_reset_without_a_member_id_changes_nothing(case_world):
     _, case_id, _ = case_world.sign_up()
     before = _rows_of(case_world.engine, case_id)
 
-    _reset(case_world.engine, None)
+    # 지운 게 없다는 걸 화면에서 알 수 있다
+    assert _reset(case_world.engine, None) == (None, None)
 
     assert _rows_of(case_world.engine, case_id) == before
 
