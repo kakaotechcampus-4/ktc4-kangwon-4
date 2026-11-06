@@ -8,7 +8,7 @@ import {
   TimeoutError,
   UnauthorizedError,
 } from './api'
-import { createOAuthState, getAccessToken, getRefreshToken, logInWithMock, saveTokens } from './auth'
+import { createOAuthState, getAccessToken, getRefreshToken, logInWithMock, logOut, saveTokens } from './auth'
 
 function jsonResponse(body: unknown, init: ResponseInit = {}) {
   return new Response(JSON.stringify(body), { status: 200, ...init })
@@ -356,6 +356,71 @@ describe('request — 로그인 다시 받기', () => {
     const sent = fetchMock.mock.calls.filter(([url]) => url.endsWith('/cases/documents'))
     expect(sent).toHaveLength(2)
     expect(sent[1][1].body).toBe(form)
+  })
+
+  it.each([
+    ['로그아웃', '정상'], ['로그아웃', '거절'], ['로그아웃', '헤더 누락'],
+    ['새 세션', '정상'], ['새 세션', '거절'], ['새 세션', '헤더 누락'],
+  ])('재발급 중 %s이면 늦은 %s 응답은 현재 세션을 바꾸거나 재전송하지 않는다', async (change, reply) => {
+    saveTokens('access-1', 'refresh-1')
+    let settle!: (response: Response) => void
+    const delayed = new Promise<Response>((resolve) => { settle = resolve })
+    const fetchMock = serve(() => delayed)
+    const pending = request('/cases')
+    await vi.waitFor(() => expect(reissueCalls(fetchMock)).toHaveLength(1))
+    if (change === '로그아웃') logOut()
+    else saveTokens('new-session-access', 'new-session-refresh')
+    settle(reply === '정상' ? renewed() : new Response(null, { status: reply === '거절' ? 401 : 200 }))
+    await expect(pending).rejects.toMatchObject({ status: 409 })
+    expect(getAccessToken()).toBe(change === '로그아웃' ? null : 'new-session-access')
+    expect(getRefreshToken()).toBe(change === '로그아웃' ? null : 'new-session-refresh')
+    expect(fetchMock.mock.calls.filter(([url]) => !isReissue(url))).toHaveLength(1)
+  })
+
+  it('이전 세션의 재발급이 끝나도 새 세션의 동시 요청은 새 재발급 한 건을 함께 기다린다', async () => {
+    saveTokens('access-1', 'refresh-1')
+    let finishOld!: (response: Response) => void
+    let finishNew!: (response: Response) => void
+    const oldResponse = new Promise<Response>((resolve) => { finishOld = resolve })
+    const newResponse = new Promise<Response>((resolve) => { finishNew = resolve })
+    const fetchMock = vi.fn(async (url: string, init: RequestInit) => {
+      const headers = new Headers(init.headers)
+      if (isReissue(url)) return headers.get('Refresh-Token') === 'refresh-1' ? oldResponse : newResponse
+      return headers.get('Access-Token') === 'new-access-2' ? jsonResponse({ ok: true }) : new Response(null, { status: 401 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const old = request('/cases').catch((error: unknown) => error)
+    await vi.waitFor(() => expect(reissueCalls(fetchMock)).toHaveLength(1))
+    saveTokens('new-access-1', 'new-refresh-1')
+    const first = request('/cases/logs')
+    await vi.waitFor(() => expect(reissueCalls(fetchMock)).toHaveLength(2))
+    finishOld(renewed())
+    expect(await old).toMatchObject({ status: 409 })
+    const second = request('/cases/roadmap')
+    await vi.waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => !isReissue(url))).toHaveLength(3))
+    expect(reissueCalls(fetchMock)).toHaveLength(2)
+    finishNew(new Response(null, { status: 200, headers: { 'Access-Token': 'new-access-2', 'Refresh-Token': 'new-refresh-2' } }))
+    expect((await Promise.all([first, second])).map((response) => response.status)).toEqual([200, 200])
+    expect(getAccessToken()).toBe('new-access-2')
+    expect(getRefreshToken()).toBe('new-refresh-2')
+  })
+
+  it('재전송한 요청의 늦은 401도 새 세션을 로그아웃시키지 않는다', async () => {
+    saveTokens('access-1', 'refresh-1')
+    let finish!: (response: Response) => void
+    const retry = new Promise<Response>((resolve) => { finish = resolve })
+    const fetchMock = vi.fn(async (url: string, init: RequestInit) => {
+      if (isReissue(url)) return renewed()
+      return new Headers(init.headers).get('Access-Token') === 'access-2' ? retry : new Response(null, { status: 401 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const pending = request('/cases')
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
+    saveTokens('new-session-access', 'new-session-refresh')
+    finish(new Response(null, { status: 401 }))
+    await expect(pending).rejects.toMatchObject({ status: 409 })
+    expect(getAccessToken()).toBe('new-session-access')
+    expect(getRefreshToken()).toBe('new-session-refresh')
   })
 })
 

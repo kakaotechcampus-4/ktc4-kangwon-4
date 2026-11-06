@@ -91,19 +91,14 @@ interface RequestOptions {
  * 못 쓰는 토큰을 들고 있으면 다음 요청도 똑같이 막힌다.
  */
 export async function request(path: string, options: RequestOptions = {}) {
-  const sentWith = getAccessToken()
-  let response = await send(path, options, sentWith)
+  const sentWith = readTokens()
+  let response = await send(path, options, sentWith.access)
 
   if (response.status === 401) {
-    if (!(await renewedAfter(path, sentWith))) {
-      logOut()
-      throw new UnauthorizedError()
-    }
-    response = await send(path, options, getAccessToken())
-    if (response.status === 401) {
-      logOut()
-      throw new UnauthorizedError()
-    }
+    const renewed = await renewedAfter(path, sentWith)
+    assertCurrentTokens(renewed)
+    response = await send(path, options, renewed.access)
+    if (response.status === 401) rejectAuthentication(renewed)
   }
 
   if (!response.ok) throw new ApiError(response.status, `요청이 실패했습니다 (${response.status})`)
@@ -145,54 +140,80 @@ function send(
 
 const REISSUE_PATH = '/reissue'
 
+type Tokens = { access: string | null; refresh: string | null }
+
+function readTokens(): Tokens {
+  return { access: getAccessToken(), refresh: getRefreshToken() }
+}
+
+function sameTokens(left: Tokens, right: Tokens): boolean {
+  return left.access === right.access && left.refresh === right.refresh
+}
+
+/** 그사이 끝났거나 바뀐 세션의 응답으로 현재 로그인을 덮거나 지우지 않는다. */
+function assertCurrentTokens(tokens: Tokens): void {
+  if (!sameTokens(tokens, readTokens())) throw new ApiError(409, '로그인 상태가 바뀌었습니다.')
+}
+
+function rejectAuthentication(tokens: Tokens): never {
+  assertCurrentTokens(tokens)
+  logOut()
+  throw new UnauthorizedError()
+}
+
 /**
  * 401을 받은 뒤 새 토큰이 생겼는지. 생겼으면 다시 보내면 된다.
  *
  * 보낼 때 쓴 토큰이 그사이 바뀌었으면 다른 요청이 이미 새로 받은 것이라 또 받지 않는다.
  * 다시 받기 자신이 401이면 받을 길이 없다.
  */
-async function renewedAfter(path: string, sentWith: string | null): Promise<boolean> {
-  if (path === REISSUE_PATH) return false
-  const current = getAccessToken()
-  if (current !== null && current !== sentWith) return true
-  return reissueTokens()
+async function renewedAfter(path: string, sentWith: Tokens): Promise<Tokens> {
+  if (path === REISSUE_PATH) rejectAuthentication(sentWith)
+  const current = readTokens()
+  if (current.access !== null && current.access !== sentWith.access) return current
+  assertCurrentTokens(sentWith)
+  return reissueTokens(sentWith)
 }
 
 /** 지금 진행 중인 다시 받기. 여럿이 동시에 401을 받아도 다시 받기는 하나만 나간다 */
-let reissuing: Promise<boolean> | null = null
+let reissuing: { tokens: Tokens; promise: Promise<Tokens> } | null = null
 
 /**
- * 로그인 토큰을 새로 받는다(`POST /reissue`). 받았으면 `true`.
+ * 로그인 토큰을 새로 받는다(`POST /reissue`). 받은 토큰을 돌려준다.
  *
  * **한 번에 하나만 보낸다.** 서버는 Refresh 토큰을 쓸 때마다 새것으로 바꾸고 마지막 하나만 기억한다.
  * 동시에 둘이 보내면 뒤의 것은 이미 바뀐 옛 토큰을 보내 401이 되고, 사장님은 로그아웃된다.
  *
  * Refresh 토큰이 없으면(가짜 세션 · 로그아웃) 받지 않는다. 서버가 거절하거나 새 토큰을 읽지 못하면
- * `false` — 부른 쪽이 로그아웃시킨다. 연결 실패 · 5xx 는 토큰을 그대로 두고 오류를 올린다.
+ * 같은 세션인 경우에만 로그아웃시킨다. 연결 실패 · 5xx 는 토큰을 그대로 두고 오류를 올린다.
  * 서버가 거절한 게 아니라 답을 못 받은 것이라, 지우면 잠깐 끊긴 연결로 로그아웃된다.
  */
-function reissueTokens(): Promise<boolean> {
-  reissuing ??= renew().finally(() => {
-    reissuing = null
+function reissueTokens(tokens: Tokens): Promise<Tokens> {
+  if (reissuing !== null && sameTokens(reissuing.tokens, tokens)) return reissuing.promise
+  const pending = { tokens, promise: renew(tokens) }
+  pending.promise = pending.promise.finally(() => {
+    // 이전 세션의 응답이 늦게 끝나도 새 세션의 진행 중 재발급은 유지한다.
+    if (reissuing === pending) reissuing = null
   })
-  return reissuing
+  reissuing = pending
+  return pending.promise
 }
 
-async function renew(): Promise<boolean> {
-  const refresh = getRefreshToken()
-  if (refresh === null) return false
+async function renew(tokens: Tokens): Promise<Tokens> {
+  if (tokens.refresh === null) rejectAuthentication(tokens)
 
-  const response = await send(REISSUE_PATH, { method: 'POST' }, null, { 'Refresh-Token': refresh })
-  if (response.status === 401) return false
+  const response = await send(REISSUE_PATH, { method: 'POST' }, null, { 'Refresh-Token': tokens.refresh })
+  assertCurrentTokens(tokens)
+  if (response.status === 401) rejectAuthentication(tokens)
   if (!response.ok) throw new ApiError(response.status, `로그인을 이어 가지 못했습니다 (${response.status})`)
 
   const access = response.headers.get('Access-Token')
   const nextRefresh = response.headers.get('Refresh-Token')
   // 서버는 이미 Refresh 토큰을 바꿨다. 새 값을 못 읽으면 들고 있는 것은 더 쓸 수 없다
-  if (access === null || nextRefresh === null) return false
+  if (access === null || nextRefresh === null) rejectAuthentication(tokens)
 
   saveTokens(access, nextRefresh)
-  return true
+  return { access, refresh: nextRefresh }
 }
 
 /**
