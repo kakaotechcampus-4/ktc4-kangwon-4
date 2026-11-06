@@ -302,6 +302,9 @@ def get_case_results_entry(session: Session, member_id: int) -> CaseResultsEntry
     if latest_history.judgment_status == "DONE":
         return CaseResultsEntryResponse(
             judgment_status="DONE",
+            result_input_kind=(
+                "RESTORATION_ANSWER" if latest_history.next_action_code == "CONFIRM_RESTORATION_SCOPE" else "TEXT"
+            ),
             case_history_id=latest_history.id,
             next_action=(
                 NextActionResponse(
@@ -407,11 +410,31 @@ def submit_case_results(
     if submit_request.case_history_id != latest_history.id:
         raise HTTPException(status_code=409, detail="최신 판단에 대해 요청을 주지 않았습니다.")
 
+    answer = submit_request.restoration_answer
+    if answer is not None:
+        current_action = (
+            latest_history.judgment_status == "DONE"
+            and latest_history.next_action_code == "CONFIRM_RESTORATION_SCOPE"
+            and latest_history.next_action is not None
+        )
+        # 실패 이력에는 다음 행동이 없다. 이미 접수한 선택값을 그대로 다시 보낼 때만 허용한다.
+        retrying_same_answer = (
+            latest_history.source == "USER_INPUT"
+            and latest_history.judgment_status == "FAILED"
+            and latest_history.recovery_action_code == "RETRY"
+            and latest_history.retryable is True
+            and latest_history.restoration_answer == answer.model_dump(mode="json")
+            and latest_history.raw_input == answer.to_input_text()
+        )
+        if not (current_action or retrying_same_answer):
+            raise HTTPException(status_code=422, detail="현재 할 일에는 선택형 원상복구 답변을 보낼 수 없습니다.")
+
     history = case_history_crud.create_case_history(
         session,
         CaseHistory(
             case_id=case.id,
-            raw_input=submit_request.raw_input,
+            raw_input=answer.to_input_text() if answer is not None else submit_request.raw_input,
+            restoration_answer=answer.model_dump(mode="json") if answer is not None else None,
             source="USER_INPUT",
             judgment_status="PENDING",
         ),

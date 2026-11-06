@@ -155,6 +155,23 @@ class ReviewTool:
         self._max_output_attempts = max_output_attempts
         self._provider_max_retries = provider_max_retries
 
+    async def review_code_only(self, subject: ReviewSubject) -> ReviewResult:
+        """모델 없이 무결성·코드 안전 검사만 한다. 어떤 판단에 쓸지는 graph가 정한다."""
+        context = _validate_integrity(subject)
+        deterministic = _deterministic_safety_review(
+            subject,
+            context,
+            resolve_procedure_bindings(subject.known_procedure_steps, self._procedure_bindings),
+        )
+        no_model = _coerce_model_output(
+            ReviewProviderOutput(
+                verdict="PASS", issues=[], missing_evidence=[], recommended_rework_targets=[],
+                resolution_reason="모델이 쓴 사실·문장이 없어 코드 검사만 했습니다.",
+            ),
+            subject,
+        )
+        return _finalize_result(subject, no_model, deterministic)
+
     async def review(self, subject: ReviewSubject) -> ReviewResult:
         context = _validate_integrity(subject)
         procedure_bindings = resolve_procedure_bindings(

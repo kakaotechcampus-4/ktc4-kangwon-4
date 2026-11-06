@@ -40,6 +40,8 @@ class TraceEvent:
     # A successful Review call may return REVISE; status describes execution,
     # while this bounded value records the independent review decision.
     review_verdict: Literal["PASS", "REVISE"] | None = None
+    # 모델이 쓴 사실·문장이 없는 판단은 Review 모델 없이 코드 검사만 한다(CODE_ONLY).
+    review_mode: Literal["MODEL", "CODE_ONLY"] | None = None
     # RUN-only totals: returned verdicts, returned REVISE verdicts, and distinct
     # rework rounds that actually reached a component call after its deadline check.
     # Failed review calls are not verdicts and do not enter review_count.

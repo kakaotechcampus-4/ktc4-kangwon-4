@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react'
 import { RouterProvider, createMemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { CaseResultsEntryResponse, CaseResultsSubmitResponse } from '../types/api'
+import type { CaseResultsEntryResponse, CaseResultsSubmitRequest, CaseResultsSubmitResponse } from '../types/api'
 import { ResultInputPage } from './ResultInputPage'
 
 /**
@@ -101,12 +101,13 @@ function serve({ entry = [], submit = [], judged = [] }: Partial<Record<'entry' 
 function sentBodies(fetchMock: ReturnType<typeof serve>) {
   return fetchMock.mock.calls
     .filter(([, init]) => init.method === 'POST')
-    .map(([, init]) => JSON.parse(init.body as string) as { case_history_id: number; raw_input: string })
+    .map(([, init]) => JSON.parse(init.body as string) as CaseResultsSubmitRequest)
 }
 
 function entryBody(overrides: Partial<CaseResultsEntryResponse>): CaseResultsEntryResponse {
   return {
     judgment_status: 'DONE',
+    result_input_kind: 'TEXT',
     case_history_id: 12,
     raw_input: null,
     conflicts: null,
@@ -136,7 +137,7 @@ function judgedBody(overrides: Partial<CaseResultsSubmitResponse>): CaseResultsS
 
 const READY = json(entryBody({}))
 const ACCEPTED = json({ case_history_id: 13 })
-const INTERVAL_MS = 10_000
+const INTERVAL_MS = 3_000
 
 /**
  * 서버를 부르는 경로. 들어올 때 지금 판단을 묻고, 보낸 뒤 판단이 끝날 때까지 기다린다.
@@ -146,6 +147,76 @@ const INTERVAL_MS = 10_000
 describe('ResultInputPage — 서버', () => {
   beforeEach(() => {
     vi.useFakeTimers()
+  })
+
+  it('선택을 기본으로 채우지 않고 두 항목을 고른 뒤에만 선택값을 전송한다', async () => {
+    const fetchMock = serve({
+      entry: [json(entryBody({ result_input_kind: 'RESTORATION_ANSWER' }))],
+      submit: [ACCEPTED], judged: [json(judgedBody({ result: 'PENDING' }))],
+    })
+    renderFlow()
+    await advance()
+    expect(screen.getAllByRole('radio').every((radio) => !(radio as HTMLInputElement).checked)).toBe(true)
+    expect(screen.getByRole('button', { name: '보내기' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('radio', { name: '일부만 원상복구하면 돼요' }))
+    expect(screen.getByRole('button', { name: '보내기' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('radio', { name: '철거가 필요 없어요' }))
+    expect(sentBodies(fetchMock)).toEqual([])
+    fireEvent.click(screen.getByRole('button', { name: '보내기' }))
+    await advance()
+    expect(sentBodies(fetchMock)).toEqual([{ case_history_id: 12, restoration_answer: {
+      restoration_scope: 'PARTIAL', demolition_required: 'NOT_REQUIRED',
+    } }])
+  })
+
+  it('모름도 직접 선택할 수 있고 충돌 응답은 확인 화면으로 보낸다', async () => {
+    const fetchMock = serve({
+      entry: [json(entryBody({ result_input_kind: 'RESTORATION_ANSWER' }))], submit: [ACCEPTED],
+      judged: [json(judgedBody({ result: 'CONFLICT', raw_input: '선택한 답변', conflicts: [
+        { id: 1, field: 'demolition_required', stored_value: 'REQUIRED', proposed_value: 'NOT_REQUIRED' },
+      ] }))],
+    })
+    const router = renderFlow()
+    await advance()
+    fireEvent.click(screen.getByRole('radio', { name: '범위는 아직 몰라요' }))
+    fireEvent.click(screen.getByRole('radio', { name: '철거가 필요 없어요' }))
+    fireEvent.click(screen.getByRole('button', { name: '보내기' }))
+    await advance()
+    expect(sentBodies(fetchMock)[0]).toEqual({ case_history_id: 12, restoration_answer: {
+      restoration_scope: 'UNKNOWN', demolition_required: 'NOT_REQUIRED',
+    } })
+    await advance(INTERVAL_MS)
+    expect(router.state.location.pathname).toBe('/confirm')
+  })
+
+  it('직접 입력과 선택을 오가도 초안을 보존하고 현재 입력 방식만 전송한다', async () => {
+    const fetchMock = serve({
+      entry: [json(entryBody({ result_input_kind: 'RESTORATION_ANSWER' }))],
+      submit: [status(422)],
+    })
+    renderFlow()
+    await advance()
+    fireEvent.click(screen.getByRole('radio', { name: '일부만 원상복구하면 돼요' }))
+    fireEvent.click(screen.getByRole('radio', { name: '철거 여부는 아직 몰라요' }))
+    fireEvent.click(screen.getByRole('button', { name: '자세히 직접 적기' }))
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '간판만 떼면 된대요' } })
+    fireEvent.click(screen.getByRole('button', { name: '선택해서 답하기' }))
+    expect(screen.getByRole('radio', { name: '일부만 원상복구하면 돼요' })).toBeChecked()
+    expect(screen.getByRole('radio', { name: '철거 여부는 아직 몰라요' })).toBeChecked()
+    fireEvent.click(screen.getByRole('button', { name: '자세히 직접 적기' }))
+    expect(screen.getByRole('textbox')).toHaveValue('간판만 떼면 된대요')
+    fireEvent.click(screen.getByRole('button', { name: '보내기' }))
+    await advance()
+    expect(sentBodies(fetchMock)).toEqual([{ case_history_id: 12, raw_input: '간판만 떼면 된대요' }])
+    expect(screen.getByRole('textbox')).toHaveValue('간판만 떼면 된대요')
+  })
+
+  it('정정 화면은 서버가 선택형을 제공해도 직접 입력을 사용한다', async () => {
+    serve({ entry: [json(entryBody({ result_input_kind: 'RESTORATION_ANSWER' }))] })
+    renderFlow('/results?fix=1')
+    await advance()
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument()
+    expect(screen.getByRole('textbox')).toBeInTheDocument()
   })
 
   describe('들어올 때', () => {

@@ -126,6 +126,7 @@ async def run_judgment(
         ),
         # TODO: 프론트가 자기 쪽 이벤트 식별자를 보내주기로 하면 그 값을 넣는다. 아직 미협의.
         client_event_id=None,
+        restoration_answer=history.restoration_answer,
     )
 
     # AI 호출은 AI팀이 공개한 입구 하나로만 한다(app/common/agent_service.py). 런타임을 우리가

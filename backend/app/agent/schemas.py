@@ -925,6 +925,27 @@ class ConflictCandidate(AgentSchema):
         return handler(self)
 
 
+class RestorationAnswer(AgentSchema):
+    """사장님이 직접 고른 값. 법적 판단이나 철거 여부를 추론하지 않는다."""
+
+    restoration_scope: Literal["FULL", "PARTIAL", "NOT_REQUIRED", "UNKNOWN"]
+    demolition_required: Literal["REQUIRED", "NOT_REQUIRED", "UNKNOWN"]
+
+    def to_input_text(self) -> str:
+        scope = {
+            "FULL": "원상복구 범위는 전부입니다.",
+            "PARTIAL": "원상복구 범위는 일부입니다.",
+            "NOT_REQUIRED": "원상복구는 필요하지 않습니다.",
+            "UNKNOWN": "원상복구 범위는 아직 확인하지 못했습니다.",
+        }
+        demolition = {
+            "REQUIRED": "철거가 필요합니다.",
+            "NOT_REQUIRED": "철거가 필요하지 않습니다.",
+            "UNKNOWN": "철거 필요 여부는 아직 확인하지 못했습니다.",
+        }
+        return scope[self.restoration_scope] + "\n" + demolition[self.demolition_required]
+
+
 class InfoAnalysisInput(AgentSchema):
     """Complete request schema accepted by ``InfoAnalysisAgent.analyze``."""
 
@@ -934,6 +955,8 @@ class InfoAnalysisInput(AgentSchema):
             "a confirmed conflict without extracting new facts."
         )
     )
+    # 없던 칸을 null로 직렬화하면 과거 검수·충돌 기록의 지문이 달라진다.
+    restoration_answer: RestorationAnswer | None = Field(default=None, exclude_if=lambda value: value is None)
     case_snapshot: CaseSnapshot = Field(
         description="Immutable Case read view used as the analysis baseline."
     )
@@ -967,6 +990,12 @@ class InfoAnalysisInput(AgentSchema):
 
     @model_validator(mode="after")
     def validate_input(self) -> InfoAnalysisInput:
+        if self.restoration_answer is not None and (
+            self.input is None or self.conflict_confirmation is not None
+            or self.input.source_type != InputSourceType.USER_INPUT
+            or self.input.redacted_text != self.restoration_answer.to_input_text()
+        ):
+            raise ValueError("restoration answer requires its exact USER_INPUT text")
         if self.conflict_confirmation is not None:
             if self.input is not None:
                 raise ValueError("confirmation must not replay the rejected user text")
@@ -1824,6 +1853,7 @@ class CaseCreatedTrigger(AgentSchema):
 
 class ResultSubmittedTrigger(AgentSchema):
     trigger_type: Literal["RESULT_SUBMITTED"]
+    restoration_answer: RestorationAnswer | None = Field(default=None, exclude_if=lambda value: value is None)
     procedure_completion_confirmation: ProcedureCompletionConfirmation | None = None
     input_event_id: NonEmptyStr
     client_event_id: NonEmptyStr | None = Field(
@@ -1839,6 +1869,12 @@ class ResultSubmittedTrigger(AgentSchema):
     def validate_event(self) -> ResultSubmittedTrigger:
         if self.input.input_event_id != self.input_event_id:
             raise ValueError("trigger and input event IDs must match")
+        if self.restoration_answer is not None and (
+            self.input.source_type != InputSourceType.USER_INPUT
+            or self.input.redacted_text != self.restoration_answer.to_input_text()
+            or self.procedure_completion_confirmation is not None
+        ):
+            raise ValueError("restoration answer requires its exact USER_INPUT text only")
         if (
             self.procedure_completion_confirmation is not None
             and self.procedure_completion_confirmation.input.input_event_id == self.input_event_id
@@ -2589,8 +2625,10 @@ def _model_field_values(
     excluded = exclude or set()
     return {
         field_name: getattr(value, field_name)
-        for field_name in type(value).model_fields
+        for field_name, field in type(value).model_fields.items()
         if field_name not in excluded
+        # 새 선택값이 없는 과거 입력은 직렬화뿐 아니라 검수 지문에서도 같은 모양이다.
+        and not (field.exclude_if is not None and field.exclude_if(getattr(value, field_name)))
     }
 
 
@@ -2696,6 +2734,7 @@ __all__ = [
     "RedactionType",
     "RequiredDocument",
     "ResultSubmittedTrigger",
+    "RestorationAnswer",
     "RetainedInfoResult",
     "ReviewIssue",
     "ReviewIssueCode",

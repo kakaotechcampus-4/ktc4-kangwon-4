@@ -35,7 +35,7 @@ from app.common.agent_data import (
     load_reviewed_procedures,
 )
 from app.common.agent_dto import (
-    CaseSnapshot, DocumentContext, RedactedInput, document_input_text, document_replan_text,
+    CaseSnapshot, DocumentContext, RedactedInput, RestorationAnswer, document_input_text, document_replan_text,
 )
 from app.common.agent_service import (
     build_conflict_input,
@@ -118,6 +118,40 @@ def case_snapshot():
 
 # 1. Bindings. BE's step_code is its own ("BUSINESS_CLOSURE_REPORT"), so the
 # mapping is supplied, never guessed from a name or alias.
+def test_restoration_answer_requires_matching_text_and_result_trigger():
+    from app.agent.schemas import canonical_digest
+
+    answer = RestorationAnswer(restoration_scope="PARTIAL", demolition_required="NOT_REQUIRED")
+    request = build_planning_input(trigger_type="RESULT_SUBMITTED", case_snapshot=case_snapshot(),
+                                   user_input=redacted_input(redacted_text=answer.to_input_text()),
+                                   restoration_answer=answer)
+    assert request.trigger.restoration_answer == answer
+    assert request.model_dump()["trigger"]["restoration_answer"] == answer.model_dump()
+    assert canonical_digest(request.trigger) != canonical_digest(request.trigger.model_copy(update={"restoration_answer": None}))
+    with pytest.raises(ValidationError, match="exact USER_INPUT text"):
+        build_planning_input(trigger_type="RESULT_SUBMITTED", case_snapshot=case_snapshot(),
+                             user_input=redacted_input(), restoration_answer=answer)
+    with pytest.raises(ValueError, match="requires RESULT_SUBMITTED"):
+        build_planning_input(trigger_type="CASE_CREATED", case_snapshot=case_snapshot(),
+                             user_input=redacted_input(), restoration_answer=answer)
+
+
+def test_restoration_answer_absence_keeps_legacy_serialization_unchanged():
+    from pydantic import create_model
+    from app.agent.schemas import AgentSchema, ResultSubmittedTrigger, canonical_digest
+
+    request = build_planning_input(trigger_type="RESULT_SUBMITTED", case_snapshot=case_snapshot(),
+                                   user_input=redacted_input())
+    assert "restoration_answer" not in request.model_dump()["trigger"]
+    assert "restoration_answer" not in request.model_dump(mode="json")["trigger"]
+    legacy_type = create_model("LegacyResultSubmittedTrigger", __base__=AgentSchema, **{
+        name: (field.annotation, field) for name, field in ResultSubmittedTrigger.model_fields.items()
+        if name != "restoration_answer"
+    })
+    legacy = legacy_type.model_validate(request.trigger.model_dump())
+    assert canonical_digest(request.trigger) == canonical_digest(legacy)
+
+
 def test_bindings_reject_one_step_bound_twice():
     steps = known(row(11, "TAX_CLOSE_V2"))
     ref = ProcedureStepRef(procedure_step_id=11, step_code="TAX_CLOSE_V2")

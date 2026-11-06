@@ -13,10 +13,10 @@ from test_info_replanning import Responses, finding, output
 from test_procedure_only_graph import graph_run_inputs
 
 
-def run_until_conflict(*, held=False):
+def run_until_conflict(*, held=False, completed=False):
     graph, request, _, _, _ = graph_run_inputs("RESULT_SUBMITTED")
     lines = ["자가가 아니라 무상 임차예요.", "폐업 예정일은 2026-12-20입니다.",
-             "사업자 폐업신고 서류를 제출했어요."]
+             "사업자 폐업신고 처리가 완료됐어요." if completed else "사업자 폐업신고 서류를 제출했어요."]
     request.trigger.input.redacted_text = " ".join(lines)
     first = output([finding("FILE_TAX_BUSINESS_CLOSURE", "doc1")])
     first["facts"] = [{
@@ -28,11 +28,15 @@ def run_until_conflict(*, held=False):
         ("planned_closure_date", "DATE", "2026-12-20", lines[1]),
     ])]
     first["procedure_observations"] = [{
-        "step_code": "FILE_TAX_BUSINESS_CLOSURE", "observed_status": "IN_PROGRESS",
+        "step_code": "FILE_TAX_BUSINESS_CLOSURE", "observed_status": "COMPLETED" if completed else "IN_PROGRESS",
         "source_text": lines[2], "requires_confirmation": False,
         "requirements_confirmed": False, "submitted": True, "reason_summary": "사용자의 제출 보고",
     }]
-    client = Responses(first, output([finding("FILE_TAX_BUSINESS_CLOSURE", "doc1")]))
+    reconsidered = output([], uncertainties=[{
+        "code": "CONTEXT_MISSING", "target_path": "/procedure_lookup_result/documents/0",
+        "reason_summary": "완료 보고 확인이 필요합니다.", "evidence_refs": ["doc1"],
+    }]) if completed else output([finding("FILE_TAX_BUSINESS_CLOSURE", "doc1")])
+    client = Responses(first, reconsidered)
     graph._info_agent = InfoAnalysisAgent(client, clock=lambda: NOW, max_local_attempts=1)
     original = request.model_dump_json()
     outcome = asyncio.run(graph.run(request))
@@ -78,6 +82,25 @@ def test_uncertain_retained_fact_is_not_saved():
     assert outcome.outcome_type == "REVIEWED_PLAN", outcome
     assert all(c.field_path != "planned_closure_date"
                for c in outcome.review_subject.supervisor_draft.mutations.fact_changes)
+
+
+@pytest.mark.parametrize("accepted", [True, False])
+def test_retained_completion_without_a_new_finding_keeps_its_current_official_source(accepted):
+    graph, saved, _ = run_until_conflict(completed=True)
+    request = confirm(saved, accepted)
+    original = request.model_dump_json()
+    outcome = asyncio.run(graph.run(request))
+    assert outcome.outcome_type == "REVIEWED_PLAN", outcome
+    outcome.assert_integrity()
+    subject = outcome.review_subject
+    info = next(item.output for item in subject.source_results if item.meta.component == "INFO_AGENT")
+    assert info.procedure_findings == []
+    assert info.procedure_progress_observations == saved.retained_info_result.output.procedure_progress_observations
+    assert subject.supervisor_draft.mutations.procedure_progress_changes == []
+    assert subject.supervisor_draft.decision.decision_type == "NEEDS_MORE_INFO"
+    completion = subject.supervisor_draft.decision.blocker
+    assert completion.candidate_id == "procedure:1" and "synthetic-document" in completion.evidence_refs
+    assert request.model_dump_json() == original
 
 
 @pytest.mark.parametrize("change", ["digest", "case", "conflicted_field", "missing_evidence", "stale"])
@@ -135,7 +158,12 @@ def test_document_clause_that_differs_from_a_confirmed_fact_goes_to_conflict():
     from uuid import UUID
 
     from app.agent.document_tool.models import (
-        DocumentAnalysis, DocumentContext, DocumentKind, DocumentRecord, ExtractedField, document_input_text,
+        DocumentAnalysis,
+        DocumentContext,
+        DocumentKind,
+        DocumentRecord,
+        ExtractedField,
+        document_input_text,
     )
 
     graph, request, _, _, _ = graph_run_inputs("DOCUMENT_SUBMITTED")

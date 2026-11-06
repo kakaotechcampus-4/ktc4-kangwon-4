@@ -237,7 +237,7 @@ describe('useCase 폴링', () => {
     setTabHidden(false)
   })
 
-  it('판단 중이면 10초 뒤에 다시 묻는다', async () => {
+  it('판단 중이면 3초 뒤에 다시 묻는다', async () => {
     saveTokens('access-1', 'refresh-1')
     const fetchMock = mockFetch(PENDING)
     vi.useFakeTimers()
@@ -246,11 +246,11 @@ describe('useCase 폴링', () => {
     await advance(0)
     expect(fetchMock).toHaveBeenCalledTimes(1)
 
-    // 9초까지는 묻지 않는다. 더 자주 부르면 서버만 바쁘다
-    await advance(9_000)
+    // 3초 직전까지는 추가로 묻지 않는다
+    await advance(2_999)
     expect(fetchMock).toHaveBeenCalledTimes(1)
 
-    await advance(1_000)
+    await advance(1)
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
@@ -267,8 +267,8 @@ describe('useCase 폴링', () => {
     renderAt('/case')
 
     await advance(0)
-    // 10분 동안은 10초마다 묻는다
-    for (let elapsed = 0; elapsed < 10 * 60 * 1000; elapsed += 10_000) await advance(10_000)
+    // 10분 동안은 3초마다 묻는다
+    for (let elapsed = 0; elapsed < 10 * 60 * 1000; elapsed += 3_000) await advance(3_000)
     const atLimit = fetchMock.mock.calls.length
     expect(atLimit).toBeGreaterThan(1)
 
@@ -287,7 +287,7 @@ describe('useCase 폴링', () => {
     await advance(0)
     expect(screen.queryByText('오래 기다림')).not.toBeInTheDocument()
 
-    for (let elapsed = 0; elapsed < 10 * 60 * 1000; elapsed += 10_000) await advance(10_000)
+    for (let elapsed = 0; elapsed < 10 * 60 * 1000; elapsed += 3_000) await advance(3_000)
 
     expect(screen.getByText('오래 기다림')).toBeInTheDocument()
   })
@@ -300,7 +300,7 @@ describe('useCase 폴링', () => {
     renderAt('/case')
 
     await advance(0)
-    for (let elapsed = 0; elapsed < 10 * 60 * 1000; elapsed += 10_000) await advance(10_000)
+    for (let elapsed = 0; elapsed < 10 * 60 * 1000; elapsed += 3_000) await advance(3_000)
     const atLimit = fetchMock.mock.calls.length
 
     await act(async () => {
@@ -321,7 +321,7 @@ describe('useCase 폴링', () => {
     renderAt('/case')
 
     await advance(0)
-    await advance(10_000)
+    await advance(3_000)
     expect(fetchMock).toHaveBeenCalledTimes(2)
 
     await advance(60_000)
@@ -340,7 +340,7 @@ describe('useCase 폴링', () => {
   })
 
   /**
-   * 서버가 멎어 있으면 10초마다 같은 실패를 쌓을 뿐이다. 사장님이 직접 누를 때까지 멈춘다.
+   * 서버가 멎어 있으면 3초마다 같은 실패를 쌓을 뿐이다. 사장님이 직접 누를 때까지 멈춘다.
    * 그 사이에도 마지막으로 받은 가게 정보는 그대로 남아 있어야 한다 — 지우면 사장님은
    * 적어낸 내용이 날아간 줄 안다.
    */
@@ -354,7 +354,7 @@ describe('useCase 폴링', () => {
     renderAt('/case')
 
     await advance(0)
-    await advance(10_000)
+    await advance(3_000)
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(screen.getByText(/^READY/)).toBeInTheDocument()
 
@@ -426,7 +426,7 @@ describe('useCase 폴링', () => {
       renderAt('/case')
 
       await advance(0)
-      await advance(10_000)
+      await advance(3_000)
       await advance(REQUEST_TIMEOUT_MS)
 
       expect(screen.getByText('READY PENDING 카페')).toBeInTheDocument()
@@ -454,7 +454,7 @@ describe('useCase 폴링', () => {
     })
   })
 
-  /** 숨어 있는 사이 판단이 끝났을 수 있다. 10초를 더 기다리게 하면 멈춘 것처럼 보인다 */
+  /** 숨어 있는 사이 판단이 끝났을 수 있다. 3초를 더 기다리게 하면 멈춘 것처럼 보인다 */
   it('탭으로 돌아오면 기다리지 않고 한 번 묻는다', async () => {
     saveTokens('access-1', 'refresh-1')
     const fetchMock = mockFetch(PENDING)

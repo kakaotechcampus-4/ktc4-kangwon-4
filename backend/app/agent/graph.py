@@ -347,6 +347,7 @@ class AgentGraph:
             ))
         component_input = InfoAnalysisInput(
             input=trigger_input,
+            restoration_answer=getattr(request.trigger, "restoration_answer", None),
             case_snapshot=request.case_snapshot,
             fact_overlays=analysis_overlays,
             conflict_confirmation=(request.trigger if isinstance(request.trigger, ConflictConfirmedTrigger) else None),
@@ -366,13 +367,25 @@ class AgentGraph:
             output = None
             if (
                 self._info_from_digests is not None
-                and getattr(request.trigger, "trigger_type", None) == "CASE_CREATED"
-                and retained is None
-                and not confirmed_overlays
+                and (
+                    (
+                        getattr(request.trigger, "trigger_type", None) == "CASE_CREATED"
+                        and retained is None
+                        and not confirmed_overlays
+                    )
+                    # 충돌 확인 후 재판단은 읽을 새 글이 없다. 사실은 사용자 선택·보관된 결과로 오고, 절차 정리만 남아 정리본으로 채운다
+                    or getattr(request.trigger, "trigger_type", None) == "CONFLICT_CONFIRMED"
+                )
                 # Review가 Info를 다시 보라고 했으면 같은 정리본을 또 내지 않고 모델에게 맡긴다
                 and not state.get("review_feedback")
             ):
                 output = self._info_from_digests(self._info_agent, component_input)
+            # 정리본으로 채웠거나 선택형 답변이면 Info 모델을 부르지 않는다(info_agent.analyze 참고)
+            # 보관된 사실은 이전 판단에서 Info 모델이 글에서 꺼냈고 아직 Review를 거치지 않았다. Review 모델을 유지한다
+            used_model = (
+                (output is None and component_input.restoration_answer is None)
+                or retained is not None
+            )
             if output is None:
                 output = await self._info_agent.analyze(component_input)
             if retained is not None:
@@ -406,6 +419,7 @@ class AgentGraph:
             "phase": "INFO_ANALYSIS",
             "source_results": [*state.get("source_results", []), source],
             "fact_overlays": overlays,
+            "info_used_model": used_model,
         }
 
     def _restore_procedure_completion(
@@ -679,7 +693,17 @@ class AgentGraph:
                 source_results=state["source_results"],
                 supervisor_draft=state["current_draft"],
             )
-            result = await self._review_tool.review(subject)
+            # 모델이 쓴 사실·문장이 없는 첫 회차 판단은 코드 검사만 한다. 화면 문장은 검수된
+            # 절차 자료에서 코드가 만들고, Supervisor는 코드 후보 중 고르기만 한다.
+            code_only = (
+                state.get("info_used_model") is False
+                and state.get("revision_count", 0) == 0
+                and getattr(type(self._review_tool), "review_code_only", None) is not None
+            )
+            if code_only:
+                result = await self._review_tool.review_code_only(subject)
+            else:
+                result = await self._review_tool.review(subject)
         except Exception as exc:  # noqa: BLE001 - graph must fail closed
             if "meta" in locals():
                 self._emit(meta, started, "ERROR", exc)
@@ -696,6 +720,7 @@ class AgentGraph:
             started,
             "SUCCESS",
             review_verdict="PASS" if result.verdict == ReviewVerdict.PASS else "REVISE",
+            review_mode="CODE_ONLY" if code_only else "MODEL",
         )
         update: dict[str, Any] = {
             "phase": "REVIEWING",
@@ -705,7 +730,10 @@ class AgentGraph:
         }
         if result.verdict == ReviewVerdict.REVISE:
             revision_count = state.get("revision_count", 0)
-            if revision_count >= self._max_review_revisions:
+            if (
+                revision_count >= self._max_review_revisions
+                or self._supervisor_cannot_fix(result)
+            ):
                 # Keep the last Review's findings instead of dropping them.
                 # Without this the caller learns only that the run failed, not
                 # what would unblock it, and the reason for the verdict is gone.
@@ -935,6 +963,25 @@ class AgentGraph:
         return "supervisor"
 
     @staticmethod
+    def _supervisor_cannot_fix(result: ReviewResult) -> bool:
+        """전체 blockers 목록 반려는 Supervisor를 다시 돌려도 고칠 수 없다.
+
+        목록은 Supervisor 모델을 부르기 전에 같은 입력으로 코드가 정하고, 초안은 그 목록과
+        정확히 같아야 통과한다(candidate_decision_violations). 재작업해도 같은 목록이 나와
+        같은 이유로 반려된다(Langfuse 재작업 4건 모두 3번 반려 후 실패).
+        """
+        blocking = [issue for issue in result.issues if issue.severity == "BLOCKING"]
+        return (
+            list(result.recommended_rework_targets) == [Component.SUPERVISOR]
+            and not result.missing_evidence
+            and bool(blocking)
+            and all(
+                issue.target_path == "/supervisor_draft/decision/blockers"
+                for issue in blocking
+            )
+        )
+
+    @staticmethod
     def _earliest_rework_target(targets: Sequence[Component]) -> Component:
         for component in (
             Component.PROCEDURE_TOOL,
@@ -1105,6 +1152,7 @@ class AgentGraph:
         exc: Exception | None = None,
         *,
         review_verdict: Literal["PASS", "REVISE"] | None = None,
+        review_mode: Literal["MODEL", "CODE_ONLY"] | None = None,
     ) -> None:
         counters = _REVIEW_TRACE_COUNTERS.get()
         if counters is not None and review_verdict is not None:
@@ -1122,6 +1170,7 @@ class AgentGraph:
             latency_ms=max(0, int((time.monotonic() - started) * 1000)),
             attempt=meta.attempt,
             review_verdict=review_verdict,
+            review_mode=review_mode,
             model=model,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
