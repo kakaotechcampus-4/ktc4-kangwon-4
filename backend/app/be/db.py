@@ -3,6 +3,7 @@ from functools import lru_cache
 
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError
+from sqlalchemy.pool import NullPool
 from sqlmodel import Session, SQLModel, create_engine
 
 import app.be.models  # noqa: F401 — 모든 모델을 SQLModel 메타데이터에 등록
@@ -32,6 +33,34 @@ def get_engine() -> Engine:
         pool_pre_ping=True,
         pool_recycle=3600,
     )
+
+
+# /health가 DB를 기다리는 한도. compose healthcheck가 5초에 포기하므로 연결 2초 + 읽기 2초로 그 안에 끝낸다.
+HEALTH_DB_TIMEOUT_SECONDS = 2
+
+
+def create_health_engine(url: str) -> Engine:
+    """/health만 쓰는 엔진. 기다리는 시간에 끝이 있고, 앱의 커넥션 자리를 쓰지 않는다.
+
+    PyMySQL은 읽기 한도(read_timeout)가 기본으로 없어서, DB가 연결만 받고 말이 없으면
+    끝없이 기다린다. healthcheck는 5초에 포기해도 서버의 이 작업은 남아 10초마다 쌓인다(승준님 #219).
+    connect_timeout은 TCP 연결까지만이라 첫 인사부터 모든 읽기는 read_timeout이 끊는다.
+
+    매번 새로 열고 닫는다(NullPool). 앱 풀을 같이 쓰면 DB는 멀쩡한데 자리가 꽉 찼을 때도
+    자리를 30초 기다리다 503이 되어 컨테이너가 unhealthy로 찍힌다(현종님 #219).
+    """
+
+    timeout = HEALTH_DB_TIMEOUT_SECONDS
+    return create_engine(
+        url,
+        poolclass=NullPool,
+        connect_args={"connect_timeout": timeout, "read_timeout": timeout, "write_timeout": timeout},
+    )
+
+
+@lru_cache
+def get_health_engine() -> Engine:
+    return create_health_engine(get_settings().DATABASE_URL)
 
 
 def get_db() -> Generator[Session, None, None]:
