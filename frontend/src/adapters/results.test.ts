@@ -251,6 +251,25 @@ describe('toResultsEntry', () => {
     })
   })
 
+  /** 서버가 결과 알려주기 실패를 다시 돌려 주지 않아서(#196) 홈이 이리 보낸다. 같은 번호로 새 글을 받는다 */
+  it('다시 해볼 수 있는 실패면 결과를 다시 받을 판단 번호를 담는다', () => {
+    expect(
+      toResultsEntry(entry({ judgment_status: 'FAILED', case_history_id: 12, recovery_action_code: 'RETRY' })),
+    ).toEqual({ kind: 'RETELL', historyId: 12 })
+  })
+
+  it.each(['CONTACT_SUPPORT', 'NONE'] as const)('다시 보내도 풀리지 않는 실패(%s)면 다른 화면으로 보낸다', (code) => {
+    expect(
+      toResultsEntry(entry({ judgment_status: 'FAILED', case_history_id: 12, recovery_action_code: code })),
+    ).toEqual({ kind: 'ELSEWHERE' })
+  })
+
+  it('다시 해볼 수 있는 실패인데 판단 번호가 없으면 알 수 없는 응답으로 둔다', () => {
+    expect(toResultsEntry(entry({ judgment_status: 'FAILED', recovery_action_code: 'RETRY' }))).toEqual({
+      kind: 'UNRECOGNIZED',
+    })
+  })
+
   /** 번호가 없으면 다 적고 보낸 뒤에야 막힌다 */
   it('더 알려주셔야 하는 실패인데 판단 번호가 없으면 알 수 없는 응답으로 둔다', () => {
     expect(

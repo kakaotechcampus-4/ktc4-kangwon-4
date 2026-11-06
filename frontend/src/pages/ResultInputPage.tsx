@@ -51,6 +51,7 @@ const DEMOLITION_OPTIONS: { value: DemolitionRequired; label: string }[] = [
  * - `RESULT` 할 일을 하고 온 결과
  * - `ANSWER` 리본이 되물은 질문들의 답
  * - `RESUBMIT` 판단이 실패해 더 알려주셔야 하는 내용
+ * - `RETELL` 판단이 실패해 결과를 처음부터 다시 받는 것(홈의 [결과 다시 알려주기])
  *
  * 둘 다 같은 길(`POST /cases/results`)로 보낸다. 다른 것은 화면에 띄울 물음과 보낼 글 모양뿐이다.
  */
@@ -58,6 +59,7 @@ type Ask =
   | { kind: 'RESULT'; nextAction: NextAction; inputKind: ResultInputKind }
   | { kind: 'ANSWER'; questions: string[] }
   | { kind: 'RESUBMIT'; notice: Extract<FailureNotice, { kind: 'NEEDS_DETAIL' }> }
+  | { kind: 'RETELL' }
 
 /** 들어올 때 서버에 물은 결과. 폼은 `READY` 일 때만 연다 */
 type EntryQuery =
@@ -181,6 +183,9 @@ export function ResultInputPage() {
               ask: { kind: 'RESUBMIT', notice: entry.notice },
               historyId: entry.historyId,
             })
+            return
+          case 'RETELL':
+            setFetched({ status: 'READY', ask: { kind: 'RETELL' }, historyId: entry.historyId })
             return
           // 확인을 기다리는 충돌부터 풀어야 한다. 뒤로 가기로 이 화면에 돌아오지 않게 바꿔 낀다
           case 'CONFIRM':
@@ -447,6 +452,16 @@ export function ResultInputPage() {
             </h1>
             <p className="mt-2 text-15 text-fg-neutral-muted">
               다음 할 일을 정하다 멈췄어요. 알려주시면 다시 정해 드려요.
+            </p>
+          </div>
+        ) : entry.ask.kind === 'RETELL' ? (
+          // TODO(#55): 제안 문구다. PM 답이 오면 바꾼다
+          <div>
+            <h1 id="result-title" className="text-26 font-bold">
+              다시 알려주세요
+            </h1>
+            <p className="mt-2 text-15 text-fg-neutral-muted">
+              지난번 결과로 다음 할 일을 정하지 못했어요. 들으신 내용을 다시 적어 주시면 다시 정해 드려요.
             </p>
           </div>
         ) : (
