@@ -89,21 +89,21 @@ interface RequestOptions {
  * (`JWT_ACCESS_TOKEN_EXPIRE_MINUTES`), 다시 받지 않으면 30분 뒤 첫 요청에서 로그인 화면으로 간다
  * (#212). 다시 받을 수 없거나, 새 토큰으로 보내도 401이면 토큰을 지우고 `UnauthorizedError` 를 던진다 —
  * 못 쓰는 토큰을 들고 있으면 다음 요청도 똑같이 막힌다.
+ *
+ * **기다리는 사이 로그인이 바뀌었으면 지금 로그인을 덮거나 지우지 않는다**(승준님 #210). 로그아웃했거나
+ * 새로 로그인했는데 옛 로그인의 늦은 응답이 토큰을 저장하거나 지우면, 끝낸 로그인이 되살아나거나 새 로그인이
+ * 풀린다. 그때는 토큰에 손대지 않고 `UnauthorizedError` 만 올린다. 화면은 로그인으로 보내고, 로그인 화면은
+ * 이미 로그인돼 있으면 진입 분기로 돌려보낸다(`LoginPage`). `ApiError(409)` 로 멈추지 않는 이유는 화면들이
+ * 409 를 그 API 의 뜻(거절됨 · 상황 바뀜)으로 읽어서다.
  */
 export async function request(path: string, options: RequestOptions = {}) {
-  const sentWith = getAccessToken()
-  let response = await send(path, options, sentWith)
+  const sentWith = readTokens()
+  let response = await send(path, options, sentWith.access)
 
   if (response.status === 401) {
-    if (!(await renewedAfter(path, sentWith))) {
-      logOut()
-      throw new UnauthorizedError()
-    }
-    response = await send(path, options, getAccessToken())
-    if (response.status === 401) {
-      logOut()
-      throw new UnauthorizedError()
-    }
+    const renewed = await renewedAfter(path, sentWith)
+    response = await send(path, options, renewed.access)
+    if (response.status === 401) endSession(renewed)
   }
 
   if (!response.ok) throw new ApiError(response.status, `요청이 실패했습니다 (${response.status})`)
@@ -145,54 +145,92 @@ function send(
 
 const REISSUE_PATH = '/reissue'
 
-/**
- * 401을 받은 뒤 새 토큰이 생겼는지. 생겼으면 다시 보내면 된다.
- *
- * 보낼 때 쓴 토큰이 그사이 바뀌었으면 다른 요청이 이미 새로 받은 것이라 또 받지 않는다.
- * 다시 받기 자신이 401이면 받을 길이 없다.
- */
-async function renewedAfter(path: string, sentWith: string | null): Promise<boolean> {
-  if (path === REISSUE_PATH) return false
-  const current = getAccessToken()
-  if (current !== null && current !== sentWith) return true
-  return reissueTokens()
+/** 한 로그인의 토큰 한 쌍. 다시 받을 때마다 둘 다 바뀐다 */
+interface Tokens {
+  access: string | null
+  refresh: string | null
 }
 
-/** 지금 진행 중인 다시 받기. 여럿이 동시에 401을 받아도 다시 받기는 하나만 나간다 */
-let reissuing: Promise<boolean> | null = null
+function readTokens(): Tokens {
+  return { access: getAccessToken(), refresh: getRefreshToken() }
+}
+
+function isCurrent(tokens: Tokens): boolean {
+  return tokens.access === getAccessToken() && tokens.refresh === getRefreshToken()
+}
 
 /**
- * 로그인 토큰을 새로 받는다(`POST /reissue`). 받았으면 `true`.
+ * 이 토큰으로는 더 이어 갈 수 없다. 아직 이 토큰을 들고 있을 때만 지운다 — 그사이 로그아웃했거나 새로
+ * 로그인했으면 지금 것은 이 실패와 상관없다.
+ */
+function endSession(tokens: Tokens): never {
+  if (isCurrent(tokens)) logOut()
+  throw new UnauthorizedError()
+}
+
+/**
+ * 401을 받은 뒤 다시 보낼 토큰. 받을 수 없으면 `UnauthorizedError` 를 던진다.
+ *
+ * 보낸 사이 Refresh 토큰이 바뀌었으면 다른 요청이 이미 새로 받은 것이라 또 받지 않고 지금 것으로 다시
+ * 보낸다. 새로 로그인한 경우도 토큰만으로는 이와 가를 수 없어 같이 다시 보낸다. 비어 있으면 그사이
+ * 로그아웃한 것이다. 다시 받기 자신이 401이면 받을 길이 없다.
+ */
+async function renewedAfter(path: string, sentWith: Tokens): Promise<Tokens> {
+  if (path === REISSUE_PATH) endSession(sentWith)
+  const current = readTokens()
+  if (current.refresh !== sentWith.refresh) {
+    if (current.access === null) throw new UnauthorizedError()
+    return current
+  }
+  return reissueTokens(sentWith)
+}
+
+/**
+ * 지금 진행 중인 다시 받기와 그것을 시작한 토큰. 여럿이 동시에 401을 받아도 같은 토큰이면 다시 받기는
+ * 하나만 나간다. 토큰이 다르면(그사이 로그인이 바뀜) 따로 받는다.
+ */
+let reissuing: { from: string | null; promise: Promise<Tokens> } | null = null
+
+/**
+ * 로그인 토큰을 새로 받는다(`POST /reissue`). 새 토큰을 돌려준다.
  *
  * **한 번에 하나만 보낸다.** 서버는 Refresh 토큰을 쓸 때마다 새것으로 바꾸고 마지막 하나만 기억한다.
  * 동시에 둘이 보내면 뒤의 것은 이미 바뀐 옛 토큰을 보내 401이 되고, 사장님은 로그아웃된다.
  *
  * Refresh 토큰이 없으면(가짜 세션 · 로그아웃) 받지 않는다. 서버가 거절하거나 새 토큰을 읽지 못하면
- * `false` — 부른 쪽이 로그아웃시킨다. 연결 실패 · 5xx 는 토큰을 그대로 두고 오류를 올린다.
+ * 이 로그인은 끝난 것이다(`endSession`). 연결 실패 · 5xx 는 토큰을 그대로 두고 오류를 올린다.
  * 서버가 거절한 게 아니라 답을 못 받은 것이라, 지우면 잠깐 끊긴 연결로 로그아웃된다.
  */
-function reissueTokens(): Promise<boolean> {
-  reissuing ??= renew().finally(() => {
-    reissuing = null
-  })
-  return reissuing
+function reissueTokens(tokens: Tokens): Promise<Tokens> {
+  if (reissuing !== null && reissuing.from === tokens.refresh) return reissuing.promise
+
+  const mine = {
+    from: tokens.refresh,
+    promise: renew(tokens).finally(() => {
+      // 옛 로그인의 다시 받기가 늦게 끝나도, 그 뒤 시작한 새 로그인의 다시 받기는 남겨 둔다
+      if (reissuing === mine) reissuing = null
+    }),
+  }
+  reissuing = mine
+  return mine.promise
 }
 
-async function renew(): Promise<boolean> {
-  const refresh = getRefreshToken()
-  if (refresh === null) return false
+async function renew(tokens: Tokens): Promise<Tokens> {
+  if (tokens.refresh === null) endSession(tokens)
 
-  const response = await send(REISSUE_PATH, { method: 'POST' }, null, { 'Refresh-Token': refresh })
-  if (response.status === 401) return false
+  const response = await send(REISSUE_PATH, { method: 'POST' }, null, { 'Refresh-Token': tokens.refresh })
+  // 기다리는 사이 로그아웃했거나 새로 로그인했다. 늦게 온 답으로 지금 로그인을 덮거나 지우지 않는다
+  if (!isCurrent(tokens)) throw new UnauthorizedError()
+  if (response.status === 401) endSession(tokens)
   if (!response.ok) throw new ApiError(response.status, `로그인을 이어 가지 못했습니다 (${response.status})`)
 
   const access = response.headers.get('Access-Token')
   const nextRefresh = response.headers.get('Refresh-Token')
   // 서버는 이미 Refresh 토큰을 바꿨다. 새 값을 못 읽으면 들고 있는 것은 더 쓸 수 없다
-  if (access === null || nextRefresh === null) return false
+  if (access === null || nextRefresh === null) endSession(tokens)
 
   saveTokens(access, nextRefresh)
-  return true
+  return { access, refresh: nextRefresh }
 }
 
 /**
