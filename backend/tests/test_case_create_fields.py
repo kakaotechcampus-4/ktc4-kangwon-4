@@ -11,6 +11,7 @@ from pydantic import ValidationError
 from sqlmodel import Session, SQLModel, create_engine
 from testcontainers.community.mysql import MySqlContainer
 
+from app.be.db import MYSQL_IMAGE
 from app.be.crud.case_history import get_case_created_history
 from app.be.crud.member import create_member
 from app.be.schemas.case import CaseCreateRequest
@@ -23,7 +24,7 @@ BASE = dict(business_type="CAFE", franchise_status=False, lease_status="LEASED_P
 @pytest.fixture(scope="module")
 def mysql_engine():
     container = MySqlContainer(
-        "mysql:8.0", dialect="pymysql", username="test", password="test",
+        MYSQL_IMAGE, dialect="pymysql", username="test", password="test",
         root_password="test", dbname="case_create_fields_test",
     ).with_env("TZ", "Asia/Seoul")
     with container:

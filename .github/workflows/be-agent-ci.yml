@@ -7,6 +7,7 @@ on:
       - "backend/tests/**"
       - "backend/scripts/**"
       - "backend/sql/**"
+      - "docker-compose*.yml"
       - "backend/requirements*.txt"
       - ".github/workflows/be-agent-ci.yml"
 

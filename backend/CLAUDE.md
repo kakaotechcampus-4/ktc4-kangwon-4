@@ -23,9 +23,9 @@
 | 항목 | 결정 |
 |---|---|
 | 배포 | Docker, `backend/Dockerfile`(`python:3.12-slim` + `pip install -r requirements.txt`) |
-| 로컬 개발 | 루트 `docker-compose.yml`은 `db`=`mysql:8.0`만 실행. backend+Agent는 로컬 Python 프로세스 |
+| 로컬 개발 | 루트 `docker-compose.yml`은 `db`=`mysql:8.0.46`만 실행. backend+Agent는 로컬 Python 프로세스 |
 | 배포 실행 | Compose와 분리해 추후 확정. `backend/Dockerfile`은 존재하지만 현재 db-only Compose가 app을 빌드하지 않음 |
-| 테스트 DB | `testcontainers[mysql]` — 테스트마다 격리된 MySQL 컨테이너를 코드로 직접 실행(compose와 별개 메커니즘, 이미지 버전만 `mysql:8.0`으로 통일) |
+| 테스트 DB | `testcontainers[mysql]` — 테스트마다 격리된 MySQL 컨테이너를 코드로 직접 실행(compose와 별개 메커니즘). 이미지는 운영·로컬 compose와 같은 `mysql:8.0.46`으로 고정하고, 기준은 `app/be/db.py`의 `MYSQL_IMAGE`다. 셋이 다르면 `tests/test_schema_sql.py`가 실패한다 |
 | 테스트 범위 | API 엔드포인트 테스트 + 서비스 로직 단위 테스트 |
 | Agent 호출부 테스트 | 실제 LLM 호출 대신 `unittest.mock`으로 목 처리 |
 | 커버리지 측정 | 도입 안 함 |

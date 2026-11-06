@@ -4,6 +4,7 @@
 테스트는 통과하는데 운영에는 칸이 없어 그 기능이 터진다. 그걸 여기서 막는다. 모델 호출은 없다.
 """
 
+import re
 from pathlib import Path
 
 import pymysql
@@ -13,14 +14,16 @@ from sqlmodel import SQLModel
 from testcontainers.community.mysql import MySqlContainer
 
 import app.main  # noqa: F401  표를 정의한 모델을 모두 불러온다
+from app.be.db import MYSQL_IMAGE
 from scripts.dump_schema_sql import SCHEMA_SQL
 
 DOCUMENT_SUBMITTED_SQL = SCHEMA_SQL.parent / "002_case_history_source_document_submitted.sql"
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 @pytest.fixture(scope="module")
 def mysql():
-    with MySqlContainer("mysql:8.0", dialect="pymysql") as container:
+    with MySqlContainer(MYSQL_IMAGE, dialect="pymysql") as container:
         yield container
 
 
@@ -101,3 +104,11 @@ def test_document_submitted_sql_brings_an_old_db_up_to_the_schema(mysql):
     # 이미 넣은 DB에 다시 넣어도 그대로다
     _run_file(mysql, "before_173", DOCUMENT_SUBMITTED_SQL)
     assert _show_create(mysql, "before_173")["case_history"] == expected
+
+
+@pytest.mark.parametrize("compose_file", ["docker-compose.prod.yml", "docker-compose.yml"])
+def test_compose_runs_the_same_mysql_as_the_tests(compose_file):
+    # 테스트·SQL 뽑기가 쓰는 버전(MYSQL_IMAGE)과 운영·로컬 DB가 다르면, 통과한 검사가 운영을 보장하지 못한다
+    images = re.findall(r"^\s*image:\s*(mysql:\S+)", (REPO_ROOT / compose_file).read_text(encoding="utf-8"), re.M)
+
+    assert images == [MYSQL_IMAGE], f"{compose_file}의 MySQL 버전을 backend/app/be/db.py의 MYSQL_IMAGE와 맞춰 주세요."

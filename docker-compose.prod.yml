@@ -17,7 +17,10 @@ secrets:
 
 services:
   mysql:
-    image: mysql:8.0
+    # 버전을 고정한다. 열어 두면 컨테이너를 새로 만들 때 그때 최신판이 깔려 테스트한 버전과 갈린다.
+    # 지금 운영보다 낮추면 안 된다(데이터 폴더를 낮은 버전으로 되돌리지 못해 DB가 안 뜬다).
+    # 바꿀 때는 docker-compose.yml과 backend/app/be/db.py의 MYSQL_IMAGE도 같이 바꾼다.
+    image: mysql:8.0.46
     restart: always
     environment:
       MYSQL_DATABASE: closure_agent

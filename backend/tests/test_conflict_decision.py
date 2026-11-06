@@ -13,6 +13,7 @@ from unittest.mock import MagicMock
 import pytest
 from sqlmodel import Session
 
+from app.be.db import MYSQL_IMAGE
 from app.be.crud import case_history as case_history_crud
 from app.be.crud import conflict_reference as conflict_reference_crud
 from app.be.services import agent_runtime as agent_runtime_service
@@ -455,7 +456,7 @@ def test_submitting_a_decision_schedules_the_rejudgment(monkeypatch):
 @pytest.fixture(scope="module")
 def mysql_engine():
     container = MySqlContainer(
-        "mysql:8.0", dialect="pymysql", username="test", password="test",
+        MYSQL_IMAGE, dialect="pymysql", username="test", password="test",
         root_password="test", dbname="conflict_decision_test",
     ).with_env("TZ", "Asia/Seoul")
     with container:

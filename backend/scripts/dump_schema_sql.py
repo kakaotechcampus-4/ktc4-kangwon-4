@@ -14,17 +14,24 @@ from sqlmodel import SQLModel
 from testcontainers.community.mysql import MySqlContainer
 
 import app.main  # noqa: F401  표를 정의한 모델을 모두 불러온다
+from app.be.db import MYSQL_IMAGE
 
 SCHEMA_SQL = Path(__file__).resolve().parents[1] / "sql" / "001_schema.sql"
 
 HEADER = """\
--- 빈 DB에 표를 처음 만들 때 넣는다. 이미 표가 있으면 "already exists"로 멈추고 아무것도 지우지 않는다.
+-- 빈 DB 전용이다. 표를 처음 만들 때만 넣는다. 이미 표가 있으면 "already exists"로 멈추고 아무것도 지우지 않는다.
+-- 넣는 법(EC2, docker-compose.prod.yml이 있는 폴더에서):
+--   docker compose -f docker-compose.prod.yml exec -T mysql mysql --defaults-extra-file=/run/secrets/mysql_health_cnf closure_agent < backend/sql/001_schema.sql
+--
+-- 이미 돌고 있는 DB에 칸·값을 더할 때는 이 파일이 아니라 002처럼 고치는 SQL을 따로 만들어 넣는다.
+-- CI(tests/test_schema_sql.py)는 모델과 이 파일이 같은지만 본다. 고치는 SQL을 빠뜨렸는지는 보지 않는다(현종님 #217).
+--
 -- 손으로 고치지 않는다. 모델을 바꾸면 backend에서 python -m scripts.dump_schema_sql 로 다시 뽑는다.
 """
 
 
 def dump_schema_sql() -> str:
-    with MySqlContainer("mysql:8.0", dialect="pymysql", dbname="closure_agent") as container:
+    with MySqlContainer(MYSQL_IMAGE, dialect="pymysql", dbname="closure_agent") as container:
         engine = create_engine(container.get_connection_url() + "?charset=utf8mb4")
         try:
             SQLModel.metadata.create_all(engine)
