@@ -80,7 +80,12 @@ function mockEntry(mockKey: string): EntryQuery {
       ? { kind: 'ANSWER', questions: moreInfoCase.judgment.questions }
       : mockKey === 'judgment-failed-detail' && failed.status === 'FAILED' && failed.notice.kind === 'NEEDS_DETAIL'
         ? { kind: 'RESUBMIT', notice: failed.notice }
-        : { kind: 'RESULT', nextAction: resultInput.nextAction, inputKind: 'TEXT' }
+        : {
+            kind: 'RESULT',
+            nextAction: resultInput.nextAction,
+            // `?mock=result-choice` 는 서버가 원상복구 답을 골라서 받겠다고 한 화면(#197). 보내면 기본 반영 결과로 간다
+            inputKind: mockKey === 'result-choice' ? 'RESTORATION_ANSWER' : 'TEXT',
+          }
   return { status: 'READY', ask, historyId: 0 }
 }
 

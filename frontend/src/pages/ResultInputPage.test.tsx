@@ -60,6 +60,24 @@ describe('ResultInputPage — Mock', () => {
     expect(router.state.location.pathname).toBe('/replan')
     expect(fetchMock).not.toHaveBeenCalled()
   })
+
+  /** 골라서 답하는 화면(#197)은 서버가 정할 때만 열려서, Mock 키가 없으면 Preview 에서 볼 수 없다 */
+  it('?mock=result-choice 면 골라서 답하는 화면을 열고, 고른 뒤 보내면 재계획 화면으로 간다', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const router = renderFlow('/results?mock=result-choice')
+
+    fireEvent.click(screen.getByRole('radio', { name: '전부 원래대로 해야 한대요' }))
+    fireEvent.click(screen.getByRole('radio', { name: '철거해야 한대요' }))
+    fireEvent.click(screen.getByRole('button', { name: '보내기' }))
+    await act(async () => {
+      vi.runAllTimers()
+    })
+
+    expect(router.state.location.pathname).toBe('/replan')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
 })
 
 type Answer = () => Response
