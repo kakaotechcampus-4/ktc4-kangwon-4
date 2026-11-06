@@ -1,4 +1,4 @@
-import { getAccessToken, logOut, verifyOAuthState } from './auth'
+import { getAccessToken, getRefreshToken, logOut, saveTokens, verifyOAuthState } from './auth'
 
 /**
  * 서버를 부르는 유일한 자리.
@@ -85,41 +85,114 @@ interface RequestOptions {
  * 네트워크 자체가 실패하면 `fetch`가 던지는 오류가 그대로 올라간다.
  * 서버가 준 답이 없다는 뜻이라 상태 코드로 감쌀 것이 없다.
  *
+ * **401이면 로그인 토큰을 새로 받아 한 번만 다시 보낸다.** 서버의 로그인 토큰은 30분짜리라
+ * (`JWT_ACCESS_TOKEN_EXPIRE_MINUTES`), 다시 받지 않으면 30분 뒤 첫 요청에서 로그인 화면으로 간다
+ * (#212). 다시 받을 수 없거나, 새 토큰으로 보내도 401이면 토큰을 지우고 `UnauthorizedError` 를 던진다 —
+ * 못 쓰는 토큰을 들고 있으면 다음 요청도 똑같이 막힌다.
+ */
+export async function request(path: string, options: RequestOptions = {}) {
+  const sentWith = getAccessToken()
+  let response = await send(path, options, sentWith)
+
+  if (response.status === 401) {
+    if (!(await renewedAfter(path, sentWith))) {
+      logOut()
+      throw new UnauthorizedError()
+    }
+    response = await send(path, options, getAccessToken())
+    if (response.status === 401) {
+      logOut()
+      throw new UnauthorizedError()
+    }
+  }
+
+  if (!response.ok) throw new ApiError(response.status, `요청이 실패했습니다 (${response.status})`)
+
+  return response
+}
+
+/**
+ * 한 번 보낸다. 다시 보낼 때도 같은 것을 새로 만들어 보낸다 — 제한 시간도 새로 센다.
+ *
  * 제한 시간을 넘기면 요청을 취소한다. **취소를 예약한 타이머는 지우지 않는다** —
  * 이 함수는 `Response`만 돌려주고 본문은 호출부가 나중에 읽는데, 응답을 받자마자 지우면
  * **헤더만 오고 본문이 멈추는 경우**를 못 막는다. 이미 끝난 요청을 취소하는 것은 아무 일도
  * 하지 않으므로, 정상 응답 뒤 하는 일 없는 타이머가 잠시 남는 대신 본문까지 보호한다.
  */
-export async function request(
+function send(
   path: string,
-  { method = 'GET', body, timeoutMs = REQUEST_TIMEOUT_MS }: RequestOptions = {},
+  { method = 'GET', body, timeoutMs = REQUEST_TIMEOUT_MS }: RequestOptions,
+  token: string | null,
+  extraHeaders: Record<string, string> = {},
 ) {
-  const token = getAccessToken()
   const isForm = body instanceof FormData
 
   const controller = new AbortController()
   setTimeout(() => controller.abort(new TimeoutError()), timeoutMs)
 
-  const response = await fetch(`${API_BASE}${path}`, {
+  return fetch(`${API_BASE}${path}`, {
     method,
     signal: controller.signal,
     headers: {
       ...(body === undefined || isForm ? {} : { 'Content-Type': 'application/json' }),
       // BE가 표준 Authorization 대신 커스텀 헤더를 쓴다
       ...(token === null ? {} : { 'Access-Token': token }),
+      ...extraHeaders,
     },
     body: body === undefined ? undefined : isForm ? body : JSON.stringify(body),
   })
+}
 
-  if (response.status === 401) {
-    // 못 쓰는 토큰을 들고 있으면 다음 요청도 똑같이 막힌다
-    logOut()
-    throw new UnauthorizedError()
-  }
+const REISSUE_PATH = '/reissue'
 
-  if (!response.ok) throw new ApiError(response.status, `요청이 실패했습니다 (${response.status})`)
+/**
+ * 401을 받은 뒤 새 토큰이 생겼는지. 생겼으면 다시 보내면 된다.
+ *
+ * 보낼 때 쓴 토큰이 그사이 바뀌었으면 다른 요청이 이미 새로 받은 것이라 또 받지 않는다.
+ * 다시 받기 자신이 401이면 받을 길이 없다.
+ */
+async function renewedAfter(path: string, sentWith: string | null): Promise<boolean> {
+  if (path === REISSUE_PATH) return false
+  const current = getAccessToken()
+  if (current !== null && current !== sentWith) return true
+  return reissueTokens()
+}
 
-  return response
+/** 지금 진행 중인 다시 받기. 여럿이 동시에 401을 받아도 다시 받기는 하나만 나간다 */
+let reissuing: Promise<boolean> | null = null
+
+/**
+ * 로그인 토큰을 새로 받는다(`POST /reissue`). 받았으면 `true`.
+ *
+ * **한 번에 하나만 보낸다.** 서버는 Refresh 토큰을 쓸 때마다 새것으로 바꾸고 마지막 하나만 기억한다.
+ * 동시에 둘이 보내면 뒤의 것은 이미 바뀐 옛 토큰을 보내 401이 되고, 사장님은 로그아웃된다.
+ *
+ * Refresh 토큰이 없으면(가짜 세션 · 로그아웃) 받지 않는다. 서버가 거절하거나 새 토큰을 읽지 못하면
+ * `false` — 부른 쪽이 로그아웃시킨다. 연결 실패 · 5xx 는 토큰을 그대로 두고 오류를 올린다.
+ * 서버가 거절한 게 아니라 답을 못 받은 것이라, 지우면 잠깐 끊긴 연결로 로그아웃된다.
+ */
+function reissueTokens(): Promise<boolean> {
+  reissuing ??= renew().finally(() => {
+    reissuing = null
+  })
+  return reissuing
+}
+
+async function renew(): Promise<boolean> {
+  const refresh = getRefreshToken()
+  if (refresh === null) return false
+
+  const response = await send(REISSUE_PATH, { method: 'POST' }, null, { 'Refresh-Token': refresh })
+  if (response.status === 401) return false
+  if (!response.ok) throw new ApiError(response.status, `로그인을 이어 가지 못했습니다 (${response.status})`)
+
+  const access = response.headers.get('Access-Token')
+  const nextRefresh = response.headers.get('Refresh-Token')
+  // 서버는 이미 Refresh 토큰을 바꿨다. 새 값을 못 읽으면 들고 있는 것은 더 쓸 수 없다
+  if (access === null || nextRefresh === null) return false
+
+  saveTokens(access, nextRefresh)
+  return true
 }
 
 /**
