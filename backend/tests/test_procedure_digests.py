@@ -685,6 +685,111 @@ def test_code_only_review_blocks_a_procedure_that_needs_confirmation_without_ask
     assert ("HUMAN_CONFIRMATION_OMITTED", ACTION_PATH) in _code_only_issues(request, draft)
 
 
+REASON_PATH = f"{ACTION_PATH}/reason"
+OVERCONFIDENT_SUPPORT = "지원 대상입니다. 무조건 받을 수 있어요."
+
+
+def _confirm_case():
+    from app.agent.supervisor import SupervisorAgent
+    from test_action_codes import StubModel, supervisor_request
+
+    request = supervisor_request()
+    draft = asyncio.run(SupervisorAgent(StubModel()).draft(request))
+    assert _code_only_issues(request, draft) == set()  # 바꾸기 전 정상 초안은 통과
+    return request, draft
+
+
+def _with_reason(draft, text):
+    action = draft.decision.next_action.model_copy(update={"reason": text})
+    return draft.model_copy(update={"decision": draft.decision.model_copy(update={"next_action": action})})
+
+
+def test_code_only_review_blocks_overconfident_and_ungrounded_support_text():
+    request, draft = _confirm_case()
+    issues = _code_only_issues(request, _with_reason(draft, OVERCONFIDENT_SUPPORT))
+    assert ("OVERCONFIDENT_LANGUAGE", REASON_PATH) in issues  # 화면 문장의 단정 표현
+    assert ("UNSUPPORTED_CLAIM", REASON_PATH) in issues  # 지원 자격 문장에 근거 연결 없음
+
+
+def test_code_only_review_blocks_an_overconfident_grounded_claim():
+    # 근거 문장(GroundedClaim)까지 같이 바꾸면 화면 문장 규칙과 같은 위치에 걸린다. 근거가 붙은 반려로 구분한다
+    from app.agent.review_tool import ReviewTool
+    from test_blocker_candidates import subject
+
+    request, draft = _confirm_case()
+    claims = [claim.model_copy(update={"text": OVERCONFIDENT_SUPPORT}) if claim.target_path == REASON_PATH else claim
+              for claim in draft.grounded_claims]
+    draft = _with_reason(draft, OVERCONFIDENT_SUPPORT).model_copy(update={"grounded_claims": claims})
+    result = asyncio.run(ReviewTool(NoModel()).review_code_only(subject(request, draft)))
+    assert any(issue.issue_code == "OVERCONFIDENT_LANGUAGE" and issue.target_path == REASON_PATH and issue.evidence_refs
+               for issue in result.issues)
+
+
+def test_code_only_review_requires_an_official_source_for_each_claim():
+    from test_action_codes import evidence
+
+    request, draft = _confirm_case()
+    request = request.model_copy(deep=True)
+    request.case_snapshot.evidence_records.append(evidence(evidence_id="user-1", source_type="USER_INPUT"))
+    index = next(i for i, claim in enumerate(draft.grounded_claims) if claim.target_path == REASON_PATH)
+    claims = list(draft.grounded_claims)
+    claims[index] = claims[index].model_copy(update={"evidence_refs": ["user-1"]})  # 공식 자료 대신 사장님 입력만
+    issues = _code_only_issues(request, draft.model_copy(update={"grounded_claims": claims}))
+    assert ("MISSING_EVIDENCE", f"/supervisor_draft/grounded_claims/{index}") in issues
+
+
+@pytest.mark.parametrize("prerequisite_done", [False, True])
+def test_code_only_review_blocks_a_procedure_before_its_prerequisite(prerequisite_done):
+    from app.agent.schemas import ProcedureProgress
+    from test_action_codes import NOW, REF
+
+    request, draft = _confirm_case()
+    request = request.model_copy(deep=True)
+    step = request.known_procedure_steps[0]
+    prerequisite = step.model_copy(deep=True, update={"step_name": "선행 절차", "dependencies": []})
+    prerequisite.procedure_step = step.procedure_step.model_copy(update={"procedure_step_id": 2, "step_code": "PRE_STEP"})
+    step.dependencies = [{"prerequisite_procedure_step_id": 2, "dependency_type": "SEQUENTIAL"}]
+    request.known_procedure_steps.append(prerequisite)
+    if prerequisite_done:
+        request.case_snapshot.procedure_progress.append(ProcedureProgress(procedure_step=prerequisite.procedure_step,
+            status="COMPLETED", requirements_confirmed=True, evidence_refs=[REF], updated_at=NOW))
+    blocked = ("PROCEDURE_CONFLICT", f"{ACTION_PATH}/target") in _code_only_issues(request, draft)
+    assert blocked is not prerequisite_done
+
+
+@pytest.mark.parametrize(
+    "info_used_model,revision_count,expected",
+    [(False, 0, "CODE_ONLY"), (True, 0, "MODEL"), (False, 1, "MODEL")],
+)
+def test_only_a_first_round_without_model_text_skips_the_review_model(info_used_model, revision_count, expected):
+    # 재작업 회차는 Supervisor가 반려를 받고 다시 쓴 초안이라 Review 모델이 본다
+    from unittest.mock import AsyncMock
+    from uuid import UUID
+    from app.agent.graph import AgentGraph
+    from app.agent.review_tool import ReviewTool
+    from test_action_codes import NOW, StubModel
+
+    used = []
+
+    class Recorder(ReviewTool):
+        async def review(self, subject):
+            used.append("MODEL")
+            return await super().review(subject)
+
+        async def review_code_only(self, subject):
+            used.append("CODE_ONLY")
+            return await super().review_code_only(subject)
+
+    request, draft = _confirm_case()
+    graph = AgentGraph(procedure_tool=AsyncMock(), info_agent=AsyncMock(), support_agent=AsyncMock(),
+                       supervisor=AsyncMock(), review_tool=Recorder(StubModel()),
+                       known_procedure_steps=request.known_procedure_steps, clock=lambda: NOW)
+    asyncio.run(graph._review_node({"run_id": UUID(int=2), "request": request, "source_results": request.source_results,
+                                    "current_draft": draft, "info_used_model": info_used_model,
+                                    "revision_count": revision_count}))
+    assert used == [expected]
+
+
 def test_a_free_text_reply_with_unknown_detail_still_lets_the_supervisor_choose():
     # "구체 범위 먼저" 규칙은 선택형 답변에만 쓴다. 자유글 답변("아직 모름" 포함)은 모델이 고른다(같은 질문 반복 방지).
     calls = []
