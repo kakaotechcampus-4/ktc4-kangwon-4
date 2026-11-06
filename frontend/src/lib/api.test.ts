@@ -8,7 +8,7 @@ import {
   TimeoutError,
   UnauthorizedError,
 } from './api'
-import { createOAuthState, getAccessToken, saveTokens } from './auth'
+import { createOAuthState, getAccessToken, getRefreshToken, logInWithMock, logOut, saveTokens } from './auth'
 
 function jsonResponse(body: unknown, init: ResponseInit = {}) {
   return new Response(JSON.stringify(body), { status: 200, ...init })
@@ -220,6 +220,253 @@ describe('request', () => {
       await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS)
 
       expect(init.signal?.aborted).toBe(true)
+    })
+  })
+})
+
+/**
+ * 서버의 로그인 토큰은 30분짜리다. 다시 받지 않으면 시연 도중 30분이 지나 첫 요청에서 로그인 화면으로 간다(#212).
+ * 서버는 Refresh 토큰을 쓸 때마다 바꾸고 마지막 하나만 기억해서, 다시 받기가 둘 나가면 뒤의 것이 로그아웃시킨다.
+ */
+describe('request — 로그인 다시 받기', () => {
+  const isReissue = (url: string) => url.endsWith('/reissue')
+  const renewed = () =>
+    new Response(null, { status: 200, headers: { 'Access-Token': 'access-2', 'Refresh-Token': 'refresh-2' } })
+
+  /** 다시 받기는 `reissue` 로, 나머지는 보낸 로그인 토큰이 `access-2` 일 때만 200 이다 */
+  function serve(reissue: () => Response | Promise<Response> = renewed) {
+    const fetchMock = vi.fn(async (url: string, init: RequestInit) => {
+      if (isReissue(url)) return reissue()
+      return new Headers(init.headers).get('Access-Token') === 'access-2'
+        ? jsonResponse({ ok: true })
+        : new Response(null, { status: 401 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    return fetchMock
+  }
+
+  const reissueCalls = (fetchMock: ReturnType<typeof serve>) =>
+    fetchMock.mock.calls.filter(([url]) => isReissue(url))
+
+  it('만료되면 새 토큰을 받아 저장하고, 같은 요청을 새 토큰으로 한 번 더 보낸다', async () => {
+    saveTokens('access-1', 'refresh-1')
+    const fetchMock = serve()
+
+    const response = await request('/cases/results', { method: 'POST', body: { raw_input: '철거하래요' } })
+
+    expect(response.status).toBe(200)
+    expect(getAccessToken()).toBe('access-2')
+    expect(getRefreshToken()).toBe('refresh-2')
+    const [, reissueInit] = reissueCalls(fetchMock)[0]
+    expect(new Headers(reissueInit.headers).get('Refresh-Token')).toBe('refresh-1')
+    const [, , retried] = fetchMock.mock.calls
+    expect(retried[1].body).toBe(JSON.stringify({ raw_input: '철거하래요' }))
+  })
+
+  it('여럿이 동시에 만료돼도 다시 받기는 한 번만 보낸다', async () => {
+    saveTokens('access-1', 'refresh-1')
+    const fetchMock = serve()
+
+    const responses = await Promise.all([request('/cases'), request('/cases/logs'), request('/cases/roadmap')])
+
+    expect(responses.map((response) => response.status)).toEqual([200, 200, 200])
+    expect(reissueCalls(fetchMock)).toHaveLength(1)
+  })
+
+  it('서버가 다시 받기를 거절하면 로그아웃한다', async () => {
+    saveTokens('access-1', 'refresh-1')
+    serve(() => new Response(null, { status: 401 }))
+
+    await expect(request('/cases')).rejects.toBeInstanceOf(UnauthorizedError)
+    expect(getAccessToken()).toBeNull()
+    expect(getRefreshToken()).toBeNull()
+  })
+
+  /** 서버가 거절한 게 아니라 답을 못 받은 것이다. 지우면 잠깐 끊긴 연결로 로그아웃된다 */
+  it('다시 받다가 연결이 끊기면 토큰을 그대로 두고 오류를 올린다', async () => {
+    saveTokens('access-1', 'refresh-1')
+    serve(() => Promise.reject(new TypeError('Failed to fetch')))
+
+    await expect(request('/cases')).rejects.toBeInstanceOf(TypeError)
+    expect(getAccessToken()).toBe('access-1')
+    expect(getRefreshToken()).toBe('refresh-1')
+  })
+
+  /** 서버는 이미 Refresh 토큰을 바꿨다. 새 값을 못 읽으면 들고 있는 것은 쓸 수 없다 */
+  it('다시 받았는데 새 토큰을 읽지 못하면 로그아웃한다', async () => {
+    saveTokens('access-1', 'refresh-1')
+    const fetchMock = serve(() => new Response(null, { status: 200 }))
+
+    await expect(request('/cases')).rejects.toBeInstanceOf(UnauthorizedError)
+    expect(getAccessToken()).toBeNull()
+    // 빈 토큰으로 한 번 더 보내 보지 않는다
+    expect(fetchMock.mock.calls.filter(([url]) => !isReissue(url))).toHaveLength(1)
+  })
+
+  /** 늦게 돌아온 401이다. 그사이 다른 요청이 이미 새로 받았으면, 또 받으면 방금 받은 토큰이 버려진다 */
+  it('보낸 사이 다른 요청이 이미 새로 받았으면 또 받지 않고 새 토큰으로 다시 보낸다', async () => {
+    saveTokens('access-1', 'refresh-1')
+    const fetchMock = serve()
+    fetchMock.mockImplementationOnce(async () => {
+      saveTokens('access-2', 'refresh-2')
+      return new Response(null, { status: 401 })
+    })
+
+    const response = await request('/cases')
+
+    expect(response.status).toBe(200)
+    expect(reissueCalls(fetchMock)).toHaveLength(0)
+  })
+
+  it('새 토큰으로 보내도 401이면 더 받지 않고 로그아웃한다', async () => {
+    saveTokens('access-1', 'refresh-1')
+    const fetchMock = vi.fn(async (url: string) => (isReissue(url) ? renewed() : new Response(null, { status: 401 })))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(request('/cases')).rejects.toBeInstanceOf(UnauthorizedError)
+    expect(reissueCalls(fetchMock)).toHaveLength(1)
+    expect(getAccessToken()).toBeNull()
+  })
+
+  it.each([
+    ['가짜 세션', () => logInWithMock()],
+    [
+      '다시 받을 토큰이 없음',
+      () => {
+        saveTokens('access-1', 'refresh-1')
+        window.sessionStorage.removeItem('reborn:refresh-token')
+      },
+    ],
+  ])('%s 이면 다시 받지 않고 로그아웃한다', async (_name, setUp) => {
+    setUp()
+    const fetchMock = serve()
+
+    await expect(request('/cases')).rejects.toBeInstanceOf(UnauthorizedError)
+    expect(reissueCalls(fetchMock)).toHaveLength(0)
+  })
+
+  it('올리던 파일도 새 토큰으로 그대로 다시 보낸다', async () => {
+    saveTokens('access-1', 'refresh-1')
+    const fetchMock = serve()
+    const form = new FormData()
+    form.append('file', new Blob(['계약서']), 'contract.pdf')
+
+    await request('/cases/documents', { method: 'POST', body: form })
+
+    const sent = fetchMock.mock.calls.filter(([url]) => url.endsWith('/cases/documents'))
+    expect(sent).toHaveLength(2)
+    expect(sent[1][1].body).toBe(form)
+  })
+
+  /**
+   * 다시 받기를 기다리는 사이 로그인이 바뀌었다(승준님 #210). 옛 로그인의 늦은 답이 끝낸 로그인을 되살리거나
+   * 새 로그인을 덮거나 지우면 안 된다. 토큰에 손대지 않고 로그인 오류로만 멈춘다 — 409 로 멈추면 화면들이
+   * 그 API 의 뜻(거절됨 · 상황 바뀜)으로 읽는다
+   */
+  describe('기다리는 사이 로그인이 바뀌면', () => {
+    const lateReplies: [string, () => Response][] = [
+      ['새 토큰', renewed],
+      ['거절(401)', () => new Response(null, { status: 401 })],
+      ['헤더 없음', () => new Response(null, { status: 200 })],
+    ]
+    const changes: [string, () => void, Record<'access' | 'refresh', string | null>][] = [
+      ['로그아웃', () => logOut(), { access: null, refresh: null }],
+      ['새 로그인', () => saveTokens('new-access', 'new-refresh'), { access: 'new-access', refresh: 'new-refresh' }],
+    ]
+
+    it.each(changes.flatMap(([change, apply, kept]) => lateReplies.map(([reply, answer]) => [change, reply, apply, answer, kept] as const)))(
+      '%s 뒤 늦은 %s 답은 지금 로그인을 바꾸지 않고, 다시 보내지 않는다',
+      async (_change, _reply, apply, answer, kept) => {
+        saveTokens('access-1', 'refresh-1')
+        let settle!: (response: Response) => void
+        const fetchMock = serve(() => new Promise<Response>((resolve) => { settle = resolve }))
+        const pending = request('/cases')
+        await vi.waitFor(() => expect(reissueCalls(fetchMock)).toHaveLength(1))
+
+        apply()
+        settle(answer())
+
+        await expect(pending).rejects.toBeInstanceOf(UnauthorizedError)
+        expect({ access: getAccessToken(), refresh: getRefreshToken() }).toEqual(kept)
+        expect(fetchMock.mock.calls.filter(([url]) => !isReissue(url))).toHaveLength(1)
+      },
+    )
+
+    it('다시 보낸 요청의 늦은 401은 그사이 새로 로그인했으면 지우지 않는다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      let settle!: (response: Response) => void
+      const fetchMock = vi.fn(async (url: string, init: RequestInit) => {
+        if (isReissue(url)) return renewed()
+        if (new Headers(init.headers).get('Access-Token') === 'access-2') {
+          return new Promise<Response>((resolve) => { settle = resolve })
+        }
+        return new Response(null, { status: 401 })
+      })
+      vi.stubGlobal('fetch', fetchMock)
+      const pending = request('/cases')
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
+
+      saveTokens('new-access', 'new-refresh')
+      settle(new Response(null, { status: 401 }))
+
+      await expect(pending).rejects.toBeInstanceOf(UnauthorizedError)
+      expect(getAccessToken()).toBe('new-access')
+      expect(getRefreshToken()).toBe('new-refresh')
+    })
+
+    /** 옛 다시 받기가 끝나며 새 로그인의 다시 받기 표시를 지우면, 새 로그인의 다음 요청이 하나를 더 보낸다 */
+    it('옛 로그인의 다시 받기가 끝나도 새 로그인의 요청들은 새 다시 받기 하나를 같이 기다린다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      let finishOld!: (response: Response) => void
+      let finishNew!: (response: Response) => void
+      const fetchMock = vi.fn(async (url: string, init: RequestInit) => {
+        const headers = new Headers(init.headers)
+        if (isReissue(url)) {
+          return new Promise<Response>((resolve) => {
+            if (headers.get('Refresh-Token') === 'refresh-1') finishOld = resolve
+            else finishNew = resolve
+          })
+        }
+        return headers.get('Access-Token') === 'new-access-2' ? jsonResponse({ ok: true }) : new Response(null, { status: 401 })
+      })
+      vi.stubGlobal('fetch', fetchMock)
+
+      const old = request('/cases').catch((error: unknown) => error)
+      await vi.waitFor(() => expect(reissueCalls(fetchMock)).toHaveLength(1))
+      saveTokens('new-access-1', 'new-refresh-1')
+      const first = request('/cases/logs')
+      await vi.waitFor(() => expect(reissueCalls(fetchMock)).toHaveLength(2))
+
+      finishOld(renewed())
+      expect(await old).toBeInstanceOf(UnauthorizedError)
+      const second = request('/cases/roadmap')
+      await vi.waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => !isReissue(url))).toHaveLength(3))
+      expect(reissueCalls(fetchMock)).toHaveLength(2)
+
+      finishNew(new Response(null, { status: 200, headers: { 'Access-Token': 'new-access-2', 'Refresh-Token': 'new-refresh-2' } }))
+      expect((await Promise.all([first, second])).map((response) => response.status)).toEqual([200, 200])
+      expect(getRefreshToken()).toBe('new-refresh-2')
+    })
+
+    /** 동시에 보낸 요청 중 하나가 먼저 로그아웃시켰다. 늦게 401을 받은 요청도 로그인으로 가야 한다 */
+    it('이미 로그아웃된 뒤 늦게 온 401은 409가 아니라 로그인 오류다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      let settle!: (response: Response) => void
+      const fetchMock = vi.fn(async (url: string) => {
+        if (isReissue(url)) return new Response(null, { status: 401 })
+        if (url.endsWith('/cases/logs')) return new Promise<Response>((resolve) => { settle = resolve })
+        return new Response(null, { status: 401 })
+      })
+      vi.stubGlobal('fetch', fetchMock)
+      const slow = request('/cases/logs')
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+
+      await expect(request('/cases')).rejects.toBeInstanceOf(UnauthorizedError)
+      expect(getAccessToken()).toBeNull()
+      settle(new Response(null, { status: 401 }))
+
+      await expect(slow).rejects.toBeInstanceOf(UnauthorizedError)
+      expect(reissueCalls(fetchMock)).toHaveLength(1)
     })
   })
 })

@@ -5,16 +5,20 @@ import {
   IconPersonLine,
   IconSparkle2Fill,
 } from '@karrotmarket/react-monochrome-icon'
-import type { ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router'
 
 import { Button } from '../components/ui/Button'
 import { HomeBanner } from '../components/ui/HomeBanner'
 import { HomeStageCard } from '../components/ui/HomeStageCard'
+import { InfoBox } from '../components/ui/InfoBox'
 import { TaskCard } from '../components/ui/TaskCard'
 import { useCase } from '../hooks/useCase'
 import { useLogs } from '../hooks/useLogs'
 import { useRoadmap } from '../hooks/useRoadmap'
+import { ApiError, UnauthorizedError } from '../lib/api'
+import { usesMockData } from '../lib/auth'
+import { retryJudgment } from '../lib/judgmentRetry'
 import { useEntersForward } from '../lib/viewTransition'
 import type { FailureNotice, JudgmentView } from '../types/view'
 
@@ -35,6 +39,7 @@ import type { FailureNotice, JudgmentView } from '../types/view'
 export function CurrentCasePage() {
   const { search } = useLocation()
   const { query, refresh, refreshing, waitedTooLong } = useCase()
+  const [retrying, setRetrying] = useState(false)
 
   /**
    * 아직 Case를 만들지 않은 사용자가 주소로 직접 들어온 경우다.
@@ -86,7 +91,7 @@ export function CurrentCasePage() {
 
   const card = judgmentCard(view.judgment, waitedTooLong)
   const recheck = (
-    <Button variant="neutral" size={card.main ? 'md' : 'lg'} onClick={refresh} disabled={refreshing}>
+    <Button variant="neutral" size={card.main ? 'md' : 'lg'} onClick={refresh} disabled={refreshing || retrying}>
       상태 다시 확인
     </Button>
   )
@@ -99,7 +104,7 @@ export function CurrentCasePage() {
         {...card.props}
         actions={
           <>
-            {card.main?.(stale)}
+            {card.main?.(stale, refresh, refreshing, setRetrying)}
             {recheck}
           </>
         }
@@ -219,8 +224,11 @@ interface JudgmentCard {
   /**
    * 회색 "상태 다시 확인" 위에 놓을 주 버튼. `stale`이면 잠근다.
    * 없으면 "상태 다시 확인"이 카드의 큰 버튼이 된다.
+   *
+   * `refresh` 는 버튼이 서버에 무언가를 맡긴 뒤 지금 상황을 다시 묻는 데 쓴다(다시 판단하기).
+   * `refreshing` 이면 이미 묻는 중이라, 그 사이 맡기면 뒤따르는 `refresh` 가 무시된다(`useCase` 는 한 번에 하나만 묻는다).
    */
-  main?: (stale: boolean) => ReactNode
+  main?: (stale: boolean, refresh: () => void, refreshing: boolean, onSendingChange: (sending: boolean) => void) => ReactNode
 }
 
 const CRITICAL_ICON = <IconExclamationmarkCircleFill size={40} />
@@ -310,9 +318,12 @@ function judgmentCard(judgment: JudgmentView, waitedTooLong: boolean): JudgmentC
       }
 
     /*
-      어긋난 항목이 응답에 없어서(#66) 무엇과 무엇이 다른지는 아직 못 보여준다.
-      `/confirm` 으로 보내는 버튼은 달지 않는다. 어긋난 목록을 받아올 API 가 없어서
-      그 화면이 빈손으로 열리고 `/` 로 튕긴다 — 되지 않는 일을 버튼으로 약속하지 않는다.
+      어긋난 항목이 `GET /cases` 응답에 없어서(#66) 무엇과 무엇이 다른지는 여기서 못 보여준다.
+      [확인하러 가기]는 결과 입력(`/results`)으로 보낸다. 결과 입력은 `GET /cases/results` 로 어긋난 목록을
+      받아 확인 화면(`/confirm`)으로 넘긴다 — 확인 화면은 목록을 넘겨받아야 열려서 바로 갈 수 없다.
+
+      서버는 충돌 선택이 실패해도 충돌이 남아 있으면 `CONFLICT` 를 준다(#196). 이 버튼이 없으면 확인 화면을
+      떠난 뒤 홈에서 풀 길이 없다.
     */
     case 'CONFLICT':
       return {
@@ -322,30 +333,37 @@ function judgmentCard(judgment: JudgmentView, waitedTooLong: boolean): JudgmentC
           icon: CRITICAL_ICON,
           badge: '확인 필요',
           title: '확인이 필요한 내용이 있어요',
-          description:
-            '알려주신 내용이 저장된 기록과 달라서, 어느 쪽이 맞는지 여쭤봐야 해요. 확인하시는 화면을 준비하고 있습니다.',
+          description: '알려주신 내용이 저장된 기록과 달라서, 어느 쪽이 맞는지 여쭤봐야 해요.',
         },
+        main: (stale) => <AnswerButton locked={stale} label="확인하러 가기" mockPathname="/confirm" />,
       }
 
     /*
-      "잠시 후 다시" 라고 말하지 않는다. 실패한 Case 를 다시 판단시키는 수단이 아직 없어서
-      (#57) 몇 번을 눌러도 같은 실패가 돌아온다.
+      실패마다 풀 길이 다르다.
 
-      **사장님이 더 알려주셔야 풀리는 실패만** 결과 입력으로 보낸다. 같은 길로 다시 보내면
-      서버가 다시 판단한다. 나머지는 더 적어도 풀리지 않아 재조회 하나만 둔다.
+      - **사장님이 더 알려주셔야 풀리는 실패**는 결과 입력으로 보낸다. 같은 길로 다시 보내면 서버가 다시 판단한다
+      - **서버가 "다시 해볼 수 있다"고 한 실패**(`RETRY`)는 그 자리에서 다시 판단을 맡긴다(#196)
+      - 나머지는 다시 해도 풀리지 않아 재조회 하나만 둔다
     */
     case 'FAILED': {
       const { askOwner, title, description } = failureCard(judgment.notice)
-      return askOwner
-        ? {
-            headline: '확인하실 일이 있어요',
-            props: { tone: 'critical', icon: CRITICAL_ICON, badge: '확인 필요', title, description },
-            main: (stale) => <AnswerButton locked={stale} label="다시 알려주기" />,
-          }
-        : {
-            headline: '할 일 정리가 멈췄어요',
-            props: { tone: 'neutral', icon: NEUTRAL_ICON, badge: '판단 멈춤', title, description },
-          }
+      if (askOwner) {
+        return {
+          headline: '확인하실 일이 있어요',
+          props: { tone: 'critical', icon: CRITICAL_ICON, badge: '확인 필요', title, description },
+          main: (stale) => <AnswerButton locked={stale} label="다시 알려주기" />,
+        }
+      }
+      return {
+        headline: '할 일 정리가 멈췄어요',
+        props: { tone: 'neutral', icon: NEUTRAL_ICON, badge: '판단 멈춤', title, description },
+        main:
+          judgment.notice.kind === 'RETRY_AVAILABLE'
+            ? (stale, refresh, refreshing, onSendingChange) => (
+                <RetryButton locked={stale} busy={refreshing} onRetried={refresh} onSendingChange={onSendingChange} />
+              )
+            : undefined,
+      }
     }
 
     /*
@@ -403,18 +421,117 @@ function TaskButton({ hasQuestions, locked }: { hasQuestions: boolean; locked: b
  *
  * 최신 상태를 확인하지 못했으면 잠근다 — 이미 지난 질문에 답하게 된다.
  */
-function AnswerButton({ locked, label = '답하러 가기' }: { locked: boolean; label?: string }) {
+function AnswerButton({
+  locked,
+  label = '답하러 가기',
+  mockPathname,
+}: {
+  locked: boolean
+  label?: string
+  /** Mock 은 서버가 없어 결과 입력이 다음 화면을 정해 주지 못한다. 그때 바로 갈 곳(충돌 확인) */
+  mockPathname?: string
+}) {
   const navigate = useNavigate()
   const { search } = useLocation()
+  const pathname = mockPathname !== undefined && usesMockData(search) ? mockPathname : '/results'
 
   return (
     <>
-      <Button size="lg" disabled={locked} onClick={() => navigate({ pathname: '/results', search }, { viewTransition: true })}>
+      <Button size="lg" disabled={locked} onClick={() => navigate({ pathname, search }, { viewTransition: true })}>
         {label}
       </Button>
       {locked && (
         <p className="text-center text-14 text-fg-neutral-muted">
           최신 상태를 확인한 뒤에 답하실 수 있어요
+        </p>
+      )}
+    </>
+  )
+}
+
+/**
+ * 서버가 "다시 해볼 수 있다"고 한 실패를 다시 판단해 달라고 맡기는 버튼(#196).
+ *
+ * 맡기고 나면 홈이 지금 상황을 다시 묻는다(`onRetried`). 서버가 받았으면 `PENDING` 이 와서
+ * "리본이 일하고 있어요"와 반복 조회가 가입 직후처럼 이어진다. 기다리는 자리를 따로 만들지 않는다.
+ *
+ * **401 말고는 어떻게 끝나든 다시 묻는다.** 응답만 끊겼거나 읽지 못했어도 서버는 이미 받았을 수 있다.
+ * 실패 카드는 저절로 다시 묻지 않아서, 여기서 묻지 않으면 판단이 도는 중에도 실패 카드가 남고 다시 누르면 409 다.
+ *
+ * 홈이 지금 상황을 묻는 중이면(`busy`) 누를 수 없다. 묻는 중에 맡기면 뒤따르는 다시 묻기가 무시되고(`useCase`),
+ * 맡긴 직후 다시 누르면 첫 요청이 이미 판단을 돌려 409 가 온다.
+ *
+ * 서버가 거절해도(409) 다시 묻는다. 두 번 눌렀거나 그사이 상황이 바뀐 것이라 지금 상황을 그리면 된다.
+ * 다시 물어도 같은 실패 카드면 이 버튼이 그대로 남아 있어(같은 자리 같은 부품) 거절된 것을 기억한다.
+ * 서버는 가입·결과 알려주기·서류 판단을 다시 돌려서(#196) 보통은 생기지 않는다. 서버가 받지 않는 실패가
+ * 홈에 남는 드문 경우에 같은 409 를 되풀이하지 않게 잠근다.
+ *
+ * TODO(#55): 버튼·안내 문구는 제안 문구다. PM 답이 오면 바꾼다.
+ */
+function RetryButton({ locked, busy, onRetried, onSendingChange }: {
+  locked: boolean; busy: boolean; onRetried: () => void; onSendingChange: (sending: boolean) => void
+}) {
+  const navigate = useNavigate()
+  const { pathname, search } = useLocation()
+  const [state, setState] = useState<'IDLE' | 'SENDING' | 'SEND_FAILED' | 'REFUSED'>('IDLE')
+  const alive = useRef(true)
+  useEffect(() => {
+    alive.current = true
+    return () => {
+      alive.current = false
+      onSendingChange(false)
+    }
+  }, [onSendingChange])
+
+  async function handleRetry() {
+    // Mock 은 서버를 부르지 않는다. 받아들여진 다음 화면(판단 중)으로 바로 넘긴다
+    if (usesMockData(search)) {
+      const next = new URLSearchParams(search)
+      next.set('mock', 'pending')
+      navigate({ pathname, search: `?${next}` })
+      return
+    }
+
+    setState('SENDING')
+    // 맡기는 동안 수동 조회도 막아, 접수 뒤 다시 묻기가 진행 중 조회에 묻히지 않게 한다.
+    onSendingChange(true)
+    try {
+      await retryJudgment()
+      if (!alive.current) return
+      setState('IDLE')
+      onRetried()
+    } catch (error: unknown) {
+      if (!alive.current) return
+      if (error instanceof UnauthorizedError) {
+        navigate('/login', { replace: true })
+        return
+      }
+      if (error instanceof ApiError && error.status === 409) {
+        setState('REFUSED')
+        onRetried()
+        return
+      }
+      // 404 는 Case 가 없다는 뜻이다. 다시 물으면 홈이 진단으로 보낸다. 그 밖(연결 실패 · 5xx · 읽지 못한 응답)은
+      // 서버가 받았는지 모른다. 알리되 다시 물어서, 받았으면 판단 중 화면이 이 안내를 덮게 한다
+      setState(error instanceof ApiError && error.status === 404 ? 'IDLE' : 'SEND_FAILED')
+      onRetried()
+    } finally {
+      if (alive.current) onSendingChange(false)
+    }
+  }
+
+  return (
+    <>
+      {state === 'REFUSED' && <InfoBox tone="critical">이 실패는 여기서 다시 판단할 수 없어요.</InfoBox>}
+      {state === 'SEND_FAILED' && (
+        <InfoBox tone="critical">다시 판단을 요청하지 못했어요. 잠시 뒤 다시 눌러 주세요.</InfoBox>
+      )}
+      <Button size="lg" disabled={locked || busy || state === 'SENDING' || state === 'REFUSED'} onClick={handleRetry}>
+        다시 판단하기
+      </Button>
+      {locked && (
+        <p className="text-center text-14 text-fg-neutral-muted">
+          최신 상태를 확인한 뒤에 누르실 수 있어요
         </p>
       )}
     </>
@@ -454,13 +571,13 @@ function failureCard(notice: FailureNotice): {
   switch (notice.kind) {
     /*
       서버가 다시 해볼 수 있다고 분류했을 뿐, 원인이 일시적이라는 뜻은 아니다.
-      그래서 "잠시 후 다시" 도 "곧 됩니다" 도 쓰지 않는다.
+      그래서 "잠시 후 다시" 도 "곧 됩니다" 도 쓰지 않는다. 다시 맡기는 버튼은 카드가 단다(`RetryButton`)
     */
     case 'RETRY_AVAILABLE':
       return {
         askOwner: false,
         title: '다음 할 일을 정하지 못했어요',
-        description: '가게 정보는 그대로 있어요. 다시 판단해 드리는 기능을 준비하고 있습니다.',
+        description: '가게 정보는 그대로 있어요. 같은 내용으로 다시 판단해 드릴게요.',
       }
 
     /*
