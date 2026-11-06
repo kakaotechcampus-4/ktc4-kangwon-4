@@ -15,6 +15,7 @@ from pydantic import ValidationError
 from sqlmodel import Session, SQLModel, create_engine
 from testcontainers.community.mysql import MySqlContainer
 
+from app.be.db import MYSQL_IMAGE
 from app.agent.roadmap import CHECKLIST_IDS, CompletedRoadmapSnapshot
 from app.be.crud.case import get_case_by_member_id
 from app.be.crud.member import create_member
@@ -29,7 +30,7 @@ from app.be.services.roadmap import build_roadmap_input, get_case_roadmap
 @pytest.fixture(scope="module")
 def mysql_engine():
     container = MySqlContainer(
-        "mysql:8.0", dialect="pymysql", username="test", password="test",
+        MYSQL_IMAGE, dialect="pymysql", username="test", password="test",
         root_password="test", dbname="case_roadmap_test",
     ).with_env("TZ", "Asia/Seoul")
     with container:
