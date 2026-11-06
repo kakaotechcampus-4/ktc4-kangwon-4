@@ -464,6 +464,9 @@ def retry_case_judgment(session: Session, member_id: int) -> CaseRetryResponse:
     if case is None:
         raise HTTPException(status_code=404, detail="Case를 찾을 수 없습니다.")
 
+    if case.case_status == "COMPLETED":
+        raise HTTPException(status_code=409, detail="폐업 정리를 마친 Case입니다.")
+
     history = case_history_crud.get_latest_user_driven_case_history(session, case.id)
     if (
         history is None

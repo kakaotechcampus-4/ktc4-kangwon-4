@@ -14,7 +14,7 @@ from app.be.routers import case as case_router
 from app.be.schemas.case import CaseRetryResponse
 from app.be.services import case as case_service
 from app.be.services import judgment
-from app.be.services.case import retry_case_judgment
+from app.be.services.case import retry_case_judgment, update_case_checklist
 from app.common.agent_dto import RestorationAnswer
 from case_world import case_engine, case_world  # noqa: F401
 
@@ -65,6 +65,25 @@ def test_a_failed_document_judgment_goes_back_to_pending(case_world):
     assert response.case_history_id == history_id
     with Session(case_world.engine) as session:
         assert get_case_history_by_id(session, history_id).judgment_status == "PENDING"
+
+
+def test_a_completed_case_keeps_its_failed_document_judgment(case_world):  # noqa: F811
+    member_id, case_id, _ = case_world.sign_up()
+    history_id = case_world.add_history(case_id, "DOCUMENT_SUBMITTED", "FAILED")
+    _fail_signup(case_world.engine, history_id)
+    with Session(case_world.engine) as session:
+        update_case_checklist(session, member_id, "vat_submission", True)
+
+    with pytest.raises(HTTPException) as error:
+        _retry(case_world.engine, member_id)
+
+    assert (error.value.status_code, error.value.detail) == (409, "폐업 정리를 마친 Case입니다.")
+    with Session(case_world.engine) as session:
+        history = get_case_history_by_id(session, history_id)
+        assert (history.judgment_status, history.failure_code, history.recovery_action_code,
+                history.retryable, history.requested_field_paths) == (
+            "FAILED", "RUN_DEADLINE_EXCEEDED", "RETRY", True, [],
+        )
 
 
 def test_a_finished_signup_judgment_is_not_retried(case_world):
