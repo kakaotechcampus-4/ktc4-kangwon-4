@@ -120,6 +120,22 @@ def test_a_real_post_also_leaves_no_connection_held(
     assert held_while_waiting == [0]
 
 
+def test_retrying_over_http_also_leaves_no_connection_held(
+    held_while_waiting, client, member_id, case_world, case_engine  # noqa: F811
+):
+    # 홈의 [다시 판단하기](POST /cases/retry)도 같은 판단을 뒤에서 건다(#196)
+    from app.be.crud import case as case_crud
+
+    with Session(case_engine) as session:
+        case = case_crud.get_case_by_member_id(session, member_id)
+    case_world.add_history(case.id, "USER_INPUT", "FAILED")
+
+    response = client.post("/cases/retry")
+
+    assert response.status_code == 200
+    assert held_while_waiting == [0]
+
+
 def test_signing_up_over_http_also_leaves_no_connection_held(
     held_while_waiting, case_engine, isolated_lifespan  # noqa: F811
 ):
