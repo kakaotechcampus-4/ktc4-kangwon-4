@@ -144,4 +144,13 @@ $C up -d --wait mysql && \
 
 ### 검수 자료 버전을 올렸을 때
 
-절차조회는 Case 근거의 버전이 지금 검수 자료 버전과 같은 것만 고릅니다. 버전을 올리면 기존 Case를 옮겨야 그 Case가 "자료 없음"이 되지 않습니다(`backend/scripts/import_reviewed_procedures.py`, `docs/hero-scenario.md`). 이 스크립트는 배포 이미지에 들어 있지 않아서, 필요할 때 AI팀과 실행 방법을 같이 정합니다.
+절차조회는 Case 근거의 버전이 지금 검수 자료 버전과 같은 것만 고릅니다. 버전을 올리면 기존 Case도 재적재해야 그 Case가 "자료 없음"이 되지 않습니다. #246부터 기존 스크립트가 배포 이미지에 포함돼 있습니다.
+
+백업과 변경 전·후 자료 버전을 확인하고, 대상 Case 목록을 먼저 조회·확정합니다. 아래 명령은 **Case 하나**를 받으므로 확인한 대상마다 실행합니다. 소스를 생략하면 이미지에 포함된 검수 자료를 사용합니다.
+
+```bash
+$C exec -T fastapi python -m scripts.import_reviewed_procedures --help
+$C exec -T fastapi python -m scripts.import_reviewed_procedures --case-id <확인한_Case_ID>
+```
+
+같은 버전을 재실행해도 근거를 중복 추가하지 않고, 과거 판단의 근거는 덮어쓰지 않습니다. 실패하면 다음 대상을 진행하지 말고 해당 Case의 결과를 확인합니다. 실제 이미지·격리 DB 검증과 운영 반영 범위는 #239에서 추적합니다.
