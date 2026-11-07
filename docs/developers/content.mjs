@@ -119,7 +119,7 @@ doc('operations/common', '실패와 복구', '접수·판단·저장 실패를 �
   section('failure', '복구 종류', 'recovery_action_code와 retryable을 확인해 다시 판단하기·내용 보완·서비스 확인·복구 행동 없음으로 나눕니다. 같은 파일의 안전 검사 차단은 일반 업로드 재시도와 다릅니다.', { table: [['코드', '의미'], ['RETRY', '보관된 같은 입력으로 허용된 판단 재개'], ['RESUBMIT_INPUT', '요청한 내용을 보완해 다시 입력'], ['CONTACT_SUPPORT', '서비스 쪽 확인이 필요'], ['NONE', '서버가 가능한 복구 행동을 제공하지 않음']] }),
   section('restart', '재시작과 경합', 'BackgroundTasks는 내구성 큐가 아닙니다. 재시작으로 남은 PENDING은 실패 상태로 풀고 복구 경로를 제공합니다. 같은 Case 접수를 잠그고 저장 직전에 최신 사실을 대조해 늦은 판단의 덮어쓰기를 막습니다.'),
   section('demo-reset', '시연 계정 초기화', '운영자용 backend/sql/reset_member_case.sql이 추가됐습니다. 선택한 회원의 Case와 종속 이력을 지우고 회원·공유 자료는 남겨 같은 카카오 계정으로 진단부터 다시 시작할 수 있게 합니다. PENDING 이력이 있거나 회원 번호가 없으면 지우지 않습니다. 끝에 member_id와 case_id를 표시하며 case_id가 null이면 삭제된 Case가 없습니다. DB 삭제는 한 트랜잭션이지만 document_data의 서류 파일은 지우지 않습니다. 실제 계정에 실행하기 전 대상과 처리 상태를 별도로 확인해야 합니다.'),
-  section('health', '운영 상태와 데이터', '현재 /health는 status 문자열만 반환하며 DB 접속까지 검사하지 않습니다. 운영 Compose는 MySQL·FastAPI와 DB·문서 볼륨을 구성합니다. 설정이 있다는 사실과 현재 배포가 성공했다는 증거는 구분합니다.'),
+  section('health', '운영 상태와 데이터', '현재 /health는 별도 DB 연결로 SELECT 1을 확인하고, 성공 시 200 status: ok, DB 오류 시 503 status: unavailable을 반환합니다. 연결·읽기·쓰기 제한은 각각 2초이며 앱 커넥션 풀을 쓰지 않습니다. 운영 Compose는 MySQL·FastAPI와 DB·문서 볼륨을 구성합니다. 설정이 있다는 사실과 현재 배포가 성공했다는 증거는 구분합니다.'),
 ], ['backend/app/be/services/judgment.py', 'backend/app/be/db.py', 'backend/app/main.py', 'frontend/src/hooks/useCase.ts', 'docker-compose.prod.yml', 'backend/sql/reset_member_case.sql'], { family: 'operations' });
 
 doc('reference/errors', '에러 코드', 'HTTP 요청 실패와 AI 업무 결과를 구분합니다.', [
@@ -140,8 +140,8 @@ doc('reference/glossary', '용어집', '서비스와 코드에서 사용하는 �
 ], ['backend/app/agent/schemas.py', 'backend/app/be/models/case.py']);
 
 doc('reference/changes', '변경 이력', '문서에 반영한 서비스 변경과 확인한 코드 버전을 기록합니다.', [
-  section('latest', '최신 반영', '366617a까지의 develop을 반영했습니다. 시연 계정 초기화 SQL과 PENDING 제외·대상 번호 표시를 운영 문서에 추가했습니다. 서류 안전 검사 코드의 422 응답과 FE 안내 분기, 이름을 명시한 일부 표현의 가림 설명을 확인했습니다.'),
-  section('history', '기록', '', { table: [['기준', '반영 내용'], ['2026-11-07 / 366617a 작업본', '리본 운영철학·안심 이용 7개 화면과 확인·정정·서류 보호 안내 추가'], ['2026-11-07 / 366617a', '시연 계정 초기화 SQL과 실행 중 제외·대상 결과 표시 반영'], ['2026-11-07 / 764f3c2', '서류 안전 차단·위기 지원 분기와 설명을 최신화'], ['2026-11-07 / 4e64e0e', '카카오 문서 방식의 대표 4개 시안 작성'], ['2026-11-07 / 4e64e0e', '59쪽 화면 설명서와 92개 테스트 점검표 작성']] }),
+  section('latest', '최신 반영', 'b0fa738까지의 develop을 반영했습니다. DB 연결을 확인하는 /health, Case 회전 집계 도구와 모의 모델 브라우저 E2E의 추가를 확인했습니다. 시연 계정 초기화 SQL과 PENDING 제외·대상 번호 표시를 운영 문서에 추가했습니다. 서류 안전 검사 코드의 422 응답과 FE 안내 분기, 이름을 명시한 일부 표현의 가림 설명을 확인했습니다.'),
+  section('history', '기록', '', { table: [['기준', '반영 내용'], ['2026-11-07 / b0fa738', 'DB 점검 health 200·503, Case 회전 집계 도구와 E2E 테스트 추가 반영'], ['2026-11-07 / 366617a 작업본', '리본 운영철학·안심 이용 7개 화면과 확인·정정·서류 보호 안내 추가'], ['2026-11-07 / 366617a', '시연 계정 초기화 SQL과 실행 중 제외·대상 결과 표시 반영'], ['2026-11-07 / 764f3c2', '서류 안전 차단·위기 지원 분기와 설명을 최신화'], ['2026-11-07 / 4e64e0e', '카카오 문서 방식의 대표 4개 시안 작성'], ['2026-11-07 / 4e64e0e', '59쪽 화면 설명서와 92개 테스트 점검표 작성']] }),
   section('scope', '갱신 기준', '원격 develop의 최신 코드를 먼저 확인하고 화면·라우터·스키마·서비스·테스트를 대조합니다. 사람의 설명과 자동 생성 계약을 함께 갱신하며 확인한 날짜와 소스 해시를 보관합니다.', { links: [['문서 갱신 절차', '/developers/ko/reference/maintenance/']] }),
 ], ['backend/app/be/services/document.py', 'frontend/src/hooks/useDocuments.ts', 'backend/app/be/services/redaction.py']);
 

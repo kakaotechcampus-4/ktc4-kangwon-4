@@ -1,6 +1,6 @@
 # RE:BORN 기술 스택과 현재 사용 상태
 
-기준일은 2026년 11월 7일이며, `develop`의 `366617a` 구현을 확인했습니다. 패키지 설치 여부와 실제 실행 경로를 구분합니다. 화면별 설명과 테스트 시나리오는 [서비스 전체 설명서](final-guide/설명서.md)를 참고합니다.
+기준일은 2026년 11월 7일이며, `develop`의 `b0fa738` 구현을 확인했습니다. 패키지 설치 여부와 실제 실행 경로를 구분합니다. 화면별 설명과 테스트 시나리오는 [서비스 전체 설명서](final-guide/설명서.md)를 참고합니다.
 
 ## 현재 동작하는 전체 흐름
 
@@ -87,7 +87,7 @@ LangChain·langchain-openai·OpenAI SDK·Chroma 관련 패키지는 requirements
 
 로컬 `docker-compose.yml`은 MySQL만 실행합니다. FE는 Vite, BE와 Agent는 로컬 Python 프로세스로 실행합니다. 운영 `docker-compose.prod.yml`은 MySQL과 FastAPI 컨테이너, DB·서류 볼륨을 구성합니다. Caddy와 Vercel 프록시 설정이 저장소에 있습니다. 설정의 존재는 현재 운영 배포 성공의 증거와 구분합니다.
 
-`BackgroundTasks`는 영구 작업 큐가 아닙니다. 재시작 시 남은 PENDING을 실패로 풀어 복구합니다. `/health`는 현재 `status: ok`만 반환하여 DB 접속까지 검사하지 않습니다. `ENVIRONMENT=dev` 시작 시에는 테이블 초기화 코드가 있으므로 운영 DB에 연결해 실행하면 안 됩니다.
+`BackgroundTasks`는 영구 작업 큐가 아닙니다. 재시작 시 남은 PENDING을 실패로 풀어 복구합니다. `/health`는 앱 풀과 별도인 연결로 `SELECT 1`을 확인합니다. 성공은 200·`status: ok`, DB 오류는 503·`status: unavailable`이며 연결·읽기·쓰기 제한은 각각 2초입니다. `ENVIRONMENT=dev` 시작 시에는 테이블 초기화 코드가 있으므로 운영 DB에 연결해 실행하면 안 됩니다.
 
 ## 공개 개발 문서
 

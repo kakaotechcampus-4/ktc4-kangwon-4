@@ -6,7 +6,7 @@
 
 - **운영철학·안심 이용:** `/safety/` — 사장님의 선택, 서류 보호와 AI 검수를 설명하는 [리본 안심가이드](docs/safety/README.md)
 
-`develop 366617a`까지 최신화하고 카카오디벨로퍼스의 문서 구성을 참고해 29개 페이지로 구현했습니다. 로그인 없이 **`/developers/`**에서 서비스 흐름·화면·기능·API·테스트를 확인합니다.
+`develop b0fa738`까지 최신화하고 카카오디벨로퍼스의 문서 구성을 참고해 29개 페이지로 구현했습니다. 로그인 없이 **`/developers/`**에서 서비스 흐름·화면·기능·API·테스트를 확인합니다.
 
 - [문서 실행·수정·11월 11일까지 갱신하는 방법](docs/developers/README.md)
 - 로컬: `cd frontend && npm run dev` 후 `http://localhost:5173/developers/`
