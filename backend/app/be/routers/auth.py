@@ -1,3 +1,5 @@
+from urllib.parse import quote
+
 from fastapi import APIRouter, Depends, Header, Response
 from fastapi.responses import RedirectResponse
 from sqlmodel import Session
@@ -20,7 +22,7 @@ def login_form(state: str | None = None):
         f"&redirect_uri={settings.KAKAO_REDIRECT_URI}"
         "&response_type=code"
         "&scope=profile_nickname"
-        + (f"&state={state}" if state else "")
+        + (f"&state={quote(state, safe='')}" if state else "")
     )
     return RedirectResponse(url=kakao_auth_url, status_code=303)
 
