@@ -41,6 +41,7 @@ import uvicorn  # noqa: E402
 from sqlmodel import Session  # noqa: E402
 
 import app.agent.runtime as runtime_module  # noqa: E402
+from app.agent.llm import LLMRequestError  # noqa: E402
 from app.agent.document_tool.documents import DocumentService  # noqa: E402
 from app.agent.document_tool.safety import ContentSafetyGuard  # noqa: E402
 from app.agent.document_tool.tool import DocumentTool  # noqa: E402
@@ -81,6 +82,8 @@ def document_files(directory):
 class FirstCandidateModel:
     """선택은 첫 후보, 직접 입력 해석은 아래 합성 문장만 받는 모델 대역이다."""
 
+    retry_failure_sent = False
+
     @classmethod
     def from_env(cls, *args, **kwargs):
         return cls()
@@ -105,6 +108,9 @@ class FirstCandidateModel:
                           for field, kind, value in facts],
             })
         if name == "reborn_review_output":
+            if "일시 장애 확인용 합성 입력" in json.dumps(messages, ensure_ascii=False) and not type(self).retry_failure_sent:
+                type(self).retry_failure_sent = True
+                raise LLMRequestError("합성 일시 장애", code="PROVIDER_HTTP_ERROR", retryable=True, status_code=503)
             return response_model.model_validate({
                 "verdict": "PASS", "issues": [], "missing_evidence": [],
                 "recommended_rework_targets": [], "resolution_reason": "합성 문장 검수 응답 대역",
@@ -144,6 +150,7 @@ def main() -> None:
         os.environ["AGENT_DOCUMENT_DIR"] = directory
         tokens = {**_signed_in_member(), "restoration_members": [_signed_in_member() for _ in range(6)],
                   "conflict_members": [_signed_in_member() for _ in range(2)],
+                  "retry_member": _signed_in_member(),
                   "document_member": _signed_in_member(), "document_directory": directory,
                   "document_files": document_files(directory)}
         Path(os.environ["E2E_TOKEN_FILE"]).write_text(json.dumps(tokens), encoding="utf-8")
