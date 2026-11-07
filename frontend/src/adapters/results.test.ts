@@ -258,6 +258,14 @@ describe('toResultsEntry', () => {
     ).toEqual({ kind: 'UNRECOGNIZED' })
   })
 
+  it('NONE 실패는 이전 질문 없이 새 글을 받고 판단 번호가 없으면 열지 않는다', () => {
+    const failed = entry({ judgment_status: 'FAILED', recovery_action_code: 'NONE',
+      requested_field_paths: ['restoration_scope'], questions_for_user: ['예전 질문'],
+      result_input_kind: 'RESTORATION_ANSWER' })
+    expect(toResultsEntry({ ...failed, case_history_id: 12 })).toEqual({ kind: 'NEW_INPUT', historyId: 12 })
+    expect(toResultsEntry(failed)).toEqual({ kind: 'UNRECOGNIZED' })
+  })
+
   /**
    * 번호 없이 폼을 열면 사장님이 다 적고 보낸 뒤에야 막힌다.
    * 할 일 없이 열면 무엇에 대한 결과를 적는지 모른다.

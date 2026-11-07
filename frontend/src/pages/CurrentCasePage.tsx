@@ -347,7 +347,7 @@ function judgmentCard(judgment: JudgmentView, waitedTooLong: boolean): JudgmentC
 
       - **사장님이 더 알려주셔야 풀리는 실패**는 결과 입력으로 보낸다. 같은 길로 다시 보내면 서버가 다시 판단한다
       - **서버가 "다시 해볼 수 있다"고 한 실패**(`RETRY`)는 그 자리에서 다시 판단을 맡긴다(#196)
-      - 나머지는 다시 해도 풀리지 않아 재조회 하나만 둔다
+      - NONE은 새 상황 입력을 열고, 그 밖의 실패는 재조회만 둔다
     */
     case 'FAILED': {
       const { askOwner, title, description } = failureCard(judgment.notice)
@@ -366,7 +366,9 @@ function judgmentCard(judgment: JudgmentView, waitedTooLong: boolean): JudgmentC
             ? (stale, refresh, refreshing, onSendingChange) => (
                 <RetryButton locked={stale} busy={refreshing} onRetried={refresh} onSendingChange={onSendingChange} />
               )
-            : undefined,
+            : judgment.notice.kind === 'NO_RECOVERY'
+              ? (stale) => <AnswerButton locked={stale} label="새 상황 알려주기" />
+              : undefined,
       }
     }
 
@@ -610,7 +612,7 @@ function failureCard(notice: FailureNotice): {
       return {
         askOwner: false,
         title: '다음 할 일을 정하지 못했어요',
-        description: '가게 정보는 그대로 있어요. 이번 판단에 대해서는 더 해 보실 수 있는 것이 없어요.',
+        description: '가게 정보는 그대로 있어요. 새로 확인한 상황을 알려주실 수 있어요.',
       }
 
     /*

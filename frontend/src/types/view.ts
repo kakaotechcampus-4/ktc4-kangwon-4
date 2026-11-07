@@ -88,7 +88,7 @@ export type FailureNotice =
   | { kind: 'NEEDS_DETAIL'; fields: string[]; partial: boolean }
   /** 사장님 쪽에서 할 수 있는 것이 없고 서비스가 들여다봐야 한다 */
   | { kind: 'SERVICE_SIDE' }
-  /** 서버가 **할 수 있는 복구 행동이 없다고 말했다.** 모르는 것과 다르다 */
+  /** 서버가 이 판단의 재시도 행동은 없다고 말했다. 모르는 것과 다르다 */
   | { kind: 'NO_RECOVERY' }
   /**
    * 코드가 안 왔거나 우리가 모르는 값이다.
@@ -200,6 +200,8 @@ export type ResultsEntry =
    * 보여주고 글을 다시 받는다.
    */
   | { kind: 'RESUBMIT'; notice: Extract<FailureNotice, { kind: 'NEEDS_DETAIL' }>; historyId: number }
+  /** 같은 판단의 재시도 대신, 새로 확인한 상황을 자유글로 받는다 */
+  | { kind: 'NEW_INPUT'; historyId: number }
   /**
    * 지금은 결과를 받을 때가 아니다 — 판단 중이거나, 더 적어도 풀리지 않는 실패다.
    *
