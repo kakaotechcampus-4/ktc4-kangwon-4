@@ -147,6 +147,32 @@ def test_case_is_required_and_empty_upload_is_rejected(api):
     assert client.get("/cases/documents").status_code == 404
 
 
+@pytest.mark.parametrize("decision", ["REFUSE", "CRISIS_SUPPORT"])
+def test_safety_blocked_upload_says_why_instead_of_asking_to_retry(api, monkeypatch, decision):
+    # 안전 검사가 막으면 다시 올려도 같은 판정이다. "다시 올려 주세요"(502)가 아니라 422와 판정 코드를 준다
+    from app.agent.document_tool.safety import SafetyBlockedError
+
+    async def blocked(*_args, **_kwargs):
+        raise SafetyBlockedError(decision)
+
+    monkeypatch.setattr(DocumentTool, "add_document", blocked)
+    response = api[0].post("/cases/documents", files={"file": ("memo.pdf", b"%PDF-1.4", "application/pdf")})
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == f"AGENT_SAFETY_{decision}"
+    assert ("109" in response.json()["detail"]["message"]) is (decision == "CRISIS_SUPPORT")
+
+
+def test_unavailable_safety_check_still_asks_to_retry(api, monkeypatch):
+    from app.agent.document_tool.safety import SafetyCheckUnavailableError
+
+    async def unavailable(*_args, **_kwargs):
+        raise SafetyCheckUnavailableError()
+
+    monkeypatch.setattr(DocumentTool, "add_document", unavailable)
+    response = api[0].post("/cases/documents", files={"file": ("memo.pdf", b"%PDF-1.4", "application/pdf")})
+    assert response.status_code == 502
+
+
 # 1: 가입 때 폐업 예정일(2026-10-31)을 정한 Case, 2: "예상 달·아직"을 골라 예정일이 없는 Case
 @pytest.mark.parametrize("case_id", [1, 2])
 def test_only_owner_confirmed_closure_date_is_checked(api, case_id):

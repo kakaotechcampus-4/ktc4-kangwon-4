@@ -43,6 +43,8 @@ export type DocumentsQuery =
  *   TIMED_OUT      올리는 사이 기다림이 끊겼다. 서버는 읽기를 마치고 저장해 두니 같은 파일을 다시 올리면 된다
  *   UNREADABLE     서버가 서류를 읽지 못했다(502, 모델·글자 인식 실패)
  *   REJECTED       서버가 받지 않는 파일·요청이다(422)
+ *   SAFETY_BLOCKED 안전 검사가 처리할 수 없는 내용으로 판정했다(422, AGENT_SAFETY_REFUSE). 같은 파일은 다시 올려도 같다
+ *   CRISIS_SUPPORT 안전 검사가 위기 신호로 판정했다(422, AGENT_SAFETY_CRISIS_SUPPORT). 다시 올리라 하지 않고 상담 창구를 알린다
  *   UPLOAD_FAILED  연결이 끊기는 등 올리지 못했다
  *   CHANGE_FAILED  확인·빼기를 저장하지 못했다
  */
@@ -53,6 +55,8 @@ export type DocumentAction =
   | 'TIMED_OUT'
   | 'UNREADABLE'
   | 'REJECTED'
+  | 'SAFETY_BLOCKED'
+  | 'CRISIS_SUPPORT'
   | 'UPLOAD_FAILED'
   | 'CHANGE_FAILED'
 
@@ -156,11 +160,15 @@ export function useDocuments() {
         setAction(
           error instanceof TimeoutError
             ? 'TIMED_OUT'
-            : error instanceof ApiError && error.status === 502
-              ? 'UNREADABLE'
-              : error instanceof ApiError && error.status >= 400 && error.status < 500
-                ? 'REJECTED'
-                : 'UPLOAD_FAILED',
+            : error instanceof ApiError && error.code === 'AGENT_SAFETY_CRISIS_SUPPORT'
+              ? 'CRISIS_SUPPORT'
+              : error instanceof ApiError && error.code === 'AGENT_SAFETY_REFUSE'
+                ? 'SAFETY_BLOCKED'
+                : error instanceof ApiError && error.status === 502
+                  ? 'UNREADABLE'
+                  : error instanceof ApiError && error.status >= 400 && error.status < 500
+                    ? 'REJECTED'
+                    : 'UPLOAD_FAILED',
         )
       } finally {
         busy.current = false

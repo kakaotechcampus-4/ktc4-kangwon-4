@@ -408,6 +408,30 @@ function ActionNotice({ action }: { action: DocumentAction }) {
           비어 있거나 받을 수 없는 파일이에요. 사진이나 PDF로 다시 골라 주세요.
         </InfoBox>
       )
+    // 같은 파일은 다시 올려도 같은 판정이라 "다시 올려 주세요"를 쓰지 않는다
+    case 'SAFETY_BLOCKED':
+      return (
+        <InfoBox tone="critical" title="이 파일은 자동으로 읽지 않았어요.">
+          폐업 서류와 관계없는 내용이나 처리할 수 없는 요청이 들어 있을 수 있어요. 같은 파일을 다시 올리지 마시고, 서류
+          내용을 확인한 뒤 다른 파일로 올려 주세요.
+        </InfoBox>
+      )
+    // 위기 신호로 판정된 경우. 폐업 절차보다 사람을 먼저 챙기고, 공식 상담 번호만 알린다(상담은 우리가 하지 않는다)
+    case 'CRISIS_SUPPORT':
+      return (
+        <InfoBox tone="neutral" title="지금 많이 힘드시다면, 혼자 견디지 않으셔도 돼요.">
+          폐업 준비는 잠시 멈춰도 괜찮아요. 올려 두신 서류와 진행 상황은 그대로 남아 있어요. 지금 바로 이야기 나눌 곳이
+          필요하시면{' '}
+          <a href="tel:109" className="font-semibold underline">
+            자살예방상담전화 109
+          </a>
+          (24시간),{' '}
+          <a href="tel:15770199" className="font-semibold underline">
+            정신건강위기상담전화 1577-0199
+          </a>
+          로 전화해 주세요.
+        </InfoBox>
+      )
     case 'UPLOAD_FAILED':
       return (
         <InfoBox tone="critical" title="서류를 올리지 못했어요.">
