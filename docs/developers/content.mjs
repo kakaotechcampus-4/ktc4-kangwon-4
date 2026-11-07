@@ -27,7 +27,7 @@ doc('guide/overview', '서비스 이해하기', '폐업을 결심한 개인 카�
 doc('guide/quickstart', '개발 환경', 'FE, Backend와 Agent를 로컬에서 실행하기 전에 확인합니다.', [
   section('requirements', '요구 사항', 'FE는 Node 20.19 이상 또는 22.12 이상, BE는 Python 3.12와 MySQL 8.0.46을 사용합니다. 정확한 패키지 버전은 lockfile과 requirements가 기준입니다.', { table: [['구분', '실행 위치', '역할'], ['Frontend', 'frontend/', 'React·Vite 화면과 /api 프록시'], ['Backend와 Agent', 'backend/', 'FastAPI·LangGraph, 같은 Python 프로세스'], ['MySQL', '루트 Compose', 'Case·이력·근거·회원 상태'], ['문서', 'frontend/public/developers/', '빌드 때 생성되는 공개 정적 문서']] }),
   section('frontend', 'Frontend 실행', '처음 설치하거나 CI에서는 lockfile 그대로 설치합니다. FE 기본 API 주소는 /api이며, 로컬 BE에 직접 붙일 때만 frontend/.env.local에 공개 API 주소를 설정합니다.', { code: { language: 'Shell', text: 'cd frontend\nnpm ci\nnpm run dev' } }),
-  section('backend', 'Backend 실행', '환경변수는 저장소의 .env.example을 확인해 별도로 준비합니다. 데이터베이스와 문서 볼륨의 대상부터 확인합니다.', { code: { language: 'Shell', text: '# 저장소 루트에서 DB 실행\ndocker compose up -d db\n\n# Python 3.12 환경에서\ncd backend\npython -m pip install -r requirements.txt\npython -m uvicorn app.main:app --reload' }, note: note('주의', 'ENVIRONMENT=dev의 앱 시작에는 테이블 초기화가 있습니다. 운영 데이터베이스에 연결한 상태로 개발 서버를 시작하면 안 됩니다.', 'warning') }),
+  section('backend', 'Backend 실행', 'AI 연결은 루트 .env.example, 서버 인증·DB는 backend/.env.example을 보고 각각 .env와 backend/.env를 준비합니다. 서류 기능은 OCR 준비 명령을 한 번 실행합니다. 데이터베이스와 문서 볼륨의 대상부터 확인합니다.', { code: { language: 'Shell', text: '# 저장소 루트에서 DB 실행\ndocker compose up -d db\n\n# Python 3.12 환경에서\ncd backend\npython -m pip install -r requirements.txt\npython scripts/setup_agent_ocr.py\npython -m uvicorn app.main:app --reload' }, note: note('주의', 'ENVIRONMENT=dev의 앱 시작에는 테이블 초기화가 있습니다. 운영 데이터베이스에 연결한 상태로 개발 서버를 시작하면 안 됩니다.', 'warning') }),
   section('oauth', '카카오 로그인과 로컬 미리보기', '실제 로그인은 카카오 앱의 Redirect URI, KAKAO_REDIRECT_URI와 브라우저 콜백 주소가 일치해야 합니다. 가짜 로그인은 개발·허용된 Preview에서 화면을 보는 기능이며 실제 인증 성공의 증거가 아닙니다.', { links: [['카카오 로그인 설정하기', '/developers/ko/auth/settings/']] }),
 ], ['frontend/README.md', 'frontend/package.json', 'backend/.python-version', 'backend/app/main.py', 'docker-compose.yml']);
 
@@ -70,7 +70,7 @@ doc('roadmap/common', '폐업 로드맵', '전체 순서와 작업별 진행을 
 ], ['backend/app/agent/roadmap.py', 'frontend/src/lib/taskFlows.ts', 'frontend/src/pages/TaskFlowPage.tsx', 'backend/app/be/services/case.py'], { family: 'roadmap' });
 
 doc('documents/common', '서류함과 정산 점검', '사진과 PDF를 모아 종류·값을 확인하고 정산 서류를 대조합니다.', [
-  section('flow', '문서 처리 흐름', '업로드와 점검은 별도 기능입니다. 올린 파일이 있다는 사실만으로 점검 통과나 기관 제출이 되지 않습니다.', { steps: ['PDF·PNG·JPG/JPEG를 한 장씩 올립니다.', '로컬 OCR과 가린 자료의 모델 판독으로 종류와 값을 읽습니다.', '불확실한 판독은 사용자가 확인합니다.', '신청인과 실제 폐업일을 받아 코드 규칙으로 대조합니다.', '문제가 없으면 점검된 서류와 요약 ZIP을 받습니다.'], images: ['17-docs', '18-docs-issues'] }),
+  section('flow', '문서 처리 흐름', '업로드와 점검은 별도 기능입니다. 올린 파일이 있다는 사실만으로 점검 통과나 기관 제출이 되지 않습니다.', { steps: ['PDF·PNG·JPG/JPEG를 한 장씩 올립니다.', '로컬 OCR과 가린 자료의 모델 판독으로 종류와 값을 읽습니다.', '불확실한 판독은 사용자가 확인합니다.', '가게 이름·신청인과 실제 폐업일을 받아 코드 규칙으로 대조합니다. 직접 입력한 가게 이름은 Case에 저장하고, 서류에서 읽은 상호로 덮어쓰지 않습니다.', '문제가 없으면 점검된 서류와 요약 ZIP을 받습니다.'], images: ['17-docs', '18-docs-issues'] }),
   section('limits', '지원 형식과 제한', '20,000,000바이트 이하, 암호 없는 30쪽 이하 문서를 받습니다. 손상·과도한 페이지 크기·지원하지 않는 형식은 거부합니다. 현재 FE 업로드 제한 시간은 110초입니다.'),
   section('checks', '점검 항목', '누락, 공사내역서·세금계산서·이체 금액, 거래처·수취인·신청인·공급받는 자, 실제 폐업일, 같은 전후 사진을 대조합니다. 통장 사본은 필수 정산 목록이 아니며 카드 결제 대체 서류 경로는 아직 없습니다.', { note: note('읽기와 대조', 'OCR·모델은 문서의 종류와 값을 읽습니다. 금액·이름·날짜의 대조는 코드로 실행합니다. 서비스 점검 통과는 기관의 적격 판단이 아닙니다.') }),
   section('safety', '안전 검사 결과와 복구', '최신 구현은 안전 검사 차단을 일반 업로드 실패와 구분합니다. 같은 파일 재업로드를 반복 권하지 않습니다.', { table: [['상황', '응답·화면 분기'], ['AGENT_SAFETY_REFUSE', '422 detail.code, 처리하지 않았음을 알리고 내용 확인·다른 파일 안내'], ['AGENT_SAFETY_CRISIS_SUPPORT', '422 detail.code, 진행·서류를 보존하고 상담 창구 안내'], ['모델·OCR 실패', '502, 잠시 뒤 재시도 안내'], ['시간 초과', '기존 서류 재조회, 같은 파일의 처리 상태 확인']], code: { language: 'JSON · 응답 형식 예시', text: '{\n  "detail": {\n    "code": "AGENT_SAFETY_REFUSE",\n    "message": "이 파일은 자동으로 읽지 않았어요. 서류 내용을 확인한 뒤 다른 파일로 올려 주세요."\n  }\n}' } }),
@@ -111,7 +111,7 @@ doc('agent/guardrails', '근거와 검수', '검수되지 않은 초안이 확�
   section('evidence', '근거', '공식 자료는 출처·버전·검수·최신성·내용 hash를 확인합니다. 자료가 없으면 다른 자료로 채우지 않습니다. 사용자 입력에는 원문 근거를 연결하고 다른 Case 자료를 섞지 않습니다.'),
   section('proof', '검수 증명', 'ReviewProof는 같은 Case·snapshot·입력·초안을 묶습니다. 초안이나 선행 결과가 바뀌면 과거 PASS를 재사용할 수 없습니다. Agent는 변경 후보를 반환하며 저장은 BE가 맡습니다.'),
   section('store', 'DB와 이력', '현재 상태는 Case, 입력·판단 상태와 다음 행동은 CaseHistory에 둡니다. 공식 문서 본문은 문서·버전별 행을 공유하고 Case Evidence가 참조합니다. 충돌 해결과 상태 변경은 함께 저장합니다.', { note: note('재현 범위', '현재 전체 snapshot·절차 목록·모든 grounded_claims를 DB에 영구 보관하지는 않습니다. 완전한 사후 재현을 보장하지 않습니다.') }),
-  section('privacy', '개인정보와 문서', 'BE가 자유글에서 식별번호 등을 가리고, 이름임을 밝힌 표현의 일부를 규칙으로 가립니다. 모든 문장 속 이름을 탐지하는 것은 아닙니다. 문서 모델용 가림과 제출용 주민번호 뒷자리 가림 정책은 서로 다릅니다. 원문과 OCR 텍스트를 추적 도구로 보내지 않습니다.'),
+  section('privacy', '개인정보와 문서', 'BE가 자유글에서 식별번호·연락처·주소 등을 가리고, 이름임을 밝힌 표현의 일부를 규칙으로 가립니다. 모든 문장 속 이름을 탐지하는 것은 아닙니다. 결과 확인·충돌 확인 화면에도 [주소] 같은 가림 표시가 그대로 나오며 원래 글자로 되돌리지 않습니다. 입력 원문은 재시도와 충돌 확인을 위해 서버 DB에만 남습니다. 문서 모델용 가림과 제출용 주민번호 뒷자리 가림 정책은 서로 다릅니다. 원문과 OCR 텍스트를 추적 도구로 보내지 않습니다.'),
 ], ['backend/app/agent/guardrails.py', 'backend/app/agent/review_tool/tool.py', 'backend/app/be/services/decision_record.py', 'backend/app/be/models/evidence.py', 'backend/app/be/services/redaction.py', 'backend/app/agent/document_tool/documents.py']);
 
 doc('operations/common', '실패와 복구', '접수·판단·저장 실패를 나누고 복구할 수 있는 경로를 안내합니다.', [
@@ -130,7 +130,7 @@ doc('reference/errors', '에러 코드', 'HTTP 요청 실패와 AI 업무 결과
 
 doc('reference/tests', '테스트 케이스', '정상 흐름과 경계·예외·동시성·복구를 함께 점검합니다.', [
   section('principle', '무엇을 검증하는가', '자동 테스트는 모델 응답을 대체해 계약·저장·보호 동작을 확인합니다. 격리 MySQL 테스트도 포함됩니다. 테스트 통과가 실제 LLM 정확도나 실제 사장님의 사용성을 보장하지 않습니다.'),
-  section('commands', '실행 방법', '프로젝트 테스트는 실제 모델을 호출하지 않습니다. 실제 LLM 평가 스크립트는 호출 수와 비용을 확인하는 별도 규칙을 따릅니다.', { code: { language: 'Shell', text: '# Frontend\ncd frontend\nnpm test\nnpm run lint\nnpm run build\n\n# Backend: Python 3.12, 테스트 의존성과 Docker 필요\ncd ../backend\npython -m pytest tests -q\n\n# 문서 소스와 계약·링크 확인\ncd ../frontend\nnpm run docs:check' } }),
+  section('commands', '실행 방법', '프로젝트 테스트는 실제 모델을 호출하지 않습니다. 실제 LLM 평가 스크립트는 호출 수와 비용을 확인하는 별도 규칙을 따릅니다.', { code: { language: 'Shell', text: '# Frontend\ncd frontend\nnpm test\nnpm run lint\nnpm run build\n\n# 실제 FE·BE·MySQL 브라우저 검사(Playwright, Docker 필요)\nnpm run test:e2e\n\n# Backend: Python 3.12, 테스트 의존성과 Docker 필요\ncd ../backend\npython -m pytest tests -q\n\n# 문서 소스와 계약·링크 확인\ncd ../frontend\nnpm run docs:check' } }),
   section('scenarios', '대표 시나리오', '', { tests: tests(['최초 진단', '임차·보험·이력 조합에 맞는 첫 행동'], ['선택형 일부 복구', '없는 세부 범위 되묻기'], ['기존값과 충돌', '선택 전 미변경·선택 뒤 검수'], ['동시 제출', 'Case당 한 건만 접수'], ['서류 누락·변조', '구체 문제 안내·ZIP 제한'], ['안전 검사', '코드별 화면, 원문·식별번호 추적 누출 방지'], ['서버 재시작', 'PENDING 해제와 재시도'], ['UI 접근성', '새로고침·키보드·동작 줄이기·느린 연결']) }),
   section('evidence', '검증 기록', '실행 시점과 소스 버전을 함께 남깁니다. 이전 최종 설명서의 658개 FE·1,098개 BE 통과는 4e64e0e 시점의 기록이며 현재 코드의 새 측정으로 재사용하지 않습니다. PERF 전용 테스트는 기본 실행에서 건너뜁니다.', { validation: true }),
 ], ['frontend/package.json', 'backend/tests/test_double_submit.py', 'backend/tests/test_document_api.py', 'backend/tests/test_llm_limits.py', 'backend/tests/test_pool_capacity.py']);
@@ -140,8 +140,8 @@ doc('reference/glossary', '용어집', '서비스와 코드에서 사용하는 �
 ], ['backend/app/agent/schemas.py', 'backend/app/be/models/case.py']);
 
 doc('reference/changes', '변경 이력', '문서에 반영한 서비스 변경과 확인한 코드 버전을 기록합니다.', [
-  section('latest', '최신 반영', 'b0fa738까지의 develop을 반영했습니다. DB 연결을 확인하는 /health, Case 회전 집계 도구와 모의 모델 브라우저 E2E의 추가를 확인했습니다. 시연 계정 초기화 SQL과 PENDING 제외·대상 번호 표시를 운영 문서에 추가했습니다. 서류 안전 검사 코드의 422 응답과 FE 안내 분기, 이름을 명시한 일부 표현의 가림 설명을 확인했습니다.'),
-  section('history', '기록', '', { table: [['기준', '반영 내용'], ['2026-11-07 / b0fa738', 'DB 점검 health 200·503, Case 회전 집계 도구와 E2E 테스트 추가 반영'], ['2026-11-07 / 366617a 작업본', '리본 운영철학·안심 이용 7개 화면과 확인·정정·서류 보호 안내 추가'], ['2026-11-07 / 366617a', '시연 계정 초기화 SQL과 실행 중 제외·대상 결과 표시 반영'], ['2026-11-07 / 764f3c2', '서류 안전 차단·위기 지원 분기와 설명을 최신화'], ['2026-11-07 / 4e64e0e', '카카오 문서 방식의 대표 4개 시안 작성'], ['2026-11-07 / 4e64e0e', '59쪽 화면 설명서와 92개 테스트 점검표 작성']] }),
+  section('latest', '최신 반영', '279dad5까지의 develop을 반영했습니다. 서류 점검 직전 가게 이름 입력과 저장, 서류 응답의 표시 이름·종류 목록, 서버 시작 때 공식 자료 적재, 화면 응답의 개인정보 원문 복원 제거, 로드맵 철거 작업 이름 변경을 확인했습니다. 그 전에는 DB 연결을 확인하는 /health, Case 회전 집계 도구와 모의 모델 브라우저 E2E의 추가를 확인했습니다. 시연 계정 초기화 SQL과 PENDING 제외·대상 번호 표시를 운영 문서에 추가했습니다. 서류 안전 검사 코드의 422 응답과 FE 안내 분기, 이름을 명시한 일부 표현의 가림 설명을 확인했습니다.'),
+  section('history', '기록', '', { table: [['기준', '반영 내용'], ['2026-11-07 / 279dad5', '가게 이름 입력·저장(#251), 서류 표시 이름·종류 목록(#260), 시작 시 공식 자료 적재(#263), 화면 원문 복원 제거(#274), 철거 작업 이름(#248) 반영'], ['2026-11-07 / b0fa738', 'DB 점검 health 200·503, Case 회전 집계 도구와 E2E 테스트 추가 반영'], ['2026-11-07 / 366617a 작업본', '리본 운영철학·안심 이용 7개 화면과 확인·정정·서류 보호 안내 추가'], ['2026-11-07 / 366617a', '시연 계정 초기화 SQL과 실행 중 제외·대상 결과 표시 반영'], ['2026-11-07 / 764f3c2', '서류 안전 차단·위기 지원 분기와 설명을 최신화'], ['2026-11-07 / 4e64e0e', '카카오 문서 방식의 대표 4개 시안 작성'], ['2026-11-07 / 4e64e0e', '59쪽 화면 설명서와 92개 테스트 점검표 작성']] }),
   section('scope', '갱신 기준', '원격 develop의 최신 코드를 먼저 확인하고 화면·라우터·스키마·서비스·테스트를 대조합니다. 사람의 설명과 자동 생성 계약을 함께 갱신하며 확인한 날짜와 소스 해시를 보관합니다.', { links: [['문서 갱신 절차', '/developers/ko/reference/maintenance/']] }),
 ], ['backend/app/be/services/document.py', 'frontend/src/hooks/useDocuments.ts', 'backend/app/be/services/redaction.py']);
 
@@ -160,7 +160,7 @@ export const apiGroups = [
   { family: 'roadmap', title: '로드맵 REST API', description: '전체 순서와 체크·기관 결과·신고 정보·보증금 기록을 관리합니다.', operations: ['GET /cases/roadmap', 'PUT /cases/checklists/{task_id}', 'PUT /cases/support-approval', 'PUT /cases/closure-report', 'PUT /cases/deposit-return'] },
   { family: 'documents', title: '서류 REST API', description: '서류 업로드·확인·삭제·점검·제출 파일을 연결합니다.', operations: ['GET /cases/documents', 'POST /cases/documents', 'POST /cases/documents/{document_id}/confirm', 'DELETE /cases/documents/{document_id}', 'POST /cases/documents/check', 'GET /cases/documents/settlement.zip'] },
   { family: 'logs', title: '기록 REST API', description: '사용자와 리본의 작업 이력을 조회합니다.', operations: ['GET /cases/logs'] },
-  { family: 'operations', title: '복구와 운영 REST API', description: '허용된 실패 판단을 재개하고 프로세스 응답을 확인합니다.', operations: ['POST /cases/retry', 'GET /health'] },
+  { family: 'operations', title: '복구와 운영 REST API', description: '허용된 실패 판단을 재개하고 서버와 DB 연결 상태를 확인합니다.', operations: ['POST /cases/retry', 'GET /health'] },
 ];
 
 export const operationNotes = {
@@ -185,7 +185,7 @@ export const operationNotes = {
   'POST /cases/documents': { title: '서류 올리기', description: 'multipart/form-data의 file과 선택적 kind를 받습니다. 20,000,000바이트 이하 PDF·PNG·JPG/JPEG, 암호 없는 30쪽 이하 문서를 처리합니다. 안전 검사 422는 detail.code로 구분합니다.' },
   'POST /cases/documents/{document_id}/confirm': { title: '서류 종류와 값 확인', description: '종류와 확인값을 저장하고 지난 점검을 무효화합니다. 확인된 원상복구 조항이 바뀌면 별도 판단을 예약할 수 있습니다.' },
   'DELETE /cases/documents/{document_id}': { title: '서류 빼기', description: '소유 Case의 서류를 제거합니다. 이전 점검 통과는 무효가 되므로 다시 점검합니다.' },
-  'POST /cases/documents/check': { title: '정산 서류 점검', description: '신청인 이름과 확인한 실제 폐업일로 코드 규칙을 실행합니다. 예상 폐업일로 대신하지 않습니다. 모델을 새로 부르는 점검은 아닙니다.' },
+  'POST /cases/documents/check': { title: '정산 서류 점검', description: '가게 이름·신청인 이름과 확인한 실제 폐업일로 코드 규칙을 실행합니다. 가게 이름을 보내면 Case에 저장하고, 생략하면 저장된 이름을 씁니다. 예상 폐업일로 대신하지 않습니다. 모델을 새로 부르는 점검은 아닙니다.' },
   'GET /cases/documents/settlement.zip': { title: '정산 제출 ZIP 받기', description: 'COMPLETE, 현재 문서 digest·가림 정책·산출물 무결성을 확인한 뒤 ZIP을 반환합니다. 다운로드는 기관 제출과 별개입니다.', binary: true },
-  'GET /health': { title: '프로세스 응답 확인', description: '현재 구현은 status 문자열만 반환합니다. DB 연결까지 확인하는 상태 점검이 아닙니다.', responseExample: { status: 'ok' } },
+  'GET /health': { title: '서버·DB 상태 확인', description: '별도 DB 연결로 SELECT 1을 확인합니다. 성공하면 200 status: ok, DB 오류면 503 status: unavailable입니다. 모델 연결까지 확인하지는 않습니다.', responseExample: { status: 'ok' } },
 };

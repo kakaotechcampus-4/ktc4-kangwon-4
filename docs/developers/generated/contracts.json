@@ -1,5 +1,5 @@
 {
-  "checked_at": "2026-11-07T13:05:49+09:00",
+  "checked_at": "2026-11-07T16:39:41+09:00",
   "maintain_through": "2026-11-11",
   "openapi": {
     "components": {
@@ -1577,6 +1577,19 @@
                 }
               ],
               "title": "Closure Date"
+            },
+            "store_name": {
+              "anyOf": [
+                {
+                  "maxLength": 50,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Store Name"
             }
           },
           "required": [
@@ -1600,6 +1613,11 @@
               "type": "array"
             },
             "status": {
+              "enum": [
+                "COMPLETE",
+                "ISSUES",
+                "ERROR"
+              ],
               "title": "Status",
               "type": "string"
             },
@@ -1658,6 +1676,10 @@
         },
         "DocumentFieldResponse": {
           "properties": {
+            "label": {
+              "title": "Label",
+              "type": "string"
+            },
             "name": {
               "enum": [
                 "business_name",
@@ -1687,6 +1709,7 @@
           },
           "required": [
             "name",
+            "label",
             "value",
             "page"
           ],
@@ -1715,6 +1738,23 @@
           "title": "DocumentKind",
           "type": "string"
         },
+        "DocumentKindResponse": {
+          "properties": {
+            "kind": {
+              "$ref": "#/components/schemas/DocumentKind"
+            },
+            "label": {
+              "title": "Label",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "label"
+          ],
+          "title": "DocumentKindResponse",
+          "type": "object"
+        },
         "DocumentListResponse": {
           "properties": {
             "check": {
@@ -1727,15 +1767,35 @@
                 }
               ]
             },
+            "document_kinds": {
+              "items": {
+                "$ref": "#/components/schemas/DocumentKindResponse"
+              },
+              "title": "Document Kinds",
+              "type": "array"
+            },
             "documents": {
               "items": {
                 "$ref": "#/components/schemas/DocumentResponse"
               },
               "title": "Documents",
               "type": "array"
+            },
+            "store_name": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Store Name"
             }
           },
           "required": [
+            "store_name",
+            "document_kinds",
             "documents",
             "check"
           ],
@@ -3801,7 +3861,7 @@
       "stage": 2,
       "stage_title": "원상복구·철거",
       "task_id": "restoration_work",
-      "title": "원상복구·철거 작업"
+      "title": "영업 마무리 후 원상복구·철거 작업"
     },
     {
       "condition": "demolition",
@@ -3935,7 +3995,7 @@
     "backend/app/agent/document_tool/__init__.py": "e224c6b50e1c00b1029d7d6f0e7467b4b88c036106bc7a4bd2ede6fc5e78f113",
     "backend/app/agent/document_tool/checks.py": "abc3fd6040023ab5a79824e0b5c8366bb8e9969110465a7d8fcc5be217f6e107",
     "backend/app/agent/document_tool/documents.py": "513d86b131c3915b48bea60bbdd955b6026219a119d8c4613396289880fbc5fa",
-    "backend/app/agent/document_tool/models.py": "0cc354ae00ecfdc00dba13071096b4a636502abbe7093bf31a204b4026391708",
+    "backend/app/agent/document_tool/models.py": "7091c12967564ede22dd853740770fef94e55f7fc9e3535a221d07e4a1d94322",
     "backend/app/agent/document_tool/preparation.py": "13e9786e79f994520a8fa5c2c61f754a77ffdf20bf2eff8d4973639936abcf43",
     "backend/app/agent/document_tool/safety.py": "a802e5d84eb3ed9c0d5c803d3cc870f7556901ecb8e037dfa862f225e33ad70a",
     "backend/app/agent/document_tool/tool.py": "a346653285d45a22f922bbf0d01d787c77d617f5f2692d0e3d53440b474fa909",
@@ -3956,7 +4016,7 @@
     "backend/app/agent/review_tool/__init__.py": "31053c8258b934a58e76031de18972e45c5f2c2d7aba5f3d2a8a62e7743786b8",
     "backend/app/agent/review_tool/models.py": "72222f50255b8d0d98e9e4675ee9e33736342905b491c322e6d931e9822bd15c",
     "backend/app/agent/review_tool/tool.py": "427457e95b4491e73657e8c0b23c992edc3b9d6b8bfc1b0a36a6c1249bee00c6",
-    "backend/app/agent/roadmap.py": "5ce5a97a43896e89defd438639b16209acad302e1ef01efc6b823e53d2ec86da",
+    "backend/app/agent/roadmap.py": "ada9176063de12d6a1633a4a13129440741a42377e84442073f2d3ab4747e291",
     "backend/app/agent/run_scope.py": "cb267f2ded59ec540a11ea0d69a05ac204bdd406763d65bad9f6f77e0fe6f747",
     "backend/app/agent/runtime.py": "35659c4009ee240eec5a7d1c54b3d559283d5b6401e008069ceb23b93c9f87fe",
     "backend/app/agent/schemas.py": "440b6cbf9c1f0efdeaad87915ff25d06c8ac81b245742015dd0fbd5ea2e6390e",
@@ -3981,7 +4041,7 @@
     "backend/app/be/crud/member.py": "8beea1f73e7603161bc71e50a4abdf3793d469ac7eca8ad80597b67a20aadcd1",
     "backend/app/be/crud/procedure_step.py": "7ce5cdb4f4256d29dedffe0dc905388ddb7da80d403c7ce4d5b3779dc0c1a15e",
     "backend/app/be/crud/support_item.py": "106b4402e1b250731e63e97131326eab4a50a584d8b1f960d1c3e91ba73beb35",
-    "backend/app/be/db.py": "9bf88d0748b74e8a82ba84bdc029da9e9fccf07a9d66b978f8327d3dee5f5c87",
+    "backend/app/be/db.py": "50f7fbc6dc60180c4ef9133d0d54a14728e4283d53f33d8c30ceb95779c2b4f0",
     "backend/app/be/dependencies/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/be/dependencies/auth.py": "1e375f898d5c5bf5343295960e08e6eab384880202aa109621215e9d077ceec3",
     "backend/app/be/models/__init__.py": "e7cd734f6d97f86e0227bdc4744c9140ce570f230de102e12e656ed009976715",
@@ -3997,21 +4057,21 @@
     "backend/app/be/models/procedure_step.py": "d3afa28485df5e46f45fdb24275d43e589f297132e0ff7372d1afbf161ffe50b",
     "backend/app/be/models/support_item.py": "1d988351a583da9736cadac0259ad6f44aaa12b2d562cbdc35b9168495821655",
     "backend/app/be/routers/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "backend/app/be/routers/auth.py": "05c99567bb13a5177be0a369e92c43b8aacb31f685ec59408d6af802ab75f7a2",
+    "backend/app/be/routers/auth.py": "d5bfbc4646bc6ef5b610956ba58024f4ae10ff999f3eb841984a4128d4d19268",
     "backend/app/be/routers/case.py": "2e2f1a58b11c7d748ff0f40e2e432de7eaae4f9ddbf47b3b333659251d36bba5",
-    "backend/app/be/routers/document.py": "ec52548b06d71ac9c3142148a606ebbad1e529c2eb4215cf8d5c476237d2774e",
+    "backend/app/be/routers/document.py": "012eaa8c5e5f7e01782b627500b5567274514970a96c92d9d4eeff8ca6521119",
     "backend/app/be/schemas/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/be/schemas/auth.py": "f1b34a14a386b8301b9335bdaa160caa5894e6b473a4d79f06761b6713a6c58b",
     "backend/app/be/schemas/case.py": "5d5506aa4e9f76bd3984712ce98cb4314a583f01393f4ad0d15664ac2531131b",
-    "backend/app/be/schemas/document.py": "5f0c913b4bb257adb350f9ea0c0fd0de867839fad296af50e1056465466f82b5",
+    "backend/app/be/schemas/document.py": "e4f93b60953c03341d459a70f1ca7c0a9b470561dd5d02b31deec670100828c0",
     "backend/app/be/services/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/be/services/agent_runtime.py": "95707c6ee56c9b37c4a1223e36fbb585de43a05136f47b28424f3fae2f636f42",
     "backend/app/be/services/auth.py": "90d3d2c2b40736618c9c02faf3fbcfddc5c30457a5b2b1fc7bde4555a62a5bdd",
-    "backend/app/be/services/case.py": "0cb89e0814ed1e39c004d99834b8a267daf62c2b239f227215be9709fc350d03",
+    "backend/app/be/services/case.py": "04f800afe67044c9d7343cef77afe0646374dc33ca5725d5da30c633ea1a47d0",
     "backend/app/be/services/case_snapshot.py": "ca58c04bd41dc9cd175c8b5bab5b7a18e30061c10e6acc65f062f072c963b6a3",
     "backend/app/be/services/conflict_decision.py": "5c6b4b95286cfe476d8015e7a7e0018a69b6e108a50991a8bec95332c9a7b555",
     "backend/app/be/services/decision_record.py": "fd8e615bb1f304b9cba899cd142cefbcea2df5b7d02c41a01d75596e92400f12",
-    "backend/app/be/services/document.py": "cc5d4925d0c4832b3857e7ce24de51066a81621bb020ab9c545fc7e11a2050ef",
+    "backend/app/be/services/document.py": "773f9c86d9080b279398f347e3f45cd91a54bba2a873aa2dc521354f785ba256",
     "backend/app/be/services/judgment.py": "c818b189770414c7991cd5d0457e708526aa713c1cbdb7aa876659b9f56ba550",
     "backend/app/be/services/official_document.py": "6c2d076a8fb092c6d12fd781f879c14c41a1814b439c154a8ef96fc4a4e61f62",
     "backend/app/be/services/procedure_registry.py": "fddacc4d6361ecdd3636e29a80cb47394e448381f9fc8337f22a53b4457ef77d",
@@ -4026,17 +4086,17 @@
     "backend/app/common/config.py": "a89eeabcdd478a7991dd186a54f1c7421219299c02a9795096bda58e93cecf0e",
     "backend/app/common/procedure-digests.ko-KR.json": "8df285b76f00488bf9c07333e1025151e0b5abbf9468a667a7173b535d1fc952",
     "backend/app/common/reviewed-procedures.ko-KR.json": "2da204f302d2fd177000f00fa1957d881664b623f790d162c1e7fbd08bf04c7a",
-    "backend/app/main.py": "1b4466556eca2eaa3a2d861830e7175744d5cc82529beb6716b583e6be463559",
+    "backend/app/main.py": "d261691c51e22c4753d4091e1a652d6a81edf586bd96dbacc3e2a70f1ef60a02",
     "backend/requirements.txt": "326f57043c631a91af2799351bc378a98f0cb699b1d3694e27470084dd43cece",
     "backend/sql/001_schema.sql": "8c97936387160126d16cb98096df79da85ff18c29eccda143f7ad538ae30476d",
     "backend/sql/002_case_history_source_document_submitted.sql": "4183aab2f72d6296472054d20791c41fdbaf792b82aa4bcf834ad5888835a5e8",
     "backend/sql/reset_member_case.sql": "e260b78219adbc425118100ff3778a9599affafefc15cd22060d44f66706a28f",
     "docker-compose.prod.yml": "7425078f6a6298b192790eb6247aad4d9e1e6c636a572b3bfc204e639424e151",
-    "frontend/package.json": "c77b489d27e0e87977d06a69318cb5a6ef3434ee25d9640406bfa81593e7eaa5",
+    "frontend/package.json": "567b3e7edfedd798a4d8ffcbb35b470a48cc54a193934e571c905dec66d1598d",
     "frontend/src/App.tsx": "8223684420789b9755c6994b972226c7450d7af21a98806d53e0b9e57c37930b",
     "frontend/src/adapters/case.ts": "0df1ed9b30ff54c0c5347b96d15f64b74561a8e7a646cb031e11d24156ad9016",
-    "frontend/src/adapters/documents.ts": "167409e681196816056d66990031509af91535e546bbae8dfd74ec467bf27a79",
-    "frontend/src/adapters/logs.ts": "7ff9dcf336c456dfa4bb0ec1c4a100349b75e2b318c7a011587998fb055d3bca",
+    "frontend/src/adapters/documents.ts": "3803039d54d500b3086522576458df8c588045f89a1353a6d6decc58ce28b88f",
+    "frontend/src/adapters/logs.ts": "7e34dc9ee258aa98a451e5e2790fa6f937d60b6a61756072e3cad0cfa2d31b90",
     "frontend/src/adapters/results.ts": "60e9121803901da051cabf789278b9215ba13daabdd78a160e276d8f96063d30",
     "frontend/src/adapters/roadmap.ts": "c26d2c4a53018f5d4c46be9d2a86d727849ae5e3000d870380feeaef9070871b",
     "frontend/src/components/RequireAuth.tsx": "86c1fcf2ca8a5bb4dae8c12c57b75b9247cea827fb52d6ca1a91ad17946948ef",
@@ -4057,7 +4117,7 @@
     "frontend/src/components/ui/TaskCard.tsx": "3141f352eb6afde822ffb81208ef7a8d24128bd93f2bf312bdaa01a891588337",
     "frontend/src/components/ui/TopBar.tsx": "4021e5ca0e46c3bcccba4b9b1c7e7b92dd6c5a736a82f7233fedd222f3c68e3d",
     "frontend/src/hooks/useCase.ts": "c811d2b47887a79e5699848f07039c29b8ae16cda566690d04a73ed3d4e804d0",
-    "frontend/src/hooks/useDocuments.ts": "a320d9236813082d1fb540c76410e2bb83d70e639129c2ce66a8562b7c633c02",
+    "frontend/src/hooks/useDocuments.ts": "c4b315d2fa2a24bad50f9f2ee8163da4e923102de8ac69bba9d234f5e588850b",
     "frontend/src/hooks/useLogs.ts": "7dfaea31f2e5b571c0da79f9870580bbaa5295b5faa87f4002c954e3ce092908",
     "frontend/src/hooks/useRoadmap.ts": "eed95e8fb4472d9890d95784f66e46813ee21eb0f04c6e3f3d9179127472de54",
     "frontend/src/index.css": "33c2f14da276be3b5f58c0b013c3a48691a1e903745c6f7c4dc8abbf0c99e3a4",
@@ -4065,7 +4125,7 @@
     "frontend/src/lib/auth.ts": "a6157e8d03eee60313904f6d790ffb7e81243e9c8719d0a9aa2e97e31aa211c5",
     "frontend/src/lib/caseOptions.ts": "87ddf56599271b5a5054d7f3f7ba4cbb3d8ded7fd50b78dbfc86e4065579a38a",
     "frontend/src/lib/diagnosisSteps.ts": "d4e7778c8dbb9fa42ec5fb8238cf91682c4dcdeca02516d891453b3b6e986732",
-    "frontend/src/lib/documentsApi.ts": "0aadacef7900cec6e7cede48678892be4025fb4d9569c88a9490fad635d78510",
+    "frontend/src/lib/documentsApi.ts": "1593d2f22997d7908d28f075d7670136ed691c4afe0bda1ee871064c3588fc88",
     "frontend/src/lib/judgmentRetry.ts": "b1742f997f6c396c2d3262c565281069c41a9456ed25157db8fa1a1607905eb4",
     "frontend/src/lib/mockSwitch.ts": "b0fa2679b4ef409860c78c2f006bb1d82c722de077372e9ddb19bb6e9eabfd4b",
     "frontend/src/lib/motionFeatures.ts": "a6d0f0baf55e3d6e6b5923d9022adbba7b57be0762aaa0d2bdd2c6c2c0e68be0",
@@ -4077,16 +4137,16 @@
     "frontend/src/lib/viewTransition.ts": "e5dcf28495e50e084509a02bf71646064e795a381be44be60232f652131064cf",
     "frontend/src/main.tsx": "e75aafc9c5e2322e707b7f8936fff570c97bcdf176816dc2d1624116e650f342",
     "frontend/src/mocks/currentCase.ts": "0a7ac6481fb8e8ac361e75de5ba26755626f7bb86b63422631f3539d2915942f",
-    "frontend/src/mocks/documents.ts": "d7cc66f0c7963259bd721b40f5e840b1cc138af311720d828dae90dc01265b27",
+    "frontend/src/mocks/documents.ts": "15ea8c738ad34aea55cc6e45d927311c9e7ffc4fd1e136f99ba5768865923a5d",
     "frontend/src/mocks/logs.ts": "29efae98c1c866f9f3ab0c2c1e6a231db5d9e521e6958c7148e5ecab6ea0e769",
     "frontend/src/mocks/resultFlow.ts": "75252ca4be1f58810f90e00a273069af03395eab58da34b34f4b4b6e1a498936",
     "frontend/src/mocks/roadmap.ts": "6a9b1523cebf5dbc5d114720d16d14f566e2accdc9c8a41e11bf0b0aac9e792b",
     "frontend/src/pages/CaseCreatePage.tsx": "c0b30ff46ca564e0286af70c8cfa7141411cf83d675472c0666c4e67cde5f42c",
-    "frontend/src/pages/ConfirmChangePage.tsx": "ab0a18f7692cdbe1fb47d0327ffc1953489942d962c682ec9d2c27ef3bb2256e",
+    "frontend/src/pages/ConfirmChangePage.tsx": "bb408e9fff1fd63fd866355b8cbbf8a89e189fd58836274581d910d265044410",
     "frontend/src/pages/CurrentCasePage.tsx": "27d76d5875cc590928a33bf4e30ebc5b36e05b1c08c578fce9396dea0e089997",
-    "frontend/src/pages/DocsCheckPage.tsx": "d897412c313aed879bf18b01cfc0c2ccdb9b0fa499491748a9f71f1a12ff461e",
+    "frontend/src/pages/DocsCheckPage.tsx": "ae90463e9ba3f64aec6e521001a4c8fdadd833e47a693881fb32d1588f95875d",
     "frontend/src/pages/DocsDonePage.tsx": "fc39239d2f62a99a925c5d1a66f911cfd261630fe685a92fa43b110207e135da",
-    "frontend/src/pages/DocsPage.tsx": "635b7db66f9467cb35948498afe0f745e71fb58c9bdf1c736b40cbe52b658ef7",
+    "frontend/src/pages/DocsPage.tsx": "1505add672259fd004fd7198d92d38271178319b26036cd10786ac1e6e75cdb8",
     "frontend/src/pages/EntryPage.tsx": "6bbd3c417d20198dab26f7e405abccd4a5581af1e7ba228c8cd9c6cd3cf1c289",
     "frontend/src/pages/LogPage.tsx": "266b495a07945a995236f3ce98f85ee6811709336070ac5be6ce1678c313d016",
     "frontend/src/pages/LoginCallbackPage.tsx": "d94de9a6774431a3736f84bf361a6e2adcf37296bfd3257b07f702ec0dcbf321",
@@ -4097,16 +4157,16 @@
     "frontend/src/pages/RoadmapPage.tsx": "f535f27d88865d7b85ae8382e29fbe2f9c612ebdad4d7cb1162ab34b7d338dbe",
     "frontend/src/pages/TaskFlowPage.tsx": "b0a29bf527e085b215fd6376c40f8e3241cf95a90e2c3bba914a6a36cd6d5d75",
     "frontend/src/pages/TaskPage.tsx": "41d789755f12e29c90932f0b2295183f0727726850bd7a26ff9398b022db29be",
-    "frontend/src/pages/docsTestServer.ts": "201a3d6958849e91d5b8dbff3284a2f730f958c9827cfec9bd65ae0f136aa45b",
+    "frontend/src/pages/docsTestServer.ts": "cfc21ddaa0c75deebfd04f08adb713081432024aa37cb1831815f7d88ba9cdbc",
     "frontend/src/routes.tsx": "ba7f9bce99c05a0e64c8daa43235e08a1479dd4a4788f93e6135c621b1dcdd9e",
     "frontend/src/setupTests.ts": "e21d12550201c791de27aa00c4f57a56d0cb6258420b0c4bf048a80533003f9a",
     "frontend/src/stores/useDiagnosisStore.ts": "ffbae0509f5fab05f66fc4bc3a15db6cdd7611c76283fe2d1a7182833e511284",
     "frontend/src/styles/tokens.css": "ac9fc68080e3efe75b7f5ddb35f5b9c64f5408374fc612c2d93aebfd91d8bee5",
-    "frontend/src/types/api.ts": "98ff6b08438f24167daa007c437cd378d66b400b364fd18afbffdc33d3007a4c",
-    "frontend/src/types/view.ts": "eaaa27ad2a652e6ac2b7811f8e7b23e55bd27fbcc42530ddb2b7d6e5b6dcefb2",
+    "frontend/src/types/api.ts": "276ba95bbcd5255045fb70241b1fc1a236d95c28110daf2ad6d4f43a39aa1d62",
+    "frontend/src/types/view.ts": "1f6702488b87c05929d87d0d9ec3afbdca74ec5970db180c460ee6fb6e290ae6",
     "frontend/src/vite-env.d.ts": "918a0674786e414c2501b27954c72740e7565b0fcd52a214484c69e68ac2b8b4",
     "frontend/vercel.json": "1549d197267d93234cfe0fdf05eaa2dc680f192acc2cac0dcb3f80fe22867808",
-    "frontend/vite.config.ts": "a4cc0e8a26c6b429ed80e0b70a6880ea2f558f05da802f5bb7ea9561e0f4c77e"
+    "frontend/vite.config.ts": "5aea7e89b922a21bd905069764da8c8eef193436ba616f36ea17db87a4779f70"
   },
-  "source_revision": "366617abdc0b85dc779c27f5260269d60746c365"
+  "source_revision": "a516eb6ef9a891e18e219e70c0e3c1bf15ec8430"
 }
