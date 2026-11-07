@@ -15,8 +15,11 @@ interface HomeStageCardProps {
 /**
  * 홈 아래쪽의 폐업 단계 카드. 누르면 로드맵(폐업 전체 순서)으로 간다(시안과 같음).
  *
- * "지금은 원상복구·철거 단계"처럼 지금 단계를 굵게 칠한다. 지금 단계는 서버가 정한다 — 화면이
+ * "챙길 일이 남은 단계: 원상복구·철거"처럼 지금 단계를 굵게 칠한다. 지금 단계는 서버가 정한다 — 화면이
  * 할 일 상태로 짐작해 칠하면 서버가 정하지 않은 진행 상황을 확정된 것처럼 보여주게 된다.
+ *
+ * 시안의 "지금은 ○○ 단계"를 쓰지 않는다. 서버의 지금 단계는 "할 일이 남은 첫 단계"라, 영업 마무리(3단계)
+ * 일을 하는 중에도 철거 할 일이 남아 있으면 2단계를 준다. 단계를 차례로 밟는 것처럼 읽히지 않게 한다(#237).
  * 서버가 아직 주지 않으면 막대를 비워 둔다.
  *
  * 막대는 시안처럼 지금 단계의 가운데까지 채운다(`(단계 - 0.5) / 5`). 단계를 다 마쳤다는 뜻이 아니라
@@ -40,7 +43,7 @@ export function HomeStageCard({ stage = null, completed = false }: HomeStageCard
         <span className="flex-1 text-17 font-bold">
           {current ? (
             <>
-              지금은 <span className="text-fg-brand-contrast">{current.title}</span> 단계
+              챙길 일이 남은 단계: <span className="text-fg-brand-contrast">{current.title}</span>
             </>
           ) : (
             '폐업 단계'

@@ -176,16 +176,22 @@ export function CheckFlow({ task, attach = false }: { task: RoadmapTaskView; att
         </p>
       )}
       {waiting && (
-        <InfoBox title="아직 기록할 수 없는 할 일이에요.">필요한 내용이 확인되면 기록할 수 있어요.</InfoBox>
+        // 무엇이 비었는지는 서버가 주지 않는다. 사장님이 할 수 있는 일(결과 알려주기)을 알린다(#237)
+        <InfoBox title="아직 확인되지 않은 정보가 있어서 기록할 수 없어요.">
+          알게 되면 결과 알려주기에서 알려 주세요.
+        </InfoBox>
       )}
       <SaveNotice save={save} />
       <div className="mt-auto flex flex-col gap-2">
-        {checked ? (
+        {/* 기록할 수 없는 동안에는 꺼진 [다 했어요] 대신 할 수 있는 일을 주요 버튼으로 둔다(주요 버튼은 하나) */}
+        {waiting && !checked ? (
+          <Button onClick={() => navigate({ pathname: '/results', search }, { viewTransition: true })}>결과 알려주기</Button>
+        ) : checked ? (
           <Button variant="outline" disabled={save === 'SAVING' || save === 'REJECTED'} onClick={toggle}>
             완료 취소하기
           </Button>
         ) : (
-          <Button disabled={waiting || save === 'SAVING' || save === 'REJECTED'} onClick={toggle}>
+          <Button disabled={save === 'SAVING' || save === 'REJECTED'} onClick={toggle}>
             다 했어요
           </Button>
         )}
@@ -255,7 +261,10 @@ export function SupportResultFlow({ task }: { task: RoadmapTaskView }) {
       </div>
       {savedLabel && save !== 'SAVING' && (
         <p className="flex items-center gap-2 text-17 font-bold">
-          <IconCheckmarkCircleFill size={22} className="text-fg-brand motion-safe:animate-pop" aria-hidden="true" />
+          {/* "아직 몰라요"에는 완료 체크를 달지 않는다. 할 일은 확인 필요로 남는다(#237, ui-guidelines "모름은 모름으로") */}
+          {saved !== null && (
+            <IconCheckmarkCircleFill size={22} className="text-fg-brand motion-safe:animate-pop" aria-hidden="true" />
+          )}
           &ldquo;{savedLabel}&rdquo;로 기록했어요
         </p>
       )}
@@ -645,12 +654,33 @@ export function AddressSheet({
   )
 }
 
-/** 사장님이 따로 할 것이 없는 할 일(가입 때 정한 것 등) */
-function InfoFlow({ task }: { task: RoadmapTaskView }) {
+/**
+ * 가게 정보로 정해지는 할 일(가입 때 정한 것 등). 정해져 있으면 따로 할 것이 없다.
+ *
+ * 아직 정해지지 않았으면 "할 것 없음"이라 하지 않는다. 폐업 날짜를 "아직 안 정했어요"로 고른 가게(확인 필요)와
+ * 예상 달만 고른 가게(진행 중)가 여기 온다. 정해지면 결과 알려주기로 알려 주게 한다 — 판단이 가게 정보를 고친다(#237).
+ */
+export function InfoFlow({ task }: { task: RoadmapTaskView }) {
+  const navigate = useNavigate()
+  const { search } = useLocation()
+  if (task.status === 'COMPLETED') {
+    return (
+      <TaskFrame>
+        <TaskHeader task={task} />
+        <InfoBox>이 일은 여기서 따로 하실 것이 없어요. 리본이 가게 정보로 확인해요.</InfoBox>
+      </TaskFrame>
+    )
+  }
   return (
     <TaskFrame>
       <TaskHeader task={task} />
-      <InfoBox>이 일은 여기서 따로 하실 것이 없어요. 리본이 가게 정보로 확인해요.</InfoBox>
+      {/* 예시에 연도를 넣는다. 연도가 있는 날짜만 저장 경로를 확인했다(#266 리뷰) */}
+      <InfoBox>
+        폐업 날짜가 아직 정해지지 않았어요. 날짜가 정해지면 결과 알려주기에서 알려 주세요. (예: 2026년 12월 20일에 폐업해요)
+      </InfoBox>
+      <div className="mt-auto">
+        <Button onClick={() => navigate({ pathname: '/results', search }, { viewTransition: true })}>결과 알려주기</Button>
+      </div>
     </TaskFrame>
   )
 }

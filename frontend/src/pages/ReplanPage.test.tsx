@@ -78,6 +78,8 @@ describe('ReplanPage — 서버', () => {
 
     expect(await screen.findByRole('heading', { name: '이렇게 이해하고 반영했어요' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '이해한 내용' })).toBeInTheDocument()
+    // AI가 사장님 글을 해석한 것이라 고지를 붙인다
+    expect(screen.getByText(/리본\(AI\)이 정리한 안내예요/)).toBeInTheDocument()
     expect(screen.getByText('철거 비용 지원은 신청이 먼저예요.')).toBeInTheDocument()
     // 홈에서 뺀 것과 같은 기준이다
     expect(screen.queryByText('철거 전에 지원 조건을 확인해야 합니다.')).not.toBeInTheDocument()
@@ -170,6 +172,8 @@ describe('ReplanPage — 서버', () => {
 
     expect(await screen.findByRole('heading', { name: '고르신 내용을 반영했어요' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '바뀐 내용' })).toBeInTheDocument()
+    // 사장님이 직접 고른 값은 AI 해석이 아니라 고지를 붙이지 않는다
+    expect(screen.queryByText(/리본\(AI\)이 정리한 안내예요/)).not.toBeInTheDocument()
     expect(screen.getByText('고르신 내용을 반영하고 있어요')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '홈으로' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '다르게 이해했어요' })).not.toBeInTheDocument()

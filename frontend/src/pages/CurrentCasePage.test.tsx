@@ -176,6 +176,9 @@ describe('CurrentCasePage', () => {
       expect(
         screen.getByText('철거가 필요한지 판단하려면 원상복구 범위를 먼저 알아야 합니다.'),
       ).toBeInTheDocument()
+      // 할 일과 이유는 AI가 정한 것이라 알린다. 카드가 좁아 짧은 표시만 보이고, 화면 읽기에는 문장 전체를 준다
+      expect(screen.getByText('리본(AI)')).toBeInTheDocument()
+      expect(screen.getByText(/리본\(AI\)이 정리한 안내예요/)).toHaveClass('sr-only')
     })
 
     it('물어볼 내용 보기를 누르면 할 일 상세로 간다', async () => {
@@ -227,6 +230,8 @@ describe('CurrentCasePage', () => {
       expect(
         await screen.findByRole('heading', { level: 2, name: '다음 할 일을 정하지 못했어요' }),
       ).toBeInTheDocument()
+      // AI가 정한 안내가 없는 카드에는 고지를 붙이지 않는다
+      expect(screen.queryByText(/리본\(AI\)이 정리한 안내예요/)).not.toBeInTheDocument()
     })
 
     /**
@@ -719,7 +724,7 @@ describe('CurrentCasePage', () => {
       )
       renderAt('/case')
 
-      expect(await screen.findByRole('link', { name: /지금은 원상복구·철거 단계/ })).toBeInTheDocument()
+      expect(await screen.findByRole('link', { name: /챙길 일이 남은 단계: 원상복구·철거/ })).toBeInTheDocument()
     })
 
     /** 단계 카드는 덤이다. 로드맵 하나 못 받았다고 홈에 오류를 띄우면 할 일 카드가 가려진다 */

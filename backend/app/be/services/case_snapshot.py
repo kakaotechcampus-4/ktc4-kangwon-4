@@ -56,7 +56,10 @@ class StoredEvidenceMissingError(ValueError):
     retryable = False
 
 
-def build_user_input(case_history_id: int, raw_input: str, submitted_at: datetime) -> RedactedInput:
+def build_user_input(
+    case_history_id: int, raw_input: str, submitted_at: datetime,
+    *, placeholders: dict[tuple[str, str], str] | None = None,
+) -> RedactedInput:
     """사용자가 넣은 입력 한 건을 AI가 받는 모양으로 바꾼다.
 
     CaseHistory 행 전체가 아니라 실제로 쓰는 값 세 개만 받는다. 모델을 통째로 받으면 이
@@ -66,7 +69,7 @@ def build_user_input(case_history_id: int, raw_input: str, submitted_at: datetim
     트리거(= 왜 판단을 부르는가)로 감싸는 일은 AI팀 입구(app/common/agent_service.py)가 한다.
     """
 
-    redacted_text, redactions = redact(raw_input)
+    redacted_text, redactions = redact(raw_input, placeholders=placeholders)
     return RedactedInput(
         input_event_id=f"case_history:{case_history_id}",
         source_type=InputSourceType.USER_INPUT,
@@ -81,7 +84,8 @@ def build_user_input(case_history_id: int, raw_input: str, submitted_at: datetim
 
 
 def build_case_snapshot(
-    session: Session, case_id: int, *, snapshot_id: UUID | None = None
+    session: Session, case_id: int, *, snapshot_id: UUID | None = None,
+    placeholders: dict[tuple[str, str], str] | None = None,
 ) -> CaseSnapshot:
     """Case의 지금 상태를 AI가 받는 모양으로 만든다.
 
@@ -91,7 +95,7 @@ def build_case_snapshot(
     (schemas.CaseSnapshot.snapshot_id 설명, #114에서 확정).
     """
 
-    return CaseSnapshot.model_validate(_snapshot_fields(session, case_id, snapshot_id))
+    return CaseSnapshot.model_validate(_snapshot_fields(session, case_id, snapshot_id, placeholders))
 
 
 def build_roadmap_snapshot(session: Session, case_id: int) -> CaseSnapshot | CompletedRoadmapSnapshot:
@@ -112,7 +116,10 @@ def build_roadmap_snapshot(session: Session, case_id: int) -> CaseSnapshot | Com
     return model.model_validate(fields)
 
 
-def _snapshot_fields(session: Session, case_id: int, snapshot_id: UUID | None) -> dict:
+def _snapshot_fields(
+    session: Session, case_id: int, snapshot_id: UUID | None,
+    placeholders: dict[tuple[str, str], str] | None = None,
+) -> dict:
     """두 모양이 같은 값을 쓰도록, 읽어 오는 일만 한곳에 둔다."""
 
     case = case_crud.get_case_by_id(session, case_id)
@@ -128,7 +135,7 @@ def _snapshot_fields(session: Session, case_id: int, snapshot_id: UUID | None) -
         case_status=CaseStatus(case.case_status),
         facts=_build_facts(session, case, evidences),
         procedure_progress=[_build_procedure_progress(step) for step in case_procedure_steps],
-        evidence_records=_build_evidence_records(session, case.id, evidences),
+        evidence_records=_build_evidence_records(session, case.id, evidences, placeholders=placeholders),
         active_blocker_candidate_ids=sorted({
             row.candidate_id for row in blocker_crud.get_active_blockers_by_case_id(session, case.id)
             if row.candidate_id is not None
@@ -219,7 +226,8 @@ def _build_procedure_progress(step: CaseProcedureStep) -> ProcedureProgress:
 
 
 def _build_evidence_records(
-    session: Session, case_id: int, evidences: list[Evidence]
+    session: Session, case_id: int, evidences: list[Evidence],
+    *, placeholders: dict[tuple[str, str], str] | None = None,
 ) -> list[EvidenceRecord]:
     """근거마다 "어느 근거에서 나왔는지"를 채워서 넘긴다(evidence_lineage에 저장해 둔 관계)."""
 
@@ -234,11 +242,12 @@ def _build_evidence_records(
     bodies = evidence_crud.get_official_document_bodies(
         session, [e.official_document_id for e in evidences if e.official_document_id]
     )
-    return [_build_evidence_record(e, parents.get(e.id, []), bodies) for e in evidences]
+    return [_build_evidence_record(e, parents.get(e.id, []), bodies, placeholders=placeholders) for e in evidences]
 
 
 def _build_evidence_record(
-    evidence: Evidence, parent_evidence_refs: list[str], bodies: dict[int, str] | None = None
+    evidence: Evidence, parent_evidence_refs: list[str], bodies: dict[int, str] | None = None,
+    *, placeholders: dict[tuple[str, str], str] | None = None,
 ) -> EvidenceRecord:
     source_type = EvidenceSourceType(evidence.source_type)
     return EvidenceRecord(
@@ -250,7 +259,7 @@ def _build_evidence_record(
         # 최신 입력만 가리면 소용이 없다. 같은 글이 근거로도 저장돼 있어서, 여기를 두면
         # 검수 모델이 원문을 그대로 받는다(승준님 #107 리뷰). 공식 자료는 사람이 쓴 글이
         # 아니라 가리지 않는다 — 가리면 저장된 content_hash와 어긋난다.
-        excerpt=_excerpt_of(evidence, source_type, bodies),
+        excerpt=_excerpt_of(evidence, source_type, bodies, placeholders=placeholders),
         parent_evidence_refs=parent_evidence_refs,
         published_at=evidence.published_at.replace(tzinfo=KST) if evidence.published_at else None,
         retrieved_at=evidence.retrieved_at.replace(tzinfo=KST),
@@ -261,7 +270,8 @@ def _build_evidence_record(
 
 
 def _excerpt_of(
-    evidence: Evidence, source_type: EvidenceSourceType, bodies: dict[int, str] | None
+    evidence: Evidence, source_type: EvidenceSourceType, bodies: dict[int, str] | None,
+    *, placeholders: dict[tuple[str, str], str] | None = None,
 ) -> str | None:
     """이 근거의 본문. 공식 자료는 공용 줄에서 가져온다.
 
@@ -270,7 +280,7 @@ def _excerpt_of(
     """
 
     if evidence.official_document_id is None:
-        return _redacted_excerpt(evidence.excerpt, source_type)
+        return _redacted_excerpt(evidence.excerpt, source_type, placeholders=placeholders)
     body = (bodies or {}).get(evidence.official_document_id)
     if body is None:
         raise StoredEvidenceMissingError(
@@ -280,8 +290,11 @@ def _excerpt_of(
     return body
 
 
-def _redacted_excerpt(excerpt: str | None, source_type: EvidenceSourceType) -> str | None:
+def _redacted_excerpt(
+    excerpt: str | None, source_type: EvidenceSourceType,
+    *, placeholders: dict[tuple[str, str], str] | None = None,
+) -> str | None:
     if excerpt is None or source_type is not EvidenceSourceType.USER_INPUT:
         return excerpt
-    redacted_text, _ = redact(excerpt)
+    redacted_text, _ = redact(excerpt, placeholders=placeholders)
     return redacted_text

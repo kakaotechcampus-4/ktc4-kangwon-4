@@ -50,7 +50,7 @@ from app.be.services import roadmap as roadmap_service
 logger = logging.getLogger(__name__)
 
 
-def _field_changes(session: Session, case_id: int, case_history_id: int) -> list[FieldChangeResponse]:
+def _field_changes(session: Session, case_history_id: int) -> list[FieldChangeResponse]:
     """이 제출에서 바뀐 값들. 화면에서도 저장된 가림 문구를 유지한다(#258)."""
 
     rows = case_field_history_crud.get_case_field_histories_by_case_history_id(session, case_history_id)
@@ -64,9 +64,7 @@ def _field_changes(session: Session, case_id: int, case_history_id: int) -> list
     ]
 
 
-def _conflict_items(
-    session: Session, case_id: int, conflicts: list[ConflictReference]
-) -> list[ConflictItemResponse]:
+def _conflict_items(conflicts: list[ConflictReference]) -> list[ConflictItemResponse]:
     """확인 화면에 띄울 충돌들.
 
     아직 확인 전이라 Case에는 이전 값이 그대로 있다. 새 값만 이번 제출에서 나온다.
@@ -83,7 +81,7 @@ def _conflict_items(
     ]
 
 
-def _case_detail(session: Session, case: Case) -> CaseGetDetailResponse:
+def _case_detail(case: Case) -> CaseGetDetailResponse:
     """Case 자체를 화면에 낼 때도 가림 문구를 원문으로 복원하지 않는다."""
 
     return CaseGetDetailResponse(**case.model_dump())
@@ -197,7 +195,7 @@ def get_case(session: Session, member_id: int) -> CaseGetResponse:
         session, case.id
     ):
         return CaseGetResponse(
-            case=_case_detail(session, case),
+            case=_case_detail(case),
             blocker=None,
             next_action=None,
             judgment_status="CONFLICT",
@@ -220,7 +218,7 @@ def get_case(session: Session, member_id: int) -> CaseGetResponse:
     )
 
     changes = (
-        _field_changes(session, case.id, latest_history.id)
+        _field_changes(session, latest_history.id)
         # 충돌을 확인한 뒤 되묻는 경우(NEEDS_MORE_INFO)에도 검수를 통과한 변경은 저장된다.
         # DONE만 보면 그 변경이 화면에 안 보인다.
         if latest_history.judgment_status in ("DONE", "NEEDS_MORE_INFO")
@@ -228,7 +226,7 @@ def get_case(session: Session, member_id: int) -> CaseGetResponse:
     )
 
     return CaseGetResponse(
-        case=_case_detail(session, case),
+        case=_case_detail(case),
         blocker=(
             latest_history.priority_blocker.description if latest_history.priority_blocker else None
         ),
@@ -269,7 +267,7 @@ def get_case_results_entry(session: Session, member_id: int) -> CaseResultsEntry
         return CaseResultsEntryResponse(
             judgment_status="CONFLICT",
             raw_input=raw_input,
-            conflicts=_conflict_items(session, case.id, pending_conflicts),
+            conflicts=_conflict_items(pending_conflicts),
         )
 
     _assert_judgment_is_showable(latest_history)
@@ -560,7 +558,7 @@ def get_case_results_submit_status(
         return CaseResultsSubmitResponse(
             result="CONFLICT",
             raw_input=latest_history.raw_input,
-            conflicts=_conflict_items(session, case.id, pending_conflicts),
+            conflicts=_conflict_items(pending_conflicts),
         )
 
     if latest_history.judgment_status == "PENDING":
@@ -588,7 +586,7 @@ def get_case_results_submit_status(
             detail=f"처리 상태 조회가 다루지 않는 판단 상태입니다: {latest_history.judgment_status}",
         )
 
-    changes = _field_changes(session, case.id, latest_history.id)
+    changes = _field_changes(session, latest_history.id)
     return CaseResultsSubmitResponse(
         result="UPDATED" if changes else "NO_CHANGE",
         changes=changes,
