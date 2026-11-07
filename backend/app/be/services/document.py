@@ -16,6 +16,7 @@ from sqlmodel import Session
 
 from app.agent.document_tool.documents import DocumentError
 from app.agent.document_tool.models import DocumentContext, DocumentFieldName, DocumentKind
+from app.agent.document_tool.safety import SafetyBlockedError
 from app.agent.document_tool.tool import DocumentTool
 from app.be.crud import case as case_crud
 from app.be.crud import case_document_history as case_document_history_crud
@@ -64,6 +65,14 @@ def save_context(directory: Path, context: DocumentContext, filename: str = CONT
     pending.replace(path)
 
 
+# 안전 검사가 막은 서류. 같은 파일은 다시 올려도 같은 판정이라(retryable=False) "다시 올려 주세요"를 쓰지 않는다.
+# 화면 문구는 FE(DocsPage)가 code를 보고 정한다. 위기 판정이면 상담 창구를 안내한다.
+_SAFETY_MESSAGES = {
+    "AGENT_SAFETY_REFUSE": "이 파일은 자동으로 읽지 않았어요. 서류 내용을 확인한 뒤 다른 파일로 올려 주세요.",
+    "AGENT_SAFETY_CRISIS_SUPPORT": "폐업 준비는 잠시 멈춰도 괜찮아요. 자살예방상담전화 109(24시간)로 이야기 나눌 수 있어요.",
+}
+
+
 def _rejected(error: DocumentError) -> HTTPException:
     # DocumentError 문구는 사장님에게 보여 줄 말로 쓰여 있어(예: "현재 Case의 문서가 아닙니다") 그대로 넘긴다
     return HTTPException(status_code=422, detail=str(error))
@@ -80,6 +89,10 @@ async def upload_document(
         updated = await tool.add_document(context, filename, content, kind_hint=kind)
     except DocumentError as error:
         raise _rejected(error) from None
+    except SafetyBlockedError as error:
+        raise HTTPException(status_code=422, detail={
+            "code": error.code, "message": _SAFETY_MESSAGES.get(error.code, _SAFETY_MESSAGES["AGENT_SAFETY_REFUSE"]),
+        }) from None
     except Exception:  # noqa: BLE001 - 모델·OCR 실패. 제공자 응답 본문을 사장님에게 보이지 않는다
         logger.exception("서류 처리 실패")
         raise HTTPException(status_code=502, detail="서류를 읽지 못했어요. 잠시 뒤 다시 올려 주세요.") from None

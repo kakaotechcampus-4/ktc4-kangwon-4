@@ -4,6 +4,8 @@ from uuid import uuid4
 
 import pymupdf
 import pytest
+from document_fixtures import DocumentClient, document_pdf
+
 from app.agent.document_tool.documents import DocumentError, DocumentService
 from app.agent.document_tool.models import (
     DocumentAnalysis,
@@ -15,9 +17,10 @@ from app.agent.document_tool.models import (
 from app.agent.document_tool.safety import (
     ContentSafetyGuard,
     SafetyBlockedError,
+    SafetyCheckUnavailableError,
     SafetyDecision,
 )
-from document_fixtures import DocumentClient, document_pdf
+from app.agent.llm import LLMRequestError, LLMResponseError
 
 
 @pytest.mark.parametrize("setting", ["model", "effort", "safety", "redaction"])
@@ -144,14 +147,28 @@ def test_unsupported_quote_never_reaches_review_or_persistence(tmp_path):
     asyncio.run(run())
 
 
-def test_safety_refusal_stops_extraction(tmp_path):
+@pytest.mark.parametrize(("reply", "error_type", "code", "retryable"), [
+    (SafetyDecision(decision="REFUSE"), SafetyBlockedError, "AGENT_SAFETY_REFUSE", False),
+    (SafetyDecision(decision="CRISIS_SUPPORT"), SafetyBlockedError, "AGENT_SAFETY_CRISIS_SUPPORT", False),
+    (LLMResponseError("synthetic refusal", code="PROVIDER_REFUSAL", retryable=False),
+     SafetyBlockedError, "AGENT_SAFETY_REFUSE", False),
+    (LLMRequestError("synthetic failure", code="UPSTREAM_HTTP_ERROR", retryable=True),
+     SafetyCheckUnavailableError, "AGENT_SAFETY_CHECK_UNAVAILABLE", True),
+    (LLMResponseError("synthetic invalid response", code="INVALID_JSON", retryable=False),
+     SafetyCheckUnavailableError, "AGENT_SAFETY_CHECK_UNAVAILABLE", True),
+    ({"decision": "UNKNOWN"}, SafetyCheckUnavailableError, "AGENT_SAFETY_CHECK_UNAVAILABLE", True),
+], ids=["refuse", "crisis", "provider-refusal", "request-failed", "invalid-response", "invalid-decision"])
+def test_safety_failure_stops_extraction_review_and_record_save(tmp_path, reply, error_type, code, retryable):
     async def run():
-        client, checker = DocumentClient(), DocumentClient()
-        checker.generate = AsyncMock(return_value=SafetyDecision(decision="REFUSE"))
-        service = DocumentService(tmp_path, client, safety=ContentSafetyGuard(checker), submission_policy="RRN_BACK_ONLY")
-        with pytest.raises(SafetyBlockedError):
+        client, checker, reviewer = DocumentClient(), DocumentClient(), DocumentClient()
+        checker.generate = AsyncMock(side_effect=[reply])
+        service = DocumentService(tmp_path, client, safety=ContentSafetyGuard(checker), reviewer=reviewer,
+                                  submission_policy="RRN_BACK_ONLY")
+        with pytest.raises(error_type) as raised:
             await service.ingest(uuid4(), "document.pdf", document_pdf(DocumentKind.TRANSFER))
-        assert not client.calls and checker.generate.await_count == 1
+        assert raised.value.code == code and raised.value.retryable is retryable
+        assert not client.calls and not reviewer.calls and checker.generate.await_count == 1
+        assert not [path for path in tmp_path.rglob("*.json") if not path.name.endswith(".prepared.json")]
     asyncio.run(run())
 
 
