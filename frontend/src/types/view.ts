@@ -467,6 +467,8 @@ export interface DocumentCheckView {
 
 /** 서류함 화면 데이터. 서류를 더하거나 빼면 서버가 지난 점검을 지워 `check` 가 `null` 이 된다 */
 export interface DocumentsView {
+  storeName: string | null
+  documentKinds: readonly { kind: string; label: string }[]
   documents: DocumentView[]
   check: DocumentCheckView | null
 }

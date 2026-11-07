@@ -3,12 +3,15 @@
 판단을 실제로 돌리지 않고, 가입 판단이 끝난 상태를 DB에 직접 만든다(case_world). 모델 호출은 없다.
 """
 
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier, BrokenBarrierError
 from unittest.mock import MagicMock
 
 import pytest
 from fastapi import BackgroundTasks, HTTPException
 from sqlmodel import Session
 
+from app.be.crud import case_history as case_history_crud
 from app.be.crud.case_history import get_case_history_by_id
 from app.be.routers import case as case_router
 from app.be.schemas.case import CaseRetryResponse
@@ -148,6 +151,39 @@ def test_pressing_twice_starts_one_judgment(case_world):
         _retry(case_world.engine, member_id)
 
     assert error.value.status_code == 409
+
+
+def test_two_retries_at_the_same_time_accept_only_one(case_world, monkeypatch):  # noqa: F811
+    member_id, case_id, history_id = case_world.sign_up()
+    _fail_signup(case_world.engine, history_id)
+    gate = Barrier(2, timeout=2)
+    original = case_history_crud.get_latest_user_driven_case_history
+
+    def read_before_either_request_can_save(session, case_id):
+        history = original(session, case_id)
+        # 잠금이 없으면 둘 다 FAILED를 읽고 나서 저장한다. 잠금이 있으면 둘째 요청은
+        # Case 줄에서 기다리므로 첫째만 통과해 PENDING으로 저장한 뒤 둘째가 409를 받는다.
+        try:
+            gate.wait()
+        except BrokenBarrierError:
+            pass
+        return history
+
+    monkeypatch.setattr(case_history_crud, "get_latest_user_driven_case_history", read_before_either_request_can_save)
+
+    def retry():
+        try:
+            return "접수", _retry(case_world.engine, member_id).case_history_id
+        except HTTPException as error:
+            return "거절", error.status_code
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = [future.result() for future in [pool.submit(retry) for _ in range(2)]]
+
+    assert sorted(results) == [("거절", 409), ("접수", history_id)]
+    with Session(case_world.engine) as session:
+        histories = case_history_crud.get_case_histories_by_case_id(session, case_id)
+        assert [(history.id, history.judgment_status) for history in histories] == [(history_id, "PENDING")]
 
 
 def test_a_member_without_a_case_gets_404(case_world):

@@ -10,7 +10,6 @@ import {
 import { type ChangeEvent, type ReactNode, useId, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 
-import { DOCUMENT_KINDS } from '../adapters/documents'
 import { Badge } from '../components/ui/Badge'
 import { BottomSheet } from '../components/ui/BottomSheet'
 import { Button } from '../components/ui/Button'
@@ -19,7 +18,7 @@ import { HammerLoader } from '../components/ui/HammerLoader'
 import { InfoBox } from '../components/ui/InfoBox'
 import { type DocumentAction, useDocuments } from '../hooks/useDocuments'
 import { useEntersForward } from '../lib/viewTransition'
-import type { DocumentCheckView, DocumentView } from '../types/view'
+import type { DocumentCheckView, DocumentsView, DocumentView } from '../types/view'
 
 /**
  * 서류함 (시안 M04). 할 일을 하면서 올린 서류가 모이는 곳.
@@ -80,7 +79,7 @@ export function DocsPage() {
     )
   }
 
-  const { documents, check } = query.view
+  const { documents, check, documentKinds } = query.view
 
   return (
     <div className="flex flex-1 flex-col gap-4 px-4 pt-2 pb-6">
@@ -140,6 +139,7 @@ export function DocsPage() {
       <ConfirmSheet
         key={confirming?.id ?? 'none'}
         document={confirming}
+        documentKinds={documentKinds}
         onCancel={() => setConfirming(null)}
         onConfirm={(id, kind, values) => {
           setConfirming(null)
@@ -226,14 +226,16 @@ function DocumentRow({
  */
 export function ConfirmSheet({
   document,
+  documentKinds,
   onCancel,
   onConfirm,
 }: {
   document: DocumentView | null
+  documentKinds: DocumentsView['documentKinds']
   onCancel: () => void
   onConfirm: (id: string, kind: string, values: Record<string, string>) => void
 }) {
-  const kindKnown = DOCUMENT_KINDS.some((option) => option.kind === document?.kind)
+  const kindKnown = documentKinds.some((option) => option.kind === document?.kind)
   const [kind, setKind] = useState(kindKnown && document ? document.kind : '')
   const [values, setValues] = useState<Record<string, string>>(() =>
     Object.fromEntries((document?.fields ?? []).map((field) => [field.name, field.value])),
@@ -283,7 +285,7 @@ export function ConfirmSheet({
               <option value="" disabled>
                 종류를 골라 주세요
               </option>
-              {DOCUMENT_KINDS.map((option) => (
+              {documentKinds.map((option) => (
                 <option key={option.kind} value={option.kind}>
                   {option.label}
                 </option>

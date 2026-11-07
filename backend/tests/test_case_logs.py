@@ -16,6 +16,7 @@ from app.be.crud import case_history as case_history_crud
 from app.be.crud.case_history import get_case_created_history
 from app.be.crud.member import create_member
 from app.be.models.case_history import CaseHistory
+from app.be.models.case_document_history import CaseDocumentHistory
 from app.be.schemas.case import CaseCreateRequest
 from app.be.services import procedure_registry
 from app.be.services.case import create_case, get_case_logs, update_case_checklist, update_case_support_approval
@@ -99,6 +100,32 @@ def test_a_judgment_still_running_has_no_ribbon_log(mysql_engine, signed_up):
     member_id, _ = signed_up
 
     assert logs_of(mysql_engine, member_id) == [("OWNER", "CASE_CREATED", SIGNED_UP)]
+
+
+@pytest.mark.parametrize(("status", "event"), [
+    ("PENDING", None), ("FAILED", "JUDGMENT_FAILED"),
+    ("CONFLICT", "CONFLICT_FOUND"), ("DONE", "NEXT_ACTION_DECIDED"),
+    ("NEEDS_MORE_INFO", "MORE_INFO_REQUESTED"),
+])
+def test_document_judgment_keeps_upload_and_ribbon_logs_without_an_extra_owner_log(mysql_engine, signed_up, status, event):
+    member_id, case_id = signed_up
+    uploaded = SIGNED_UP + timedelta(days=1)
+    judged = uploaded + timedelta(minutes=1) if event else None
+    history_id = add_history(mysql_engine, case_id, "DOCUMENT_SUBMITTED", status, uploaded, judged)
+    with Session(mysql_engine) as session:
+        session.add(CaseDocumentHistory(case_id=case_id, action="UPLOADED", document_kind="LEASE", created_at=uploaded))
+        session.add(CaseDocumentHistory(case_id=case_id, action="CHECKED", created_at=uploaded))
+        if status == "DONE":
+            session.get(CaseHistory, history_id).next_action = "임대인에게 준비사항 확인"
+        session.commit()
+    logs = items_of(mysql_engine, member_id)
+    assert not any(log.event == "DOCUMENT_SUBMITTED" for log in logs)
+    assert [(log.actor, log.detail) for log in logs if log.event == "DOCUMENT_UPLOADED"] == [("OWNER", "LEASE")]
+    assert [(log.actor, log.event) for log in logs if log.event == "DOCUMENTS_CHECKED"] == [("RIBBON", "DOCUMENTS_CHECKED")]
+    judgments = [log for log in logs if log.event in {"NEXT_ACTION_DECIDED", "JUDGMENT_FAILED", "CONFLICT_FOUND", "MORE_INFO_REQUESTED"}]
+    assert [(log.actor, log.event, log.detail) for log in judgments] == (
+        [("RIBBON", event, "임대인에게 준비사항 확인" if status == "DONE" else None)] if event else []
+    )
 
 
 @pytest.mark.parametrize(("status", "event"), [

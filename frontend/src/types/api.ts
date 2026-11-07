@@ -74,9 +74,8 @@ export interface CaseResponse {
   id: number
   member_id: number
   /**
-   * 가게 이름. 진단에서 묻지 않아 지금은 늘 `null` 이다(#156).
-   * 서류 점검이 이 값을 서류의 "공급받는 자"와 맞춰 보므로, 비어 있으면 그 확인을 하지 못한다
-   * (#160 `BUYER_UNCONFIRMED`). 점검 때 따로 받을지는 아직 정하지 않았다(#175 현종님).
+   * 가게 이름. 진단에서는 비워 두고, 서류 점검 직전에 사장님이 확인한 이름을 저장한다(#230).
+   * 서류의 "공급받는 자"와 대조하며 신청인 이름과 구분한다.
    */
   store_name: string | null
   business_type: string
@@ -551,7 +550,7 @@ export interface DocumentResponse {
   kind_label: string
   /** 종류를 모르거나 사진·글자 인식처럼 확신하지 못한 서류. 사장님이 확인해야 점검이 끝난다 */
   needs_confirmation: boolean
-  fields: { name: DocumentFieldName; value: string; page: number }[]
+  fields: { name: DocumentFieldName; label: string; value: string; page: number }[]
   /** 사장님이 확인한 값. 확인 전이면 `null` */
   confirmed_fields: Partial<Record<DocumentFieldName, string>> | null
 }
@@ -559,11 +558,10 @@ export interface DocumentResponse {
 /**
  * 정산 서류 점검 결과(#159).
  *
- * `status` 는 서버 응답에 글자(`str`)로 열려 있어 그대로 적는다. 문서 Tool 이 내는 값은
- * `COMPLETE` · `ISSUES` · `ERROR` 셋이고(#159 승준님), 그 밖의 값은 어댑터가 읽지 못한 것으로 둔다.
+ * 서버와 문서 Tool이 같은 상태 세 가지를 사용한다.
  */
 export interface DocumentCheckResponse {
-  status: string
+  status: 'COMPLETE' | 'ISSUES' | 'ERROR'
   steps: { name: string; status: 'WAITING' | 'RUNNING' | 'DONE' | 'NEEDS_CONFIRMATION' | 'ERROR' }[]
   issues: { code: string; document_ids: string[]; message: string }[]
   checked_at: string
@@ -574,6 +572,10 @@ export interface DocumentCheckResponse {
  * 서류를 더하거나 빼거나 확인하면 지난 점검은 지워진다(`check: null`).
  */
 export interface DocumentListResponse {
+  /** 사장님이 확인해 Case에 저장한 가게 이름. 서류에서 읽은 값과 구분한다 */
+  store_name: string | null
+  /** 확인 화면에서 고를 수 있는 종류와 이름. UNKNOWN은 선택 목록에 포함하지 않는다 */
+  document_kinds: { kind: DocumentKind; label: string }[]
   documents: DocumentResponse[]
   check: DocumentCheckResponse | null
 }
@@ -589,6 +591,8 @@ export interface DocumentConfirmRequest {
  * 폐업일을 비우면 예정일로 대신하지 않고 "폐업일 미확인"으로 점검이 끝나지 않는다
  */
 export interface DocumentCheckRequest {
+  /** 1~50자. 이미 저장한 이름이 있는 구형 호출자는 생략할 수 있다 */
+  store_name?: string | null
   /** 1~50자 */
   applicant_name: string
   /** `YYYY-MM-DD` */

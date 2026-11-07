@@ -115,9 +115,9 @@ outcome = await run_case_planning(
 반환된 `AgentGraphOutput`은 아직 저장되지 않은 결과다. BE의
 [`case_snapshot.py`](../../backend/app/be/services/case_snapshot.py)가 저장된 Case로 snapshot을 만들고,
 [`decision_record.py`](../../backend/app/be/services/decision_record.py)가 검수된 판단을 저장한다.
-Blocker·Next Action·검수 기록을 저장한다. BE 연결 작업과 후속 저장 범위는
-[#56](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/issues/56)·
-[#57](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/issues/57)에서 추적한다.
+Blocker·Next Action·검수 기록을 저장한다. 현재 연결의 후속 검증은
+[#243](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/issues/243),
+자료 버전 반영과 운영 재적재는 [#239](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/issues/239)에서 추적한다.
 
 ### 비슷한 필드의 역할
 
@@ -147,19 +147,18 @@ BE가 조회한 `ProcedureStep`·`StepDependency`·`StepEligibility` 행을 변�
 각각 `load_reviewed_procedure_store`·`load_reviewed_support_catalog`로 검증한다.
 BE 모델에 없는 검수·조건·근거 필드를 만들어 채우지는 않는다.
 
-### DB 원본 공급 (아직 연결 전)
+### DB 원본 공급
 
-현재 Case 생성·재적재 경로는 **승인 JSON → BE Evidence 저장 → DB snapshot 조회 →
-Agent 전달**이다(#65). 절차 원본 자체를 DB에서 공급하는 경로는 아직 없다.
-
-그 경로를 만들려면 BE에 `procedure_step.reviewed_source_snapshot` JSON 컬럼(제안명)이
-먼저 필요하다. **현재 BE 모델에는 이 컬럼이 없다.** 컬럼이 확정되면 DB JSON 값을
-자료 객체로 바꾸는 변환 함수를 그때 같이 넣는다. 지금 미리 넣으면 앱에서 부르는 곳이
-없고 없는 컬럼을 전제하게 되어, 테스트는 통과하지만 실제로는 쓸 수 없는 코드가 된다.
+현재 Case 생성·재적재는 **승인 JSON → 공용 `OfficialDocument` 본문과 Case별 `Evidence` 연결 →
+DB snapshot 조회 → Agent 전달**로 이어진다. 본문 적재는
+[`ensure_official_documents()`](../../backend/app/be/services/official_document.py),
+Case별 연결은 [`import_reviewed_procedures()`](../../backend/app/be/services/reviewed_procedure.py)가 맡는다.
+[`case_snapshot.py`](../../backend/app/be/services/case_snapshot.py)는 `official_document_id`로 본문을 읽어
+`EvidenceRecord.excerpt`를 채운다. Agent는 이 DTO를 읽으며 DB를 직접 조회하지 않는다.
 
 기존 두 규칙 테이블은 스키마를 유지하며 선후 관계·적용 조건 데이터는 따로 검수해야 한다.
-운영 절차의 ID·코드·표시 이름을 테스트용 값으로 대신하지 않는다. 원본 저장 구조 변경은
-[BE 요청사항](https://app.notion.com/p/3ef3c6661b7d80c9a697d4f39dce1841)에서 별도로 다룬다.
+운영 절차의 ID·코드·표시 이름을 테스트용 값으로 대신하지 않는다. 자료 버전 변경 시 기존 Case의
+재적재·운영 확인은 [#239](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/issues/239)에서 추적한다.
 
 `procedure_bindings`의 키는 AI의 기존 절차 의미 코드, 값은 BE의 실제 `ProcedureStepRef`다.
 예를 들어 `"FILE_FOOD_SERVICE_CLOSURE"`에 BE에서 조회한 식품영업 폐업 절차의 ID·코드를 연결한다.
@@ -182,7 +181,7 @@ DB 근거가 없으면 JSON 본문으로 대신하지 않고 빈 결과를 반�
 ### 검수 절차 자료 저장·조회
 
 공식 안내문을 수집·발췌한 뒤 개발자가 내용을 검수·승인한 자료를 사용한다.
-현재 #65의 BE는 승인 JSON을 읽어 Case 생성 시 공식 문서 4건을 Case별 Evidence로 적재한다.
+BE는 승인 JSON을 읽어 공용 본문을 준비하고 Case 생성 시 해당 자료의 Case별 Evidence를 적재한다.
 이후 DB에서 조립한 Case snapshot과 승인 목록을 Agent에 전달한다.
 
 승인 자료는
@@ -198,8 +197,8 @@ backend 디렉토리에서 다음 명령을 실행한다. 제안 DB 컬럼 추�
 별도 승인 JSON을 사용할 때는 `--source <파일 경로>`를 지정한다. 재적재는 문서 근거를 저장하는
 작업이므로 절차 대응표를 받지 않으며 공통 절차 행도 생성하지 않는다.
 
-[`import_reviewed_procedures`](../../backend/app/be/services/reviewed_procedure.py)는 기존 BE의
-`create_evidence()`로 Case별 발췌·출처·버전·해시·시각·상태를 저장한다. CLI가 전체 자료를
+[`import_reviewed_procedures`](../../backend/app/be/services/reviewed_procedure.py)는 공용 본문을 준비한 뒤
+`create_evidence()`로 Case별 본문 연결·출처·버전·해시·시각·상태를 저장한다. CLI가 전체 자료를
 한 번에 commit하며 실패하면 rollback한다. 같은 ID와 내용의 재실행은 건너뛰고,
 같은 ID에 다른 내용이 있으면 덮어쓰지 않는다. 새 버전은 새 근거로 남는다.
 검수 시각·유효기간·검색어·절차 연결 등 검수 메타데이터는 BE가 읽어 전달한 승인 목록에
@@ -217,12 +216,27 @@ DB의 `evidence_id`를 그대로 반환한다. Agent는 전달받은 자료를 �
 사용자에게 입력 필드를 요구하거나 Supervisor·Review LLM 호출을 반복하지 않는다.
 실제 사용자 정보 부족은 Info가 판단을 막는다고 표시한 미확인 조건 하나를 질문한다.
 
-실제 절차·Case 연결, 자료 자동 적재의 진행 상황과 BE 요청·검증 기준은
-[#56](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/issues/56)에서 관리한다.
+현재 판단 연결은 [`judgment.py`](../../backend/app/be/services/judgment.py)의 snapshot 조립·Agent 호출을 따른다.
+전체 후속 작업은 [#243](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/issues/243),
+배포 이미지의 기존 재적재 명령과 운영 확인은 [#239](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/issues/239)에서 관리한다.
 
 권한을 확인한 Case snapshot 제공, 검수된 변경 후보의 저장·재조회는 호출자의 책임이다.
 `CONFLICT_CONFIRMED`에는 서버가 보관한 원래 충돌 후보를 전달하며, 클라이언트가 보내온
 임의 후보를 그대로 신뢰하지 않는다. Agent의 `REVIEWED_PLAN`은 DB 저장 완료를 뜻하지 않는다.
+
+### 현재 화면에서의 절차 제출·완료 보고
+
+현재 `POST /cases/results`는 글(`raw_input`) 또는 원상복구 선택(`restoration_answer`)과
+`case_history_id`를 받는다. 공식 절차 화면도 결과를 글로 보내며, 별도 완료 확인 선택값은 보내지 않는다.
+
+신고서를 제출했다는 유효한 보고는 `IN_PROGRESS`·`submitted=true`로 남긴다.
+기관 처리 완료 보고는 확인이 필요한 후보로 보류하며, 그 보고만으로 `COMPLETED` 변경을 만들지 않는다.
+내부 `ProcedureCompletionConfirmation`은 존재하지만 현재 FE·BE에는 이를 전달하는 별도 확인 계약이 없다.
+따라서 현재 화면에서 글을 다시 보내는 것만으로 공식 절차 완료를 확정할 수 없다.
+이 내부 DTO를 직접 조립하는 테스트는 Agent의 확인 제약 검사이며 화면·API 연결 완료의 증거가 아니다.
+
+로드맵 체크리스트 완료와 부가세 신고 체크에 따른 Case 종료는 별도 저장 동작이다.
+이를 공식 절차의 `CaseProcedureStep` 완료나 기관 처리 완료로 대신 사용하지 않는다.
 
 ### 충돌 확인
 
@@ -381,9 +395,8 @@ Supervisor·Review는 5~8초다. 당시 한도 `AGENT_LLM_TIMEOUT_SECONDS=150`·
 세 번 모두 503이면 여전히 `SAFE_FAILURE`로 끝나는데, 그건 제공자 장애라 맞는 동작이다.
 
 위 검증은 당시 Agent 직접 호출의 결과이며, 서버 전체 연결의 통과 증거는 아니다.
-이후 BE 연결 작업과 서비스 전체 검증 결과는
-[#56](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/issues/56)·
-[#57](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/issues/57)에서 추적한다.
+현재 연결과 서비스 전체 검증 후속은
+[#243](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/issues/243)에서 추적한다.
 
 ### 2026-10-07 폐업 우선순위 검증
 
@@ -480,7 +493,8 @@ Info·Review도 같은 구조이지만 고치지 않았다. 두 곳은 코드가
 재시도한 호출을 반복하게 된다. 위 2026-09-29 기록의 "503 한 번에 120초"가 그 경우다.
 
 **DB 원본 공급용 변환 함수 제거** — 앱에서 부르는 곳이 없고 BE 모델에 없는
-`reviewed_source_snapshot` 컬럼을 전제했다. 컬럼이 확정될 때 함께 넣는다.
+`reviewed_source_snapshot` 컬럼을 전제하던 당시 함수를 제거한 기록이다.
+현재 원본 공급은 위의 `OfficialDocument`·`Evidence`·snapshot 경로를 사용한다.
 `app/common/`은 BE 소유이므로 이 PR에서 해당 디렉터리 변경은 모두 되돌렸다.
 
 ### 2026-10-09 되묻기 연결과 실제 LLM 확인

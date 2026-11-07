@@ -1,9 +1,4 @@
-"""화면에 돌려줄 때만 가림 문구를 원래 글자로 되돌리는지. DB 연결 없이 crud만 바꿔 끼운다.
-
-AI는 가린 글을 보고 값을 쓰므로 자유 글 칸에 가림 문구가 섞여 들어온다. 저장은 가린 채로
-두고(그래야 다음 판단에 개인정보가 다시 안 나간다) 화면에 낼 때만 되돌린다. 여기서 틀리면
-사장님이 남의 주소를 자기 것으로 보게 된다.
-"""
+"""화면 응답은 저장된 가림 문구를 유지한다. 기존 복원 함수의 보호 회귀도 함께 둔다."""
 
 from types import SimpleNamespace
 
@@ -29,6 +24,10 @@ def histories():
     ]
 
 
+def fail_original_lookup(*_args):
+    raise AssertionError("화면 응답을 만들며 입력 원문을 읽었다")
+
+
 def field_row(row_id: int, case_history_id: int, before: str | None, after: str | None):
     return SimpleNamespace(
         id=row_id, case_history_id=case_history_id, canonical_field="restoration_scope_detail",
@@ -44,7 +43,7 @@ def case_with_two_submissions(monkeypatch):
         field_row(1, 11, None, "서울특별시 마포구 [주소] 전체"),
         field_row(2, 22, "서울특별시 마포구 [주소] 전체", "서울특별시 강남구 [주소]만"),
     ]
-    monkeypatch.setattr(case_history_crud, "get_case_histories_by_case_id", lambda *_: histories())
+    monkeypatch.setattr(case_history_crud, "get_case_histories_by_case_id", fail_original_lookup)
     monkeypatch.setattr(
         case_field_history_crud, "get_case_field_histories_by_case_id", lambda *_: rows
     )
@@ -55,19 +54,19 @@ def case_with_two_submissions(monkeypatch):
     return rows
 
 
-def test_the_old_value_is_restored_from_the_submission_that_made_it(case_with_two_submissions):
-    """이전 값과 새 값을 같은 입력으로 되돌리면, 이전 값 자리에 새 주소가 들어간다."""
+def test_changes_keep_both_stored_values_hidden(case_with_two_submissions):
+    """입력 원문이 있어도 화면 응답은 저장된 가림 문구를 그대로 쓴다(#258)."""
 
     changes = case_service._field_changes(MagicMock(spec=Session), CASE_ID, 22)
 
-    assert changes[0].stored_value == "서울특별시 마포구 월드컵북로 12 1층 전체"
-    assert changes[0].new_value == "서울특별시 강남구 테헤란로 5 2층만"
+    assert changes[0].stored_value == "서울특별시 마포구 [주소] 전체"
+    assert changes[0].new_value == "서울특별시 강남구 [주소]만"
 
 
-def test_a_conflict_shows_each_side_with_its_own_submission(monkeypatch):
+def test_a_conflict_keeps_both_sides_hidden(monkeypatch):
     """확인 전이라 두 번째 제출의 값은 아직 이력에 없다. Case에는 첫 제출의 값이 남아 있다."""
 
-    monkeypatch.setattr(case_history_crud, "get_case_histories_by_case_id", lambda *_: histories())
+    monkeypatch.setattr(case_history_crud, "get_case_histories_by_case_id", fail_original_lookup)
     monkeypatch.setattr(
         case_field_history_crud, "get_case_field_histories_by_case_id",
         lambda *_: [field_row(1, 11, None, "서울특별시 마포구 [주소] 전체")],
@@ -80,11 +79,11 @@ def test_a_conflict_shows_each_side_with_its_own_submission(monkeypatch):
 
     items = case_service._conflict_items(MagicMock(spec=Session), CASE_ID, [conflict])
 
-    assert items[0].stored_value == "서울특별시 마포구 월드컵북로 12 1층 전체"
-    assert items[0].proposed_value == "서울특별시 강남구 테헤란로 5 2층만"
+    assert items[0].stored_value == "서울특별시 마포구 [주소] 전체"
+    assert items[0].proposed_value == "서울특별시 강남구 [주소]만"
 
 
-def test_the_case_itself_shows_the_restored_free_text(case_with_two_submissions):
+def test_the_case_itself_keeps_free_text_hidden(case_with_two_submissions):
     case = SimpleNamespace(
         id=CASE_ID,
         model_dump=lambda: dict(
@@ -101,7 +100,7 @@ def test_the_case_itself_shows_the_restored_free_text(case_with_two_submissions)
 
     detail = case_service._case_detail(MagicMock(spec=Session), case)
 
-    assert detail.restoration_scope_detail == "서울특별시 강남구 테헤란로 5 2층만"
+    assert detail.restoration_scope_detail == "서울특별시 강남구 [주소]만"
 
 
 def test_a_value_without_a_hidden_spot_is_left_alone(monkeypatch):
@@ -191,7 +190,7 @@ def case_whose_last_change_came_from_a_conflict_decision(monkeypatch):
     ]
     monkeypatch.setattr(
         case_history_crud, "get_case_histories_by_case_id",
-        lambda *_: [*histories(), SimpleNamespace(id=33, raw_input=None)],
+        fail_original_lookup,
     )
     monkeypatch.setattr(
         case_field_history_crud, "get_case_field_histories_by_case_id", lambda *_: rows
@@ -211,19 +210,15 @@ def case_whose_last_change_came_from_a_conflict_decision(monkeypatch):
     return rows
 
 
-def test_a_conflict_decision_shows_the_restored_text(
+def test_a_conflict_decision_keeps_changed_values_hidden(
     case_whose_last_change_came_from_a_conflict_decision
 ):
-    """충돌 결정이 바꾼 값도 되돌려야 한다.
-
-    #136으로 충돌 결정이 실제로 돌기 시작하면서 이 경로가 화면에 보이게 됐다. 결정 이력에는
-    글이 없지만, 그 결정이 다룬 충돌을 낸 제출에 원문이 있다.
-    """
+    """충돌 결정이 바꾼 값도 원문을 찾아 복원하지 않는다."""
 
     changes = case_service._field_changes(MagicMock(spec=Session), CASE_ID, 33)
 
-    assert changes[0].stored_value == "서울특별시 마포구 월드컵북로 12 1층 전체"
-    assert changes[0].new_value == "서울특별시 마포구 월드컵북로 12 1층 일부"
+    assert changes[0].stored_value == "서울특별시 마포구 [주소] 전체"
+    assert changes[0].new_value == "서울특별시 마포구 [주소] 일부"
 
 
 def decided(case_history_id: int, closed_by: int, status: str = "CONFIRMED"):

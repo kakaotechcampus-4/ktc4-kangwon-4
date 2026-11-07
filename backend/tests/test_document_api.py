@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session
 
 from app.agent.document_tool.documents import DocumentService
-from app.agent.document_tool.models import DocumentKind
+from app.agent.document_tool.models import DOCUMENT_FIELD_LABELS, DOCUMENT_LABELS, DocumentKind
 from app.agent.document_tool.tool import DocumentTool
 from app.be.crud import case as case_crud
 from app.be.crud import case_history as case_history_crud
@@ -118,11 +118,38 @@ def test_list_keeps_saved_documents_and_hides_other_cases(api):
     assert [d["document_id"] for d in client.get("/cases/documents").json()["documents"]] == [uploaded["document_id"]]
 
     member["id"] = 2
-    assert client.get("/cases/documents").json() == {"documents": [], "check": None}
+    empty = client.get("/cases/documents").json()
+    assert empty == {
+        "store_name": "다른가게", "documents": [], "check": None,
+        "document_kinds": [{"kind": kind, "label": label} for kind, label in DOCUMENT_LABELS.items()
+                           if kind != DocumentKind.UNKNOWN],
+    }
     other = client.post(f"/cases/documents/{uploaded['document_id']}/confirm",
                         json={"kind": "TRANSFER", "confirmed_fields": {"amount": "1원"}})
     assert other.status_code == 422
     assert client.delete(f"/cases/documents/{uploaded['document_id']}").status_code == 422
+
+
+def test_response_uses_agent_labels_even_after_confirmation_and_reload(api, monkeypatch):
+    client, _, _ = api
+    monkeypatch.setitem(DOCUMENT_FIELD_LABELS, "amount", "확인용 송금액")
+    monkeypatch.setitem(DOCUMENT_LABELS, DocumentKind.TRANSFER, "확인용 이체서류")
+    kinds = client.get("/cases/documents").json()["document_kinds"]
+    assert {item["kind"] for item in kinds} == {kind.value for kind in DocumentKind if kind != DocumentKind.UNKNOWN}
+    assert {"kind": "TRANSFER", "label": "확인용 이체서류"} in kinds
+    document = upload(client, DocumentKind.TRANSFER, TRANSFER).json()["documents"][0]
+    client.post(f"/cases/documents/{document['document_id']}/confirm", json={
+        "kind": "TRANSFER", "confirmed_fields": {**TRANSFER, "amount": "1원"},
+    })
+    restored = client.get("/cases/documents").json()["documents"][0]
+    assert restored["kind_label"] == "확인용 이체서류"
+    assert next(field for field in restored["fields"] if field["name"] == "amount")["label"] == "확인용 송금액"
+    assert restored["confirmed_fields"]["amount"] == "1원"
+    schemas = app.openapi()["components"]["schemas"]
+    assert set(DOCUMENT_FIELD_LABELS) == set(schemas["DocumentFieldResponse"]["properties"]["name"]["enum"])
+    assert schemas["DocumentCheckResponse"]["properties"]["status"]["enum"] == ["COMPLETE", "ISSUES", "ERROR"]
+    assert "label" in schemas["DocumentFieldResponse"]["required"]
+    assert "document_kinds" in schemas["DocumentListResponse"]["required"]
 
 
 def test_owner_confirms_uncertain_values_and_can_remove_document(api):
@@ -140,6 +167,38 @@ def test_owner_confirms_uncertain_values_and_can_remove_document(api):
     assert client.delete(f"/cases/documents/{record['document_id']}").json()["documents"] == []
 
 
+@pytest.mark.parametrize("legacy_fields", [{}, {"store_name": None}])
+def test_legacy_nameless_case_keeps_checking_then_accepts_the_explicit_name(api, legacy_fields):
+    client, _, _ = api
+    case = case_crud.get_case_by_member_id(None, 1)
+    case.store_name = None
+    # 업로드에서 읽은 상호로 Case를 채우지 않는다.
+    upload(client, DocumentKind.TAX_INVOICE, SETTLEMENT[DocumentKind.TAX_INVOICE])
+    assert client.get("/cases/documents").json()["store_name"] is None
+    missing = client.post("/cases/documents/check", json={**OWNER, **legacy_fields})
+    assert missing.status_code == 200 and missing.json()["check"]["status"] == "ISSUES"
+    assert "BUYER_UNCONFIRMED" in {issue["code"] for issue in missing.json()["check"]["issues"]}
+    assert client.get("/cases/documents").json()["store_name"] is None
+
+    checked = client.post("/cases/documents/check", json={**OWNER, "store_name": " 봄날개인카페 "})
+    assert checked.status_code == 200 and checked.json()["store_name"] == "봄날개인카페"
+    assert client.get("/cases/documents").json()["store_name"] == "봄날개인카페"
+
+
+@pytest.mark.parametrize("name", ["", " \t ", "가" * 51])
+def test_invalid_store_name_does_not_replace_the_saved_name(api, name):
+    client, _, _ = api
+    response = client.post("/cases/documents/check", json={**OWNER, "store_name": name})
+    assert response.status_code == 422
+    assert client.get("/cases/documents").json()["store_name"] == "봄날개인카페"
+
+
+def test_store_name_accepts_fifty_characters_after_trimming(api):
+    client, _, _ = api
+    response = client.post("/cases/documents/check", json={**OWNER, "store_name": " " + "가" * 50 + " "})
+    assert response.status_code == 200 and response.json()["store_name"] == "가" * 50
+
+
 def test_case_is_required_and_empty_upload_is_rejected(api):
     client, member, _ = api
     assert client.post("/cases/documents", files={"file": ("empty.pdf", b"", "application/pdf")}).status_code == 422
@@ -148,7 +207,7 @@ def test_case_is_required_and_empty_upload_is_rejected(api):
 
 
 @pytest.mark.parametrize("decision", ["REFUSE", "CRISIS_SUPPORT"])
-def test_safety_blocked_upload_says_why_instead_of_asking_to_retry(api, monkeypatch, decision):
+def test_safety_blocked_upload_says_why_instead_of_asking_to_retry(api, monkeypatch, caplog, decision):
     # 안전 검사가 막으면 다시 올려도 같은 판정이다. "다시 올려 주세요"(502)가 아니라 422와 판정 코드를 준다
     from app.agent.document_tool.safety import SafetyBlockedError
 
@@ -156,10 +215,16 @@ def test_safety_blocked_upload_says_why_instead_of_asking_to_retry(api, monkeypa
         raise SafetyBlockedError(decision)
 
     monkeypatch.setattr(DocumentTool, "add_document", blocked)
+    caplog.set_level("WARNING", logger=document_service.__name__)
     response = api[0].post("/cases/documents", files={"file": ("memo.pdf", b"%PDF-1.4", "application/pdf")})
     assert response.status_code == 422
     assert response.json()["detail"]["code"] == f"AGENT_SAFETY_{decision}"
     assert ("109" in response.json()["detail"]["message"]) is (decision == "CRISIS_SUPPORT")
+    # 파일명·내용·예외 원문은 남기지 않고 판정 코드만 기록한다(#227 리뷰).
+    records = [record for record in caplog.records if record.name == document_service.__name__]
+    assert [(record.getMessage(), record.exc_info) for record in records] == [
+        (f"서류 안전 검사 차단: AGENT_SAFETY_{decision}", None),
+    ]
 
 
 def test_unavailable_safety_check_still_asks_to_retry(api, monkeypatch):

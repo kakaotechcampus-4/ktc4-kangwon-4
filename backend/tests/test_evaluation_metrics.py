@@ -1,4 +1,5 @@
 import pytest
+
 from scripts.evaluation_metrics import load_prices, summarize_metrics
 
 
@@ -70,3 +71,32 @@ def test_price_aliases_match_only_the_same_model_and_currency(tmp_path):
     env.write_text(env.read_text().replace("=708", "=-1"))
     with pytest.raises(SystemExit):
         load_prices(env_file=env, environ={})
+
+
+@pytest.mark.parametrize(("times", "expected"), [
+    ([], None), ([7], 7), ([30, 10], 30), (list(range(20, 0, -1)), 19),
+])
+def test_p95_uses_nearest_rank_for_all_timed_runs(times, expected):
+    rows = [{**trial(success=index != 0), "elapsed_ms": value}
+            for index, value in enumerate(times)]
+    assert summarize_metrics(rows)["p95_latency_ms"] == expected
+
+
+def test_wrong_dataset_answers_are_not_successes_but_their_cost_is_included():
+    rows = [trial(), {**trial(), "score": {"result": "WRONG"}}, trial(success=False)]
+    report = summarize_metrics(rows, {"gpt-6.1-sol": (2835, 141, 14175)})
+    assert report["successful_runs"] == 1 and report["http_attempts"] == 3
+    assert report["cost_per_success_krw"] == pytest.approx(1.37772)
+    assert report["estimated_cost_krw"] == report["cost_per_success_krw"]
+
+
+@pytest.mark.parametrize("missing", [None, "calls_by_role", "provider_usage"])
+def test_zero_cost_requires_explicit_zero_call_telemetry(missing):
+    row = {"status": "REVIEWED_PLAN", "calls_by_role": {}, "provider_usage": []}
+    if missing:
+        del row[missing]
+    report = summarize_metrics([row])
+    assert report["estimated_cost_krw"] == (None if missing else 0)
+    assert report["total_tokens"] == (None if missing else 0)
+    assert report["usage_complete"] is (missing is None)
+    assert summarize_metrics([trial(), row])["usage_complete"] is (missing is None)

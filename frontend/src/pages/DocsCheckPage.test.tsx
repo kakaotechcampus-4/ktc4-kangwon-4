@@ -42,7 +42,28 @@ describe('DocsCheckPage — 서버', () => {
 
     expect(await screen.findByText('정산 점검 목록에서 빠진 서류: 이체확인증')).toBeInTheDocument()
     expect(calls()[1]).toMatchObject({ url: expect.stringMatching(/\/cases\/documents\/check$/), method: 'POST' })
-    expect(JSON.parse(calls()[1].body as string)).toEqual({ applicant_name: '김리본', closure_date: '2026-10-31' })
+    expect(JSON.parse(calls()[1].body as string)).toEqual({ store_name: '봄날개인카페', applicant_name: '김리본', closure_date: '2026-10-31' })
+  })
+
+  it('이름이 없는 기존 가게의 상호를 신청인과 따로 보내고 재진입 때 저장한 이름을 보여준다', async () => {
+    const { calls } = serve(
+      json(serverList([serverDocument()], null, null)),
+      json(serverList([serverDocument()], issuesCheck, '봄날개인카페')),
+    )
+    const router = renderAt('/docs/check')
+    fireEvent.click(await screen.findByRole('button', { name: '점검 시작하기' }))
+    expect(within(sheet()!).getByLabelText('가게 이름')).toHaveValue('')
+    fireEvent.change(within(sheet()!).getByLabelText('가게 이름'), { target: { value: ' 봄날개인카페 ' } })
+    fireEvent.change(within(sheet()!).getByLabelText('신청인 이름'), { target: { value: '김리본' } })
+    fireEvent.click(within(sheet()!).getByRole('button', { name: '점검하기' }))
+    await screen.findByText('정산 점검 목록에서 빠진 서류: 이체확인증')
+    expect(JSON.parse(calls()[1].body as string)).toEqual({ store_name: '봄날개인카페', applicant_name: '김리본', closure_date: null })
+
+    await act(() => router.navigate('/docs'))
+    await act(() => router.navigate('/docs/check'))
+    fireEvent.click(await screen.findByRole('button', { name: '다시 점검하기' }))
+    expect(within(sheet()!).getByLabelText('가게 이름')).toHaveValue('봄날개인카페')
+    expect(within(sheet()!).getByLabelText('신청인 이름')).toHaveValue('')
   })
 
   /** 보내지 못했는데 아무 말이 없으면 점검이 된 줄 안다 */
@@ -146,8 +167,8 @@ describe('DocsCheckPage — Mock', () => {
 })
 
 describe('ApplicantSheet', () => {
-  function renderSheet(onSubmit = vi.fn()) {
-    render(<ApplicantSheet open onClose={() => {}} onSubmit={onSubmit} />)
+  function renderSheet(initialStoreName: string | null = '봄날개인카페', onSubmit = vi.fn()) {
+    render(<ApplicantSheet open initialStoreName={initialStoreName} onClose={() => {}} onSubmit={onSubmit} />)
     return onSubmit
   }
 
@@ -158,7 +179,7 @@ describe('ApplicantSheet', () => {
     fireEvent.change(screen.getByLabelText('신청인 이름'), { target: { value: ' 김리본 ' } })
     fireEvent.click(screen.getByRole('button', { name: '점검하기' }))
 
-    expect(onSubmit).toHaveBeenCalledWith('김리본', null)
+    expect(onSubmit).toHaveBeenCalledWith('봄날개인카페', '김리본', null)
   })
 
   it('폐업일을 적으면 그 날짜를 보낸다', () => {
@@ -168,6 +189,24 @@ describe('ApplicantSheet', () => {
     fireEvent.change(screen.getByLabelText('실제 폐업일 (선택)'), { target: { value: '2026-10-31' } })
     fireEvent.click(screen.getByRole('button', { name: '점검하기' }))
 
-    expect(onSubmit).toHaveBeenCalledWith('김리본', '2026-10-31')
+    expect(onSubmit).toHaveBeenCalledWith('봄날개인카페', '김리본', '2026-10-31')
+  })
+
+  it('가게 이름은 공백만 있거나 50자를 넘으면 보내지 않고, 50자까지 받는다', () => {
+    const onSubmit = renderSheet(null)
+    const store = screen.getByLabelText('가게 이름')
+    const submit = screen.getByRole('button', { name: '점검하기' })
+    fireEvent.change(screen.getByLabelText('신청인 이름'), { target: { value: '김리본' } })
+    for (const value of ['   ', '가'.repeat(51)]) {
+      fireEvent.change(store, { target: { value } })
+      expect(submit).toBeDisabled()
+      fireEvent.submit(store.closest('form')!)
+      expect(onSubmit).not.toHaveBeenCalled()
+    }
+    fireEvent.change(store, { target: { value: '가'.repeat(50) } })
+    expect(submit).toBeEnabled()
+    expect(store).toHaveAttribute('maxlength', '50')
+    fireEvent.click(submit)
+    expect(onSubmit).toHaveBeenCalledWith('가'.repeat(50), '김리본', null)
   })
 })

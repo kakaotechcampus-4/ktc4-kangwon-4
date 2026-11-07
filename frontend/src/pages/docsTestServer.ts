@@ -15,7 +15,7 @@ export const serverDocument = (overrides: Partial<DocumentResponse> = {}): Docum
   kind: 'TRANSFER',
   kind_label: '이체확인증',
   needs_confirmation: false,
-  fields: [{ name: 'amount', value: '3,300,000원', page: 1 }],
+  fields: [{ name: 'amount', label: '금액', value: '3,300,000원', page: 1 }],
   confirmed_fields: null,
   ...overrides,
 })
@@ -23,7 +23,15 @@ export const serverDocument = (overrides: Partial<DocumentResponse> = {}): Docum
 export const serverList = (
   documents: DocumentResponse[],
   check: DocumentListResponse['check'] = null,
-): DocumentListResponse => ({ documents, check })
+  storeName: string | null = '봄날개인카페',
+): DocumentListResponse => ({
+  store_name: storeName,
+  document_kinds: [
+    { kind: 'TRANSFER', label: '이체확인증' },
+    { kind: 'CLOSURE_RECEIPT', label: '폐업신고 접수증' },
+  ],
+  documents, check,
+})
 
 export const completeCheck: DocumentListResponse['check'] = {
   status: 'COMPLETE',

@@ -135,10 +135,10 @@ describe('toLogEntries', () => {
     ])
   })
 
-  /** 서류로 계약 내용이 바뀌어 다시 판단했다(#173). "서류를 올리셨어요"와 같은 말을 되풀이하지 않는다 */
-  it('서류로 계약 내용이 바뀐 것은 사장님 줄로 적는다', () => {
+  /** 이전 서버는 재판단 중이거나 실패해도 이 사건을 보낸다. 접수만으로 계약 변경을 단정하지 않는다 */
+  it('이전 서버의 서류 재판단 기록은 업로드 사실만 적는다', () => {
     expect(toLogEntries(logsOf(log('OWNER', 'DOCUMENT_SUBMITTED')))).toEqual([
-      { key: '0-DOCUMENT_SUBMITTED', actor: 'OWNER', text: '올린 서류로 계약 내용이 바뀌었어요', date: '10.17' },
+      { key: '0-DOCUMENT_SUBMITTED', actor: 'OWNER', text: '서류를 올리셨어요', date: '10.17' },
     ])
   })
 

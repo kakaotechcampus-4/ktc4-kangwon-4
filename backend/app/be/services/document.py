@@ -90,6 +90,7 @@ async def upload_document(
     except DocumentError as error:
         raise _rejected(error) from None
     except SafetyBlockedError as error:
+        logger.warning("서류 안전 검사 차단: %s", error.code)
         raise HTTPException(status_code=422, detail={
             "code": error.code, "message": _SAFETY_MESSAGES.get(error.code, _SAFETY_MESSAGES["AGENT_SAFETY_REFUSE"]),
         }) from None
@@ -135,7 +136,13 @@ def remove_document(tool: DocumentTool, directory: Path, case: Case, document_id
 
 def check_documents(
     session: Session, tool: DocumentTool, directory: Path, case: Case, applicant_name: str, closure_date: date | None,
+    *, store_name: str | None = None,
 ) -> DocumentContext:
+    # 서류에서 읽은 상호로 덮어쓰지 않는다. 사장님이 이 요청에 직접 보낸 이름만 저장한다.
+    if store_name is not None:
+        case.store_name = store_name
+        session.add(case)
+    # #251 순차 배포 중 구형 화면은 이름을 보내지 않는다. 기존 점검의 미확인 안내를 유지한다.
     context = load_context(directory, case)
     # 이체확인증의 보낸 사람과 맞춰 볼 신청인 이름은 서비스가 받는 칸이 없어 점검 직전에 사장님께 묻는다.
     # 폐업사실증명원과 맞춰 볼 폐업일은 사장님이 실제 날짜라고 확인한 값만 쓴다.
@@ -157,7 +164,8 @@ def check_documents(
         case_document_history_crud.create_case_document_history(
             session, CaseDocumentHistory(case_id=case.id, action="CHECKED"),
         )
-        session.commit()
+    # 점검이 누락·불일치로 끝나도 직접 입력한 이름은 재접속 때 다시 보여 준다.
+    session.commit()
     return updated
 
 

@@ -64,7 +64,7 @@ export type DocumentAction =
 export type CheckAction = 'IDLE' | 'RUNNING' | 'FAILED'
 
 /** 빈 서류함. Case 가 없으면(404) 서류도 없다 */
-const EMPTY: DocumentsView = { documents: [], check: null }
+const EMPTY: DocumentsView = { storeName: null, documentKinds: DOCUMENT_KINDS, documents: [], check: null }
 
 /**
  * 서류함 데이터와 올리기 · 확인 · 빼기 · 점검(#159). 서류함 · 점검 · 정산 파일 화면이 같이 쓴다.
@@ -202,7 +202,7 @@ export function useDocuments() {
     (id: string) => {
       if (usesMock) {
         // 서류가 바뀌면 지난 점검은 지운다(서버와 같음)
-        setMockView((view) => ({ documents: view.documents.filter((document) => document.id !== id), check: null }))
+        setMockView((view) => ({ ...view, documents: view.documents.filter((document) => document.id !== id), check: null }))
         return
       }
       void change(() => removeDocument(id))
@@ -222,6 +222,7 @@ export function useDocuments() {
       }
       const kindLabel = DOCUMENT_KINDS.find((option) => option.kind === kind)?.label ?? kind
       setMockView((view) => ({
+        ...view,
         documents: view.documents.map((document) =>
           document.id !== id
             ? document
@@ -242,14 +243,14 @@ export function useDocuments() {
   /**
    * 정산 서류 점검. 신청인 이름은 이체확인증의 보낸 사람과, 실제 폐업일은 폐업사실증명원과 맞춰 본다.
    * 폐업일을 비우면 서버가 "폐업일 미확인"으로 점검을 끝내지 않는다(#159). 이름·날짜는 점검에만
-   * 쓰이고 Case 에는 남지 않는다.
+   * 쓰인다. 가게 이름은 Case에도 저장하고, 신청인 이름·폐업일은 점검에만 남긴다.
    */
   const runCheck = useCallback(
-    async (applicantName: string, closureDate: string | null) => {
+    async (storeName: string, applicantName: string, closureDate: string | null) => {
       setChecking('RUNNING')
       try {
-        if (usesMock) setMockView(await simulateCheck(mockView))
-        else show(await checkDocuments(applicantName, closureDate))
+        if (usesMock) setMockView(await simulateCheck({ ...mockView, storeName }))
+        else show(await checkDocuments(storeName, applicantName, closureDate))
         if (alive.current) setChecking('IDLE')
       } catch (error: unknown) {
         if (alive.current && !leftForLogin(error)) setChecking('FAILED')
