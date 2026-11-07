@@ -651,13 +651,13 @@ export function AddressSheet({
 /**
  * 가게 정보로 정해지는 할 일(가입 때 정한 것 등). 정해져 있으면 따로 할 것이 없다.
  *
- * 확인 필요면 "할 것 없음"이라 하지 않는다. 폐업 날짜를 "아직 안 정했어요"로 고른 가게가 여기 온다.
- * 정해지면 결과 알려주기로 알려 주게 한다 — 판단이 가게 정보를 고친다(#237).
+ * 아직 정해지지 않았으면 "할 것 없음"이라 하지 않는다. 폐업 날짜를 "아직 안 정했어요"로 고른 가게(확인 필요)와
+ * 예상 달만 고른 가게(진행 중)가 여기 온다. 정해지면 결과 알려주기로 알려 주게 한다 — 판단이 가게 정보를 고친다(#237).
  */
 export function InfoFlow({ task }: { task: RoadmapTaskView }) {
   const navigate = useNavigate()
   const { search } = useLocation()
-  if (task.status !== 'NEEDS_CONFIRMATION') {
+  if (task.status === 'COMPLETED') {
     return (
       <TaskFrame>
         <TaskHeader task={task} />

@@ -178,6 +178,12 @@ describe('InfoFlow', () => {
     expect(await screen.findByText('결과 입력')).toBeInTheDocument()
   })
 
+  /** 예상 달만 고르면 서버가 진행 중으로 준다. 날짜는 아직 안 정해졌으니 같은 안내가 필요하다 */
+  it('예상 달만 정한 진행 중에도 결과 알려주기로 보낸다', () => {
+    renderInfo({ ...closureDateTask, status: 'IN_PROGRESS' })
+    expect(screen.getByRole('button', { name: '결과 알려주기' })).toBeInTheDocument()
+  })
+
   it('정해져 있으면 할 일을 내밀지 않는다', () => {
     renderInfo({ ...closureDateTask, status: 'COMPLETED' })
     expect(screen.queryByRole('button', { name: '결과 알려주기' })).not.toBeInTheDocument()
