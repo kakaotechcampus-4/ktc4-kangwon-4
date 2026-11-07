@@ -69,7 +69,7 @@ def save_context(directory: Path, context: DocumentContext, filename: str = CONT
 # 화면 문구는 FE(DocsPage)가 code를 보고 정한다. 위기 판정이면 상담 창구를 안내한다.
 _SAFETY_MESSAGES = {
     "AGENT_SAFETY_REFUSE": "이 파일은 자동으로 읽지 않았어요. 서류 내용을 확인한 뒤 다른 파일로 올려 주세요.",
-    "AGENT_SAFETY_CRISIS_SUPPORT": "폐업 준비는 잠시 멈춰도 괜찮아요. 자살예방상담전화 109(24시간)로 이야기 나눌 수 있어요.",
+    "AGENT_SAFETY_CRISIS_SUPPORT": "폐업 준비는 잠시 멈춰도 괜찮아요. 힘들 땐 언제든 상담전화 109(24시간)에 연락해 보세요.",
 }
 
 
