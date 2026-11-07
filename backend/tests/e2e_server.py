@@ -7,7 +7,8 @@
   .env의 DATABASE_URL(개발 DB)을 그대로 쓰면 그 DB가 지워진다.
 - 판단은 진짜 AI 그래프를 그대로 돌리고, 모델 자리에만 가짜를 끼운다. 가입 첫 판단은 정리본을
   써서 Supervisor 모델만 부르고 검수는 코드로 한다(AI팀 test_first_judgment_reviews_with_code_only…).
-  직접 입력은 테스트에 적힌 두 합성 문장에만 고정 사실·검수 응답을 준다. 모델 품질을 평가하지 않는다.
+  직접 입력은 테스트에 적힌 두 합성 문장에만 고정 사실·검수 응답을 준다. 충돌 선택 뒤 검수도 대체한다.
+  모델 품질을 평가하지 않는다.
   판단 저장·화면 조회는 운영과 같은 길을 탄다.
 - 로그인은 우회 API를 만들지 않는다. 독립된 합성 회원과 토큰을 E2E_TOKEN_FILE에 쓴다.
   브라우저 검사가 이걸 sessionStorage에 넣고 시작한다.
@@ -142,6 +143,7 @@ def main() -> None:
          patch.object(runtime_module.LangfuseTraceSink, "from_env", lambda *a, **k: None):
         os.environ["AGENT_DOCUMENT_DIR"] = directory
         tokens = {**_signed_in_member(), "restoration_members": [_signed_in_member() for _ in range(6)],
+                  "conflict_members": [_signed_in_member() for _ in range(2)],
                   "document_member": _signed_in_member(), "document_directory": directory,
                   "document_files": document_files(directory)}
         Path(os.environ["E2E_TOKEN_FILE"]).write_text(json.dumps(tokens), encoding="utf-8")
