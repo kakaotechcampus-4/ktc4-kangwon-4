@@ -176,8 +176,9 @@ describe('CurrentCasePage', () => {
       expect(
         screen.getByText('철거가 필요한지 판단하려면 원상복구 범위를 먼저 알아야 합니다.'),
       ).toBeInTheDocument()
-      // 할 일과 이유는 AI가 정한 것이라 고지를 붙인다
-      expect(screen.getByText(/리본\(AI\)이 정리한 안내예요/)).toBeInTheDocument()
+      // 할 일과 이유는 AI가 정한 것이라 알린다. 카드가 좁아 짧은 표시만 보이고, 화면 읽기에는 문장 전체를 준다
+      expect(screen.getByText('리본(AI)')).toBeInTheDocument()
+      expect(screen.getByText(/리본\(AI\)이 정리한 안내예요/)).toHaveClass('sr-only')
     })
 
     it('물어볼 내용 보기를 누르면 할 일 상세로 간다', async () => {
