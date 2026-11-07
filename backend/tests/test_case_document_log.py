@@ -4,7 +4,9 @@
 """
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
+from threading import Barrier
 
 import pytest
 from sqlmodel import Session
@@ -84,12 +86,39 @@ def test_same_file_uploaded_again_is_logged_once(documents):
     assert _document_logs(engine, member_id) == [("OWNER", "DOCUMENT_UPLOADED", "TRANSFER")]
 
 
+def test_concurrent_reuploads_merge_once_after_analysis_without_holding_the_case_lock(documents, monkeypatch):
+    engine, member_id, tool, directory = documents
+    content = document_pdf(DocumentKind.TRANSFER, **TRANSFER)
+    first = _upload(engine, member_id, tool, directory, DocumentKind.TRANSFER, TRANSFER, content)
+    with Session(engine) as session:
+        case = case_crud.get_case_by_member_id(session, member_id)
+        document_service.remove_document(session, tool, directory, case, first.documents[0].document_id)
+    parsed = Barrier(2)
+    original = tool.add_document
+
+    async def paused(context, *args, **kwargs):
+        updated = await original(context, *args, **kwargs)
+        await asyncio.to_thread(parsed.wait, 10)
+        return updated
+
+    monkeypatch.setattr(tool, "add_document", paused)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        uploads = [pool.submit(_upload, engine, member_id, tool, directory, DocumentKind.TRANSFER, TRANSFER, content)
+                   for _ in range(2)]
+        assert all(len(upload.result(timeout=15).documents) == 1 for upload in uploads)
+    with Session(engine) as session:
+        case = case_crud.get_case_by_member_id(session, member_id)
+        assert len(document_service.load_context(directory, case).documents) == 1
+    # 삭제 전 한 번과 동시 재업로드 한 번. 두 요청이 같은 추가 이력을 중복 저장하지 않는다.
+    assert _document_logs(engine, member_id) == [("OWNER", "DOCUMENT_UPLOADED", "TRANSFER")] * 2
+
+
 def test_removed_document_stays_in_log(documents):
     engine, member_id, tool, directory = documents
     uploaded = _upload(engine, member_id, tool, directory, DocumentKind.TRANSFER, TRANSFER)
     with Session(engine) as session:
         case = case_crud.get_case_by_member_id(session, member_id)
-        document_service.remove_document(tool, directory, case, uploaded.documents[0].document_id)
+        document_service.remove_document(session, tool, directory, case, uploaded.documents[0].document_id)
 
     assert _document_logs(engine, member_id) == [("OWNER", "DOCUMENT_UPLOADED", "TRANSFER")]
 
@@ -103,7 +132,7 @@ def test_only_passed_check_is_logged_as_ribbon(documents):
         case = case_crud.get_case_by_member_id(session, member_id)
         for document in context.documents:
             values = {field.name: field.value for field in document.analysis.fields}
-            document_service.confirm_document(tool, directory, case, document.document_id,
+            document_service.confirm_document(session, tool, directory, case, document.document_id,
                                               document.analysis.kind, values)
 
     # 이체확인증이 빠져 문제가 남은 점검은 기록하지 않는다
@@ -135,7 +164,7 @@ def test_explicit_store_name_is_saved_reloaded_and_used_without_changing_documen
         for document in context.documents:
             if document.analysis.needs_confirmation:
                 document_service.confirm_document(
-                    tool, directory, case, document.document_id, document.analysis.kind,
+                    session, tool, directory, case, document.document_id, document.analysis.kind,
                     {field.name: field.value for field in document.analysis.fields},
                 )
         if initial_name is None:

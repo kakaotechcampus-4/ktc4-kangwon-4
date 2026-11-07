@@ -97,24 +97,37 @@ async def upload_document(
     except Exception:  # noqa: BLE001 - 모델·OCR 실패. 제공자 응답 본문을 사장님에게 보이지 않는다
         logger.exception("서류 처리 실패")
         raise HTTPException(status_code=502, detail="서류를 읽지 못했어요. 잠시 뒤 다시 올려 주세요.") from None
-    save_context(directory, updated)
-
-    # 같은 파일을 다시 올리면 도구가 같은 서류로 보고 목록에 더하지 않는다. 새로 생긴 서류만 기록한다.
-    before = {document.document_id for document in context.documents}
+    # 모델을 기다리는 동안 삭제·확인·다른 업로드가 끝날 수 있다. 저장 구간만 Case로
+    # 줄 세우고, 이번 분석이 바꾼 문서만 최신 목록에 합친다. 그사이 바뀐 문서는 보존한다.
+    session.refresh(case, with_for_update=True)
+    current = load_context(directory, case)
+    before = {document.document_id: document for document in context.documents}
+    records = {document.document_id: document for document in current.documents}
+    changed = False
     for document in updated.documents:
-        if document.document_id not in before:
+        previous = before.get(document.document_id)
+        if document == previous or records.get(document.document_id) != previous:
+            continue
+        records[document.document_id] = document
+        changed = True
+        if previous is None:
             case_document_history_crud.create_case_document_history(
                 session,
                 CaseDocumentHistory(case_id=case.id, action="UPLOADED", document_kind=document.analysis.kind),
             )
+    if changed:
+        current.documents = list(records.values())
+        current.document_check = None
+    save_context(directory, current)
     session.commit()
-    return updated
+    return current
 
 
 def confirm_document(
-    tool: DocumentTool, directory: Path, case: Case, document_id: UUID,
+    session: Session, tool: DocumentTool, directory: Path, case: Case, document_id: UUID,
     kind: DocumentKind, confirmed_fields: dict[DocumentFieldName, str],
 ) -> DocumentContext:
+    session.refresh(case, with_for_update=True)
     try:
         updated = tool.confirm_document(
             load_context(directory, case), document_id, kind, confirmed_fields=confirmed_fields,
@@ -122,15 +135,18 @@ def confirm_document(
     except DocumentError as error:
         raise _rejected(error) from None
     save_context(directory, updated)
+    session.commit()
     return updated
 
 
-def remove_document(tool: DocumentTool, directory: Path, case: Case, document_id: UUID) -> DocumentContext:
+def remove_document(session: Session, tool: DocumentTool, directory: Path, case: Case, document_id: UUID) -> DocumentContext:
+    session.refresh(case, with_for_update=True)
     try:
         updated = tool.remove_document(load_context(directory, case), document_id)
     except DocumentError as error:
         raise _rejected(error) from None
     save_context(directory, updated)
+    session.commit()
     return updated
 
 
@@ -138,6 +154,7 @@ def check_documents(
     session: Session, tool: DocumentTool, directory: Path, case: Case, applicant_name: str, closure_date: date | None,
     *, store_name: str | None = None,
 ) -> DocumentContext:
+    session.refresh(case, with_for_update=True)
     # 서류에서 읽은 상호로 덮어쓰지 않는다. 사장님이 이 요청에 직접 보낸 이름만 저장한다.
     if store_name is not None:
         case.store_name = store_name

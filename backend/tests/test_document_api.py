@@ -3,8 +3,11 @@
 DB와 모델은 부르지 않는다. Case는 가짜 객체로, 모델은 document_fixtures의 가짜 응답으로 바꾼다.
 """
 
+import asyncio
 import io
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
+from threading import Event
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 from zipfile import ZipFile
@@ -165,6 +168,76 @@ def test_owner_confirms_uncertain_values_and_can_remove_document(api):
     assert confirmed["confirmed_fields"]["amount"] == "3,000,000원"
 
     assert client.delete(f"/cases/documents/{record['document_id']}").json()["documents"] == []
+
+
+@pytest.mark.parametrize("during_analysis", ["remove", "confirm", "upload", "check", "remove_reupload", "confirm_reupload"])
+def test_upload_keeps_changes_saved_while_analysis_runs(api, monkeypatch, during_analysis):
+    client, _, _ = api
+    content = document_pdf(DocumentKind.TRANSFER, **TRANSFER)
+    first = client.post("/cases/documents", files={"file": ("first.pdf", content, "application/pdf")}).json()["documents"][0]
+    started, resume = Event(), Event()
+    original = DocumentTool.add_document
+
+    async def paused(tool, context, filename, content, **kwargs):
+        updated = await original(tool, context, filename, content, **kwargs)
+        if filename == "pending.pdf":
+            started.set()
+            assert await asyncio.to_thread(resume.wait, 10), "동시 변경 후 분석을 재개하지 못했습니다."
+        return updated
+
+    monkeypatch.setattr(DocumentTool, "add_document", paused)
+    pending_content = content if during_analysis.endswith("reupload") else document_pdf(DocumentKind.BUSINESS_REGISTRATION)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        pending = pool.submit(client.post, "/cases/documents", files={"file": ("pending.pdf", pending_content, "application/pdf")})
+        try:
+            assert started.wait(10), "서류 분석이 시작되지 않았습니다."
+            if during_analysis.startswith("remove"):
+                response = client.delete(f"/cases/documents/{first['document_id']}")
+            elif during_analysis.startswith("confirm"):
+                response = client.post(f"/cases/documents/{first['document_id']}/confirm", json={
+                    "kind": "TRANSFER", "confirmed_fields": {**TRANSFER, "amount": "3,000,000원"},
+                })
+            elif during_analysis == "upload":
+                response = upload(client, DocumentKind.BANK_COPY, {})
+            else:
+                response = client.post("/cases/documents/check", json=OWNER)
+            assert response.status_code == 200
+        finally:
+            resume.set()
+        uploaded = pending.result(timeout=10)
+    assert uploaded.status_code == 200
+    restored = client.get("/cases/documents").json()
+    assert uploaded.json() == restored
+    records = {document["document_id"]: document for document in restored["documents"]}
+    if during_analysis.startswith("remove"):
+        assert first["document_id"] not in records
+    elif during_analysis.startswith("confirm"):
+        assert records[first["document_id"]]["confirmed_fields"]["amount"] == "3,000,000원"
+    elif during_analysis == "upload":
+        assert len(records) == 3
+        assert {item["kind"] for item in records.values()} == {"TRANSFER", "BANK_COPY", "BUSINESS_REGISTRATION"}
+    else:
+        case = case_crud.get_case_by_member_id(None, 1)
+        directory = app.dependency_overrides[document_router.get_document_directory]()
+        context = document_service.load_context(directory, case)
+        assert context.applicant_name == OWNER["applicant_name"]
+        assert context.closure_date == date(2026, 10, 31)
+    assert restored["check"] is None
+
+
+def test_reanalysis_replaces_only_the_current_document(api):
+    client, _, model = api
+    content = document_pdf(DocumentKind.TRANSFER, **TRANSFER)
+    first = client.post("/cases/documents", files={"file": ("first.pdf", content, "application/pdf")}).json()["documents"][0]
+    case = case_crud.get_case_by_member_id(None, 1)
+    directory = app.dependency_overrides[document_router.get_document_directory]()
+    before = document_service.load_context(directory, case).documents[0]
+    model.config.reasoning_effort = "medium"
+    again = client.post("/cases/documents", files={"file": ("first.pdf", content, "application/pdf")})
+    assert again.status_code == 200
+    assert [document["document_id"] for document in again.json()["documents"]] == [first["document_id"]]
+    after = document_service.load_context(directory, case).documents[0]
+    assert after.cache_key != before.cache_key
 
 
 @pytest.mark.parametrize("legacy_fields", [{}, {"store_name": None}])

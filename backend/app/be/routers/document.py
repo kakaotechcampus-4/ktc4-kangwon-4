@@ -97,7 +97,7 @@ def confirm_document(
 ):
     case = _current_case(session, member_id)
     context = document_service.confirm_document(
-        tool, directory, case, document_id, confirm_request.kind, confirm_request.confirmed_fields,
+        session, tool, directory, case, document_id, confirm_request.kind, confirm_request.confirmed_fields,
     )
     _judge_if_changed(background_tasks, session, directory, case)
     return document_list_response(context)
@@ -112,7 +112,7 @@ def remove_document(
     tool: DocumentTool = Depends(get_document_tool),
 ):
     case = _current_case(session, member_id)
-    return document_list_response(document_service.remove_document(tool, directory, case, document_id))
+    return document_list_response(document_service.remove_document(session, tool, directory, case, document_id))
 
 
 @router.post("/cases/documents/check", response_model=DocumentListResponse)
