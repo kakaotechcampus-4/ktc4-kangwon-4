@@ -35,19 +35,21 @@ DB와 서류 폴더를 **같은 시점으로** 받습니다. DB만 되돌리면 
 그래서 **백업부터 3단계 반영이 끝날 때까지 FastAPI를 멈춥니다.** 켜 둔 채 받으면 DB를 받은 뒤 서류를 받는 사이에 업로드·판단 저장이 끼어 둘이 다른 시점이 됩니다(승준님 #225). 이 동안 화면은 서버에 닿지 않습니다.
 
 ```bash
-mkdir -p ~/backup && TS=$(date +%Y%m%d-%H%M) && echo $TS    # TS는 되돌릴 때 쓰니 적어 둔다
+mkdir -p /home/ubuntu/backup && TS=$(date +%Y%m%d-%H%M) && echo $TS    # TS는 되돌릴 때 쓰니 적어 둔다
 $C stop fastapi
 $C exec -T mysql mysqldump --defaults-extra-file=/run/secrets/mysql_health_cnf \
-  --single-transaction --default-character-set=utf8mb4 closure_agent > ~/backup/db-$TS.sql
+  --single-transaction --default-character-set=utf8mb4 closure_agent > /home/ubuntu/backup/db-$TS.sql
 # 멈춘 컨테이너에는 exec를 못 쓴다. 같은 볼륨을 붙인 임시 컨테이너로 묶는다
-$C run --rm --no-deps -T fastapi tar czf - -C /data/documents . > ~/backup/documents-$TS.tgz
+$C run --rm --no-deps -T fastapi tar czf - -C /data/documents . > /home/ubuntu/backup/documents-$TS.tgz
 
 # 제대로 받았는지
-tail -n 1 ~/backup/db-$TS.sql              # "-- Dump completed on …"이 나와야 한다
-tar tzf ~/backup/documents-$TS.tgz | head
+tail -n 1 /home/ubuntu/backup/db-$TS.sql              # "-- Dump completed on …"이 나와야 한다
+tar tzf /home/ubuntu/backup/documents-$TS.tgz | head
 ```
 
-`~/backup`은 EC2 디스크 안이라 EC2가 망가지면 같이 잃습니다. 큰 배포 전에는 내 컴퓨터로도 한 부 받아 둡니다.
+`/home/ubuntu/backup`은 EC2 디스크 안이라 EC2가 망가지면 같이 잃습니다. 큰 배포 전에는 내 컴퓨터로도 한 부 받아 둡니다.
+
+경로를 `~/backup`이 아니라 그대로 적는 이유는, `sudo`로 돌리면 `~`가 `/root`가 되기 때문입니다. 그러면 백업이 `/root/backup`에 쌓이고, 다른 사람이 `ubuntu`로 들어와 `~/backup`을 보면 아무것도 없습니다 — 되돌려야 하는 상황은 급한 상황이라 거기서 파일을 찾고 있으면 곤란합니다(현종님 #270).
 배포를 여기서 그만두면 `$C start fastapi`로 다시 켭니다.
 
 ## 3. 반영
@@ -116,11 +118,11 @@ $C up -d --build
 TS=<2단계에서 적은 값>
 $C stop fastapi
 git checkout <1단계에서 적은 커밋>
-tail -n 1 ~/backup/db-$TS.sql | grep -q '^-- Dump completed' && \
-  tar tzf ~/backup/documents-$TS.tgz > /dev/null && \
-  $MYSQL closure_agent < ~/backup/db-$TS.sql && \
+tail -n 1 /home/ubuntu/backup/db-$TS.sql | grep -q '^-- Dump completed' && \
+  tar tzf /home/ubuntu/backup/documents-$TS.tgz > /dev/null && \
+  $MYSQL closure_agent < /home/ubuntu/backup/db-$TS.sql && \
   $C run --rm --no-deps -T fastapi sh -c 'find /data/documents -mindepth 1 -delete && tar xzf - -C /data/documents' \
-    < ~/backup/documents-$TS.tgz && \
+    < /home/ubuntu/backup/documents-$TS.tgz && \
   $C up -d --build
 ```
 
