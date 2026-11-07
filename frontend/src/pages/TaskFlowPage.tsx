@@ -668,8 +668,10 @@ export function InfoFlow({ task }: { task: RoadmapTaskView }) {
   return (
     <TaskFrame>
       <TaskHeader task={task} />
-      {/* TODO(#237): 문구는 PM 확인 전 임시 */}
-      <InfoBox>아직 정해지지 않았어요. 정해지면 결과 알려주기로 알려 주세요.</InfoBox>
+      {/* 예시에 연도를 넣는다. 연도가 있는 날짜만 저장 경로를 확인했다(#266 리뷰) */}
+      <InfoBox>
+        폐업 날짜가 아직 정해지지 않았어요. 날짜가 정해지면 결과 알려주기에서 알려 주세요. (예: 2026년 12월 20일에 폐업해요)
+      </InfoBox>
       <div className="mt-auto">
         <Button onClick={() => navigate({ pathname: '/results', search }, { viewTransition: true })}>결과 알려주기</Button>
       </div>
