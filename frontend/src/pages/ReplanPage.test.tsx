@@ -125,6 +125,30 @@ describe('ReplanPage — 서버', () => {
     expect(screen.getByText('지원 조건 확인하기')).toBeInTheDocument()
   })
 
+  /** changes는 가게 정보 칸만 담는다. 준비·진행만 저장한 UPDATED도 반영된 결과다. */
+  it('가게 정보 변경 목록이 비어도 서버가 반영했다고 하면 중립적으로 알린다', async () => {
+    serve(json(judged({ result: 'UPDATED', changes: [] })))
+    renderAt('/replan?history=13')
+
+    expect(await screen.findByRole('heading', { name: '알려주신 내용을 반영했어요' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '가게 정보에 바뀐 내용은 없어요' })).not.toBeInTheDocument()
+    // 서버에 없는 상세 진행이나 절차 완료를 화면이 만들어 보여주지 않는다.
+    expect(screen.queryByRole('heading', { name: '이해한 내용' })).not.toBeInTheDocument()
+    expect(screen.getByText('지원 조건 확인하기')).toBeInTheDocument()
+    expect(screen.getByText(/리본\(AI\)이 정리한 안내예요/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '홈으로' })).toBeEnabled()
+  })
+
+  it('충돌 선택 뒤 가게 정보 외의 반영이 있어도 새 해석처럼 묻지 않는다', async () => {
+    serve(json(judged({ result: 'UPDATED', changes: [] })))
+    renderAt('/replan?history=13&from=confirm')
+
+    expect(await screen.findByRole('heading', { name: '고르신 내용을 반영했어요' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '바뀐 내용' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/리본\(AI\)이 정리한 안내예요/)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '홈으로' })).toBeEnabled()
+  })
+
   /** 바뀐 것이 없는데 "반영했어요"라고 하면 제목과 엇갈린다 */
   it.each([
     ['바뀐 것이 있으면 다시 정했다고 한다', {}, '다음 할 일을 다시 정했어요.', '다음 할 일을 다시 확인했어요.'],

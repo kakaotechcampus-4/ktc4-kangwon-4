@@ -409,6 +409,17 @@ describe('CurrentCasePage', () => {
    * 서버가 "다시 해볼 수 있다"고 한 실패를 다시 판단해 달라고 맡긴다(#196, `POST /cases/retry`).
    * 맡긴 뒤에는 지금 상황을 다시 물어 그대로 그린다 — 기다리는 자리를 따로 만들지 않는다.
    */
+  it('NONE 실패에서는 같은 판단 재시도 대신 새 상황 입력으로 간다', async () => {
+    saveTokens('access-1', 'refresh-1')
+    mockCase(envelope({ judgment_status: 'FAILED', recovery_action_code: 'NONE' }))
+    renderAt('/case')
+
+    const newInput = await screen.findByRole('button', { name: '새 상황 알려주기' })
+    expect(screen.queryByRole('button', { name: '다시 판단하기' })).not.toBeInTheDocument()
+    fireEvent.click(newInput)
+    expect(await screen.findByText('결과 입력 화면')).toBeInTheDocument()
+  })
+
   describe('다시 판단하기', () => {
     const RETRYABLE = envelope({ judgment_status: 'FAILED', recovery_action_code: 'RETRY' })
     const PENDING = envelope({ judgment_status: 'PENDING' })
