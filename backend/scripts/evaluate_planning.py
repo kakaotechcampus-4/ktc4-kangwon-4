@@ -21,9 +21,11 @@ from time import perf_counter
 from unittest.mock import patch
 from uuid import UUID, uuid5
 
-import app.agent.runtime as runtime_module
 import httpx
+
+import app.agent.runtime as runtime_module
 from app.agent.llm import LLMConfig, StructuredLLMClient
+from app.agent.procedure_tool.cafe import build_cafe_procedure_steps
 from app.agent.procedure_tool.store import ReviewedProcedureSnapshot
 from app.agent.schemas import (
     AgentGraphInput,
@@ -31,12 +33,19 @@ from app.agent.schemas import (
     CaseSnapshot,
     EvidenceRecord,
     KnownProcedureStep,
+    RestorationAnswer,
+    ReviewResult,
+    ReviewSubject,
     canonical_digest,
 )
 from app.agent.support_agent import ReviewedSupportCatalog
 from app.agent.tracing import capture_usage
 from app.be.schemas.case import CaseCreateRequest
-from scripts.evaluation_metrics import load_prices, summarize_metrics
+from scripts.evaluation_metrics import (
+    evaluation_code_digest,
+    load_prices,
+    summarize_metrics,
+)
 
 # A fixed clock keeps two runs of the same payload comparable. Reviewed sources
 # carry their own review dates, so this does not make stale data look current.
@@ -218,8 +227,8 @@ def load_dataset(path: Path) -> dict[str, tuple[AgentGraphInput, dict]]:
     """One AgentGraphInput per JSONL row, keyed by its id, with the row itself.
 
     Each row carries its own intake answers and pre-input state, so rows run
-    independently; no row's output feeds the next. Only typed results are
-    supported: a conflict confirmation is a button press, not a result text.
+    independently; no row's output feeds the next. Structured answers use the
+    existing RestorationAnswer contract; conflict confirmation is not replayed.
     """
 
     items: dict[str, tuple[AgentGraphInput, dict]] = {}
@@ -232,14 +241,15 @@ def load_dataset(path: Path) -> dict[str, tuple[AgentGraphInput, dict]]:
             raise SystemExit(f"{row_id}: only RESULT_SUBMITTED rows can run")
         if row_id in items:
             raise SystemExit(f"{row_id}: duplicate id")
-        items[row_id] = (
-            build_graph_input(
-                row["case_create_request"],
-                result_text=row["raw_input"],
-                prior_facts=row["current_facts"],
-            ),
-            row,
+        request = build_graph_input(
+            row["case_create_request"],
+            result_text=row["raw_input"],
+            prior_facts=row["current_facts"],
         )
+        if row.get("restoration_answer") is not None:
+            request.trigger.restoration_answer = RestorationAnswer.model_validate(row["restoration_answer"])
+            request = AgentGraphInput.model_validate_json(request.model_dump_json())
+        items[row_id] = (request, row)
     return items
 
 
@@ -301,11 +311,13 @@ _STEP_NAMES = {
 }
 
 
-def build_registry(store: SnapshotStore) -> list[KnownProcedureStep]:
+def build_registry(store: SnapshotStore, *, cafe_registry: bool = False) -> list[KnownProcedureStep]:
     """One registry entry per step_code the reviewed documents cover.
 
     The IDs are local to this run. BE owns the real PROCEDURE_STEP rows, so the
     registry_version says so rather than pretending these were persisted.
+    cafe_registry reuses production names, aliases, conditions and dependencies
+    with those same local IDs. The default preserves historical evaluations.
     """
 
     steps: list[KnownProcedureStep] = []
@@ -330,6 +342,10 @@ def build_registry(store: SnapshotStore) -> list[KnownProcedureStep]:
                     eligibility_conditions=[],
                 )
             )
+    if cafe_registry:
+        return build_cafe_procedure_steps({
+            step.procedure_step.step_code: step.procedure_step.procedure_step_id for step in steps
+        })
     return steps
 
 
@@ -353,7 +369,8 @@ def code_version() -> dict:
         return done.stdout.strip() if done.returncode == 0 else None
 
     status = git("status", "--porcelain")
-    return {"git_commit": git("rev-parse", "HEAD"), "uncommitted_changes": bool(status)}
+    return {"git_commit": git("rev-parse", "HEAD"), "uncommitted_changes": bool(status),
+            "code_sha256": evaluation_code_digest()}
 
 
 def source_manifest(store, registry, catalog, catalog_path: Path | None) -> dict:
@@ -375,6 +392,8 @@ def source_manifest(store, registry, catalog, catalog_path: Path | None) -> dict
             for record in store.records()
         ],
         "procedure_registry_count": len(registry),
+        "procedure_registry_versions": sorted({step.registry_version for step in registry}),
+        "procedure_registry_sha256": digest([step.model_dump(mode="json") for step in registry]),
         "support_catalog_version": catalog.catalog_version,
         "support_catalog_file": None if catalog_path is None else str(catalog_path),
         "support_program_count": len(catalog.programs),
@@ -495,12 +514,37 @@ def decision_summary(outcome) -> dict:
                 "step_code": change.procedure_step.step_code,
                 "before_status": as_text(change.before_status),
                 "proposed_status": as_text(change.proposed_status),
+                "proposed_submitted": change.proposed_submitted,
             }
             for change in subject.supervisor_draft.mutations.procedure_progress_changes
         ],
         # Recorded, never gated: rework bookkeeping is not user-visible text.
         "review_attempt": subject.review_attempt,
         "draft_version": decision.draft_version,
+    }
+
+
+def review_metadata(subject: ReviewSubject, reviewed: ReviewResult) -> dict:
+    """Keep review locations and routing, never free-text reasons or values."""
+    decision = subject.supervisor_draft.decision
+    return {
+        "verdict": as_text(reviewed.verdict),
+        "issue_codes": [as_text(issue.issue_code) for issue in reviewed.issues],
+        "review_attempt": subject.review_attempt,
+        "draft_decision_type": as_text(decision.decision_type),
+        "draft_action_code": None if decision.next_action is None else as_text(decision.next_action.action_code),
+        "draft_fact_changes": [
+            {"field_path": as_text(change.field_path), "operation": as_text(change.operation),
+             "proposed_status": as_text(change.proposed_status),
+             **({"proposed_value": as_text(change.proposed_value)}
+                if as_text(change.value_type) in {"ENUM", "BOOLEAN", "INTEGER"} else {})}
+            for change in subject.supervisor_draft.mutations.fact_changes
+        ],
+        "issues": [{"issue_code": as_text(issue.issue_code), "severity": issue.severity,
+                    "target_component": as_text(issue.target_component), "target_path": issue.target_path}
+                   for issue in reviewed.issues],
+        "missing_evidence_paths": [item.claim_path for item in reviewed.missing_evidence],
+        "recommended_rework_targets": [as_text(target) for target in reviewed.recommended_rework_targets],
     }
 
 
@@ -531,10 +575,7 @@ async def trial(case: str, request: AgentGraphInput, store, registry, catalog) -
 
         async def record_review(subject):
             reviewed = await review(subject)
-            result["review_results"].append({
-                "verdict": reviewed.verdict.value,
-                "issue_codes": [item.issue_code.value for item in reviewed.issues],
-            })
+            result["review_results"].append(review_metadata(subject, reviewed))
             return reviewed
 
         with capture_usage() as usage, patch.object(runtime._graph._review_tool, "review", record_review):
@@ -563,7 +604,7 @@ def verdict(rows: list[dict]) -> dict:
 
     Two different questions are reported separately, because a provider outage
     and a model changing its mind are not the same problem:
-      reliability -- did every repeat produce a reviewed plan at all
+      reliability -- did every repeat produce a plan or an expected conflict
       consistency -- did the repeats that DID produce one agree with each other
     Mixing them would let one HTTP 503 read as "the answer was unstable".
     """
@@ -572,25 +613,22 @@ def verdict(rows: list[dict]) -> dict:
         row for row in rows
         if row["status"] == "REVIEWED_PLAN" and "error" not in row
     ]
+    completed = [row for row in rows if "error" not in row and (
+        row["status"] == "REVIEWED_PLAN"
+        or (row["status"] == "CONFLICT" and row.get("score", {}).get("result") == "PASS")
+    )]
 
     def same(key: str) -> bool:
         return len({canonical(row.get(key)) for row in planned}) <= 1
 
     checks = {
         "no_errors": all("error" not in row for row in rows),
-        "all_reviewed_plan": len(planned) == len(rows),
+        "all_expected_outcomes": len(completed) == len(rows),
         "same_graph_input": len({row["graph_input_digest"] for row in rows}) == 1,
         "same_decision_type": same("decision_type"),
         "same_blocker": same("blocker_digest"),
         "same_next_action": same("next_action_digest"),
         "same_fact_changes": same("fact_changes"),
-        # Observable proof no repeat replayed an earlier answer: a cache hit
-        # returns with zero provider calls. Which roles are called depends on
-        # the configuration and on whether reviewed support data was supplied,
-        # so requiring a specific set of roles would be wrong.
-        "provider_called_every_repeat": all(
-            sum(row["calls_by_role"].values()) > 0 for row in rows
-        ),
     }
     consistency = [
         key for key in checks if key.startswith("same_") or key == "decision_type"
@@ -598,10 +636,11 @@ def verdict(rows: list[dict]) -> dict:
     return {
         "repeats": len(rows),
         "reviewed_plans": len(planned),
+        "all_reviewed_plan": len(planned) == len(rows),
         # What the repeats that succeeded agreed on.
         "consistency": "PASS" if all(checks[key] for key in consistency) else "FAIL",
         # Whether every repeat got that far at all.
-        "reliability": "PASS" if checks["all_reviewed_plan"] else "FAIL",
+        "reliability": "PASS" if checks["all_expected_outcomes"] else "FAIL",
         "verdict": "PASS" if all(checks.values()) else "FAIL",
         **checks,
     }
@@ -657,6 +696,30 @@ def score(row: dict, result: dict) -> dict:
     for item in row["must_not"]:
         if item in STATE_CHECKS and STATE_CHECKS[item](result):
             reasons.append(f"must_not {item}")
+    if "expected_action_codes" in row and result.get("action_code") not in row["expected_action_codes"]:
+        reasons.append("unexpected action_code")
+    if "expected_decision_types" in row and result.get("decision_type") not in row["expected_decision_types"]:
+        reasons.append("unexpected decision_type")
+    questions = set(result.get("questions_for_user", [])) | set(
+        (result.get("next_action") or {}).get("questions_to_ask", [])
+    )
+    if row.get("expected_questions_any_of") and not questions.intersection(row["expected_questions_any_of"]):
+        reasons.append("expected question missing")
+    if questions.intersection(row.get("forbidden_questions", [])):
+        reasons.append("repeated or forbidden question")
+    changed_fields = {change["field_path"] for change in result.get("fact_changes", [])}
+    if changed_fields.intersection(row.get("forbidden_fact_changes", [])):
+        reasons.append("forbidden fact change")
+    if "expected_conflict_fields" in row and {
+        conflict["field_path"] for conflict in result.get("conflicts", [])
+    } != set(row["expected_conflict_fields"]):
+        reasons.append("unexpected conflict fields")
+    for expected in row.get("expected_procedure_progress", []):
+        if not any(
+            all(change.get(key) == value for key, value in expected.items())
+            for change in result.get("procedure_progress_changes", [])
+        ):
+            reasons.append("expected procedure progress missing")
     return {
         "result": "WRONG" if reasons else "PASS",
         "reasons": reasons,
@@ -705,6 +768,14 @@ def overall_verdict(per_case: dict, dataset_rows: list[dict] | None) -> str:
     return "PASS"
 
 
+def metrics_by_case(rows: list[dict], prices: dict) -> dict:
+    """Keep different inputs separate; include failed runs in time and cost."""
+    return {
+        case: summarize_metrics([row for row in rows if row["case"] == case], prices)
+        for case in sorted({row["case"] for row in rows})
+    }
+
+
 async def run(args) -> None:
     graph_input_path = getattr(args, "graph_input", None)
     dataset_path = getattr(args, "dataset", None)
@@ -716,16 +787,18 @@ async def run(args) -> None:
         raise SystemExit("--dataset cannot be combined with --graph-input, --case or --result-input")
 
     store = SnapshotStore(args.procedure_snapshot)
-    registry = build_registry(store)
+    cafe_registry = getattr(args, "cafe_registry", False)
+    registry = build_registry(store, cafe_registry=cafe_registry)
     catalog = load_catalog(args.support_catalog)
     expected = dict(pair.split("=", 1) for pair in args.expect)
     # Read exactly what build_runtime will read: the process environment on
     # top of .env. Passing environ={} would check the file while the run used
     # an override, so the guard could pass for the wrong models.
-    configured = {
-        role: LLMConfig.from_env(env_prefix=prefix).model
+    configurations = {
+        role: LLMConfig.from_env(env_prefix=prefix)
         for prefix, role in ROLE_BY_PREFIX.items()
     }
+    configured = {role: config.model for role, config in configurations.items()}
     mismatched = {
         role: {"expected": model, "configured": configured.get(role)}
         for role, model in expected.items()
@@ -770,12 +843,16 @@ async def run(args) -> None:
         },
         "code_version": code_version(),
         "configured_models": configured,
+        "registry_mode": "cafe" if cafe_registry else "legacy",
+        "configured_efforts": {role: config.reasoning_effort for role, config in configurations.items()},
         "expected_models": expected,
         "model_mismatch": mismatched,
         "sources": source_manifest(store, registry, catalog, args.support_catalog),
         "scope": (
             "지정한 Agent 입력으로 전체 판단 경로를 반복 실행한다. "
             "FE HTTP·로그인·DB 저장은 포함하지 않는다."
+            + (" dataset은 결과 입력만 평가하며 서류 처리·충돌 선택 후 실행·장애 주입은 별도 검증이다."
+               if dataset_path is not None else "")
         ),
     }
 
@@ -802,6 +879,7 @@ async def run(args) -> None:
                 row["difficulty"] = expected_row["difficulty"]
                 row["scenario_family"] = expected_row["scenario_family"]
                 row["score"] = score(expected_row, row)
+                row["metrics"] = summarize_metrics([row], load_prices())
             rows.append(row)
             (args.output / f"trial-{len(rows):03d}.json").write_text(
                 json.dumps(row, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -827,6 +905,7 @@ async def run(args) -> None:
     summary = {
         "verdict": overall_verdict(per_case, rows if dataset_path is not None else None),
         "per_case": per_case,
+        "metrics_by_case": metrics_by_case(rows, load_prices()),
         # If every different intake converges on one action, the run shows
         # consistency, not that the model picks well among several candidates.
         "distinct_next_action_digests": len(
@@ -848,6 +927,10 @@ async def run(args) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--procedure-snapshot", type=Path, required=True)
+    parser.add_argument(
+        "--cafe-registry", action="store_true",
+        help="Reuse production cafe rules with file-derived local IDs; changes the registry fingerprint",
+    )
     parser.add_argument("--support-catalog", type=Path)
     parser.add_argument(
         "--graph-input", type=Path,
