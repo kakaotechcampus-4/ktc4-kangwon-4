@@ -9,6 +9,10 @@ from uuid import UUID
 import pytest
 
 from app.agent.graph import AgentGraph
+from app.agent.procedure_tool.rules import (
+    procedure_applicability,
+    procedure_constraints,
+)
 from app.agent.procedure_tool.stored_tool import StoredProcedureLookupTool
 from app.agent.schemas import (
     ActionDecisionDraft,
@@ -399,3 +403,75 @@ def test_review_metadata_preserves_failure_location_without_copying_private_free
         "restoration_scope_detail", "planned_closure_date",
     ]
     assert private not in json.dumps(report)
+
+
+@pytest.mark.parametrize(("lease", "scope", "demolition", "applicable"), [
+    ("LEASED_PAID", "NOT_REQUIRED", "NOT_REQUIRED", False),
+    ("LEASED_PAID", "FULL", "REQUIRED", True), ("OWNED", "FULL", "REQUIRED", False),
+])
+def test_cafe_evaluation_registry_preserves_real_applicability_and_local_ids(lease, scope, demolition, applicable):
+    store = SnapshotStore(INPUTS.parents[3] / "backend/app/common/reviewed-procedures.ko-KR.json")
+    legacy, cafe = build_registry(store), build_registry(store, cafe_registry=True)
+    ids = lambda steps: {step.procedure_step.step_code: step.procedure_step.procedure_step_id for step in steps}
+    assert ids(legacy) == ids(cafe)
+    snapshot, _ = build_case_snapshot(dict(CASES["benchmark_case1"], lease_status=lease), {
+        "restoration_scope": scope, "demolition_required": demolition,
+    })
+    restoration = next(step for step in cafe if step.procedure_step.step_code == "PERFORM_RESTORATION")
+    assert procedure_applicability(restoration, snapshot) is applicable
+    assert restoration.applicable_business_type == "CAFE" and restoration.dependencies
+    assert restoration.registry_version != "LOCAL_TEST_IDS_NOT_PERSISTED"
+
+
+@pytest.mark.parametrize("required", [False, True])
+def test_cafe_evaluation_return_waits_for_required_restoration(required):
+    store = SnapshotStore(INPUTS.parents[3] / "backend/app/common/reviewed-procedures.ko-KR.json")
+    registry = build_registry(store, cafe_registry=True)
+    snapshot, _ = build_case_snapshot(CASES["benchmark_case1"], {
+        "restoration_scope": "FULL" if required else "NOT_REQUIRED",
+        "demolition_required": "REQUIRED" if required else "NOT_REQUIRED",
+    })
+    step = next(step for step in registry if step.procedure_step.step_code == "RETURN_PREMISES")
+    reasons = procedure_constraints(step, snapshot, known_steps=registry)
+    assert bool(reasons) is required
+
+
+def test_cafe_registry_requires_all_eight_ids_instead_of_silently_falling_back():
+    records = [SimpleNamespace(step_codes=["FILE_TAX_BUSINESS_CLOSURE"], title="합성 자료")]
+    with pytest.raises(ValueError, match="all eight cafe procedure IDs"):
+        build_registry(SimpleNamespace(records=lambda: records), cafe_registry=True)
+
+
+def test_h04_future_expectation_follows_the_existing_confirmed_fact_contract():
+    from test_info_replanning import (
+        FOOD,
+        RESTORATION,
+        TAX,
+        Responses,
+        finding,
+        output,
+        request_for_replanning,
+    )
+
+    from app.agent.info_agent.agent import InfoAnalysisAgent
+
+    _, frozen = load_dataset(HELD_OUT)["H04"]
+    request = request_for_replanning(status="NOT_STARTED", scope="FULL")
+    request.input.redacted_text = frozen["raw_input"]
+    raw = output([finding(TAX, "doc1"), finding(FOOD, "doc2"), finding(RESTORATION, "doc3")])
+    raw["facts"] = [{"operation": "SET", "field_path": "restoration_status", "value_type": "ENUM",
+                     "value": "IN_PROGRESS", "source_text": frozen["raw_input"], "confidence_bps": 9500,
+                     "requires_confirmation": False, "reason_summary": "진행 보고"}]
+    result = asyncio.run(InfoAnalysisAgent(Responses(raw), max_local_attempts=1).analyze(request))
+    [conflict] = result.conflicts
+    assert (conflict.field_path, conflict.committed_value, conflict.proposed_value) == (
+        "restoration_status", "NOT_STARTED", "IN_PROGRESS",
+    )
+    assert result.fact_candidates == []
+    reported = {"status": "CONFLICT", "conflicts": [conflict.model_dump(mode="json")]}
+    assert score(frozen, reported)["result"] == "WRONG"  # Preserve the original measurement.
+    proposed = {**frozen, "expected_branch": "CONFLICT", "expected_fact_changes": {},
+                "expected_conflict_fields": ["restoration_status"],
+                "forbidden_fact_changes": [*frozen["forbidden_fact_changes"], "restoration_status"]}
+    assert score(proposed, reported)["result"] == "PASS"
+    assert frozen["expected_branch"] == "REPLAN_OR_NEEDS_MORE_INFO"

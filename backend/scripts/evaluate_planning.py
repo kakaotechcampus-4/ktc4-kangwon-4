@@ -25,6 +25,7 @@ import httpx
 
 import app.agent.runtime as runtime_module
 from app.agent.llm import LLMConfig, StructuredLLMClient
+from app.agent.procedure_tool.cafe import build_cafe_procedure_steps
 from app.agent.procedure_tool.store import ReviewedProcedureSnapshot
 from app.agent.schemas import (
     AgentGraphInput,
@@ -310,11 +311,13 @@ _STEP_NAMES = {
 }
 
 
-def build_registry(store: SnapshotStore) -> list[KnownProcedureStep]:
+def build_registry(store: SnapshotStore, *, cafe_registry: bool = False) -> list[KnownProcedureStep]:
     """One registry entry per step_code the reviewed documents cover.
 
     The IDs are local to this run. BE owns the real PROCEDURE_STEP rows, so the
     registry_version says so rather than pretending these were persisted.
+    cafe_registry reuses production names, aliases, conditions and dependencies
+    with those same local IDs. The default preserves historical evaluations.
     """
 
     steps: list[KnownProcedureStep] = []
@@ -339,6 +342,10 @@ def build_registry(store: SnapshotStore) -> list[KnownProcedureStep]:
                     eligibility_conditions=[],
                 )
             )
+    if cafe_registry:
+        return build_cafe_procedure_steps({
+            step.procedure_step.step_code: step.procedure_step.procedure_step_id for step in steps
+        })
     return steps
 
 
@@ -385,6 +392,7 @@ def source_manifest(store, registry, catalog, catalog_path: Path | None) -> dict
             for record in store.records()
         ],
         "procedure_registry_count": len(registry),
+        "procedure_registry_versions": sorted({step.registry_version for step in registry}),
         "procedure_registry_sha256": digest([step.model_dump(mode="json") for step in registry]),
         "support_catalog_version": catalog.catalog_version,
         "support_catalog_file": None if catalog_path is None else str(catalog_path),
@@ -779,7 +787,8 @@ async def run(args) -> None:
         raise SystemExit("--dataset cannot be combined with --graph-input, --case or --result-input")
 
     store = SnapshotStore(args.procedure_snapshot)
-    registry = build_registry(store)
+    cafe_registry = getattr(args, "cafe_registry", False)
+    registry = build_registry(store, cafe_registry=cafe_registry)
     catalog = load_catalog(args.support_catalog)
     expected = dict(pair.split("=", 1) for pair in args.expect)
     # Read exactly what build_runtime will read: the process environment on
@@ -834,6 +843,7 @@ async def run(args) -> None:
         },
         "code_version": code_version(),
         "configured_models": configured,
+        "registry_mode": "cafe" if cafe_registry else "legacy",
         "configured_efforts": {role: config.reasoning_effort for role, config in configurations.items()},
         "expected_models": expected,
         "model_mismatch": mismatched,
@@ -917,6 +927,10 @@ async def run(args) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--procedure-snapshot", type=Path, required=True)
+    parser.add_argument(
+        "--cafe-registry", action="store_true",
+        help="Reuse production cafe rules with file-derived local IDs; changes the registry fingerprint",
+    )
     parser.add_argument("--support-catalog", type=Path)
     parser.add_argument(
         "--graph-input", type=Path,
