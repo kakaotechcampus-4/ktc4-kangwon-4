@@ -7,7 +7,7 @@
   .env의 DATABASE_URL(개발 DB)을 그대로 쓰면 그 DB가 지워진다.
 - 판단은 진짜 AI 그래프를 그대로 돌리고, 모델 자리에만 가짜를 끼운다. 가입 첫 판단은 정리본을
   써서 Supervisor 모델만 부르고 검수는 코드로 한다(AI팀 test_first_judgment_reviews_with_code_only…).
-  직접 입력은 테스트에 적힌 두 합성 문장에만 고정 사실·검수 응답을 준다. 충돌 선택 뒤 검수도 대체한다.
+  직접 입력·서류는 테스트에 적힌 합성 문장에만 고정 사실·검수 응답을 준다. 충돌 선택 뒤 검수도 대체한다.
   모델 품질을 평가하지 않는다.
   판단 저장·화면 조회는 운영과 같은 길을 탄다.
 - 로그인은 우회 API를 만들지 않는다. 독립된 합성 회원과 토큰을 E2E_TOKEN_FILE에 쓴다.
@@ -16,6 +16,7 @@
 pytest가 모으지 않는다(test_로 시작하지 않음). 이름은 다물님 E2E 제안을 따랐다.
 """
 
+import asyncio
 import json
 import os
 import sys
@@ -75,6 +76,19 @@ def document_files(directory):
     return files
 
 
+def replan_files(directory):
+    files = {}
+    for name, clause, day in [
+        ("LEASE", "카운터만 철거한다.", "2026-11-01"),
+        ("SAME_CLAUSE", "카운터만 철거한다.", "2026-11-02"),
+        ("CHANGED_CLAUSE", "카운터만 철거한다. 작업 전 보양한다.", "2026-11-03"),
+    ]:
+        path = Path(directory) / f"{name}.pdf"
+        path.write_bytes(document_pdf("LEASE", restoration_clause=clause, date=day))
+        files[name] = str(path)
+    return files
+
+
 class FirstCandidateModel:
     """선택은 첫 후보, 직접 입력 해석은 아래 합성 문장만 받는 모델 대역이다."""
 
@@ -88,6 +102,16 @@ class FirstCandidateModel:
             prompt = json.dumps(messages, ensure_ascii=False)
             progress = "원상복구 작업을 시작했습니다." in prompt
             text = "원상복구 작업을 시작했습니다." if progress else "원상복구는 일부이고 카운터만 철거해야 합니다."
+            if not progress and "카운터만 철거한다." in prompt:
+                text = "카운터만 철거한다."
+            if "서류 대기 검증입니다." in prompt:
+                # 실제 판단을 기다리는 동안 업로드한다. 제품용 제어 API나 시간 추측 없이
+                # 테스트 파일로 모델 대역만 멈춘다. 실패해도 서버가 무한히 기다리지 않는다.
+                directory = Path(os.environ["AGENT_DOCUMENT_DIR"])
+                (directory / "model-entered").touch()
+                async with asyncio.timeout(45):
+                    while not (directory / "model-release").exists():
+                        await asyncio.sleep(0.05)
             assert text in prompt and "010-1234-5678" not in prompt
             facts = [("restoration_status", "ENUM", "IN_PROGRESS")] if progress else [
                 ("restoration_scope", "ENUM", "PARTIAL"), ("demolition_required", "ENUM", "REQUIRED"),
@@ -142,6 +166,8 @@ def main() -> None:
         os.environ["AGENT_DOCUMENT_DIR"] = directory
         tokens = {**_signed_in_member(), "restoration_members": [_signed_in_member() for _ in range(6)],
                   "conflict_members": [_signed_in_member() for _ in range(2)],
+                  "replan_members": [_signed_in_member() for _ in range(3)],
+                  "replan_files": replan_files(directory),
                   "document_member": _signed_in_member(), "document_directory": directory,
                   "document_files": document_files(directory)}
         Path(os.environ["E2E_TOKEN_FILE"]).write_text(json.dumps(tokens), encoding="utf-8")
