@@ -7,8 +7,9 @@
   .env의 DATABASE_URL(개발 DB)을 그대로 쓰면 그 DB가 지워진다.
 - 판단은 진짜 AI 그래프를 그대로 돌리고, 모델 자리에만 가짜를 끼운다. 가입 첫 판단은 정리본을
   써서 Supervisor 모델만 부르고 검수는 코드로 한다(AI팀 test_first_judgment_reviews_with_code_only…).
-  그래서 가짜는 "첫 번째 후보를 고른다"만 하면 되고, 판단 저장·화면 조회는 운영과 같은 길을 탄다.
-- 로그인은 우회 API를 만들지 않는다. 회원 한 명을 만들고 그 토큰을 E2E_TOKEN_FILE에 쓴다.
+  직접 입력은 테스트에 적힌 두 합성 문장에만 고정 사실·검수 응답을 준다. 모델 품질을 평가하지 않는다.
+  판단 저장·화면 조회는 운영과 같은 길을 탄다.
+- 로그인은 우회 API를 만들지 않는다. 독립된 합성 회원과 토큰을 E2E_TOKEN_FILE에 쓴다.
   브라우저 검사가 이걸 sessionStorage에 넣고 시작한다.
 
 pytest가 모으지 않는다(test_로 시작하지 않음). 이름은 다물님 E2E 제안을 따랐다.
@@ -18,6 +19,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -38,23 +40,76 @@ import uvicorn  # noqa: E402
 from sqlmodel import Session  # noqa: E402
 
 import app.agent.runtime as runtime_module  # noqa: E402
+from app.agent.document_tool.documents import DocumentService  # noqa: E402
+from app.agent.document_tool.safety import ContentSafetyGuard  # noqa: E402
+from app.agent.document_tool.tool import DocumentTool  # noqa: E402
 from app.be.crud.member import create_member  # noqa: E402
 from app.be.db import get_engine, reset_all_tables  # noqa: E402
 from app.be.services import auth as auth_service  # noqa: E402
 from app.main import app  # noqa: E402
+from app.be.routers.document import get_document_tool  # noqa: E402
+from document_fixtures import DocumentClient, document_pdf  # noqa: E402
+
+
+async def synthetic_documents():
+    client = DocumentClient()
+    client.needs_confirmation = True
+    tool = DocumentTool(DocumentService(Path(os.environ["AGENT_DOCUMENT_DIR"]), client,
+        reviewer=client, safety=ContentSafetyGuard(client), submission_policy="RRN_BACK_ONLY"))
+    try:
+        yield tool
+    finally:
+        await tool.aclose()
+
+
+def document_files(directory):
+    # 텍스트 PDF 합성 자료다. 사진/OCR·실제 모델의 판독 품질을 검증하지 않는다.
+    fields = {
+        "CONSTRUCTION_STATEMENT": dict(amount="3,300,000원\n주민번호 800101-1234567", supplier="그린철거", buyer="봄날개인카페"),
+        "TAX_INVOICE": dict(supply_amount="3,000,000원", tax_amount="300,000원", supplier="그린철거", buyer="봄날개인카페"),
+        "BEFORE_PHOTO": {}, "AFTER_PHOTO": {},
+        "CLOSURE_CERTIFICATE": dict(closure_date="2026-10-31"),
+        "TRANSFER": dict(amount="3,300,000원", sender="김리본", recipient="그린철거"),
+    }
+    files = {kind: str(Path(directory) / f"{kind}.pdf") for kind in fields}
+    for kind, values in fields.items():
+        Path(files[kind]).write_bytes(document_pdf(kind, **values))
+    return files
 
 
 class FirstCandidateModel:
-    """Supervisor 자리의 가짜. 받은 Blocker 후보 중 첫 번째와 그 첫 할 일을 고른다."""
+    """선택은 첫 후보, 직접 입력 해석은 아래 합성 문장만 받는 모델 대역이다."""
 
     @classmethod
     def from_env(cls, *args, **kwargs):
         return cls()
 
     async def generate(self, response_model, messages, **kwargs):
-        # 가입 첫 판단에서 다른 모델이 불리면 이 E2E가 가정한 길이 아니다. 조용히 넘기지 않는다.
-        if kwargs.get("schema_name") != "reborn_supervisor_draft":
-            raise AssertionError(f"E2E 가짜 모델은 Supervisor만 받는다: {kwargs.get('schema_name')}")
+        name = kwargs.get("schema_name")
+        if name == "reborn_info_analysis":
+            prompt = json.dumps(messages, ensure_ascii=False)
+            progress = "원상복구 작업을 시작했습니다." in prompt
+            text = "원상복구 작업을 시작했습니다." if progress else "원상복구는 일부이고 카운터만 철거해야 합니다."
+            assert text in prompt and "010-1234-5678" not in prompt
+            facts = [("restoration_status", "ENUM", "IN_PROGRESS")] if progress else [
+                ("restoration_scope", "ENUM", "PARTIAL"), ("demolition_required", "ENUM", "REQUIRED"),
+                ("restoration_scope_detail", "STRING", "카운터"),
+            ]
+            return response_model.model_validate({
+                "completion_status": "COMPLETE", "procedure_observations": [],
+                "missing_fields": [], "uncertainties": [],
+                "facts": [{"operation": "SET", "field_path": field, "value_type": kind,
+                           "value": value, "source_text": text, "confidence_bps": 10000,
+                           "requires_confirmation": False, "reason_summary": "합성 문장의 고정 답변"}
+                          for field, kind, value in facts],
+            })
+        if name == "reborn_review_output":
+            return response_model.model_validate({
+                "verdict": "PASS", "issues": [], "missing_evidence": [],
+                "recommended_rework_targets": [], "resolution_reason": "합성 문장 검수 응답 대역",
+            })
+        if name != "reborn_supervisor_draft":
+            raise AssertionError(f"지원하지 않는 E2E 모델 호출: {name}")
         contract = json.loads(messages[1]["content"].removeprefix("INPUT_JSON="))["contract"]
         first = contract["blocker_candidates"][0]
         return response_model.model_validate({
@@ -81,10 +136,16 @@ def _signed_in_member() -> dict[str, str]:
 
 def main() -> None:
     reset_all_tables()
-    Path(os.environ["E2E_TOKEN_FILE"]).write_text(json.dumps(_signed_in_member()), encoding="utf-8")
     port = int(os.environ.get("E2E_BE_PORT", "8765"))
-    with patch.object(runtime_module.StructuredLLMClient, "from_env", FirstCandidateModel.from_env), \
+    with TemporaryDirectory(prefix="reborn-e2e-documents-") as directory, \
+         patch.object(runtime_module.StructuredLLMClient, "from_env", FirstCandidateModel.from_env), \
          patch.object(runtime_module.LangfuseTraceSink, "from_env", lambda *a, **k: None):
+        os.environ["AGENT_DOCUMENT_DIR"] = directory
+        tokens = {**_signed_in_member(), "restoration_members": [_signed_in_member() for _ in range(6)],
+                  "document_member": _signed_in_member(), "document_directory": directory,
+                  "document_files": document_files(directory)}
+        Path(os.environ["E2E_TOKEN_FILE"]).write_text(json.dumps(tokens), encoding="utf-8")
+        app.dependency_overrides[get_document_tool] = synthetic_documents
         uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
 
 

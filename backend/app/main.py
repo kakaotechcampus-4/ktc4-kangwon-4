@@ -1,14 +1,18 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
+from sqlalchemy.engine import Engine
+from sqlalchemy.exc import SQLAlchemyError
 
 from sqlmodel import Session
 
 from app.be.routers.auth import router as auth_router
 from app.be.routers.case import router as case_router
 from app.be.routers.document import router as document_router
-from app.be.db import get_engine, reset_all_tables
+from app.be.db import get_engine, get_health_engine, reset_all_tables
 from app.be.services import judgment as judgment_service
 from app.be.services import procedure_registry
 from app.common.config import get_settings
@@ -45,5 +49,13 @@ app.include_router(document_router)
 
 
 @app.get("/health")
-def health():
+def health(engine: Engine = Depends(get_health_engine)):
+    # 배포 컨테이너가 이 주소로 살아 있는지 본다(docker-compose.prod.yml). DB가 끊겨도 ok라고 하면
+    # 모든 요청이 실패하는데 서버는 건강하다고 남는다. DB 오류 내용은 밖에 내보내지 않는다.
+    # 기다리는 한도와 앱 풀을 안 쓰는 이유는 create_health_engine에 있다.
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+    except SQLAlchemyError:
+        return JSONResponse(status_code=503, content={"status": "unavailable"})
     return {"status": "ok"}
