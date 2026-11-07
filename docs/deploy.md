@@ -80,6 +80,22 @@ $C logs --tail 50 fastapi                            # 시작 오류가 없는�
 - `/health`는 DB에 `SELECT 1`까지 보냅니다(#219). DB가 안 되면 503 `{"status":"unavailable"}`이고 fastapi가 `unhealthy`로 보입니다. 그때는 `$C logs mysql`부터 봅니다
 - 화면에서 로그인 → 홈까지 한 번 들어가 봅니다
 
+**AI 설정 확인(모델 호출 없음).** `.env.prod.example`의 Sol·Luna 6 endpoint/키를 실제 `.env.prod`에 채웁니다. Info는 Sol high, Supervisor는 Luna 6 high, 독립 Review·서류 판독은 Sol xhigh입니다. `/health`는 AI 설정이나 모델 연결을 검사하지 않으므로 별도로 확인합니다. 아래는 설정만 읽으며 endpoint·키를 출력하지 않습니다.
+
+```bash
+$C exec -T fastapi python - <<'PY'
+from app.agent.llm import LLMConfig, resolve_max_calls_per_run
+from app.agent.runtime import RuntimeLimits, resolve_run_deadline_seconds
+for role, prefix in (("공용/Review", ""), ("Info", "INFO_"), ("Supervisor", "SUPERVISOR_")):
+    config = LLMConfig.from_env(env_prefix=prefix)
+    print(role, config.model, config.reasoning_effort)
+limits = RuntimeLimits(resolve_max_calls_per_run(), resolve_run_deadline_seconds())
+print("실행당 호출/시간 상한", limits.max_llm_calls_per_run, limits.run_deadline_seconds)
+PY
+```
+
+실패하면 `.env.prod`를 고친 뒤 `$C up -d fastapi`로 다시 반영합니다. 이 확인은 설정 해석까지이며 발급 키의 실제 권한·모델 응답·비용·OCR 실행의 운영 확인은 별개입니다. Langfuse 키는 선택값입니다. 현재 판단 재시작 복구는 FastAPI 프로세스1개·서버1개를 전제로 하며 증설은 #242에서 다룹니다.
+
 ## 5. 문제가 생기면 되돌리기
 
 **코드만 되돌리기** — 표를 바꾸지 않은 배포면 이것으로 충분합니다.
