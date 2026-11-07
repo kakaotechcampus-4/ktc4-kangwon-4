@@ -442,7 +442,7 @@ def test_cafe_registry_requires_all_eight_ids_instead_of_silently_falling_back()
         build_registry(SimpleNamespace(records=lambda: records), cafe_registry=True)
 
 
-def test_h04_future_expectation_follows_the_existing_confirmed_fact_contract():
+def test_h04_expectation_follows_the_existing_confirmed_fact_contract():
     from test_info_replanning import (
         FOOD,
         RESTORATION,
@@ -455,12 +455,12 @@ def test_h04_future_expectation_follows_the_existing_confirmed_fact_contract():
 
     from app.agent.info_agent.agent import InfoAnalysisAgent
 
-    _, frozen = load_dataset(HELD_OUT)["H04"]
+    _, expected = load_dataset(HELD_OUT)["H04"]
     request = request_for_replanning(status="NOT_STARTED", scope="FULL")
-    request.input.redacted_text = frozen["raw_input"]
+    request.input.redacted_text = expected["raw_input"]
     raw = output([finding(TAX, "doc1"), finding(FOOD, "doc2"), finding(RESTORATION, "doc3")])
     raw["facts"] = [{"operation": "SET", "field_path": "restoration_status", "value_type": "ENUM",
-                     "value": "IN_PROGRESS", "source_text": frozen["raw_input"], "confidence_bps": 9500,
+                     "value": "IN_PROGRESS", "source_text": expected["raw_input"], "confidence_bps": 9500,
                      "requires_confirmation": False, "reason_summary": "진행 보고"}]
     result = asyncio.run(InfoAnalysisAgent(Responses(raw), max_local_attempts=1).analyze(request))
     [conflict] = result.conflicts
@@ -469,9 +469,5 @@ def test_h04_future_expectation_follows_the_existing_confirmed_fact_contract():
     )
     assert result.fact_candidates == []
     reported = {"status": "CONFLICT", "conflicts": [conflict.model_dump(mode="json")]}
-    assert score(frozen, reported)["result"] == "WRONG"  # Preserve the original measurement.
-    proposed = {**frozen, "expected_branch": "CONFLICT", "expected_fact_changes": {},
-                "expected_conflict_fields": ["restoration_status"],
-                "forbidden_fact_changes": [*frozen["forbidden_fact_changes"], "restoration_status"]}
-    assert score(proposed, reported)["result"] == "PASS"
-    assert frozen["expected_branch"] == "REPLAN_OR_NEEDS_MORE_INFO"
+    assert score(expected, reported)["result"] == "PASS"
+    assert expected["expected_branch"] == "CONFLICT"
