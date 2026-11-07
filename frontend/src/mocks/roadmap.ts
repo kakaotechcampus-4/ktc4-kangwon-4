@@ -51,7 +51,7 @@ export const mockRoadmap: RoadmapView = {
       title: '영업 마무리·폐업 신고',
       tasks: [
         task('dispose_stock', '재고·장비 처분', 'CHECKLIST', 'NOT_STARTED'),
-        task('terminate_contracts', '카드단말기·배달앱·렌탈·공과금 해지', 'CHECKLIST', 'NOT_STARTED'),
+        task('terminate_contracts', '렌탈·공과금 해지', 'CHECKLIST', 'NOT_STARTED'),
         task('employee_payments', '직원 임금·퇴직급여 정산', 'PROCEDURE', 'NOT_STARTED'),
         task('employee_insurance', '4대보험 상실·탈퇴 신고', 'PROCEDURE', 'NOT_STARTED'),
         task('closure_submission', '통합 폐업 신고', 'PROCEDURE', 'NOT_STARTED'),
