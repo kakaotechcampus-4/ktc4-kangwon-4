@@ -214,7 +214,7 @@ function Replanned({ view, search, decided }: { view: ReplanView; search: string
             {changed ? '다음 할 일을 다시 정했어요.' : '다음 할 일을 다시 확인했어요.'}
           </p>
           {/* AI가 사장님 글을 해석해 반영했을 때만 알린다. 사장님이 직접 고른 값(decided)은 해석이 아니다 */}
-          {changed && !decided && <AiNotice className="mt-2 justify-center" />}
+          {changed && !decided && <AiNotice align="center" className="mt-2" />}
         </div>
 
         <ProcessSteps steps={toResultSteps('DONE', decided ? 'DECISION' : 'RESULT')} />

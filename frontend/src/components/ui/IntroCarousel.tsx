@@ -275,7 +275,7 @@ export function IntroCarousel() {
               {slide.post}
             </h1>
             <p className="mt-2.5 text-17 text-fg-neutral-muted">{slide.sub}</p>
-            {slide.aiNotice && <AiNotice className="mt-2 justify-center" />}
+            {slide.aiNotice && <AiNotice align="center" className="mt-2" />}
           </div>
           <div className="motion-safe:animate-picture-in">{slide.picture}</div>
         </div>
