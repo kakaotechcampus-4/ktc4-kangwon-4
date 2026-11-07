@@ -42,7 +42,7 @@ export const mockRoadmap: RoadmapView = {
         task('support_approval', '1차 적격심사 결과 확인', 'CASE_FACT', 'NEEDS_CONFIRMATION'),
         task('choose_contractor', '철거 업체 정하기', 'CHECKLIST', 'NOT_STARTED'),
         task('before_photo', '철거 전 사진', 'CHECKLIST', 'NOT_STARTED'),
-        task('restoration_work', '원상복구·철거 작업', 'PROCEDURE', 'NOT_STARTED'),
+        task('restoration_work', '영업 마무리 후 원상복구·철거 작업', 'PROCEDURE', 'NOT_STARTED'),
         task('contractor_documents', '철거 후 서류 받기', 'CHECKLIST', 'NOT_STARTED'),
       ],
     },
