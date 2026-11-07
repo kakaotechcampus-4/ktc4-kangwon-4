@@ -5,13 +5,18 @@
 - GET /cases/results/status — 제출 뒤 처리 상태 조회
 """
 
+from uuid import uuid4
+
 import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
 from sqlmodel import Session
 
+from app.agent.schemas import ProcedureProgressChangeCandidate
+from app.be.crud import procedure_step as procedure_step_crud
 from app.be.models.case_history import CaseHistory
 from app.be.schemas.case import CaseResultsSubmitRequest
+from app.be.services import decision_record
 from app.be.services.case import (
     get_case_results_entry,
     get_case_results_submit_status,
@@ -274,6 +279,53 @@ def test_status_reports_no_change_when_nothing_moved(case_engine, case_world):
     done = case_world.add_history(case_id, "USER_INPUT", "DONE")
 
     assert status(case_engine, member_id, done).result == "NO_CHANGE"
+
+
+def record_progress(engine, case_id, history_id, code, before, after):
+    with Session(engine) as session:
+        definition = procedure_step_crud.get_procedure_step_by_code(session, code)
+        step = procedure_step_crud.get_case_procedure_step(session, case_id, definition.id)
+        step.status, step.requirements_confirmed, step.submitted = before
+        change = ProcedureProgressChangeCandidate(
+            candidate_id=uuid4(), procedure_step={"procedure_step_id": definition.id, "step_code": code},
+            before_status=before[0], proposed_status=after[0],
+            before_requirements_confirmed=before[1], proposed_requirements_confirmed=after[1],
+            before_submitted=before[2], proposed_submitted=after[2],
+            reason_summary="합성 진행 보고", execution_evidence_refs=["synthetic-progress-report"],
+            procedure_analysis_call_id=uuid4(),
+        )
+        decision_record._apply_procedure_progress_changes(session, session.get(CaseHistory, history_id), [change])
+        session.commit()
+
+
+@pytest.mark.parametrize("source", ["USER_INPUT", "CONFLICT_DECISION"])
+@pytest.mark.parametrize("code,before,after", [
+    ("PERFORM_RESTORATION", ("IN_PROGRESS", False, False), ("IN_PROGRESS", True, False)),
+    ("FILE_TAX_BUSINESS_CLOSURE", ("IN_PROGRESS", True, False), ("IN_PROGRESS", True, True)),
+    ("FILE_TAX_BUSINESS_CLOSURE", ("IN_PROGRESS", True, True), ("COMPLETED", True, True)),
+])
+def test_status_reports_updated_for_progress_without_case_field_changes(
+    case_engine, case_world, source, code, before, after,
+):
+    member_id, case_id, _ = case_world.sign_up()
+    done = case_world.add_history(case_id, source, "DONE")
+    record_progress(case_engine, case_id, done, code, before, after)
+
+    response = status(case_engine, member_id, done)
+
+    assert response.result == "UPDATED"
+    assert response.changes == []
+    assert response.next_action is not None
+
+
+def test_old_progress_changes_do_not_make_a_new_report_updated(case_engine, case_world):
+    member_id, case_id, _ = case_world.sign_up()
+    old = case_world.add_history(case_id, "USER_INPUT", "DONE")
+    record_progress(case_engine, case_id, old, "PERFORM_RESTORATION",
+                    ("IN_PROGRESS", False, False), ("IN_PROGRESS", True, False))
+    current = case_world.add_history(case_id, "USER_INPUT", "DONE")
+
+    assert status(case_engine, member_id, current).result == "NO_CHANGE"
 
 
 def test_status_stops_on_a_conflict_without_any_open_conflict(case_engine, case_world):
