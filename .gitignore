@@ -139,3 +139,7 @@ langfuse_data/
 
 # Vercel CLI가 만드는 로컬 연결 정보 (프로젝트·조직 ID)
 /frontend/**/.vercel
+
+# 브라우저 E2E(Playwright)가 실행할 때마다 만드는 결과·보고서
+/frontend/test-results/
+/frontend/playwright-report/
