@@ -57,7 +57,7 @@ def case_with_two_submissions(monkeypatch):
 def test_changes_keep_both_stored_values_hidden(case_with_two_submissions):
     """입력 원문이 있어도 화면 응답은 저장된 가림 문구를 그대로 쓴다(#258)."""
 
-    changes = case_service._field_changes(MagicMock(spec=Session), CASE_ID, 22)
+    changes = case_service._field_changes(MagicMock(spec=Session), 22)
 
     assert changes[0].stored_value == "서울특별시 마포구 [주소] 전체"
     assert changes[0].new_value == "서울특별시 강남구 [주소]만"
@@ -77,7 +77,7 @@ def test_a_conflict_keeps_both_sides_hidden(monkeypatch):
         proposed_value="서울특별시 강남구 [주소]만",
     )
 
-    items = case_service._conflict_items(MagicMock(spec=Session), CASE_ID, [conflict])
+    items = case_service._conflict_items([conflict])
 
     assert items[0].stored_value == "서울특별시 마포구 [주소] 전체"
     assert items[0].proposed_value == "서울특별시 강남구 [주소]만"
@@ -98,7 +98,7 @@ def test_the_case_itself_keeps_free_text_hidden(case_with_two_submissions):
         ),
     )
 
-    detail = case_service._case_detail(MagicMock(spec=Session), case)
+    detail = case_service._case_detail(case)
 
     assert detail.restoration_scope_detail == "서울특별시 강남구 [주소]만"
 
@@ -116,7 +116,7 @@ def test_a_value_without_a_hidden_spot_is_left_alone(monkeypatch):
         case_field_history_crud, "get_case_field_histories_by_case_history_id", lambda *_: rows
     )
 
-    changes = case_service._field_changes(MagicMock(spec=Session), CASE_ID, 11)
+    changes = case_service._field_changes(MagicMock(spec=Session), 11)
 
     assert changes[0].new_value == "PARTIAL"
 
@@ -215,7 +215,7 @@ def test_a_conflict_decision_keeps_changed_values_hidden(
 ):
     """충돌 결정이 바꾼 값도 원문을 찾아 복원하지 않는다."""
 
-    changes = case_service._field_changes(MagicMock(spec=Session), CASE_ID, 33)
+    changes = case_service._field_changes(MagicMock(spec=Session), 33)
 
     assert changes[0].stored_value == "서울특별시 마포구 [주소] 전체"
     assert changes[0].new_value == "서울특별시 마포구 [주소] 일부"

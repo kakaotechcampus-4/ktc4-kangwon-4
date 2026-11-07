@@ -11,6 +11,7 @@ from typing import Literal
 
 from sqlmodel import Session
 
+from app.agent.schemas import KnownProcedureStep
 from app.be.crud import case_history as case_history_crud
 from app.be.db import get_engine
 from app.be.models.case_history import CaseHistory
@@ -20,7 +21,7 @@ from app.be.services import case_snapshot as case_snapshot_service
 from app.be.services import decision_record as decision_record_service
 from app.be.services import document as document_service
 from app.be.services import reviewed_procedure as reviewed_procedure_service
-from app.agent.schemas import KnownProcedureStep
+from app.be.services.unmasking import build_case_placeholders
 from app.common.agent_dto import AgentGraphInput, AgentGraphOutput
 from app.common.agent_service import build_planning_input, run_case_planning
 
@@ -133,13 +134,15 @@ def _read_judgment_input(
     if history is None:
         raise ValueError(f"case_history {case_history_id} not found")
 
+    placeholders, _ = build_case_placeholders(session, history.case_id)
     graph_input = build_planning_input(
         trigger_type=_trigger_type_of(history),
-        case_snapshot=case_snapshot_service.build_case_snapshot(session, history.case_id),
+        case_snapshot=case_snapshot_service.build_case_snapshot(session, history.case_id, placeholders=placeholders),
         user_input=case_snapshot_service.build_user_input(
             case_history_id=history.id,
             raw_input=history.raw_input,
             submitted_at=history.created_at,
+            placeholders=placeholders,
         ),
         # TODO: 프론트가 자기 쪽 이벤트 식별자를 보내주기로 하면 그 값을 넣는다. 아직 미협의.
         client_event_id=None,

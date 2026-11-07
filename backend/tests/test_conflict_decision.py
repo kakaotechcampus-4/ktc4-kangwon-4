@@ -74,7 +74,7 @@ def flow(monkeypatch):
         )
         monkeypatch.setattr(
             conflict_decision, "CaseSnapshot",
-            SimpleNamespace(model_validate=lambda payload: SimpleNamespace(**payload)),
+            SimpleNamespace(model_validate=lambda payload: SimpleNamespace(**payload, model_dump=lambda **_: payload)),
         )
         monkeypatch.setattr(
             conflict_decision, "RetainedInfoResult",
@@ -87,7 +87,8 @@ def flow(monkeypatch):
         monkeypatch.setattr(conflict_decision, "run_case_planning", fake_run_case_planning)
         monkeypatch.setattr(
             case_snapshot_service, "build_case_snapshot",
-            lambda _s, _c, *, snapshot_id=None: SimpleNamespace(snapshot_id=snapshot_id),
+            lambda _s, _c, *, snapshot_id=None, **_: SimpleNamespace(
+                snapshot_id=snapshot_id, model_dump=lambda **_: {"snapshot_id": snapshot_id}),
         )
         monkeypatch.setattr(agent_runtime_service, "build_known_procedure_steps", lambda *_a: [])
         monkeypatch.setattr(agent_runtime_service, "empty_support_catalog", lambda: None)
