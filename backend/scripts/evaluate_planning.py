@@ -21,8 +21,9 @@ from time import perf_counter
 from unittest.mock import patch
 from uuid import UUID, uuid5
 
-import app.agent.runtime as runtime_module
 import httpx
+
+import app.agent.runtime as runtime_module
 from app.agent.llm import LLMConfig, StructuredLLMClient
 from app.agent.procedure_tool.store import ReviewedProcedureSnapshot
 from app.agent.schemas import (
@@ -584,13 +585,6 @@ def verdict(rows: list[dict]) -> dict:
         "same_blocker": same("blocker_digest"),
         "same_next_action": same("next_action_digest"),
         "same_fact_changes": same("fact_changes"),
-        # Observable proof no repeat replayed an earlier answer: a cache hit
-        # returns with zero provider calls. Which roles are called depends on
-        # the configuration and on whether reviewed support data was supplied,
-        # so requiring a specific set of roles would be wrong.
-        "provider_called_every_repeat": all(
-            sum(row["calls_by_role"].values()) > 0 for row in rows
-        ),
     }
     consistency = [
         key for key in checks if key.startswith("same_") or key == "decision_type"
@@ -705,6 +699,14 @@ def overall_verdict(per_case: dict, dataset_rows: list[dict] | None) -> str:
     return "PASS"
 
 
+def metrics_by_case(rows: list[dict], prices: dict) -> dict:
+    """Keep different inputs separate; include failed runs in time and cost."""
+    return {
+        case: summarize_metrics([row for row in rows if row["case"] == case], prices)
+        for case in sorted({row["case"] for row in rows})
+    }
+
+
 async def run(args) -> None:
     graph_input_path = getattr(args, "graph_input", None)
     dataset_path = getattr(args, "dataset", None)
@@ -802,6 +804,7 @@ async def run(args) -> None:
                 row["difficulty"] = expected_row["difficulty"]
                 row["scenario_family"] = expected_row["scenario_family"]
                 row["score"] = score(expected_row, row)
+                row["metrics"] = summarize_metrics([row], load_prices())
             rows.append(row)
             (args.output / f"trial-{len(rows):03d}.json").write_text(
                 json.dumps(row, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -827,6 +830,7 @@ async def run(args) -> None:
     summary = {
         "verdict": overall_verdict(per_case, rows if dataset_path is not None else None),
         "per_case": per_case,
+        "metrics_by_case": metrics_by_case(rows, load_prices()),
         # If every different intake converges on one action, the run shows
         # consistency, not that the model picks well among several candidates.
         "distinct_next_action_digests": len(

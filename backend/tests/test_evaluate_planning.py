@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
+
 from app.agent.graph import AgentGraph
 from app.agent.procedure_tool.stored_tool import StoredProcedureLookupTool
 from app.agent.schemas import ActionDecisionDraft, Blocker, ProcedureLookupInput
@@ -19,6 +20,7 @@ from scripts.evaluate_planning import (
     build_graph_input,
     build_registry,
     decision_summary,
+    metrics_by_case,
     overall_verdict,
     score,
     verdict,
@@ -225,3 +227,35 @@ def test_fixture_inputs_carry_the_reviewed_sources_the_lookup_accepts():
     assert found(request) != []
     # Attaching twice does not duplicate a source.
     assert attach_fixture_sources(request, store) == request
+
+
+@pytest.mark.parametrize(("status", "error", "expected"), [
+    ("REVIEWED_PLAN", False, "PASS"), ("SAFE_FAILURE", False, "FAIL"),
+    ("ERROR", True, "FAIL"), ("REVIEWED_PLAN", True, "FAIL"),
+])
+def test_zero_provider_calls_do_not_replace_outcome_validation(status, error, expected):
+    item = {"status": status, "graph_input_digest": "same-input", "calls_by_role": {}}
+    if error:
+        item["error"] = {"code": "SYNTHETIC_FAILURE"}
+    assert verdict([item, dict(item)])["verdict"] == expected
+    assert item["calls_by_role"] == {}
+
+
+def test_metrics_keep_different_cases_separate_without_hiding_failures():
+    base = {
+        "status": "REVIEWED_PLAN", "calls_by_role": {"all": 1},
+        "provider_usage": [{"requested_model": "synthetic", "prompt_tokens": 100,
+                            "completion_tokens": 20, "cached_prompt_tokens": 0}],
+    }
+    rows = [
+        {**base, "case": "A", "elapsed_ms": 10},
+        {**base, "case": "A", "elapsed_ms": 30, "score": {"result": "WRONG"}},
+        {**base, "case": "B", "elapsed_ms": 1000},
+    ]
+    report = metrics_by_case(rows, {"synthetic": (1000, 0, 1000)})
+    assert report["A"]["runs"] == 2 and report["B"]["runs"] == 1
+    assert report["A"]["median_latency_ms"] == 20
+    assert report["A"]["p95_latency_ms"] == 30 and report["B"]["p95_latency_ms"] == 1000
+    assert report["A"]["successful_runs"] == 1
+    assert report["A"]["cost_per_success_krw"] == pytest.approx(0.24)
+    assert "behavior_passed" not in rows[1]

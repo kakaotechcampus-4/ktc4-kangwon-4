@@ -86,7 +86,8 @@ def summarize_metrics(rows: list[dict], prices: dict | None = None) -> dict:
     }
     successful = sum(
         row.get("status") == "REVIEWED_PLAN" and "error" not in row
-        and (row.get("behavior_passed", True)) for row in rows
+        and row.get("behavior_passed", True)
+        and row.get("score", {}).get("result", "PASS") == "PASS" for row in rows
     )
     cost = uncached_cost = 0.0 if complete else None
     unpriced_models = set()
@@ -112,7 +113,7 @@ def summarize_metrics(rows: list[dict], prices: dict | None = None) -> dict:
             cost = None
         if cost is not None:
             cost += ((prompt - cached) * rates[0] + cached * rates[1] + output * rates[2]) / 1_000_000
-    times = [row["elapsed_ms"] for row in rows if "elapsed_ms" in row]
+    times = sorted(row["elapsed_ms"] for row in rows if "elapsed_ms" in row)
     return {
         "runs": len(rows), "successful_runs": successful,
         "success_rate": successful / len(rows) if rows else None,
@@ -132,6 +133,8 @@ def summarize_metrics(rows: list[dict], prices: dict | None = None) -> dict:
         "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
         "mean_latency_ms": mean(times) if times else None,
         "median_latency_ms": median(times) if times else None,
+        # Nearest rank: with fewer than 20 timed runs, p95 is the maximum.
+        "p95_latency_ms": times[math.ceil(0.95 * len(times)) - 1] if times else None,
         "max_latency_ms": max(times) if times else None,
         "transport_retries": sum(call.get("attempt", 1) > 1 for call in usage),
         "review_revise_count": None if any("review_results" not in row for row in rows) else sum(
