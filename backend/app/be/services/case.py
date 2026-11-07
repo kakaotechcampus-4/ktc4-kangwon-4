@@ -785,6 +785,7 @@ def get_case_logs(session: Session, member_id: int) -> CaseLogResponse:
         if history.roadmap_task_ids is not None:
             previous_task_ids = history.roadmap_task_ids
         owner_event = _LOG_OWNER_EVENTS.get(history.source)
+        # DOCUMENT_SUBMITTED는 위 표에 넣지 않고, 이 예외로 RIBBON 결과만 통과시킨다.
         if owner_event is None and history.source != "DOCUMENT_SUBMITTED":
             continue
         # 올린 사실은 CaseDocumentHistory가 남긴다. 서류 재판단은 리본 결과만 기록한다.
