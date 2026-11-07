@@ -719,7 +719,7 @@ describe('CurrentCasePage', () => {
       )
       renderAt('/case')
 
-      expect(await screen.findByRole('link', { name: /지금은 원상복구·철거 단계/ })).toBeInTheDocument()
+      expect(await screen.findByRole('link', { name: /챙길 일이 남은 단계: 원상복구·철거/ })).toBeInTheDocument()
     })
 
     /** 단계 카드는 덤이다. 로드맵 하나 못 받았다고 홈에 오류를 띄우면 할 일 카드가 가려진다 */

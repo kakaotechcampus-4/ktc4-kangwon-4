@@ -26,7 +26,7 @@ describe('IntroCarousel', () => {
   it('첫 장에서 시작하고, 앞 장으로는 갈 수 없다', () => {
     render(<IntroCarousel />)
 
-    expect(heading()).toHaveTextContent(/순서대로/)
+    expect(heading()).toHaveTextContent(/단계별로/)
     expect(prev()).toBeDisabled()
   })
 
@@ -37,7 +37,7 @@ describe('IntroCarousel', () => {
     expect(heading()).toHaveTextContent(/리본이 먼저/)
 
     fireEvent.click(prev())
-    expect(heading()).toHaveTextContent(/순서대로/)
+    expect(heading()).toHaveTextContent(/단계별로/)
   })
 
   it('막대가 다 차면 다음 장으로 넘어간다', () => {

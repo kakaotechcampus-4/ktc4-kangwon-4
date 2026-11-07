@@ -28,7 +28,7 @@ describe('HomeStageCard', () => {
   it('지금 단계를 받으면 그 단계 이름으로 부른다', () => {
     renderCard({ number: 2, title: '원상복구·철거' })
 
-    expect(screen.getByRole('link')).toHaveTextContent('지금은 원상복구·철거 단계')
+    expect(screen.getByRole('link')).toHaveTextContent('챙길 일이 남은 단계: 원상복구·철거')
     expect(screen.queryByText('단계 정보는 곧 보여드릴게요')).not.toBeInTheDocument()
   })
 
@@ -40,14 +40,14 @@ describe('HomeStageCard', () => {
   })
 
   /**
-   * 마친 뒤에 "지금은 ○○ 단계"라고 하면 아직 그 단계에 있는 것으로 읽힌다. 단계 이름은 로드맵이 주는
+   * 마친 뒤에 "챙길 일이 남은 단계: ○○"라고 하면 아직 그 단계에 있는 것으로 읽힌다. 단계 이름은 로드맵이 주는
    * 값이라 FE 가 마지막 단계 이름을 적지 않고, "곧 보여드릴게요"처럼 아직 모른다는 말도 하지 않는다
    */
   it('폐업 정리를 마쳤으면 지금 단계로 부르지 않고 곧 보여준다고도 하지 않는다', () => {
     renderCard({ number: 5, title: '세금·마무리' }, '/case', true)
 
     expect(screen.getByRole('link')).toHaveTextContent('폐업 단계')
-    expect(screen.getByRole('link')).not.toHaveTextContent('지금은')
+    expect(screen.getByRole('link')).not.toHaveTextContent('챙길 일이 남은 단계')
     expect(screen.queryByText('단계 정보는 곧 보여드릴게요')).not.toBeInTheDocument()
   })
 

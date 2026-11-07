@@ -185,12 +185,15 @@ function SubmitPicture() {
   )
 }
 
-/** 시안 M00의 네 장. 문구는 시안 그대로다 */
+/**
+ * 시안 M00의 네 장. 문구는 시안 그대로다.
+ * 첫 장만 다르다 — 시안 "순서대로 알려드려요"는 단계를 차례로 밟는 것처럼 읽혀 "단계별로 챙겨드려요"로 바꿨다(#237)
+ */
 const SLIDES: Slide[] = [
   {
     pre: '폐업 준비, ',
-    highlight: '순서대로',
-    post: '\n알려드려요',
+    highlight: '단계별로',
+    post: '\n챙겨드려요',
     sub: '우리 가게에 필요한 일만 골라드려요',
     picture: <RoadmapPicture />,
   },
