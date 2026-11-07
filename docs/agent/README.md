@@ -130,10 +130,12 @@ DB 전체 복사본이나 별도로 저장한 snapshot 행을 뜻하지 않는�
 |---|---|
 | `snapshot_id` / `based_on_snapshot_id` | BE가 조립한 입력 묶음의 ID / 하위 결과가 참조하는 같은 ID. |
 | `run_id` / `call_id` / `review_call_id` | Graph 실행 / 개별 구성요소 호출 / PASS를 반환한 Review 호출의 ID. |
-| `trace_id` | 호출자가 선택적으로 주는 외부 추적 ID. `InvocationMeta`로 전달하며, 판단 저장 시에는 `save_reviewed_plan(trace_id=...)`에도 별도로 전달한다. |
+| `trace_id` | Langfuse RUN span이 속한 실제 `trace_id`를 내부 입력 복사본의 `InvocationMeta`로 전달한다. `save_reviewed_plan`은 검증된 하위 결과의 ID가 하나로 모이면 기존 `DecisionRecord.trace_id`에 저장한다. 명시적으로 넘긴 저장 인자가 있으면 그 값을 유지한다. |
 | `input_event_id` / `client_event_id` | 서버에 저장된 입력 이벤트의 ID / 클라이언트가 부여한 이벤트 ID. `client_event_id` 전달만으로 중복 요청 방지가 보장되지는 않는다. |
 | `CaseFact.updated_at` / `ProcedureProgress.updated_at` | 개별 사실의 변경 시각 / Case별 절차 진행 행의 변경 시각. 사실의 시각을 모르면 `None`을 유지하며 Case 행의 변경 시각으로 대신하지 않는다. |
 | `submitted_at` / `captured_at` / `confirmed_at` | 입력 이력 시각 / snapshot 조립 시각 / 사용자 충돌 확인 시각. 서로 대신 채우는 값이 아니다. |
+
+Langfuse 미설정·장애로 실제 ID를 얻지 못하면 연결값은 비어 있을 수 있다. `DecisionRecord`는 검수 PASS 판단만 저장하며, 실패·충돌 대기 이력에는 새 `trace_id` 필드를 추가하지 않는다.
 
 Trigger와 그 안의 `RedactedInput`에는 같은 의미의 `submitted_at`이 있으며,
 `build_planning_input`은 저장된 입력 시각을 두 곳에 함께 넣는다.

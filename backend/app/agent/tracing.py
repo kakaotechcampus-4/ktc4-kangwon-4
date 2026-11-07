@@ -9,6 +9,7 @@ only when both Langfuse credentials resolve.
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Iterator, Mapping
 from contextlib import ExitStack, contextmanager, suppress
 from contextvars import ContextVar
@@ -117,6 +118,17 @@ def update_observation(**values: Any) -> None:
     if observation is not None:
         with suppress(Exception):
             observation.update(**values)
+
+
+def current_trace_id() -> str | None:
+    """Read the active SDK trace ID without making tracing a planning dependency."""
+    try:
+        trace_id = _CURRENT_OBSERVATION.get().trace_id
+        if isinstance(trace_id, str) and re.fullmatch(r"[0-9a-f]{32}", trace_id) and trace_id != "0" * 32:
+            return trace_id
+    except Exception:  # noqa: BLE001 - unavailable/broken telemetry stays optional
+        pass
+    return None
 
 
 def traced_component(name: str):
