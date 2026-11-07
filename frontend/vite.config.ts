@@ -1,6 +1,6 @@
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
-import { defineConfig } from 'vitest/config'
+import { configDefaults, defineConfig } from 'vitest/config'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Plugin } from 'vite'
 
@@ -48,5 +48,7 @@ export default defineConfig({
     /** 화면을 렌더해 역할·상태로 찾는 테스트라 DOM이 필요하다 */
     environment: 'jsdom',
     setupFiles: ['./src/setupTests.ts'],
+    /** 브라우저 E2E(`e2e/`, Playwright)는 진짜 서버가 필요해서 `npm run test:e2e`로 따로 돈다 */
+    exclude: [...configDefaults.exclude, 'e2e/**'],
   },
 })

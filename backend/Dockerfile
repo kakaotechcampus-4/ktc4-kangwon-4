@@ -16,4 +16,7 @@ RUN python scripts/setup_agent_ocr.py --directory /opt/reborn/tessdata
 ENV AGENT_OCR_TESSDATA_DIR=/opt/reborn/tessdata \
     AGENT_DOCUMENT_DIR=/data/documents
 
+# 검수 자료 버전이 바뀌면 기존 Case에 다시 적재하는 명령을 배포 이미지에서도 쓴다.
+COPY ./scripts/import_reviewed_procedures.py ./scripts/import_reviewed_procedures.py
+
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
