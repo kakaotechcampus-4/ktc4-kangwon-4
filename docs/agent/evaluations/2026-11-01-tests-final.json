@@ -1,0 +1,14 @@
+{
+  "command": [
+    "/home/vasebull/KakaoTechCampus/STEP2/ReBorn/ktc4-kangwon-4/backend/.venv/bin/python",
+    "-m",
+    "pytest",
+    "-q",
+    "tests"
+  ],
+  "captured_at": "2026-11-01T08:29:22.824369+00:00",
+  "cwd": "backend",
+  "exit_code": 0,
+  "elapsed_seconds": 35.955,
+  "includes_isolated_mysql": true
+}

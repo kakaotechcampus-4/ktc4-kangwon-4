@@ -1,0 +1,2867 @@
+{
+  "date": "2026-11-02",
+  "purpose": "Correctness before cost optimization; supersedes initial Luna high document default",
+  "synthetic_only": true,
+  "final_document_config": {
+    "prefix": "INFO_",
+    "model": "gpt-6.1-sol",
+    "effort": "xhigh",
+    "vision_reader": "shared gpt-6.1-sol xhigh",
+    "independent_image_reviewer": "shared gpt-6.1-sol xhigh"
+  },
+  "summary": {
+    "http_attempts": 86,
+    "tokens": 128020,
+    "estimated_cost_krw": 565.8182850000001,
+    "scan_runs": 3,
+    "required_fields_per_scan_run": 14,
+    "required_field_checks_passed": 42,
+    "owner_value_corrections": 0,
+    "scan_mean_tokens": 33992,
+    "scan_mean_cost_krw": 145.673844,
+    "scan_mean_elapsed_ms": 108272.66666666667,
+    "native_tokens": 12178,
+    "native_cost_krw": 65.69829
+  },
+  "original_ocr_higher_effort_diagnostics": {
+    "luna6-xhigh-original-ocr-pilot": {
+      "synthetic_data": true,
+      "scope": "Standalone document Agent; explicit synthetic owner confirmations; no app APIs",
+      "layout": "scan",
+      "pilot": true,
+      "code_digest": "sha256:155576377e50847c56f752f187d2a5db9fda1f2a0e2cb9b95e192b58ae7cae03",
+      "code_unchanged": true,
+      "trials": [
+        {
+          "model": "gpt-6-luna",
+          "effort": "xhigh",
+          "automatic_fields_correct": false,
+          "owner_confirmations": [],
+          "owner_corrections": [],
+          "workflow_passed": true,
+          "passed": false,
+          "status": "REVIEWED_PLAN",
+          "behavior_passed": false,
+          "elapsed_ms": 18856,
+          "provider_usage": [
+            {
+              "model": "gpt-6.1-sol",
+              "prompt_tokens": 868,
+              "completion_tokens": 82,
+              "reasoning_tokens": 63,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "ContentSafetyDecision",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 2399,
+              "requested_model": "gpt-6.1-sol"
+            },
+            {
+              "model": "gpt-6-luna",
+              "prompt_tokens": 600,
+              "completion_tokens": 521,
+              "reasoning_tokens": 448,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "reborn_document_extraction",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 5212,
+              "requested_model": "gpt-6-luna"
+            },
+            {
+              "model": "gpt-6.1-sol",
+              "prompt_tokens": 290,
+              "completion_tokens": 240,
+              "reasoning_tokens": 216,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "reborn_document_review",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 10562,
+              "requested_model": "gpt-6.1-sol"
+            }
+          ],
+          "calls_by_role": {
+            "all": 3
+          },
+          "metrics": {
+            "runs": 1,
+            "successful_runs": 0,
+            "success_rate": 0.0,
+            "http_attempts": 3,
+            "usage_complete": true,
+            "attempts_with_reported_usage": 3,
+            "reported_tokens": {
+              "prompt_tokens": 1758,
+              "completion_tokens": 843
+            },
+            "total_tokens": 2601,
+            "tokens_per_success": null,
+            "estimated_cost_krw": 8.300748,
+            "cost_per_success_krw": null,
+            "uncached_cost_krw": 8.300748,
+            "cache_usage_complete": true,
+            "unpriced_models": [],
+            "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+            "mean_latency_ms": 18856,
+            "median_latency_ms": 18856,
+            "max_latency_ms": 18856,
+            "transport_retries": 0,
+            "review_revise_count": null
+          }
+        }
+      ],
+      "passed": false
+    },
+    "sol-xhigh-original-ocr-pilot": {
+      "synthetic_data": true,
+      "scope": "Standalone document Agent; explicit synthetic owner confirmations; no app APIs",
+      "layout": "scan",
+      "pilot": true,
+      "code_digest": "sha256:155576377e50847c56f752f187d2a5db9fda1f2a0e2cb9b95e192b58ae7cae03",
+      "code_unchanged": true,
+      "trials": [
+        {
+          "model": "gpt-6.1-sol",
+          "effort": "xhigh",
+          "automatic_fields_correct": false,
+          "owner_confirmations": [],
+          "owner_corrections": [],
+          "workflow_passed": true,
+          "passed": false,
+          "status": "REVIEWED_PLAN",
+          "behavior_passed": false,
+          "elapsed_ms": 14400,
+          "provider_usage": [
+            {
+              "model": "gpt-6.1-sol",
+              "prompt_tokens": 868,
+              "completion_tokens": 51,
+              "reasoning_tokens": 32,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "ContentSafetyDecision",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 2326,
+              "requested_model": "gpt-6.1-sol"
+            },
+            {
+              "model": "gpt-6.1-sol",
+              "prompt_tokens": 600,
+              "completion_tokens": 433,
+              "reasoning_tokens": 336,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "reborn_document_extraction",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 5921,
+              "requested_model": "gpt-6.1-sol"
+            },
+            {
+              "model": "gpt-6.1-sol",
+              "prompt_tokens": 290,
+              "completion_tokens": 290,
+              "reasoning_tokens": 266,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "reborn_document_review",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 5481,
+              "requested_model": "gpt-6.1-sol"
+            }
+          ],
+          "calls_by_role": {
+            "all": 3
+          },
+          "metrics": {
+            "runs": 1,
+            "successful_runs": 0,
+            "success_rate": 0.0,
+            "http_attempts": 3,
+            "usage_complete": true,
+            "attempts_with_reported_usage": 3,
+            "reported_tokens": {
+              "prompt_tokens": 1758,
+              "completion_tokens": 774
+            },
+            "total_tokens": 2532,
+            "tokens_per_success": null,
+            "estimated_cost_krw": 15.95538,
+            "cost_per_success_krw": null,
+            "uncached_cost_krw": 15.95538,
+            "cache_usage_complete": true,
+            "unpriced_models": [],
+            "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+            "mean_latency_ms": 14400,
+            "median_latency_ms": 14400,
+            "max_latency_ms": 14400,
+            "transport_retries": 0,
+            "review_revise_count": null
+          }
+        }
+      ],
+      "passed": false
+    }
+  },
+  "vision_capability_pilot": {
+    "synthetic_only": true,
+    "no_identifiers_in_image": true,
+    "row": {
+      "status": "REVIEWED_PLAN",
+      "behavior_passed": true,
+      "passed": true,
+      "analysis": {
+        "kind": "BANK_COPY",
+        "fields": [
+          {
+            "name": "account_holder",
+            "value": "김리본",
+            "page": 1,
+            "quote": "김리본"
+          }
+        ],
+        "needs_confirmation": false
+      },
+      "elapsed_ms": 3263,
+      "provider_usage": [
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 1740,
+          "completion_tokens": 203,
+          "reasoning_tokens": 123,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_vision_capability_pilot",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 3261,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "vision_pilot": 1
+      },
+      "metrics": {
+        "runs": 1,
+        "successful_runs": 1,
+        "success_rate": 1.0,
+        "http_attempts": 1,
+        "usage_complete": true,
+        "attempts_with_reported_usage": 1,
+        "reported_tokens": {
+          "prompt_tokens": 1740,
+          "completion_tokens": 203
+        },
+        "total_tokens": 1943,
+        "tokens_per_success": 1943.0,
+        "estimated_cost_krw": 7.810425,
+        "cost_per_success_krw": 7.810425,
+        "uncached_cost_krw": 7.810425,
+        "cache_usage_complete": true,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 3263,
+        "median_latency_ms": 3263,
+        "max_latency_ms": 3263,
+        "transport_retries": 0,
+        "review_revise_count": null
+      }
+    }
+  },
+  "quality_checks": {
+    "scope": "Correctness first; strongest configured text/vision model; synthetic documents only",
+    "model": "gpt-6.1-sol",
+    "effort": "xhigh",
+    "failed_runs_stop_followups": true,
+    "lower_efforts": "NOT_RUN",
+    "pilot": {
+      "synthetic_data": true,
+      "scope": "Standalone document Tool; explicit synthetic owner confirmations; no app APIs",
+      "layout": "scan",
+      "pilot": true,
+      "code_digest": "sha256:70a8e2c19fa063183fb6d3f548e090c0f35304c7c73cfcbd549d7e1cac89771a",
+      "code_unchanged": true,
+      "trials": [
+        {
+          "model": "gpt-6.1-sol",
+          "effort": "xhigh",
+          "automatic_fields_correct": true,
+          "automatic_document_results": [
+            {
+              "expected_kind": "TAX_INVOICE",
+              "analysis": {
+                "kind": "TAX_INVOICE",
+                "fields": [
+                  {
+                    "name": "supplier",
+                    "value": "그린철거",
+                    "page": 1,
+                    "quote": "공급자\t그린철거"
+                  },
+                  {
+                    "name": "buyer",
+                    "value": "봄날개인카페",
+                    "page": 1,
+                    "quote": "공급받는 자\t봄날개인카페"
+                  },
+                  {
+                    "name": "supply_amount",
+                    "value": "3,000,000원",
+                    "page": 1,
+                    "quote": "공급가액\t3,000,000원"
+                  },
+                  {
+                    "name": "tax_amount",
+                    "value": "300,000원",
+                    "page": 1,
+                    "quote": "세액\t300,000원"
+                  },
+                  {
+                    "name": "amount",
+                    "value": "3,300,000원",
+                    "page": 1,
+                    "quote": "합계금액( 부가세 포함)\t3,300,000원"
+                  }
+                ],
+                "needs_confirmation": true
+              },
+              "correct": true
+            }
+          ],
+          "owner_confirmations": [],
+          "owner_corrections": [],
+          "workflow_passed": true,
+          "passed": true,
+          "status": "REVIEWED_PLAN",
+          "behavior_passed": true,
+          "elapsed_ms": 18311,
+          "provider_usage": [
+            {
+              "model": "gpt-6.1-sol",
+              "prompt_tokens": 1945,
+              "completion_tokens": 397,
+              "reasoning_tokens": 293,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "reborn_document_vision_ocr",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 6647,
+              "requested_model": "gpt-6.1-sol"
+            },
+            {
+              "model": "gpt-6.1-sol",
+              "prompt_tokens": 896,
+              "completion_tokens": 55,
+              "reasoning_tokens": 36,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "ContentSafetyDecision",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 2110,
+              "requested_model": "gpt-6.1-sol"
+            },
+            {
+              "model": "gpt-6.1-sol",
+              "prompt_tokens": 628,
+              "completion_tokens": 369,
+              "reasoning_tokens": 91,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "reborn_document_extraction",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 4117,
+              "requested_model": "gpt-6.1-sol"
+            },
+            {
+              "model": "gpt-6.1-sol",
+              "prompt_tokens": 2282,
+              "completion_tokens": 218,
+              "reasoning_tokens": 194,
+              "cached_prompt_tokens": 0,
+              "reasoning_effort": "xhigh",
+              "schema_name": "reborn_document_review",
+              "attempt": 1,
+              "status": "SUCCESS",
+              "status_code": 200,
+              "error_code": null,
+              "latency_ms": 4311,
+              "requested_model": "gpt-6.1-sol"
+            }
+          ],
+          "calls_by_role": {
+            "all": 4
+          },
+          "metrics": {
+            "runs": 1,
+            "successful_runs": 1,
+            "success_rate": 1.0,
+            "http_attempts": 4,
+            "usage_complete": true,
+            "attempts_with_reported_usage": 4,
+            "reported_tokens": {
+              "prompt_tokens": 5751,
+              "completion_tokens": 1039
+            },
+            "total_tokens": 6790,
+            "tokens_per_success": 6790.0,
+            "estimated_cost_krw": 31.031910000000003,
+            "cost_per_success_krw": 31.031910000000003,
+            "uncached_cost_krw": 31.031910000000003,
+            "cache_usage_complete": true,
+            "unpriced_models": [],
+            "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+            "mean_latency_ms": 18311,
+            "median_latency_ms": 18311,
+            "max_latency_ms": 18311,
+            "transport_retries": 0,
+            "review_revise_count": null
+          }
+        }
+      ],
+      "passed": true
+    },
+    "runs": [
+      {
+        "name": "sol-xhigh-vision-native-final",
+        "synthetic_data": true,
+        "scope": "Standalone document Tool; explicit synthetic owner confirmations; no app APIs",
+        "layout": "simple",
+        "pilot": false,
+        "code_digest": "sha256:503f5046d0344e5c65c731893f397bfe6ca7904a17c5d760c502cfb6525c2f97",
+        "code_unchanged": true,
+        "trials": [
+          {
+            "model": "gpt-6.1-sol",
+            "effort": "xhigh",
+            "automatic_fields_correct": true,
+            "automatic_document_results": [
+              {
+                "expected_kind": "CONSTRUCTION_STATEMENT",
+                "analysis": {
+                  "kind": "CONSTRUCTION_STATEMENT",
+                  "fields": [
+                    {
+                      "name": "supplier",
+                      "value": "그린철거",
+                      "page": 1,
+                      "quote": "공급자: 그린철거"
+                    },
+                    {
+                      "name": "buyer",
+                      "value": "봄날개인카페",
+                      "page": 1,
+                      "quote": "공급받는 자: 봄날개인카페"
+                    },
+                    {
+                      "name": "amount",
+                      "value": "3,300,000원",
+                      "page": 1,
+                      "quote": "합계금액(부가세 포함): 3,300,000원"
+                    }
+                  ],
+                  "needs_confirmation": false
+                },
+                "ocr_used": false,
+                "correct": true
+              },
+              {
+                "expected_kind": "TAX_INVOICE",
+                "analysis": {
+                  "kind": "TAX_INVOICE",
+                  "fields": [
+                    {
+                      "name": "supplier",
+                      "value": "그린철거",
+                      "page": 1,
+                      "quote": "공급자: 그린철거"
+                    },
+                    {
+                      "name": "buyer",
+                      "value": "봄날개인카페",
+                      "page": 1,
+                      "quote": "공급받는 자: 봄날개인카페"
+                    },
+                    {
+                      "name": "supply_amount",
+                      "value": "3,000,000원",
+                      "page": 1,
+                      "quote": "공급가액: 3,000,000원"
+                    },
+                    {
+                      "name": "tax_amount",
+                      "value": "300,000원",
+                      "page": 1,
+                      "quote": "세액: 300,000원"
+                    },
+                    {
+                      "name": "amount",
+                      "value": "3,300,000원",
+                      "page": 1,
+                      "quote": "합계금액(부가세 포함): 3,300,000원"
+                    }
+                  ],
+                  "needs_confirmation": false
+                },
+                "ocr_used": false,
+                "correct": true
+              },
+              {
+                "expected_kind": "CLOSURE_CERTIFICATE",
+                "analysis": {
+                  "kind": "CLOSURE_CERTIFICATE",
+                  "fields": [
+                    {
+                      "name": "business_name",
+                      "value": "봄날개인카페",
+                      "page": 1,
+                      "quote": "상호: 봄날개인카페"
+                    },
+                    {
+                      "name": "closure_date",
+                      "value": "2026년 10월 31일",
+                      "page": 1,
+                      "quote": "폐업일: 2026년 10월 31일"
+                    }
+                  ],
+                  "needs_confirmation": false
+                },
+                "ocr_used": false,
+                "correct": true
+              },
+              {
+                "expected_kind": "BANK_COPY",
+                "analysis": {
+                  "kind": "BANK_COPY",
+                  "fields": [
+                    {
+                      "name": "account_holder",
+                      "value": "김리본",
+                      "page": 1,
+                      "quote": "예금주: 김리본"
+                    }
+                  ],
+                  "needs_confirmation": false
+                },
+                "ocr_used": false,
+                "correct": true
+              },
+              {
+                "expected_kind": "BEFORE_PHOTO",
+                "analysis": {
+                  "kind": "BEFORE_PHOTO",
+                  "fields": [],
+                  "needs_confirmation": true
+                },
+                "ocr_used": true,
+                "correct": true
+              },
+              {
+                "expected_kind": "AFTER_PHOTO",
+                "analysis": {
+                  "kind": "AFTER_PHOTO",
+                  "fields": [],
+                  "needs_confirmation": true
+                },
+                "ocr_used": true,
+                "correct": true
+              },
+              {
+                "expected_kind": "CONSTRUCTION_STATEMENT",
+                "analysis": {
+                  "kind": "CONSTRUCTION_STATEMENT",
+                  "fields": [
+                    {
+                      "name": "supplier",
+                      "value": "그린철거",
+                      "page": 1,
+                      "quote": "공급자: 그린철거"
+                    },
+                    {
+                      "name": "buyer",
+                      "value": "봄날개인카페",
+                      "page": 1,
+                      "quote": "공급받는 자: 봄날개인카페"
+                    },
+                    {
+                      "name": "amount",
+                      "value": "3,300,000원",
+                      "page": 1,
+                      "quote": "합계금액(부가세 포함): 3,300,000원"
+                    }
+                  ],
+                  "needs_confirmation": false
+                },
+                "ocr_used": false,
+                "correct": true
+              },
+              {
+                "expected_kind": "TAX_INVOICE",
+                "analysis": {
+                  "kind": "TAX_INVOICE",
+                  "fields": [
+                    {
+                      "name": "supplier",
+                      "value": "그린철거",
+                      "page": 1,
+                      "quote": "공급자: 그린철거"
+                    },
+                    {
+                      "name": "buyer",
+                      "value": "봄날개인카페",
+                      "page": 1,
+                      "quote": "공급받는 자: 봄날개인카페"
+                    },
+                    {
+                      "name": "supply_amount",
+                      "value": "3,000,000원",
+                      "page": 1,
+                      "quote": "공급가액: 3,000,000원"
+                    },
+                    {
+                      "name": "tax_amount",
+                      "value": "300,000원",
+                      "page": 1,
+                      "quote": "세액: 300,000원"
+                    },
+                    {
+                      "name": "amount",
+                      "value": "3,300,000원",
+                      "page": 1,
+                      "quote": "합계금액(부가세 포함): 3,300,000원"
+                    }
+                  ],
+                  "needs_confirmation": false
+                },
+                "ocr_used": false,
+                "correct": true
+              },
+              {
+                "expected_kind": "CLOSURE_CERTIFICATE",
+                "analysis": {
+                  "kind": "CLOSURE_CERTIFICATE",
+                  "fields": [
+                    {
+                      "name": "business_name",
+                      "value": "봄날개인카페",
+                      "page": 1,
+                      "quote": "상호: 봄날개인카페"
+                    },
+                    {
+                      "name": "closure_date",
+                      "value": "2026년 10월 31일",
+                      "page": 1,
+                      "quote": "폐업일: 2026년 10월 31일"
+                    }
+                  ],
+                  "needs_confirmation": false
+                },
+                "ocr_used": false,
+                "correct": true
+              },
+              {
+                "expected_kind": "BANK_COPY",
+                "analysis": {
+                  "kind": "BANK_COPY",
+                  "fields": [
+                    {
+                      "name": "account_holder",
+                      "value": "김리본",
+                      "page": 1,
+                      "quote": "예금주: 김리본"
+                    }
+                  ],
+                  "needs_confirmation": false
+                },
+                "ocr_used": false,
+                "correct": true
+              },
+              {
+                "expected_kind": "TRANSFER",
+                "analysis": {
+                  "kind": "TRANSFER",
+                  "fields": [
+                    {
+                      "name": "sender",
+                      "value": "김리본",
+                      "page": 1,
+                      "quote": "보낸 사람: 김리본"
+                    },
+                    {
+                      "name": "recipient",
+                      "value": "그린철거",
+                      "page": 1,
+                      "quote": "받는 사람: 그린철거"
+                    },
+                    {
+                      "name": "amount",
+                      "value": "3,300,000원",
+                      "page": 1,
+                      "quote": "합계금액(부가세 포함): 3,300,000원"
+                    }
+                  ],
+                  "needs_confirmation": false
+                },
+                "ocr_used": false,
+                "correct": true
+              }
+            ],
+            "owner_confirmations": [
+              "BEFORE_PHOTO",
+              "AFTER_PHOTO"
+            ],
+            "owner_corrections": [],
+            "workflow_passed": true,
+            "missing_transfer_detected": true,
+            "new_document_provider_calls": 3,
+            "same_file_reupload_provider_calls": 0,
+            "redaction_count": 1,
+            "documents": 7,
+            "zip_entries": 9,
+            "passed": true,
+            "status": "REVIEWED_PLAN",
+            "behavior_passed": true,
+            "elapsed_ms": 57458,
+            "provider_usage": [
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 884,
+                "completion_tokens": 56,
+                "reasoning_tokens": 37,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "ContentSafetyDecision",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 2523,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 616,
+                "completion_tokens": 315,
+                "reasoning_tokens": 128,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_extraction",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 4784,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 413,
+                "completion_tokens": 167,
+                "reasoning_tokens": 143,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_review",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 4169,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 911,
+                "completion_tokens": 67,
+                "reasoning_tokens": 48,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "ContentSafetyDecision",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 2553,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 643,
+                "completion_tokens": 312,
+                "reasoning_tokens": 121,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_extraction",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 4210,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 517,
+                "completion_tokens": 373,
+                "reasoning_tokens": 349,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_review",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 6085,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 866,
+                "completion_tokens": 70,
+                "reasoning_tokens": 51,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "ContentSafetyDecision",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 4699,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 599,
+                "completion_tokens": 217,
+                "reasoning_tokens": 113,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_extraction",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 3287,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 361,
+                "completion_tokens": 368,
+                "reasoning_tokens": 344,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_review",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 6580,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 842,
+                "completion_tokens": 67,
+                "reasoning_tokens": 48,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "ContentSafetyDecision",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 2379,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 572,
+                "completion_tokens": 110,
+                "reasoning_tokens": 54,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_extraction",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 2638,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 281,
+                "completion_tokens": 115,
+                "reasoning_tokens": 91,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_review",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 3226,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 893,
+                "completion_tokens": 64,
+                "reasoning_tokens": 45,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "ContentSafetyDecision",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 2105,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 622,
+                "completion_tokens": 295,
+                "reasoning_tokens": 121,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_extraction",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 3576,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 409,
+                "completion_tokens": 153,
+                "reasoning_tokens": 129,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_review",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 3957,
+                "requested_model": "gpt-6.1-sol"
+              }
+            ],
+            "calls_by_role": {
+              "all": 15
+            },
+            "metrics": {
+              "runs": 1,
+              "successful_runs": 1,
+              "success_rate": 1.0,
+              "http_attempts": 15,
+              "usage_complete": true,
+              "attempts_with_reported_usage": 15,
+              "reported_tokens": {
+                "prompt_tokens": 9429,
+                "completion_tokens": 2749
+              },
+              "total_tokens": 12178,
+              "tokens_per_success": 12178.0,
+              "estimated_cost_krw": 65.69829,
+              "cost_per_success_krw": 65.69829,
+              "uncached_cost_krw": 65.69829,
+              "cache_usage_complete": true,
+              "unpriced_models": [],
+              "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+              "mean_latency_ms": 57458,
+              "median_latency_ms": 57458,
+              "max_latency_ms": 57458,
+              "transport_retries": 0,
+              "review_revise_count": null
+            }
+          }
+        ],
+        "passed": true
+      },
+      {
+        "name": "sol-xhigh-vision-scan-r1",
+        "synthetic_data": true,
+        "scope": "Standalone document Tool; explicit synthetic owner confirmations; no app APIs",
+        "layout": "scan",
+        "pilot": false,
+        "code_digest": "sha256:503f5046d0344e5c65c731893f397bfe6ca7904a17c5d760c502cfb6525c2f97",
+        "code_unchanged": true,
+        "trials": [
+          {
+            "model": "gpt-6.1-sol",
+            "effort": "xhigh",
+            "automatic_fields_correct": true,
+            "automatic_document_results": [
+              {
+                "expected_kind": "CONSTRUCTION_STATEMENT",
+                "analysis": {
+                  "kind": "CONSTRUCTION_STATEMENT",
+                  "fields": [
+                    {
+                      "name": "supplier",
+                      "value": "그린철거",
+                      "page": 1,
+                      "quote": "공급자\t그린철거"
+                    },
+                    {
+                      "name": "buyer",
+                      "value": "봄날개인카페",
+                      "page": 1,
+                      "quote": "공급받는 자\t봄날개인카페"
+                    },
+                    {
+                      "name": "amount",
+                      "value": "3,300,000원",
+                      "page": 1,
+                      "quote": "합계금액( 부가세 포함)\t3,300,000원"
+                    }
+                  ],
+                  "needs_confirmation": true
+                },
+                "ocr_used": true,
+                "correct": true
+              },
+              {
+                "expected_kind": "TAX_INVOICE",
+                "analysis": {
+                  "kind": "TAX_INVOICE",
+                  "fields": [
+                    {
+                      "name": "supplier",
+                      "value": "그린철거",
+                      "page": 1,
+                      "quote": "공급자\t그린철거"
+                    },
+                    {
+                      "name": "buyer",
+                      "value": "봄날개인카페",
+                      "page": 1,
+                      "quote": "공급받는 자\t봄날개인카페"
+                    },
+                    {
+                      "name": "supply_amount",
+                      "value": "3,000,000원",
+                      "page": 1,
+                      "quote": "공급가액\t3,000,000원"
+                    },
+                    {
+                      "name": "tax_amount",
+                      "value": "300,000원",
+                      "page": 1,
+                      "quote": "세액\t300,000원"
+                    },
+                    {
+                      "name": "amount",
+                      "value": "3,300,000원",
+                      "page": 1,
+                      "quote": "합계금액( 부가세 포함)\t3,300,000원"
+                    }
+                  ],
+                  "needs_confirmation": true
+                },
+                "ocr_used": true,
+                "correct": true
+              },
+              {
+                "expected_kind": "CLOSURE_CERTIFICATE",
+                "analysis": {
+                  "kind": "CLOSURE_CERTIFICATE",
+                  "fields": [
+                    {
+                      "name": "business_name",
+                      "value": "봄날개인카페",
+                      "page": 1,
+                      "quote": "상호\t봄날개인카페"
+                    },
+                    {
+                      "name": "closure_date",
+                      "value": "2 0 2 6 년 1 0 월 3 1 일",
+                      "page": 1,
+                      "quote": "폐업일\t2 0 2 6 년 1 0 월 3 1 일"
+                    }
+                  ],
+                  "needs_confirmation": true
+                },
+                "ocr_used": true,
+                "correct": true
+              },
+              {
+                "expected_kind": "BANK_COPY",
+                "analysis": {
+                  "kind": "BANK_COPY",
+                  "fields": [
+                    {
+                      "name": "account_holder",
+                      "value": "김리본",
+                      "page": 1,
+                      "quote": "예금주\t김리본"
+                    }
+                  ],
+                  "needs_confirmation": true
+                },
+                "ocr_used": true,
+                "correct": true
+              },
+              {
+                "expected_kind": "BEFORE_PHOTO",
+                "analysis": {
+                  "kind": "BEFORE_PHOTO",
+                  "fields": [],
+                  "needs_confirmation": true
+                },
+                "ocr_used": true,
+                "correct": true
+              },
+              {
+                "expected_kind": "AFTER_PHOTO",
+                "analysis": {
+                  "kind": "AFTER_PHOTO",
+                  "fields": [],
+                  "needs_confirmation": true
+                },
+                "ocr_used": true,
+                "correct": true
+              },
+              {
+                "expected_kind": "TRANSFER",
+                "analysis": {
+                  "kind": "TRANSFER",
+                  "fields": [
+                    {
+                      "name": "sender",
+                      "value": "김리본",
+                      "page": 1,
+                      "quote": "보낸 사람\t김리본"
+                    },
+                    {
+                      "name": "recipient",
+                      "value": "그린철거",
+                      "page": 1,
+                      "quote": "받는 사람\t그린철거"
+                    },
+                    {
+                      "name": "amount",
+                      "value": "3 , 3 0 0 , 0 0 0 원",
+                      "page": 1,
+                      "quote": "합계금액( 부가세 포함)\t3 , 3 0 0 , 0 0 0 원"
+                    }
+                  ],
+                  "needs_confirmation": true
+                },
+                "ocr_used": true,
+                "correct": true
+              }
+            ],
+            "owner_confirmations": [
+              "CONSTRUCTION_STATEMENT",
+              "TAX_INVOICE",
+              "CLOSURE_CERTIFICATE",
+              "BANK_COPY",
+              "BEFORE_PHOTO",
+              "AFTER_PHOTO",
+              "TRANSFER"
+            ],
+            "owner_corrections": [],
+            "workflow_passed": true,
+            "missing_transfer_detected": true,
+            "new_document_provider_calls": 4,
+            "same_file_reupload_provider_calls": 0,
+            "redaction_count": 1,
+            "documents": 7,
+            "zip_entries": 9,
+            "passed": true,
+            "status": "REVIEWED_PLAN",
+            "behavior_passed": true,
+            "elapsed_ms": 99983,
+            "provider_usage": [
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 1945,
+                "completion_tokens": 541,
+                "reasoning_tokens": 456,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_vision_ocr",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 8258,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 877,
+                "completion_tokens": 64,
+                "reasoning_tokens": 45,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "ContentSafetyDecision",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 2400,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 609,
+                "completion_tokens": 359,
+                "reasoning_tokens": 172,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_extraction",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 4447,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 2188,
+                "completion_tokens": 149,
+                "reasoning_tokens": 125,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_review",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 3757,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 1945,
+                "completion_tokens": 521,
+                "reasoning_tokens": 418,
+                "cached_prompt_tokens": 1536,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_vision_ocr",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 7162,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 895,
+                "completion_tokens": 40,
+                "reasoning_tokens": 21,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "ContentSafetyDecision",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 2097,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 627,
+                "completion_tokens": 424,
+                "reasoning_tokens": 146,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_extraction",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 5548,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 2281,
+                "completion_tokens": 197,
+                "reasoning_tokens": 173,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_review",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 4217,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 1945,
+                "completion_tokens": 445,
+                "reasoning_tokens": 369,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_vision_ocr",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 6073,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 868,
+                "completion_tokens": 85,
+                "reasoning_tokens": 66,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "ContentSafetyDecision",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 2613,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 601,
+                "completion_tokens": 346,
+                "reasoning_tokens": 184,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_extraction",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 4498,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 2162,
+                "completion_tokens": 221,
+                "reasoning_tokens": 197,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_review",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 5367,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 1945,
+                "completion_tokens": 135,
+                "reasoning_tokens": 86,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_vision_ocr",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 2700,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 841,
+                "completion_tokens": 63,
+                "reasoning_tokens": 44,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "ContentSafetyDecision",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 2580,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 571,
+                "completion_tokens": 116,
+                "reasoning_tokens": 60,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_extraction",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 2750,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 2062,
+                "completion_tokens": 287,
+                "reasoning_tokens": 263,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_review",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 5280,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 1945,
+                "completion_tokens": 868,
+                "reasoning_tokens": 768,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_vision_ocr",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 12759,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 886,
+                "completion_tokens": 91,
+                "reasoning_tokens": 72,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "ContentSafetyDecision",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 3048,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 615,
+                "completion_tokens": 336,
+                "reasoning_tokens": 142,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_extraction",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 4614,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 2204,
+                "completion_tokens": 254,
+                "reasoning_tokens": 230,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_review",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 5442,
+                "requested_model": "gpt-6.1-sol"
+              }
+            ],
+            "calls_by_role": {
+              "all": 20
+            },
+            "metrics": {
+              "runs": 1,
+              "successful_runs": 1,
+              "success_rate": 1.0,
+              "http_attempts": 20,
+              "usage_complete": true,
+              "attempts_with_reported_usage": 20,
+              "reported_tokens": {
+                "prompt_tokens": 28012,
+                "completion_tokens": 5542
+              },
+              "total_tokens": 33554,
+              "tokens_per_success": 33554.0,
+              "estimated_cost_krw": 153.833886,
+              "cost_per_success_krw": 153.833886,
+              "uncached_cost_krw": 157.97187000000002,
+              "cache_usage_complete": true,
+              "unpriced_models": [],
+              "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+              "mean_latency_ms": 99983,
+              "median_latency_ms": 99983,
+              "max_latency_ms": 99983,
+              "transport_retries": 0,
+              "review_revise_count": null
+            }
+          }
+        ],
+        "passed": true
+      },
+      {
+        "name": "sol-xhigh-vision-scan-r2",
+        "synthetic_data": true,
+        "scope": "Standalone document Tool; explicit synthetic owner confirmations; no app APIs",
+        "layout": "scan",
+        "pilot": false,
+        "code_digest": "sha256:503f5046d0344e5c65c731893f397bfe6ca7904a17c5d760c502cfb6525c2f97",
+        "code_unchanged": true,
+        "trials": [
+          {
+            "model": "gpt-6.1-sol",
+            "effort": "xhigh",
+            "automatic_fields_correct": true,
+            "automatic_document_results": [
+              {
+                "expected_kind": "CONSTRUCTION_STATEMENT",
+                "analysis": {
+                  "kind": "CONSTRUCTION_STATEMENT",
+                  "fields": [
+                    {
+                      "name": "supplier",
+                      "value": "그린철거",
+                      "page": 1,
+                      "quote": "공급자\t그린철거"
+                    },
+                    {
+                      "name": "buyer",
+                      "value": "봄날개인카페",
+                      "page": 1,
+                      "quote": "공급받는 자\t봄날개인카페"
+                    },
+                    {
+                      "name": "amount",
+                      "value": "3,300,000원",
+                      "page": 1,
+                      "quote": "합계금액( 부가세 포함)\t3,300,000원"
+                    }
+                  ],
+                  "needs_confirmation": true
+                },
+                "ocr_used": true,
+                "correct": true
+              },
+              {
+                "expected_kind": "TAX_INVOICE",
+                "analysis": {
+                  "kind": "TAX_INVOICE",
+                  "fields": [
+                    {
+                      "name": "supplier",
+                      "value": "그린철거",
+                      "page": 1,
+                      "quote": "공급자\t그린철거"
+                    },
+                    {
+                      "name": "buyer",
+                      "value": "봄날개인카페",
+                      "page": 1,
+                      "quote": "공급받는 자\t봄날개인카페"
+                    },
+                    {
+                      "name": "supply_amount",
+                      "value": "3 , 0 0 0 , 0 0 0 원",
+                      "page": 1,
+                      "quote": "공급가액\t3 , 0 0 0 , 0 0 0 원"
+                    },
+                    {
+                      "name": "tax_amount",
+                      "value": "3 0 0 , 0 0 0 원",
+                      "page": 1,
+                      "quote": "세액\t3 0 0 , 0 0 0 원"
+                    },
+                    {
+                      "name": "amount",
+                      "value": "3 , 3 0 0 , 0 0 0 원",
+                      "page": 1,
+                      "quote": "합계금액( 부가세 포함)\t3 , 3 0 0 , 0 0 0 원"
+                    }
+                  ],
+                  "needs_confirmation": true
+                },
+                "ocr_used": true,
+                "correct": true
+              },
+              {
+                "expected_kind": "CLOSURE_CERTIFICATE",
+                "analysis": {
+                  "kind": "CLOSURE_CERTIFICATE",
+                  "fields": [
+                    {
+                      "name": "business_name",
+                      "value": "봄날개인카페",
+                      "page": 1,
+                      "quote": "상호\t봄날개인카페"
+                    },
+                    {
+                      "name": "closure_date",
+                      "value": "2 0 2 6 년 1 0 월 3 1 일",
+                      "page": 1,
+                      "quote": "폐업일\t2 0 2 6 년 1 0 월 3 1 일"
+                    }
+                  ],
+                  "needs_confirmation": true
+                },
+                "ocr_used": true,
+                "correct": true
+              },
+              {
+                "expected_kind": "BANK_COPY",
+                "analysis": {
+                  "kind": "BANK_COPY",
+                  "fields": [
+                    {
+                      "name": "account_holder",
+                      "value": "김리본",
+                      "page": 1,
+                      "quote": "예금주 김리본"
+                    }
+                  ],
+                  "needs_confirmation": true
+                },
+                "ocr_used": true,
+                "correct": true
+              },
+              {
+                "expected_kind": "BEFORE_PHOTO",
+                "analysis": {
+                  "kind": "BEFORE_PHOTO",
+                  "fields": [],
+                  "needs_confirmation": true
+                },
+                "ocr_used": true,
+                "correct": true
+              },
+              {
+                "expected_kind": "AFTER_PHOTO",
+                "analysis": {
+                  "kind": "AFTER_PHOTO",
+                  "fields": [],
+                  "needs_confirmation": true
+                },
+                "ocr_used": true,
+                "correct": true
+              },
+              {
+                "expected_kind": "TRANSFER",
+                "analysis": {
+                  "kind": "TRANSFER",
+                  "fields": [
+                    {
+                      "name": "sender",
+                      "value": "김리본",
+                      "page": 1,
+                      "quote": "보낸 사람 김리본"
+                    },
+                    {
+                      "name": "recipient",
+                      "value": "그린철거",
+                      "page": 1,
+                      "quote": "받는 사람 그린철거"
+                    },
+                    {
+                      "name": "amount",
+                      "value": "3,300,000원",
+                      "page": 1,
+                      "quote": "합계금액( 부가세 포함) 3,300,000원"
+                    }
+                  ],
+                  "needs_confirmation": true
+                },
+                "ocr_used": true,
+                "correct": true
+              }
+            ],
+            "owner_confirmations": [
+              "CONSTRUCTION_STATEMENT",
+              "TAX_INVOICE",
+              "CLOSURE_CERTIFICATE",
+              "BANK_COPY",
+              "BEFORE_PHOTO",
+              "AFTER_PHOTO",
+              "TRANSFER"
+            ],
+            "owner_corrections": [],
+            "workflow_passed": true,
+            "missing_transfer_detected": true,
+            "new_document_provider_calls": 4,
+            "same_file_reupload_provider_calls": 0,
+            "redaction_count": 1,
+            "documents": 7,
+            "zip_entries": 9,
+            "passed": true,
+            "status": "REVIEWED_PLAN",
+            "behavior_passed": true,
+            "elapsed_ms": 108116,
+            "provider_usage": [
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 1945,
+                "completion_tokens": 662,
+                "reasoning_tokens": 572,
+                "cached_prompt_tokens": 1536,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_vision_ocr",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 9595,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 876,
+                "completion_tokens": 71,
+                "reasoning_tokens": 52,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "ContentSafetyDecision",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 2535,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 608,
+                "completion_tokens": 316,
+                "reasoning_tokens": 129,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_extraction",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 4326,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 2187,
+                "completion_tokens": 158,
+                "reasoning_tokens": 134,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_review",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 4368,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 1945,
+                "completion_tokens": 1125,
+                "reasoning_tokens": 985,
+                "cached_prompt_tokens": 1536,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_vision_ocr",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 18083,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 925,
+                "completion_tokens": 90,
+                "reasoning_tokens": 71,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "ContentSafetyDecision",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 2841,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 657,
+                "completion_tokens": 472,
+                "reasoning_tokens": 136,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_extraction",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 5805,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 2369,
+                "completion_tokens": 279,
+                "reasoning_tokens": 255,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_review",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 5023,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 1945,
+                "completion_tokens": 428,
+                "reasoning_tokens": 352,
+                "cached_prompt_tokens": 1536,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_vision_ocr",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 5726,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 868,
+                "completion_tokens": 106,
+                "reasoning_tokens": 87,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "ContentSafetyDecision",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 1986,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 601,
+                "completion_tokens": 280,
+                "reasoning_tokens": 118,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_extraction",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 3656,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 2162,
+                "completion_tokens": 219,
+                "reasoning_tokens": 195,
+                "cached_prompt_tokens": 1664,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_review",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 4563,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 1945,
+                "completion_tokens": 167,
+                "reasoning_tokens": 121,
+                "cached_prompt_tokens": 1536,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_vision_ocr",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 2895,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 838,
+                "completion_tokens": 71,
+                "reasoning_tokens": 52,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "ContentSafetyDecision",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 1887,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 568,
+                "completion_tokens": 110,
+                "reasoning_tokens": 55,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_extraction",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 2328,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 2058,
+                "completion_tokens": 168,
+                "reasoning_tokens": 144,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_review",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 4467,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 1945,
+                "completion_tokens": 869,
+                "reasoning_tokens": 784,
+                "cached_prompt_tokens": 1536,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_vision_ocr",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 12921,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 871,
+                "completion_tokens": 115,
+                "reasoning_tokens": 96,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "ContentSafetyDecision",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 3108,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 600,
+                "completion_tokens": 228,
+                "reasoning_tokens": 113,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_extraction",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 3916,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 2167,
+                "completion_tokens": 171,
+                "reasoning_tokens": 147,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_review",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 3499,
+                "requested_model": "gpt-6.1-sol"
+              }
+            ],
+            "calls_by_role": {
+              "all": 20
+            },
+            "metrics": {
+              "runs": 1,
+              "successful_runs": 1,
+              "success_rate": 1.0,
+              "http_attempts": 20,
+              "usage_complete": true,
+              "attempts_with_reported_usage": 20,
+              "reported_tokens": {
+                "prompt_tokens": 28080,
+                "completion_tokens": 6105
+              },
+              "total_tokens": 34185,
+              "tokens_per_success": 34185.0,
+              "estimated_cost_krw": 140.972439,
+              "cost_per_success_krw": 140.972439,
+              "uncached_cost_krw": 166.14517499999997,
+              "cache_usage_complete": true,
+              "unpriced_models": [],
+              "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+              "mean_latency_ms": 108116,
+              "median_latency_ms": 108116,
+              "max_latency_ms": 108116,
+              "transport_retries": 0,
+              "review_revise_count": null
+            }
+          }
+        ],
+        "passed": true
+      },
+      {
+        "name": "sol-xhigh-vision-scan-r3",
+        "synthetic_data": true,
+        "scope": "Standalone document Tool; explicit synthetic owner confirmations; no app APIs",
+        "layout": "scan",
+        "pilot": false,
+        "code_digest": "sha256:503f5046d0344e5c65c731893f397bfe6ca7904a17c5d760c502cfb6525c2f97",
+        "code_unchanged": true,
+        "trials": [
+          {
+            "model": "gpt-6.1-sol",
+            "effort": "xhigh",
+            "automatic_fields_correct": true,
+            "automatic_document_results": [
+              {
+                "expected_kind": "CONSTRUCTION_STATEMENT",
+                "analysis": {
+                  "kind": "CONSTRUCTION_STATEMENT",
+                  "fields": [
+                    {
+                      "name": "supplier",
+                      "value": "그린철거",
+                      "page": 1,
+                      "quote": "공급자\t그린철거"
+                    },
+                    {
+                      "name": "buyer",
+                      "value": "봄날개인카페",
+                      "page": 1,
+                      "quote": "공급받는 자\t봄날개인카페"
+                    },
+                    {
+                      "name": "amount",
+                      "value": "3 , 3 0 0 , 0 0 0 원",
+                      "page": 1,
+                      "quote": "합계금액( 부가세 포함)\t3 , 3 0 0 , 0 0 0 원"
+                    }
+                  ],
+                  "needs_confirmation": true
+                },
+                "ocr_used": true,
+                "correct": true
+              },
+              {
+                "expected_kind": "TAX_INVOICE",
+                "analysis": {
+                  "kind": "TAX_INVOICE",
+                  "fields": [
+                    {
+                      "name": "supplier",
+                      "value": "그린철거",
+                      "page": 1,
+                      "quote": "공급자\t그린철거"
+                    },
+                    {
+                      "name": "buyer",
+                      "value": "봄날개인카페",
+                      "page": 1,
+                      "quote": "공급받는 자\t봄날개인카페"
+                    },
+                    {
+                      "name": "supply_amount",
+                      "value": "3,000,000원",
+                      "page": 1,
+                      "quote": "공급가액\t3,000,000원"
+                    },
+                    {
+                      "name": "tax_amount",
+                      "value": "300,000원",
+                      "page": 1,
+                      "quote": "세액\t300,000원"
+                    },
+                    {
+                      "name": "amount",
+                      "value": "3,300,000원",
+                      "page": 1,
+                      "quote": "합계금액( 부가세 포함)\t3,300,000원"
+                    }
+                  ],
+                  "needs_confirmation": true
+                },
+                "ocr_used": true,
+                "correct": true
+              },
+              {
+                "expected_kind": "CLOSURE_CERTIFICATE",
+                "analysis": {
+                  "kind": "CLOSURE_CERTIFICATE",
+                  "fields": [
+                    {
+                      "name": "business_name",
+                      "value": "봄날개인카페",
+                      "page": 1,
+                      "quote": "상호 봄날개인카페"
+                    },
+                    {
+                      "name": "closure_date",
+                      "value": "2 0 2 6 년 1 0 월 3 1 일",
+                      "page": 1,
+                      "quote": "폐업일 2 0 2 6 년 1 0 월 3 1 일"
+                    }
+                  ],
+                  "needs_confirmation": true
+                },
+                "ocr_used": true,
+                "correct": true
+              },
+              {
+                "expected_kind": "BANK_COPY",
+                "analysis": {
+                  "kind": "BANK_COPY",
+                  "fields": [
+                    {
+                      "name": "account_holder",
+                      "value": "김리본",
+                      "page": 1,
+                      "quote": "예금주\t김리본"
+                    }
+                  ],
+                  "needs_confirmation": true
+                },
+                "ocr_used": true,
+                "correct": true
+              },
+              {
+                "expected_kind": "BEFORE_PHOTO",
+                "analysis": {
+                  "kind": "BEFORE_PHOTO",
+                  "fields": [],
+                  "needs_confirmation": true
+                },
+                "ocr_used": true,
+                "correct": true
+              },
+              {
+                "expected_kind": "AFTER_PHOTO",
+                "analysis": {
+                  "kind": "AFTER_PHOTO",
+                  "fields": [],
+                  "needs_confirmation": true
+                },
+                "ocr_used": true,
+                "correct": true
+              },
+              {
+                "expected_kind": "TRANSFER",
+                "analysis": {
+                  "kind": "TRANSFER",
+                  "fields": [
+                    {
+                      "name": "sender",
+                      "value": "김리본",
+                      "page": 1,
+                      "quote": "보낸 사람\t김리본"
+                    },
+                    {
+                      "name": "recipient",
+                      "value": "그린철거",
+                      "page": 1,
+                      "quote": "받는 사람\t그린철거"
+                    },
+                    {
+                      "name": "amount",
+                      "value": "3,300,000원",
+                      "page": 1,
+                      "quote": "합계금액( 부가세 포함)\t3,300,000원"
+                    }
+                  ],
+                  "needs_confirmation": true
+                },
+                "ocr_used": true,
+                "correct": true
+              }
+            ],
+            "owner_confirmations": [
+              "CONSTRUCTION_STATEMENT",
+              "TAX_INVOICE",
+              "CLOSURE_CERTIFICATE",
+              "BANK_COPY",
+              "BEFORE_PHOTO",
+              "AFTER_PHOTO",
+              "TRANSFER"
+            ],
+            "owner_corrections": [],
+            "workflow_passed": true,
+            "missing_transfer_detected": true,
+            "new_document_provider_calls": 4,
+            "same_file_reupload_provider_calls": 0,
+            "redaction_count": 1,
+            "documents": 7,
+            "zip_entries": 9,
+            "passed": true,
+            "status": "REVIEWED_PLAN",
+            "behavior_passed": true,
+            "elapsed_ms": 116719,
+            "provider_usage": [
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 1945,
+                "completion_tokens": 792,
+                "reasoning_tokens": 690,
+                "cached_prompt_tokens": 1536,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_vision_ocr",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 11535,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 887,
+                "completion_tokens": 113,
+                "reasoning_tokens": 94,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "ContentSafetyDecision",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 1995,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 619,
+                "completion_tokens": 375,
+                "reasoning_tokens": 168,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_extraction",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 4782,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 2218,
+                "completion_tokens": 136,
+                "reasoning_tokens": 112,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_review",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 4009,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 1945,
+                "completion_tokens": 1552,
+                "reasoning_tokens": 1436,
+                "cached_prompt_tokens": 1536,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_vision_ocr",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 27333,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 896,
+                "completion_tokens": 68,
+                "reasoning_tokens": 49,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "ContentSafetyDecision",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 3361,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 628,
+                "completion_tokens": 394,
+                "reasoning_tokens": 116,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_extraction",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 4109,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 2282,
+                "completion_tokens": 136,
+                "reasoning_tokens": 112,
+                "cached_prompt_tokens": 1792,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_review",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 3509,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 1945,
+                "completion_tokens": 300,
+                "reasoning_tokens": 225,
+                "cached_prompt_tokens": 1536,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_vision_ocr",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 4844,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 867,
+                "completion_tokens": 67,
+                "reasoning_tokens": 48,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "ContentSafetyDecision",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 2531,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 600,
+                "completion_tokens": 317,
+                "reasoning_tokens": 197,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_extraction",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 4363,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 2160,
+                "completion_tokens": 316,
+                "reasoning_tokens": 292,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_review",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 5868,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 1945,
+                "completion_tokens": 122,
+                "reasoning_tokens": 75,
+                "cached_prompt_tokens": 1536,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_vision_ocr",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 3091,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 839,
+                "completion_tokens": 87,
+                "reasoning_tokens": 68,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "ContentSafetyDecision",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 2665,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 569,
+                "completion_tokens": 144,
+                "reasoning_tokens": 88,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_extraction",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 3124,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 2060,
+                "completion_tokens": 160,
+                "reasoning_tokens": 136,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_review",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 3929,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 1945,
+                "completion_tokens": 581,
+                "reasoning_tokens": 497,
+                "cached_prompt_tokens": 1536,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_vision_ocr",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 10306,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 876,
+                "completion_tokens": 94,
+                "reasoning_tokens": 75,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "ContentSafetyDecision",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 2727,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 605,
+                "completion_tokens": 301,
+                "reasoning_tokens": 127,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_extraction",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 3929,
+                "requested_model": "gpt-6.1-sol"
+              },
+              {
+                "model": "gpt-6.1-sol",
+                "prompt_tokens": 2174,
+                "completion_tokens": 177,
+                "reasoning_tokens": 153,
+                "cached_prompt_tokens": 0,
+                "reasoning_effort": "xhigh",
+                "schema_name": "reborn_document_review",
+                "attempt": 1,
+                "status": "SUCCESS",
+                "status_code": 200,
+                "error_code": null,
+                "latency_ms": 4025,
+                "requested_model": "gpt-6.1-sol"
+              }
+            ],
+            "calls_by_role": {
+              "all": 20
+            },
+            "metrics": {
+              "runs": 1,
+              "successful_runs": 1,
+              "success_rate": 1.0,
+              "http_attempts": 20,
+              "usage_complete": true,
+              "attempts_with_reported_usage": 20,
+              "reported_tokens": {
+                "prompt_tokens": 28005,
+                "completion_tokens": 6232
+              },
+              "total_tokens": 34237,
+              "tokens_per_success": 34237.0,
+              "estimated_cost_krw": 142.21520700000002,
+              "cost_per_success_krw": 142.21520700000002,
+              "uncached_cost_krw": 167.73277500000003,
+              "cache_usage_complete": true,
+              "unpriced_models": [],
+              "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+              "mean_latency_ms": 116719,
+              "median_latency_ms": 116719,
+              "max_latency_ms": 116719,
+              "transport_retries": 0,
+              "review_revise_count": null
+            }
+          }
+        ],
+        "passed": true
+      }
+    ],
+    "passed": true,
+    "new_source_http_attempts": 79
+  },
+  "offline_ocr_trials": {
+    "full_page": [
+      {
+        "file": "TAX_INVOICE.png",
+        "full": false,
+        "dpi": 180,
+        "seconds": 0.311,
+        "text": "ASS 가상문서   / 제출용아님\n\n전자세금계산서\n\n\n\n\n\n  0\n\n\n\n\n\n합계금액( 부가세     3,300,0008\n포함)"
+      },
+      {
+        "file": "TAX_INVOICE.png",
+        "full": true,
+        "dpi": 180,
+        "seconds": 0.28,
+        "text": "ASS 가상문서   / 제출용아님\n\n전자세금계산서\n\n\n\n\n\n  0\n\n\n\n\n\n합계금액( 부가세     3,300,0008\n포함)"
+      },
+      {
+        "file": "TAX_INVOICE.png",
+        "full": true,
+        "dpi": 300,
+        "seconds": 0.518,
+        "text": "ass 카상문서＊ㅠ  ABS 마님\n\n전자세금계산서\n\n\n\n\n\n공급받는자       봄날캐민카페\n\n\n\n 공급가맥           3,000, 000 원\n\n\n\n세맥              300, 0008\n\n\n\n합계금액( 부가세      3,300, 0008\n포함)"
+      },
+      {
+        "file": "CONSTRUCTION_STATEMENT.png",
+        "full": false,
+        "dpi": 180,
+        "seconds": 0.253,
+        "text": "ASS 가상문서   /  ABS 아님\n\n철거공사내역서\n\n\n\n\n\n  0\n\n\n\n 합계금액( 부가세 포함)           3,300,000원"
+      },
+      {
+        "file": "CONSTRUCTION_STATEMENT.png",
+        "full": true,
+        "dpi": 180,
+        "seconds": 0.254,
+        "text": "ASS 가상문서   /  ABS 아님\n\n철거공사내역서\n\n\n\n\n\n  0\n\n\n\n 합계금액( 부가세 포함)           3,300,000원"
+      },
+      {
+        "file": "CONSTRUCTION_STATEMENT.png",
+        "full": true,
+        "dpi": 300,
+        "seconds": 0.422,
+        "text": "검증용가상문서/  ABS 아님\n\n철거공사내역서\n\n\n\n\n\n공급받는자       봄날개민카페\n\n\n합계금맥( 부가세      3,300, 000 원\n 포함)"
+      },
+      {
+        "file": "CLOSURE_CERTIFICATE.png",
+        "full": false,
+        "dpi": 180,
+        "seconds": 0.208,
+        "text": "ASS 가상문서   / 제출용아님\n\n폐업사실증명원\n\n\n\n  7"
+      },
+      {
+        "file": "CLOSURE_CERTIFICATE.png",
+        "full": true,
+        "dpi": 180,
+        "seconds": 0.199,
+        "text": "ASS 가상문서   / 제출용아님\n\n폐업사실증명원\n\n\n\n  7"
+      },
+      {
+        "file": "CLOSURE_CERTIFICATE.png",
+        "full": true,
+        "dpi": 300,
+        "seconds": 0.292,
+        "text": "ASS 가상문서/  제출용아님\n\n폐업사실증명원\n\n\n\n  0\n\n\n\n\n”"
+      },
+      {
+        "file": "BANK_COPY.png",
+        "full": false,
+        "dpi": 180,
+        "seconds": 0.177,
+        "text": "ASS 가상문서   / 제출용아님\n\n통장 사본"
+      },
+      {
+        "file": "BANK_COPY.png",
+        "full": true,
+        "dpi": 180,
+        "seconds": 0.173,
+        "text": "ASS 가상문서   / 제출용아님\n\n통장 사본"
+      },
+      {
+        "file": "BANK_COPY.png",
+        "full": true,
+        "dpi": 300,
+        "seconds": 0.247,
+        "text": "검증용가상문서/  제출용아님\n\n통장 사본"
+      },
+      {
+        "file": "TRANSFER.png",
+        "full": false,
+        "dpi": 180,
+        "seconds": 0.447,
+        "text": " ASS 가상문서/ 제출용아님\n\n이체확인증\n제세이이력이이\na\n\n합계금액( 부가세 포함)           3,300,000원\n\n\n\n\n\n주민등록번호  900101-1234567"
+      },
+      {
+        "file": "TRANSFER.png",
+        "full": true,
+        "dpi": 180,
+        "seconds": 0.451,
+        "text": " ASS 가상문서/ 제출용아님\n\n이체확인증\n제세이이력이이\na\n\n합계금액( 부가세 포함)           3,300,000원\n\n\n\n\n\n주민등록번호  900101-1234567"
+      },
+      {
+        "file": "TRANSFER.png",
+        "full": true,
+        "dpi": 300,
+        "seconds": 0.707,
+        "text": " HSS 카상문서/  ABS 마님\n\n이체확인증\na ae\n_ we\n BASHA 부가세     3,300,0002\n 포함)\n\n\n\n\n\n주민등록번호:  900101-1234567"
+      }
+    ],
+    "best_language_data": [
+      {
+        "file": "TAX_INVOICE.png",
+        "engine": "tessdata_best",
+        "dpi": 180,
+        "seconds": 0.936,
+        "text": "HEE 가상문서/  HEE 아님\n\n전자세금계산서\n\n\n\n\n\n     or\n\n\n\n\n\n합계금액( 부가세        3, 300, 000 원\n포함)"
+      },
+      {
+        "file": "TAX_INVOICE.png",
+        "engine": "tessdata_best",
+        "dpi": 300,
+        "seconds": 1.664,
+        "text": "검즘용가삼문서/  제출용마님\n\n전자세금계산서\n\n\n\n\n\n 공급받는자       봄날개민카페\n\n\n\n 공급가맥                 3,  000, 000 원\n\n\n\n세액              300, 000 원\n\n\n\n합계금액(부가세         3,  300, 000 뭔\n포함)"
+      },
+      {
+        "file": "CONSTRUCTION_STATEMENT.png",
+        "engine": "tessdata_best",
+        "dpi": 180,
+        "seconds": 0.71,
+        "text": "검증용가상문서/  HEE 아님\n\n철거공사내역서\n\n\n\n\n\n     or\n\n\n\n 함계금액( 부가세     3,300,0008\n 포함)"
+      },
+      {
+        "file": "CONSTRUCTION_STATEMENT.png",
+        "engine": "tessdata_best",
+        "dpi": 300,
+        "seconds": 1.283,
+        "text": "검즘용HEM    /  제출용아님\n\n철거공사  내역서\n\n\n\n\n\n공급받는자       봄날개인카페\n\n\n\n 합계금맥( 부가세         3,  300, 000%\n 포함)"
+      },
+      {
+        "file": "CLOSURE_CERTIFICATE.png",
+        "engine": "tessdata_best",
+        "dpi": 180,
+        "seconds": 0.55,
+        "text": "UES 가상문서   / 제출용아님\n\n폐업사실증명원\n\n\n\n  ~"
+      },
+      {
+        "file": "CLOSURE_CERTIFICATE.png",
+        "engine": "tessdata_best",
+        "dpi": 300,
+        "seconds": 0.618,
+        "text": "UES 가상문서/  제출용아님\n\n폐업사실증명원\n\n\n\n  ~\n\n\n\n\n배"
+      },
+      {
+        "file": "BANK_COPY.png",
+        "engine": "tessdata_best",
+        "dpi": 180,
+        "seconds": 0.357,
+        "text": "검증용가상문서   / 제출용아님\n\n통장 사본"
+      },
+      {
+        "file": "BANK_COPY.png",
+        "engine": "tessdata_best",
+        "dpi": 300,
+        "seconds": 0.473,
+        "text": "검증용가상문서/  제출용아님\n\n통장 사본"
+      },
+      {
+        "file": "TRANSFER.png",
+        "engine": "tessdata_best",
+        "dpi": 180,
+        "seconds": 1.506,
+        "text": " UES 가상문서/ 제출용아님\n체확인증SE이\na\n\n함계금액( 부가세      3,300, 000 원\n 포함)\n\n\n\n\n주민등록번호ㅎ900101-1234567"
+      },
+      {
+        "file": "TRANSFER.png",
+        "engine": "tessdata_best",
+        "dpi": 300,
+        "seconds": 1.927,
+        "text": " HEE 가삼문서/  제출용아님\n이체확인증=~\nCT NE\n EAHZY( 부가세      3,300, 000%\n 포함)\n\n\n\n\n\n주민등록번호 .900101-1234567"
+      }
+    ],
+    "bands": [
+      {
+        "file": "TAX_INVOICE.png",
+        "bands": [
+          "ASS 가상문서    /  제출용아님\n\n전자세금계산서",
+          "ee he   |\n\n\n\n    _\n\n\n\n\n\n  “= “™HL Le    71    ceoe a",
+          " 공급받는자       봄날개인카페\n\ni           3,000, 00028",
+          "나                 Se eee   Oe a   oe                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |\n\n\n세맥              300, 0008",
+          "합계금액( 부가세         3, 300, 000 원\n포함)"
+        ]
+      },
+      {
+        "file": "CONSTRUCTION_STATEMENT.png",
+        "bands": [
+          "ASS 가상문서    ＊  제출용아님\n\n철거공사내역서",
+          "오그11 71\n\n\n\n    —\n\n\n\n\n\n  “= “™HL Le    71    ceoe a",
+          " 공급받는자       봄날개민카페\n\n\n\n\n\n 포함)| 합계금맥【부가세      3,300, 0008",
+          "~ 다—   FR        ^    6  비         Se 노비,반년난건\n포함)",
+          ""
+        ]
+      },
+      {
+        "file": "CLOSURE_CERTIFICATE.png",
+        "bands": [
+          "ASS 가상문서    ＊  제출용아님\n\n폐업사실증명원",
+          "te TSsoot\n\n\n\n  0",
+          "더",
+          "",
+          ""
+        ]
+      },
+      {
+        "file": "BANK_COPY.png",
+        "bands": [
+          "ASS 가상문서    /  제출용아님\n\n통장 사본",
+          "oo  “Ih",
+          "Fee",
+          "",
+          ""
+        ]
+      },
+      {
+        "file": "TRANSFER.png",
+        "bands": [
+          "ASS 가상문서    /  제출용아님\n\n이체확인증",
+          "이히히모으\n\n\n\n\n\n LL.           .  |  를ㅣ      이이        때",
+          "_\n\n\n\n\n합\n 포함)|  계금맥【부가세      3,300, 0008",
+          "~ 다—   FR        ^    6  비         Se 노비,반년난건\n포함)",
+          "주민등록번호:  900101-1234567"
+        ]
+      }
+    ]
+  },
+  "artifact_checks": {
+    "sol-xhigh-vision-native-final": {
+      "zip_entries": 9,
+      "pdfs_open": 8,
+      "zip_integrity": true
+    },
+    "sol-xhigh-vision-scan-r1": {
+      "zip_entries": 9,
+      "pdfs_open": 8,
+      "zip_integrity": true
+    },
+    "vision_input": {
+      "redactions": 1,
+      "rrn_front_not_readable": true,
+      "rrn_back_not_readable": true,
+      "offline_proof": true
+    }
+  },
+  "automated_tests": {
+    "passed": 622,
+    "seconds": 30.68,
+    "stdout": "........................................................................ [ 11%]\n........................................................................ [ 23%]\n........................................................................ [ 34%]\n........................................................................ [ 46%]\n........................................................................ [ 57%]\n........................................................................ [ 69%]\n........................................................................ [ 81%]\n........................................................................ [ 92%]\n..............................................                           [100%]\n622 passed in 30.68s\n",
+    "focused_passed": 31,
+    "focused_seconds": 4.97
+  },
+  "privacy_boundary": "Vision and independent scan review use separately rasterized copies masking complete locally detected identifiers; submission policy remains separate. Configured private values that cannot be located block vision reading. No prompt or image payload sent to tracing.",
+  "final_source_note": "After actual model evaluation only the module docstring was corrected to describe masked image inputs. Executable AST is identical. Code-based caches intentionally invalidate on any source change. Original measured code digests are preserved.",
+  "model_evaluation_source_commit": "bddcced",
+  "lower_efforts": "NOT_RUN; correctness baseline first",
+  "actual_customer_document_accuracy": "NOT_VALIDATED",
+  "prices": "User-provided Elice Serverless KRW/token rates; usage-based estimates, not an invoice"
+}

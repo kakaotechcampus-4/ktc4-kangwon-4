@@ -18,7 +18,7 @@ from uuid import UUID, uuid4
 from langgraph.graph import END, START, StateGraph
 
 from app.agent.blocker_candidates import field_confirmation_question
-from app.agent.enrichment import build_confirmed_conflict_overlay, build_fact_overlays
+from app.agent.enrichment import build_conflict_overlays, build_fact_overlays
 from app.agent.llm import current_call_budget
 from app.agent.run_scope import current_deadline
 from app.agent.schemas import (
@@ -42,6 +42,7 @@ from app.agent.schemas import (
     ProcedureLookupInput,
     ProcedureLookupResult,
     ProcedureProgressStatus,
+    RetainedInfoResult,
     ReviewedPlanOutcome,
     ReviewIssue,
     ReviewProof,
@@ -63,6 +64,7 @@ from app.agent.tracing import (
     TraceEvent,
     TraceSink,
     UsageAccumulator,
+    traced_component,
 )
 
 
@@ -123,6 +125,9 @@ class AgentGraph:
         if max_review_revisions < 0 or max_review_revisions > 2:
             raise ValueError("max_review_revisions must be between 0 and 2")
         self._info_agent = info_agent
+        # 첫 판단은 읽을 글이 없어 검수 정리본으로 Info 결과를 만든다(info_agent/procedure_digests.py).
+        # 클래스에 정의된 경우만 쓴다. 모의 객체(AsyncMock)는 없는 메서드도 만들어 내서 인스턴스로 보면 안 된다.
+        self._info_from_digests = getattr(type(info_agent), "analyze_from_digests", None)
         self._procedure_tool = procedure_tool
         self._support_agent = support_agent
         self._supervisor = supervisor
@@ -138,6 +143,7 @@ class AgentGraph:
         self._usage = usage
         self.compiled = self._compile()
 
+    @traced_component("RUN")
     async def run(self, request: AgentGraphInput) -> AgentGraphOutput:
         if self._usage is not None:
             # Usage a previous run recorded but never drained would otherwise be
@@ -309,6 +315,7 @@ class AgentGraph:
         if counters is not None and meta.attempt > 1:
             counters.started_rework_rounds.add(meta.attempt - 1)
 
+    @traced_component("INFO_AGENT")
     async def _info_node(self, state: AgentGraphState) -> dict[str, Any]:
         request = state["request"]
         trigger_input = getattr(request.trigger, "input", None)
@@ -332,10 +339,18 @@ class AgentGraph:
             Component.INFO_AGENT,
             attempt=state.get("revision_count", 0) + 1,
         )
+        retained = getattr(request.trigger, "retained_info_result", None)
+        analysis_overlays = list(confirmed_overlays)
+        if retained is not None:
+            analysis_overlays.extend(build_fact_overlays(
+                request.case_snapshot, retained.output, meta.call_id, uuid_factory=self._uuid,
+            ))
         component_input = InfoAnalysisInput(
             input=trigger_input,
+            restoration_answer=getattr(request.trigger, "restoration_answer", None),
             case_snapshot=request.case_snapshot,
-            fact_overlays=confirmed_overlays,
+            fact_overlays=analysis_overlays,
+            conflict_confirmation=(request.trigger if isinstance(request.trigger, ConflictConfirmedTrigger) else None),
             allowed_field_paths=list(CASE_FIELD_SPECS),
             known_procedure_steps=[
                 step.model_copy(deep=True) for step in self._known_procedure_steps
@@ -349,7 +364,38 @@ class AgentGraph:
         try:
             self._check_deadline()
             self._record_rework_start(meta)
-            output = await self._info_agent.analyze(component_input)
+            output = None
+            if (
+                self._info_from_digests is not None
+                and (
+                    (
+                        getattr(request.trigger, "trigger_type", None) == "CASE_CREATED"
+                        and retained is None
+                        and not confirmed_overlays
+                    )
+                    # 충돌 확인 후 재판단은 읽을 새 글이 없다. 사실은 사용자 선택·보관된 결과로 오고, 절차 정리만 남아 정리본으로 채운다
+                    or getattr(request.trigger, "trigger_type", None) == "CONFLICT_CONFIRMED"
+                )
+                # Review가 Info를 다시 보라고 했으면 같은 정리본을 또 내지 않고 모델에게 맡긴다
+                and not state.get("review_feedback")
+            ):
+                output = self._info_from_digests(self._info_agent, component_input)
+            # 정리본으로 채웠거나 선택형 답변이면 Info 모델을 부르지 않는다(info_agent.analyze 참고)
+            # 보관된 사실은 이전 판단에서 Info 모델이 글에서 꺼냈고 아직 Review를 거치지 않았다. Review 모델을 유지한다
+            used_model = (
+                (output is None and component_input.restoration_answer is None)
+                or retained is not None
+            )
+            if output is None:
+                output = await self._info_agent.analyze(component_input)
+            if retained is not None:
+                if output.fact_candidates or output.procedure_progress_observations or output.conflicts:
+                    raise ValueError("confirmation analysis cannot extract fresh facts or progress")
+                output = InfoAnalysisResult.model_validate(output.model_dump() | {
+                    "fact_candidates": retained.output.fact_candidates,
+                    "procedure_progress_observations": retained.output.procedure_progress_observations,
+                    "evidence_records": [*output.evidence_records, *retained.output.evidence_records],
+                })
             output = self._restore_procedure_completion(request, output)
             source = ReviewSourceResult(
                 meta=meta,
@@ -373,6 +419,7 @@ class AgentGraph:
             "phase": "INFO_ANALYSIS",
             "source_results": [*state.get("source_results", []), source],
             "fact_overlays": overlays,
+            "info_used_model": used_model,
         }
 
     def _restore_procedure_completion(
@@ -425,6 +472,17 @@ class AgentGraph:
         if len(info_sources) != 1:
             raise RuntimeError("conflict outcome requires one Info result")
         info = info_sources[0].output
+        fields = {item.field_path for item in info.conflicts}
+        kept_facts = [item for item in info.fact_candidates if item.field_path not in fields]
+        retained = None
+        if kept_facts or info.procedure_progress_observations:
+            kept = InfoAnalysisResult.model_validate(info.model_dump() | {
+                "completion_status": "PARTIAL", "fact_candidates": kept_facts,
+                "procedure_findings": [], "conflicts": [], "missing_fields": [],
+                "uncertainties": [], "question_candidates": [],
+            })
+            retained = RetainedInfoResult(meta=info_sources[0].meta, input=state["request"].trigger.input,
+                                         output=kept, output_digest=canonical_digest(kept))
         evidence_by_id = {}
         for evidence in [
             *state["request"].case_snapshot.evidence_records,
@@ -438,6 +496,8 @@ class AgentGraph:
         pending = [
             ref for conflict in info.conflicts for ref in conflict.source_evidence_refs
         ]
+        if retained is not None:
+            pending.extend(item.evidence_id for item in retained.output.evidence_records)
         included = set()
         while pending:
             ref = pending.pop()
@@ -449,6 +509,11 @@ class AgentGraph:
             included.add(ref)
             evidence_records.append(evidence)
             pending.extend(evidence.parent_evidence_refs)
+        baseline_records = {item.evidence_id: item for item in state["request"].case_snapshot.evidence_records}
+        baseline_records.update((item.evidence_id, item) for item in evidence_records)
+        baseline = state["request"].case_snapshot.model_copy(
+            update={"evidence_records": list(baseline_records.values())}, deep=True,
+        )
         outcome = ConflictOutcome(
             outcome_type="CONFLICT",
             run_id=state["run_id"],
@@ -457,12 +522,14 @@ class AgentGraph:
             snapshot_id=state["request"].case_snapshot.snapshot_id,
             conflicts=info.conflicts,
             evidence_records=evidence_records,
+            conflict_snapshot=baseline,
+            retained_info_result=retained,
             message_code="CONFIRM_CONFLICT",
         )
         return {"phase": "COMPLETED", "outcome": outcome}
 
     def _confirmed_conflict_node(self, state: AgentGraphState) -> dict[str, Any]:
-        """Turn the user's confirmation into one reviewable change candidate.
+        """Turn the user's accepted choices into reviewable change candidates.
 
         Deliberately not a write.  Letting the caller apply a confirmed value
         straight to the Case would put a Case change outside Review, and every
@@ -477,17 +544,18 @@ class AgentGraph:
         started = time.monotonic()
         try:
             self._check_deadline()
-            overlay = build_confirmed_conflict_overlay(
+            overlays = build_conflict_overlays(
                 request.case_snapshot,
-                trigger.confirmed_conflict,
+                trigger,
                 uuid_factory=self._uuid,
             )
         except Exception as exc:  # noqa: BLE001 - graph must fail closed
             self._emit(meta, started, "ERROR", exc)
             return self._failure(exc, Component.INFO_AGENT)
         self._emit(meta, started, "SUCCESS")
-        return {"phase": "INFO_ANALYSIS", "fact_overlays": [overlay]}
+        return {"phase": "INFO_ANALYSIS", "fact_overlays": overlays}
 
+    @traced_component("PROCEDURE_TOOL")
     async def _procedure_node(self, state: AgentGraphState) -> dict[str, Any]:
         request = state["request"]
         meta = self._meta(
@@ -533,6 +601,7 @@ class AgentGraph:
             "source_results": [*state.get("source_results", []), source],
         }
 
+    @traced_component("SUPPORT_AGENT")
     async def _support_node(self, state: AgentGraphState) -> dict[str, Any]:
         request = state["request"]
         meta = self._meta(
@@ -568,6 +637,7 @@ class AgentGraph:
             "source_results": [*state.get("source_results", []), source],
         }
 
+    @traced_component("SUPERVISOR")
     async def _supervisor_node(self, state: AgentGraphState) -> dict[str, Any]:
         meta = self._meta(
             state,
@@ -602,6 +672,7 @@ class AgentGraph:
         self._emit(meta, started, "SUCCESS")
         return {"phase": "DRAFTING", "current_draft": draft}
 
+    @traced_component("REVIEW_TOOL")
     async def _review_node(self, state: AgentGraphState) -> dict[str, Any]:
         attempt = state.get("revision_count", 0) + 1
         started = time.monotonic()
@@ -622,7 +693,17 @@ class AgentGraph:
                 source_results=state["source_results"],
                 supervisor_draft=state["current_draft"],
             )
-            result = await self._review_tool.review(subject)
+            # 모델이 쓴 사실·문장이 없는 첫 회차 판단은 코드 검사만 한다. 화면 문장은 검수된
+            # 절차 자료에서 코드가 만들고, Supervisor는 코드 후보 중 고르기만 한다.
+            code_only = (
+                state.get("info_used_model") is False
+                and state.get("revision_count", 0) == 0
+                and getattr(type(self._review_tool), "review_code_only", None) is not None
+            )
+            if code_only:
+                result = await self._review_tool.review_code_only(subject)
+            else:
+                result = await self._review_tool.review(subject)
         except Exception as exc:  # noqa: BLE001 - graph must fail closed
             if "meta" in locals():
                 self._emit(meta, started, "ERROR", exc)
@@ -639,6 +720,7 @@ class AgentGraph:
             started,
             "SUCCESS",
             review_verdict="PASS" if result.verdict == ReviewVerdict.PASS else "REVISE",
+            review_mode="CODE_ONLY" if code_only else "MODEL",
         )
         update: dict[str, Any] = {
             "phase": "REVIEWING",
@@ -648,7 +730,10 @@ class AgentGraph:
         }
         if result.verdict == ReviewVerdict.REVISE:
             revision_count = state.get("revision_count", 0)
-            if revision_count >= self._max_review_revisions:
+            if (
+                revision_count >= self._max_review_revisions
+                or self._supervisor_cannot_fix(result)
+            ):
                 # Keep the last Review's findings instead of dropping them.
                 # Without this the caller learns only that the run failed, not
                 # what would unblock it, and the reason for the verdict is gone.
@@ -878,6 +963,26 @@ class AgentGraph:
         return "supervisor"
 
     @staticmethod
+    def _supervisor_cannot_fix(result: ReviewResult) -> bool:
+        """blockers 목록과 그 안의 고정값은 Supervisor를 다시 돌려도 고칠 수 없다.
+
+        목록은 Supervisor 모델을 부르기 전에 같은 입력으로 코드가 정하고, 초안은 그 목록과
+        정확히 같아야 통과한다(candidate_decision_violations). 재작업해도 같은 목록이 나와
+        같은 이유로 반려된다. 하위 description 반려도 선택만 바꿔서는 수정할 수 없다.
+        """
+        blocking = [issue for issue in result.issues if issue.severity == "BLOCKING"]
+        return (
+            list(result.recommended_rework_targets) == [Component.SUPERVISOR]
+            and not result.missing_evidence
+            and bool(blocking)
+            and all(
+                issue.target_path == "/supervisor_draft/decision/blockers"
+                or issue.target_path.startswith("/supervisor_draft/decision/blockers/")
+                for issue in blocking
+            )
+        )
+
+    @staticmethod
     def _earliest_rework_target(targets: Sequence[Component]) -> Component:
         for component in (
             Component.PROCEDURE_TOOL,
@@ -1048,6 +1153,7 @@ class AgentGraph:
         exc: Exception | None = None,
         *,
         review_verdict: Literal["PASS", "REVISE"] | None = None,
+        review_mode: Literal["MODEL", "CODE_ONLY"] | None = None,
     ) -> None:
         counters = _REVIEW_TRACE_COUNTERS.get()
         if counters is not None and review_verdict is not None:
@@ -1065,6 +1171,7 @@ class AgentGraph:
             latency_ms=max(0, int((time.monotonic() - started) * 1000)),
             attempt=meta.attempt,
             review_verdict=review_verdict,
+            review_mode=review_mode,
             model=model,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,

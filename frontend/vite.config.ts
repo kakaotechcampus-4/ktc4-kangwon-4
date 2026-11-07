@@ -1,6 +1,6 @@
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
-import { defineConfig } from 'vitest/config'
+import { configDefaults, defineConfig } from 'vitest/config'
 
 /**
  * 배포된 화면은 서버를 `/api/...` 로 부르고 `vercel.json` 의 규칙이 서버로 넘긴다.
@@ -31,5 +31,7 @@ export default defineConfig({
     /** 화면을 렌더해 역할·상태로 찾는 테스트라 DOM이 필요하다 */
     environment: 'jsdom',
     setupFiles: ['./src/setupTests.ts'],
+    /** 브라우저 E2E(`e2e/`, Playwright)는 진짜 서버가 필요해서 `npm run test:e2e`로 따로 돈다 */
+    exclude: [...configDefaults.exclude, 'e2e/**'],
   },
 })

@@ -58,9 +58,15 @@ export function saveTokens(access: string, refresh: string): void {
 }
 
 /**
- * TODO(테스트): Refresh 토큰이 지워지는지는 지금 테스트로 못 잡는다 — 꺼내 보는 함수가
- * 없어서다. `/reissue`를 붙일 때 `getRefreshToken()`과 함께 테스트를 넣는다.
- * 남아 있으면 로그아웃한 사용자가 재발급으로 되살아난다.
+ * 로그인 토큰이 만료됐을 때 새로 받는 데 쓰는 값(`POST /reissue`, `lib/api.ts`).
+ * 가짜 세션은 이 값이 없어서 다시 받지 않는다.
+ */
+export function getRefreshToken(): string | null {
+  return refreshToken.read()
+}
+
+/**
+ * Refresh 토큰도 같이 지운다. 남아 있으면 로그아웃한 사용자가 다시 받기로 되살아난다.
  */
 export function logOut(): void {
   accessToken.write(null)
@@ -80,8 +86,8 @@ export function logInWithMock(): void {
 /**
  * 가짜 세션인지.
  *
- * TODO(API): 다음 PR에서 Case를 서버에 물을 때, 가짜 세션이면 서버를 부르지 않고
- * Mock 데이터를 쓴다. 지금 그대로 보내면 서버가 401로 돌려보낸다.
+ * 가짜 세션이면 서버를 부르지 않고 Mock 데이터를 쓴다(아래 `usesMockData`). 그대로 보내면
+ * 서버에 없는 사용자라 401로 돌아온다.
  */
 export function isMockSession(): boolean {
   return accessToken.read() === MOCK_TOKEN

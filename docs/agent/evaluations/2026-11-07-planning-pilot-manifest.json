@@ -1,0 +1,26 @@
+{
+  "recorded_date": "2026-11-07",
+  "synthetic_data": true,
+  "trial_file": "2026-11-07-planning-pilot-trials.jsonl",
+  "scope": "Local Agent runtime creation -> run_planning -> aclose. No HTTP intake, authentication, DB writes/requery, browser, document processing or support approval evaluation.",
+  "measurement_function_sha256": "d3f71f9fadb74e58828b50dd153c46eb8147b4fe878d2bec4372b9e4b30035ce",
+  "shared_sources": {"procedure_snapshot_version":"cafe-official-sources/2026-11-04-reviewed1","procedure_file_sha256":"sha256:2da204f302d2fd177000f00fa1957d881664b623f790d162c1e7fbd08bf04c7a","procedure_registry_count":8,"procedure_registry_sha256":"sha256:719f5daa4e0fc7ce7553420244b24b75e59c8d6bafd3f00bc286abaad5ccefa6","support_catalog_version":"evaluate-planning/no-reviewed-support-data","support_program_count":0},
+  "current_recorded_configured_models": {"shared":"gpt-6.1-sol","supervisor":"gpt-6-luna","info":"gpt-6.1-sol"},
+  "current_recorded_configured_efforts": {"shared":"xhigh","supervisor":"high","info":"high"},
+  "baseline_observed_role_settings": {"info":{"model":"gpt-6.1-sol","reasoning_effort":"high","schema_name":"reborn_info_analysis"},"supervisor":{"model":"gpt-6-luna","reasoning_effort":"high","schema_name":"reborn_supervisor_draft"},"shared":{"model":"gpt-6.1-sol","reasoning_effort":"xhigh","schema_name":"reborn_review_output"}},
+  "baseline_effort_evidence": "Derived from original calls and provider_usage, not from a missing configured_efforts field in the old manifest.",
+  "registry_scope": "LOCAL_TEST_IDS_NOT_PERSISTED; same build_registry source bytes in both versions; does not represent all BE master dependencies.",
+  "preflight_checks": {"graph_input_digests":true,"configured_models":true,"configured_efforts":true,"procedure_file_sha256":true,"procedure_snapshot_version":true,"procedure_registry_count":true,"trial_source_identical":true,"build_registry_source_identical":true},
+  "runs": [
+    {"run_label":"current_first_cap1","code_version":{"git_commit":"7c854b75bc2481029a1312910ea843d7965a3b58","uncommitted_changes":false,"code_sha256":"sha256:1347404013f08bf983eb84a3bffb38d4b3cb27e9d5370e3d8fbc9ad4789a6146"},"limits":{"max_llm_calls_per_run":1,"run_deadline_seconds":420.0},"graph_input_digest":"sha256:530c935e123e4261f2c97f499229830aa5dc4d04b2e26a6a9333e2e55b7ca394","trial_sha256":"6efa885020b0c9d9fdd4e0bebf7525da89ac58fbf462312f9239f83fdec2ee17"},
+    {"run_label":"before_first_matched_cap3","code_version":{"git_commit":"2ece7086f7b62488be0268c9c9ca9f86c7325d6c","uncommitted_changes":false},"limits":{"max_llm_calls_per_run":3,"run_deadline_seconds":420.0},"graph_input_digest":"sha256:530c935e123e4261f2c97f499229830aa5dc4d04b2e26a6a9333e2e55b7ca394","trial_sha256":"0f548ebb6ef5d7d0411575233be9467befc2b07259a5f73570573e27bcebf196"},
+    {"run_label":"current_first_matched_cap3","code_version":{"git_commit":"7c854b75bc2481029a1312910ea843d7965a3b58","uncommitted_changes":false,"code_sha256":"sha256:1347404013f08bf983eb84a3bffb38d4b3cb27e9d5370e3d8fbc9ad4789a6146"},"limits":{"max_llm_calls_per_run":3,"run_deadline_seconds":420.0},"graph_input_digest":"sha256:530c935e123e4261f2c97f499229830aa5dc4d04b2e26a6a9333e2e55b7ca394","trial_sha256":"be4967b82aa01f2d2650a4f1edf5a8a95b8214a0e4ef4d7bfccea88dc985da5c"},
+    {"run_label":"current_free_F01_cap3","code_version":{"git_commit":"7c854b75bc2481029a1312910ea843d7965a3b58","uncommitted_changes":false,"code_sha256":"sha256:1347404013f08bf983eb84a3bffb38d4b3cb27e9d5370e3d8fbc9ad4789a6146"},"limits":{"max_llm_calls_per_run":3,"run_deadline_seconds":420.0},"graph_input_digest":"sha256:473a332ed3afcafcea0a3b13ec765f5bc36b74e1110136dddcba19956e9eef32","trial_sha256":"521151df0dab49b0fa8bc17f96a1ef8ef77754d29fae2231104631da746433ae"}
+  ],
+  "matched_pair_checks": {"labels":["before_first_matched_cap3","current_first_matched_cap3"],"same_input_digest":true,"same_full_next_action":true,"same_blocker_digest":true,"same_fact_changes":true,"same_limits":true},
+  "actual_provider_calls": 8,
+  "estimated_total_cost_krw": 495.515841,
+  "cost_basis": {"currency":"KRW","rate_unit":"per 1000000 tokens","columns":["input","cached_input","output"],"user_provided_rates":{"gpt-6.1-sol":[2835,141,14175],"gpt-6-luna":[141,14,708]},"method":"(input-cached)*input_rate + cached*cached_rate + output*output_rate; reasoning is a subset of output; usage-based estimate, not invoice reconciliation."},
+  "sample_size_caveats": ["Matched first-plan comparison is one run per version, capped at 3 provider requests each; not a population p95 or service-wide performance claim.","Initial current_first_cap1 is separate because its per-run call cap is 1.","Current free F01 is a different input path and is not pooled into first-plan timing.","The held-out dataset and full quality evaluation have not run in these pilot records."],
+  "privacy_scan": "Exact secret/prompt/endpoint key scan plus local private credential value scan passed before preparing these proposed files."
+}

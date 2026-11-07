@@ -146,6 +146,8 @@ class AgentFieldKey(StrEnum):
     RESTORATION_SCOPE_DETAIL = "restoration_scope_detail"
     DEMOLITION_REQUIRED = "demolition_required"
     PLANNED_CLOSURE_DATE = "planned_closure_date"
+    # 정확한 날짜를 아직 못 정했을 때의 예상 달("YYYY-MM"). 가게 등록 때만 받고 AI 대화로는 저장하지 않는다.
+    PLANNED_CLOSURE_MONTH = "planned_closure_month"
 
 
 class FactValueType(StrEnum):
@@ -226,6 +228,7 @@ CASE_FIELD_SPECS: dict[AgentFieldKey, tuple[FactValueType, frozenset[str] | None
         frozenset({"REQUIRED", "NOT_REQUIRED"}),
     ),
     AgentFieldKey.PLANNED_CLOSURE_DATE: (FactValueType.DATE, None),
+    AgentFieldKey.PLANNED_CLOSURE_MONTH: (FactValueType.STRING, None),
 }
 
 REQUIRED_CASE_FIELDS = frozenset(
@@ -279,6 +282,8 @@ def validate_case_field_value(
             and re.fullmatch(r"\d{4}-\d{2}-\d{2}", value) is not None
             and _is_iso_date(value)
         )
+    elif field_path == AgentFieldKey.PLANNED_CLOSURE_MONTH:
+        valid = type(value) is str and re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", value) is not None
     else:
         valid = type(value) is str and bool(value.strip())
 
@@ -300,6 +305,13 @@ def _is_iso_date(value: str) -> bool:
     except ValueError:
         return False
     return True
+
+
+def case_field_values_equal(field_path: AgentFieldKey, left: StrictScalar, right: StrictScalar) -> bool:
+    """Preserve typed equality while accepting DATE's Python/JSON representations."""
+    if CASE_FIELD_SPECS[field_path][0] == FactValueType.DATE:
+        return str(left) == str(right)
+    return type(left) is type(right) and left == right
 
 
 def validate_restoration_state(statuses: dict[AgentFieldKey, FactStatus]) -> None:
@@ -423,10 +435,11 @@ class CaseSnapshot(AgentSchema):
     snapshot_id: RuntimeUUID = Field(
         description=(
             "Caller-issued identity of the Case read view used for this planning run "
-            "and its review proof. Conflict confirmation must match the original "
-            "candidate's snapshot ID and current field state/value; a mismatch causes "
-            "STALE_CONFLICT_CONFIRMATION. How the caller stores and reuses this ID "
-            "and the conflict candidate is a separate integration decision."
+            "and its review proof. Conflict confirmation must be built with the stored "
+            "ConflictOutcome.snapshot_id, and a batch confirmation must also match the "
+            "stored conflict_snapshot state (every field except snapshot_id and "
+            "captured_at; list order and fractions of a second are ignored); a mismatch "
+            "causes STALE_CONFLICT_CONFIRMATION. Every other run takes a newly issued ID."
         )
     )
     case_id: PositiveStrictInt
@@ -912,6 +925,27 @@ class ConflictCandidate(AgentSchema):
         return handler(self)
 
 
+class RestorationAnswer(AgentSchema):
+    """사장님이 직접 고른 값. 법적 판단이나 철거 여부를 추론하지 않는다."""
+
+    restoration_scope: Literal["FULL", "PARTIAL", "NOT_REQUIRED", "UNKNOWN"]
+    demolition_required: Literal["REQUIRED", "NOT_REQUIRED", "UNKNOWN"]
+
+    def to_input_text(self) -> str:
+        scope = {
+            "FULL": "원상복구 범위는 전부입니다.",
+            "PARTIAL": "원상복구 범위는 일부입니다.",
+            "NOT_REQUIRED": "원상복구는 필요하지 않습니다.",
+            "UNKNOWN": "원상복구 범위는 아직 확인하지 못했습니다.",
+        }
+        demolition = {
+            "REQUIRED": "철거가 필요합니다.",
+            "NOT_REQUIRED": "철거가 필요하지 않습니다.",
+            "UNKNOWN": "철거 필요 여부는 아직 확인하지 못했습니다.",
+        }
+        return scope[self.restoration_scope] + "\n" + demolition[self.demolition_required]
+
+
 class InfoAnalysisInput(AgentSchema):
     """Complete request schema accepted by ``InfoAnalysisAgent.analyze``."""
 
@@ -921,9 +955,12 @@ class InfoAnalysisInput(AgentSchema):
             "a confirmed conflict without extracting new facts."
         )
     )
+    # 없던 칸을 null로 직렬화하면 과거 검수·충돌 기록의 지문이 달라진다.
+    restoration_answer: RestorationAnswer | None = Field(default=None, exclude_if=lambda value: value is None)
     case_snapshot: CaseSnapshot = Field(
         description="Immutable Case read view used as the analysis baseline."
     )
+    conflict_confirmation: ConflictConfirmedTrigger | None = None
     fact_overlays: list[FactChangeCandidate] = Field(
         default_factory=list,
         description="Uncommitted confirmed changes used to assess procedure relevance.",
@@ -953,14 +990,40 @@ class InfoAnalysisInput(AgentSchema):
 
     @model_validator(mode="after")
     def validate_input(self) -> InfoAnalysisInput:
-        if self.input is None and (
-            not self.fact_overlays
-            or any(
-                item.source_type != FactChangeSourceType.CONFIRMED_CONFLICT
-                for item in self.fact_overlays
+        if self.restoration_answer is not None and (
+            self.input is None or self.conflict_confirmation is not None
+            or self.input.source_type != InputSourceType.USER_INPUT
+            or self.input.redacted_text != self.restoration_answer.to_input_text()
+        ):
+            raise ValueError("restoration answer requires its exact USER_INPUT text")
+        if self.conflict_confirmation is not None:
+            if self.input is not None:
+                raise ValueError("confirmation must not replay the rejected user text")
+            accepted = {
+                item.conflict_ref for item, selected in self.conflict_confirmation.choices()
+                if selected
+            }
+            confirmed = [item for item in self.fact_overlays
+                         if item.source_type == FactChangeSourceType.CONFIRMED_CONFLICT]
+            if {item.confirmed_conflict_ref for item in confirmed} != accepted:
+                raise ValueError("Info overlays must equal accepted conflict choices")
+            source = self.conflict_confirmation.retained_info_result
+            retained = {} if source is None else {item.candidate_id: item for item in source.output.fact_candidates}
+            for item in self.fact_overlays:
+                if item.source_type == FactChangeSourceType.CONFIRMED_CONFLICT:
+                    continue
+                candidate = retained.get(item.source_fact_candidate_id)
+                if (candidate is None or candidate.requires_confirmation
+                        or item.source_type != FactChangeSourceType.INFO_ANALYSIS
+                        or item.field_path != candidate.field_path
+                        or item.proposed_value != candidate.value):
+                    raise ValueError("confirmation cannot introduce new Info facts")
+        elif self.input is None and (
+            not self.fact_overlays or any(
+                item.source_type != FactChangeSourceType.CONFIRMED_CONFLICT for item in self.fact_overlays
             )
         ):
-            raise ValueError("Info without input requires confirmed-conflict overlays")
+            raise ValueError("Info without input requires conflict confirmation")
         if self.fact_overlays:
             PlanningContext(
                 case_snapshot=self.case_snapshot, fact_overlays=self.fact_overlays
@@ -972,10 +1035,9 @@ class InfoAnalysisInput(AgentSchema):
             for overlay in self.fact_overlays:
                 current = facts.get(overlay.field_path)
                 if (
-                    current is None
-                    or current.status != overlay.before_status
-                    or type(current.value) is not type(overlay.before_value)
-                    or current.value != overlay.before_value
+                    (FactStatus.UNKNOWN if current is None else current.status) != overlay.before_status
+                    or not case_field_values_equal(overlay.field_path,
+                                                   None if current is None else current.value, overlay.before_value)
                 ):
                     raise ValueError(
                         "Info overlay before state must match its snapshot"
@@ -1791,6 +1853,7 @@ class CaseCreatedTrigger(AgentSchema):
 
 class ResultSubmittedTrigger(AgentSchema):
     trigger_type: Literal["RESULT_SUBMITTED"]
+    restoration_answer: RestorationAnswer | None = Field(default=None, exclude_if=lambda value: value is None)
     procedure_completion_confirmation: ProcedureCompletionConfirmation | None = None
     input_event_id: NonEmptyStr
     client_event_id: NonEmptyStr | None = Field(
@@ -1806,6 +1869,12 @@ class ResultSubmittedTrigger(AgentSchema):
     def validate_event(self) -> ResultSubmittedTrigger:
         if self.input.input_event_id != self.input_event_id:
             raise ValueError("trigger and input event IDs must match")
+        if self.restoration_answer is not None and (
+            self.input.source_type != InputSourceType.USER_INPUT
+            or self.input.redacted_text != self.restoration_answer.to_input_text()
+            or self.procedure_completion_confirmation is not None
+        ):
+            raise ValueError("restoration answer requires its exact USER_INPUT text only")
         if (
             self.procedure_completion_confirmation is not None
             and self.procedure_completion_confirmation.input.input_event_id == self.input_event_id
@@ -1814,18 +1883,41 @@ class ResultSubmittedTrigger(AgentSchema):
         return self
 
 
-class ConflictConfirmedTrigger(AgentSchema):
-    """User chose which of two conflicting values for one Case field holds.
+class DocumentSubmittedTrigger(AgentSchema):
+    """사장님이 서류를 올린 뒤 다시 판단한다.
 
-    The confirmed candidate is restored by the caller from its own stored
-    conflict record, not resent by the client.  That is what makes this safe:
-    a client cannot use a confirmation to write an arbitrary field or value,
-    only to accept a proposal the Agent itself produced earlier.
-
-    The confirmed value still goes through Review like any other change. A
-    user saying "yes" settles which value was meant; it does not make the
-    resulting plan correct.
+    input.redacted_text는 서류에서 꺼낸 값의 원문 요약(document_tool.models.document_input_text)이다.
+    근거 종류는 USER_INPUT으로 남긴다. 이 코드에서 OFFICIAL_DOCUMENT는 절차 조회에 쓰는
+    기관 안내 문서이고 금액·기한 문구를 허용하는 근거라서, 사장님이 올린 서류를 섞지 않는다.
     """
+
+    trigger_type: Literal["DOCUMENT_SUBMITTED"]
+    input_event_id: NonEmptyStr
+    client_event_id: NonEmptyStr | None = Field(
+        description=(
+            "Client-provided event ID, distinct from input_event_id. Use null when "
+            "absent; this field does not implement duplicate-request prevention."
+        )
+    )
+    input: RedactedInput
+    submitted_at: AwareDatetime
+
+    @model_validator(mode="after")
+    def validate_event(self) -> DocumentSubmittedTrigger:
+        if self.input.input_event_id != self.input_event_id:
+            raise ValueError("trigger and input event IDs must match")
+        if self.input.source_type != InputSourceType.USER_INPUT:
+            raise ValueError("document input is recorded as USER_INPUT")
+        return self
+
+
+class ConflictSelection(AgentSchema):
+    conflict_ref: NonEmptyStr
+    accepted: StrictBool
+
+
+class ConflictConfirmedTrigger(AgentSchema):
+    """Accept one legacy proposal or choose new/existing values for a whole batch."""
 
     trigger_type: Literal["CONFLICT_CONFIRMED"]
     input_event_id: NonEmptyStr
@@ -1835,16 +1927,82 @@ class ConflictConfirmedTrigger(AgentSchema):
             "absent; this field does not implement duplicate-request prevention."
         )
     )
-    confirmed_conflict: ConflictCandidate = Field(
-        description="The original conflict candidate the user accepted."
+    confirmed_conflict: ConflictCandidate | None = Field(
+        default=None,
+        description=(
+            "Legacy single acceptance. It checks only the snapshot ID and the conflicted "
+            "field, so once the stored snapshot ID is reused it cannot notice other Case "
+            "changes. Use conflicts, selections and conflict_snapshot even for one conflict."
+        ),
+    )
+    conflicts: list[ConflictCandidate] = Field(
+        default_factory=list,
+        description="Batch only: the stored ConflictOutcome.conflicts, unchanged.",
+    )
+    selections: list[ConflictSelection] = Field(
+        default_factory=list,
+        description=(
+            "Batch only: exactly one choice per conflict; accepted=true uses the new "
+            "value, false keeps the existing one."
+        ),
+    )
+    conflict_snapshot: CaseSnapshot | None = Field(
+        default=None,
+        description=(
+            "Batch only: the stored ConflictOutcome.conflict_snapshot, unchanged. "
+            "The request's case_snapshot must carry its snapshot_id and equal state."
+        ),
+    )
+    retained_info_result: RetainedInfoResult | None = Field(
+        default=None, description="Stored non-conflicting Info facts/progress; BE restores this from its saved outcome, never client input."
     )
     confirmed_at: AwareDatetime = Field(
         description="When the user confirmed; used as the planning as-of date."
     )
 
+    @model_validator(mode="after")
+    def validate_choices(self) -> ConflictConfirmedTrigger:
+        if self.confirmed_conflict is not None:
+            if (self.conflicts or self.selections or self.conflict_snapshot is not None
+                    or self.retained_info_result is not None):
+                raise ValueError("use either the legacy acceptance or a complete batch")
+            return self
+        if not self.conflicts or not self.selections or self.conflict_snapshot is None:
+            raise ValueError("batch confirmation requires candidates, choices and baseline")
+        _ensure_unique(self.conflicts, lambda item: item.conflict_ref, "conflict_ref")
+        _ensure_unique(self.conflicts, lambda item: item.candidate_id, "conflict candidate_id")
+        _ensure_unique(self.conflicts, lambda item: item.field_path, "conflict field_path")
+        _ensure_unique(self.selections, lambda item: item.conflict_ref, "selection conflict_ref")
+        if {item.conflict_ref for item in self.conflicts} != {item.conflict_ref for item in self.selections}:
+            raise ValueError("every stored conflict needs exactly one choice")
+        for conflict in self.conflicts:
+            conflict.assert_integrity()
+            if conflict.snapshot_id != self.conflict_snapshot.snapshot_id:
+                raise ValueError("conflict batch must share its stored baseline")
+        if self.retained_info_result is not None:
+            source = self.retained_info_result
+            if not isinstance(source.output, InfoAnalysisResult):
+                raise ValueError("retained result must be Info analysis")
+            info = source.output
+            if (info.based_on_snapshot_id != self.conflict_snapshot.snapshot_id
+                    or source.meta.case_id != self.conflict_snapshot.case_id
+                    or any(item.source_call_id != source.meta.call_id for item in self.conflicts)):
+                raise ValueError("retained Info must belong to the original conflict batch")
+            if (info.conflicts or info.procedure_findings or info.missing_fields
+                    or info.question_candidates or info.uncertainties
+                    or {f.field_path for f in info.fact_candidates} & {c.field_path for c in self.conflicts}):
+                raise ValueError("retain only non-conflicting facts and progress, not old procedure analysis")
+        return self
+
+    def choices(self) -> list[tuple[ConflictCandidate, bool]]:
+        if self.confirmed_conflict is not None:
+            return [(self.confirmed_conflict, True)]
+        selected = {item.conflict_ref: item.accepted for item in self.selections}
+        return [(item, selected[item.conflict_ref]) for item in self.conflicts]
+
 
 RunTrigger: TypeAlias = Annotated[
-    CaseCreatedTrigger | ResultSubmittedTrigger | ConflictConfirmedTrigger,
+    CaseCreatedTrigger | ResultSubmittedTrigger | DocumentSubmittedTrigger | ConflictConfirmedTrigger,
     Field(discriminator="trigger_type"),
 ]
 
@@ -1947,6 +2105,12 @@ class ReviewSourceResult(AgentSchema):
         if self.output_digest != canonical_digest(self.output):
             raise ValueError("source output_digest does not match output")
         return self
+
+
+class RetainedInfoResult(ReviewSourceResult):
+    """Validated facts/progress and their original redacted input; never re-extracted."""
+
+    input: RedactedInput
 
 
 class SupervisorAgentInput(AgentSchema):
@@ -2257,6 +2421,9 @@ class ConflictOutcome(AgentSchema):
     outcome_type: Literal["CONFLICT"] = Field(
         description="Discriminator for confirmed-Case fact conflicts."
     )
+    retained_info_result: RetainedInfoResult | None = Field(
+        default=None, description="Non-conflicting facts/progress to persist and return unchanged on confirmation."
+    )
     run_id: RuntimeUUID = Field(
         description="Graph run identifier that produced these conflicts."
     )
@@ -2277,7 +2444,19 @@ class ConflictOutcome(AgentSchema):
         ),
     ]
     evidence_records: list[EvidenceRecord] = Field(
-        description="Conflict source evidence and its parents to retain for confirmation."
+        description=(
+            "Conflict source evidence and its parents. BE saves the rows its table lacks "
+            "with every field unchanged (including freshness_status); if a time column "
+            "drops fractions of a second it must truncate, not round. The Case rebuilt "
+            "at confirmation must then equal conflict_snapshot."
+        )
+    )
+    conflict_snapshot: CaseSnapshot = Field(
+        description=(
+            "Case state the conflicts were found against, with the conflict evidence "
+            "already merged in. BE stores it whole and returns it unchanged as "
+            "ConflictConfirmedTrigger.conflict_snapshot."
+        )
     )
     message_code: Literal["CONFIRM_CONFLICT"] = Field(
         description="Caller instruction to request explicit user confirmation."
@@ -2285,6 +2464,12 @@ class ConflictOutcome(AgentSchema):
 
     @model_validator(mode="after")
     def validate_conflicts(self) -> ConflictOutcome:
+        if self.retained_info_result is not None:
+            source = RetainedInfoResult.model_validate(self.retained_info_result.model_dump(mode="python"))
+            if (not isinstance(source.output, InfoAnalysisResult)
+                    or source.meta.run_id != self.run_id or source.meta.case_id != self.case_id
+                    or source.output.based_on_snapshot_id != self.snapshot_id):
+                raise ValueError("retained Info result must match its conflict outcome")
         _ensure_unique(self.conflicts, lambda item: item.conflict_ref, "conflict_ref")
         _ensure_unique(self.conflicts, lambda item: item.candidate_id, "candidate_id")
         _ensure_unique(
@@ -2300,9 +2485,21 @@ class ConflictOutcome(AgentSchema):
         }
         if referenced - known_evidence:
             raise ValueError("conflict outcome contains unresolved evidence refs")
+        baseline = self.conflict_snapshot
+        if baseline.case_id != self.case_id or baseline.snapshot_id != self.snapshot_id:
+            raise ValueError("conflict snapshot must match its outcome Case and snapshot ID")
+        stored = {item.evidence_id: item for item in baseline.evidence_records}
+        if any(stored.get(item.evidence_id) != item for item in self.evidence_records):
+            raise ValueError("conflict evidence must be retained unchanged in its snapshot")
         for conflict in self.conflicts:
+            conflict.assert_integrity()
             if conflict.snapshot_id != self.snapshot_id:
                 raise ValueError("conflict does not match outcome snapshot")
+            current = next((item for item in baseline.facts if item.field_path == conflict.field_path), None)
+            if current is None or current.status != conflict.committed_status or not case_field_values_equal(
+                conflict.field_path, current.value, conflict.committed_value,
+            ):
+                raise ValueError("conflict committed value must match its stored snapshot")
         return self
 
 
@@ -2428,8 +2625,10 @@ def _model_field_values(
     excluded = exclude or set()
     return {
         field_name: getattr(value, field_name)
-        for field_name in type(value).model_fields
+        for field_name, field in type(value).model_fields.items()
         if field_name not in excluded
+        # 새 선택값이 없는 과거 입력은 직렬화뿐 아니라 검수 지문에서도 같은 모양이다.
+        and not (field.exclude_if is not None and field.exclude_if(getattr(value, field_name)))
     }
 
 
@@ -2476,6 +2675,7 @@ __all__ = [
     "ConflictCandidate",
     "ConflictConfirmedTrigger",
     "ConflictOutcome",
+    "ConflictSelection",
     "ContentHash",
     "CriterionStatus",
     "DecisionAuthority",
@@ -2483,6 +2683,7 @@ __all__ = [
     "DecisionType",
     "Digest",
     "DiscoverSupportInput",
+    "DocumentSubmittedTrigger",
     "EvidenceRecord",
     "EvidenceSourceType",
     "FactCandidate",
@@ -2510,6 +2711,7 @@ __all__ = [
     "NonNullStrictScalar",
     "PlanningContext",
     "ProcedureActionTarget",
+    "ProcedureCompletionConfirmation",
     "ProcedureCompletionStatus",
     "ProcedureDependency",
     "ProcedureEligibility",
@@ -2521,7 +2723,6 @@ __all__ = [
     "ProcedureProgress",
     "ProcedureProgressChangeCandidate",
     "ProcedureProgressObservation",
-    "ProcedureCompletionConfirmation",
     "ProcedureProgressStatus",
     "ProcedureRelevance",
     "ProcedureSourceDocument",
@@ -2533,6 +2734,8 @@ __all__ = [
     "RedactionType",
     "RequiredDocument",
     "ResultSubmittedTrigger",
+    "RestorationAnswer",
+    "RetainedInfoResult",
     "ReviewIssue",
     "ReviewIssueCode",
     "ReviewProof",
@@ -2568,6 +2771,7 @@ __all__ = [
     "Varchar500",
     "VerifiedTextSpan",
     "canonical_digest",
+    "case_field_values_equal",
     "validate_case_field_value",
     "validate_procedure_registry",
     "validate_restoration_state",

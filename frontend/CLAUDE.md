@@ -3,8 +3,8 @@
 폐업을 결심한 임차형 소상공인의 Closure Case를 관리하는 Agent 서비스.
 **FE는 서버가 판단한 Blocker와 Next Action을 보여주는 표면이다.**
 
-> 팀 공통 규칙(하지 않는 것 · 역할 경계 · 개인정보 · 용어)은 레포 루트 `CLAUDE.md`에 둔다.
-> 아직 작성 전이라 아래 "핵심 루프"를 임시로 여기 둔다. 루트가 생기면 옮긴다.
+> 팀 공통 규칙(Claude 작업 방식 · 계약 · PR · 소통)은 레포 루트 `CLAUDE.md`에 있다.
+> 아래 "핵심 루프"는 루트에 없어서 여기 둔다. 화면이 루프의 어느 단계를 보여주는지 정할 때 쓴다.
 
 ## 핵심 루프
 
@@ -22,10 +22,14 @@ Case 생성 → Blocker 1개 판정 → Next Action 1개 제시
   `@tailwindcss/vite` 플러그인과 `src/index.css`의 `@import "tailwindcss";` 로 동작한다.
   3버전 방식(`tailwind.config.js`, `@tailwind base;`)을 쓰지 않는다
 - 통신 **Fetch API** — axios 등 HTTP 클라이언트를 추가하지 않는다
-- 상태관리는 **React 내장**(`useState` / `useContext`). 외부 상태 라이브러리를 도입하지 않는다
-- **Mobile-first** 반응형. 좁은 쪽 기준은 375px, 기본 컨테이너는 `max-w-md`(약 448px)다.
-  넓은 화면에서 2단으로 나눌 내용이 있는 화면만 `AppShell` 의 `width="wide"` 를 쓴다
-  (지금은 `/case`). 폼처럼 한 줄로 읽는 화면은 넓혀도 읽기 어려워지기만 한다
+- 상태관리는 **React 내장**(`useState` / `useContext`)이 기본이다. 서버 데이터(Case, 판단 결과)는
+  서버에 다시 묻고 전역에 들고 있지 않는다. **화면 여러 장에 걸쳐 이어지는 사용자의 답·선택만**
+  **Zustand**(`src/stores/`)에 둔다 — 지금은 상황 진단 답(`useDiagnosisStore`) 하나다.
+  처음엔 전역 상태가 없어 넣지 않았는데, 진단이 `?step=` 여러 장으로 나뉘고 새로고침에도 답이
+  남아야 해서 넣었다(상황 진단 온보딩, 11/03). 새로 넣을 때도 "여러 화면이 같은 사용자 입력을 보는가"를 먼저 묻는다
+- **Mobile-first** 반응형. 좁은 쪽 기준은 375px, 화면 틀은 시안 기기 폭 402px
+  (`screen-frame mx-auto max-w-[402px]`)다. 넓은 화면에서도 넓히거나 2단으로 나누지 않고 가운데에 둔다.
+  화면 틀(`screen-frame`)은 화면마다 하나다 — 화면 이동 움직임이 이 틀만 옮긴다(`docs/ui-guidelines.md` "움직임")
 
 현재 설치된 패키지와 버전, 실행 방법은 `README.md`를 본다.
 
@@ -44,21 +48,18 @@ Case 생성 → Blocker 1개 판정 → Next Action 1개 제시
    어느 쪽도 기본 선택으로 두지 않는다.
 
    *(정상 경로에는 확인 단계가 없다. `UPDATED` 응답은 서버가 이미 반영을 마친
-   결과이므로 프론트가 되물을 수 있는 시점이 아니다. "후보 제시 → 확인 → 반영"
-   2단계로 갈지는 BE 계약 확인이 필요하다 — `docs/be-agent-integration-requirements.md`
-   §4의 P0 결정 목록에 미확정으로 올라 있다.)*
+   결과이므로 프론트가 되물을 수 있는 시점이 아니다. 사장님 확인은 서버가 기존 값과
+   어긋난다고 본 경우(`CONFLICT`)에만 받는다 — 고른 쪽으로 서버가 다시 판단해 저장한다
+   (#108, `POST /cases/results/decision`, `backend/app/be/services/conflict_decision.py`).)*
 
-4. **`result` 7종을 전부 분기한다. 미처리 분기를 남기지 않는다.**
-   `UPDATED` / `NO_CHANGE` / `NEEDS_MORE_INFO` / `CONFLICT` /
-   `INVALID_TRANSITION` / `REPLAN_FAILED` / `CASE_NOT_FOUND`
-   응답 타입은 discriminated union으로 정의해 컴파일 단계에서 누락이 잡히게 한다.
+4. **판단 결과 `result` 6종을 전부 분기한다. 미처리 분기를 남기지 않는다.**
+   `PENDING` / `UPDATED` / `NO_CHANGE` / `NEEDS_MORE_INFO` / `CONFLICT` / `FAILED`
+   (`types/api.ts`의 `ResultsSubmitResult`). 응답 타입은 discriminated union으로 정의해
+   컴파일 단계에서 누락이 잡히게 한다. `FAILED`는 `recovery_action_code`로 한 번 더 가른다.
 
-   **이 목록은 확정 전이다.** `docs/be-agent-integration-requirements.md` §6.3이
-   `CONFLICT`를 200 또는 409로 두고 `VERSION_CONFLICT`·`SAFE_FAILURE`를 후보로
-   추가했다. 409가 확정되면 아래 "본문으로 분기한다"도 함께 다시 본다.
-
-   **`res.ok`가 아니라 본문의 `result`로 분기한다.** 검증 실패도 HTTP 200으로
-   오고, 404는 `CASE_NOT_FOUND`뿐이다.
+   **판단 결과는 본문의 `result`로, 요청이 받아들여졌는지는 HTTP 상태로 가른다.**
+   401은 로그인 만료, 404는 Case나 그 판단 번호가 없다는 것, 409는 화면이 아는 판단이
+   낡았다는 것(더 새로운 판단·처리 중인 제출·미결 충돌)이다.
 
 5. **한 화면에서 강하게 강조하는 것은 Next Action 하나다.**
    Blocker는 그 이유를 설명하는 보조 정보로 둔다. 주요 버튼도 화면당 하나다.
@@ -78,7 +79,7 @@ Case 생성 → Blocker 1개 판정 → Next Action 1개 제시
 
 8. **정상 화면과 예외 화면을 같은 작업 단위에서 만든다.**
    정상 화면만 먼저 만들고 예외를 나중에 붙이지 않는다.
-   어떤 예외가 있는지는 루트 `docs/hero-scenario.md`에 정리한다(작성 예정).
+   어떤 예외가 있는지는 루트 `docs/hero-scenario.md`에 정리한다.
 
 9. **확정되지 않은 API 필드를 임의로 타입에 추가하지 않는다.**
    optional로 만들어 두면 실제 응답이 비어 있어도 조용히 넘어가 버그를 숨긴다.
@@ -118,4 +119,5 @@ Case 생성 → Blocker 1개 판정 → Next Action 1개 제시
 
 - `README.md` — 설치·실행·현재 기술 구성
 - `docs/ui-guidelines.md` — 디자인 토큰과 UI 기준
-- 화면 흐름 · API 스펙 · 데이터 모델 → 레포 루트 `docs/` (작성 예정)
+- 화면 흐름 → 레포 루트 `docs/hero-scenario.md`, 데이터 모델 → `docs/schema/`,
+  API 스펙 → 서버가 코드에서 만드는 OpenAPI(`/openapi.json`)

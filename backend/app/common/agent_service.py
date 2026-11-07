@@ -13,7 +13,7 @@ from app.agent.action_catalog import ProcedureBindings
 from app.agent.guardrails import ensure_no_sensitive_text
 from app.agent.procedure_tool.store import ReviewedProcedureStore
 from app.agent.runtime import RuntimeLimits, build_runtime
-from app.agent.schemas import KnownProcedureStep
+from app.agent.schemas import ConflictSelection, KnownProcedureStep, RetainedInfoResult
 from app.agent.support_agent import ReviewedSupportCatalog
 from app.common.agent_dto import (
     AgentGraphInput,
@@ -22,9 +22,11 @@ from app.common.agent_dto import (
     CaseSnapshot,
     ConflictCandidate,
     ConflictConfirmedTrigger,
+    DocumentSubmittedTrigger,
     ProcedureCompletionConfirmation,
     RedactedInput,
     ResultSubmittedTrigger,
+    RestorationAnswer,
 )
 
 __all__ = [
@@ -34,14 +36,23 @@ __all__ = [
 ]
 
 
+# 서류를 올렸을 때는 document_tool.models.document_input_text로 만든 글을 user_input에 담는다.
+_INPUT_TRIGGERS = {
+    "CASE_CREATED": CaseCreatedTrigger,
+    "RESULT_SUBMITTED": ResultSubmittedTrigger,
+    "DOCUMENT_SUBMITTED": DocumentSubmittedTrigger,
+}
+
+
 def build_planning_input(
     *,
-    trigger_type: Literal["CASE_CREATED", "RESULT_SUBMITTED"],
+    trigger_type: Literal["CASE_CREATED", "RESULT_SUBMITTED", "DOCUMENT_SUBMITTED"],
     case_snapshot: CaseSnapshot,
     user_input: RedactedInput,
     client_event_id: str | None = None,
     trace_id: str | None = None,
     procedure_completion_confirmation: ProcedureCompletionConfirmation | None = None,
+    restoration_answer: RestorationAnswer | None = None,
 ) -> AgentGraphInput:
     """Use the persisted input event's ID/time, not invented run-time values.
 
@@ -51,18 +62,20 @@ def build_planning_input(
     string.  Email, address, name and bank account are not checked, so BE must
     still redact them before calling.
     """
-    if trigger_type not in {"CASE_CREATED", "RESULT_SUBMITTED"}:
-        raise ValueError("input trigger must be CASE_CREATED or RESULT_SUBMITTED")
+    if trigger_type not in _INPUT_TRIGGERS:
+        raise ValueError("input trigger must be CASE_CREATED, RESULT_SUBMITTED or DOCUMENT_SUBMITTED")
     ensure_no_sensitive_text([user_input.redacted_text])
     confirmation_fields = {}
+    if restoration_answer is not None:
+        if trigger_type != "RESULT_SUBMITTED":
+            raise ValueError("restoration answer requires RESULT_SUBMITTED")
+        confirmation_fields["restoration_answer"] = restoration_answer
     if procedure_completion_confirmation is not None:
         if trigger_type != "RESULT_SUBMITTED":
             raise ValueError("completion confirmation requires RESULT_SUBMITTED")
         ensure_no_sensitive_text([procedure_completion_confirmation.input.redacted_text])
         confirmation_fields["procedure_completion_confirmation"] = procedure_completion_confirmation
-    trigger_model = (
-        CaseCreatedTrigger if trigger_type == "CASE_CREATED" else ResultSubmittedTrigger
-    )
+    trigger_model = _INPUT_TRIGGERS[trigger_type]
     return AgentGraphInput.model_validate({
         "trigger": trigger_model(
             trigger_type=trigger_type,
@@ -80,25 +93,29 @@ def build_planning_input(
 def build_conflict_input(
     *,
     case_snapshot: CaseSnapshot,
-    confirmed_conflict: ConflictCandidate,
+    confirmed_conflict: ConflictCandidate | None = None,
+    conflicts: Sequence[ConflictCandidate] = (),
+    selections: Sequence[ConflictSelection] = (),
+    conflict_snapshot: CaseSnapshot | None = None,
+    retained_info_result: RetainedInfoResult | None = None,
     input_event_id: str,
     confirmed_at: datetime,
     client_event_id: str | None = None,
     trace_id: str | None = None,
 ) -> AgentGraphInput:
-    """Accept the original candidate restored by BE, never a client field/value.
-
-    BE checks ownership, expiry and single use before restoring this candidate.
-    The Agent checks its digest/current Case values and reviews the new plan.
-    """
+    """Build a single acceptance or complete batch of new/existing value choices."""
+    if retained_info_result is not None:
+        ensure_no_sensitive_text([retained_info_result.input.redacted_text])
     return AgentGraphInput.model_validate({
         "trigger": ConflictConfirmedTrigger(
             trigger_type="CONFLICT_CONFIRMED",
             input_event_id=input_event_id,
             client_event_id=client_event_id,
-            confirmed_conflict=ConflictCandidate.model_validate(
-                confirmed_conflict.model_dump(mode="python")
-            ),
+            confirmed_conflict=confirmed_conflict,
+            conflicts=list(conflicts),
+            selections=list(selections),
+            conflict_snapshot=conflict_snapshot,
+            retained_info_result=retained_info_result,
             confirmed_at=confirmed_at,
         ).model_dump(mode="python"),
         "case_snapshot": case_snapshot.model_dump(mode="python"),
@@ -127,6 +144,9 @@ async def run_case_planning(
     returning this result does not report database persistence.
     """
     owned_request = AgentGraphInput.model_validate(request.model_dump(mode="python"))
+    retained = getattr(owned_request.trigger, "retained_info_result", None)
+    if retained is not None:
+        ensure_no_sensitive_text([retained.input.redacted_text])
     if isinstance(owned_request.trigger, (CaseCreatedTrigger, ResultSubmittedTrigger)):
         ensure_no_sensitive_text([owned_request.trigger.input.redacted_text])
     confirmation = getattr(owned_request.trigger, "procedure_completion_confirmation", None)

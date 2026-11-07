@@ -1,0 +1,254 @@
+/*
+ * 리본 디자인 토큰.
+ *
+ * 값은 확정 시안(모바일 v3)에서 실제로 쓰는 것만 옮겼다. 색은 SEED 팔레트 값이고,
+ * 이름도 SEED 의미 이름을 그대로 쓴다. 새 이름을 만들지 않으려는 것이다.
+ *
+ * 두 층으로 나눈다.
+ * - 팔레트(`:root`): 색 값 자체. Tailwind 클래스로 나오지 않아 화면 코드가 직접 쓸 수 없다.
+ * - 의미 이름(`@theme`): "어디에 쓰는 색인가". 화면 코드는 이것만 쓴다
+ *   (`text-fg-neutral`, `bg-bg-brand-solid`, `border-stroke-neutral-weak`).
+ *
+ * Tailwind 기본 색(`gray-*`·`white` 등)은 끈다(`--color-*: initial`). 화면 교체가 끝나 쓰는 곳이 없고,
+ * 켜 두면 시안에 없는 색을 실수로 쓰게 된다. 쓰면 클래스가 만들어지지 않아 색이 빠진다.
+ */
+
+:root {
+  --seed-color-palette-gray-100: #f7f8f9;
+  --seed-color-palette-gray-200: #f3f4f5;
+  --seed-color-palette-gray-300: #eeeff1;
+  --seed-color-palette-gray-400: #dcdee3;
+  --seed-color-palette-gray-600: #b0b3ba;
+  --seed-color-palette-gray-700: #868b94;
+  --seed-color-palette-gray-800: #555d6d;
+  --seed-color-palette-gray-900: #2a3038;
+  --seed-color-palette-gray-1000: #1a1c20;
+
+  --seed-color-palette-carrot-100: #fff2ec;
+  --seed-color-palette-carrot-200: #ffe8db;
+  --seed-color-palette-carrot-600: #ff6600;
+  --seed-color-palette-carrot-700: #e14d00;
+  --seed-color-palette-carrot-800: #b93901;
+  --seed-color-palette-carrot-900: #862b00;
+
+  --seed-color-palette-red-100: #fdf0f0;
+  --seed-color-palette-red-700: #fa342c;
+  --seed-color-palette-red-900: #921708;
+
+  --seed-color-palette-static-white: #ffffff;
+  --seed-color-palette-static-black-alpha-100: #00000007;
+  --seed-color-palette-static-black-alpha-200: #0000000c;
+  --seed-color-palette-static-black-alpha-300: #00000010;
+  --seed-color-palette-static-black-alpha-700: #00000074;
+}
+
+/* `inline`은 클래스에 변수 이름 대신 위 팔레트 값을 바로 넣게 한다 */
+@theme inline {
+  /* Tailwind 기본 색을 모두 끈다. 아래 의미 이름만 남는다 */
+  --color-*: initial;
+
+  /* 글자 */
+  --color-fg-neutral: var(--seed-color-palette-gray-1000);
+  --color-fg-neutral-muted: var(--seed-color-palette-gray-800);
+  --color-fg-neutral-subtle: var(--seed-color-palette-gray-700);
+  /* SEED는 gray-500이지만 시안의 꺼진 버튼 글자는 gray-600이다 */
+  --color-fg-disabled: var(--seed-color-palette-gray-600);
+  --color-fg-brand: var(--seed-color-palette-carrot-600);
+  --color-fg-brand-contrast: var(--seed-color-palette-carrot-700);
+  --color-fg-critical: var(--seed-color-palette-red-700);
+  --color-fg-critical-contrast: var(--seed-color-palette-red-900);
+  --color-fg-on-brand-solid: var(--seed-color-palette-static-white);
+
+  /* 바탕 */
+  /* 주 버튼은 SEED의 carrot-600이 아니라 800이다. 흰 글씨 대비가 2.94:1 → 5.76:1 */
+  --color-bg-brand-solid: var(--seed-color-palette-carrot-800);
+  --color-bg-brand-solid-pressed: var(--seed-color-palette-carrot-900);
+  --color-bg-brand-weak: var(--seed-color-palette-carrot-100);
+  --color-bg-brand-weak-pressed: var(--seed-color-palette-carrot-200);
+  --color-bg-critical-solid: var(--seed-color-palette-red-700);
+  --color-bg-critical-weak: var(--seed-color-palette-red-100);
+  --color-bg-layer-basement: var(--seed-color-palette-gray-200);
+  --color-bg-layer-default: var(--seed-color-palette-static-white);
+  --color-bg-layer-default-pressed: var(--seed-color-palette-gray-100);
+  --color-bg-neutral-weak: var(--seed-color-palette-gray-200);
+  --color-bg-neutral-weak-pressed: var(--seed-color-palette-gray-300);
+  --color-bg-neutral-solid: var(--seed-color-palette-gray-900);
+  --color-bg-transparent-pressed: var(--seed-color-palette-static-black-alpha-100);
+  --color-bg-overlay: var(--seed-color-palette-static-black-alpha-700);
+
+  /* 선 */
+  --color-stroke-neutral-weak: var(--seed-color-palette-gray-400);
+  --color-stroke-neutral-subtle: var(--seed-color-palette-static-black-alpha-200);
+  --color-stroke-neutral-muted: var(--seed-color-palette-static-black-alpha-300);
+  --color-stroke-brand-solid: var(--seed-color-palette-carrot-700);
+}
+
+@theme {
+  /* 글꼴. 글꼴 파일은 `main.tsx`가 불러온다 */
+  --font-sans: 'Pretendard Variable', Pretendard, -apple-system, 'Apple SD Gothic Neo', sans-serif;
+
+  /*
+   * 글자 크기. 이름은 픽셀 그대로다(`text-17` = 17px, 줄높이 24px).
+   * 시안의 크기·줄높이 29쌍에서 1px 차이 나는 줄높이를 합쳐 11단계로 줄였다.
+   * 19·24px는 홈의 큰 버튼과 머리 문구에만 쓰여 홈을 만들 때 더했다.
+   */
+  --text-11: 11px;
+  --text-11--line-height: 15px;
+  --text-12: 12px;
+  --text-12--line-height: 16px;
+  --text-13: 13px;
+  --text-13--line-height: 18px;
+  --text-14: 14px;
+  --text-14--line-height: 20px;
+  --text-15: 15px;
+  --text-15--line-height: 21px;
+  --text-16: 16px;
+  --text-16--line-height: 22px;
+  --text-17: 17px;
+  --text-17--line-height: 24px;
+  --text-18: 18px;
+  --text-18--line-height: 24px;
+  --text-19: 19px;
+  --text-19--line-height: 26px;
+  --text-20: 20px;
+  --text-20--line-height: 28px;
+  --text-22: 22px;
+  --text-22--line-height: 30px;
+  --text-24: 24px;
+  --text-24--line-height: 32px;
+  --text-26: 26px;
+  --text-26--line-height: 36px;
+
+  /* 모서리. 4·6·8·12·16px는 Tailwind 기본(`rounded-sm`~`rounded-2xl`)에 있어 시안에 많은 14px만 더한다 */
+  --radius-14: 14px;
+  /* 홈의 할 일 카드처럼 화면에서 가장 큰 카드 */
+  --radius-20: 20px;
+
+  /* 그림자. 테두리선은 그림자가 아니라 `ring`으로 그린다 */
+  --shadow-card: 0 1px 4px #00000014;
+  --shadow-floating: 0 2px 10px #0000001a;
+  /* 홈의 할 일 카드. 다른 카드보다 한 겹 떠 있게 퍼지되, 시트(`floating`)보다는 옅다 */
+  --shadow-raised: 0 2px 10px #00000014;
+
+  /*
+   * 움직임. 망치 로더가 빙글 돈다(`animate-hammer-spin`). 처음에 천천히, 가운데서 빠르게 돈다.
+   * 시안과 달리 시계 반대 방향이다. 망치 머리가 왼쪽 위를 보고 있어서, 머리 쪽으로 넘어가야 자연스럽다
+   */
+  --animate-hammer-spin: hammer-spin 1.2s cubic-bezier(0.55, 0, 0.45, 1) infinite;
+
+  @keyframes hammer-spin {
+    to {
+      transform: rotate(-360deg);
+    }
+  }
+
+  /* 불러오는 중에 내용 자리를 채우는 회색 막대가 천천히 깜빡인다(`animate-skeleton-pulse`) */
+  --animate-skeleton-pulse: skeleton-pulse 1.4s ease-in-out infinite;
+
+  @keyframes skeleton-pulse {
+    50% {
+      opacity: 0.45;
+    }
+  }
+
+  /*
+   * 소개 화면 위의 진행 막대가 왼쪽부터 차오른다(`animate-intro-progress`).
+   * 다 차면 다음 장으로 넘긴다 — 넘기는 시점을 따로 재지 않고 이 움직임이 끝나는 것으로 안다
+   */
+  --animate-intro-progress: intro-progress 4.5s linear forwards;
+
+  @keyframes intro-progress {
+    from {
+      width: 0;
+    }
+    to {
+      width: 100%;
+    }
+  }
+
+  /*
+   * 화면 움직임의 곡선. 시간은 쓰는 곳에 적고, 곡선만 여기서 맞춘다.
+   *
+   * - `out-soft` 시안의 화면 밀기 곡선. 빠르게 나와서 천천히 멈춘다. 화면 이동·장면 페이드·펼치기에 쓴다
+   * - `sheet`    iOS 시트 곡선. 끝이 더 길게 미끄러진다. 아래 시트에 쓴다
+   */
+  --ease-out-soft: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-sheet: cubic-bezier(0.32, 0.72, 0, 1);
+
+  /*
+   * 홈 단계 막대가 차오르는 시간. 시우님이 눈으로 보고 다시 정하기로 한 값이라(11/04) 한곳에 둔다
+   */
+  --duration-stage-fill: 0.8s;
+
+  /* 내용이 새로 나타날 때 흐리게 들어온다(`animate-fade-in`). 홈 띠 넘김, 소개 화면 글 */
+  --animate-fade-in: fade-in 0.3s var(--ease-out-soft);
+  /* 도움말·오류 한 줄처럼 작은 것은 더 짧게 들어온다(`animate-fade-in-short`) */
+  --animate-fade-in-short: fade-in 0.2s var(--ease-out-soft);
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+  }
+
+  /*
+   * 상황 진단 질문을 넘길 때. 앞으로 가면 오른쪽에서, [이전]이면 왼쪽에서 조금 밀려 들어온다
+   * (`animate-step-forward` · `animate-step-back`). 화면 전체가 아니라 질문만 움직인다
+   */
+  --animate-step-forward: step-forward 0.3s var(--ease-out-soft);
+  --animate-step-back: step-back 0.3s var(--ease-out-soft);
+
+  @keyframes step-forward {
+    from {
+      opacity: 0;
+      transform: translateX(16px);
+    }
+  }
+
+  @keyframes step-back {
+    from {
+      opacity: 0;
+      transform: translateX(-16px);
+    }
+  }
+
+  /*
+   * 목록 줄·카드가 조금 아래에서 흐리게 올라온다(`animate-rise`). 한 줄씩 늦게 시작하는 것은
+   * `index.css` 의 `rise-children` 이 정한다. `backwards` 라 늦게 시작하는 줄도 기다리는 동안 숨어 있다
+   */
+  --animate-rise: rise 0.4s var(--ease-out-soft) backwards;
+
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+  }
+
+  /*
+   * 끝난 것을 알리는 체크가 작게 나타나 살짝 넘쳤다 제 크기로 돌아온다(`animate-pop`, 용수철 흉내).
+   * 홈 완료 카드·처리 단계의 "끝남"·저장 뒤 "기록했어요"에 쓴다
+   */
+  --animate-pop: pop 0.45s var(--ease-out-soft) backwards;
+
+  @keyframes pop {
+    0% {
+      opacity: 0;
+      transform: scale(0.6);
+    }
+    60% {
+      opacity: 1;
+      transform: scale(1.1);
+    }
+  }
+
+  /* 소개 화면의 그림이 조금 작은 데서 커지며 들어온다(`animate-picture-in`) */
+  --animate-picture-in: picture-in 0.35s var(--ease-out-soft);
+
+  @keyframes picture-in {
+    from {
+      opacity: 0;
+      transform: scale(0.96);
+    }
+  }
+}

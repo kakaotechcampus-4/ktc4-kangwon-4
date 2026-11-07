@@ -41,3 +41,18 @@ def get_conflict_reference_by_id(session: Session, conflict_reference_id: int) -
     return session.exec(
         select(ConflictReference).where(ConflictReference.id == conflict_reference_id)
     ).one_or_none()
+
+
+def get_decided_conflicts_by_case_id(session: Session, case_id: int) -> list[ConflictReference]:
+    """사장님이 결정을 끝낸(PENDING이 아닌) 충돌 전부, 오래된 것부터. 없으면 빈 리스트.
+
+    과거 고정 표식의 출처를 확인해 번호와 호환하는 쪽이 쓴다(services.unmasking).
+    채택·거절에 따른 출처 구분은 서비스가 맡고 화면은 원문으로 복원하지 않는다.
+    """
+
+    return session.exec(
+        select(ConflictReference)
+        .where(ConflictReference.case_id == case_id)
+        .where(ConflictReference.status != "PENDING")
+        .order_by(ConflictReference.id)
+    ).all()

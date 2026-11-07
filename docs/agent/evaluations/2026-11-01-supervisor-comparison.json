@@ -1,0 +1,2815 @@
+{
+  "synthetic_data": true,
+  "scope": "Existing components; no simulated LLM responses",
+  "code_digest": "sha256:2d13a20d2f8f04e12f065ed97448a8bfd3dbb71b83fef2c065a65591475c8d2f",
+  "input_sha256": "2b9758b575a2352c6675529a0d655e50cee148be88085d55534dd95673cfc6d6",
+  "prices_krw_per_million": {
+    "gpt-6.1-sol": [
+      2835.0,
+      141.0,
+      14175.0
+    ],
+    "gpt-6-luna": [
+      141.0,
+      14.0,
+      708.0
+    ],
+    "claude-haiku-5-5": [
+      141.0,
+      14.0,
+      708.0
+    ],
+    "gemini-3.1-flash-lite": [
+      354.0,
+      35.0,
+      2126.0
+    ]
+  },
+  "trials": [
+    {
+      "case": "scope_unknown",
+      "model": "gpt-6.1-sol",
+      "effort": "xhigh",
+      "review_results": [
+        {
+          "verdict": "PASS"
+        }
+      ],
+      "decision_signature": {
+        "decision_type": "ACTION",
+        "action_code": "CONFIRM_RESTORATION_SCOPE",
+        "questions": []
+      },
+      "passed": true,
+      "elapsed_ms": 17142,
+      "provider_usage": [
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 2732,
+          "completion_tokens": 101,
+          "reasoning_tokens": 58,
+          "cached_prompt_tokens": 2729,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_supervisor_draft",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 2595,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 4714,
+          "completion_tokens": 827,
+          "reasoning_tokens": 731,
+          "cached_prompt_tokens": 4711,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_review_output",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 14255,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 2
+      },
+      "status": "REVIEWED_PLAN",
+      "metrics": {
+        "runs": 1,
+        "successful_runs": 1,
+        "success_rate": 1.0,
+        "http_attempts": 2,
+        "usage_complete": true,
+        "attempts_with_reported_usage": 2,
+        "reported_tokens": {
+          "prompt_tokens": 7446,
+          "completion_tokens": 928
+        },
+        "total_tokens": 8374,
+        "tokens_per_success": 8374.0,
+        "estimated_cost_krw": 14.22045,
+        "cost_per_success_krw": 14.22045,
+        "uncached_cost_krw": 34.26381,
+        "cache_usage_complete": true,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 17142,
+        "median_latency_ms": 17142,
+        "max_latency_ms": 17142,
+        "transport_retries": 0,
+        "review_revise_count": 0
+      },
+      "configuration": "baseline",
+      "repeat": 1,
+      "reused_from_report_sha256": "960d168a7b6b7f4cfbffc2dd658b1fc72fe05b24fbf1b354e2e8d271402d14be"
+    },
+    {
+      "case": "scope_partial",
+      "model": "gpt-6.1-sol",
+      "effort": "xhigh",
+      "review_results": [
+        {
+          "verdict": "PASS"
+        }
+      ],
+      "decision_signature": {
+        "decision_type": "ACTION",
+        "action_code": "CONFIRM_TAX_CLOSURE_REQUIREMENTS",
+        "questions": []
+      },
+      "passed": true,
+      "elapsed_ms": 30022,
+      "provider_usage": [
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 3080,
+          "completion_tokens": 74,
+          "reasoning_tokens": 29,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_supervisor_draft",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 2426,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 5032,
+          "completion_tokens": 1575,
+          "reasoning_tokens": 1465,
+          "cached_prompt_tokens": 2770,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_review_output",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 27318,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 2
+      },
+      "status": "REVIEWED_PLAN",
+      "metrics": {
+        "runs": 1,
+        "successful_runs": 1,
+        "success_rate": 1.0,
+        "http_attempts": 2,
+        "usage_complete": true,
+        "attempts_with_reported_usage": 2,
+        "reported_tokens": {
+          "prompt_tokens": 8112,
+          "completion_tokens": 1649
+        },
+        "total_tokens": 9761,
+        "tokens_per_success": 9761.0,
+        "estimated_cost_krw": 38.909715,
+        "cost_per_success_krw": 38.909715,
+        "uncached_cost_krw": 46.372094999999995,
+        "cache_usage_complete": true,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 30022,
+        "median_latency_ms": 30022,
+        "max_latency_ms": 30022,
+        "transport_retries": 0,
+        "review_revise_count": 0
+      },
+      "configuration": "baseline",
+      "repeat": 1,
+      "reused_from_report_sha256": "960d168a7b6b7f4cfbffc2dd658b1fc72fe05b24fbf1b354e2e8d271402d14be"
+    },
+    {
+      "case": "owned",
+      "model": "gpt-6.1-sol",
+      "effort": "xhigh",
+      "review_results": [
+        {
+          "verdict": "PASS"
+        }
+      ],
+      "decision_signature": {
+        "decision_type": "ACTION",
+        "action_code": "CONFIRM_TAX_CLOSURE_REQUIREMENTS",
+        "questions": []
+      },
+      "passed": true,
+      "elapsed_ms": 38729,
+      "provider_usage": [
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 3077,
+          "completion_tokens": 75,
+          "reasoning_tokens": 30,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_supervisor_draft",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 2491,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 5030,
+          "completion_tokens": 1973,
+          "reasoning_tokens": 1852,
+          "cached_prompt_tokens": 2770,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_review_output",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 35957,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 2
+      },
+      "status": "REVIEWED_PLAN",
+      "metrics": {
+        "runs": 1,
+        "successful_runs": 1,
+        "success_rate": 1.0,
+        "http_attempts": 2,
+        "usage_complete": true,
+        "attempts_with_reported_usage": 2,
+        "reported_tokens": {
+          "prompt_tokens": 8107,
+          "completion_tokens": 2048
+        },
+        "total_tokens": 10155,
+        "tokens_per_success": 10155.0,
+        "estimated_cost_krw": 44.551365,
+        "cost_per_success_krw": 44.551365,
+        "uncached_cost_krw": 52.013745,
+        "cache_usage_complete": true,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 38729,
+        "median_latency_ms": 38729,
+        "max_latency_ms": 38729,
+        "transport_retries": 0,
+        "review_revise_count": 0
+      },
+      "configuration": "baseline",
+      "repeat": 1,
+      "reused_from_report_sha256": "960d168a7b6b7f4cfbffc2dd658b1fc72fe05b24fbf1b354e2e8d271402d14be"
+    },
+    {
+      "case": "missing_employee_count",
+      "model": "gpt-6.1-sol",
+      "effort": "xhigh",
+      "review_results": [
+        {
+          "verdict": "PASS"
+        }
+      ],
+      "decision_signature": {
+        "decision_type": "NEEDS_MORE_INFO",
+        "action_code": null,
+        "questions": [
+          "직원이 몇 명인가요?"
+        ]
+      },
+      "checks": {
+        "review_passed": true,
+        "expected_action": true,
+        "input_unchanged": true
+      },
+      "passed": true,
+      "elapsed_ms": 12544,
+      "provider_usage": [
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 2391,
+          "completion_tokens": 77,
+          "reasoning_tokens": 36,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_supervisor_draft",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 4140,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 4006,
+          "completion_tokens": 408,
+          "reasoning_tokens": 322,
+          "cached_prompt_tokens": 2770,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_review_output",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 8117,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 2
+      },
+      "status": "REVIEWED_PLAN",
+      "metrics": {
+        "runs": 1,
+        "successful_runs": 1,
+        "success_rate": 1.0,
+        "http_attempts": 2,
+        "usage_complete": true,
+        "attempts_with_reported_usage": 2,
+        "reported_tokens": {
+          "prompt_tokens": 6397,
+          "completion_tokens": 485
+        },
+        "total_tokens": 6882,
+        "tokens_per_success": 6882.0,
+        "estimated_cost_krw": 17.54799,
+        "cost_per_success_krw": 17.54799,
+        "uncached_cost_krw": 25.010369999999998,
+        "cache_usage_complete": true,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 12544,
+        "median_latency_ms": 12544,
+        "max_latency_ms": 12544,
+        "transport_retries": 0,
+        "review_revise_count": 0
+      },
+      "configuration": "baseline",
+      "repeat": 1
+    },
+    {
+      "case": "scope_unknown",
+      "model": "gpt-6.1-sol",
+      "effort": "xhigh",
+      "review_results": [
+        {
+          "verdict": "PASS"
+        }
+      ],
+      "decision_signature": {
+        "decision_type": "ACTION",
+        "action_code": "CONFIRM_RESTORATION_SCOPE",
+        "questions": []
+      },
+      "passed": true,
+      "elapsed_ms": 22498,
+      "provider_usage": [
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 2732,
+          "completion_tokens": 93,
+          "reasoning_tokens": 50,
+          "cached_prompt_tokens": 2729,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_supervisor_draft",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 3983,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 4714,
+          "completion_tokens": 1088,
+          "reasoning_tokens": 995,
+          "cached_prompt_tokens": 4711,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_review_output",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 18216,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 2
+      },
+      "status": "REVIEWED_PLAN",
+      "metrics": {
+        "runs": 1,
+        "successful_runs": 1,
+        "success_rate": 1.0,
+        "http_attempts": 2,
+        "usage_complete": true,
+        "attempts_with_reported_usage": 2,
+        "reported_tokens": {
+          "prompt_tokens": 7446,
+          "completion_tokens": 1181
+        },
+        "total_tokens": 8627,
+        "tokens_per_success": 8627.0,
+        "estimated_cost_krw": 17.806725,
+        "cost_per_success_krw": 17.806725,
+        "uncached_cost_krw": 37.850085,
+        "cache_usage_complete": true,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 22498,
+        "median_latency_ms": 22498,
+        "max_latency_ms": 22498,
+        "transport_retries": 0,
+        "review_revise_count": 0
+      },
+      "configuration": "baseline",
+      "repeat": 2,
+      "reused_from_report_sha256": "960d168a7b6b7f4cfbffc2dd658b1fc72fe05b24fbf1b354e2e8d271402d14be"
+    },
+    {
+      "case": "scope_partial",
+      "model": "gpt-6.1-sol",
+      "effort": "xhigh",
+      "review_results": [
+        {
+          "verdict": "PASS"
+        }
+      ],
+      "decision_signature": {
+        "decision_type": "ACTION",
+        "action_code": "CONFIRM_TAX_CLOSURE_REQUIREMENTS",
+        "questions": []
+      },
+      "passed": true,
+      "elapsed_ms": 32208,
+      "provider_usage": [
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 2464,
+          "completion_tokens": 75,
+          "reasoning_tokens": 30,
+          "cached_prompt_tokens": 2461,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_supervisor_draft",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 2314,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 4580,
+          "completion_tokens": 1756,
+          "reasoning_tokens": 1640,
+          "cached_prompt_tokens": 4577,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_review_output",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 29615,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 2
+      },
+      "status": "REVIEWED_PLAN",
+      "metrics": {
+        "runs": 1,
+        "successful_runs": 1,
+        "success_rate": 1.0,
+        "http_attempts": 2,
+        "usage_complete": true,
+        "attempts_with_reported_usage": 2,
+        "reported_tokens": {
+          "prompt_tokens": 7044,
+          "completion_tokens": 1831
+        },
+        "total_tokens": 8875,
+        "tokens_per_success": 8875.0,
+        "estimated_cost_krw": 26.963793000000003,
+        "cost_per_success_krw": 26.963793000000003,
+        "uncached_cost_krw": 45.924165,
+        "cache_usage_complete": true,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 32208,
+        "median_latency_ms": 32208,
+        "max_latency_ms": 32208,
+        "transport_retries": 0,
+        "review_revise_count": 0
+      },
+      "configuration": "baseline",
+      "repeat": 2,
+      "reused_from_report_sha256": "960d168a7b6b7f4cfbffc2dd658b1fc72fe05b24fbf1b354e2e8d271402d14be"
+    },
+    {
+      "case": "owned",
+      "model": "gpt-6.1-sol",
+      "effort": "xhigh",
+      "review_results": [
+        {
+          "verdict": "PASS"
+        }
+      ],
+      "decision_signature": {
+        "decision_type": "ACTION",
+        "action_code": "CONFIRM_TAX_CLOSURE_REQUIREMENTS",
+        "questions": []
+      },
+      "passed": true,
+      "elapsed_ms": 25024,
+      "provider_usage": [
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 2462,
+          "completion_tokens": 78,
+          "reasoning_tokens": 33,
+          "cached_prompt_tokens": 2459,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_supervisor_draft",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 2387,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 4578,
+          "completion_tokens": 1298,
+          "reasoning_tokens": 1187,
+          "cached_prompt_tokens": 4575,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_review_output",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 22187,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 2
+      },
+      "status": "REVIEWED_PLAN",
+      "metrics": {
+        "runs": 1,
+        "successful_runs": 1,
+        "success_rate": 1.0,
+        "http_attempts": 2,
+        "usage_complete": true,
+        "attempts_with_reported_usage": 2,
+        "reported_tokens": {
+          "prompt_tokens": 7040,
+          "completion_tokens": 1376
+        },
+        "total_tokens": 8416,
+        "tokens_per_success": 8416.0,
+        "estimated_cost_krw": 20.513604,
+        "cost_per_success_krw": 20.513604,
+        "uncached_cost_krw": 39.4632,
+        "cache_usage_complete": true,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 25024,
+        "median_latency_ms": 25024,
+        "max_latency_ms": 25024,
+        "transport_retries": 0,
+        "review_revise_count": 0
+      },
+      "configuration": "baseline",
+      "repeat": 2,
+      "reused_from_report_sha256": "960d168a7b6b7f4cfbffc2dd658b1fc72fe05b24fbf1b354e2e8d271402d14be"
+    },
+    {
+      "case": "missing_employee_count",
+      "model": "gpt-6.1-sol",
+      "effort": "xhigh",
+      "review_results": [
+        {
+          "verdict": "PASS"
+        }
+      ],
+      "decision_signature": {
+        "decision_type": "NEEDS_MORE_INFO",
+        "action_code": null,
+        "questions": [
+          "직원이 몇 명인가요?"
+        ]
+      },
+      "checks": {
+        "review_passed": true,
+        "expected_action": true,
+        "input_unchanged": true
+      },
+      "passed": true,
+      "elapsed_ms": 10181,
+      "provider_usage": [
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 1913,
+          "completion_tokens": 72,
+          "reasoning_tokens": 31,
+          "cached_prompt_tokens": 1910,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_supervisor_draft",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 3143,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 3759,
+          "completion_tokens": 372,
+          "reasoning_tokens": 285,
+          "cached_prompt_tokens": 3756,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_review_output",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 6762,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 2
+      },
+      "status": "REVIEWED_PLAN",
+      "metrics": {
+        "runs": 1,
+        "successful_runs": 1,
+        "success_rate": 1.0,
+        "http_attempts": 2,
+        "usage_complete": true,
+        "attempts_with_reported_usage": 2,
+        "reported_tokens": {
+          "prompt_tokens": 5672,
+          "completion_tokens": 444
+        },
+        "total_tokens": 6116,
+        "tokens_per_success": 6116.0,
+        "estimated_cost_krw": 7.109616,
+        "cost_per_success_krw": 7.109616,
+        "uncached_cost_krw": 22.37382,
+        "cache_usage_complete": true,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 10181,
+        "median_latency_ms": 10181,
+        "max_latency_ms": 10181,
+        "transport_retries": 0,
+        "review_revise_count": 0
+      },
+      "configuration": "baseline",
+      "repeat": 2
+    },
+    {
+      "case": "scope_unknown",
+      "model": "gpt-6.1-sol",
+      "effort": "xhigh",
+      "review_results": [
+        {
+          "verdict": "PASS"
+        }
+      ],
+      "decision_signature": {
+        "decision_type": "ACTION",
+        "action_code": "CONFIRM_RESTORATION_SCOPE",
+        "questions": []
+      },
+      "passed": true,
+      "elapsed_ms": 21355,
+      "provider_usage": [
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 2732,
+          "completion_tokens": 118,
+          "reasoning_tokens": 75,
+          "cached_prompt_tokens": 2729,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_supervisor_draft",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 3059,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 4714,
+          "completion_tokens": 941,
+          "reasoning_tokens": 847,
+          "cached_prompt_tokens": 4711,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_review_output",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 18011,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 2
+      },
+      "status": "REVIEWED_PLAN",
+      "metrics": {
+        "runs": 1,
+        "successful_runs": 1,
+        "success_rate": 1.0,
+        "http_attempts": 2,
+        "usage_complete": true,
+        "attempts_with_reported_usage": 2,
+        "reported_tokens": {
+          "prompt_tokens": 7446,
+          "completion_tokens": 1059
+        },
+        "total_tokens": 8505,
+        "tokens_per_success": 8505.0,
+        "estimated_cost_krw": 16.077375,
+        "cost_per_success_krw": 16.077375,
+        "uncached_cost_krw": 36.120734999999996,
+        "cache_usage_complete": true,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 21355,
+        "median_latency_ms": 21355,
+        "max_latency_ms": 21355,
+        "transport_retries": 0,
+        "review_revise_count": 0
+      },
+      "configuration": "baseline",
+      "repeat": 3,
+      "reused_from_report_sha256": "960d168a7b6b7f4cfbffc2dd658b1fc72fe05b24fbf1b354e2e8d271402d14be"
+    },
+    {
+      "case": "scope_partial",
+      "model": "gpt-6.1-sol",
+      "effort": "xhigh",
+      "review_results": [
+        {
+          "verdict": "PASS"
+        }
+      ],
+      "decision_signature": {
+        "decision_type": "ACTION",
+        "action_code": "CONFIRM_TAX_CLOSURE_REQUIREMENTS",
+        "questions": []
+      },
+      "passed": true,
+      "elapsed_ms": 27317,
+      "provider_usage": [
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 2464,
+          "completion_tokens": 74,
+          "reasoning_tokens": 29,
+          "cached_prompt_tokens": 2461,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_supervisor_draft",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 2299,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 4580,
+          "completion_tokens": 1397,
+          "reasoning_tokens": 1292,
+          "cached_prompt_tokens": 4577,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_review_output",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 24664,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 2
+      },
+      "status": "REVIEWED_PLAN",
+      "metrics": {
+        "runs": 1,
+        "successful_runs": 1,
+        "success_rate": 1.0,
+        "http_attempts": 2,
+        "usage_complete": true,
+        "attempts_with_reported_usage": 2,
+        "reported_tokens": {
+          "prompt_tokens": 7044,
+          "completion_tokens": 1471
+        },
+        "total_tokens": 8515,
+        "tokens_per_success": 8515.0,
+        "estimated_cost_krw": 21.860793,
+        "cost_per_success_krw": 21.860793,
+        "uncached_cost_krw": 40.821165,
+        "cache_usage_complete": true,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 27317,
+        "median_latency_ms": 27317,
+        "max_latency_ms": 27317,
+        "transport_retries": 0,
+        "review_revise_count": 0
+      },
+      "configuration": "baseline",
+      "repeat": 3,
+      "reused_from_report_sha256": "960d168a7b6b7f4cfbffc2dd658b1fc72fe05b24fbf1b354e2e8d271402d14be"
+    },
+    {
+      "case": "owned",
+      "model": "gpt-6.1-sol",
+      "effort": "xhigh",
+      "review_results": [
+        {
+          "verdict": "PASS"
+        }
+      ],
+      "decision_signature": {
+        "decision_type": "ACTION",
+        "action_code": "CONFIRM_TAX_CLOSURE_REQUIREMENTS",
+        "questions": []
+      },
+      "passed": true,
+      "elapsed_ms": 35835,
+      "provider_usage": [
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 2462,
+          "completion_tokens": 72,
+          "reasoning_tokens": 27,
+          "cached_prompt_tokens": 2459,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_supervisor_draft",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 2165,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 4578,
+          "completion_tokens": 2694,
+          "reasoning_tokens": 2559,
+          "cached_prompt_tokens": 4575,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_review_output",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 33381,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 2
+      },
+      "status": "REVIEWED_PLAN",
+      "metrics": {
+        "runs": 1,
+        "successful_runs": 1,
+        "success_rate": 1.0,
+        "http_attempts": 2,
+        "usage_complete": true,
+        "attempts_with_reported_usage": 2,
+        "reported_tokens": {
+          "prompt_tokens": 7040,
+          "completion_tokens": 2766
+        },
+        "total_tokens": 9806,
+        "tokens_per_success": 9806.0,
+        "estimated_cost_krw": 40.216854000000005,
+        "cost_per_success_krw": 40.216854000000005,
+        "uncached_cost_krw": 59.16645,
+        "cache_usage_complete": true,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 35835,
+        "median_latency_ms": 35835,
+        "max_latency_ms": 35835,
+        "transport_retries": 0,
+        "review_revise_count": 0
+      },
+      "configuration": "baseline",
+      "repeat": 3,
+      "reused_from_report_sha256": "960d168a7b6b7f4cfbffc2dd658b1fc72fe05b24fbf1b354e2e8d271402d14be"
+    },
+    {
+      "case": "missing_employee_count",
+      "model": "gpt-6.1-sol",
+      "effort": "xhigh",
+      "review_results": [
+        {
+          "verdict": "PASS"
+        }
+      ],
+      "decision_signature": {
+        "decision_type": "NEEDS_MORE_INFO",
+        "action_code": null,
+        "questions": [
+          "직원이 몇 명인가요?"
+        ]
+      },
+      "checks": {
+        "review_passed": true,
+        "expected_action": true,
+        "input_unchanged": true
+      },
+      "passed": true,
+      "elapsed_ms": 9161,
+      "provider_usage": [
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 1913,
+          "completion_tokens": 84,
+          "reasoning_tokens": 43,
+          "cached_prompt_tokens": 1910,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_supervisor_draft",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 2321,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 3759,
+          "completion_tokens": 346,
+          "reasoning_tokens": 258,
+          "cached_prompt_tokens": 3756,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_review_output",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 6546,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 2
+      },
+      "status": "REVIEWED_PLAN",
+      "metrics": {
+        "runs": 1,
+        "successful_runs": 1,
+        "success_rate": 1.0,
+        "http_attempts": 2,
+        "usage_complete": true,
+        "attempts_with_reported_usage": 2,
+        "reported_tokens": {
+          "prompt_tokens": 5672,
+          "completion_tokens": 430
+        },
+        "total_tokens": 6102,
+        "tokens_per_success": 6102.0,
+        "estimated_cost_krw": 6.911166,
+        "cost_per_success_krw": 6.911166,
+        "uncached_cost_krw": 22.17537,
+        "cache_usage_complete": true,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 9161,
+        "median_latency_ms": 9161,
+        "max_latency_ms": 9161,
+        "transport_retries": 0,
+        "review_revise_count": 0
+      },
+      "configuration": "baseline",
+      "repeat": 3
+    },
+    {
+      "case": "scope_unknown",
+      "model": "gpt-6.1-sol",
+      "effort": "high",
+      "review_results": [
+        {
+          "verdict": "PASS"
+        }
+      ],
+      "decision_signature": {
+        "decision_type": "ACTION",
+        "action_code": "CONFIRM_RESTORATION_SCOPE",
+        "questions": []
+      },
+      "checks": {
+        "review_passed": true,
+        "expected_action": true,
+        "input_unchanged": true
+      },
+      "passed": true,
+      "elapsed_ms": 29912,
+      "provider_usage": [
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 3415,
+          "completion_tokens": 59,
+          "reasoning_tokens": 16,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "high",
+          "schema_name": "reborn_supervisor_draft",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 2917,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 4714,
+          "completion_tokens": 2023,
+          "reasoning_tokens": 1904,
+          "cached_prompt_tokens": 4711,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_review_output",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 26596,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 2
+      },
+      "status": "REVIEWED_PLAN",
+      "metrics": {
+        "runs": 1,
+        "successful_runs": 1,
+        "success_rate": 1.0,
+        "http_attempts": 2,
+        "usage_complete": true,
+        "attempts_with_reported_usage": 2,
+        "reported_tokens": {
+          "prompt_tokens": 8129,
+          "completion_tokens": 2082
+        },
+        "total_tokens": 10211,
+        "tokens_per_success": 10211.0,
+        "estimated_cost_krw": 39.866631,
+        "cost_per_success_krw": 39.866631,
+        "uncached_cost_krw": 52.558065,
+        "cache_usage_complete": true,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 29912,
+        "median_latency_ms": 29912,
+        "max_latency_ms": 29912,
+        "transport_retries": 0,
+        "review_revise_count": 0
+      },
+      "configuration": "sol-high",
+      "repeat": 1
+    },
+    {
+      "case": "scope_unknown",
+      "model": "gpt-6.1-sol",
+      "effort": "medium",
+      "review_results": [
+        {
+          "verdict": "PASS"
+        }
+      ],
+      "decision_signature": {
+        "decision_type": "ACTION",
+        "action_code": "CONFIRM_RESTORATION_SCOPE",
+        "questions": []
+      },
+      "checks": {
+        "review_passed": true,
+        "expected_action": true,
+        "input_unchanged": true
+      },
+      "passed": true,
+      "elapsed_ms": 19894,
+      "provider_usage": [
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 3415,
+          "completion_tokens": 37,
+          "reasoning_tokens": 0,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "medium",
+          "schema_name": "reborn_supervisor_draft",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 2046,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 4714,
+          "completion_tokens": 870,
+          "reasoning_tokens": 781,
+          "cached_prompt_tokens": 4711,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_review_output",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 17569,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 2
+      },
+      "status": "REVIEWED_PLAN",
+      "metrics": {
+        "runs": 1,
+        "successful_runs": 1,
+        "success_rate": 1.0,
+        "http_attempts": 2,
+        "usage_complete": true,
+        "attempts_with_reported_usage": 2,
+        "reported_tokens": {
+          "prompt_tokens": 8129,
+          "completion_tokens": 907
+        },
+        "total_tokens": 9036,
+        "tokens_per_success": 9036.0,
+        "estimated_cost_krw": 23.211005999999998,
+        "cost_per_success_krw": 23.211005999999998,
+        "uncached_cost_krw": 35.90244,
+        "cache_usage_complete": true,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 19894,
+        "median_latency_ms": 19894,
+        "max_latency_ms": 19894,
+        "transport_retries": 0,
+        "review_revise_count": 0
+      },
+      "configuration": "sol-medium",
+      "repeat": 1
+    },
+    {
+      "case": "scope_unknown",
+      "model": "gpt-6.1-sol",
+      "effort": "low",
+      "review_results": [
+        {
+          "verdict": "PASS"
+        }
+      ],
+      "decision_signature": {
+        "decision_type": "ACTION",
+        "action_code": "CONFIRM_RESTORATION_SCOPE",
+        "questions": []
+      },
+      "checks": {
+        "review_passed": true,
+        "expected_action": true,
+        "input_unchanged": true
+      },
+      "passed": true,
+      "elapsed_ms": 16615,
+      "provider_usage": [
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 3415,
+          "completion_tokens": 37,
+          "reasoning_tokens": 0,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "low",
+          "schema_name": "reborn_supervisor_draft",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 1823,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 4714,
+          "completion_tokens": 867,
+          "reasoning_tokens": 757,
+          "cached_prompt_tokens": 4711,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_review_output",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 14509,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 2
+      },
+      "status": "REVIEWED_PLAN",
+      "metrics": {
+        "runs": 1,
+        "successful_runs": 1,
+        "success_rate": 1.0,
+        "http_attempts": 2,
+        "usage_complete": true,
+        "attempts_with_reported_usage": 2,
+        "reported_tokens": {
+          "prompt_tokens": 8129,
+          "completion_tokens": 904
+        },
+        "total_tokens": 9033,
+        "tokens_per_success": 9033.0,
+        "estimated_cost_krw": 23.168481,
+        "cost_per_success_krw": 23.168481,
+        "uncached_cost_krw": 35.859915,
+        "cache_usage_complete": true,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 16615,
+        "median_latency_ms": 16615,
+        "max_latency_ms": 16615,
+        "transport_retries": 0,
+        "review_revise_count": 0
+      },
+      "configuration": "sol-low",
+      "repeat": 1
+    },
+    {
+      "case": "scope_unknown",
+      "model": "gpt-6-luna",
+      "effort": "high",
+      "review_results": [
+        {
+          "verdict": "PASS"
+        }
+      ],
+      "decision_signature": {
+        "decision_type": "ACTION",
+        "action_code": "CONFIRM_RESTORATION_SCOPE",
+        "questions": []
+      },
+      "checks": {
+        "review_passed": true,
+        "expected_action": true,
+        "input_unchanged": true
+      },
+      "passed": true,
+      "elapsed_ms": 18880,
+      "provider_usage": [
+        {
+          "model": "gpt-6-luna",
+          "prompt_tokens": 3415,
+          "completion_tokens": 165,
+          "reasoning_tokens": 122,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "high",
+          "schema_name": "reborn_supervisor_draft",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 3155,
+          "requested_model": "gpt-6-luna"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 4714,
+          "completion_tokens": 866,
+          "reasoning_tokens": 754,
+          "cached_prompt_tokens": 4711,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_review_output",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 15433,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 2
+      },
+      "status": "REVIEWED_PLAN",
+      "metrics": {
+        "runs": 1,
+        "successful_runs": 1,
+        "success_rate": 1.0,
+        "http_attempts": 2,
+        "usage_complete": true,
+        "attempts_with_reported_usage": 2,
+        "reported_tokens": {
+          "prompt_tokens": 8129,
+          "completion_tokens": 1031
+        },
+        "total_tokens": 9160,
+        "tokens_per_success": 9160.0,
+        "estimated_cost_krw": 13.546641000000001,
+        "cost_per_success_krw": 13.546641000000001,
+        "uncached_cost_krw": 26.238075,
+        "cache_usage_complete": true,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 18880,
+        "median_latency_ms": 18880,
+        "max_latency_ms": 18880,
+        "transport_retries": 0,
+        "review_revise_count": 0
+      },
+      "configuration": "luna6-high",
+      "repeat": 1
+    },
+    {
+      "case": "scope_unknown",
+      "model": "gpt-6-luna",
+      "effort": "medium",
+      "review_results": [
+        {
+          "verdict": "PASS"
+        }
+      ],
+      "decision_signature": {
+        "decision_type": "ACTION",
+        "action_code": "CONFIRM_RESTORATION_SCOPE",
+        "questions": []
+      },
+      "checks": {
+        "review_passed": true,
+        "expected_action": true,
+        "input_unchanged": true
+      },
+      "passed": true,
+      "elapsed_ms": 18932,
+      "provider_usage": [
+        {
+          "model": "gpt-6-luna",
+          "prompt_tokens": 3415,
+          "completion_tokens": 132,
+          "reasoning_tokens": 89,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "medium",
+          "schema_name": "reborn_supervisor_draft",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 2486,
+          "requested_model": "gpt-6-luna"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 4714,
+          "completion_tokens": 879,
+          "reasoning_tokens": 783,
+          "cached_prompt_tokens": 4711,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_review_output",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 16138,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 2
+      },
+      "status": "REVIEWED_PLAN",
+      "metrics": {
+        "runs": 1,
+        "successful_runs": 1,
+        "success_rate": 1.0,
+        "http_attempts": 2,
+        "usage_complete": true,
+        "attempts_with_reported_usage": 2,
+        "reported_tokens": {
+          "prompt_tokens": 8129,
+          "completion_tokens": 1011
+        },
+        "total_tokens": 9140,
+        "tokens_per_success": 9140.0,
+        "estimated_cost_krw": 13.707552,
+        "cost_per_success_krw": 13.707552,
+        "uncached_cost_krw": 26.398986,
+        "cache_usage_complete": true,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 18932,
+        "median_latency_ms": 18932,
+        "max_latency_ms": 18932,
+        "transport_retries": 0,
+        "review_revise_count": 0
+      },
+      "configuration": "luna6-medium",
+      "repeat": 1
+    },
+    {
+      "case": "scope_unknown",
+      "model": "gpt-6-luna",
+      "effort": "low",
+      "review_results": [
+        {
+          "verdict": "PASS"
+        }
+      ],
+      "decision_signature": {
+        "decision_type": "ACTION",
+        "action_code": "CONFIRM_RESTORATION_SCOPE",
+        "questions": []
+      },
+      "checks": {
+        "review_passed": true,
+        "expected_action": true,
+        "input_unchanged": true
+      },
+      "passed": true,
+      "elapsed_ms": 18353,
+      "provider_usage": [
+        {
+          "model": "gpt-6-luna",
+          "prompt_tokens": 3415,
+          "completion_tokens": 120,
+          "reasoning_tokens": 77,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "low",
+          "schema_name": "reborn_supervisor_draft",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 2183,
+          "requested_model": "gpt-6-luna"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 4714,
+          "completion_tokens": 975,
+          "reasoning_tokens": 879,
+          "cached_prompt_tokens": 4711,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_review_output",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 15870,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 2
+      },
+      "status": "REVIEWED_PLAN",
+      "metrics": {
+        "runs": 1,
+        "successful_runs": 1,
+        "success_rate": 1.0,
+        "http_attempts": 2,
+        "usage_complete": true,
+        "attempts_with_reported_usage": 2,
+        "reported_tokens": {
+          "prompt_tokens": 8129,
+          "completion_tokens": 1095
+        },
+        "total_tokens": 9224,
+        "tokens_per_success": 9224.0,
+        "estimated_cost_krw": 15.059856,
+        "cost_per_success_krw": 15.059856,
+        "uncached_cost_krw": 27.75129,
+        "cache_usage_complete": true,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 18353,
+        "median_latency_ms": 18353,
+        "max_latency_ms": 18353,
+        "transport_retries": 0,
+        "review_revise_count": 0
+      },
+      "configuration": "luna6-low",
+      "repeat": 1
+    },
+    {
+      "case": "scope_unknown",
+      "model": "gpt-6-luna",
+      "effort": "high",
+      "review_results": [
+        {
+          "verdict": "PASS"
+        }
+      ],
+      "decision_signature": {
+        "decision_type": "ACTION",
+        "action_code": "CONFIRM_RESTORATION_SCOPE",
+        "questions": []
+      },
+      "checks": {
+        "review_passed": true,
+        "expected_action": true,
+        "input_unchanged": true
+      },
+      "passed": true,
+      "elapsed_ms": 25125,
+      "provider_usage": [
+        {
+          "model": "gpt-6-luna",
+          "prompt_tokens": 2732,
+          "completion_tokens": 209,
+          "reasoning_tokens": 166,
+          "cached_prompt_tokens": 2729,
+          "reasoning_effort": "high",
+          "schema_name": "reborn_supervisor_draft",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 3457,
+          "requested_model": "gpt-6-luna"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 4714,
+          "completion_tokens": 1246,
+          "reasoning_tokens": 1149,
+          "cached_prompt_tokens": 4711,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_review_output",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 21387,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 2
+      },
+      "status": "REVIEWED_PLAN",
+      "metrics": {
+        "runs": 1,
+        "successful_runs": 1,
+        "success_rate": 1.0,
+        "http_attempts": 2,
+        "usage_complete": true,
+        "attempts_with_reported_usage": 2,
+        "reported_tokens": {
+          "prompt_tokens": 7446,
+          "completion_tokens": 1455
+        },
+        "total_tokens": 8901,
+        "tokens_per_success": 8901.0,
+        "estimated_cost_krw": 18.521407,
+        "cost_per_success_krw": 18.521407,
+        "uncached_cost_krw": 31.559424,
+        "cache_usage_complete": true,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 25125,
+        "median_latency_ms": 25125,
+        "max_latency_ms": 25125,
+        "transport_retries": 0,
+        "review_revise_count": 0
+      },
+      "configuration": "final-luna6-high",
+      "repeat": 1
+    },
+    {
+      "case": "scope_partial",
+      "model": "gpt-6-luna",
+      "effort": "high",
+      "review_results": [
+        {
+          "verdict": "PASS"
+        }
+      ],
+      "decision_signature": {
+        "decision_type": "ACTION",
+        "action_code": "CONFIRM_TAX_CLOSURE_REQUIREMENTS",
+        "questions": []
+      },
+      "checks": {
+        "review_passed": true,
+        "expected_action": true,
+        "input_unchanged": true
+      },
+      "passed": true,
+      "elapsed_ms": 31267,
+      "provider_usage": [
+        {
+          "model": "gpt-6-luna",
+          "prompt_tokens": 3080,
+          "completion_tokens": 85,
+          "reasoning_tokens": 40,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "high",
+          "schema_name": "reborn_supervisor_draft",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 1856,
+          "requested_model": "gpt-6-luna"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 4580,
+          "completion_tokens": 1771,
+          "reasoning_tokens": 1660,
+          "cached_prompt_tokens": 4577,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_review_output",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 29125,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 2
+      },
+      "status": "REVIEWED_PLAN",
+      "metrics": {
+        "runs": 1,
+        "successful_runs": 1,
+        "success_rate": 1.0,
+        "http_attempts": 2,
+        "usage_complete": true,
+        "attempts_with_reported_usage": 2,
+        "reported_tokens": {
+          "prompt_tokens": 7660,
+          "completion_tokens": 1856
+        },
+        "total_tokens": 9516,
+        "tokens_per_success": 9516.0,
+        "estimated_cost_krw": 26.252247,
+        "cost_per_success_krw": 26.252247,
+        "uncached_cost_krw": 38.582685,
+        "cache_usage_complete": true,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 31267,
+        "median_latency_ms": 31267,
+        "max_latency_ms": 31267,
+        "transport_retries": 0,
+        "review_revise_count": 0
+      },
+      "configuration": "final-luna6-high",
+      "repeat": 1
+    },
+    {
+      "case": "owned",
+      "model": "gpt-6-luna",
+      "effort": "high",
+      "review_results": [
+        {
+          "verdict": "PASS"
+        }
+      ],
+      "decision_signature": {
+        "decision_type": "ACTION",
+        "action_code": "CONFIRM_TAX_CLOSURE_REQUIREMENTS",
+        "questions": []
+      },
+      "checks": {
+        "review_passed": true,
+        "expected_action": true,
+        "input_unchanged": true
+      },
+      "passed": true,
+      "elapsed_ms": 20329,
+      "provider_usage": [
+        {
+          "model": "gpt-6-luna",
+          "prompt_tokens": 3077,
+          "completion_tokens": 76,
+          "reasoning_tokens": 31,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "high",
+          "schema_name": "reborn_supervisor_draft",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 1639,
+          "requested_model": "gpt-6-luna"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 4578,
+          "completion_tokens": 1066,
+          "reasoning_tokens": 969,
+          "cached_prompt_tokens": 4575,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_review_output",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 18407,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 2
+      },
+      "status": "REVIEWED_PLAN",
+      "metrics": {
+        "runs": 1,
+        "successful_runs": 1,
+        "success_rate": 1.0,
+        "http_attempts": 2,
+        "usage_complete": true,
+        "attempts_with_reported_usage": 2,
+        "reported_tokens": {
+          "prompt_tokens": 7655,
+          "completion_tokens": 1142
+        },
+        "total_tokens": 8797,
+        "tokens_per_success": 8797.0,
+        "estimated_cost_krw": 16.251795,
+        "cost_per_success_krw": 16.251795,
+        "uncached_cost_krw": 28.576845,
+        "cache_usage_complete": true,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 20329,
+        "median_latency_ms": 20329,
+        "max_latency_ms": 20329,
+        "transport_retries": 0,
+        "review_revise_count": 0
+      },
+      "configuration": "final-luna6-high",
+      "repeat": 1
+    },
+    {
+      "case": "missing_employee_count",
+      "model": "gpt-6-luna",
+      "effort": "high",
+      "review_results": [
+        {
+          "verdict": "PASS"
+        }
+      ],
+      "decision_signature": {
+        "decision_type": "NEEDS_MORE_INFO",
+        "action_code": null,
+        "questions": [
+          "직원이 몇 명인가요?"
+        ]
+      },
+      "checks": {
+        "review_passed": true,
+        "expected_action": true,
+        "input_unchanged": true
+      },
+      "passed": true,
+      "elapsed_ms": 9918,
+      "provider_usage": [
+        {
+          "model": "gpt-6-luna",
+          "prompt_tokens": 2391,
+          "completion_tokens": 93,
+          "reasoning_tokens": 52,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "high",
+          "schema_name": "reborn_supervisor_draft",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 2094,
+          "requested_model": "gpt-6-luna"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 3759,
+          "completion_tokens": 322,
+          "reasoning_tokens": 244,
+          "cached_prompt_tokens": 3756,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_review_output",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 7529,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 2
+      },
+      "status": "REVIEWED_PLAN",
+      "metrics": {
+        "runs": 1,
+        "successful_runs": 1,
+        "success_rate": 1.0,
+        "http_attempts": 2,
+        "usage_complete": true,
+        "attempts_with_reported_usage": 2,
+        "reported_tokens": {
+          "prompt_tokens": 6150,
+          "completion_tokens": 415
+        },
+        "total_tokens": 6565,
+        "tokens_per_success": 6565.0,
+        "estimated_cost_krw": 5.505426,
+        "cost_per_success_krw": 5.505426,
+        "uncached_cost_krw": 15.624089999999999,
+        "cache_usage_complete": true,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 9918,
+        "median_latency_ms": 9918,
+        "max_latency_ms": 9918,
+        "transport_retries": 0,
+        "review_revise_count": 0
+      },
+      "configuration": "final-luna6-high",
+      "repeat": 1
+    },
+    {
+      "case": "scope_unknown",
+      "model": "gpt-6-luna",
+      "effort": "high",
+      "review_results": [
+        {
+          "verdict": "PASS"
+        }
+      ],
+      "decision_signature": {
+        "decision_type": "ACTION",
+        "action_code": "CONFIRM_RESTORATION_SCOPE",
+        "questions": []
+      },
+      "checks": {
+        "review_passed": true,
+        "expected_action": true,
+        "input_unchanged": true
+      },
+      "passed": true,
+      "elapsed_ms": 21485,
+      "provider_usage": [
+        {
+          "model": "gpt-6-luna",
+          "prompt_tokens": 2732,
+          "completion_tokens": 151,
+          "reasoning_tokens": 108,
+          "cached_prompt_tokens": 2729,
+          "reasoning_effort": "high",
+          "schema_name": "reborn_supervisor_draft",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 2690,
+          "requested_model": "gpt-6-luna"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 4714,
+          "completion_tokens": 1007,
+          "reasoning_tokens": 906,
+          "cached_prompt_tokens": 4711,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_review_output",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 18506,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 2
+      },
+      "status": "REVIEWED_PLAN",
+      "metrics": {
+        "runs": 1,
+        "successful_runs": 1,
+        "success_rate": 1.0,
+        "http_attempts": 2,
+        "usage_complete": true,
+        "attempts_with_reported_usage": 2,
+        "reported_tokens": {
+          "prompt_tokens": 7446,
+          "completion_tokens": 1158
+        },
+        "total_tokens": 8604,
+        "tokens_per_success": 8604.0,
+        "estimated_cost_krw": 15.092517999999998,
+        "cost_per_success_krw": 15.092517999999998,
+        "uncached_cost_krw": 28.130535,
+        "cache_usage_complete": true,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 21485,
+        "median_latency_ms": 21485,
+        "max_latency_ms": 21485,
+        "transport_retries": 0,
+        "review_revise_count": 0
+      },
+      "configuration": "final-luna6-high",
+      "repeat": 2
+    },
+    {
+      "case": "scope_partial",
+      "model": "gpt-6-luna",
+      "effort": "high",
+      "review_results": [
+        {
+          "verdict": "PASS"
+        }
+      ],
+      "decision_signature": {
+        "decision_type": "ACTION",
+        "action_code": "CONFIRM_TAX_CLOSURE_REQUIREMENTS",
+        "questions": []
+      },
+      "checks": {
+        "review_passed": true,
+        "expected_action": true,
+        "input_unchanged": true
+      },
+      "passed": true,
+      "elapsed_ms": 31874,
+      "provider_usage": [
+        {
+          "model": "gpt-6-luna",
+          "prompt_tokens": 2464,
+          "completion_tokens": 83,
+          "reasoning_tokens": 38,
+          "cached_prompt_tokens": 2461,
+          "reasoning_effort": "high",
+          "schema_name": "reborn_supervisor_draft",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 2208,
+          "requested_model": "gpt-6-luna"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 4580,
+          "completion_tokens": 1729,
+          "reasoning_tokens": 1612,
+          "cached_prompt_tokens": 4577,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_review_output",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 29361,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 2
+      },
+      "status": "REVIEWED_PLAN",
+      "metrics": {
+        "runs": 1,
+        "successful_runs": 1,
+        "success_rate": 1.0,
+        "http_attempts": 2,
+        "usage_complete": true,
+        "attempts_with_reported_usage": 2,
+        "reported_tokens": {
+          "prompt_tokens": 7044,
+          "completion_tokens": 1812
+        },
+        "total_tokens": 8856,
+        "tokens_per_success": 8856.0,
+        "estimated_cost_krw": 25.256078000000002,
+        "cost_per_success_krw": 25.256078000000002,
+        "uncached_cost_krw": 37.899063,
+        "cache_usage_complete": true,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 31874,
+        "median_latency_ms": 31874,
+        "max_latency_ms": 31874,
+        "transport_retries": 0,
+        "review_revise_count": 0
+      },
+      "configuration": "final-luna6-high",
+      "repeat": 2
+    },
+    {
+      "case": "owned",
+      "model": "gpt-6-luna",
+      "effort": "high",
+      "review_results": [
+        {
+          "verdict": "PASS"
+        }
+      ],
+      "decision_signature": {
+        "decision_type": "ACTION",
+        "action_code": "CONFIRM_TAX_CLOSURE_REQUIREMENTS",
+        "questions": []
+      },
+      "checks": {
+        "review_passed": true,
+        "expected_action": true,
+        "input_unchanged": true
+      },
+      "passed": true,
+      "elapsed_ms": 29390,
+      "provider_usage": [
+        {
+          "model": "gpt-6-luna",
+          "prompt_tokens": 2462,
+          "completion_tokens": 69,
+          "reasoning_tokens": 24,
+          "cached_prompt_tokens": 2459,
+          "reasoning_effort": "high",
+          "schema_name": "reborn_supervisor_draft",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 1761,
+          "requested_model": "gpt-6-luna"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 4578,
+          "completion_tokens": 1550,
+          "reasoning_tokens": 1452,
+          "cached_prompt_tokens": 4575,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_review_output",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 27347,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 2
+      },
+      "status": "REVIEWED_PLAN",
+      "metrics": {
+        "runs": 1,
+        "successful_runs": 1,
+        "success_rate": 1.0,
+        "http_attempts": 2,
+        "usage_complete": true,
+        "attempts_with_reported_usage": 2,
+        "reported_tokens": {
+          "prompt_tokens": 7040,
+          "completion_tokens": 1619
+        },
+        "total_tokens": 8659,
+        "tokens_per_success": 8659.0,
+        "estimated_cost_krw": 22.708531,
+        "cost_per_success_krw": 22.708531,
+        "uncached_cost_krw": 35.345874,
+        "cache_usage_complete": true,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 29390,
+        "median_latency_ms": 29390,
+        "max_latency_ms": 29390,
+        "transport_retries": 0,
+        "review_revise_count": 0
+      },
+      "configuration": "final-luna6-high",
+      "repeat": 2
+    },
+    {
+      "case": "missing_employee_count",
+      "model": "gpt-6-luna",
+      "effort": "high",
+      "review_results": [
+        {
+          "verdict": "PASS"
+        }
+      ],
+      "decision_signature": {
+        "decision_type": "NEEDS_MORE_INFO",
+        "action_code": null,
+        "questions": [
+          "직원이 몇 명인가요?"
+        ]
+      },
+      "checks": {
+        "review_passed": true,
+        "expected_action": true,
+        "input_unchanged": true
+      },
+      "passed": true,
+      "elapsed_ms": 8925,
+      "provider_usage": [
+        {
+          "model": "gpt-6-luna",
+          "prompt_tokens": 1913,
+          "completion_tokens": 72,
+          "reasoning_tokens": 31,
+          "cached_prompt_tokens": 1910,
+          "reasoning_effort": "high",
+          "schema_name": "reborn_supervisor_draft",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 1679,
+          "requested_model": "gpt-6-luna"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 3759,
+          "completion_tokens": 329,
+          "reasoning_tokens": 253,
+          "cached_prompt_tokens": 3756,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_review_output",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 6964,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 2
+      },
+      "status": "REVIEWED_PLAN",
+      "metrics": {
+        "runs": 1,
+        "successful_runs": 1,
+        "success_rate": 1.0,
+        "http_attempts": 2,
+        "usage_complete": true,
+        "attempts_with_reported_usage": 2,
+        "reported_tokens": {
+          "prompt_tokens": 5672,
+          "completion_tokens": 401
+        },
+        "total_tokens": 6073,
+        "tokens_per_success": 6073.0,
+        "estimated_cost_krw": 5.279815,
+        "cost_per_success_krw": 5.279815,
+        "uncached_cost_krw": 15.641049,
+        "cache_usage_complete": true,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 8925,
+        "median_latency_ms": 8925,
+        "max_latency_ms": 8925,
+        "transport_retries": 0,
+        "review_revise_count": 0
+      },
+      "configuration": "final-luna6-high",
+      "repeat": 2
+    },
+    {
+      "case": "scope_unknown",
+      "model": "gpt-6-luna",
+      "effort": "high",
+      "review_results": [
+        {
+          "verdict": "PASS"
+        }
+      ],
+      "decision_signature": {
+        "decision_type": "ACTION",
+        "action_code": "CONFIRM_RESTORATION_SCOPE",
+        "questions": []
+      },
+      "checks": {
+        "review_passed": true,
+        "expected_action": true,
+        "input_unchanged": true
+      },
+      "passed": true,
+      "elapsed_ms": 29802,
+      "provider_usage": [
+        {
+          "model": "gpt-6-luna",
+          "prompt_tokens": 2732,
+          "completion_tokens": 467,
+          "reasoning_tokens": 424,
+          "cached_prompt_tokens": 2729,
+          "reasoning_effort": "high",
+          "schema_name": "reborn_supervisor_draft",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 6142,
+          "requested_model": "gpt-6-luna"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 4714,
+          "completion_tokens": 1351,
+          "reasoning_tokens": 1241,
+          "cached_prompt_tokens": 4711,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_review_output",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 23368,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 2
+      },
+      "status": "REVIEWED_PLAN",
+      "metrics": {
+        "runs": 1,
+        "successful_runs": 1,
+        "success_rate": 1.0,
+        "http_attempts": 2,
+        "usage_complete": true,
+        "attempts_with_reported_usage": 2,
+        "reported_tokens": {
+          "prompt_tokens": 7446,
+          "completion_tokens": 1818
+        },
+        "total_tokens": 9264,
+        "tokens_per_success": 9264.0,
+        "estimated_cost_krw": 20.192446,
+        "cost_per_success_krw": 20.192446,
+        "uncached_cost_krw": 33.230463,
+        "cache_usage_complete": true,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 29802,
+        "median_latency_ms": 29802,
+        "max_latency_ms": 29802,
+        "transport_retries": 0,
+        "review_revise_count": 0
+      },
+      "configuration": "final-luna6-high",
+      "repeat": 3
+    },
+    {
+      "case": "scope_partial",
+      "model": "gpt-6-luna",
+      "effort": "high",
+      "review_results": [
+        {
+          "verdict": "PASS"
+        }
+      ],
+      "decision_signature": {
+        "decision_type": "ACTION",
+        "action_code": "CONFIRM_TAX_CLOSURE_REQUIREMENTS",
+        "questions": []
+      },
+      "checks": {
+        "review_passed": true,
+        "expected_action": true,
+        "input_unchanged": true
+      },
+      "passed": true,
+      "elapsed_ms": 30298,
+      "provider_usage": [
+        {
+          "model": "gpt-6-luna",
+          "prompt_tokens": 2464,
+          "completion_tokens": 105,
+          "reasoning_tokens": 60,
+          "cached_prompt_tokens": 2461,
+          "reasoning_effort": "high",
+          "schema_name": "reborn_supervisor_draft",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 2257,
+          "requested_model": "gpt-6-luna"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 4580,
+          "completion_tokens": 1644,
+          "reasoning_tokens": 1536,
+          "cached_prompt_tokens": 4577,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_review_output",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 27746,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 2
+      },
+      "status": "REVIEWED_PLAN",
+      "metrics": {
+        "runs": 1,
+        "successful_runs": 1,
+        "success_rate": 1.0,
+        "http_attempts": 2,
+        "usage_complete": true,
+        "attempts_with_reported_usage": 2,
+        "reported_tokens": {
+          "prompt_tokens": 7044,
+          "completion_tokens": 1749
+        },
+        "total_tokens": 8793,
+        "tokens_per_success": 8793.0,
+        "estimated_cost_krw": 24.066779,
+        "cost_per_success_krw": 24.066779,
+        "uncached_cost_krw": 36.709764,
+        "cache_usage_complete": true,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 30298,
+        "median_latency_ms": 30298,
+        "max_latency_ms": 30298,
+        "transport_retries": 0,
+        "review_revise_count": 0
+      },
+      "configuration": "final-luna6-high",
+      "repeat": 3
+    },
+    {
+      "case": "owned",
+      "model": "gpt-6-luna",
+      "effort": "high",
+      "review_results": [
+        {
+          "verdict": "PASS"
+        }
+      ],
+      "decision_signature": {
+        "decision_type": "ACTION",
+        "action_code": "CONFIRM_TAX_CLOSURE_REQUIREMENTS",
+        "questions": []
+      },
+      "checks": {
+        "review_passed": true,
+        "expected_action": true,
+        "input_unchanged": true
+      },
+      "passed": true,
+      "elapsed_ms": 27958,
+      "provider_usage": [
+        {
+          "model": "gpt-6-luna",
+          "prompt_tokens": 2462,
+          "completion_tokens": 67,
+          "reasoning_tokens": 22,
+          "cached_prompt_tokens": 2459,
+          "reasoning_effort": "high",
+          "schema_name": "reborn_supervisor_draft",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 1911,
+          "requested_model": "gpt-6-luna"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 4578,
+          "completion_tokens": 1445,
+          "reasoning_tokens": 1332,
+          "cached_prompt_tokens": 4575,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_review_output",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 25760,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 2
+      },
+      "status": "REVIEWED_PLAN",
+      "metrics": {
+        "runs": 1,
+        "successful_runs": 1,
+        "success_rate": 1.0,
+        "http_attempts": 2,
+        "usage_complete": true,
+        "attempts_with_reported_usage": 2,
+        "reported_tokens": {
+          "prompt_tokens": 7040,
+          "completion_tokens": 1512
+        },
+        "total_tokens": 8552,
+        "tokens_per_success": 8552.0,
+        "estimated_cost_krw": 21.21874,
+        "cost_per_success_krw": 21.21874,
+        "uncached_cost_krw": 33.856083000000005,
+        "cache_usage_complete": true,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 27958,
+        "median_latency_ms": 27958,
+        "max_latency_ms": 27958,
+        "transport_retries": 0,
+        "review_revise_count": 0
+      },
+      "configuration": "final-luna6-high",
+      "repeat": 3
+    },
+    {
+      "case": "missing_employee_count",
+      "model": "gpt-6-luna",
+      "effort": "high",
+      "review_results": [
+        {
+          "verdict": "PASS"
+        }
+      ],
+      "decision_signature": {
+        "decision_type": "NEEDS_MORE_INFO",
+        "action_code": null,
+        "questions": [
+          "직원이 몇 명인가요?"
+        ]
+      },
+      "checks": {
+        "review_passed": true,
+        "expected_action": true,
+        "input_unchanged": true
+      },
+      "passed": true,
+      "elapsed_ms": 9421,
+      "provider_usage": [
+        {
+          "model": "gpt-6-luna",
+          "prompt_tokens": 1913,
+          "completion_tokens": 99,
+          "reasoning_tokens": 58,
+          "cached_prompt_tokens": 1910,
+          "reasoning_effort": "high",
+          "schema_name": "reborn_supervisor_draft",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 2116,
+          "requested_model": "gpt-6-luna"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 3759,
+          "completion_tokens": 403,
+          "reasoning_tokens": 325,
+          "cached_prompt_tokens": 3756,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_review_output",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 7001,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 2
+      },
+      "status": "REVIEWED_PLAN",
+      "metrics": {
+        "runs": 1,
+        "successful_runs": 1,
+        "success_rate": 1.0,
+        "http_attempts": 2,
+        "usage_complete": true,
+        "attempts_with_reported_usage": 2,
+        "reported_tokens": {
+          "prompt_tokens": 5672,
+          "completion_tokens": 502
+        },
+        "total_tokens": 6174,
+        "tokens_per_success": 6174.0,
+        "estimated_cost_krw": 6.347880999999999,
+        "cost_per_success_krw": 6.347880999999999,
+        "uncached_cost_krw": 16.709115,
+        "cache_usage_complete": true,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 9421,
+        "median_latency_ms": 9421,
+        "max_latency_ms": 9421,
+        "transport_retries": 0,
+        "review_revise_count": 0
+      },
+      "configuration": "final-luna6-high",
+      "repeat": 3
+    }
+  ],
+  "groups": {
+    "baseline": {
+      "passed": true,
+      "metrics": {
+        "runs": 12,
+        "successful_runs": 12,
+        "success_rate": 1.0,
+        "http_attempts": 24,
+        "usage_complete": true,
+        "attempts_with_reported_usage": 24,
+        "reported_tokens": {
+          "prompt_tokens": 84466,
+          "completion_tokens": 15668
+        },
+        "total_tokens": 100134,
+        "tokens_per_success": 8344.5,
+        "estimated_cost_krw": 272.68944600000003,
+        "cost_per_success_krw": 22.7241205,
+        "uncached_cost_krw": 461.5550099999999,
+        "cache_usage_complete": true,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 23501.333333333332,
+        "median_latency_ms": 23761.0,
+        "max_latency_ms": 38729,
+        "transport_retries": 0,
+        "review_revise_count": 0
+      }
+    },
+    "sol-high": {
+      "passed": true,
+      "metrics": {
+        "runs": 1,
+        "successful_runs": 1,
+        "success_rate": 1.0,
+        "http_attempts": 2,
+        "usage_complete": true,
+        "attempts_with_reported_usage": 2,
+        "reported_tokens": {
+          "prompt_tokens": 8129,
+          "completion_tokens": 2082
+        },
+        "total_tokens": 10211,
+        "tokens_per_success": 10211.0,
+        "estimated_cost_krw": 39.866631,
+        "cost_per_success_krw": 39.866631,
+        "uncached_cost_krw": 52.558065,
+        "cache_usage_complete": true,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 29912,
+        "median_latency_ms": 29912,
+        "max_latency_ms": 29912,
+        "transport_retries": 0,
+        "review_revise_count": 0
+      }
+    },
+    "sol-medium": {
+      "passed": true,
+      "metrics": {
+        "runs": 1,
+        "successful_runs": 1,
+        "success_rate": 1.0,
+        "http_attempts": 2,
+        "usage_complete": true,
+        "attempts_with_reported_usage": 2,
+        "reported_tokens": {
+          "prompt_tokens": 8129,
+          "completion_tokens": 907
+        },
+        "total_tokens": 9036,
+        "tokens_per_success": 9036.0,
+        "estimated_cost_krw": 23.211005999999998,
+        "cost_per_success_krw": 23.211005999999998,
+        "uncached_cost_krw": 35.90244,
+        "cache_usage_complete": true,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 19894,
+        "median_latency_ms": 19894,
+        "max_latency_ms": 19894,
+        "transport_retries": 0,
+        "review_revise_count": 0
+      }
+    },
+    "sol-low": {
+      "passed": true,
+      "metrics": {
+        "runs": 1,
+        "successful_runs": 1,
+        "success_rate": 1.0,
+        "http_attempts": 2,
+        "usage_complete": true,
+        "attempts_with_reported_usage": 2,
+        "reported_tokens": {
+          "prompt_tokens": 8129,
+          "completion_tokens": 904
+        },
+        "total_tokens": 9033,
+        "tokens_per_success": 9033.0,
+        "estimated_cost_krw": 23.168481,
+        "cost_per_success_krw": 23.168481,
+        "uncached_cost_krw": 35.859915,
+        "cache_usage_complete": true,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 16615,
+        "median_latency_ms": 16615,
+        "max_latency_ms": 16615,
+        "transport_retries": 0,
+        "review_revise_count": 0
+      }
+    },
+    "luna6-high": {
+      "passed": true,
+      "metrics": {
+        "runs": 1,
+        "successful_runs": 1,
+        "success_rate": 1.0,
+        "http_attempts": 2,
+        "usage_complete": true,
+        "attempts_with_reported_usage": 2,
+        "reported_tokens": {
+          "prompt_tokens": 8129,
+          "completion_tokens": 1031
+        },
+        "total_tokens": 9160,
+        "tokens_per_success": 9160.0,
+        "estimated_cost_krw": 13.546641000000001,
+        "cost_per_success_krw": 13.546641000000001,
+        "uncached_cost_krw": 26.238075,
+        "cache_usage_complete": true,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 18880,
+        "median_latency_ms": 18880,
+        "max_latency_ms": 18880,
+        "transport_retries": 0,
+        "review_revise_count": 0
+      }
+    },
+    "luna6-medium": {
+      "passed": true,
+      "metrics": {
+        "runs": 1,
+        "successful_runs": 1,
+        "success_rate": 1.0,
+        "http_attempts": 2,
+        "usage_complete": true,
+        "attempts_with_reported_usage": 2,
+        "reported_tokens": {
+          "prompt_tokens": 8129,
+          "completion_tokens": 1011
+        },
+        "total_tokens": 9140,
+        "tokens_per_success": 9140.0,
+        "estimated_cost_krw": 13.707552,
+        "cost_per_success_krw": 13.707552,
+        "uncached_cost_krw": 26.398986,
+        "cache_usage_complete": true,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 18932,
+        "median_latency_ms": 18932,
+        "max_latency_ms": 18932,
+        "transport_retries": 0,
+        "review_revise_count": 0
+      }
+    },
+    "luna6-low": {
+      "passed": true,
+      "metrics": {
+        "runs": 1,
+        "successful_runs": 1,
+        "success_rate": 1.0,
+        "http_attempts": 2,
+        "usage_complete": true,
+        "attempts_with_reported_usage": 2,
+        "reported_tokens": {
+          "prompt_tokens": 8129,
+          "completion_tokens": 1095
+        },
+        "total_tokens": 9224,
+        "tokens_per_success": 9224.0,
+        "estimated_cost_krw": 15.059856,
+        "cost_per_success_krw": 15.059856,
+        "uncached_cost_krw": 27.75129,
+        "cache_usage_complete": true,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 18353,
+        "median_latency_ms": 18353,
+        "max_latency_ms": 18353,
+        "transport_retries": 0,
+        "review_revise_count": 0
+      }
+    },
+    "final-luna6-high": {
+      "passed": true,
+      "metrics": {
+        "runs": 12,
+        "successful_runs": 12,
+        "success_rate": 1.0,
+        "http_attempts": 24,
+        "usage_complete": true,
+        "attempts_with_reported_usage": 24,
+        "reported_tokens": {
+          "prompt_tokens": 83315,
+          "completion_tokens": 15439
+        },
+        "total_tokens": 98754,
+        "tokens_per_success": 8229.5,
+        "estimated_cost_krw": 206.69366300000002,
+        "cost_per_success_krw": 17.22447191666667,
+        "uncached_cost_krw": 351.86499,
+        "cache_usage_complete": true,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 22982.666666666668,
+        "median_latency_ms": 26541.5,
+        "max_latency_ms": 31874,
+        "transport_retries": 0,
+        "review_revise_count": 0
+      }
+    }
+  },
+  "selected_supervisor_config": {
+    "prefix": "LUNA6_",
+    "model": "gpt-6-luna",
+    "effort": "high"
+  },
+  "selection_metric": "uncached_cost_per_success_krw",
+  "code_unchanged": true,
+  "new_call_metrics": {
+    "runs": 21,
+    "successful_runs": 21,
+    "success_rate": 1.0,
+    "http_attempts": 42,
+    "usage_complete": true,
+    "attempts_with_reported_usage": 42,
+    "reported_tokens": {
+      "prompt_tokens": 149830,
+      "completion_tokens": 23828
+    },
+    "total_tokens": 173658,
+    "tokens_per_success": 8269.42857142857,
+    "estimated_cost_krw": 366.82260199999996,
+    "cost_per_success_krw": 17.467742952380952,
+    "uncached_cost_krw": 626.1333210000001,
+    "cache_usage_complete": true,
+    "unpriced_models": [],
+    "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+    "mean_latency_ms": 20488.761904761905,
+    "median_latency_ms": 19894,
+    "max_latency_ms": 31874,
+    "transport_retries": 0,
+    "review_revise_count": 0
+  },
+  "passed": true
+}

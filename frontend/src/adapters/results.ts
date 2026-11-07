@@ -1,5 +1,7 @@
+import type { Step, StepStatus } from '../components/ui/ProcessSteps'
 import { factLabelOf, fieldLabelOf, FRANCHISE_OPTIONS, LEASE_OPTIONS } from '../lib/caseOptions'
 import type {
+  CaseConflictsDecisionRequest,
   CaseResultsEntryResponse,
   CaseResultsSubmitResponse,
   LeaseStatus,
@@ -8,7 +10,9 @@ import type {
 import type {
   ConfirmView,
   ConflictItem,
+  ConflictSide,
   FactChange,
+  ReplanView,
   ResultsEntry,
   SubmitOutcome,
 } from '../types/view'
@@ -163,6 +167,30 @@ export function toConflicts(value: unknown): ConflictItem[] | null {
   return conflicts
 }
 
+/**
+ * 충돌마다 고른 쪽을 결정 요청 모양으로. 하나라도 고르지 않았으면 `null`.
+ *
+ * 서버는 남은 충돌을 전부 받아야 판단을 다시 돌린다(일부만이면 422). 화면이 이미 다 고르기
+ * 전에는 버튼을 잠그지만, 보내는 쪽에서 한 번 더 걸러 반쪽 요청이 나가지 않게 한다.
+ *
+ * 항목은 화면 열쇠가 아니라 서버 번호(`referenceId`)로 가리킨다.
+ */
+export function toDecisionRequest(
+  conflicts: ConflictItem[],
+  choices: Record<string, ConflictSide>,
+): CaseConflictsDecisionRequest | null {
+  const decisions: CaseConflictsDecisionRequest['decisions'] = []
+  for (const conflict of conflicts) {
+    const side = choices[conflict.key]
+    if (side === undefined) return null
+    decisions.push({
+      conflict_reference_id: conflict.referenceId,
+      side: side === 'INCOMING' ? 'PROPOSED' : 'STORED',
+    })
+  }
+  return { decisions }
+}
+
 /** 충돌 확인 화면 데이터. 사장님이 한 말이나 충돌 목록 중 하나라도 없으면 `null` */
 function toConfirmView(rawInput: unknown, conflicts: unknown): ConfirmView | null {
   const items = toConflicts(conflicts)
@@ -185,7 +213,10 @@ export function toResultsEntry(body: CaseResultsEntryResponse | null): ResultsEn
       // 번호가 없으면 결과를 보낼 수 없고, 할 일이 없으면 무엇에 대한 결과인지 보여줄 수 없다
       const nextAction = toNextAction(body.next_action)
       if (!Number.isInteger(body.case_history_id) || nextAction === null) return { kind: 'UNRECOGNIZED' }
-      return { kind: 'READY', nextAction, historyId: body.case_history_id as number }
+      if (body.result_input_kind !== 'TEXT' && body.result_input_kind !== 'RESTORATION_ANSWER') {
+        return { kind: 'UNRECOGNIZED' }
+      }
+      return { kind: 'READY', nextAction, historyId: body.case_history_id as number, inputKind: body.result_input_kind }
     }
 
     case 'CONFLICT': {
@@ -193,9 +224,26 @@ export function toResultsEntry(body: CaseResultsEntryResponse | null): ResultsEn
       return view === null ? { kind: 'UNRECOGNIZED' } : { kind: 'CONFIRM', view }
     }
 
+    case 'NEEDS_MORE_INFO': {
+      // 번호가 없으면 답을 보낼 수 없고, 질문이 없으면 무엇에 답하는지 보여줄 수 없다
+      const questions = toQuestionsForUser(body.questions_for_user)
+      if (!Number.isInteger(body.case_history_id) || questions === null) return { kind: 'UNRECOGNIZED' }
+      return { kind: 'ANSWER', questions, historyId: body.case_history_id as number }
+    }
+
+    /*
+      NONE은 같은 제출 재시도 대신 새 상황 글을 받는다. 과거 질문·선택은 새 입력에 넘기지 않는다.
+      RESUBMIT_INPUT은 요청한 내용을 받고, 나머지 실패는 `/case` 가 안내한다.
+    */
+    case 'FAILED': {
+      const notice = toFailureNotice(body)
+      if (notice.kind !== 'NEEDS_DETAIL' && notice.kind !== 'NO_RECOVERY') return { kind: 'ELSEWHERE' }
+      if (!Number.isInteger(body.case_history_id)) return { kind: 'UNRECOGNIZED' }
+      if (notice.kind === 'NO_RECOVERY') return { kind: 'NEW_INPUT', historyId: body.case_history_id as number }
+      return { kind: 'RESUBMIT', notice, historyId: body.case_history_id as number }
+    }
+
     case 'PENDING':
-    case 'NEEDS_MORE_INFO':
-    case 'FAILED':
       return { kind: 'ELSEWHERE' }
 
     default:
@@ -225,7 +273,10 @@ export function toSubmitOutcome(body: CaseResultsSubmitResponse | null): SubmitO
       const nextAction = toNextAction(body.next_action)
       if (changes === null || !isReadableText(body.blocker) || nextAction === null) return UNRECOGNIZED
 
-      return { kind: 'REPLAN', view: { changes, blocker: { title: body.blocker }, nextAction } }
+      return {
+        kind: 'REPLAN',
+        view: { changes, blocker: { title: body.blocker }, nextAction, newTasks: toNewTasks(body.new_tasks) },
+      }
     }
 
     case 'NEEDS_MORE_INFO': {
@@ -247,4 +298,72 @@ export function toSubmitOutcome(body: CaseResultsSubmitResponse | null): SubmitO
     default:
       return UNRECOGNIZED
   }
+}
+
+/**
+ * 새로 생긴 할 일(#182). 목록이 아니면(`null` 포함) 빈 목록이다.
+ *
+ * **이것 때문에 응답 전체를 읽지 못한 것으로 돌리지 않는다.** 바뀐 내용·다음 할 일이 멀쩡한데 덤인 이
+ * 칸 하나로 반영 결과를 못 보여주면 더 큰 손해다. 번호나 제목이 빈 줄은 그 줄만 뺀다.
+ */
+function toNewTasks(value: unknown): ReplanView['newTasks'] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((item: unknown) => {
+    const row = item as Partial<Record<'task_id' | 'title', unknown>> | null
+    return isReadableText(row?.task_id) && isReadableText(row?.title) ? [{ id: row.task_id, title: row.title }] : []
+  })
+}
+
+/** 리본이 되물은 질문 하나와 사장님이 적은 답 */
+export interface AnswerPair {
+  question: string
+  answer: string
+}
+
+/**
+ * 되물은 질문에 대한 답을 서버로 보낼 글(`raw_input`) 하나로 만든다.
+ *
+ * **질문을 함께 붙인다.** 재판단 때 AI에 넘어가는 것은 가게 정보와 이 글뿐이고, 직전에 무엇을
+ * 물었는지(`questions_for_user`)는 넘어가지 않는다(BE `run_judgment`). 사장님이 "2명이요"라고만
+ * 적으면 무엇에 대한 답인지 알 수 없어서, 질문과 답을 짝으로 적어 보낸다.
+ *
+ * 답을 적지 않은 질문은 뺀다. 질문만 덩그러니 보내면 AI가 답이 없는 것을 "모른다"로 읽을 수 있다.
+ *
+ * 재판단 입력에 직전 질문을 따로 넣지 않고 이 형식을 쓰기로 정했다(#120). 승준님이 실제 모델로 12가지 경우를
+ * 돌려, 질문을 사장님 말로 읽거나 답을 다른 질문에 붙인 경우가 없음을 확인했다.
+ */
+export function toAnswerInput(pairs: AnswerPair[]): string {
+  return pairs
+    .map(({ question, answer }) => ({ question: question.trim(), answer: answer.trim() }))
+    .filter(({ answer }) => answer.length > 0)
+    .map(({ question, answer }) => `[리본이 물어본 것] ${question}\n[사장님 답] ${answer}`)
+    .join('\n\n')
+}
+
+/**
+ * 결과를 보낸 뒤 처리 단계 줄. 결과 입력의 처리 중 화면과 반영 결과 화면이 같은 줄을 쓴다.
+ *
+ * 서버는 처리 단계를 내려주지 않는다. 그래서 화면이 확실히 아는 사건에만 맞춘다.
+ *
+ *   SENDING  보냈지만 접수 번호를 아직 못 받았다
+ *   WAITING  접수됐고 판단을 기다린다
+ *   DONE     반영된 결과가 왔다
+ *
+ * 둘째·셋째 줄이 서버 안에서 언제 갈리는지는 알 수 없어, 결과가 오면 함께 끝난다.
+ *
+ * 충돌 확인에서 보낸 것(`DECISION`)은 둘째 줄만 다르다. 글을 정리하는 것이 아니라 고른 쪽을
+ * 반영하는 판단이라서다. 기다리는 사건은 같아서 줄이 끝나는 때도 같다.
+ */
+export function toResultSteps(stage: 'SENDING' | 'WAITING' | 'DONE', sent: 'RESULT' | 'DECISION' = 'RESULT'): Step[] {
+  const status = (sending: StepStatus, waiting: StepStatus): StepStatus =>
+    stage === 'DONE' ? 'done' : stage === 'WAITING' ? waiting : sending
+
+  return [
+    { label: '보냈어요', status: status('run', 'done') },
+    {
+      label: sent === 'DECISION' ? '고르신 내용을 반영하고 있어요' : '리본이 내용을 정리하고 있어요',
+      status: status('wait', 'run'),
+    },
+    { label: '다음 할 일 다시 정하기', status: status('wait', 'wait') },
+  ]
 }

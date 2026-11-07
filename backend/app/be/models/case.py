@@ -12,9 +12,28 @@ class Case(TimestampMixin, table=True):
     id: int | None = Field(default=None, sa_column=Column(BigInteger, primary_key=True, autoincrement=True))
     member_id: int = Field(sa_column=Column(BigInteger, ForeignKey("members.id"), nullable=False, unique=True))
 
+    # AI 판단에 쓰지 않는다.
+    store_name: str | None = Field(default=None, sa_column=Column(String(50), nullable=True))
     business_type: str = Field(max_length=50)
     franchise_status: bool = Field(default=False)
     employee_count: int | None = Field(default=None)
+    has_business_loan: bool | None = Field(default=None)
+    has_service_contracts: bool | None = Field(default=None)
+
+    # 직원 고용 이력과 사업장 4대보험 가입 이력. 모두 "지금"이 아니라 "있었던 적"을 묻는다
+    # (blocker_candidates.py:43-47). 지금 직원이 0명이어도 지난달 내보낸 직원의 퇴직금 정산이
+    # 남아 있고, 이미 탈퇴한 보험도 상실·탈퇴 신고 대상이기 때문이다.
+    #
+    # NULL은 "안 물어봤다"는 뜻이고 AI에는 모름으로 넘어간다. false("아니오")와 다르다 —
+    # 안 물어본 것을 false로 두면 AI가 해당 절차를 "해당 없음"으로 보고 로드맵에서 빼버린다.
+    #
+    # 보험은 네 칸을 같이 채워야 한다. AI는 넷 중 하나라도 true면 해당, 넷 다 false여야
+    # 해당 없음으로 보고, 섞이면 모름으로 둔다(rules.py:129-136).
+    had_employees: bool | None = Field(default=None)
+    pension_enrolled: bool | None = Field(default=None)
+    health_insurance_enrolled: bool | None = Field(default=None)
+    employment_insurance_enrolled: bool | None = Field(default=None)
+    industrial_accident_insurance_enrolled: bool | None = Field(default=None)
 
     case_status: str = Field(
         default="IN_PROGRESS",
@@ -23,6 +42,14 @@ class Case(TimestampMixin, table=True):
     lease_status: str = Field(
         sa_column=Column(
             Enum("LEASED_PAID", "LEASED_FREE", "OWNED", name="lease_status_enum"),
+            nullable=False,
+        ),
+    )
+    restoration_clause: str = Field(
+        default="UNKNOWN",
+        sa_column=Column(
+            Enum("EXISTS", "NOT_EXISTS", "UNKNOWN", name="restoration_clause_enum"),
+            server_default="UNKNOWN",
             nullable=False,
         ),
     )
@@ -51,9 +78,31 @@ class Case(TimestampMixin, table=True):
             nullable=False,
         ),
     )
+    # 사장님이 알려 준 점포철거비 1차 적격심사 결과. null이면 아직 모름. AI가 판단한 지원 자격이 아니고,
+    # 뒤의 정산 검토·비용 지급과도 다르다(AI 로드맵 RoadmapInput.support_approved와 같은 뜻).
+    support_approved: bool | None = Field(default=None)
+    # 심사 결과를 마지막으로 알려 준 시각. 기록 탭에 "승인 결과를 알려주셨어요"로 보인다
+    support_approved_at: datetime | None = Field(default=None, sa_column=Column(DateTime, nullable=True))
 
     planned_closure_date: date | None = Field(default=None, sa_column=Column(Date, nullable=True))
+    # 정확한 날짜 대신 예상 달만 정했을 때 "YYYY-MM". 날짜가 있으면 비워 둔다
+    planned_closure_month: str | None = Field(default=None, sa_column=Column(String(7), nullable=True))
     completed_at: datetime | None = Field(default=None, sa_column=Column(DateTime, nullable=True))
+
+    # 통합 폐업 신고 화면에서 사장님이 확인한 값(시안 "폐업 정보·가게 주소 확인"). 신고 요약에 다시 보여준다.
+    # AI 판단에는 쓰지 않는다. 가입 때 받은 예상일(planned_closure_date)과 달리 신고할 실제 폐업일이다.
+    closure_date: date | None = Field(default=None, sa_column=Column(Date, nullable=True))
+    closure_reason: str | None = Field(
+        default=None,
+        sa_column=Column(Enum("BUSINESS_SLUMP", "PERSONAL", "OTHER", name="closure_reason_enum"), nullable=True),
+    )
+    road_address: str | None = Field(default=None, sa_column=Column(String(200), nullable=True))
+    address_detail: str | None = Field(default=None, sa_column=Column(String(100), nullable=True))
+    # 가게 반환 화면의 "보증금은 돌려받으셨나요?". 리본은 기록만 하고 판단하지 않는다.
+    deposit_return_result: str | None = Field(
+        default=None,
+        sa_column=Column(Enum("FULL", "PARTIAL", "NONE", name="deposit_return_result_enum"), nullable=True),
+    )
 
     member: "Member" = Relationship()
     histories: list["CaseHistory"] = Relationship(back_populates="case")

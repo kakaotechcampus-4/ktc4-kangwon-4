@@ -3,16 +3,13 @@
 import asyncio
 import json
 from copy import deepcopy
+from datetime import date
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
-from test_action_codes import NOW, StubModel, result_fixes_xfail, supervisor_request
-from test_blocker_candidates import ChoiceModel, request_with_state
-from test_procedure_only_graph import graph_run_inputs
-
-from app.agent.graph import AgentGraph
 from app.agent.enrichment import build_fact_overlays
+from app.agent.graph import AgentGraph
 from app.agent.info_agent.agent import (
     InfoAnalysisAgent,
     InfoAnalysisGuardrailError,
@@ -21,6 +18,7 @@ from app.agent.review_tool import ReviewIntegrityError, ReviewTool
 from app.agent.schemas import (
     CASE_FIELD_SPECS,
     AgentGraphInput,
+    CaseFact,
     CaseFieldKey,
     CaseSnapshot,
     InfoAnalysisInput,
@@ -33,6 +31,9 @@ from app.agent.schemas import (
 from app.agent.supervisor.agent import SupervisorAgent
 from app.common.agent_dto import ProcedureCompletionConfirmation
 from app.common.agent_service import build_planning_input
+from test_action_codes import NOW, StubModel, result_fixes_xfail, supervisor_request
+from test_blocker_candidates import ChoiceModel, request_with_state
+from test_procedure_only_graph import graph_run_inputs
 
 TAX = "FILE_TAX_BUSINESS_CLOSURE"
 FOOD = "FILE_FOOD_SERVICE_CLOSURE"
@@ -96,6 +97,25 @@ def request_for_replanning(status="NOT_REQUIRED", scope="NOT_REQUIRED"):
         procedure_lookup_result=lookup,
         review_feedback=[],
     )
+
+
+def test_same_date_report_after_json_storage_does_not_create_a_new_conflict():
+    request = request_for_replanning()
+    request.case_snapshot.facts.append(CaseFact.model_validate({
+        "field_path": "planned_closure_date", "value_type": "DATE", "value": date(2026, 11, 2),
+        "status": "CONFIRMED", "evidence_refs": ["synthetic-document"], "updated_at": NOW,
+    }))
+    request = InfoAnalysisInput.model_validate_json(request.model_dump_json())
+    request.input.redacted_text = "폐업 예정일은 2026-11-02입니다."
+    response = output([finding(TAX, "doc1"), finding(FOOD, "doc2")])
+    response["facts"] = [{
+        "operation": "SET", "field_path": "planned_closure_date", "value_type": "DATE",
+        "value": "2026-11-02", "source_text": request.input.redacted_text,
+        "confidence_bps": 10000, "requires_confirmation": False, "reason_summary": "기존과 같은 날짜 보고",
+    }]
+    result = asyncio.run(InfoAnalysisAgent(Responses(response), max_local_attempts=1).analyze(request))
+    assert result.fact_candidates == []
+    assert result.conflicts == []
 
 
 def finding(code, alias):
@@ -195,6 +215,37 @@ def test_all_unsourced_summaries_are_reported_in_one_retry():
     assert f"{TAX}, {FOOD}: summaries" in feedback
     assert len(client.messages) == 2
     assert len(result.procedure_findings) == 2
+
+
+@pytest.mark.parametrize("invalid_code", [TAX, "UNKNOWN_PROCEDURE"])
+def test_unknown_or_duplicate_procedure_retry_names_the_valid_codes_and_uniqueness_rule(invalid_code):
+    request = request_for_replanning()
+    original = request.model_dump_json()
+    valid = output([finding(TAX, "doc1"), finding(FOOD, "doc2")])
+    rejected = output([finding(TAX, "doc1"), finding(invalid_code, "doc1"), finding(FOOD, "doc2")])
+    client = Responses(rejected, valid)
+
+    result = asyncio.run(InfoAnalysisAgent(client, max_local_attempts=2).analyze(request))
+
+    assert len(client.messages) == 2
+    feedback = " ".join(item["content"] for item in client.messages[1] if item["role"] == "system")
+    assert "Return at most one finding per step_code" in feedback
+    assert "duplicate step_code values are forbidden" in feedback
+    assert "exact quotations from that step's allowed documents" in feedback
+    for step in request.known_procedure_steps:
+        assert step.procedure_step.step_code in feedback
+    assert [item.procedure_step.step_code for item in result.procedure_findings] == [TAX, FOOD]
+    assert all(item.summary.text == "합성 테스트 절차입니다." for item in result.procedure_findings)
+    assert request.model_dump_json() == original
+
+
+@pytest.mark.parametrize("invalid_code", [TAX, "UNKNOWN_PROCEDURE"])
+def test_repeated_unknown_or_duplicate_procedure_findings_still_fail(invalid_code):
+    rejected = output([finding(TAX, "doc1"), finding(invalid_code, "doc1"), finding(FOOD, "doc2")])
+    client = Responses(rejected, rejected)
+    with pytest.raises(InfoAnalysisGuardrailError):
+        asyncio.run(InfoAnalysisAgent(client, max_local_attempts=2).analyze(request_for_replanning()))
+    assert len(client.messages) == 2
 
 
 def test_procedure_names_with_digits_are_not_rejected_as_deadlines():
@@ -406,6 +457,60 @@ def test_new_fact_still_requires_a_literal_user_source_span():
                 request_for_replanning()
             )
         )
+
+
+@pytest.mark.parametrize("rejected_quote", [
+    "직원은 9명인가요?",
+    "[사장님 답] 2명이요",
+    "2명이요\n\n[리본이 물어본 것] 프랜차이즈인가요?",
+])
+def test_followup_questions_cannot_be_fact_evidence_and_retry_uses_only_answer(rejected_quote):
+    request = request_for_replanning()
+    request.input.redacted_text = (
+        "[리본이 물어본 것] 직원은 9명인가요?\n[사장님 답] 2명이요\n\n"
+        "[리본이 물어본 것] 프랜차이즈인가요?\n[사장님 답] 아니요"
+    )
+    before = request.model_dump_json()
+    corrected = output([finding(TAX, "doc1"), finding(FOOD, "doc2")])
+    corrected["facts"] = [{
+        "operation": "SET", "field_path": "employee_count", "value_type": "INTEGER",
+        "value": 2, "source_text": "2명이요", "confidence_bps": 9500,
+        "requires_confirmation": False, "reason_summary": "직원 수 답변",
+    }]
+    rejected = deepcopy(corrected)
+    rejected["facts"][0].update(value=9, source_text=rejected_quote)
+    client = Responses(rejected, corrected)
+    result = asyncio.run(InfoAnalysisAgent(client).analyze(request))
+    fact, = result.fact_candidates
+    assert (fact.field_path, fact.value, fact.source_span.text) == ("employee_count", 2, "2명이요")
+    assert "questions and labels are context" in client.messages[1][-2]["content"]
+    assert len(client.messages) == 2
+    assert request.model_dump_json() == before
+
+
+@pytest.mark.parametrize("answer", ["2명이요", "직원은\n2명입니다."])
+def test_followup_repeated_text_is_grounded_in_answer_not_earlier_question(answer):
+    text = f"[리본이 물어본 것] {answer}라고 하셨나요?\n[사장님 답] {answer}"
+    result = analyze_facts([("employee_count", 2, answer)], text)
+    fact, = result.fact_candidates
+    expected_start = text.index("[사장님 답] ") + len("[사장님 답] ")
+    assert fact.source_span.start_offset == expected_start
+    assert fact.source_span.end_offset == expected_start + len(answer)
+    assert result.evidence_records[0].excerpt == answer
+
+
+@pytest.mark.parametrize("suffix", ["", "\n[사장님 답] "])
+def test_followup_without_answer_cannot_create_procedure_completion(suffix):
+    request = request_for_replanning()
+    question = "세무 폐업 처리가 완료되었나요?"
+    request.input.redacted_text = f"[리본이 물어본 것] {question}{suffix}"
+    raw = output([finding(TAX, "doc1"), finding(FOOD, "doc2")])
+    raw["procedure_observations"] = [{
+        "step_code": TAX, "observed_status": "COMPLETED", "source_text": question,
+        "requires_confirmation": True, "reason_summary": "질문을 완료 보고로 오해한 모델",
+    }]
+    with pytest.raises(InfoAnalysisGuardrailError):
+        asyncio.run(InfoAnalysisAgent(Responses(raw), max_local_attempts=1).analyze(request))
 
 
 @pytest.mark.parametrize("already_completed", [True, False])
@@ -1136,8 +1241,10 @@ def test_staff_history_guides_this_plan_without_becoming_case_changes(employee_c
         if employee_count is not None:
             text = f"현재 직원은 {employee_count}명이고 " + text
         response = output([finding(TAX, "doc1")])
+        # 대화로 저장하지 않는 칸 중 직원·보험 이력(참/거짓)만 보고한다. 예상 폐업 달은 문자열이라 뺀다
         reports = [
-            (field.value, True) for field in CASE_FIELD_SPECS if field not in CaseFieldKey
+            (field.value, True) for field, (value_type, _) in CASE_FIELD_SPECS.items()
+            if field not in CaseFieldKey and value_type.value == "BOOLEAN"
         ]
         if employee_count is not None:
             reports.insert(0, ("employee_count", employee_count))

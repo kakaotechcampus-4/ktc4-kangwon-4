@@ -357,6 +357,8 @@ def test_reviewed_staff_facts_keep_internal_context_and_save_only_case_fields(mo
     monkeypatch.setattr(decision_record, "_save_evidence_records", Mock())
     monkeypatch.setattr(decision_record.case_field_history_crud, "create_case_field_history", fact_writer)
     monkeypatch.setattr(decision_record.evidence_crud, "create_decision_record", record_writer)
+    # 로드맵 계산은 test_result_new_tasks.py가 실제 DB로 본다. 여기서는 판단 저장이 그 값을 남기는지만 본다
+    monkeypatch.setattr(decision_record, "_roadmap_task_ids", lambda *_: ["intake"])
     if stored_count is not None:
         with pytest.raises(decision_record.StaleJudgmentError, match="employee_count"):
             decision_record.save_reviewed_plan(session, history, outcome)
@@ -374,7 +376,40 @@ def test_reviewed_staff_facts_keep_internal_context_and_save_only_case_fields(mo
         assert record_writer.call_args.args[1].subject_digest == outcome.review_subject.subject_digest
         session.commit.assert_called_once()
         assert history.judgment_status == "DONE"
+        assert history.roadmap_task_ids == ["intake"]
     outcome.assert_integrity()
     assert len(outcome.review_subject.source_results[1].output.fact_candidates) == 6
     assert len(outcome.review_subject.supervisor_draft.mutations.fact_changes) == 1
     assert outcome.model_dump_json() == before
+
+
+def test_closure_month_and_exact_date_cannot_both_be_given():
+    from datetime import date
+
+    from app.be.schemas.case import CaseCreateRequest
+
+    base = {"business_type": "CAFE", "franchise_status": False, "lease_status": "LEASED_PAID"}
+    assert CaseCreateRequest(**base, planned_closure_month="2026-12").planned_closure_month == "2026-12"
+    assert CaseCreateRequest(**base, planned_closure_date=date(2026, 12, 15)).planned_closure_month is None
+    # 화면은 셋 중 하나만 고른다. 둘 다 오면 FE 실수라 조용히 하나를 버리지 않고 거절한다
+    with pytest.raises(ValidationError):
+        CaseCreateRequest(**base, planned_closure_date=date(2026, 12, 15), planned_closure_month="2026-11")
+    for wrong in ("2026-13", "2026-1", "2026/12", "12월"):
+        with pytest.raises(ValidationError):
+            CaseCreateRequest(**base, planned_closure_month=wrong)
+
+
+def test_closure_month_fact_accepts_only_year_and_month():
+    from app.agent.schemas import AgentFieldKey, FactValueType, validate_case_field_value
+
+    validate_case_field_value(AgentFieldKey.PLANNED_CLOSURE_MONTH, FactValueType.STRING, "2026-12", allow_null=False)
+    for wrong in ("2026-12-01", "2026-00", "다음 달"):
+        with pytest.raises(ValueError):
+            validate_case_field_value(AgentFieldKey.PLANNED_CLOSURE_MONTH, FactValueType.STRING, wrong, allow_null=False)
+
+
+def test_closure_month_is_not_written_by_an_agent_conversation():
+    # 가입 때만 받는 칸이다. AI가 대화에서 "다음 달쯤"을 듣고 저장하면 사장님이 고른 값을 덮는다
+    from app.agent.schemas import AgentFieldKey, CaseFieldKey
+
+    assert AgentFieldKey.PLANNED_CLOSURE_MONTH.value not in {key.value for key in CaseFieldKey}

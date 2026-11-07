@@ -34,7 +34,12 @@ from app.agent.claim_safety import (
     is_overconfident,
     references_other_known_label,
 )
-from app.agent.enrichment import build_confirmed_conflict_overlay, build_fact_overlays
+from app.agent.enrichment import (
+    build_conflict_overlays,
+    build_fact_overlays,
+    evidence_records_equal,
+    same_fact_value,
+)
 from app.agent.guardrails import GuardrailViolation, ensure_no_sensitive_text
 from app.agent.procedure_tool.rules import procedure_plan_constraints
 from app.agent.projection import (
@@ -150,6 +155,23 @@ class ReviewTool:
         self._max_output_attempts = max_output_attempts
         self._provider_max_retries = provider_max_retries
 
+    async def review_code_only(self, subject: ReviewSubject) -> ReviewResult:
+        """모델 없이 무결성·코드 안전 검사만 한다. 어떤 판단에 쓸지는 graph가 정한다."""
+        context = _validate_integrity(subject)
+        deterministic = _deterministic_safety_review(
+            subject,
+            context,
+            resolve_procedure_bindings(subject.known_procedure_steps, self._procedure_bindings),
+        )
+        no_model = _coerce_model_output(
+            ReviewProviderOutput(
+                verdict="PASS", issues=[], missing_evidence=[], recommended_rework_targets=[],
+                resolution_reason="모델이 쓴 사실·문장이 없어 코드 검사만 했습니다.",
+            ),
+            subject,
+        )
+        return _finalize_result(subject, no_model, deterministic)
+
     async def review(self, subject: ReviewSubject) -> ReviewResult:
         context = _validate_integrity(subject)
         procedure_bindings = resolve_procedure_bindings(
@@ -176,6 +198,10 @@ class ReviewTool:
             + "\n선택된 action_code의 의미와 제목·이유·질문을 대조하세요. "
             "확인 코드인데 신고서 제출 등 실행을 지시하는 경우처럼 의미가 다르면 "
             "CONTRACT_VIOLATION으로 반려하세요. 코드가 같아도 내용 검수는 생략하지 마세요."
+            "\n절차 문서(source_results의 documents)의 excerpt와 source_results의 evidence_records가 "
+            "null이면, 같은 evidence_id의 원문이 snapshot.evidence_records에 있어 중복을 뺀 것입니다. "
+            "원문은 evidence_ref·evidence_id로 snapshot.evidence_records에서 찾아 대조하고, "
+            "null이라는 이유만으로 근거가 없다고 보지 마세요."
         )
         base_messages[0]["content"] += (
             "\n- Every issue.target_path and missing_evidence.claim_path must be an "
@@ -356,7 +382,7 @@ def _validate_integrity(subject: ReviewSubject) -> _ReviewContext:
     evidence_by_id: dict[str, EvidenceRecord] = {}
     for evidence in _walk_evidence_records(subject):
         existing = evidence_by_id.get(evidence.evidence_id)
-        if existing is not None and existing != evidence:
+        if existing is not None and not evidence_records_equal(existing, evidence):
             raise ReviewIntegrityError(
                 "the same evidence ID has conflicting content in the review package"
             )
@@ -378,6 +404,9 @@ def _validate_integrity(subject: ReviewSubject) -> _ReviewContext:
             continue
         for observation in source.output.procedure_progress_observations:
             original_input = getattr(subject.trigger, "input", None)
+            retained = getattr(subject.trigger, "retained_info_result", None)
+            if retained is not None:
+                original_input = retained.input
             if confirmation is not None and confirmation.matches(observation):
                 original_input = confirmation.input
             if original_input is None:
@@ -402,20 +431,43 @@ def _validate_mutation_provenance(
     sources_by_call_id: dict[UUID, Any],
 ) -> None:
     mutations = subject.supervisor_draft.mutations
+    expected_changes = {}
     if isinstance(subject.trigger, ConflictConfirmedTrigger):
-        confirmed_changes = [
-            candidate
-            for candidate in mutations.fact_changes
-            if candidate.source_type == FactChangeSourceType.CONFIRMED_CONFLICT
-        ]
-        if len(confirmed_changes) != 1:
+        try:
+            expected_changes = {
+                item.confirmed_conflict_ref: item
+                for item in build_conflict_overlays(subject.snapshot, subject.trigger)
+            }
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise ReviewIntegrityError("confirmed-conflict provenance is invalid") from exc
+        confirmed = [item for item in mutations.fact_changes
+                     if item.source_type == FactChangeSourceType.CONFIRMED_CONFLICT]
+        if (len(confirmed) != len(expected_changes)
+                or {item.confirmed_conflict_ref for item in confirmed} != set(expected_changes)):
             raise ReviewIntegrityError(
-                "conflict confirmation requires exactly one confirmed change"
+                "conflict confirmation must contain exactly the accepted changes"
             )
-        if len(mutations.fact_changes) != 1 or mutations.procedure_progress_changes:
-            raise ReviewIntegrityError(
-                "conflict confirmation cannot create new facts or procedure progress"
-            )
+        retained = subject.trigger.retained_info_result
+        others = [item for item in mutations.fact_changes if item not in confirmed]
+        if retained is None:
+            if others or mutations.procedure_progress_changes:
+                raise ReviewIntegrityError("conflict confirmation must contain exactly the accepted changes")
+        else:
+            sources = [item for item in subject.source_results if item.meta.component == Component.INFO_AGENT]
+            if (len(sources) != 1
+                    or sources[0].output.fact_candidates != retained.output.fact_candidates
+                    or sources[0].output.procedure_progress_observations != retained.output.procedure_progress_observations):
+                raise ReviewIntegrityError("confirmation Info differs from its retained input")
+            expected = {item.field_path: item for item in build_fact_overlays(
+                subject.snapshot, retained.output, sources[0].meta.call_id,
+            ) if item.field_path in CaseFieldKey}
+            if (len(others) != len(expected) or any(
+                item.field_path not in expected
+                or canonical_digest(item, exclude={"candidate_id"})
+                != canonical_digest(expected[item.field_path], exclude={"candidate_id"})
+                for item in others
+            )):
+                raise ReviewIntegrityError("retained facts must be reviewed unchanged")
     snapshot_facts = {fact.field_path: fact for fact in subject.snapshot.facts}
     for candidate in mutations.fact_changes:
         if candidate.field_path not in CaseFieldKey:
@@ -425,25 +477,10 @@ def _validate_mutation_provenance(
                 raise ReviewIntegrityError(
                     "confirmed-conflict mutation requires its confirmation trigger"
                 )
-            conflict = subject.trigger.confirmed_conflict
-            try:
-                conflict.assert_integrity()
-                expected = build_confirmed_conflict_overlay(
-                    subject.snapshot,
-                    conflict,
-                    uuid_factory=lambda candidate_id=candidate.candidate_id: (
-                        candidate_id
-                    ),
-                )
-            except (AttributeError, TypeError, ValueError) as exc:
-                raise ReviewIntegrityError(
-                    "confirmed-conflict provenance is invalid"
-                ) from exc
-            snapshot_evidence = {
-                item.evidence_id for item in subject.snapshot.evidence_records
-            }
-            if not set(conflict.source_evidence_refs).issubset(snapshot_evidence):
-                raise ReviewIntegrityError("confirmed-conflict evidence is missing")
+            expected = expected_changes.get(candidate.confirmed_conflict_ref)
+            if expected is None:
+                raise ReviewIntegrityError("mutation does not belong to an accepted conflict")
+            expected = expected.model_copy(update={"candidate_id": candidate.candidate_id})
             if canonical_digest(candidate) != canonical_digest(expected):
                 raise ReviewIntegrityError(
                     "mutation differs from the confirmed conflict"
@@ -483,7 +520,7 @@ def _validate_mutation_provenance(
             and candidate.field_path == fact_candidate.field_path
             and candidate.value_type == fact_candidate.value_type
             and candidate.proposed_status == expected_status
-            and _strictly_equal_nullable(candidate.proposed_value, fact_candidate.value)
+            and same_fact_value(candidate.field_path, candidate.proposed_value, fact_candidate.value)
             and candidate.reason_summary == fact_candidate.reason_summary
             and candidate.source_evidence_refs == fact_candidate.source_evidence_refs
         ):
@@ -494,8 +531,8 @@ def _validate_mutation_provenance(
         before = snapshot_facts.get(candidate.field_path)
         before_status = before.status if before is not None else FactStatus.UNKNOWN
         before_value = before.value if before is not None else None
-        if candidate.before_status != before_status or not _strictly_equal_nullable(
-            candidate.before_value, before_value
+        if candidate.before_status != before_status or not same_fact_value(
+            candidate.field_path, candidate.before_value, before_value
         ):
             raise ReviewIntegrityError(
                 "fact mutation before state differs from the review snapshot"
@@ -643,12 +680,6 @@ def _require_source_output(
     return source
 
 
-def _strictly_equal_nullable(left: Any, right: Any) -> bool:
-    if left is None or right is None:
-        return left is right
-    return type(left) is type(right) and left == right
-
-
 _PROMPT_EXCLUDED_KEYS = {
     "candidate_id",
     "captured_at",
@@ -729,16 +760,30 @@ def _review_prompt_projection(
         _prompt_evidence_record(evidence) if evidence.evidence_id in used_refs else None
         for evidence in subject.snapshot.evidence_records
     ]
+    # 검수 절차 원문은 Case 근거(snapshot)·절차 조회 근거·절차 문서 본문으로 같은 글이 세 번 들어가
+    # Review 입력의 약 40%를 차지했다(2026-11-05 측정). 같은 evidence_id·같은 내용이면 snapshot 쪽에만
+    # 두고 나머지는 null로 비운다. 모델에 보내는 모양만 줄이고, 코드 검사는 subject 전체로 한다.
+    shown = {
+        evidence.evidence_id: evidence
+        for evidence in subject.snapshot.evidence_records
+        if evidence.evidence_id in used_refs
+    }
     source_payloads: list[dict[str, Any]] = []
     for source, output_payload in zip(
         subject.source_results, source_output_payloads, strict=True
     ):
         output_payload["evidence_records"] = [
             _prompt_evidence_record(evidence)
-            if evidence.evidence_id in used_refs
+            if evidence.evidence_id in used_refs and shown.get(evidence.evidence_id) != evidence
             else None
             for evidence in source.output.evidence_records
         ]
+        for document, payload in zip(
+            getattr(source.output, "documents", ()), output_payload.get("documents") or (), strict=False
+        ):
+            evidence = shown.get(document.evidence_ref)
+            if evidence is not None and evidence.excerpt == document.excerpt:
+                payload["excerpt"] = None
         source_payloads.append(
             {
                 "meta": {

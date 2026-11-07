@@ -1,115 +1,551 @@
-import { Navigate, useLocation } from 'react-router'
+import {
+  IconCheckmarkCircleFill,
+  IconExclamationmarkCircleFill,
+  IconExclamationmarkCircleLine,
+  IconPersonLine,
+  IconSparkle2Fill,
+} from '@karrotmarket/react-monochrome-icon'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { Navigate, useLocation, useNavigate } from 'react-router'
 
-import { AppShell } from '../components/AppShell'
-import { BlockerCard } from '../components/BlockerCard'
-import { FactList } from '../components/FactList'
-import { FollowUpQuestionCard } from '../components/FollowUpQuestionCard'
-import { NextActionCard } from '../components/NextActionCard'
-import { NoticeCard } from '../components/NoticeCard'
+import { AiNotice } from '../components/ui/AiNotice'
+import { Button } from '../components/ui/Button'
+import { HomeBanner } from '../components/ui/HomeBanner'
+import { HomeStageCard } from '../components/ui/HomeStageCard'
+import { InfoBox } from '../components/ui/InfoBox'
+import { TaskCard } from '../components/ui/TaskCard'
 import { useCase } from '../hooks/useCase'
+import { useLogs } from '../hooks/useLogs'
+import { useRoadmap } from '../hooks/useRoadmap'
+import { ApiError, UnauthorizedError } from '../lib/api'
+import { usesMockData } from '../lib/auth'
+import { retryJudgment } from '../lib/judgmentRetry'
+import { useEntersForward } from '../lib/viewTransition'
 import type { FailureNotice, JudgmentView } from '../types/view'
 
 /**
- * 현재 Case. 사용자가 돌아올 곳이고, 이 제품에서 유일하게 "지금 상황"을 보여주는 화면이다.
+ * 홈(현재 Case). 사용자가 돌아올 곳이고, 이 제품에서 유일하게 "지금 상황"을 보여주는 화면이다.
  *
  * 그래서 들어올 때마다 서버에 다시 묻는다. 앞 화면에서 받은 값을 들고 오면 편하지만,
  * 그 값이 히스토리에 남아 오래된 Case가 지금 상황인 척 다시 뜬다.
  *
  * **조회와 판단은 다른 축이다.** 서버를 잘 불렀어도 판단은 아직 안 끝날 수 있다.
- * 전에는 "다음 할 일이 없다" 하나로 판단 중·물어볼 게 있음·실패를 다 덮었는데,
  * 사장님 입장에서 기다려야 하는 상황과 답해야 하는 상황은 할 일이 전혀 다르다.
  *
  * 어느 상태에서도 **누를 것이 하나는 있어야 한다.** 할 일이 없다는 이유로 버튼까지
  * 사라지면 사장님은 화면만 보다 나가게 된다.
+ *
+ * 가게 정보 목록(업종·직원 수 등)은 시안 홈에 없어 뺐다.
  */
 export function CurrentCasePage() {
   const { search } = useLocation()
   const { query, refresh, refreshing, waitedTooLong } = useCase()
-
-  if (query.status === 'LOADING') {
-    return (
-      <AppShell title="내 폐업 준비" width="wide">
-        <section className="rounded-2xl bg-white p-5" role="status" aria-live="polite">
-          <p className="text-base leading-relaxed text-gray-600">가게 상황을 불러오고 있어요.</p>
-        </section>
-      </AppShell>
-    )
-  }
+  const [retrying, setRetrying] = useState(false)
 
   /**
    * 아직 Case를 만들지 않은 사용자가 주소로 직접 들어온 경우다.
    * 빈 화면을 보여주는 대신 만들러 보낸다.
    */
-  if (query.status === 'EMPTY') return <Navigate to={{ pathname: '/start', search }} replace />
+  if (query.status === 'EMPTY') return <Navigate to={{ pathname: '/cases/new', search }} replace />
+
+  if (query.status === 'LOADING') {
+    return (
+      <HomeFrame headline="조금만 기다려 주세요">
+        <LoadingCard />
+      </HomeFrame>
+    )
+  }
 
   if (query.status === 'LOAD_FAILED') {
     return (
-      <AppShell title="내 폐업 준비" width="wide">
-        <NoticeCard
-          tone="NEUTRAL"
-          title="가게 상황을 불러오지 못했어요."
-          description="연결 상태를 확인하고 다시 시도해 주세요. 입력하신 내용은 그대로 있습니다."
-          action={{ label: '다시 불러오기', onClick: refresh, disabled: refreshing }}
+      <HomeFrame headline="가게 상황을 불러오지 못했어요">
+        <TaskCard
+          tone="neutral"
+          icon={<IconExclamationmarkCircleLine size={40} />}
+          badge="불러오기 실패"
+          title="연결 상태를 확인해 주세요"
+          description="입력하신 내용은 그대로 있어요."
+          actions={
+            <Button size="lg" onClick={refresh} disabled={refreshing}>
+              다시 불러오기
+            </Button>
+          }
         />
-      </AppShell>
+      </HomeFrame>
     )
   }
 
   const { view, stale } = query
-  const { facts, judgment } = view
 
-  const confirmed = facts.filter((fact) => fact.status === 'CONFIRMED')
-  const pending = facts.filter((fact) => fact.status !== 'CONFIRMED')
+  /*
+    완료는 판단보다 먼저 본다. 완료돼도 마지막 판단 기록은 남아 있어서, 판단부터 보면 이미 마친 가게에
+    [결과 알려주기]가 다시 뜨고 누르면 409 다(#167).
+  */
+  if (view.completed) {
+    return (
+      <HomeFrame headline="폐업 정리를 모두 마쳤어요" completed>
+        {stale && <StaleNotice />}
+        <CompletedCard />
+      </HomeFrame>
+    )
+  }
+
+  const card = judgmentCard(view.judgment, waitedTooLong)
+  const recheck = (
+    <Button variant="neutral" size={card.main ? 'md' : 'lg'} onClick={refresh} disabled={refreshing || retrying}>
+      상태 다시 확인
+    </Button>
+  )
 
   return (
-    <AppShell title="내 폐업 준비" width="wide">
-      {/*
-        마지막으로 받은 내용을 그대로 두고 알리기만 한다. 지우면 사장님은 적어낸 것이
-        날아간 줄 알고, 조용히 두면 지난 판단을 지금 것으로 읽는다.
-      */}
-      {stale && (
-        <NoticeCard
-          tone="NEUTRAL"
-          title="최신 상태를 확인하지 못했어요."
-          description="아래는 마지막으로 받은 내용이에요."
-          action={{ label: '다시 확인', onClick: refresh, disabled: refreshing }}
+    <HomeFrame headline={card.headline}>
+      {stale && <StaleNotice />}
+
+      <TaskCard
+        {...card.props}
+        actions={
+          <>
+            {card.main?.(stale, refresh, refreshing, setRetrying)}
+            {recheck}
+          </>
+        }
+      />
+    </HomeFrame>
+  )
+}
+
+/**
+ * 시안 홈의 뼈대: 리본이 해둔 일 띠 · 머리 문구 · 할 일 카드 · 단계 카드
+ *
+ * 띠는 기록 조회에서 리본이 한 일만 골라 채운다. 기록을 불러오지 못하면 띠만 빈 모양으로
+ * 두고 홈은 그대로 그린다 — 띠는 덧붙는 정보라 할 일 카드를 가리면 안 된다.
+ *
+ * 단계 카드는 로드맵의 지금 단계로 칠한다. 로드맵을 받지 못했으면 빈 막대로 둔다. 폐업 정리를 마쳤으면
+ * (`completed`) 막대를 다 채운다 — 서버가 완료라고 한 것을 보여줄 뿐이다.
+ */
+function HomeFrame({
+  headline,
+  completed = false,
+  children,
+}: {
+  headline: string
+  completed?: boolean
+  children: ReactNode
+}) {
+  const { query } = useLogs()
+  const ribbonItems = query.status === 'READY' ? query.entries.filter((entry) => entry.actor === 'RIBBON') : []
+  // 단계 카드는 덤이다. 불러오지 못해도 알리지 않고 "곧 보여드릴게요"로 둔다 — 홈의 주인공은 할 일 카드다
+  const { query: roadmap } = useRoadmap()
+  // 머리말·카드·단계 카드가 차례로 올라온다. 뒤로 돌아온 홈은 이미 밀려 들어오는 중이라 올리지 않는다
+  const rise = useEntersForward()
+  const currentStage =
+    roadmap.status === 'READY' ? roadmap.view.stages.find((stage) => stage.stage === roadmap.view.currentStage) : undefined
+
+  return (
+    <>
+      <HomeBanner items={ribbonItems} />
+      <div className={`flex flex-1 flex-col gap-3 px-4 pt-6 pb-4 ${rise ? 'rise-children' : ''}`}>
+        <h1 className="mb-1 text-24 font-bold text-pretty">{headline}</h1>
+        {children}
+        <HomeStageCard
+          stage={currentStage ? { number: currentStage.stage, title: currentStage.title } : null}
+          completed={completed}
         />
-      )}
-
-      {/*
-        DOM 순서가 곧 읽는 순서다. 넓은 화면에서 가게 정보가 옆으로 가더라도
-        order 로 순서를 바꾸지 않는다 — 화면 낭독기는 이 순서를 따른다.
-      */}
-      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-8">
-        <div className="flex min-w-0 flex-col gap-4">
-          <JudgmentSection
-            judgment={judgment}
-            locked={stale}
-            waitedTooLong={waitedTooLong}
-            onRefresh={refresh}
-            refreshing={refreshing}
-          />
-        </div>
-
-        <aside className="flex min-w-0 flex-col gap-4">
-          <FactList
-            title="내 가게 상황"
-            caption={`확인 ${confirmed.length} · 미확인 ${pending.length}`}
-            facts={confirmed}
-          />
-
-          <FactList title="아직 확인 안 된 것" caption="순서대로 하나씩" facts={pending} />
-        </aside>
       </div>
-    </AppShell>
+    </>
+  )
+}
+
+/**
+ * 마지막으로 받은 내용을 그대로 두고 알리기만 한다. 지우면 사장님은 적어낸 것이
+ * 날아간 줄 알고, 조용히 두면 지난 판단을 지금 것으로 읽는다.
+ */
+function StaleNotice() {
+  return (
+    <p role="status" className="rounded-14 bg-bg-neutral-weak px-4 py-3 text-15">
+      <strong className="font-bold">최신 상태를 확인하지 못했어요.</strong> 아래는 마지막으로
+      받은 내용이에요.
+    </p>
+  )
+}
+
+/**
+ * 폐업 정리를 모두 마친 카드(시안 `closed`).
+ *
+ * 색은 시안대로 주황(`brand`)이다. 시안의 완료 색(`pos`)이 brand 와 같은 값이다.
+ * 시안의 "종합소득세는 다음 해 5월에 알려드릴게요"는 뺐다 — 알림 기능이 없어 지킬 수 없는 약속이고,
+ * 기한을 FE 가 적어 두게 된다(FE 규칙 7). 서류함에 서류가 남아 있다는 것만 알린다.
+ *
+ * 누를 것은 [전체 기록 보기] 하나다. 판단을 다시 물을 일이 없어 "상태 다시 확인"은 두지 않는다.
+ */
+function CompletedCard() {
+  const navigate = useNavigate()
+  const { search } = useLocation()
+
+  return (
+    <TaskCard
+      tone="brand"
+      icon={<IconCheckmarkCircleFill size={40} className="motion-safe:animate-pop" />}
+      badge="완료"
+      title="수고 많으셨어요, 사장님"
+      description="모든 서류는 서류함에 있어요."
+      actions={
+        <Button size="lg" onClick={() => navigate({ pathname: '/log', search })}>
+          전체 기록 보기
+        </Button>
+      }
+    />
+  )
+}
+
+/**
+ * 처음 불러오는 동안 할 일 카드 자리를 채우는 회색 막대.
+ * 글자 대신 모양을 먼저 보여줘서, 다 불러왔을 때 화면이 덜 흔들린다.
+ */
+function LoadingCard() {
+  const bar = 'block rounded-md bg-bg-neutral-weak animate-skeleton-pulse motion-reduce:animate-none'
+
+  return (
+    <section
+      role="status"
+      className="flex flex-col gap-3 rounded-20 bg-bg-layer-default px-5 pt-6 pb-5 shadow-raised"
+    >
+      <span className="sr-only">가게 상황을 불러오고 있어요</span>
+      <span aria-hidden="true" className={`${bar} size-18 rounded-20`} />
+      <span aria-hidden="true" className={`${bar} mt-2 h-4 w-1/4`} />
+      <span aria-hidden="true" className={`${bar} h-7 w-4/5`} />
+      <span aria-hidden="true" className={`${bar} h-5 w-3/5`} />
+    </section>
+  )
+}
+
+interface JudgmentCard {
+  headline: string
+  props: Omit<Parameters<typeof TaskCard>[0], 'actions'>
+  /**
+   * 회색 "상태 다시 확인" 위에 놓을 주 버튼. `stale`이면 잠근다.
+   * 없으면 "상태 다시 확인"이 카드의 큰 버튼이 된다.
+   *
+   * `refresh` 는 버튼이 서버에 무언가를 맡긴 뒤 지금 상황을 다시 묻는 데 쓴다(다시 판단하기).
+   * `refreshing` 이면 이미 묻는 중이라, 그 사이 맡기면 뒤따르는 `refresh` 가 무시된다(`useCase` 는 한 번에 하나만 묻는다).
+   */
+  main?: (stale: boolean, refresh: () => void, refreshing: boolean, onSendingChange: (sending: boolean) => void) => ReactNode
+}
+
+const CRITICAL_ICON = <IconExclamationmarkCircleFill size={40} />
+const NEUTRAL_ICON = <IconExclamationmarkCircleLine size={40} />
+
+/**
+ * 판단 상태에 맞는 머리 문구와 할 일 카드.
+ *
+ * 여섯 갈래를 전부 적는다. `switch`가 아니라 `if`로 흘려두면 새 상태가 늘었을 때
+ * 아무 화면도 안 나오고 조용히 빈 자리가 생긴다.
+ *
+ * 색은 사장님이 할 일이 있는지로 나눈다. 할 일이면 주황, 사장님이 답하거나 골라야 하면 빨강,
+ * 우리 쪽에서 멈춘 것이면 회색이다. 우리 쪽 문제를 빨강으로 칠하면 사장님 탓으로 읽힌다.
+ */
+function judgmentCard(judgment: JudgmentView, waitedTooLong: boolean): JudgmentCard {
+  switch (judgment.status) {
+    /*
+      막힌 것(`blocker`)은 홈에 그리지 않는다. 카드 안에 한 줄로 넣어 봤는데, 할 일의 이유와
+      겹쳐 읽혀 빼기로 했다(11/01). 할 일 상세도 이유(`reason`)만 보여준다.
+    */
+    case 'DONE': {
+      const { nextAction } = judgment
+      return {
+        headline: '오늘 하실 일은 하나예요',
+        props: {
+          tone: 'brand',
+          icon: <IconPersonLine size={40} />,
+          badge: '사장님 할 일',
+          title: nextAction.title,
+          description: nextAction.reason,
+          // 할 일과 이유는 AI가 정한 것이라 알린다. 홈은 자주 보는 좁은 카드라 짧은 표시만 아이콘 줄 오른쪽에 둔다.
+          // 긴 문장은 [물어볼 내용 보기]로 가는 할 일 상세에 있다(#237)
+          marker: <AiNotice compact />,
+        },
+        main: (stale) => (
+          <TaskButton hasQuestions={(nextAction.questions?.length ?? 0) > 0} locked={stale} />
+        ),
+      }
+    }
+
+    /*
+      오래 기다린 문구를 따로 둔다. 판단 도중 서버가 다시 뜨면 그 Case 는 계속
+      `PENDING` 으로 남아(#40) 끝나지 않는데, 그때까지 "곧 됩니다" 라고 말하면
+      사장님은 언제까지 기다려야 하는지 모른 채 화면만 붙들고 있게 된다.
+    */
+    case 'PENDING':
+      return {
+        headline: '지금은 리본이 일하고 있어요',
+        props: {
+          tone: 'brand',
+          icon: <IconSparkle2Fill size={40} />,
+          badgeIcon: <IconSparkle2Fill size={16} aria-hidden="true" />,
+          badge: 'AI 처리 중',
+          ...(waitedTooLong
+            ? {
+                title: '판단이 오래 걸리고 있어요',
+                description:
+                  '가게 정보는 그대로 있어요. 지금은 저희 쪽에서 더 확인이 필요한 상태라, 창을 닫으셨다가 나중에 다시 들러 주세요.',
+              }
+            : {
+                title: '다음 할 일을 정하고 있어요',
+                description:
+                  '가게 정보는 저장됐어요. 시간이 조금 걸릴 수 있으니 나중에 다시 오셔도 됩니다.',
+              }),
+        },
+      }
+
+    /*
+      답은 할 일의 결과와 같은 길(`POST /cases/results`)로 보낸다. 결과 입력 화면이 질문에
+      답하는 모양으로 열린다.
+    */
+    case 'NEEDS_MORE_INFO':
+      return {
+        headline: '확인하실 일이 있어요',
+        props: {
+          tone: 'critical',
+          icon: CRITICAL_ICON,
+          badge: '확인 필요',
+          title: '이 내용을 알려주세요',
+          // 질문이 곧 설명이라 설명 문단을 따로 두지 않는다. 둘 다 두면 카드가 글로 꽉 찬다
+          children: (
+            <ul className="flex flex-col gap-2 rounded-14 bg-bg-neutral-weak px-4 py-3 text-16">
+              {judgment.questions.map((question) => (
+                <li key={question}>{question}</li>
+              ))}
+            </ul>
+          ),
+        },
+        main: (stale) => <AnswerButton locked={stale} />,
+      }
+
+    /*
+      어긋난 항목이 `GET /cases` 응답에 없어서(#66) 무엇과 무엇이 다른지는 여기서 못 보여준다.
+      [확인하러 가기]는 결과 입력(`/results`)으로 보낸다. 결과 입력은 `GET /cases/results` 로 어긋난 목록을
+      받아 확인 화면(`/confirm`)으로 넘긴다 — 확인 화면은 목록을 넘겨받아야 열려서 바로 갈 수 없다.
+
+      서버는 충돌 선택이 실패해도 충돌이 남아 있으면 `CONFLICT` 를 준다(#196). 이 버튼이 없으면 확인 화면을
+      떠난 뒤 홈에서 풀 길이 없다.
+    */
+    case 'CONFLICT':
+      return {
+        headline: '확인하실 일이 있어요',
+        props: {
+          tone: 'critical',
+          icon: CRITICAL_ICON,
+          badge: '확인 필요',
+          title: '확인이 필요한 내용이 있어요',
+          description: '알려주신 내용이 저장된 기록과 달라서, 어느 쪽이 맞는지 여쭤봐야 해요.',
+        },
+        main: (stale) => <AnswerButton locked={stale} label="확인하러 가기" mockPathname="/confirm" />,
+      }
+
+    /*
+      실패마다 풀 길이 다르다.
+
+      - **사장님이 더 알려주셔야 풀리는 실패**는 결과 입력으로 보낸다. 같은 길로 다시 보내면 서버가 다시 판단한다
+      - **서버가 "다시 해볼 수 있다"고 한 실패**(`RETRY`)는 그 자리에서 다시 판단을 맡긴다(#196)
+      - NONE은 새 상황 입력을 열고, 그 밖의 실패는 재조회만 둔다
+    */
+    case 'FAILED': {
+      const { askOwner, title, description } = failureCard(judgment.notice)
+      if (askOwner) {
+        return {
+          headline: '확인하실 일이 있어요',
+          props: { tone: 'critical', icon: CRITICAL_ICON, badge: '확인 필요', title, description },
+          main: (stale) => <AnswerButton locked={stale} label="다시 알려주기" />,
+        }
+      }
+      return {
+        headline: '할 일 정리가 멈췄어요',
+        props: { tone: 'neutral', icon: NEUTRAL_ICON, badge: '판단 멈춤', title, description },
+        main:
+          judgment.notice.kind === 'RETRY_AVAILABLE'
+            ? (stale, refresh, refreshing, onSendingChange) => (
+                <RetryButton locked={stale} busy={refreshing} onRetried={refresh} onSendingChange={onSendingChange} />
+              )
+            : judgment.notice.kind === 'NO_RECOVERY'
+              ? (stale) => <AnswerButton locked={stale} label="새 상황 알려주기" />
+              : undefined,
+      }
+    }
+
+    /*
+      서버가 우리가 모르는 상태를 보냈거나 내용이 비어서 온 경우다. "정보가 부족합니다"로
+      바꿔 보여주지 않는다 — 서버가 틀린 것을 사장님이 덜 적어낸 탓으로 읽게 된다.
+    */
+    case 'UNRECOGNIZED':
+      return {
+        headline: '할 일 정리가 멈췄어요',
+        props: {
+          tone: 'neutral',
+          icon: NEUTRAL_ICON,
+          badge: '불러오기 실패',
+          title: '판단 내용을 불러오지 못했어요',
+          description: '가게 정보는 그대로 있어요. 잠시 후 다시 확인해 주세요.',
+        },
+      }
+
+    default: {
+      // 상태가 늘면 여기서 컴파일이 막힌다
+      const unhandled: never = judgment
+      return unhandled
+    }
+  }
+}
+
+/**
+ * 할 일 상세(`/task`)로 가는 버튼. 최신 상태를 확인하지 못했으면 잠근다 — 지난 할 일을
+ * 지금 할 일처럼 열어 보고 그 결과를 보내게 된다.
+ *
+ * 이름은 시안의 "물어볼 내용 보기"를 따르되, 물어볼 말이 없는 할 일에서는 거짓말이 되어
+ * "자세히 보기"로 둔다.
+ */
+function TaskButton({ hasQuestions, locked }: { hasQuestions: boolean; locked: boolean }) {
+  const navigate = useNavigate()
+  const { search } = useLocation()
+
+  return (
+    <>
+      <Button size="lg" disabled={locked} onClick={() => navigate({ pathname: '/task', search }, { viewTransition: true })}>
+        {hasQuestions ? '물어볼 내용 보기' : '자세히 보기'}
+      </Button>
+      {locked && (
+        <p className="text-center text-14 text-fg-neutral-muted">
+          최신 상태를 확인한 뒤에 볼 수 있어요
+        </p>
+      )}
+    </>
+  )
+}
+
+/**
+ * 사장님이 알려주셔야 하는 것에 답하러 가는 버튼. 결과 입력(`/results`)이 지금 판단에 맞는
+ * 모양(되물은 질문에 답하기 · 실패한 판단에 더 알려주기)으로 열린다.
+ *
+ * 최신 상태를 확인하지 못했으면 잠근다 — 이미 지난 질문에 답하게 된다.
+ */
+function AnswerButton({
+  locked,
+  label = '답하러 가기',
+  mockPathname,
+}: {
+  locked: boolean
+  label?: string
+  /** Mock 은 서버가 없어 결과 입력이 다음 화면을 정해 주지 못한다. 그때 바로 갈 곳(충돌 확인) */
+  mockPathname?: string
+}) {
+  const navigate = useNavigate()
+  const { search } = useLocation()
+  const pathname = mockPathname !== undefined && usesMockData(search) ? mockPathname : '/results'
+
+  return (
+    <>
+      <Button size="lg" disabled={locked} onClick={() => navigate({ pathname, search }, { viewTransition: true })}>
+        {label}
+      </Button>
+      {locked && (
+        <p className="text-center text-14 text-fg-neutral-muted">
+          최신 상태를 확인한 뒤에 답하실 수 있어요
+        </p>
+      )}
+    </>
+  )
+}
+
+/**
+ * 서버가 "다시 해볼 수 있다"고 한 실패를 다시 판단해 달라고 맡기는 버튼(#196).
+ *
+ * 맡기고 나면 홈이 지금 상황을 다시 묻는다(`onRetried`). 서버가 받았으면 `PENDING` 이 와서
+ * "리본이 일하고 있어요"와 반복 조회가 가입 직후처럼 이어진다. 기다리는 자리를 따로 만들지 않는다.
+ *
+ * **401 말고는 어떻게 끝나든 다시 묻는다.** 응답만 끊겼거나 읽지 못했어도 서버는 이미 받았을 수 있다.
+ * 실패 카드는 저절로 다시 묻지 않아서, 여기서 묻지 않으면 판단이 도는 중에도 실패 카드가 남고 다시 누르면 409 다.
+ *
+ * 홈이 지금 상황을 묻는 중이면(`busy`) 누를 수 없다. 묻는 중에 맡기면 뒤따르는 다시 묻기가 무시되고(`useCase`),
+ * 맡긴 직후 다시 누르면 첫 요청이 이미 판단을 돌려 409 가 온다.
+ *
+ * 서버가 거절해도(409) 다시 묻는다. 두 번 눌렀거나 그사이 상황이 바뀐 것이라 지금 상황을 그리면 된다.
+ * 다시 물어도 같은 실패 카드면 이 버튼이 그대로 남아 있어(같은 자리 같은 부품) 거절된 것을 기억한다.
+ * 서버는 가입·결과 알려주기·서류 판단을 다시 돌려서(#196) 보통은 생기지 않는다. 서버가 받지 않는 실패가
+ * 홈에 남는 드문 경우에 같은 409 를 되풀이하지 않게 잠근다.
+ *
+ * TODO(#55): 버튼·안내 문구는 제안 문구다. PM 답이 오면 바꾼다.
+ */
+function RetryButton({ locked, busy, onRetried, onSendingChange }: {
+  locked: boolean; busy: boolean; onRetried: () => void; onSendingChange: (sending: boolean) => void
+}) {
+  const navigate = useNavigate()
+  const { pathname, search } = useLocation()
+  const [state, setState] = useState<'IDLE' | 'SENDING' | 'SEND_FAILED' | 'REFUSED'>('IDLE')
+  const alive = useRef(true)
+  useEffect(() => {
+    alive.current = true
+    return () => {
+      alive.current = false
+      onSendingChange(false)
+    }
+  }, [onSendingChange])
+
+  async function handleRetry() {
+    // Mock 은 서버를 부르지 않는다. 받아들여진 다음 화면(판단 중)으로 바로 넘긴다
+    if (usesMockData(search)) {
+      const next = new URLSearchParams(search)
+      next.set('mock', 'pending')
+      navigate({ pathname, search: `?${next}` })
+      return
+    }
+
+    setState('SENDING')
+    // 맡기는 동안 수동 조회도 막아, 접수 뒤 다시 묻기가 진행 중 조회에 묻히지 않게 한다.
+    onSendingChange(true)
+    try {
+      await retryJudgment()
+      if (!alive.current) return
+      setState('IDLE')
+      onRetried()
+    } catch (error: unknown) {
+      if (!alive.current) return
+      if (error instanceof UnauthorizedError) {
+        navigate('/login', { replace: true })
+        return
+      }
+      if (error instanceof ApiError && error.status === 409) {
+        setState('REFUSED')
+        onRetried()
+        return
+      }
+      // 404 는 Case 가 없다는 뜻이다. 다시 물으면 홈이 진단으로 보낸다. 그 밖(연결 실패 · 5xx · 읽지 못한 응답)은
+      // 서버가 받았는지 모른다. 알리되 다시 물어서, 받았으면 판단 중 화면이 이 안내를 덮게 한다
+      setState(error instanceof ApiError && error.status === 404 ? 'IDLE' : 'SEND_FAILED')
+      onRetried()
+    } finally {
+      if (alive.current) onSendingChange(false)
+    }
+  }
+
+  return (
+    <>
+      {state === 'REFUSED' && <InfoBox tone="critical">이 실패는 여기서 다시 판단할 수 없어요.</InfoBox>}
+      {state === 'SEND_FAILED' && (
+        <InfoBox tone="critical">다시 판단을 요청하지 못했어요. 잠시 뒤 다시 눌러 주세요.</InfoBox>
+      )}
+      <Button size="lg" disabled={locked || busy || state === 'SENDING' || state === 'REFUSED'} onClick={handleRetry}>
+        다시 판단하기
+      </Button>
+      {locked && (
+        <p className="text-center text-14 text-fg-neutral-muted">
+          최신 상태를 확인한 뒤에 누르실 수 있어요
+        </p>
+      )}
+    </>
   )
 }
 
 /**
  * 다시 알아야 할 항목을 한 문장으로.
- *
- * 목록을 줄 나눠 보여주지 않는다. `NoticeCard` 의 설명은 문단 하나라, 목록을 그리려면
- * 그 컴포넌트를 먼저 고쳐야 한다 — 지금 필요한 모양이 아니다.
  *
  * **조사를 붙이지 않는다.** "업종을" 과 "범위를" 은 받침에 따라 갈리는데, 그걸 맞추는
  * 규칙을 넣기에는 이 문구 자체가 임시다. 항목을 문장 끝에 떼어 두면 조사가 필요 없다.
@@ -121,63 +557,62 @@ function requestedText({ fields, partial }: { fields: string[]; partial: boolean
 }
 
 /**
- * 실패 이유에 맞는 안내 한 장.
+ * 실패 이유에 맞는 안내.
  *
- * TODO(#55): 네 가지 문구는 PM 이 정한다. 지금은 **상황을 사실대로 적기만 한** 초안이다.
- * 다듬어 두면 어차피 바뀔 문구를 두고 리뷰가 돈다.
+ * TODO(#55): 문구는 PM 이 정한다. 지금은 **상황을 사실대로 적기만 한** 초안이다.
  *
  * 아직 지켜야 할 것 둘:
- *   - **못 하는 일을 약속하지 않는다.** 실패한 Case 를 다시 판단시키는 수단이 없고(#57)
- *     결과를 다시 알려주는 입력 경로도 아직 없다. "다시 보내주세요" 라고 쓰면 사장님이
- *     없는 자리를 찾아다니게 된다
+ *   - **못 하는 일을 약속하지 않는다.** 실패한 Case 를 다시 판단시키는 수단이 없다(#57).
+ *     더 알려주셔야 풀리는 실패(`askOwner`)만 결과 입력으로 다시 보낼 수 있다
  *   - **"상태 다시 확인" 을 재판단으로 읽히게 쓰지 않는다.** 그 버튼은 저장된 상태를 다시
- *     읽을 뿐이다. 다른 기기나 운영 쪽에서 상황이 바뀌었는지 보라고 남겨 둔 것이다
+ *     읽을 뿐이다
+ *
+ * `askOwner`는 사장님이 알려줘야 풀리는 실패인지다. 이것만 빨강 "확인 필요"로 칠한다.
  */
 function failureCard(notice: FailureNotice): {
-  tone: 'WARNING' | 'NEUTRAL'
+  askOwner: boolean
   title: string
   description: string
 } {
   switch (notice.kind) {
     /*
       서버가 다시 해볼 수 있다고 분류했을 뿐, 원인이 일시적이라는 뜻은 아니다.
-      그래서 "잠시 후 다시" 도 "곧 됩니다" 도 쓰지 않는다.
+      그래서 "잠시 후 다시" 도 "곧 됩니다" 도 쓰지 않는다. 다시 맡기는 버튼은 카드가 단다(`RetryButton`)
     */
     case 'RETRY_AVAILABLE':
       return {
-        tone: 'NEUTRAL',
-        title: '다음 할 일을 정하지 못했어요.',
-        description: '가게 정보는 그대로 있어요. 다시 판단해 드리는 기능을 준비하고 있습니다.',
+        askOwner: false,
+        title: '다음 할 일을 정하지 못했어요',
+        description: '가게 정보는 그대로 있어요. 같은 내용으로 다시 판단해 드릴게요.',
       }
 
     /*
-      여기만 `WARNING` 이다. **사장님이 잘못 적었다는 뜻이 아니라** 아직 모르는 것이
-      있다는 뜻이라, 문구가 탓하는 말로 읽히지 않게 쓴다.
+      **사장님이 잘못 적었다는 뜻이 아니라** 아직 모르는 것이 있다는 뜻이라,
+      문구가 탓하는 말로 읽히지 않게 쓴다.
     */
     case 'NEEDS_DETAIL':
       return {
-        tone: 'WARNING',
-        title: '추가 확인이 필요해요.',
-        description: `${requestedText(notice)} 알려주시는 자리는 준비하고 있습니다.`,
+        askOwner: true,
+        title: '추가 확인이 필요해요',
+        description: requestedText(notice),
       }
 
     case 'SERVICE_SIDE':
       return {
-        tone: 'NEUTRAL',
-        title: '서비스에서 확인이 필요한 문제가 생겼어요.',
+        askOwner: false,
+        title: '서비스에서 확인이 필요한 문제가 생겼어요',
         description: '가게 정보는 그대로 있어요. 이 건은 저희 쪽에서 봐야 하는 문제예요.',
       }
 
     /*
       **"이번 판단" 으로 범위를 좁혀 쓴다.** 그냥 "하실 수 있는 일이 없다" 고 하면 폐업
-      절차 전체에 할 일이 없다는 말로 읽힌다. 서버가 말한 것은 이 실패를 되돌릴 방법이
-      없다는 것뿐이고, 가게의 다음 할 일은 판단이 다시 돌면 그때 나온다.
+      절차 전체에 할 일이 없다는 말로 읽힌다.
     */
     case 'NO_RECOVERY':
       return {
-        tone: 'NEUTRAL',
-        title: '다음 할 일을 정하지 못했어요.',
-        description: '가게 정보는 그대로 있어요. 이번 판단에 대해서는 더 해 보실 수 있는 것이 없어요.',
+        askOwner: false,
+        title: '다음 할 일을 정하지 못했어요',
+        description: '가게 정보는 그대로 있어요. 새로 확인한 상황을 알려주실 수 있어요.',
       }
 
     /*
@@ -186,152 +621,9 @@ function failureCard(notice: FailureNotice): {
     */
     case 'UNKNOWN_CAUSE':
       return {
-        tone: 'NEUTRAL',
-        title: '다음 할 일을 정하지 못했어요.',
+        askOwner: false,
+        title: '다음 할 일을 정하지 못했어요',
         description: '가게 정보는 그대로 있어요. 자세한 이유는 확인되지 않았어요.',
       }
-  }
-}
-
-interface JudgmentSectionProps {
-  judgment: JudgmentView
-  /** 지금 들고 있는 판단이 최신인지 확신할 수 없다 */
-  locked: boolean
-  /** 판단을 기다린 지 상한을 넘겨 자동 조회가 멈췄다 */
-  waitedTooLong: boolean
-  onRefresh: () => void
-  refreshing: boolean
-}
-
-/**
- * 판단 상태에 맞는 안내와 행동.
- *
- * 여섯 갈래를 전부 적는다. `switch`가 아니라 `if`로 흘려두면 새 상태가 늘었을 때
- * 아무 화면도 안 나오고 조용히 빈 자리가 생긴다.
- */
-function JudgmentSection({
-  judgment,
-  locked,
-  waitedTooLong,
-  onRefresh,
-  refreshing,
-}: JudgmentSectionProps) {
-  const recheck = { label: '상태 다시 확인', onClick: onRefresh, disabled: refreshing }
-
-  switch (judgment.status) {
-    /*
-      오래 기다린 화면을 따로 둔다. 판단 도중 서버가 다시 뜨면 그 Case 는 계속
-      `PENDING` 으로 남아(#40) 끝나지 않는데, 그때까지 "곧 됩니다" 라고 말하면
-      사장님은 언제까지 기다려야 하는지 모른 채 화면만 붙들고 있게 된다.
-    */
-    case 'PENDING':
-      return waitedTooLong ? (
-        <NoticeCard
-          tone="NEUTRAL"
-          title="판단이 오래 걸리고 있어요."
-          description="가게 정보는 그대로 있어요. 지금은 저희 쪽에서 더 확인이 필요한 상태라, 창을 닫으셨다가 나중에 다시 들러 주세요."
-          action={recheck}
-        />
-      ) : (
-        <NoticeCard
-          tone="NEUTRAL"
-          title="다음 할 일을 정하고 있어요."
-          description="가게 정보는 저장됐어요. 시간이 조금 걸릴 수 있으니 나중에 다시 오셔도 됩니다."
-          action={recheck}
-        />
-      )
-
-    /*
-      여기만 안내 카드가 아니라 할 일 카드가 주인공이라, 조회 버튼을 따로 둔다.
-      `locked` 로 결과 제출이 막힌 상태에서 이 버튼까지 없으면 빠져나갈 길이 사라진다.
-    */
-    case 'DONE':
-      return (
-        <>
-          <NextActionCard nextAction={judgment.nextAction} locked={locked} />
-          <BlockerCard blocker={judgment.blocker} />
-
-          <button
-            type="button"
-            onClick={onRefresh}
-            disabled={refreshing}
-            className="min-h-13 w-full rounded-xl border border-gray-300 bg-white text-base font-bold text-gray-700 disabled:text-gray-400"
-          >
-            {recheck.label}
-          </button>
-        </>
-      )
-
-    /*
-      답을 보내는 기능은 아직 없다. 저장되지 않는 입력칸을 두면 사장님이 적어 넣고
-      사라지는 것을 겪는다 — 버튼이 없는 것보다 나쁘다.
-    */
-    case 'NEEDS_MORE_INFO':
-      return (
-        <>
-          <FollowUpQuestionCard
-            questions={judgment.questions}
-            label="추가 확인 필요"
-            title="이 내용을 알려주세요."
-            description="다음 할 일을 정하려면 몇 가지 확인이 필요해요."
-          />
-          <NoticeCard
-            tone="NEUTRAL"
-            title="답변을 보내는 기능은 준비 중이에요."
-            description="확인하신 내용은 곧 여기서 바로 알려주실 수 있게 하겠습니다."
-            action={recheck}
-          />
-        </>
-      )
-
-    /*
-      어긋난 항목이 응답에 없어서(#66) 무엇과 무엇이 다른지는 아직 못 보여준다.
-      그래도 "불러오지 못했어요" 로 두는 것보다 낫다 — 사장님이 해야 할 일이 기다리는
-      것인지 답하는 것인지가 달라진다.
-
-      `/confirm` 으로 보내는 버튼은 달지 않는다. 어긋난 목록을 받아올 API 가 없어서
-      그 화면이 빈손으로 열리고 `/` 로 튕긴다. `NEEDS_MORE_INFO` 에서 입력칸을 안 두는
-      것과 같다 — 되지 않는 일을 버튼으로 약속하지 않는다.
-    */
-    case 'CONFLICT':
-      return (
-        <NoticeCard
-          tone="NEUTRAL"
-          title="확인이 필요한 내용이 있어요."
-          description="알려주신 내용이 저장된 기록과 달라서, 어느 쪽이 맞는지 여쭤봐야 해요. 확인하시는 화면을 준비하고 있습니다."
-          action={recheck}
-        />
-      )
-
-    /*
-      "잠시 후 다시" 라고 말하지 않는다. 실패한 Case 를 다시 판단하는 수단이 아직 없어서
-      (#57) 몇 번을 눌러도 같은 실패가 돌아온다. 기다리면 된다고 하면 사장님은 언제
-      되는지 모른 채 계속 들어와 보게 된다.
-
-      이유마다 문구만 갈리고 **누를 것은 다섯 갈래 모두 재조회 하나다.** 이번 작업은
-      할 수 있는 일을 늘리는 것이 아니라 상황을 정확히 말하는 것이다.
-    */
-    case 'FAILED':
-      return <NoticeCard {...failureCard(judgment.notice)} action={recheck} />
-
-    /*
-      서버가 우리가 모르는 상태를 보냈거나 내용이 비어서 온 경우다. "정보가 부족합니다"로
-      바꿔 보여주지 않는다 — 서버가 틀린 것을 사장님이 덜 적어낸 탓으로 읽게 된다.
-    */
-    case 'UNRECOGNIZED':
-      return (
-        <NoticeCard
-          tone="NEUTRAL"
-          title="판단 내용을 불러오지 못했어요."
-          description="가게 정보는 그대로 있어요. 잠시 후 다시 확인해 주세요."
-          action={recheck}
-        />
-      )
-
-    default: {
-      // 상태가 늘면 여기서 컴파일이 막힌다
-      const unhandled: never = judgment
-      return unhandled
-    }
   }
 }

@@ -1,6 +1,7 @@
+from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import JSON, BigInteger, Boolean, Column, Enum, ForeignKey, String, Text
+from sqlalchemy import JSON, BigInteger, Boolean, Column, DateTime, Enum, ForeignKey, String, Text
 from sqlmodel import Field, Relationship
 
 from app.be.models.mixins import CreatedAtMixin
@@ -12,12 +13,36 @@ class CaseHistory(CreatedAtMixin, table=True):
     id: int | None = Field(default=None, sa_column=Column(BigInteger, primary_key=True, autoincrement=True))
     case_id: int = Field(sa_column=Column(BigInteger, ForeignKey("case.id"), nullable=False))
 
-    # 입력 원문. USER_INPUT·CASE_CREATED는 사장님이 쓴 문장이 항상 들어가고, SYSTEM_BATCH는 배치 지시문이
+    # 입력 원문. 선택형 USER_INPUT은 선택을 그대로 옮긴 문장, 그 외 USER_INPUT·CASE_CREATED는 사장님 글이다.
+    # SYSTEM_BATCH는 배치 지시문이
     # 들어갈 수 있다. 문장 없이 고른 값만 있는 CONFLICT_DECISION만 NULL이다.
     raw_input: str | None = Field(default=None, sa_column=Column(Text, nullable=True), description="입력 원문")
+    restoration_answer: dict | None = Field(default=None, sa_column=Column(JSON, nullable=True))
+    conflict_snapshot: dict | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+        description=(
+            "충돌이 났을 때의 Case 상태 전체. 사용자가 고른 뒤 AI에 그대로 돌려줘야 한다"
+            " — AI가 받은 것이 자기가 준 것과 같은지 대조하고, 다르면 STALE로 거절한다."
+            " 충돌을 낸 판단에만 값이 있다."
+        ),
+    )
+    retained_info_result: dict | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+        description=(
+            "같은 글에서 충돌이 아니었던 사실·진행 보고. 확인 뒤 재판단에 그대로 돌려줘야"
+            " 반영된다 — AI는 원문을 다시 읽지 않으므로, 이걸 빠뜨리면 사장님이 함께 말한"
+            " 내용이 사라진다. 충돌을 낸 판단에만 값이 있고, 그 전 이력은 NULL이다."
+        ),
+    )
     source: str = Field(
         sa_column=Column(
-            Enum("USER_INPUT", "SYSTEM_BATCH", "CASE_CREATED", "CONFLICT_DECISION", name="case_history_source_enum"),
+            # DOCUMENT_SUBMITTED: 사장님이 올리거나 확인한 서류로 원상복구 조항이 새로 생기거나 바뀌어 다시 판단한 입력
+            Enum(
+                "USER_INPUT", "SYSTEM_BATCH", "CASE_CREATED", "CONFLICT_DECISION", "DOCUMENT_SUBMITTED",
+                name="case_history_source_enum",
+            ),
             nullable=False,
         )
     )
@@ -35,6 +60,7 @@ class CaseHistory(CreatedAtMixin, table=True):
     next_action: str | None = Field(
         default=None, sa_column=Column(Text, nullable=True), description="nullable, 판단이 발생한 경우에만"
     )
+    next_action_code: str | None = Field(default=None, sa_column=Column(String(100), nullable=True))
     next_action_reason: str | None = Field(
         default=None, sa_column=Column(Text, nullable=True), description="다음 행동을 해야 하는 이유"
     )
@@ -52,6 +78,15 @@ class CaseHistory(CreatedAtMixin, table=True):
         default=None,
         sa_column=Column(JSON, nullable=True),
         description="행동을 정하기 전 서비스가 사용자에게 되묻는 질문 목록. 없으면 NULL",
+    )
+    roadmap_task_ids: list | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+        description=(
+            "이 판단 직후 로드맵에서 해야 할 일인 항목(해당 없음·확인 필요가 아닌 것)의 task_id 목록. "
+            "직전 판단과 비교해 결과 화면의 \"새로 생긴 할 일\"을 만든다. "
+            "검수를 통과한 판단만 채우고, 충돌·실패로 끝났거나 계산에 실패하면 NULL"
+        ),
     )
     failure_code: str | None = Field(
         default=None,
@@ -79,6 +114,11 @@ class CaseHistory(CreatedAtMixin, table=True):
         default=None,
         sa_column=Column(Boolean, nullable=True),
         description="재시도하면 성공할 가능성이 있는지. 실패가 아니면 NULL",
+    )
+    judged_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime, nullable=True),
+        description="판단이 끝난 시각. 판단 중(PENDING)이면 NULL",
     )
     priority_blocker_id: int | None = Field(
         default=None, sa_column=Column(BigInteger, ForeignKey("blocker.id", use_alter=True, name="fk_case_history_priority_blocker"), nullable=True)
