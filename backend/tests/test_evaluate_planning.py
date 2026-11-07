@@ -20,6 +20,7 @@ from scripts.evaluate_planning import (
     build_graph_input,
     build_registry,
     decision_summary,
+    load_dataset,
     metrics_by_case,
     overall_verdict,
     score,
@@ -270,3 +271,53 @@ def test_metrics_keep_different_cases_separate_without_hiding_failures():
     assert report["A"]["successful_runs"] == 1
     assert report["A"]["cost_per_success_krw"] == pytest.approx(0.24)
     assert "behavior_passed" not in rows[1]
+
+
+INPUTS = Path(__file__).resolve().parents[2] / "docs/agent/evaluations/2026-11-07-planning-inputs.jsonl"
+HELD_OUT = INPUTS.with_name("2026-11-07-planning-held-out.jsonl")
+
+
+def test_frozen_planning_inputs_keep_held_out_cases_separate_and_cover_the_buttons():
+    main, held_out = load_dataset(INPUTS), load_dataset(HELD_OUT)
+    assert len(main) == 20 and len(held_out) == 4 and not main.keys() & held_out.keys()
+    answers = [request.trigger.restoration_answer for request, _ in main.values()
+               if request.trigger.restoration_answer is not None]
+    assert {(answer.restoration_scope, answer.demolition_required) for answer in answers} == {
+        (scope, demolition) for scope in ("FULL", "PARTIAL", "NOT_REQUIRED", "UNKNOWN")
+        for demolition in ("REQUIRED", "NOT_REQUIRED", "UNKNOWN")
+    }
+    assert all(row["expected_action_codes"] and row["forbidden_fact_changes"]
+               for _, row in [*main.values(), *held_out.values()])
+
+
+@pytest.mark.parametrize("broken", ["action", "question", "mutation"])
+def test_frozen_partial_answer_expectations_fail_if_a_required_boundary_is_broken(broken):
+    _, expected = load_dataset(INPUTS)["S04"]
+    result = {**plan(("restoration_scope", "PARTIAL"), ("demolition_required", "REQUIRED")),
+              "decision_type": "NEEDS_MORE_INFO", "action_code": None,
+              "questions_for_user": ["확인한 원상복구 범위의 구체적인 내용을 알려주세요."]}
+    assert score(expected, result)["result"] == "PASS"
+    if broken == "action":
+        result.update(decision_type="ACTION", action_code="PERFORM_RESTORATION")
+    elif broken == "question":
+        result["questions_for_user"] = []
+    else:
+        result["fact_changes"].append({"field_path": "restoration_scope_detail", "proposed_value": "바닥"})
+    assert score(expected, result)["result"] == "WRONG"
+
+
+def test_frozen_correction_requires_the_expected_conflict_field():
+    _, expected = load_dataset(INPUTS)["F05"]
+    result = {"status": "CONFLICT", "conflicts": [{"field_path": "restoration_scope"}]}
+    assert score(expected, result)["result"] == "PASS"
+    result["conflicts"] = [{"field_path": "demolition_required"}]
+    assert score(expected, result)["result"] == "WRONG"
+
+
+def test_structured_dataset_rejects_text_that_disagrees_with_the_selected_values(tmp_path):
+    data = json.loads(INPUTS.read_text().splitlines()[0])
+    data["raw_input"] = "선택한 값과 다른 글"
+    path = tmp_path / "mismatch.jsonl"
+    path.write_text(json.dumps(data, ensure_ascii=False) + "\n")
+    with pytest.raises(ValueError):
+        load_dataset(path)

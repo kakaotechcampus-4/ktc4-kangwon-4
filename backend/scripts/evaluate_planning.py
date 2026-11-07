@@ -32,12 +32,17 @@ from app.agent.schemas import (
     CaseSnapshot,
     EvidenceRecord,
     KnownProcedureStep,
+    RestorationAnswer,
     canonical_digest,
 )
 from app.agent.support_agent import ReviewedSupportCatalog
 from app.agent.tracing import capture_usage
 from app.be.schemas.case import CaseCreateRequest
-from scripts.evaluation_metrics import load_prices, summarize_metrics
+from scripts.evaluation_metrics import (
+    evaluation_code_digest,
+    load_prices,
+    summarize_metrics,
+)
 
 # A fixed clock keeps two runs of the same payload comparable. Reviewed sources
 # carry their own review dates, so this does not make stale data look current.
@@ -219,8 +224,8 @@ def load_dataset(path: Path) -> dict[str, tuple[AgentGraphInput, dict]]:
     """One AgentGraphInput per JSONL row, keyed by its id, with the row itself.
 
     Each row carries its own intake answers and pre-input state, so rows run
-    independently; no row's output feeds the next. Only typed results are
-    supported: a conflict confirmation is a button press, not a result text.
+    independently; no row's output feeds the next. Structured answers use the
+    existing RestorationAnswer contract; conflict confirmation is not replayed.
     """
 
     items: dict[str, tuple[AgentGraphInput, dict]] = {}
@@ -233,14 +238,15 @@ def load_dataset(path: Path) -> dict[str, tuple[AgentGraphInput, dict]]:
             raise SystemExit(f"{row_id}: only RESULT_SUBMITTED rows can run")
         if row_id in items:
             raise SystemExit(f"{row_id}: duplicate id")
-        items[row_id] = (
-            build_graph_input(
-                row["case_create_request"],
-                result_text=row["raw_input"],
-                prior_facts=row["current_facts"],
-            ),
-            row,
+        request = build_graph_input(
+            row["case_create_request"],
+            result_text=row["raw_input"],
+            prior_facts=row["current_facts"],
         )
+        if row.get("restoration_answer") is not None:
+            request.trigger.restoration_answer = RestorationAnswer.model_validate(row["restoration_answer"])
+            request = AgentGraphInput.model_validate_json(request.model_dump_json())
+        items[row_id] = (request, row)
     return items
 
 
@@ -354,7 +360,8 @@ def code_version() -> dict:
         return done.stdout.strip() if done.returncode == 0 else None
 
     status = git("status", "--porcelain")
-    return {"git_commit": git("rev-parse", "HEAD"), "uncommitted_changes": bool(status)}
+    return {"git_commit": git("rev-parse", "HEAD"), "uncommitted_changes": bool(status),
+            "code_sha256": evaluation_code_digest()}
 
 
 def source_manifest(store, registry, catalog, catalog_path: Path | None) -> dict:
@@ -376,6 +383,7 @@ def source_manifest(store, registry, catalog, catalog_path: Path | None) -> dict
             for record in store.records()
         ],
         "procedure_registry_count": len(registry),
+        "procedure_registry_sha256": digest([step.model_dump(mode="json") for step in registry]),
         "support_catalog_version": catalog.catalog_version,
         "support_catalog_file": None if catalog_path is None else str(catalog_path),
         "support_program_count": len(catalog.programs),
@@ -656,6 +664,24 @@ def score(row: dict, result: dict) -> dict:
     for item in row["must_not"]:
         if item in STATE_CHECKS and STATE_CHECKS[item](result):
             reasons.append(f"must_not {item}")
+    if "expected_action_codes" in row and result.get("action_code") not in row["expected_action_codes"]:
+        reasons.append("unexpected action_code")
+    if "expected_decision_types" in row and result.get("decision_type") not in row["expected_decision_types"]:
+        reasons.append("unexpected decision_type")
+    questions = set(result.get("questions_for_user", [])) | set(
+        (result.get("next_action") or {}).get("questions_to_ask", [])
+    )
+    if row.get("expected_questions_any_of") and not questions.intersection(row["expected_questions_any_of"]):
+        reasons.append("expected question missing")
+    if questions.intersection(row.get("forbidden_questions", [])):
+        reasons.append("repeated or forbidden question")
+    changed_fields = {change["field_path"] for change in result.get("fact_changes", [])}
+    if changed_fields.intersection(row.get("forbidden_fact_changes", [])):
+        reasons.append("forbidden fact change")
+    if "expected_conflict_fields" in row and {
+        conflict["field_path"] for conflict in result.get("conflicts", [])
+    } != set(row["expected_conflict_fields"]):
+        reasons.append("unexpected conflict fields")
     return {
         "result": "WRONG" if reasons else "PASS",
         "reasons": reasons,
@@ -729,10 +755,11 @@ async def run(args) -> None:
     # Read exactly what build_runtime will read: the process environment on
     # top of .env. Passing environ={} would check the file while the run used
     # an override, so the guard could pass for the wrong models.
-    configured = {
-        role: LLMConfig.from_env(env_prefix=prefix).model
+    configurations = {
+        role: LLMConfig.from_env(env_prefix=prefix)
         for prefix, role in ROLE_BY_PREFIX.items()
     }
+    configured = {role: config.model for role, config in configurations.items()}
     mismatched = {
         role: {"expected": model, "configured": configured.get(role)}
         for role, model in expected.items()
@@ -777,12 +804,15 @@ async def run(args) -> None:
         },
         "code_version": code_version(),
         "configured_models": configured,
+        "configured_efforts": {role: config.reasoning_effort for role, config in configurations.items()},
         "expected_models": expected,
         "model_mismatch": mismatched,
         "sources": source_manifest(store, registry, catalog, args.support_catalog),
         "scope": (
             "지정한 Agent 입력으로 전체 판단 경로를 반복 실행한다. "
             "FE HTTP·로그인·DB 저장은 포함하지 않는다."
+            + (" dataset은 결과 입력만 평가하며 서류 처리·충돌 선택 후 실행·장애 주입은 별도 검증이다."
+               if dataset_path is not None else "")
         ),
     }
 
