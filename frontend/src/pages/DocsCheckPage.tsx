@@ -88,6 +88,7 @@ export function DocsCheckPage() {
   }
 
   const startCheck = () => setAsking(true)
+  // 각 결과 분기에서 시트를 다시 그려, 열 때마다 저장된 가게 이름을 초기값으로 받는다.
   const askSheet = (
     <ApplicantSheet
       open={asking}
