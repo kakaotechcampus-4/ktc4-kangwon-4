@@ -418,20 +418,20 @@ function ActionNotice({ action }: { action: DocumentAction }) {
           내용을 확인한 뒤 다른 파일로 올려 주세요.
         </InfoBox>
       )
-    // 위기 신호로 판정된 경우. 폐업 절차보다 사람을 먼저 챙기고, 공식 상담 번호만 알린다(상담은 우리가 하지 않는다)
+    // 위기 신호로 판정된 경우. 폐업 절차보다 사람을 먼저 챙기고, 공식 상담 번호만 알린다(상담은 우리가 하지 않는다).
+    // 번호 이름은 부정적으로 읽히지 않게 줄여 쓰고, 번호 자체는 빼지 않는다(#228)
     case 'CRISIS_SUPPORT':
       return (
         <InfoBox tone="neutral" title="지금 많이 힘드시다면, 혼자 견디지 않으셔도 돼요.">
-          폐업 준비는 잠시 멈춰도 괜찮아요. 올려 두신 서류와 진행 상황은 그대로 남아 있어요. 지금 바로 이야기 나눌 곳이
-          필요하시면{' '}
+          폐업 준비는 잠시 멈춰도 괜찮아요. 올려 두신 서류와 진행 상황은 그대로 남아 있어요. 언제든 힘들면{' '}
           <a href="tel:109" className="font-semibold underline">
-            자살예방상담전화 109
+            상담전화 109
           </a>
           (24시간),{' '}
           <a href="tel:15770199" className="font-semibold underline">
-            정신건강위기상담전화 1577-0199
+            정신건강 상담전화 1577-0199
           </a>
-          로 전화해 주세요.
+          로 연락해 주세요.
         </InfoBox>
       )
     case 'UPLOAD_FAILED':

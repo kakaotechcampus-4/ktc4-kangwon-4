@@ -120,7 +120,7 @@ describe('DocsPage — 서버', () => {
     expect(screen.queryByText('이 파일은 올릴 수 없어요.')).not.toBeInTheDocument()
     expect(screen.getAllByRole('listitem')).toHaveLength(1)
     if (code === 'AGENT_SAFETY_CRISIS_SUPPORT') {
-      expect(screen.getByRole('link', { name: '자살예방상담전화 109' })).toHaveAttribute('href', 'tel:109')
+      expect(screen.getByRole('link', { name: '상담전화 109' })).toHaveAttribute('href', 'tel:109')
     }
   })
 
