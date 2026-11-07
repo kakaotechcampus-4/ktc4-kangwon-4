@@ -33,6 +33,8 @@ from app.agent.schemas import (
     EvidenceRecord,
     KnownProcedureStep,
     RestorationAnswer,
+    ReviewResult,
+    ReviewSubject,
     canonical_digest,
 )
 from app.agent.support_agent import ReviewedSupportCatalog
@@ -514,6 +516,30 @@ def decision_summary(outcome) -> dict:
     }
 
 
+def review_metadata(subject: ReviewSubject, reviewed: ReviewResult) -> dict:
+    """Keep review locations and routing, never free-text reasons or values."""
+    decision = subject.supervisor_draft.decision
+    return {
+        "verdict": as_text(reviewed.verdict),
+        "issue_codes": [as_text(issue.issue_code) for issue in reviewed.issues],
+        "review_attempt": subject.review_attempt,
+        "draft_decision_type": as_text(decision.decision_type),
+        "draft_action_code": None if decision.next_action is None else as_text(decision.next_action.action_code),
+        "draft_fact_changes": [
+            {"field_path": as_text(change.field_path), "operation": as_text(change.operation),
+             "proposed_status": as_text(change.proposed_status),
+             **({"proposed_value": as_text(change.proposed_value)}
+                if as_text(change.value_type) in {"ENUM", "BOOLEAN", "INTEGER"} else {})}
+            for change in subject.supervisor_draft.mutations.fact_changes
+        ],
+        "issues": [{"issue_code": as_text(issue.issue_code), "severity": issue.severity,
+                    "target_component": as_text(issue.target_component), "target_path": issue.target_path}
+                   for issue in reviewed.issues],
+        "missing_evidence_paths": [item.claim_path for item in reviewed.missing_evidence],
+        "recommended_rework_targets": [as_text(target) for target in reviewed.recommended_rework_targets],
+    }
+
+
 async def trial(case: str, request: AgentGraphInput, store, registry, catalog) -> dict:
     calls: list[dict] = []
     result = {
@@ -541,10 +567,7 @@ async def trial(case: str, request: AgentGraphInput, store, registry, catalog) -
 
         async def record_review(subject):
             reviewed = await review(subject)
-            result["review_results"].append({
-                "verdict": reviewed.verdict.value,
-                "issue_codes": [item.issue_code.value for item in reviewed.issues],
-            })
+            result["review_results"].append(review_metadata(subject, reviewed))
             return reviewed
 
         with capture_usage() as usage, patch.object(runtime._graph._review_tool, "review", record_review):

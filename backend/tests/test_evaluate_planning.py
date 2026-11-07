@@ -10,7 +10,13 @@ import pytest
 
 from app.agent.graph import AgentGraph
 from app.agent.procedure_tool.stored_tool import StoredProcedureLookupTool
-from app.agent.schemas import ActionDecisionDraft, Blocker, ProcedureLookupInput
+from app.agent.schemas import (
+    ActionDecisionDraft,
+    Blocker,
+    FactChangeCandidate,
+    ProcedureLookupInput,
+    ReviewResult,
+)
 from scripts.evaluate_planning import (
     CASES,
     FIXED_TIME,
@@ -23,6 +29,7 @@ from scripts.evaluate_planning import (
     load_dataset,
     metrics_by_case,
     overall_verdict,
+    review_metadata,
     score,
     verdict,
 )
@@ -347,3 +354,48 @@ def test_submission_is_not_completion_checks_the_recorded_progress_and_submissio
     else:
         progress["proposed_submitted"] = False
     assert score(expected, result)["result"] == "WRONG"
+
+
+@pytest.mark.parametrize("action_code", [None, "CONFIRM_RESTORATION_SCOPE"])
+def test_review_metadata_preserves_failure_location_without_copying_private_free_text(action_code):
+    private = "synthetic-private-note@example.test"
+    target_path = ("/supervisor_draft/decision/questions_for_user/0" if action_code is None
+                   else "/supervisor_draft/decision/next_action/title")
+    reviewed = ReviewResult(
+        reviewed_subject_id=UUID(int=1), reviewed_subject_digest="sha256:" + "0" * 64,
+        verdict="REVISE", issues=[{
+            "issue_code": "CASE_MISMATCH", "category": "FACTUALITY", "severity": "BLOCKING",
+            "target_component": "SUPERVISOR", "target_call_id": None,
+            "target_path": target_path,
+            "reason_summary": private, "evidence_refs": ["synthetic-evidence"],
+        }], missing_evidence=[], recommended_rework_targets=["SUPERVISOR"], resolution_reason=private,
+    )
+    changes = [FactChangeCandidate(
+        candidate_id=UUID(int=index + 1), operation="SET", source_fact_candidate_id=UUID(int=10),
+        source_type="INFO_ANALYSIS", field_path=field, value_type=kind, before_status="UNKNOWN",
+        before_value=None, proposed_status="CONFIRMED", proposed_value=value,
+        candidate_status="READY_FOR_REVIEW", reason_summary=private,
+        source_evidence_refs=["synthetic-evidence"], source_call_id=UUID(int=20), confirmed_conflict_ref=None,
+    ) for index, (field, kind, value) in enumerate([
+        ("restoration_scope", "ENUM", "NOT_REQUIRED"), ("pension_enrolled", "BOOLEAN", False),
+        ("employee_count", "INTEGER", 2), ("restoration_scope_detail", "STRING", private),
+        ("planned_closure_date", "DATE", "2026-11-30"),
+    ])]
+    subject = SimpleNamespace(review_attempt=2, supervisor_draft=SimpleNamespace(decision=SimpleNamespace(
+        decision_type="NEEDS_MORE_INFO" if action_code is None else "ACTION",
+        next_action=None if action_code is None else SimpleNamespace(action_code=action_code, title=private),
+        questions_for_user=[private] if action_code is None else [],
+    ), mutations=SimpleNamespace(fact_changes=changes)))
+    report = review_metadata(subject, reviewed)
+    assert report["review_attempt"] == 2 and report["draft_action_code"] == action_code
+    assert report["issues"] == [{"issue_code": "CASE_MISMATCH", "severity": "BLOCKING",
+                                  "target_component": "SUPERVISOR",
+                                  "target_path": target_path}]
+    assert report["recommended_rework_targets"] == ["SUPERVISOR"]
+    assert report["issue_codes"] == ["CASE_MISMATCH"] and report["verdict"] == "REVISE"
+    assert [change.get("proposed_value") for change in report["draft_fact_changes"][:3]] == ["NOT_REQUIRED", False, 2]
+    assert all("proposed_value" not in change for change in report["draft_fact_changes"][3:])
+    assert [change["field_path"] for change in report["draft_fact_changes"]][-2:] == [
+        "restoration_scope_detail", "planned_closure_date",
+    ]
+    assert private not in json.dumps(report)
