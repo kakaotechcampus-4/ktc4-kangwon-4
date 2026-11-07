@@ -156,7 +156,7 @@ def test_safety_blocked_upload_says_why_instead_of_asking_to_retry(api, monkeypa
         raise SafetyBlockedError(decision)
 
     monkeypatch.setattr(DocumentTool, "add_document", blocked)
-    caplog.set_level("INFO", logger=document_service.__name__)
+    caplog.set_level("WARNING", logger=document_service.__name__)
     response = api[0].post("/cases/documents", files={"file": ("memo.pdf", b"%PDF-1.4", "application/pdf")})
     assert response.status_code == 422
     assert response.json()["detail"]["code"] == f"AGENT_SAFETY_{decision}"
