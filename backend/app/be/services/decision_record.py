@@ -35,6 +35,7 @@ from app.be.crud import evidence as evidence_crud
 from app.be.crud import procedure_step as procedure_step_crud
 from app.be.crud import support_item as support_item_crud
 from app.be.models.blocker import Blocker
+from app.be.models.case import Case
 from app.be.models.case_field_history import CaseFieldHistory
 from app.be.models.case_history import CaseHistory
 from app.be.models.evidence import ConflictReference, DecisionRecord, Evidence, EvidenceLineage
@@ -335,7 +336,7 @@ class StaleJudgmentError(RuntimeError):
 
 
 def _assert_changes_are_current(
-    session: Session, history: CaseHistory, mutations: MutationSet, *, snapshot: CaseSnapshot | None = None,
+    session: Session, history: CaseHistory, mutations: MutationSet, *, snapshot: CaseSnapshot,
 ) -> None:
     """AI가 보고 판단한 "바뀌기 전 값"이 지금도 그대로인지 확인한다.
 
@@ -356,7 +357,7 @@ def _assert_changes_are_current(
         # 범위 확정에 따라 함께 비울 세부값도 잠근 최신 행과 판단 당시 값이 같아야 한다.
         session.refresh(case, with_for_update=True)
         detail = next((fact for fact in snapshot.facts
-                       if fact.field_path == CaseFieldKey.RESTORATION_SCOPE_DETAIL), None) if snapshot else None
+                       if fact.field_path == CaseFieldKey.RESTORATION_SCOPE_DETAIL), None)
         if detail is None or case.restoration_scope_detail != detail.value:
             raise StaleJudgmentError("전체 범위 확정 전 세부 설명이 판단 당시와 다릅니다")
 
@@ -416,7 +417,7 @@ def _apply_fact_changes(
         raise ValueError(f"case {history.case_id} not found")
 
     full_change = _full_restoration_change(case, fact_changes)
-    old_detail = getattr(case, "restoration_scope_detail", None)
+    old_detail = case.restoration_scope_detail if full_change is not None else None
     for change in fact_changes:
         if full_change is not None and change.field_path == CaseFieldKey.RESTORATION_SCOPE_DETAIL:
             continue  # 같은 묶음의 SET/CLEAR 순서와 관계없이 전체 전환의 정리를 한 번만 남긴다.
@@ -471,11 +472,11 @@ def _apply_fact_changes(
         ))
 
 
-def _full_restoration_change(case: object, changes: list[FactChangeCandidate]) -> FactChangeCandidate | None:
+def _full_restoration_change(case: Case, changes: list[FactChangeCandidate]) -> FactChangeCandidate | None:
     return next((change for change in changes
                  if change.field_path == CaseFieldKey.RESTORATION_SCOPE
                  and change.operation == FactOperation.SET and change.proposed_value == "FULL"
-                 and getattr(case, "restoration_scope", None) != "FULL"), None)
+                 and case.restoration_scope != "FULL"), None)
 
 
 def _column_value(change: FactChangeCandidate) -> object | None:
