@@ -1,0 +1,293 @@
+{
+  "mode": "local preview fixtures",
+  "base": "http://127.0.0.1:5173",
+  "viewport": [
+    402,
+    874
+  ],
+  "records": [
+    {
+      "id": "01-login",
+      "url": "http://127.0.0.1:5173/login",
+      "path": "images/01-login.png",
+      "text": "폐업 준비, 순서대로\n알려드려요\n\n우리 가게에 필요한 일만 골라드려요\n\n우리 가게\n5단계 중 2단계 · 원상복구·철거\n사장님 할 일\n임대인에게 원상복구 범위를 물어보세요\n범위에 따라 철거와 지원금 신청이 달라져요.\n물어볼 내용 보기\n리본이 해둔 일\n계약서에서 원상복구 조항을 찾아뒀어요\n카카오로 시작하기\n가짜로 로그인 (미리보기용)"
+    },
+    {
+      "id": "02-diagnosis-biz",
+      "url": "http://127.0.0.1:5173/cases/new?mock=no-case&step=biz",
+      "path": "images/02-diagnosis-biz.png",
+      "text": "질문\n1 / 7\n어떤 가게를\n정리하시나요?\n\n업종마다 신고할 곳이 달라요\n\n개인 카페\n직접 차려서 운영해요\n프랜차이즈 카페\n본사와 가맹 계약이 있어요\n다른 음식점\n식당, 분식, 빵집 등\n다음"
+    },
+    {
+      "id": "02-diagnosis-situ",
+      "url": "http://127.0.0.1:5173/cases/new?mock=no-case&step=situ",
+      "path": "images/02-diagnosis-situ.png",
+      "text": "질문\n2 / 7\n가게에 해당하는 것을\n모두 골라주세요\n\n고르신 것만 할 일에 넣어요\n\n가게 자리를\n빌려서 써요\n같이 일하는\n직원이 있어요\n사업 대출이\n남아 있어요\n배달앱·카드기\n계약이 있어요\n4개 선택 완료"
+    },
+    {
+      "id": "02-diagnosis-rent",
+      "url": "http://127.0.0.1:5173/cases/new?mock=no-case&step=rent",
+      "path": "images/02-diagnosis-rent.png",
+      "text": "질문\n3 / 7\n가게 월세를 내고 계신가요?\n\n가족 가게나 무상으로 빌린 곳이면 \"아니요\"를 골라주세요\n\n네, 내고 있어요\n아니요, 안 내요\n다음"
+    },
+    {
+      "id": "02-diagnosis-restore",
+      "url": "http://127.0.0.1:5173/cases/new?mock=no-case&step=restore",
+      "path": "images/02-diagnosis-restore.png",
+      "text": "질문\n4 / 7\n계약서에 원상복구 조항이\n있나요?\n\n가게를 원래대로 돌려놓기로 한 약속이에요\n\n찾아볼 곳\n\n임대차계약서 특약사항\n\n보통 계약서 마지막 장에 있어요\n\n모르시면 리본이 찾아요\n\n계약서 사진만 올려주시면 돼요\n\n네, 있어요\n아니요, 없어요\n잘 모르겠어요\n다음"
+    },
+    {
+      "id": "02-diagnosis-staff",
+      "url": "http://127.0.0.1:5173/cases/new?mock=no-case&step=staff",
+      "path": "images/02-diagnosis-staff.png",
+      "text": "질문\n5 / 7\n직원은 몇 명인가요?\n\n지금 같이 일하는 분만 세어 주세요\n\n왜 여쭤보냐면\n\n4대보험에 가입한 직원\n\n직원이 있으면 미리 알리고, 4대보험도 정리해야 해요\n\n정직원\n\n주 15시간 이상 일해요\n\n1명\n\n아르바이트\n\n짧게 일하는 분\n\n1명\n다음"
+    },
+    {
+      "id": "02-diagnosis-insurance",
+      "url": "http://127.0.0.1:5173/cases/new?mock=no-case&step=insurance",
+      "path": "images/02-diagnosis-insurance.png",
+      "text": "질문\n6 / 7\n가게 이름으로 가입했던\n보험을 모두 골라주세요\n\n이미 탈퇴하거나 끝난 보험도 골라주세요\n\n국민연금\n건강보험\n고용보험\n산재보험\n잘 모르겠어요\n4개 선택 완료"
+    },
+    {
+      "id": "02-diagnosis-date",
+      "url": "http://127.0.0.1:5173/cases/new?mock=no-case&step=date",
+      "path": "images/02-diagnosis-date.png",
+      "text": "질문\n7 / 7\n언제 문을 닫으실\n생각이세요?\n\n정하지 않으셨어도 괜찮아요\n\n이번 달 안에\n다음 달\n아직 안 정했어요\n이전\n폐업 순서 만들기"
+    },
+    {
+      "id": "02-diagnosis-franchise",
+      "url": "http://127.0.0.1:5173/cases/new?mock=no-case&step=franchise",
+      "path": "images/02-diagnosis-franchise.png",
+      "text": "질문\n2 / 8\n프랜차이즈 가게인가요?\n\n본사와 가맹 계약이 있으면 프랜차이즈예요\n\n네, 프랜차이즈예요\n아니요, 직접 차렸어요\n다음"
+    },
+    {
+      "id": "02-diagnosis-hadStaff",
+      "url": "http://127.0.0.1:5173/cases/new?mock=no-case&step=hadStaff",
+      "path": "images/02-diagnosis-hadStaff.png",
+      "text": "질문\n6 / 8\n예전에 직원을 둔 적이 있나요?\n\n그만둔 직원도 정리할 일이 남아 있을 수 있어요\n\n네, 있어요\n아니요, 없어요\n다음"
+    },
+    {
+      "id": "03-creating",
+      "url": "http://127.0.0.1:5173/cases/new?mock=creating",
+      "path": "images/03-creating.png",
+      "text": "폐업 순서를 만들고 있어요\n\n사장님 가게에 맞는\n폐업 순서를 만들고 있어요\n\n답해 주신 내용만 써요"
+    },
+    {
+      "id": "04-home",
+      "url": "http://127.0.0.1:5173/case?mock=done",
+      "path": "images/04-home.png",
+      "text": "다음 할 일을 정했어요\n리본이 해둔 일 · 10.18\n전체 4개 중\n1 / 4\n오늘 하실 일은 하나예요\n\n사장님 할 일\n\n임대인에게 원상복구 범위를 확인하세요.\n\n철거가 필요한지, 이후 어떤 순서로 정리할지 판단하려면 원상복구 범위를 먼저 알아야 합니다.\n\n물어볼 내용 보기\n상태 다시 확인\n지금은 원상복구·철거 단계\n준비\n철거\n신고\n정산\n세금\n홈\n서류함\n기록"
+    },
+    {
+      "id": "05-task",
+      "url": "http://127.0.0.1:5173/task?mock=done",
+      "path": "images/05-task.png",
+      "text": "임대인에게 원상복구 범위를 확인하세요.\n\n철거가 필요한지, 이후 어떤 순서로 정리할지 판단하려면 원상복구 범위를 먼저 알아야 합니다.\n\n이렇게 물어보세요\n1\n어디까지 원래대로 돌려놔야 하나요?\n2\n철거까지 해야 하나요?\n답을 들었어요\n아직 못 물어봤어요"
+    },
+    {
+      "id": "06-results-text",
+      "url": "http://127.0.0.1:5173/results?mock=done",
+      "path": "images/06-results-text.png",
+      "text": "어떻게 됐나요?\n\n임대인에게 원상복구 범위를 확인하세요.\n\n보내기"
+    },
+    {
+      "id": "07-results-choice",
+      "url": "http://127.0.0.1:5173/results?mock=result-choice",
+      "path": "images/07-results-choice.png",
+      "text": "어떻게 됐나요?\n\n임대인에게 원상복구 범위를 확인하세요.\n\n원상복구 범위\n\n전부 원래대로 해야 한대요\n일부만 원래대로 하면 된대요\n원상복구는 안 해도 된대요\n범위는 아직 안 정해졌대요\n\n철거 필요 여부\n\n철거해야 한대요\n철거는 안 해도 된대요\n철거는 아직 안 정해졌대요\n직접 쓸게요\n보내기"
+    },
+    {
+      "id": "08-confirm",
+      "url": "http://127.0.0.1:5173/confirm?mock=conflict",
+      "path": "images/08-confirm.png",
+      "text": "어느 쪽이 맞나요?\n\n기록과 다른 부분이 있어요. 맞는 쪽을 골라 주세요.\n\n이번에 하신 말씀\n“다시 확인했는데 철거해야 한대요.”\n철거 필요 여부\n지금 기록\n필요 없음\n이번에 말씀하신 것\n필요함\n이대로 진행하기"
+    },
+    {
+      "id": "09-replan",
+      "url": "http://127.0.0.1:5173/replan?mock=done",
+      "path": "images/09-replan.png",
+      "text": "이렇게 이해하고 반영했어요\n\n다음 할 일을 다시 정했어요.\n\n보냈어요\n완료\n리본이 내용을 정리하고 있어요\n완료\n다음 할 일 다시 정하기\n완료\n이해한 내용\n\n원상복구 범위\n\n미확인→\n에서\n전체 철거\n(으)로 바뀜\n\n철거 필요 여부\n\n미확인→\n에서\n필요함\n(으)로 바뀜\n\n새로 생긴 할 일\n소상공인24 사전 신청\n철거 업체 정하기\n철거 전 사진\n다음 할 일\n\n점포철거비 지원 조건과 필요한 서류를 확인하세요.\n\n철거가 필요하다고 확인되어 점포철거비 지원이 검토 대상이 되었습니다. 신청 조건에 철거 전 증빙이 포함될 수 있습니다.\n\n맞아요\n다르게 이해했어요"
+    },
+    {
+      "id": "10-replan-unchanged",
+      "url": "http://127.0.0.1:5173/replan?mock=no-change",
+      "path": "images/10-replan-unchanged.png",
+      "text": "가게 정보에 바뀐 내용은 없어요\n\n다음 할 일을 다시 확인했어요.\n\n보냈어요\n완료\n리본이 내용을 정리하고 있어요\n완료\n다음 할 일 다시 정하기\n완료\n다음 할 일\n\n점포철거비 지원 조건과 필요한 서류를 확인하세요.\n\n철거가 필요하다고 확인되어 점포철거비 지원이 검토 대상이 되었습니다. 신청 조건에 철거 전 증빙이 포함될 수 있습니다.\n\n홈으로"
+    },
+    {
+      "id": "11-roadmap",
+      "url": "http://127.0.0.1:5173/roadmap?mock=roadmap",
+      "path": "images/11-roadmap.png",
+      "text": "폐업 전체 순서\n1\n폐업 준비\n완료\n3/4\n2\n원상복구·철거\n(지금 단계)\n완료\n1/8\n원상복구 범위 확인\n진행 중\n점포철거비 조건 확인\n완료\n소상공인24 사전 신청\n예정\n1차 적격심사 결과 확인\n확인 필요\n철거 업체 정하기\n예정\n철거 전 사진\n예정\n원상복구·철거 작업\n예정\n철거 후 서류 받기\n예정\n3\n영업 마무리·폐업 신고\n완료\n0/5\n4\n지원금 정산·가게 반환\n완료\n0/5\n5\n세금·마무리\n완료\n0/3"
+    },
+    {
+      "id": "12-checklist",
+      "url": "http://127.0.0.1:5173/roadmap/notify_employees?mock=roadmap",
+      "path": "images/12-checklist.png",
+      "text": "할 일\n직원에게 폐업 알리기\n\n폐업으로 직원을 해고하는 경우, 적어도 30일 전에 알려야 하고 30일 전에 알리지 못했다면 30일분 이상의 통상임금을 줘야 해요. 계속 일한 기간이 3개월 미만인 직원 등은 예외예요.\n\n마치셨다고 기록했어요\n\n완료 취소하기"
+    },
+    {
+      "id": "13-attachment",
+      "url": "http://127.0.0.1:5173/roadmap/before_photo?mock=roadmap",
+      "path": "images/13-attachment.png",
+      "text": "할 일\n철거 전 사진\n\n서류를 서류함에 올려 주세요.\n\n올린 서류는 정산 서류 점검에 쓰여요.\n서류함에 올리기\n다 했어요"
+    },
+    {
+      "id": "14-support-result",
+      "url": "http://127.0.0.1:5173/roadmap/support_approval?mock=roadmap",
+      "path": "images/14-support-result.png",
+      "text": "할 일\n1차 적격심사 결과 확인\n\n소상공인24에서 확인한 결과를 알려 주세요.\n\n승인됐어요\n안 됐어요\n아직 몰라요\n기록하기"
+    },
+    {
+      "id": "15-closure",
+      "url": "http://127.0.0.1:5173/roadmap/closure_submission?mock=roadmap",
+      "path": "images/15-closure.png",
+      "text": "할 일\n통합 폐업 신고\n\n사업자등록증에 적힌 것과 같게 적어 주세요.\n\n폐업일\n폐업 사유\n사업 부진\n개인 사정\n기타\n가게 주소\n주소 찾기\n상세 주소 (선택)\n저장하기"
+    },
+    {
+      "id": "16-deposit",
+      "url": "http://127.0.0.1:5173/roadmap/deposit_settlement?mock=roadmap",
+      "path": "images/16-deposit.png",
+      "text": "할 일\n보증금 정산 기록\n\n리본은 기록만 하고 판단하지 않아요.\n\n다 받았어요\n일부 빼고 받았어요\n아직 못 받았어요\n기록하기"
+    },
+    {
+      "id": "17-docs",
+      "url": "http://127.0.0.1:5173/docs?mock=docs",
+      "path": "images/17-docs.png",
+      "text": "서류함\n\n서류 5개가 모였어요.\n\n철거공사내역서\n철거공사내역서.pdf\n보관 중\n전자세금계산서\n전자세금계산서.pdf\n보관 중\n철거 전 사진\nIMG_0412.jpg\n확인하기\n폐업신고 접수증\nIMG_0420.jpg\n확인하기\n폐업사실증명원\n폐업사실증명원.pdf\n보관 중\n서류 올리기\n정산 서류 점검하기\n홈\n서류함\n기록"
+    },
+    {
+      "id": "18-docs-issues",
+      "url": "http://127.0.0.1:5173/docs/check?mock=docs-issues",
+      "path": "images/18-docs-issues.png",
+      "text": "AI 서류 점검\n확인하실 일이 1개 있어요\n\n서류를 더하거나 고친 뒤 다시 점검해 주세요.\n\n서류 종류 나누기\n완료\n2\n빠진 서류 찾기\n대기\n\n점검에서 찾은 것\n\n정산 점검 목록에서 빠진 서류: 이체확인증\n서류함으로 가기\n다시 점검하기"
+    },
+    {
+      "id": "19-docs-complete",
+      "url": "http://127.0.0.1:5173/docs/check?mock=docs-complete",
+      "path": "images/19-docs-complete.png",
+      "text": "AI 서류 점검\n서류 점검을 마쳤어요\n\n남은 확인 사항이 없어요.\n\n서류 종류 나누기\n완료\n빠진 서류 찾기\n완료\n금액 맞춰 보기\n완료\n결과 보기"
+    },
+    {
+      "id": "20-package",
+      "url": "http://127.0.0.1:5173/docs/done?mock=docs-complete",
+      "path": "images/20-package.png",
+      "text": "정산 제출 파일을\n만들었어요\n\n서류 점검을 마쳤고 남은 확인 사항은 없어요.\n\n정산 제출 파일 (ZIP)\n\n서류 5개 · 점검 결과\n\n리본은 대신 제출하지 않아요. 이 파일로 소상공인24에서 사장님이 직접 제출해요.\n홈으로\n파일 받기"
+    },
+    {
+      "id": "21-log",
+      "url": "http://127.0.0.1:5173/log?mock=done",
+      "path": "images/21-log.png",
+      "text": "작업 기록\n\n최근 일부터 보여드려요.\n\n다음 할 일을 정했어요\n철거 업체 견적 받기\n리본 · 10.18\n할 일 3개를 새로 추가했어요\n리본 · 10.18\n할 일 하나를 마치셨어요\n임대인에게 폐업 알리고 계약 종료일 맞추기\n사장님 · 10.18\n올린 서류로 계약 내용이 바뀌었어요\n사장님 · 10.17\n서류를 올리셨어요\n임대차계약서\n사장님 · 10.17\n기록과 다른 부분을 찾았어요\n리본 · 10.17\n할 일 결과를 알려주셨어요\n사장님 · 10.17\n다음 할 일을 정했어요\n임대인에게 원상복구 범위 묻기\n리본 · 10.14\n가게 상황을 알려주셨어요\n사장님 · 10.14\n홈\n서류함\n기록"
+    },
+    {
+      "id": "22-notifications",
+      "url": "http://127.0.0.1:5173/notifications?mock=done",
+      "path": "images/22-notifications.png",
+      "text": "알림\n알림이 없어요\n\n새 소식이 생기면 여기서 알려드릴게요"
+    },
+    {
+      "id": "23-pending",
+      "url": "http://127.0.0.1:5173/case?mock=pending",
+      "path": "images/23-pending.png",
+      "text": "다음 할 일을 정했어요\n리본이 해둔 일 · 10.18\n전체 4개 중\n1 / 4\n지금은 리본이 일하고 있어요\n\nAI 처리 중\n\n다음 할 일을 정하고 있어요\n\n가게 정보는 저장됐어요. 시간이 조금 걸릴 수 있으니 나중에 다시 오셔도 됩니다.\n\n상태 다시 확인\n지금은 원상복구·철거 단계\n준비\n철거\n신고\n정산\n세금\n홈\n서류함\n기록"
+    },
+    {
+      "id": "24-more-info",
+      "url": "http://127.0.0.1:5173/case?mock=more-info",
+      "path": "images/24-more-info.png",
+      "text": "다음 할 일을 정했어요\n리본이 해둔 일 · 10.18\n전체 4개 중\n1 / 4\n확인하실 일이 있어요\n\n확인 필요\n\n이 내용을 알려주세요\n임대인이 가게 전체를 원래대로 돌려놓으라고 했나요, 일부만 정리하면 된다고 했나요?\n철거 범위를 확인할 수 있는 계약서나 안내문이 있나요?\n답하러 가기\n상태 다시 확인\n지금은 원상복구·철거 단계\n준비\n철거\n신고\n정산\n세금\n홈\n서류함\n기록"
+    },
+    {
+      "id": "25-failed-retry",
+      "url": "http://127.0.0.1:5173/case?mock=judgment-failed",
+      "path": "images/25-failed-retry.png",
+      "text": "다음 할 일을 정했어요\n리본이 해둔 일 · 10.18\n전체 4개 중\n1 / 4\n할 일 정리가 멈췄어요\n\n판단 멈춤\n\n다음 할 일을 정하지 못했어요\n\n가게 정보는 그대로 있어요. 같은 내용으로 다시 판단해 드릴게요.\n\n다시 판단하기\n상태 다시 확인\n지금은 원상복구·철거 단계\n준비\n철거\n신고\n정산\n세금\n홈\n서류함\n기록"
+    },
+    {
+      "id": "26-failed-detail",
+      "url": "http://127.0.0.1:5173/case?mock=judgment-failed-detail",
+      "path": "images/26-failed-detail.png",
+      "text": "다음 할 일을 정했어요\n리본이 해둔 일 · 10.18\n전체 4개 중\n1 / 4\n확인하실 일이 있어요\n\n확인 필요\n\n추가 확인이 필요해요\n\n이 내용을 더 알아야 해요 — 원상복구 범위, 철거 필요 여부.\n\n다시 알려주기\n상태 다시 확인\n지금은 원상복구·철거 단계\n준비\n철거\n신고\n정산\n세금\n홈\n서류함\n기록"
+    },
+    {
+      "id": "27-failed-service",
+      "url": "http://127.0.0.1:5173/case?mock=judgment-failed-service",
+      "path": "images/27-failed-service.png",
+      "text": "다음 할 일을 정했어요\n리본이 해둔 일 · 10.18\n전체 4개 중\n1 / 4\n할 일 정리가 멈췄어요\n\n판단 멈춤\n\n서비스에서 확인이 필요한 문제가 생겼어요\n\n가게 정보는 그대로 있어요. 이 건은 저희 쪽에서 봐야 하는 문제예요.\n\n상태 다시 확인\n지금은 원상복구·철거 단계\n준비\n철거\n신고\n정산\n세금\n홈\n서류함\n기록"
+    },
+    {
+      "id": "28-conflict-home",
+      "url": "http://127.0.0.1:5173/case?mock=judgment-conflict",
+      "path": "images/28-conflict-home.png",
+      "text": "다음 할 일을 정했어요\n리본이 해둔 일 · 10.18\n전체 4개 중\n1 / 4\n확인하실 일이 있어요\n\n확인 필요\n\n확인이 필요한 내용이 있어요\n\n알려주신 내용이 저장된 기록과 달라서, 어느 쪽이 맞는지 여쭤봐야 해요.\n\n확인하러 가기\n상태 다시 확인\n지금은 원상복구·철거 단계\n준비\n철거\n신고\n정산\n세금\n홈\n서류함\n기록"
+    },
+    {
+      "id": "29-completed",
+      "url": "http://127.0.0.1:5173/case?mock=completed",
+      "path": "images/29-completed.png",
+      "text": "다음 할 일을 정했어요\n리본이 해둔 일 · 10.18\n전체 4개 중\n1 / 4\n폐업 정리를 모두 마쳤어요\n\n완료\n\n수고 많으셨어요, 사장님\n\n모든 서류는 서류함에 있어요.\n\n전체 기록 보기\n폐업 단계\n준비\n철거\n신고\n정산\n세금\n홈\n서류함\n기록"
+    },
+    {
+      "id": "30-unsupported",
+      "url": "http://127.0.0.1:5173/roadmap?mock=roadmap-unsupported",
+      "path": "images/30-unsupported.png",
+      "text": "폐업 전체 순서\n\n이 가게는 아직 폐업 순서를 안내하지 않아요.\n\n지금은 개인 카페만 폐업 순서를 안내해요. 프랜차이즈 카페와 일반 음식점은 준비 중이에요."
+    },
+    {
+      "id": "31-answer",
+      "url": "http://127.0.0.1:5173/results?mock=more-info",
+      "path": "images/31-answer.png",
+      "text": "이 내용을 알려주세요\n\n다음 할 일을 정하려면 알아야 해요. 아시는 만큼만 적어 주세요.\n\n임대인이 가게 전체를 원래대로 돌려놓으라고 했나요, 일부만 정리하면 된다고 했나요?\n\n철거 범위를 확인할 수 있는 계약서나 안내문이 있나요?\n\n보내기"
+    },
+    {
+      "id": "32-pending-long",
+      "url": "http://127.0.0.1:5173/case?mock=pending-long",
+      "path": "images/32-pending-long.png",
+      "text": "다음 할 일을 정했어요\n리본이 해둔 일 · 10.18\n전체 4개 중\n1 / 4\n지금은 리본이 일하고 있어요\n\nAI 처리 중\n\n판단이 오래 걸리고 있어요\n\n가게 정보는 그대로 있어요. 지금은 저희 쪽에서 더 확인이 필요한 상태라, 창을 닫으셨다가 나중에 다시 들러 주세요.\n\n상태 다시 확인\n지금은 원상복구·철거 단계\n준비\n철거\n신고\n정산\n세금\n홈\n서류함\n기록"
+    },
+    {
+      "id": "33-log-empty",
+      "url": "http://127.0.0.1:5173/log?mock=logs-empty",
+      "path": "images/33-log-empty.png",
+      "text": "작업 기록\n아직 남은 기록이 없어요\n\n리본이 한 일과 사장님이 한 일이\n여기에 차례로 남아요\n\n홈\n서류함\n기록"
+    },
+    {
+      "id": "34-check-blocked",
+      "url": "http://127.0.0.1:5173/roadmap/closure_certificate?mock=roadmap",
+      "path": "images/34-check-blocked.png",
+      "text": "할 일\n폐업사실증명원 발급\n\n서류를 서류함에 올려 주세요.\n\n올린 서류는 정산 서류 점검에 쓰여요.\n서류함에 올리기\n\n아직 기록할 수 없는 할 일이에요.\n\n필요한 내용이 확인되면 기록할 수 있어요.\n다 했어요"
+    },
+    {
+      "id": "35-doc-upload",
+      "url": "http://127.0.0.1:5173/docs?mock=docs",
+      "path": "images/35-doc-upload.png",
+      "text": "서류함\n\n서류 5개가 모였어요.\n\n철거공사내역서\n철거공사내역서.pdf\n보관 중\n전자세금계산서\n전자세금계산서.pdf\n보관 중\n철거 전 사진\nIMG_0412.jpg\n확인하기\n폐업신고 접수증\nIMG_0420.jpg\n확인하기\n폐업사실증명원\n폐업사실증명원.pdf\n보관 중\n서류 올리기\n정산 서류 점검하기\n서류 올리기\n\n사진이나 PDF를 한 장씩 올려 주세요.\n\n카메라로 찍기\n앨범에서 고르기\n파일에서 고르기\n홈\n서류함\n기록"
+    },
+    {
+      "id": "36-doc-confirm",
+      "url": "http://127.0.0.1:5173/docs?mock=docs",
+      "path": "images/36-doc-confirm.png",
+      "text": "서류함\n\n서류 5개가 모였어요.\n\n철거공사내역서\n철거공사내역서.pdf\n보관 중\n전자세금계산서\n전자세금계산서.pdf\n보관 중\n철거 전 사진\nIMG_0412.jpg\n확인하기\n폐업신고 접수증\nIMG_0420.jpg\n확인하기\n폐업사실증명원\n폐업사실증명원.pdf\n보관 중\n서류 올리기\n정산 서류 점검하기\n서류 확인하기\n\nIMG_0412.jpg · 리본이 읽은 내용이 맞는지 봐 주세요.\n\n서류 종류\n종류를 골라 주세요\n임대차계약서\n사업자등록 자료\n영업신고증\n철거공사내역서\n전자세금계산서\n철거 전 사진\n철거 후 사진\n이체확인증\n폐업사실증명원\n통장 사본\n폐업신고 접수증\n카드 매출 내역\n현금영수증 매출\n매입 세금계산서\n보증금 공제 내역\n맞아요, 확인했어요\n홈\n서류함\n기록"
+    },
+    {
+      "id": "37-check-applicant",
+      "url": "http://127.0.0.1:5173/docs/check?mock=docs",
+      "path": "images/37-check-applicant.png",
+      "text": "AI 서류 점검\n정산 서류를 점검할게요\n\n서류함에 있는 서류 5개를 그대로 써요.\n\n점검 시작하기\n점검 전에 알려 주세요\n\n서류에 적힌 것과 맞춰 볼게요.\n\n신청인 이름\n\n이체확인증의 보낸 사람과 같아야 해요.\n\n실제 폐업일 (선택)\n\n폐업사실증명원에 적힌 날짜예요. 모르면 비워 두세요.\n\n점검하기"
+    },
+    {
+      "id": "38-result-filled",
+      "url": "http://127.0.0.1:5173/results?mock=done",
+      "path": "images/38-result-filled.png",
+      "text": "어떻게 됐나요?\n\n임대인에게 원상복구 범위를 확인하세요.\n\n보내기"
+    },
+    {
+      "id": "39-understood",
+      "url": "http://127.0.0.1:5173/replan?mock=done",
+      "path": "images/39-understood.png",
+      "text": "이렇게 이해하고 반영했어요\n\n다음 할 일을 다시 정했어요.\n\n보냈어요\n완료\n리본이 내용을 정리하고 있어요\n완료\n다음 할 일 다시 정하기\n완료\n이해한 내용\n\n원상복구 범위\n\n미확인→\n에서\n전체 철거\n(으)로 바뀜\n\n철거 필요 여부\n\n미확인→\n에서\n필요함\n(으)로 바뀜\n\n새로 생긴 할 일\n소상공인24 사전 신청\n철거 업체 정하기\n철거 전 사진\n다음 할 일\n\n점포철거비 지원 조건과 필요한 서류를 확인하세요.\n\n철거가 필요하다고 확인되어 점포철거비 지원이 검토 대상이 되었습니다. 신청 조건에 철거 전 증빙이 포함될 수 있습니다.\n\n맞아요\n다르게 이해했어요"
+    }
+  ],
+  "page_errors": []
+}

@@ -1,0 +1,224 @@
+[
+  {
+    "stage": 1,
+    "stage_title": "폐업 준비",
+    "id": "intake",
+    "title": "상황 진단",
+    "condition": "always",
+    "procedure_codes": []
+  },
+  {
+    "stage": 1,
+    "stage_title": "폐업 준비",
+    "id": "closure_date",
+    "title": "폐업 날짜 정하기",
+    "condition": "always",
+    "procedure_codes": []
+  },
+  {
+    "stage": 1,
+    "stage_title": "폐업 준비",
+    "id": "notify_landlord",
+    "title": "임대인에게 폐업 알리고 계약 종료일 맞추기",
+    "condition": "lease",
+    "procedure_codes": []
+  },
+  {
+    "stage": 1,
+    "stage_title": "폐업 준비",
+    "id": "notify_employees",
+    "title": "직원에게 폐업 알리기",
+    "condition": "staff",
+    "procedure_codes": []
+  },
+  {
+    "stage": 1,
+    "stage_title": "폐업 준비",
+    "id": "check_loan",
+    "title": "은행에 폐업 후 상환 조건 확인",
+    "condition": "loan",
+    "procedure_codes": []
+  },
+  {
+    "stage": 2,
+    "stage_title": "원상복구·철거",
+    "id": "restoration",
+    "title": "원상복구 범위 확인",
+    "condition": "lease",
+    "procedure_codes": [
+      "CONFIRM_RESTORATION_SCOPE"
+    ]
+  },
+  {
+    "stage": 2,
+    "stage_title": "원상복구·철거",
+    "id": "support_conditions",
+    "title": "점포철거비 조건 확인",
+    "condition": "demolition",
+    "procedure_codes": []
+  },
+  {
+    "stage": 2,
+    "stage_title": "원상복구·철거",
+    "id": "support_application",
+    "title": "소상공인24 사전 신청",
+    "condition": "demolition",
+    "procedure_codes": []
+  },
+  {
+    "stage": 2,
+    "stage_title": "원상복구·철거",
+    "id": "support_approval",
+    "title": "1차 적격심사 결과 확인",
+    "condition": "demolition",
+    "procedure_codes": []
+  },
+  {
+    "stage": 2,
+    "stage_title": "원상복구·철거",
+    "id": "choose_contractor",
+    "title": "철거 업체 정하기",
+    "condition": "demolition",
+    "procedure_codes": []
+  },
+  {
+    "stage": 2,
+    "stage_title": "원상복구·철거",
+    "id": "before_photo",
+    "title": "철거 전 사진",
+    "condition": "demolition",
+    "procedure_codes": []
+  },
+  {
+    "stage": 2,
+    "stage_title": "원상복구·철거",
+    "id": "restoration_work",
+    "title": "원상복구·철거 작업",
+    "condition": "lease",
+    "procedure_codes": [
+      "PERFORM_RESTORATION"
+    ]
+  },
+  {
+    "stage": 2,
+    "stage_title": "원상복구·철거",
+    "id": "contractor_documents",
+    "title": "철거 후 서류 받기",
+    "condition": "demolition",
+    "procedure_codes": []
+  },
+  {
+    "stage": 3,
+    "stage_title": "영업 마무리·폐업 신고",
+    "id": "dispose_stock",
+    "title": "재고·장비 처분",
+    "condition": "always",
+    "procedure_codes": []
+  },
+  {
+    "stage": 3,
+    "stage_title": "영업 마무리·폐업 신고",
+    "id": "terminate_contracts",
+    "title": "렌탈·공과금 해지",
+    "condition": "contracts",
+    "procedure_codes": []
+  },
+  {
+    "stage": 3,
+    "stage_title": "영업 마무리·폐업 신고",
+    "id": "employee_payments",
+    "title": "직원 임금·퇴직급여 정산",
+    "condition": "always",
+    "procedure_codes": [
+      "SETTLE_EMPLOYEE_PAYMENTS"
+    ]
+  },
+  {
+    "stage": 3,
+    "stage_title": "영업 마무리·폐업 신고",
+    "id": "employee_insurance",
+    "title": "4대보험 상실·탈퇴 신고",
+    "condition": "always",
+    "procedure_codes": [
+      "REPORT_EMPLOYEE_INSURANCE_LOSS",
+      "REPORT_WORKPLACE_INSURANCE_CLOSURE"
+    ]
+  },
+  {
+    "stage": 3,
+    "stage_title": "영업 마무리·폐업 신고",
+    "id": "closure_submission",
+    "title": "통합 폐업 신고",
+    "condition": "always",
+    "procedure_codes": [
+      "FILE_TAX_BUSINESS_CLOSURE",
+      "FILE_FOOD_SERVICE_CLOSURE"
+    ]
+  },
+  {
+    "stage": 4,
+    "stage_title": "지원금 정산·가게 반환",
+    "id": "closure_certificate",
+    "title": "폐업사실증명원 발급",
+    "condition": "settlement",
+    "procedure_codes": []
+  },
+  {
+    "stage": 4,
+    "stage_title": "지원금 정산·가게 반환",
+    "id": "document_check",
+    "title": "AI 서류 점검",
+    "condition": "settlement",
+    "procedure_codes": []
+  },
+  {
+    "stage": 4,
+    "stage_title": "지원금 정산·가게 반환",
+    "id": "settlement_submission",
+    "title": "소상공인24 정산 제출",
+    "condition": "settlement",
+    "procedure_codes": []
+  },
+  {
+    "stage": 4,
+    "stage_title": "지원금 정산·가게 반환",
+    "id": "return_premises",
+    "title": "가게 반환",
+    "condition": "lease",
+    "procedure_codes": [
+      "RETURN_PREMISES"
+    ]
+  },
+  {
+    "stage": 4,
+    "stage_title": "지원금 정산·가게 반환",
+    "id": "deposit_settlement",
+    "title": "보증금 정산 기록",
+    "condition": "lease",
+    "procedure_codes": []
+  },
+  {
+    "stage": 5,
+    "stage_title": "세금·마무리",
+    "id": "vat_submission",
+    "title": "부가세 폐업 확정신고",
+    "condition": "always",
+    "procedure_codes": []
+  },
+  {
+    "stage": 5,
+    "stage_title": "세금·마무리",
+    "id": "income_tax",
+    "title": "종합소득세 신고 여부 확인",
+    "condition": "always",
+    "procedure_codes": []
+  },
+  {
+    "stage": 5,
+    "stage_title": "세금·마무리",
+    "id": "post_closure_support",
+    "title": "폐업 후 지원 안내 확인",
+    "condition": "always",
+    "procedure_codes": []
+  }
+]

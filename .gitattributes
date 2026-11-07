@@ -21,3 +21,7 @@
 # 셸 스크립트·git hook 은 CRLF 면 실행이 실패하니 LF 로 고정하는 게 좋습니다:
 #   *.sh        text eol=lf
 #   .githooks/* text eol=lf
+
+# 설명서 PDF는 ASCII 압축이어도 문서 바이너리로 비교한다.
+*.pdf binary
+docs/final-guide/*.csv whitespace=cr-at-eol

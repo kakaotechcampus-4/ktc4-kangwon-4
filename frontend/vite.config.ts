@@ -1,6 +1,23 @@
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { configDefaults, defineConfig } from 'vitest/config'
+import type { IncomingMessage, ServerResponse } from 'node:http'
+import type { Plugin } from 'vite'
+
+// 공개 문서의 디렉터리 URL이 React SPA fallback으로 넘어가지 않게 한다.
+function rewriteDocumentationPath(req: IncomingMessage, _res: ServerResponse, next: () => void) {
+  const [path, query] = (req.url ?? '').split('?')
+  if (/^\/developers(?:\/ko\/[a-z0-9/-]+)?\/?$/.test(path) || /^\/safety(?:\/[a-z0-9-]+)?\/?$/.test(path)) {
+    req.url = `${path.replace(/\/$/, '')}/index.html${query ? `?${query}` : ''}`
+  }
+  next()
+}
+
+const documentationRoutes: Plugin = {
+  name: 'reborn-documentation-routes',
+  configureServer(server) { server.middlewares.use(rewriteDocumentationPath) },
+  configurePreviewServer(server) { server.middlewares.use(rewriteDocumentationPath) },
+}
 
 /**
  * 배포된 화면은 서버를 `/api/...` 로 부르고 `vercel.json` 의 규칙이 서버로 넘긴다.
@@ -24,7 +41,7 @@ const API_PROXY = {
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [documentationRoutes, react(), tailwindcss()],
   server: { proxy: API_PROXY },
   preview: { proxy: API_PROXY },
   test: {
