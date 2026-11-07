@@ -52,7 +52,7 @@ def build_roadmap_input(session: Session, case: Case) -> RoadmapInput:
         # 서류 점검 결과. 4단계 "AI 서류 점검"은 체크가 아니라 이 값으로만 상태가 정해져서
         # (agent/roadmap.py의 document_check), 안 넘기면 사장님이 점검을 통과해도 계속
         # "시작 전"으로 남는다. 서류를 안 올린 Case는 빈 목록이라 넘겨도 결과가 같다.
-        documents=document_service.load_context(document_service.document_directory(), case),
+        documents=document_service.load_context(session, case),
     )
 
 

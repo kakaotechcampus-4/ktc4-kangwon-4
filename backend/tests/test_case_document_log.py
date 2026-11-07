@@ -46,14 +46,14 @@ def _upload(engine, member_id, tool, directory, kind, fields, content=None):
     with Session(engine) as session:
         case = case_crud.get_case_by_member_id(session, member_id)
         return asyncio.run(document_service.upload_document(
-            session, tool, directory, case, f"{kind}.pdf", content or document_pdf(kind, **fields), None,
+            session, tool, case, f"{kind}.pdf", content or document_pdf(kind, **fields), None,
         ))
 
 
 def _check(engine, member_id, tool, directory):
     with Session(engine) as session:
         case = case_crud.get_case_by_member_id(session, member_id)
-        return document_service.check_documents(session, tool, directory, case, "김리본", date(2026, 10, 31))
+        return document_service.check_documents(session, tool, case, "김리본", date(2026, 10, 31))
 
 
 def _document_logs(engine, member_id):
@@ -89,7 +89,7 @@ def test_removed_document_stays_in_log(documents):
     uploaded = _upload(engine, member_id, tool, directory, DocumentKind.TRANSFER, TRANSFER)
     with Session(engine) as session:
         case = case_crud.get_case_by_member_id(session, member_id)
-        document_service.remove_document(tool, directory, case, uploaded.documents[0].document_id)
+        document_service.remove_document(session, tool, case, uploaded.documents[0].document_id)
 
     assert _document_logs(engine, member_id) == [("OWNER", "DOCUMENT_UPLOADED", "TRANSFER")]
 
@@ -103,7 +103,7 @@ def test_only_passed_check_is_logged_as_ribbon(documents):
         case = case_crud.get_case_by_member_id(session, member_id)
         for document in context.documents:
             values = {field.name: field.value for field in document.analysis.fields}
-            document_service.confirm_document(tool, directory, case, document.document_id,
+            document_service.confirm_document(session, tool, case, document.document_id,
                                               document.analysis.kind, values)
 
     # 이체확인증이 빠져 문제가 남은 점검은 기록하지 않는다
@@ -135,18 +135,18 @@ def test_explicit_store_name_is_saved_reloaded_and_used_without_changing_documen
         for document in context.documents:
             if document.analysis.needs_confirmation:
                 document_service.confirm_document(
-                    tool, directory, case, document.document_id, document.analysis.kind,
+                    session, tool, case, document.document_id, document.analysis.kind,
                     {field.name: field.value for field in document.analysis.fields},
                 )
         if initial_name is None:
             legacy = document_service.check_documents(
-                session, tool, directory, case, "김리본", date(2026, 10, 31),
+                session, tool, case, "김리본", date(2026, 10, 31),
             )
             assert "BUYER_UNCONFIRMED" in {issue.code for issue in legacy.document_check.issues}
             session.refresh(case)
             assert case.store_name is None
         checked = document_service.check_documents(
-            session, tool, directory, case, "김리본", date(2026, 10, 31), store_name="봄날개인카페",
+            session, tool, case, "김리본", date(2026, 10, 31), store_name="봄날개인카페",
         )
         assert checked.document_check.status == "COMPLETE"
         original_documents = [row.model_dump_json() for row in checked.documents]
@@ -155,14 +155,14 @@ def test_explicit_store_name_is_saved_reloaded_and_used_without_changing_documen
     with Session(engine) as session:
         case = case_crud.get_case_by_member_id(session, member_id)
         assert case.store_name == "봄날개인카페"
-        loaded = document_service.load_context(directory, case)
+        loaded = document_service.load_context(session, case)
         assert document_list_response(loaded).store_name == "봄날개인카페"
         assert loaded.applicant_name == "김리본"
         assert document_service.check_documents(
-            session, tool, directory, case, "김리본", date(2026, 10, 31),
+            session, tool, case, "김리본", date(2026, 10, 31),
         ).document_check.status == "COMPLETE"  # 이름을 생략한 기존 클라이언트도 이어 간다.
         mismatched = document_service.check_documents(
-            session, tool, directory, case, "김리본", date(2026, 10, 31), store_name="다른 가게",
+            session, tool, case, "김리본", date(2026, 10, 31), store_name="다른 가게",
         )
         assert "BUYER_MISMATCH" in {issue.code for issue in mismatched.document_check.issues}
         assert [row.model_dump_json() for row in mismatched.documents] == original_documents

@@ -1,12 +1,14 @@
 """서류 API(/cases/documents): Golden Case 5 — 이체확인증 누락 → 추가 → 점검 완료 → 제출 파일.
 
-DB와 모델은 부르지 않는다. Case는 가짜 객체로, 모델은 document_fixtures의 가짜 응답으로 바꾼다.
+모델은 부르지 않는다. Case는 가짜 객체로, 모델은 document_fixtures의 가짜 응답으로 바꾼다.
+서류함(case_document_context)은 메모리에 담아 두는 가짜 세션으로 바꾼다 — 저장이 파일에서 표로
+옮겨 가면서(멘토님 #187) 읽고 쓰기가 DB를 타기 때문이다. 진짜 MySQL로 보는 것은
+test_case_document_log.py(저장)와 test_double_submit.py(겹침)다.
 """
 
 import io
 from datetime import date, datetime
 from types import SimpleNamespace
-from unittest.mock import MagicMock
 from zipfile import ZipFile
 
 import pytest
@@ -21,6 +23,7 @@ from app.be.crud import case_history as case_history_crud
 from app.be.crud import conflict_reference as conflict_reference_crud
 from app.be.db import get_db
 from app.be.dependencies.auth import get_current_member_id
+from app.be.models.case_document_context import CaseDocumentContext
 from app.be.routers import document as document_router
 from app.be.services import document as document_service
 from app.be.services import judgment as judgment_service
@@ -39,6 +42,39 @@ TRANSFER = {"amount": "3,300,000원", "sender": "김리본", "recipient": "그�
 OWNER = {"applicant_name": "김리본", "closure_date": "2026-10-31"}
 
 
+class FakeSession:
+    """서류함 줄(case_document_context)만 기억하는 세션. 서비스가 쓰는 것은 이 네 가지뿐이다.
+
+    commit은 "지금까지 더한 줄을 확정"이고 rollback은 "버림"이다. 잠금(with_for_update)은
+    요청을 하나씩 보내는 TestClient에서는 기다릴 일이 없어 읽기와 같다.
+    """
+
+    def __init__(self):
+        self.rows, self.staged = {}, []
+
+    def get(self, model, key, **_kwargs):
+        return self.rows.get((model, key))
+
+    def add(self, row):
+        self.staged.append(row)
+
+    def commit(self):
+        for row in self.staged:
+            if isinstance(row, CaseDocumentContext):
+                self.rows[(CaseDocumentContext, row.case_id)] = row
+        self.staged.clear()
+
+    def flush(self):
+        pass
+
+    def rollback(self):
+        self.staged.clear()
+
+    def close(self):
+        # 판단을 넘길 때 커넥션을 미리 돌려준다(db.release_request_connection). 담아 둔 줄은 그대로 둔다
+        self.staged.clear()
+
+
 @pytest.fixture
 def api(tmp_path, monkeypatch):
     client_model = DocumentClient()
@@ -54,9 +90,11 @@ def api(tmp_path, monkeypatch):
         yield DocumentTool(DocumentService(tmp_path / "vault", client_model, reviewer=client_model,
                                            submission_policy="RRN_BACK_ONLY"))
 
+    session = FakeSession()
+
     def fake_db():
-        # 서류 기록(case_document_history) 저장은 test_case_document_log.py가 실제 MySQL로 본다
-        yield MagicMock(spec=Session)
+        # 서류함만 담아 둔다. 서류 기록(case_document_history) 저장은 test_case_document_log.py가 실제 MySQL로 본다
+        yield session
 
     monkeypatch.setattr(case_crud, "get_case_by_member_id", lambda _session, member_id: cases.get(member_id))
     app.dependency_overrides.update({
@@ -65,7 +103,9 @@ def api(tmp_path, monkeypatch):
         document_router.get_document_directory: lambda: tmp_path / "vault",
         document_router.get_document_tool: fake_tool,
     })
-    yield TestClient(app), member, client_model
+    monkeypatch.setattr(document_service.case_document_history_crud, "create_case_document_history",
+                        lambda _session, history: history)
+    yield TestClient(app), member, client_model, session
     app.dependency_overrides.clear()
 
 
@@ -74,7 +114,7 @@ def upload(client, kind, fields):
 
 
 def test_missing_transfer_is_reported_then_added_and_zip_downloads(api):
-    client, _, _ = api
+    client, _, _, _ = api
     for kind, fields in SETTLEMENT.items():
         assert upload(client, kind, fields).status_code == 200
 
@@ -108,7 +148,7 @@ def test_missing_transfer_is_reported_then_added_and_zip_downloads(api):
 
 
 def test_list_keeps_saved_documents_and_hides_other_cases(api):
-    client, member, _ = api
+    client, member, _, _ = api
     uploaded = upload(client, DocumentKind.TRANSFER, TRANSFER).json()["documents"][0]
     assert uploaded["kind"] == "TRANSFER" and uploaded["kind_label"] == "이체확인증"
     assert {f["name"]: f["value"] for f in uploaded["fields"]}["amount"] == "3,300,000원"
@@ -131,7 +171,7 @@ def test_list_keeps_saved_documents_and_hides_other_cases(api):
 
 
 def test_response_uses_agent_labels_even_after_confirmation_and_reload(api, monkeypatch):
-    client, _, _ = api
+    client, _, _, _ = api
     monkeypatch.setitem(DOCUMENT_FIELD_LABELS, "amount", "확인용 송금액")
     monkeypatch.setitem(DOCUMENT_LABELS, DocumentKind.TRANSFER, "확인용 이체서류")
     kinds = client.get("/cases/documents").json()["document_kinds"]
@@ -153,7 +193,7 @@ def test_response_uses_agent_labels_even_after_confirmation_and_reload(api, monk
 
 
 def test_owner_confirms_uncertain_values_and_can_remove_document(api):
-    client, _, client_model = api
+    client, _, client_model, _ = api
     client_model.needs_confirmation = True
     record = upload(client, DocumentKind.TRANSFER, TRANSFER).json()["documents"][0]
     assert record["needs_confirmation"] is True
@@ -169,7 +209,7 @@ def test_owner_confirms_uncertain_values_and_can_remove_document(api):
 
 @pytest.mark.parametrize("legacy_fields", [{}, {"store_name": None}])
 def test_legacy_nameless_case_keeps_checking_then_accepts_the_explicit_name(api, legacy_fields):
-    client, _, _ = api
+    client, _, _, _ = api
     case = case_crud.get_case_by_member_id(None, 1)
     case.store_name = None
     # 업로드에서 읽은 상호로 Case를 채우지 않는다.
@@ -187,20 +227,20 @@ def test_legacy_nameless_case_keeps_checking_then_accepts_the_explicit_name(api,
 
 @pytest.mark.parametrize("name", ["", " \t ", "가" * 51])
 def test_invalid_store_name_does_not_replace_the_saved_name(api, name):
-    client, _, _ = api
+    client, _, _, _ = api
     response = client.post("/cases/documents/check", json={**OWNER, "store_name": name})
     assert response.status_code == 422
     assert client.get("/cases/documents").json()["store_name"] == "봄날개인카페"
 
 
 def test_store_name_accepts_fifty_characters_after_trimming(api):
-    client, _, _ = api
+    client, _, _, _ = api
     response = client.post("/cases/documents/check", json={**OWNER, "store_name": " " + "가" * 50 + " "})
     assert response.status_code == 200 and response.json()["store_name"] == "가" * 50
 
 
 def test_case_is_required_and_empty_upload_is_rejected(api):
-    client, member, _ = api
+    client, member, _, _ = api
     assert client.post("/cases/documents", files={"file": ("empty.pdf", b"", "application/pdf")}).status_code == 422
     member["id"] = 3
     assert client.get("/cases/documents").status_code == 404
@@ -241,7 +281,7 @@ def test_unavailable_safety_check_still_asks_to_retry(api, monkeypatch):
 # 1: 가입 때 폐업 예정일(2026-10-31)을 정한 Case, 2: "예상 달·아직"을 골라 예정일이 없는 Case
 @pytest.mark.parametrize("case_id", [1, 2])
 def test_only_owner_confirmed_closure_date_is_checked(api, case_id):
-    client, member, _ = api
+    client, member, _, _ = api
     member["id"] = case_id
     upload(client, DocumentKind.CLOSURE_CERTIFICATE, {"closure_date": "2026년 10월 31일"})
 
@@ -262,7 +302,7 @@ LEASE_CLAUSE = {"restoration_clause": "임차인은 계약 종료 시 원상복�
 
 
 @pytest.fixture
-def judged(api, monkeypatch, tmp_path):
+def judged(api, monkeypatch):
     """판단 이력 저장과 판단 실행을 가로채, 무엇이 남고 무엇이 불렸는지 돌려준다."""
 
     histories, runs = [], []
@@ -289,10 +329,9 @@ def judged(api, monkeypatch, tmp_path):
         runs.append(case_history_id)
 
     monkeypatch.setattr(judgment_service, "run_judgment_in_background", fake_run)
-    app.dependency_overrides[get_db] = lambda: MagicMock()
-    client, _, client_model = api
+    client, _, client_model, session = api
     return SimpleNamespace(client=client, model=client_model, histories=histories, runs=runs, state=state,
-                           directory=tmp_path / "vault")
+                           session=session)
 
 
 def test_new_restoration_clause_starts_document_judgment(judged):
@@ -349,27 +388,9 @@ def test_document_skipped_while_blocked_is_judged_once_the_block_ends(judged, mo
     monkeypatch.setattr(case_history_crud, "get_case_history_by_id",
                         lambda _session, _history_id: SimpleNamespace(case_id=1))
     monkeypatch.setattr(case_crud, "get_case_by_id", lambda session, _case_id: case_crud.get_case_by_member_id(session, 1))
-    queued = document_service.queue_owed_document_judgment(MagicMock(), judged.directory, 7)
+    queued = document_service.queue_owed_document_judgment(judged.session, 7)
 
     [history] = judged.histories
     assert queued == history.id and history.source == "DOCUMENT_SUBMITTED"
     assert "원상복구 조항: 임차인은 계약 종료 시 원상복구한다" in history.raw_input
-    assert document_service.queue_owed_document_judgment(MagicMock(), judged.directory, history.id) is None
-
-
-def test_baseline_is_restored_when_the_judgment_cannot_be_saved(judged):
-    # 기준을 쓴 뒤 판단 이력 확정이 실패하면 기준을 되돌린다. 안 그러면 이 조항이 판단에서 빠진다(#173 리뷰)
-    judged.state.update({"latest_status": "PENDING"})
-    upload(judged.client, DocumentKind.LEASE, LEASE_CLAUSE)
-    judged.state.update({"latest_status": "DONE"})
-    case = case_crud.get_case_by_member_id(None, 1)
-    judged_path = document_service._judged_context_path(judged.directory, case)
-
-    failing = MagicMock()
-    failing.commit.side_effect = [None, RuntimeError("DB 연결 끊김")]  # 읽은 시점 끝내기는 되고, 이력 확정만 실패
-    with pytest.raises(RuntimeError):
-        document_service.queue_document_judgment(failing, judged.directory, case)
-    assert not judged_path.exists()
-
-    assert document_service.queue_document_judgment(MagicMock(), judged.directory, case) is not None
-    assert judged_path.is_file()
+    assert document_service.queue_owed_document_judgment(judged.session, history.id) is None

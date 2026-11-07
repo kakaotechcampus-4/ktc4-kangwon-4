@@ -152,7 +152,7 @@ def test_a_finished_judgment_goes_on_to_documents_that_waited(monkeypatch):
     monkeypatch.setattr(judgment, "Session", MagicMock())
     monkeypatch.setattr(judgment, "get_engine", MagicMock())
     monkeypatch.setattr(document_service, "queue_owed_document_judgment",
-                        lambda _session, _directory, case_history_id: owed.pop(case_history_id, None))
+                        lambda _session, case_history_id: owed.pop(case_history_id, None))
 
     asyncio.run(judgment.run_judgment_in_background(HISTORY_ID))
     assert ran == [HISTORY_ID, HISTORY_ID + 1]

@@ -38,6 +38,7 @@ DELETE FROM case_field_history WHERE case_id = @case_id;
 DELETE FROM case_procedure_step WHERE case_id = @case_id;
 DELETE FROM case_checklist WHERE case_id = @case_id;
 DELETE FROM case_checklist_history WHERE case_id = @case_id;
+DELETE FROM case_document_context WHERE case_id = @case_id;
 DELETE FROM case_document_history WHERE case_id = @case_id;
 DELETE FROM support_item_application WHERE case_id = @case_id;
 DELETE FROM support_match WHERE case_id = @case_id;

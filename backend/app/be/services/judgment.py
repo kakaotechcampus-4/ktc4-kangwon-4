@@ -66,9 +66,7 @@ async def judge_owed_documents(case_history_id: int) -> None:
 
     try:
         with Session(get_engine()) as session:
-            next_history_id = document_service.queue_owed_document_judgment(
-                session, document_service.document_directory(), case_history_id
-            )
+            next_history_id = document_service.queue_owed_document_judgment(session, case_history_id)
     except Exception:
         logger.exception("case_history %s 뒤 서류 재판단 확인 실패", case_history_id)
         return
