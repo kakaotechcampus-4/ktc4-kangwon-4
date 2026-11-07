@@ -64,6 +64,7 @@ from app.agent.tracing import (
     TraceEvent,
     TraceSink,
     UsageAccumulator,
+    current_trace_id,
     traced_component,
 )
 
@@ -152,6 +153,9 @@ class AgentGraph:
         # An owned deep copy prevents caller-side mutation while the graph is in flight.
         owned_request = request.model_copy(deep=True)
         failure_request = request.model_copy(deep=True)
+        # The RUN span is already active. Store its actual ID, not an unrelated caller label.
+        if trace_id := current_trace_id():
+            owned_request.trace_id = failure_request.trace_id = trace_id
         snapshot_digest = canonical_digest(owned_request.case_snapshot)
         run_id = self._uuid()
         initial: AgentGraphState = {

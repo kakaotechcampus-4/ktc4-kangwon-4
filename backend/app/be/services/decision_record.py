@@ -7,6 +7,7 @@
 
 
 import logging
+import re
 from collections.abc import Mapping
 from datetime import datetime
 
@@ -62,6 +63,13 @@ def save_reviewed_plan(
 
     # 저장 직전에 검수 증거를 다시 대조한다(AI팀 스펙의 처리 설명).
     outcome.assert_integrity()
+    if trace_id is None:
+        source_trace_ids = {source.meta.trace_id for source in outcome.review_subject.source_results
+                            if source.meta.trace_id is not None}
+        if len(source_trace_ids) == 1:
+            candidate = source_trace_ids.pop()
+            if re.fullmatch(r"[0-9a-f]{32}", candidate) and candidate != "0" * 32:
+                trace_id = candidate
     # 대조 전에 읽기 트랜잭션을 끊는다. 이 세션은 판단 시작 때 스냅샷을 읽고 그대로 36~120초를
     # 기다렸는데, MySQL 기본 격리 수준(REPEATABLE READ)에서는 같은 트랜잭션 안의 재조회가 처음
     # 읽은 시점을 계속 본다. SQLAlchemy도 이미 읽어둔 객체를 그대로 돌려준다. 끊지 않으면 그

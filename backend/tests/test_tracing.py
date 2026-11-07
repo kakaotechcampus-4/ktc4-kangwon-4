@@ -10,21 +10,23 @@ from app.agent.tracing import (
     LangfuseTraceSink,
     TraceEvent,
     capture_usage,
+    current_trace_id,
     observation_scope,
     record_provider_usage,
 )
 
 
 class Client:
-    def __init__(self):
+    def __init__(self, trace_id=None):
         self.active = []
         self.observations = []
+        self.trace_id = trace_id
 
     @contextmanager
     def start_as_current_observation(self, *, name, **options):
         observation = SimpleNamespace(
             name=name, parent=self.active[-1] if self.active else None,
-            options=options, updates=[], ended=False,
+            options=options, updates=[], ended=False, trace_id=self.trace_id,
         )
         observation.update = lambda **values: observation.updates.append(values)
         self.observations.append(observation)
@@ -108,6 +110,75 @@ def test_concurrent_captures_do_not_mix_or_leak_into_next_run():
             assert calls == []
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("trace_id", [None, "external-label", "0" * 32, "ab" * 16])
+def test_current_trace_id_accepts_only_an_actual_nonzero_sdk_id(trace_id):
+    with observation_scope("RUN", sink=LangfuseTraceSink(Client(trace_id))):
+        assert current_trace_id() == (trace_id if trace_id == "ab" * 16 else None)
+    assert current_trace_id() is None
+
+
+@pytest.mark.parametrize("sink_mode", ["available", "unconfigured", "start_failure", "id_failure"])
+def test_graph_links_the_sdk_trace_without_changing_the_callers_input(sink_mode):
+    import json
+    from test_procedure_only_graph import graph_run_inputs
+
+    graph, request, _, _, _ = graph_run_inputs("CASE_CREATED")
+    request.trace_id = "external-label"
+    before = request.model_dump_json()
+    trace_id = "ab" * 16
+    client = Client(trace_id)
+
+    @contextmanager
+    def broken_start(**_):
+        raise RuntimeError("telemetry unavailable")
+        yield
+
+    class BrokenId:
+        @property
+        def trace_id(self):
+            raise RuntimeError("telemetry unavailable")
+
+        def update(self, **_):
+            pass
+
+    @contextmanager
+    def broken_id(**_):
+        yield BrokenId()
+
+    if sink_mode == "unconfigured":
+        graph._trace_sink = None
+    else:
+        if sink_mode != "available":
+            client.start_as_current_observation = broken_start if sink_mode == "start_failure" else broken_id
+        graph._trace_sink = LangfuseTraceSink(client)
+    outcome = asyncio.run(graph.run(request))
+    assert outcome.outcome_type == "REVIEWED_PLAN"
+    assert request.model_dump_json() == before
+    expected = trace_id if sink_mode == "available" else "external-label"
+    assert {source.meta.trace_id for source in outcome.review_subject.source_results} == {expected}
+    assert request.trigger.input.redacted_text not in json.dumps([
+        update for observation in client.observations for update in observation.updates
+    ])
+
+
+def test_concurrent_graph_runs_keep_their_own_sdk_trace_ids():
+    from test_procedure_only_graph import graph_run_inputs
+
+    async def one(trace_id):
+        graph, request, _, _, _ = graph_run_inputs("CASE_CREATED")
+        graph._trace_sink = LangfuseTraceSink(Client(trace_id))
+        before = request.model_dump_json()
+        outcome = await graph.run(request)
+        assert outcome.outcome_type == "REVIEWED_PLAN"
+        assert request.model_dump_json() == before
+        return {source.meta.trace_id for source in outcome.review_subject.source_results}
+
+    async def run():
+        return await asyncio.gather(one("ab" * 16), one("cd" * 16))
+
+    assert asyncio.run(run()) == [{"ab" * 16}, {"cd" * 16}]
 
 
 def test_concurrent_roles_and_requested_model_remain_separate():
