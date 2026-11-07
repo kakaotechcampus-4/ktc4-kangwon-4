@@ -10,10 +10,10 @@
 """
 
 import logging
-from uuid import UUID
 
 from sqlmodel import Session
 
+from app.agent.enrichment import confirmation_state
 from app.agent.schemas import (
     CaseSnapshot,
     ConflictCandidate,
@@ -26,13 +26,14 @@ from app.common.agent_dto import AgentGraphInput, AgentGraphOutput
 from app.be.crud import case_history as case_history_crud
 from app.be.crud import conflict_reference as conflict_reference_crud
 from app.be.db import get_engine
-from app.be.models.case_history import CaseHistory
 from app.be.models.mixins import KST
 from app.be.services import agent_runtime as agent_runtime_service
 from app.be.services import case_snapshot as case_snapshot_service
 from app.be.services import decision_record as decision_record_service
 from app.be.services import judgment as judgment_service
 from app.be.services import reviewed_procedure as reviewed_procedure_service
+from app.be.services.redaction import has_numbered_placeholders
+from app.be.services.unmasking import build_case_placeholders
 from app.common.agent_service import build_conflict_input, run_case_planning
 
 logger = logging.getLogger(__name__)
@@ -106,12 +107,23 @@ def _read_decision_input(
         session, history.case_id, choices
     )
 
+    placeholders, _ = build_case_placeholders(session, history.case_id)
+    current = case_snapshot_service.build_case_snapshot(
+        session, history.case_id, snapshot_id=conflict_snapshot.snapshot_id, placeholders=placeholders,
+    )
+    frozen_state = confirmation_state(conflict_snapshot)
+    if confirmation_state(current) != frozen_state and not has_numbered_placeholders(frozen_state):
+        # 번호 도입 전 충돌은 같은 DB를 예전 가림 방식으로 읽어 전체 상태가 같을 때만 쓴다.
+        legacy = case_snapshot_service.build_case_snapshot(
+            session, history.case_id, snapshot_id=conflict_snapshot.snapshot_id,
+        )
+        if confirmation_state(legacy) == frozen_state:
+            current = legacy
+
     return (
         build_conflict_input(
             # 보관한 번호를 그대로 쓴다. 새로 찍으면 AI가 전부 STALE로 거절한다.
-            case_snapshot=case_snapshot_service.build_case_snapshot(
-                session, history.case_id, snapshot_id=conflict_snapshot.snapshot_id
-            ),
+            case_snapshot=current,
             conflicts=conflicts,
             selections=selections,
             conflict_snapshot=conflict_snapshot,

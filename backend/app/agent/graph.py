@@ -964,11 +964,11 @@ class AgentGraph:
 
     @staticmethod
     def _supervisor_cannot_fix(result: ReviewResult) -> bool:
-        """전체 blockers 목록 반려는 Supervisor를 다시 돌려도 고칠 수 없다.
+        """blockers 목록과 그 안의 고정값은 Supervisor를 다시 돌려도 고칠 수 없다.
 
         목록은 Supervisor 모델을 부르기 전에 같은 입력으로 코드가 정하고, 초안은 그 목록과
         정확히 같아야 통과한다(candidate_decision_violations). 재작업해도 같은 목록이 나와
-        같은 이유로 반려된다(Langfuse 재작업 4건 모두 3번 반려 후 실패).
+        같은 이유로 반려된다. 하위 description 반려도 선택만 바꿔서는 수정할 수 없다.
         """
         blocking = [issue for issue in result.issues if issue.severity == "BLOCKING"]
         return (
@@ -977,6 +977,7 @@ class AgentGraph:
             and bool(blocking)
             and all(
                 issue.target_path == "/supervisor_draft/decision/blockers"
+                or issue.target_path.startswith("/supervisor_draft/decision/blockers/")
                 for issue in blocking
             )
         )
