@@ -15,7 +15,7 @@ httpx==0.28.1
 # 서류 올리기(multipart/form-data)를 FastAPI가 받으려면 필요하다
 python-multipart==0.0.20
 
-# 설정 로더 — backend/app/config.py가 사용 (루트 config.py와 동일 패턴)
+# 설정 로더 — backend/app/common/config.py가 사용 (루트 config.py와 동일 패턴)
 pydantic-settings==2.15.0
 python-dotenv==1.2.3
 
@@ -26,7 +26,7 @@ langgraph==1.2.11
 langfuse==4.15.1
 openai==3.8.0
 
-# 벡터스토어 — Chroma (2026-09 확정, 셀프호스팅. docs/architecture.md §6 참고)
+# 벡터스토어 — Chroma (2026-09 확정, 셀프호스팅. docs/agent/architecture.md 참고)
 langchain-chroma==1.1.0
 chromadb==1.5.9
 
