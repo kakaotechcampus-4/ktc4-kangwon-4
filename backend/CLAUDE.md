@@ -6,7 +6,7 @@
 
 정확한 버전·현재 사용 상태는 **`docs/tech-stack.md`**를 참고 — 이 문서에서는 숫자를 반복하지 않습니다.
 
-- FastAPI + SQLModel(SQLAlchemy 기반) + pymysql (MySQL). Alembic은 설치돼 있으며 마이그레이션은 미구현
+- FastAPI + SQLModel(SQLAlchemy 기반) + pymysql (MySQL). Alembic은 설치만 돼 있고 쓰지 않는다 — 운영 표는 `backend/sql/00N_*.sql`을 손으로 넣는다(#217, `docs/deploy.md`)
 - 인증: 카카오 OAuth + 자체 발급 Access/Refresh JWT (PyJWT). 비밀번호 해싱 라이브러리는 없음(카카오 OAuth만 사용)
 - 카카오 API(토큰 교환·사용자정보) 호출: httpx
 - Agent: 현재 `httpx` 직접 LLM 호출 + LangGraph. Info와 Supervisor·독립 Review는 선택적으로 별도 endpoint·model을 쓰고(미설정 시 공용 설정), 모든 client는 실행당 LLM 호출 예산 하나를 공유합니다. LangChain은 설치만 됐고 runtime 미사용. Langfuse는 credential이 있을 때만 metadata를 전송합니다
@@ -16,7 +16,7 @@
 - Python: **3.12** (`backend/.python-version`, `Dockerfile` 베이스 이미지 `python:3.12-slim`)
 - 패키지 관리: **plain pip + `backend/requirements.txt`**(정확 버전 고정, `==`) — 2026-09 BE가 실제로 설치·`pip check`·import 테스트까지 마친 확정본입니다. `requirements-dev.txt`는 테스트 전용(pytest, testcontainers).
 - 온보딩: `pip install -r backend/requirements.txt`. `docker compose up -d db`는 MySQL만 실행하며 backend/Agent는 로컬 Python 프로세스로 실행합니다.
-- AI 스택(langchain/langchain-openai/langgraph/langfuse/openai)도 이 파일 안에 함께 고정되어 있으며, BE가 나머지 8개 패키지와 같은 가상환경에 동시 설치해 충돌 없음을 확인했고, AI팀이 `backend/`에서 별도로 재현한 버전과 정확히 일치함을 교차 확인했습니다(자세한 버전은 `docs/tech-stack.md` §6).
+- AI 스택(langchain/langchain-openai/langgraph/langfuse/openai)도 이 파일 안에 함께 고정되어 있으며, BE가 나머지 8개 패키지와 같은 가상환경에 동시 설치해 충돌 없음을 확인했고, AI팀이 `backend/`에서 별도로 재현한 버전과 정확히 일치함을 교차 확인했습니다(자세한 버전은 `docs/tech-stack.md`).
 
 ## 개발/배포/테스트 환경 (BE 확정)
 
@@ -24,7 +24,7 @@
 |---|---|
 | 배포 | Docker, `backend/Dockerfile`(`python:3.12-slim` + `pip install -r requirements.txt`) |
 | 로컬 개발 | 루트 `docker-compose.yml`은 `db`=`mysql:8.0.46`만 실행. backend+Agent는 로컬 Python 프로세스 |
-| 배포 실행 | Compose와 분리해 추후 확정. `backend/Dockerfile`은 존재하지만 현재 db-only Compose가 app을 빌드하지 않음 |
+| 배포 실행 | `docker-compose.prod.yml`이 EC2에서 `backend/Dockerfile`을 빌드해 띄우고, Caddy가 80·443에서 받아 넘긴다. 순서는 `docs/deploy.md`. 루트 `docker-compose.yml`은 로컬 DB만 띄우는 별개 파일이다 |
 | 테스트 DB | `testcontainers[mysql]` — 테스트마다 격리된 MySQL 컨테이너를 코드로 직접 실행(compose와 별개 메커니즘). 이미지는 운영·로컬 compose와 같은 `mysql:8.0.46`으로 고정하고, 기준은 `app/be/db.py`의 `MYSQL_IMAGE`다. 셋이 다르면 `tests/test_schema_sql.py`가 실패한다 |
 | 테스트 범위 | API 엔드포인트 테스트 + 서비스 로직 단위 테스트 |
 | Agent 호출부 테스트 | 실제 LLM 호출 대신 `unittest.mock`으로 목 처리 |
