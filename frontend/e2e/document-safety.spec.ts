@@ -53,7 +53,7 @@ for (const [index, scenario] of scenarios.entries()) {
     if (scenario.status === 422) expect((await response.json()).detail.code).toBe(`AGENT_SAFETY_${scenario.decision}`)
     await expect(page.getByText(scenario.title, { exact: true })).toBeVisible()
     if (scenario.decision === 'CRISIS_SUPPORT') {
-      await expect(page.getByRole('link', { name: '자살예방상담전화 109', exact: true })).toHaveAttribute('href', 'tel:109')
+      await expect(page.getByRole('link', { name: '상담전화 109', exact: true })).toHaveAttribute('href', 'tel:109')
     }
     if (scenario.status === 422) {
       await expect(page.getByText('서류를 읽지 못했어요.', { exact: true })).toHaveCount(0)

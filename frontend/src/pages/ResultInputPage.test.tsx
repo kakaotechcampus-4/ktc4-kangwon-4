@@ -167,6 +167,26 @@ describe('ResultInputPage — 서버', () => {
     vi.useFakeTimers()
   })
 
+  it('NONE 실패 뒤에는 이전 선택과 질문 없이 빈 자유글로 새 상황만 보낸다', async () => {
+    const fetchMock = serve({ entry: [json(entryBody({
+      judgment_status: 'FAILED', recovery_action_code: 'NONE', case_history_id: 25,
+      result_input_kind: 'RESTORATION_ANSWER', raw_input: '예전 글',
+      questions_for_user: ['예전 질문'], requested_field_paths: ['restoration_scope'],
+    }))], submit: [ACCEPTED], judged: [json(judgedBody({ result: 'PENDING' }))] })
+    renderFlow('/results?fix=1')
+    await advance()
+
+    expect(screen.getByRole('textbox', { name: '지금 상황을 알려주세요' })).toHaveValue('')
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument()
+    expect(screen.queryByText('예전 질문')).not.toBeInTheDocument()
+    expect(screen.queryByText('임대인에게 원상복구 범위 묻기')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '보내기' })).toBeDisabled()
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '  철거 전 사진과 준비사항을 확인했어요  ' } })
+    fireEvent.click(screen.getByRole('button', { name: '보내기' }))
+    await advance()
+    expect(sentBodies(fetchMock)).toEqual([{ case_history_id: 25, raw_input: '철거 전 사진과 준비사항을 확인했어요' }])
+  })
+
   it('선택을 기본으로 채우지 않고 두 항목을 고른 뒤에만 선택값을 전송한다', async () => {
     const fetchMock = serve({
       entry: [json(entryBody({ result_input_kind: 'RESTORATION_ANSWER' }))],

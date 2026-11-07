@@ -5,16 +5,23 @@
 - GET /cases/results/status — 제출 뒤 처리 상태 조회
 """
 
+from uuid import uuid4
+
 import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
 from sqlmodel import Session
 
+from app.agent.schemas import ProcedureProgressChangeCandidate
+from app.be.crud import procedure_step as procedure_step_crud
+from app.be.models.case import Case
 from app.be.models.case_history import CaseHistory
 from app.be.schemas.case import CaseResultsSubmitRequest
+from app.be.services import decision_record
 from app.be.services.case import (
     get_case_results_entry,
     get_case_results_submit_status,
+    retry_case_judgment,
     submit_case_results,
 )
 
@@ -54,6 +61,39 @@ def test_a_result_on_the_latest_judgment_is_accepted(case_engine, case_world):
     with Session(case_engine) as session:
         history = session.get(CaseHistory, accepted.case_history_id)
         assert (history.source, history.judgment_status, history.raw_input) == ("USER_INPUT", "PENDING", "전체 철거래요")
+
+
+def test_new_text_after_none_failure_preserves_the_failed_history_and_case(case_engine, case_world):
+    member_id, case_id, signed_up = case_world.sign_up()
+    record_progress(case_engine, case_id, signed_up, "PERFORM_RESTORATION",
+                    ("IN_PROGRESS", False, False), ("IN_PROGRESS", True, False))
+    failed_id = case_world.add_history(case_id, "USER_INPUT", "FAILED")
+    with Session(case_engine) as session:
+        failed = session.get(CaseHistory, failed_id)
+        failed.failure_code = "REVIEW_RETRY_EXHAUSTED"
+        failed.recovery_action_code, failed.retryable = "NONE", False
+        session.commit()
+        session.refresh(failed)
+        original = failed.model_dump()
+        case = session.get(Case, case_id)
+        case_before = case.model_dump()
+        progress_before = {step.id: step.model_dump() for step in case.case_procedure_steps}
+        assert error_of(lambda: retry_case_judgment(session, member_id))[0] == 409
+
+    response = entry(case_engine, member_id)
+    assert (response.judgment_status, response.recovery_action_code, response.case_history_id,
+            response.result_input_kind) == ("FAILED", "NONE", failed_id, "TEXT")
+    accepted = submit(case_engine, member_id, failed_id)
+
+    with Session(case_engine) as session:
+        saved = session.get(CaseHistory, accepted.case_history_id)
+        assert saved.id != failed_id
+        assert (saved.source, saved.judgment_status, saved.raw_input) == ("USER_INPUT", "PENDING", "전체 철거래요")
+        assert saved.restoration_answer is None
+        assert session.get(CaseHistory, failed_id).model_dump() == original
+        case = session.get(Case, case_id)
+        assert case.model_dump() == case_before
+        assert {step.id: step.model_dump() for step in case.case_procedure_steps} == progress_before
 
 
 def test_submitting_without_a_case_is_404(case_engine, case_world):
@@ -274,6 +314,53 @@ def test_status_reports_no_change_when_nothing_moved(case_engine, case_world):
     done = case_world.add_history(case_id, "USER_INPUT", "DONE")
 
     assert status(case_engine, member_id, done).result == "NO_CHANGE"
+
+
+def record_progress(engine, case_id, history_id, code, before, after):
+    with Session(engine) as session:
+        definition = procedure_step_crud.get_procedure_step_by_code(session, code)
+        step = procedure_step_crud.get_case_procedure_step(session, case_id, definition.id)
+        step.status, step.requirements_confirmed, step.submitted = before
+        change = ProcedureProgressChangeCandidate(
+            candidate_id=uuid4(), procedure_step={"procedure_step_id": definition.id, "step_code": code},
+            before_status=before[0], proposed_status=after[0],
+            before_requirements_confirmed=before[1], proposed_requirements_confirmed=after[1],
+            before_submitted=before[2], proposed_submitted=after[2],
+            reason_summary="합성 진행 보고", execution_evidence_refs=["synthetic-progress-report"],
+            procedure_analysis_call_id=uuid4(),
+        )
+        decision_record._apply_procedure_progress_changes(session, session.get(CaseHistory, history_id), [change])
+        session.commit()
+
+
+@pytest.mark.parametrize("source", ["USER_INPUT", "CONFLICT_DECISION"])
+@pytest.mark.parametrize("code,before,after", [
+    ("PERFORM_RESTORATION", ("IN_PROGRESS", False, False), ("IN_PROGRESS", True, False)),
+    ("FILE_TAX_BUSINESS_CLOSURE", ("IN_PROGRESS", True, False), ("IN_PROGRESS", True, True)),
+    ("FILE_TAX_BUSINESS_CLOSURE", ("IN_PROGRESS", True, True), ("COMPLETED", True, True)),
+])
+def test_status_reports_updated_for_progress_without_case_field_changes(
+    case_engine, case_world, source, code, before, after,
+):
+    member_id, case_id, _ = case_world.sign_up()
+    done = case_world.add_history(case_id, source, "DONE")
+    record_progress(case_engine, case_id, done, code, before, after)
+
+    response = status(case_engine, member_id, done)
+
+    assert response.result == "UPDATED"
+    assert response.changes == []
+    assert response.next_action is not None
+
+
+def test_old_progress_changes_do_not_make_a_new_report_updated(case_engine, case_world):
+    member_id, case_id, _ = case_world.sign_up()
+    old = case_world.add_history(case_id, "USER_INPUT", "DONE")
+    record_progress(case_engine, case_id, old, "PERFORM_RESTORATION",
+                    ("IN_PROGRESS", False, False), ("IN_PROGRESS", True, False))
+    current = case_world.add_history(case_id, "USER_INPUT", "DONE")
+
+    assert status(case_engine, member_id, current).result == "NO_CHANGE"
 
 
 def test_status_stops_on_a_conflict_without_any_open_conflict(case_engine, case_world):

@@ -166,35 +166,56 @@ Mobile-first 반응형, 기준 폭 375px.
 | `npm run dev` | 개발 서버 (5173) |
 | `npm run build` | 프로덕션 빌드 (`tsc -b && vite build`) |
 | `npm run lint` | ESLint |
+| `npm run test` | 단위·화면 테스트 (Vitest) |
+| `npm run test:e2e` | 브라우저 E2E (Playwright). 실제 BE · MySQL이 떠 있어야 해서 보통 CI에서 돈다 |
 | `npm run preview` | 빌드 결과 미리보기 |
 
 ## CI
 
-`frontend/` 변경이 포함된 PR을 올리면 GitHub Actions가 아래를 자동으로 실행합니다.
+`frontend/` 변경이 포함된 PR을 올리면 GitHub Actions가 아래를 자동으로 실행합니다(`check`).
 
 ```
-npm ci  →  npm run lint  →  npm run build
+npm ci  →  npm run lint  →  npm run test  →  npm run build
 ```
 
-- `feature/* → develop`, `develop → main` PR 모두 동일하게 실행됩니다
+- `develop`, `main`으로 가는 PR 모두 동일하게 실행됩니다
 - 앞 단계가 실패하면 이후 단계는 실행되지 않습니다. PR의 Checks에서 로그를 확인합니다
 - 고친 뒤 같은 브랜치에 push하면 기존 PR에서 자동으로 다시 실행됩니다
 
-CI는 검증만 하고 배포하지 않습니다. 설정 파일은 레포 루트의 `.github/workflows/frontend-ci.yml` 입니다.
+브라우저 E2E(`browser`)는 따로 돕니다. PR과 `develop` push에서 실제 FE 빌드 · BE · MySQL ·
+Chromium을 띄워 `npm run test:e2e`를 실행합니다. 모델 응답만 가짜로 대신합니다.
+
+CI는 검증만 하고 배포하지 않습니다. 설정 파일은 레포 루트의 `.github/workflows/frontend-ci.yml`,
+`.github/workflows/e2e.yml` 입니다.
 
 ## 배포
 
-merge되면 Vercel이 자동으로 배포합니다. 사람이 배포 명령을 실행하지 않습니다.
+Preview는 push하면 Vercel이 자동으로 만듭니다. **운영(Production)은 자동으로 바뀌지 않습니다.**
+운영 BE(EC2) 반영을 확인한 뒤, 같은 커밋으로 만들어진 배포를 Vercel에서 Production으로 승격합니다.
+FE가 BE보다 먼저 올라가면 아직 없는 API를 부르게 되어서입니다(BE 배포 순서는 `docs/deploy.md`).
+BE와 주고받는 값(`types/api.ts` · `adapters/`)이 바뀌지 않았으면 FE만 앞선 커밋이어도 됩니다
+(11/7 운영: BE `314b73f`, FE `3c9d480` — 사이 변경이 화면뿐).
 
-| 브랜치 | Vercel 환경 | 용도 |
+| Vercel 환경 | 어떤 코드 | 언제 바뀌나 |
 |---|---|---|
-| `main` | Production | 실제 서비스 |
-| `develop` | Preview | 팀 통합 확인 |
-| PR 브랜치 | Preview | 리뷰용 |
+| Production | 승격한 배포 하나 | 사람이 Vercel에서 승격할 때만 |
+| Preview | `develop` · PR 브랜치 | push할 때마다 자동 |
 
-서버 주소는 Vercel에 환경변수로 두지 않습니다. 배포된 화면은 HTTPS인데 서버가 HTTP라
-직접 부르면 브라우저가 막습니다. 그래서 `/api`로 보내고 `vercel.json`의 프록시가 서버로
-넘깁니다. **BE에 인증서가 붙으면 이 규칙을 지웁니다.**
+주소는 아래 "환경 · URL" 표에 있습니다.
+
+서버 주소는 Vercel에 환경변수로 두지 않습니다. 화면은 늘 같은 주소의 `/api`만 부르고,
+`vercel.json`의 규칙이 서버(`https://reborn-ktc.duckdns.org`)로 넘깁니다. 개발 서버도
+`vite.config.ts`에 같은 규칙을 둡니다. 이렇게 두는 이유는 두 가지입니다.
+
+- **같은 출처라 CORS를 거치지 않습니다.** 로그인 토큰은 본문이 아니라 응답 헤더(`Access-Token` ·
+  `Refresh-Token`)로 옵니다. 서버를 직접 부르면 서버의 `Access-Control-Expose-Headers`가 이 두 헤더를
+  열어 둬야 읽을 수 있는데(`backend/app/main.py`), 그 설정이 틀어지면 **응답은 200인데 토큰만 비어
+  옵니다.** 원인을 찾기 아주 어려운 실패라 프록시로 피합니다(`.env.example`에도 같은 설명)
+- 서버 주소가 이 두 곳에만 있고, 로컬과 배포가 같은 길로 요청해 "로컬에서는 되는데 배포에서만
+  안 되는" 차이가 생기지 않습니다
+
+처음에는 서버가 HTTP라 브라우저가 막아서 둔 규칙이었습니다. **서버가 HTTPS가 된 뒤에도 위 이유로
+빼지 않습니다.**
 
 Preview 배포에서는 URL 쿼리로 예외 화면을 확인할 수 있고, 로그인 화면에 **"가짜로 로그인"**
 버튼이 하나 더 나옵니다. `VITE_ENABLE_MOCK_SWITCH`를 Preview 환경에만 설정하기 때문이며,
@@ -285,13 +306,15 @@ frontend/
 │  ├─ App.tsx         RouterProvider
 │  ├─ vite-env.d.ts   환경변수 타입 선언
 │  └─ index.css       Tailwind·토큰 import, 본문 기본 스타일
+├─ e2e/               브라우저 E2E (Playwright, 실제 BE · MySQL과 함께 돈다)
 ├─ index.html
 ├─ .env.example       로컬 BE 에 붙일 때만 필요
+├─ playwright.config.ts
 ├─ vercel.json        SPA fallback + API 프록시
 └─ vite.config.ts
 ```
 
-화면이 8개 규모라 `features/` 없이 `pages/` + `components/` 로 나눈다.
+화면이 16개(`routes.tsx`) 규모라 `features/` 없이 `pages/` + `components/` 로 나눈다.
 데이터를 구하는 것은 페이지가, 그리는 것은 컴포넌트가 맡는다.
 데이터가 흐르는 방향은 한 줄이다.
 
@@ -306,5 +329,9 @@ types/api.ts  →  adapters/  →  types/view.ts  →  components/
 
 - `CLAUDE.md` — FE 개발 규칙
 - `docs/ui-guidelines.md` — 디자인 토큰과 UI 기준
-- 화면 흐름 · API 스펙 · 데이터 모델 → 레포 루트 `docs/` (작성 예정)
+- 화면 흐름(사장님이 지나가는 순서와 예외) → 레포 루트 `docs/hero-scenario.md`
+- 데이터 모델 → 레포 루트 `docs/schema/`
+- BE 배포 순서(백업 · 반영 · 되돌리기) → 레포 루트 `docs/deploy.md`
+- 기술 구성 → 레포 루트 `docs/tech-stack.md`
+- API 스펙 → 서버가 코드에서 만드는 OpenAPI(`/openapi.json`)
 - CI/CD 구축안 → 팀 노션

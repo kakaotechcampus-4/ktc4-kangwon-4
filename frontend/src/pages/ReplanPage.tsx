@@ -23,7 +23,7 @@ const MOCKS: Record<string, ReplanView> = {
 /** 서버에 물은 결과 */
 type ReplanQuery =
   | { status: 'LOADING' }
-  | { status: 'READY'; view: ReplanView }
+  | { status: 'READY'; view: ReplanView; result: 'UPDATED' | 'NO_CHANGE' }
   /** 이 결과 뒤로 새 판단이 생겼다(409). 지난 결과를 지금 것처럼 보여주지 않는다 */
   | { status: 'SUPERSEDED' }
   | { status: 'LOAD_FAILED' }
@@ -101,8 +101,11 @@ function ServerReplan({ historyId, decided }: { historyId: number; decided: bool
         if (!current) return
         const outcome = toSubmitOutcome(body)
         // 판단 중·되물음·충돌·실패·읽지 못함은 이 화면이 보여줄 것이 아니다
-        if (outcome.kind !== 'REPLAN') return navigate('/case', { replace: true })
-        setQuery({ status: 'READY', view: outcome.view })
+        if (body === null || outcome.kind !== 'REPLAN' || (body.result !== 'UPDATED' && body.result !== 'NO_CHANGE')) {
+          return navigate('/case', { replace: true })
+        }
+        // changes는 가게 정보 칸뿐이다. 준비·진행만 반영한 UPDATED도 그대로 보존한다.
+        setQuery({ status: 'READY', view: outcome.view, result: body.result })
       },
       (error: unknown) => {
         if (!current) return
@@ -164,7 +167,7 @@ function ServerReplan({ historyId, decided }: { historyId: number; decided: bool
       )
 
     case 'READY':
-      return <Replanned view={query.view} search="" decided={decided} />
+      return <Replanned view={query.view} search="" decided={decided} result={query.result} />
   }
 }
 
@@ -191,11 +194,17 @@ function ServerReplan({ historyId, decided }: { historyId: number; decided: bool
  * 직접 고른 것이라 "이렇게 이해했어요"가 맞지 않고, 바로잡을 것도 없다. 제목·상자 이름·단계 줄을
  * 고른 것을 반영한 말로 바꾸고 [홈으로] 하나만 둔다.
  */
-function Replanned({ view, search, decided }: { view: ReplanView; search: string; decided: boolean }) {
+function Replanned({ view, search, decided, result = view.changes.length > 0 ? 'UPDATED' : 'NO_CHANGE' }: {
+  view: ReplanView
+  search: string
+  decided: boolean
+  result?: 'UPDATED' | 'NO_CHANGE'
+}) {
   const navigate = useNavigate()
   const { changes, nextAction, newTasks } = view
   const newTasksId = useId()
   const changed = changes.length > 0
+  const updated = result === 'UPDATED'
 
   return (
     <ReplanFrame>
@@ -203,18 +212,20 @@ function Replanned({ view, search, decided }: { view: ReplanView; search: string
         <div className="flex flex-col items-center pt-2 text-center">
           <IconCheckmarkCircleFill aria-hidden="true" className="size-16 text-fg-brand" />
           <h1 className="mt-4 text-26 font-bold">
-            {!changed
+            {!updated
               ? '가게 정보에 바뀐 내용은 없어요'
               : decided
                 ? '고르신 내용을 반영했어요'
-                : '이렇게 이해하고 반영했어요'}
+                : changed
+                  ? '이렇게 이해하고 반영했어요'
+                  : '알려주신 내용을 반영했어요'}
           </h1>
           {/* 바뀐 것이 없으면 다음 할 일도 그대로일 수 있어서 "정했어요" 대신 "확인했어요"라고 쓴다 */}
           <p className="mt-2 text-17 text-fg-neutral-muted">
-            {changed ? '다음 할 일을 다시 정했어요.' : '다음 할 일을 다시 확인했어요.'}
+            {updated ? '다음 할 일을 다시 정했어요.' : '다음 할 일을 다시 확인했어요.'}
           </p>
           {/* AI가 사장님 글을 해석해 반영했을 때만 알린다. 사장님이 직접 고른 값(decided)은 해석이 아니다 */}
-          {changed && !decided && <AiNotice align="center" className="mt-2" />}
+          {updated && !decided && <AiNotice align="center" className="mt-2" />}
         </div>
 
         <ProcessSteps steps={toResultSteps('DONE', decided ? 'DECISION' : 'RESULT')} />

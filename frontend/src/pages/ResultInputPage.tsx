@@ -58,6 +58,7 @@ type Ask =
   | { kind: 'RESULT'; nextAction: NextAction; inputKind: ResultInputKind }
   | { kind: 'ANSWER'; questions: string[] }
   | { kind: 'RESUBMIT'; notice: Extract<FailureNotice, { kind: 'NEEDS_DETAIL' }> }
+  | { kind: 'NEW_INPUT' }
 
 /** 들어올 때 서버에 물은 결과. 폼은 `READY` 일 때만 연다 */
 type EntryQuery =
@@ -181,6 +182,9 @@ export function ResultInputPage() {
               ask: { kind: 'RESUBMIT', notice: entry.notice },
               historyId: entry.historyId,
             })
+            return
+          case 'NEW_INPUT':
+            setFetched({ status: 'READY', ask: { kind: 'NEW_INPUT' }, historyId: entry.historyId })
             return
           // 확인을 기다리는 충돌부터 풀어야 한다. 뒤로 가기로 이 화면에 돌아오지 않게 바꿔 낀다
           case 'CONFIRM':
@@ -452,7 +456,7 @@ export function ResultInputPage() {
         ) : (
           <div>
             <h1 id="result-title" className="text-26 font-bold">
-              어떻게 됐나요?
+              {entry.ask.kind === 'NEW_INPUT' ? '지금 상황을 알려주세요' : '어떻게 됐나요?'}
             </h1>
             {/* 며칠 뒤에 들어올 수도 있다. 무엇에 대한 결과인지 먼저 상기시킨다 */}
             {entry.ask.kind === 'RESULT' && (
@@ -537,7 +541,7 @@ export function ResultInputPage() {
               rows={4}
               // TODO(UX): 시안의 예시라 철거 상황을 가정한다. 다른 할 일 뒤에도 같은 문구가 뜬다
               placeholder={
-                entry.ask.kind === 'RESUBMIT' ? '아시는 만큼 적어 주세요' : '예: 카운터랑 싱크대만 빼래요'
+                entry.ask.kind !== 'RESULT' ? '아시는 만큼 적어 주세요' : '예: 카운터랑 싱크대만 빼래요'
               }
               value={text}
               onChange={setText}
@@ -710,7 +714,7 @@ function failureNotice(
       return {
         tone: 'critical',
         title: '이번 결과로 다음 할 일을 정하지 못했어요.',
-        description: '이번 판단에 대해서는 더 해 보실 수 있는 것이 없어요.',
+        description: '지금 상황 보기로 돌아가 새로 확인한 상황을 알려주실 수 있어요.',
         action: goToCase,
       }
 
