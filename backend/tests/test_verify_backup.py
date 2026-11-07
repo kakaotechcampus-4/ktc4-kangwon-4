@@ -7,6 +7,7 @@
 import json
 import os
 import subprocess
+import sys
 import tarfile
 from pathlib import Path
 from uuid import uuid4
@@ -91,7 +92,7 @@ def test_real_dump_restores_and_counts_match(backup, case_engine):  # noqa: F811
     assert files["dump_complete"] is True
 
     result = subprocess.run(
-        [".venv/bin/python", "scripts/verify_backup.py", "--dump", str(dump), "--documents", str(documents)],
+        [sys.executable, "scripts/verify_backup.py", "--dump", str(dump), "--documents", str(documents)],
         cwd=Path(__file__).resolve().parents[1], env={**os.environ, "PYTHONPATH": "."},
         capture_output=True, text=True,
     )
