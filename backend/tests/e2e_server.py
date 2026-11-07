@@ -41,6 +41,7 @@ import uvicorn  # noqa: E402
 from sqlmodel import Session  # noqa: E402
 
 import app.agent.runtime as runtime_module  # noqa: E402
+from app.agent.llm import LLMRequestError  # noqa: E402
 from app.agent.document_tool.documents import DocumentService  # noqa: E402
 from app.agent.document_tool.safety import ContentSafetyGuard  # noqa: E402
 from app.agent.document_tool.tool import DocumentTool  # noqa: E402
@@ -75,8 +76,15 @@ def document_files(directory):
     return files
 
 
+# 이 문장이 결과로 오면 처음 한 번은 모델 서버가 끊긴 것처럼 실패하고(다시 시도 가능), 그다음부터는 정상이다.
+# 홈의 [다시 판단하기](POST /cases/retry)가 같은 글로 다시 판단해 이어지는지 본다(#196·#231).
+OUTAGE_TEXT = "다시 확인해 보니 원상복구는 일부이고 카운터만 철거해야 합니다."
+
+
 class FirstCandidateModel:
     """선택은 첫 후보, 직접 입력 해석은 아래 합성 문장만 받는 모델 대역이다."""
+
+    outage_seen = False
 
     @classmethod
     def from_env(cls, *args, **kwargs):
@@ -84,6 +92,21 @@ class FirstCandidateModel:
 
     async def generate(self, response_model, messages, **kwargs):
         name = kwargs.get("schema_name")
+        if name == "reborn_info_analysis" and OUTAGE_TEXT in json.dumps(messages, ensure_ascii=False):
+            if not FirstCandidateModel.outage_seen:
+                FirstCandidateModel.outage_seen = True
+                # 실제 모델 서버가 끊겼을 때 llm.py가 내는 오류와 같다. 그래프가 다시 시도 가능한 실패(RETRY)로 둔다
+                raise LLMRequestError("E2E 일시 장애 대역", code="E2E_OUTAGE", retryable=True, attempts=1)
+            return response_model.model_validate({
+                "completion_status": "COMPLETE", "procedure_observations": [],
+                "missing_fields": [], "uncertainties": [],
+                "facts": [{"operation": "SET", "field_path": field, "value_type": kind,
+                           "value": value, "source_text": OUTAGE_TEXT, "confidence_bps": 10000,
+                           "requires_confirmation": False, "reason_summary": "합성 문장의 고정 답변"}
+                          for field, kind, value in [
+                              ("restoration_scope", "ENUM", "PARTIAL"), ("demolition_required", "ENUM", "REQUIRED"),
+                              ("restoration_scope_detail", "STRING", "카운터")]],
+            })
         if name == "reborn_info_analysis":
             prompt = json.dumps(messages, ensure_ascii=False)
             progress = "원상복구 작업을 시작했습니다." in prompt
@@ -142,6 +165,7 @@ def main() -> None:
         os.environ["AGENT_DOCUMENT_DIR"] = directory
         tokens = {**_signed_in_member(), "restoration_members": [_signed_in_member() for _ in range(6)],
                   "conflict_members": [_signed_in_member() for _ in range(2)],
+                  "retry_member": _signed_in_member(), "session_members": [_signed_in_member() for _ in range(3)],
                   "document_member": _signed_in_member(), "document_directory": directory,
                   "document_files": document_files(directory)}
         Path(os.environ["E2E_TOKEN_FILE"]).write_text(json.dumps(tokens), encoding="utf-8")
