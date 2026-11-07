@@ -141,8 +141,7 @@ def check_documents(
     if store_name is not None:
         case.store_name = store_name
         session.add(case)
-    if not case.store_name or not case.store_name.strip():
-        raise HTTPException(status_code=422, detail="서류에 적힌 가게 이름을 입력해 주세요.")
+    # #251 순차 배포 중 구형 화면은 이름을 보내지 않는다. 기존 점검의 미확인 안내를 유지한다.
     context = load_context(directory, case)
     # 이체확인증의 보낸 사람과 맞춰 볼 신청인 이름은 서비스가 받는 칸이 없어 점검 직전에 사장님께 묻는다.
     # 폐업사실증명원과 맞춰 볼 폐업일은 사장님이 실제 날짜라고 확인한 값만 쓴다.

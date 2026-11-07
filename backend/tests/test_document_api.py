@@ -140,15 +140,18 @@ def test_owner_confirms_uncertain_values_and_can_remove_document(api):
     assert client.delete(f"/cases/documents/{record['document_id']}").json()["documents"] == []
 
 
-def test_nameless_case_asks_for_a_name_then_returns_the_explicit_input(api):
+@pytest.mark.parametrize("legacy_fields", [{}, {"store_name": None}])
+def test_legacy_nameless_case_keeps_checking_then_accepts_the_explicit_name(api, legacy_fields):
     client, _, _ = api
     case = case_crud.get_case_by_member_id(None, 1)
     case.store_name = None
     # 업로드에서 읽은 상호로 Case를 채우지 않는다.
     upload(client, DocumentKind.TAX_INVOICE, SETTLEMENT[DocumentKind.TAX_INVOICE])
     assert client.get("/cases/documents").json()["store_name"] is None
-    missing = client.post("/cases/documents/check", json=OWNER)
-    assert missing.status_code == 422 and "가게 이름" in missing.json()["detail"]
+    missing = client.post("/cases/documents/check", json={**OWNER, **legacy_fields})
+    assert missing.status_code == 200 and missing.json()["check"]["status"] == "ISSUES"
+    assert "BUYER_UNCONFIRMED" in {issue["code"] for issue in missing.json()["check"]["issues"]}
+    assert client.get("/cases/documents").json()["store_name"] is None
 
     checked = client.post("/cases/documents/check", json={**OWNER, "store_name": " 봄날개인카페 "})
     assert checked.status_code == 200 and checked.json()["store_name"] == "봄날개인카페"

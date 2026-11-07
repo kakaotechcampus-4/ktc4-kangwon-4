@@ -20,8 +20,20 @@ const serverDocument = (overrides: Record<string, unknown> = {}) => ({
 describe('toDocumentsView', () => {
   it('가게 이름은 서류에서 추측하지 않고 서버가 저장한 값만 옮긴다', () => {
     expect(toDocumentsView({ store_name: '확인한 가게', documents: [serverDocument()], check: null })?.storeName).toBe('확인한 가게')
-    expect(toDocumentsView({ documents: [], check: null })).toBeNull()
-    expect(toDocumentsView({ store_name: 123, documents: [], check: null })).toBeNull()
+  })
+
+  it('예전 서버가 가게 이름 키를 보내지 않아도 서류는 보여 주고 추출한 상호로 대신하지 않는다', () => {
+    const view = toDocumentsView({
+      documents: [serverDocument({ fields: [{ name: 'business_name', value: '서류에서 읽은 상호', page: 1 }] })],
+      check: null,
+    })
+    expect(view?.documents).toHaveLength(1)
+    expect(view?.documents[0].fields).toEqual([{ name: 'business_name', label: '상호', value: '서류에서 읽은 상호' }])
+    expect(view?.storeName).toBeNull()
+  })
+
+  it.each([123, true, false, {}, [], undefined])('가게 이름 키의 잘못된 값은 누락과 구분해 거절한다: %j', (storeName) => {
+    expect(toDocumentsView({ store_name: storeName, documents: [serverDocument()], check: null })).toBeNull()
   })
 
   it('서버가 정한 종류 이름과 확인 필요 여부를 그대로 옮긴다', () => {

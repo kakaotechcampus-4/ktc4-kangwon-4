@@ -138,6 +138,13 @@ def test_explicit_store_name_is_saved_reloaded_and_used_without_changing_documen
                     tool, directory, case, document.document_id, document.analysis.kind,
                     {field.name: field.value for field in document.analysis.fields},
                 )
+        if initial_name is None:
+            legacy = document_service.check_documents(
+                session, tool, directory, case, "김리본", date(2026, 10, 31),
+            )
+            assert "BUYER_UNCONFIRMED" in {issue.code for issue in legacy.document_check.issues}
+            session.refresh(case)
+            assert case.store_name is None
         checked = document_service.check_documents(
             session, tool, directory, case, "김리본", date(2026, 10, 31), store_name="봄날개인카페",
         )
