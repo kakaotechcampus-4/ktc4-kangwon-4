@@ -232,12 +232,30 @@ def load_dataset(path: Path) -> dict[str, tuple[AgentGraphInput, dict]]:
     """
 
     items: dict[str, tuple[AgentGraphInput, dict]] = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         if not line.strip():
             continue
-        row = json.loads(line)
-        row_id = row.get("start_set_id") or row["event_id"]
-        if row["trigger_type"] != "RESULT_SUBMITTED":
+        location = f"line {line_number}"
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            raise SystemExit(f"{location}: invalid JSON") from None
+        if not isinstance(row, dict):
+            raise SystemExit(f"{location}: expected an object")
+        row_id = row.get("start_set_id") or row.get("event_id")
+        if not isinstance(row_id, str) or not row_id.strip():
+            raise SystemExit(f"{location}: missing or invalid event_id/start_set_id")
+        types = {"difficulty": str, "raw_input": str, "case_create_request": dict,
+                 "current_facts": dict, "expected_fact_changes": dict, "must_not": list}
+        invalid = [key for key, kind in types.items() if not isinstance(row.get(key), kind)
+                   or (kind is str and not row[key].strip())]
+        if row.get("expected_branch") not in ("CONFLICT", "REPLAN_OR_NEEDS_MORE_INFO"):
+            invalid.append("expected_branch")
+        if isinstance(row.get("must_not"), list) and any(not isinstance(item, str) for item in row["must_not"]):
+            invalid.append("must_not")
+        if invalid:
+            raise SystemExit(f"{row_id} ({location}): missing or invalid {', '.join(invalid)}")
+        if row.get("trigger_type") != "RESULT_SUBMITTED":
             raise SystemExit(f"{row_id}: only RESULT_SUBMITTED rows can run")
         if row_id in items:
             raise SystemExit(f"{row_id}: duplicate id")
