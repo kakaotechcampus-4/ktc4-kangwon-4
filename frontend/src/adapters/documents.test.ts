@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { toDocumentsView } from './documents'
+import { DOCUMENT_KINDS, toDocumentsView } from './documents'
 
 const serverDocument = (overrides: Record<string, unknown> = {}) => ({
   document_id: '0b9f…-1',
@@ -39,6 +39,7 @@ describe('toDocumentsView', () => {
   it('서버가 정한 종류 이름과 확인 필요 여부를 그대로 옮긴다', () => {
     expect(toDocumentsView({ store_name: null, documents: [serverDocument()], check: null })).toEqual({
       storeName: null,
+      documentKinds: DOCUMENT_KINDS,
       documents: [
         {
           id: '0b9f…-1',
@@ -51,6 +52,37 @@ describe('toDocumentsView', () => {
       ],
       check: null,
     })
+  })
+
+  it('새 서버의 종류 목록과 필드 이름을 확인된 값에도 유지한다', () => {
+    const kinds = [{ kind: 'TRANSFER', label: '서버 이체서류' }]
+    const view = toDocumentsView({
+      document_kinds: kinds,
+      documents: [serverDocument({
+        fields: [{ name: 'amount', label: '서버 송금액', value: '1원', page: 1 }],
+        confirmed_fields: { amount: '2원' },
+      })], check: null,
+    })
+    expect(view?.documentKinds).toEqual(kinds)
+    expect(view?.documents[0].fields).toEqual([{ name: 'amount', label: '서버 송금액', value: '2원' }])
+    expect(toDocumentsView({ document_kinds: [], documents: [], check: null })?.documentKinds).toEqual([])
+  })
+
+  it('새 종류 목록을 준 응답에 필드 이름이 빠졌으면 깨진 새 계약으로 거절한다', () => {
+    expect(toDocumentsView({
+      document_kinds: [{ kind: 'TRANSFER', label: '이체서류' }], documents: [serverDocument()], check: null,
+    })).toBeNull()
+  })
+
+  it.each([null, undefined, 1, true, {}, [], '', ' '])('명시된 잘못된 label은 예전 사전으로 덮지 않는다: %j', (label) => {
+    expect(toDocumentsView({ documents: [serverDocument({ fields: [{ name: 'amount', label, value: '1원' }] })] })).toBeNull()
+  })
+
+  it.each([null, undefined, 1, {}, 'none', [null], [{ kind: 'TRANSFER', label: '' }],
+    [{ kind: 1, label: '이체서류' }], [{ kind: 'TRANSFER', label: undefined }],
+    [{ kind: 'TRANSFER', label: '첫째' }, { kind: 'TRANSFER', label: '둘째' }],
+  ])('명시된 잘못된 종류 목록은 예전 사전으로 덮지 않는다: %j', (documentKinds) => {
+    expect(toDocumentsView({ document_kinds: documentKinds, documents: [], check: null })).toBeNull()
   })
 
   /** 사장님이 고친 값이 맞는 값이다. 처음 읽은 값을 다시 보여주면 고친 것이 사라진 줄 안다 */

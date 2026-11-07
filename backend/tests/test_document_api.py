@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session
 
 from app.agent.document_tool.documents import DocumentService
-from app.agent.document_tool.models import DocumentKind
+from app.agent.document_tool.models import DOCUMENT_FIELD_LABELS, DOCUMENT_LABELS, DocumentKind
 from app.agent.document_tool.tool import DocumentTool
 from app.be.crud import case as case_crud
 from app.be.crud import case_history as case_history_crud
@@ -118,11 +118,38 @@ def test_list_keeps_saved_documents_and_hides_other_cases(api):
     assert [d["document_id"] for d in client.get("/cases/documents").json()["documents"]] == [uploaded["document_id"]]
 
     member["id"] = 2
-    assert client.get("/cases/documents").json() == {"store_name": "다른가게", "documents": [], "check": None}
+    empty = client.get("/cases/documents").json()
+    assert empty == {
+        "store_name": "다른가게", "documents": [], "check": None,
+        "document_kinds": [{"kind": kind, "label": label} for kind, label in DOCUMENT_LABELS.items()
+                           if kind != DocumentKind.UNKNOWN],
+    }
     other = client.post(f"/cases/documents/{uploaded['document_id']}/confirm",
                         json={"kind": "TRANSFER", "confirmed_fields": {"amount": "1원"}})
     assert other.status_code == 422
     assert client.delete(f"/cases/documents/{uploaded['document_id']}").status_code == 422
+
+
+def test_response_uses_agent_labels_even_after_confirmation_and_reload(api, monkeypatch):
+    client, _, _ = api
+    monkeypatch.setitem(DOCUMENT_FIELD_LABELS, "amount", "확인용 송금액")
+    monkeypatch.setitem(DOCUMENT_LABELS, DocumentKind.TRANSFER, "확인용 이체서류")
+    kinds = client.get("/cases/documents").json()["document_kinds"]
+    assert {item["kind"] for item in kinds} == {kind.value for kind in DocumentKind if kind != DocumentKind.UNKNOWN}
+    assert {"kind": "TRANSFER", "label": "확인용 이체서류"} in kinds
+    document = upload(client, DocumentKind.TRANSFER, TRANSFER).json()["documents"][0]
+    client.post(f"/cases/documents/{document['document_id']}/confirm", json={
+        "kind": "TRANSFER", "confirmed_fields": {**TRANSFER, "amount": "1원"},
+    })
+    restored = client.get("/cases/documents").json()["documents"][0]
+    assert restored["kind_label"] == "확인용 이체서류"
+    assert next(field for field in restored["fields"] if field["name"] == "amount")["label"] == "확인용 송금액"
+    assert restored["confirmed_fields"]["amount"] == "1원"
+    schemas = app.openapi()["components"]["schemas"]
+    assert set(DOCUMENT_FIELD_LABELS) == set(schemas["DocumentFieldResponse"]["properties"]["name"]["enum"])
+    assert schemas["DocumentCheckResponse"]["properties"]["status"]["enum"] == ["COMPLETE", "ISSUES", "ERROR"]
+    assert "label" in schemas["DocumentFieldResponse"]["required"]
+    assert "document_kinds" in schemas["DocumentListResponse"]["required"]
 
 
 def test_owner_confirms_uncertain_values_and_can_remove_document(api):

@@ -64,7 +64,7 @@ export type DocumentAction =
 export type CheckAction = 'IDLE' | 'RUNNING' | 'FAILED'
 
 /** 빈 서류함. Case 가 없으면(404) 서류도 없다 */
-const EMPTY: DocumentsView = { storeName: null, documents: [], check: null }
+const EMPTY: DocumentsView = { storeName: null, documentKinds: DOCUMENT_KINDS, documents: [], check: null }
 
 /**
  * 서류함 데이터와 올리기 · 확인 · 빼기 · 점검(#159). 서류함 · 점검 · 정산 파일 화면이 같이 쓴다.
