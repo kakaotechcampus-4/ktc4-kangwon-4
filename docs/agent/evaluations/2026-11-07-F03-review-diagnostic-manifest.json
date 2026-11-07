@@ -1,0 +1,23 @@
+{
+  "recorded_date": "2026-11-07",
+  "synthetic_data": true,
+  "trial_file": "2026-11-07-F03-review-diagnostic-trial.jsonl",
+  "code_version": {"git_commit":"d71922cd1de88c92ffda2b88b38ebf3a6a5058d9","uncommitted_changes":false,"code_sha256":"sha256:bcdef7b20c54e4aa3ebe9453c817abce73d00bf3117227ea1b89652413203031"},
+  "registry_mode": "legacy",
+  "configured_models": {"shared":"gpt-6.1-sol","supervisor":"gpt-6-luna","info":"gpt-6.1-sol"},
+  "configured_efforts": {"shared":"xhigh","supervisor":"high","info":"high"},
+  "source_fingerprints": {"procedure_snapshot_version":"cafe-official-sources/2026-11-04-reviewed1","procedure_file_sha256":"sha256:2da204f302d2fd177000f00fa1957d881664b623f790d162c1e7fbd08bf04c7a","procedure_registry_sha256":"sha256:719f5daa4e0fc7ce7553420244b24b75e59c8d6bafd3f00bc286abaad5ccefa6","procedure_registry_count":8},
+  "dataset_file_sha256": "sha256:6a0273ee3559a7d130225bdc6ececf1b1abe73853abc117be40868d75dec5dbf",
+  "graph_input_digest": "sha256:dc4595a850095143f05ae575a77002b8139125c5815239879d56df27d1d606f5",
+  "limits": {"max_llm_calls_per_run":3,"run_deadline_seconds":420.0},
+  "observed_summary": {"status":"SAFE_FAILURE","failure_code":"LOOP_LIMIT_REACHED","failed_component":"SUPERVISOR","elapsed_ms":38107,"http_attempts":3,"estimated_cost_krw":98.605335,"usage_complete":true,"transport_retries":0,"review_revise_count":1},
+  "review_observation": {"verdict":"REVISE","issue_codes":["CASE_MISMATCH"],"review_attempt":1,"draft_decision_type":"NEEDS_MORE_INFO","draft_action_code":null,"draft_fact_changes":[{"field_path":"restoration_scope","operation":"SET","proposed_status":"CONFIRMED","proposed_value":"NOT_REQUIRED"},{"field_path":"restoration_status","operation":"SET","proposed_status":"CONFIRMED","proposed_value":"NOT_REQUIRED"},{"field_path":"demolition_required","operation":"SET","proposed_status":"CONFIRMED","proposed_value":"NOT_REQUIRED"}],"issues":[{"issue_code":"CASE_MISMATCH","severity":"BLOCKING","target_component":"SUPERVISOR","target_path":"/supervisor_draft/decision/blockers/2/description"}],"missing_evidence_paths":[],"recommended_rework_targets":["SUPERVISOR"]},
+  "scope": "One separately approved diagnostic run, maximum 3 provider requests. Local Agent only; no FE, DB, browser or production deployment validation.",
+  "budget_distinction": "Runtime default and local environment configure 40 calls; this diagnostic uses cap3 and original F03 evaluation cap4. Actual deployed configuration not verified.",
+  "interpretation": ["Three proposed enum values are NOT_REQUIRED; there is no evidence here of reading the negation as FULL/REQUIRED.","Review rejected the Supervisor blocker description at the recorded indexed path, and requested Supervisor rework. Its free-text reason and the actual blocker description were intentionally not stored.","The call cap prevented another Supervisor invocation. Whether the description truly mismatched the case or the reviewer was wrong remains undetermined.","The original F03 cap4 run recorded only the issue code, so identical root cause across the two runs cannot be asserted.","The existing immediate-stop check matches the blockers root path, not this descendant description path; no runtime policy change was made for this diagnostic.","Legacy registry lacks production applicability and dependencies. That limitation is not proof of the failure cause."],
+  "original_F03_separate": {"frozen_score":"RUN_FAILED","code_commit":"7c854b75bc2481029a1312910ea843d7965a3b58","elapsed_ms":56370,"limits":{"max_llm_calls_per_run":4,"run_deadline_seconds":420.0},"http_attempts":4,"estimated_cost_krw":120.300291},
+  "batch_and_pilots_not_reclassified": true,
+  "cumulative_approved_runs_after_diagnostic": {"runs":33,"provider_calls":59,"estimated_cost_krw":2243.61117},
+  "cost_basis": {"currency":"KRW","rate_unit":"per 1000000 tokens","columns":["input","cached_input","output"],"user_provided_rates":{"gpt-6.1-sol":[2835,141,14175],"gpt-6-luna":[141,14,708]},"note":"Observed usage-based estimate with cache counted once; reasoning is part of output, not extra charge. Not invoice reconciliation."},
+  "privacy_scan": "Exact secret/prompt/endpoint key names and local configured private values scanned. Diagnostic keeps validated paths, enums, booleans and integers; no free-text reasons, raw prompts, user payload or document excerpts."
+}
