@@ -1,6 +1,6 @@
 import { type APIRequestContext, expect, test } from '@playwright/test'
 import { readFileSync } from 'node:fs'
-import { BE_URL, TOKEN_FILE } from '../playwright.config'
+import { BE_URL, TOKEN_FILE } from '../playwright.config.ts'
 
 /**
  * 진단 → 가입 → 홈 "지금 할 일" → 새로고침해도 유지. 가입한 사장님이 처음 보는 길 하나다.
