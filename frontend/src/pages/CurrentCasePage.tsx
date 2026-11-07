@@ -8,6 +8,7 @@ import {
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router'
 
+import { AiNotice } from '../components/ui/AiNotice'
 import { Button } from '../components/ui/Button'
 import { HomeBanner } from '../components/ui/HomeBanner'
 import { HomeStageCard } from '../components/ui/HomeStageCard'
@@ -259,6 +260,9 @@ function judgmentCard(judgment: JudgmentView, waitedTooLong: boolean): JudgmentC
           badge: '사장님 할 일',
           title: nextAction.title,
           description: nextAction.reason,
+          // 할 일과 이유는 AI가 정한 것이라 알린다. 홈은 자주 보는 좁은 카드라 짧은 표시만 아이콘 줄 오른쪽에 둔다.
+          // 긴 문장은 [물어볼 내용 보기]로 가는 할 일 상세에 있다(#237)
+          marker: <AiNotice compact />,
         },
         main: (stale) => (
           <TaskButton hasQuestions={(nextAction.questions?.length ?? 0) > 0} locked={stale} />

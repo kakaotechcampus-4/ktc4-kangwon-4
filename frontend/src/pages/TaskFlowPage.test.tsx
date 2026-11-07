@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { saveTokens } from '../lib/auth'
 import type { RoadmapTaskView } from '../types/view'
-import { CheckFlow, ClosureReportFlow, DepositFlow, SupportResultFlow, TaskFlowPage } from './TaskFlowPage'
+import { CheckFlow, ClosureReportFlow, DepositFlow, InfoFlow, SupportResultFlow, TaskFlowPage } from './TaskFlowPage'
 
 function renderAt(path: string) {
   const router = createMemoryRouter(
@@ -29,6 +29,7 @@ function renderFlow(element: ReactElement) {
     [
       { path: '/flow', element },
       { path: '/login', element: <p>로그인</p> },
+      { path: '/results', element: <p>결과 입력</p> },
     ],
     { initialEntries: ['/flow'] },
   )
@@ -154,6 +155,42 @@ describe('TaskFlowPage — 장면 고르기', () => {
 })
 
 /** Mock 은 Preview 에서 화면을 보려고 둔다. 서버를 부르지 않고 열리는지, 다음 화면에 Mock 표시를 잇는지만 본다 */
+/**
+ * 폐업 날짜를 "아직 안 정했어요"로 고른 가게는 이 할 일이 확인 필요다.
+ * 그때 "따로 하실 것이 없어요"라고 하면 사장님은 정할 필요가 없는 줄 안다
+ */
+describe('InfoFlow', () => {
+  const closureDateTask: RoadmapTaskView = { id: 'closure_date', title: '폐업 날짜 정하기', kind: 'CASE_FACT', status: 'NEEDS_CONFIRMATION' }
+
+  function renderInfo(task: RoadmapTaskView) {
+    const router = createMemoryRouter(
+      [
+        { path: '/flow', element: <InfoFlow task={task} /> },
+        { path: '/results', element: <p>결과 입력</p> },
+      ],
+      { initialEntries: ['/flow'] },
+    )
+    render(<RouterProvider router={router} />)
+  }
+
+  it('확인이 필요하면 결과 알려주기로 보낸다', async () => {
+    renderInfo(closureDateTask)
+    fireEvent.click(screen.getByRole('button', { name: '결과 알려주기' }))
+    expect(await screen.findByText('결과 입력')).toBeInTheDocument()
+  })
+
+  /** 예상 달만 고르면 서버가 진행 중으로 준다. 날짜는 아직 안 정해졌으니 같은 안내가 필요하다 */
+  it('예상 달만 정한 진행 중에도 결과 알려주기로 보낸다', () => {
+    renderInfo({ ...closureDateTask, status: 'IN_PROGRESS' })
+    expect(screen.getByRole('button', { name: '결과 알려주기' })).toBeInTheDocument()
+  })
+
+  it('정해져 있으면 할 일을 내밀지 않는다', () => {
+    renderInfo({ ...closureDateTask, status: 'COMPLETED' })
+    expect(screen.queryByRole('button', { name: '결과 알려주기' })).not.toBeInTheDocument()
+  })
+})
+
 describe('TaskFlowPage — Mock', () => {
   it('?mock= 이면 서버를 부르지 않고 할 일을 열고, 다음 화면에 Mock 표시를 잇는다', () => {
     const fetchMock = serve(json(SCENE_ROADMAP))
@@ -168,13 +205,13 @@ describe('TaskFlowPage — Mock', () => {
 
 describe('CheckFlow — 서버', () => {
   /** 서버가 "확인 필요"로 준 할 일은 체크를 받지 않는다(422, #181). 눌러 보고 거절당하게 두지 않는다 */
-  it('확인이 필요한 할 일은 다 했어요를 꺼 두고, 보내지 않는다', () => {
+  it('확인이 필요한 할 일은 다 했어요를 두지 않고, 결과 알려주기로 보낸다', async () => {
     const fetchMock = serve(json({}))
-    renderFlow(<CheckFlow task={{ ...checklistTask, status: 'NEEDS_CONFIRMATION' }} />)
+    const router = renderFlow(<CheckFlow task={{ ...checklistTask, status: 'NEEDS_CONFIRMATION' }} />)
 
-    expect(screen.getByText('아직 기록할 수 없는 할 일이에요.')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '다 했어요' })).toBeDisabled()
-    fireEvent.click(screen.getByRole('button', { name: '다 했어요' }))
+    expect(screen.queryByRole('button', { name: '다 했어요' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '결과 알려주기' }))
+    await waitFor(() => expect(router.state.location.pathname).toBe('/results'))
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
@@ -256,6 +293,16 @@ describe('SupportResultFlow — 서버', () => {
     expect(screen.queryByText('이 할 일은 지금 기록할 수 없어요.')).not.toBeInTheDocument()
   })
 
+  it('결과를 알면 완료 체크와 함께 알린다', async () => {
+    serve(json({ approved: true }))
+    renderFlow(<SupportResultFlow task={supportTask} />)
+
+    fireEvent.click(screen.getByRole('radio', { name: '승인됐어요' }))
+    fireEvent.click(screen.getByRole('button', { name: '기록하기' }))
+
+    expect((await screen.findByText(/승인됐어요.*로 기록했어요/)).querySelector('svg')).not.toBeNull()
+  })
+
   /** "아직 몰라요"는 키를 빼지 않고 null 로 보낸다. 빠지면 서버가 422 로 막는다 */
   it('아직 몰라요를 null 로 보내고 저장된 결과를 알린다', async () => {
     const fetchMock = serve(json({ approved: null }))
@@ -264,7 +311,9 @@ describe('SupportResultFlow — 서버', () => {
     fireEvent.click(screen.getByRole('radio', { name: '아직 몰라요' }))
     fireEvent.click(screen.getByRole('button', { name: '기록하기' }))
 
-    expect(await screen.findByText(/아직 몰라요.*로 기록했어요/)).toBeInTheDocument()
+    const notice = await screen.findByText(/아직 몰라요.*로 기록했어요/)
+    // 모르는 것을 기록했을 뿐 끝난 일이 아니라 완료 체크를 달지 않는다
+    expect(notice.querySelector('svg')).toBeNull()
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
     expect(url).toMatch(/\/cases\/support-approval$/)
     expect(JSON.parse(init.body as string)).toEqual({ approved: null })

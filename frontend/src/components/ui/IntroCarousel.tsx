@@ -12,6 +12,8 @@ import {
 } from '@karrotmarket/react-monochrome-icon'
 import { useState, type ReactNode } from 'react'
 
+import { AiNotice } from './AiNotice'
+
 /**
  * 소개 한 장. 제목은 앞 · 강조 · 뒤 세 조각으로 나눠 강조만 주황으로 칠한다.
  * 줄바꿈 자리는 `\n`으로 적고 `whitespace-pre-line`으로 살린다.
@@ -21,6 +23,8 @@ interface Slide {
   highlight: string
   post: string
   sub: string
+  /** 처음 쓸 때 한 번 AI 사용을 알린다. 마지막 장에만 둔다(#237) */
+  aiNotice?: boolean
   picture: ReactNode
 }
 
@@ -185,12 +189,15 @@ function SubmitPicture() {
   )
 }
 
-/** 시안 M00의 네 장. 문구는 시안 그대로다 */
+/**
+ * 시안 M00의 네 장. 문구는 시안 그대로다.
+ * 첫 장만 다르다 — 시안 "순서대로 알려드려요"는 단계를 차례로 밟는 것처럼 읽혀 "단계별로 챙겨드려요"로 바꿨다(#237)
+ */
 const SLIDES: Slide[] = [
   {
     pre: '폐업 준비, ',
-    highlight: '순서대로',
-    post: '\n알려드려요',
+    highlight: '단계별로',
+    post: '\n챙겨드려요',
     sub: '우리 가게에 필요한 일만 골라드려요',
     picture: <RoadmapPicture />,
   },
@@ -213,6 +220,7 @@ const SLIDES: Slide[] = [
     highlight: '사장님이 직접',
     post: ',\n준비는 함께해요',
     sub: '제출할 파일을 한 번에 묶어드려요',
+    aiNotice: true,
     picture: <SubmitPicture />,
   },
 ]
@@ -267,6 +275,7 @@ export function IntroCarousel() {
               {slide.post}
             </h1>
             <p className="mt-2.5 text-17 text-fg-neutral-muted">{slide.sub}</p>
+            {slide.aiNotice && <AiNotice align="center" className="mt-2" />}
           </div>
           <div className="motion-safe:animate-picture-in">{slide.picture}</div>
         </div>

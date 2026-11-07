@@ -26,7 +26,7 @@ describe('IntroCarousel', () => {
   it('첫 장에서 시작하고, 앞 장으로는 갈 수 없다', () => {
     render(<IntroCarousel />)
 
-    expect(heading()).toHaveTextContent(/순서대로/)
+    expect(heading()).toHaveTextContent(/단계별로/)
     expect(prev()).toBeDisabled()
   })
 
@@ -37,7 +37,7 @@ describe('IntroCarousel', () => {
     expect(heading()).toHaveTextContent(/리본이 먼저/)
 
     fireEvent.click(prev())
-    expect(heading()).toHaveTextContent(/순서대로/)
+    expect(heading()).toHaveTextContent(/단계별로/)
   })
 
   it('막대가 다 차면 다음 장으로 넘어간다', () => {
@@ -57,5 +57,15 @@ describe('IntroCarousel', () => {
 
     expect(heading()).toHaveTextContent(/사장님이 직접/)
     expect(next()).toBeDisabled()
+  })
+
+  /** 처음 쓸 때 한 번 알린다. 모든 장에 두면 소개가 경고문처럼 읽힌다 */
+  it('AI 사용 고지는 마지막 장에만 있다', () => {
+    render(<IntroCarousel />)
+    expect(screen.queryByText(/리본\(AI\)이 정리한 안내예요/)).not.toBeInTheDocument()
+
+    for (let k = 0; k < 3; k += 1) fireEvent.click(next())
+
+    expect(screen.getByText(/리본\(AI\)이 정리한 안내예요/)).toBeInTheDocument()
   })
 })

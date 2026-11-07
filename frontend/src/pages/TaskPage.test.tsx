@@ -75,6 +75,7 @@ describe('TaskPage', () => {
     const items = screen.getAllByRole('listitem')
     expect(items).toHaveLength(2)
     expect(items[0]).toHaveTextContent('어디까지 원래대로 돌려놔야 하나요?')
+    expect(screen.getByText(/리본\(AI\)이 정리한 안내예요/)).toBeInTheDocument()
   })
 
   it('답을 들었어요를 누르면 결과 입력으로 간다', async () => {

@@ -23,6 +23,8 @@ interface TaskCardProps {
   children?: ReactNode
   /** 카드 맨 아래 버튼. 보통 `Button size="lg"` 하나 */
   actions: ReactNode
+  /** 아이콘 줄 오른쪽에 두는 작은 표시. AI가 정한 할 일임을 알리는 짧은 고지 같은 것(#237) */
+  marker?: ReactNode
 }
 
 const TONE_STYLE: Record<TaskCardTone, { icon: string; badge: string }> = {
@@ -48,17 +50,21 @@ export function TaskCard({
   description,
   children,
   actions,
+  marker,
 }: TaskCardProps) {
   const style = TONE_STYLE[tone]
 
   return (
     <section className="flex flex-col gap-3 rounded-20 bg-bg-layer-default px-5 pt-6 pb-5 shadow-raised">
-      <span
-        aria-hidden="true"
-        className={`grid size-18 shrink-0 place-items-center rounded-20 ${style.icon}`}
-      >
-        {icon}
-      </span>
+      <div className="flex items-start justify-between gap-3">
+        <span
+          aria-hidden="true"
+          className={`grid size-18 shrink-0 place-items-center rounded-20 ${style.icon}`}
+        >
+          {icon}
+        </span>
+        {marker}
+      </div>
 
       <p className={`mt-2 flex items-center gap-1 text-16 font-bold ${style.badge}`}>
         {badgeIcon}

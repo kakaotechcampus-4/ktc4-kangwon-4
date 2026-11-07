@@ -79,6 +79,24 @@ describe('DocsCheckPage — 서버', () => {
     expect(screen.getByRole('button', { name: '점검 시작하기' })).toBeEnabled()
   })
 
+  /** 이름이 없는 가게는 처음부터 다시 써야 한다. 연결이 한 번 끊겼다고 쓴 것을 지우지 않는다 */
+  it('점검을 보내지 못해도 다시 열면 쓴 이름·날짜가 남아 있다', async () => {
+    serve(json(serverList([serverDocument()], null, null)), status(500))
+    renderAt('/docs/check')
+
+    fireEvent.click(await screen.findByRole('button', { name: '점검 시작하기' }))
+    fireEvent.change(within(sheet()!).getByLabelText('가게 이름'), { target: { value: '봄날개인카페' } })
+    fireEvent.change(within(sheet()!).getByLabelText('신청인 이름'), { target: { value: '김리본' } })
+    fireEvent.change(within(sheet()!).getByLabelText('실제 폐업일 (선택)'), { target: { value: '2026-10-31' } })
+    fireEvent.click(within(sheet()!).getByRole('button', { name: '점검하기' }))
+    await screen.findByText('점검을 보내지 못했어요.')
+
+    fireEvent.click(screen.getByRole('button', { name: '점검 시작하기' }))
+    expect(within(sheet()!).getByLabelText('가게 이름')).toHaveValue('봄날개인카페')
+    expect(within(sheet()!).getByLabelText('신청인 이름')).toHaveValue('김리본')
+    expect(within(sheet()!).getByLabelText('실제 폐업일 (선택)')).toHaveValue('2026-10-31')
+  })
+
   it('서류함을 불러오지 못하면 다시 불러올 수 있다', async () => {
     serve(status(500))
     renderAt('/docs/check')

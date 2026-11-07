@@ -42,7 +42,7 @@ export const mockRoadmap: RoadmapView = {
         task('support_approval', '1차 적격심사 결과 확인', 'CASE_FACT', 'NEEDS_CONFIRMATION'),
         task('choose_contractor', '철거 업체 정하기', 'CHECKLIST', 'NOT_STARTED'),
         task('before_photo', '철거 전 사진', 'CHECKLIST', 'NOT_STARTED'),
-        task('restoration_work', '원상복구·철거 작업', 'PROCEDURE', 'NOT_STARTED'),
+        task('restoration_work', '영업 마무리 후 원상복구·철거 작업', 'PROCEDURE', 'NOT_STARTED'),
         task('contractor_documents', '철거 후 서류 받기', 'CHECKLIST', 'NOT_STARTED'),
       ],
     },
@@ -51,7 +51,7 @@ export const mockRoadmap: RoadmapView = {
       title: '영업 마무리·폐업 신고',
       tasks: [
         task('dispose_stock', '재고·장비 처분', 'CHECKLIST', 'NOT_STARTED'),
-        task('terminate_contracts', '카드단말기·배달앱·렌탈·공과금 해지', 'CHECKLIST', 'NOT_STARTED'),
+        task('terminate_contracts', '렌탈·공과금 해지', 'CHECKLIST', 'NOT_STARTED'),
         task('employee_payments', '직원 임금·퇴직급여 정산', 'PROCEDURE', 'NOT_STARTED'),
         task('employee_insurance', '4대보험 상실·탈퇴 신고', 'PROCEDURE', 'NOT_STARTED'),
         task('closure_submission', '통합 폐업 신고', 'PROCEDURE', 'NOT_STARTED'),

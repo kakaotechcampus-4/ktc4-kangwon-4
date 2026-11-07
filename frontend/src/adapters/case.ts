@@ -115,7 +115,9 @@ export function toFacts(serverCase: CaseResponse): Fact[] {
     toFact(
       'planned_closure_date',
       FIELD_LABEL.planned_closure_date,
-      toDateLabel(serverCase.planned_closure_date),
+      // 날짜를 못 정하고 예상 달만 고른 가게도 미확인이 아니다. 고른 달을 보여준다(#237)
+      toDateLabel(serverCase.planned_closure_date) ??
+        (serverCase.planned_closure_month ? `${toDateLabel(serverCase.planned_closure_month)} 중` : null),
     ),
     toFact(
       'restoration_scope',
@@ -391,7 +393,7 @@ const BUSINESS_REQUEST: Record<DiagnosisBusiness, { business_type: string; franc
  *   할 일이 통째로 빠져서 서버가 이 값을 보지 않는다)
  * - 직원 수: 직원을 골랐으면 정직원 + 아르바이트, 안 골랐으면 0
  * - 예전 직원: 직원을 안 골랐을 때만 답을 보낸다. 지금 직원이 있으면 `null`이다 —
- *   서버가 직원 수로 "둔 적 있음"을 안다
+ *   서버가 직원 수로 "둔 적 있음"을 안다. "잘 모르겠어요"도 `null`이다(서버가 "모름"으로 본다)
  * - 대출·배달앱: 골랐으면 `true`, 안 골랐으면 `false`
  * - 보험: 네 칸을 늘 같이 `true`/`false`로 보낸다. 하나라도 `null`이면 서버는 "해당 없음"이
  *   아니라 "모름"으로 본다. "잘 모르겠어요"면 네 칸 모두 `null`
@@ -441,7 +443,7 @@ export function toCaseCreateRequest(answers: DiagnosisAnswers, now: Date): CaseC
     restoration_clause: restorationClause,
     planned_closure_date: null,
     planned_closure_month: closureMonthOf(answers.closure, now),
-    had_employees: staffed ? null : answers.hadEmployees,
+    had_employees: staffed || answers.hadEmployees === 'UNKNOWN' ? null : answers.hadEmployees,
     pension_enrolled: enrolled('PENSION'),
     health_insurance_enrolled: enrolled('HEALTH'),
     employment_insurance_enrolled: enrolled('EMPLOYMENT'),

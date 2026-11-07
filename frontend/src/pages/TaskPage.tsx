@@ -2,6 +2,7 @@ import { IconExclamationmarkCircleLine } from '@karrotmarket/react-monochrome-ic
 import type { ReactNode } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router'
 
+import { AiNotice } from '../components/ui/AiNotice'
 import { Button } from '../components/ui/Button'
 import { EmptyState } from '../components/ui/EmptyState'
 import { HammerLoader } from '../components/ui/HammerLoader'
@@ -73,6 +74,7 @@ export function TaskPage() {
         <div>
           <h1 className="text-26 font-bold text-pretty">{title}</h1>
           {reason && <p className="mt-2 text-17 text-pretty text-fg-neutral-muted">{reason}</p>}
+          <AiNotice className="mt-2" />
         </div>
 
         {hasQuestions && (
