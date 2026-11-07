@@ -32,7 +32,7 @@ test('진단을 마치면 홈에 지금 할 일이 뜨고, 새로고침해도 �
   await answer('네, 내고 있어요')
   await answer('네, 있어요')
   await answer('아니요, 없어요')
-  await page.getByRole('button', { name: '잘 모르겠어요' }).click()
+  await page.getByRole('button', { name: '가입한 적 없어요' }).click()
   await answer('다음 달', '폐업 순서 만들기')
 
   // 판단은 뒤에서 돌고 홈이 반복 조회한다(3초). 가짜 모델이라 몇 초면 끝난다
