@@ -46,27 +46,19 @@ from app.agent.roadmap import TASKS as ROADMAP_TASKS, record_checklist
 from app.be.services import procedure_registry
 from app.be.services import reviewed_procedure as reviewed_procedure_service
 from app.be.services import roadmap as roadmap_service
-from app.be.services.unmasking import build_restorer
 
 logger = logging.getLogger(__name__)
 
 
 def _field_changes(session: Session, case_id: int, case_history_id: int) -> list[FieldChangeResponse]:
-    """이 제출에서 바뀐 값들. 화면에 낼 때만 가림 문구를 원래 글자로 되돌린다.
-
-    이전 값과 새 값은 서로 다른 제출에서 나온다. 한쪽 기준으로 되돌리면 이전 값 자리에
-    남의 주소가 들어간다.
-    """
+    """이 제출에서 바뀐 값들. 화면에서도 저장된 가림 문구를 유지한다(#258)."""
 
     rows = case_field_history_crud.get_case_field_histories_by_case_history_id(session, case_history_id)
-    restorer = build_restorer(
-        session, case_id, [row.before_value for row in rows] + [row.after_value for row in rows]
-    )
     return [
         FieldChangeResponse(
             field=row.canonical_field,
-            stored_value=restorer.restore(row.before_value, restorer.source_of_previous(row.id)),
-            new_value=restorer.restore(row.after_value, row.case_history_id),
+            stored_value=row.before_value,
+            new_value=row.after_value,
         )
         for row in rows
     ]
@@ -80,38 +72,21 @@ def _conflict_items(
     아직 확인 전이라 Case에는 이전 값이 그대로 있다. 새 값만 이번 제출에서 나온다.
     """
 
-    restorer = build_restorer(
-        session,
-        case_id,
-        [conflict.committed_value for conflict in conflicts]
-        + [conflict.proposed_value for conflict in conflicts],
-    )
     return [
         ConflictItemResponse(
             id=conflict.id,
             field=conflict.canonical_field,
-            stored_value=restorer.restore(
-                conflict.committed_value, restorer.source_of_current(conflict.canonical_field)
-            ),
-            proposed_value=restorer.restore(conflict.proposed_value, conflict.case_history_id),
+            stored_value=conflict.committed_value,
+            proposed_value=conflict.proposed_value,
         )
         for conflict in conflicts
     ]
 
 
 def _case_detail(session: Session, case: Case) -> CaseGetDetailResponse:
-    """Case 자체를 화면에 낼 때. 자유 글 칸에만 가림 문구가 들어올 수 있다."""
+    """Case 자체를 화면에 낼 때도 가림 문구를 원문으로 복원하지 않는다."""
 
-    detail = CaseGetDetailResponse(**case.model_dump())
-    restorer = build_restorer(
-        session, case.id, [detail.business_type, detail.restoration_scope_detail]
-    )
-    return detail.model_copy(
-        update={
-            field: restorer.restore(getattr(detail, field), restorer.source_of_current(field))
-            for field in ("business_type", "restoration_scope_detail")
-        }
-    )
+    return CaseGetDetailResponse(**case.model_dump())
 
 
 def create_case(session: Session, member_id: int, case_request: CaseCreateRequest) -> tuple[Case, int]:
