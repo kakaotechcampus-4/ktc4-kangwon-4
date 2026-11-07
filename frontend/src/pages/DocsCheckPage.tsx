@@ -44,6 +44,12 @@ export function DocsCheckPage() {
   const { search } = useLocation()
   const { query, reload, checking, runCheck } = useDocuments()
   const [asking, setAsking] = useState(false)
+  /**
+   * 마지막으로 보낸 이름·날짜. 시트는 결과 분기마다 새로 그려져 입력이 지워진다.
+   * 보내기에 실패해 다시 열 때 사장님이 처음부터 다시 쓰지 않게 여기 들고 있는다(#237).
+   * 화면을 나가면 사라진다 — 신청인 이름은 서버에 남기지 않는 값이라 저장소에도 두지 않는다
+   */
+  const [lastInput, setLastInput] = useState<ApplicantInput | null>(null)
 
   if (query.status === 'LOADING') {
     return (
@@ -92,10 +98,12 @@ export function DocsCheckPage() {
   const askSheet = (
     <ApplicantSheet
       open={asking}
-      initialStoreName={query.view.storeName}
+      initialStoreName={lastInput?.storeName ?? query.view.storeName}
+      initialInput={lastInput}
       onClose={() => setAsking(false)}
       onSubmit={(storeName, name, date) => {
         setAsking(false)
+        setLastInput({ storeName, name, closureDate: date })
         void runCheck(storeName, name, date)
       }}
     />
@@ -211,6 +219,13 @@ function Header({ icon, title, sub }: { icon: ReactNode; title: string; sub: str
   )
 }
 
+/** 시트에서 보낸 값. 폐업일은 모르면 `null`이다 */
+interface ApplicantInput {
+  storeName: string
+  name: string
+  closureDate: string | null
+}
+
 /**
  * 점검 직전에 가게 이름·신청인 이름과 실제 폐업일을 묻는 시트.
  *
@@ -220,17 +235,20 @@ function Header({ icon, title, sub }: { icon: ReactNode; title: string; sub: str
 export function ApplicantSheet({
   open,
   initialStoreName,
+  initialInput = null,
   onClose,
   onSubmit,
 }: {
   open: boolean
   initialStoreName: string | null
+  /** 이 화면에서 마지막으로 보낸 이름·날짜. 처음 열 때는 없다 */
+  initialInput?: ApplicantInput | null
   onClose: () => void
   onSubmit: (storeName: string, name: string, closureDate: string | null) => void
 }) {
   const [storeName, setStoreName] = useState(initialStoreName ?? '')
-  const [name, setName] = useState('')
-  const [date, setDate] = useState('')
+  const [name, setName] = useState(initialInput?.name ?? '')
+  const [date, setDate] = useState(initialInput?.closureDate ?? '')
   const storeNameId = useId()
   const nameId = useId()
   const dateId = useId()
