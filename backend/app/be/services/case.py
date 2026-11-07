@@ -761,7 +761,6 @@ _LOG_OWNER_EVENTS = {
     "CASE_CREATED": "CASE_CREATED",
     "USER_INPUT": "RESULT_SUBMITTED",
     "CONFLICT_DECISION": "CONFLICT_DECIDED",
-    "DOCUMENT_SUBMITTED": "DOCUMENT_SUBMITTED",
 }
 _LOG_RIBBON_EVENTS = {
     "DONE": "NEXT_ACTION_DECIDED",
@@ -786,9 +785,12 @@ def get_case_logs(session: Session, member_id: int) -> CaseLogResponse:
         if history.roadmap_task_ids is not None:
             previous_task_ids = history.roadmap_task_ids
         owner_event = _LOG_OWNER_EVENTS.get(history.source)
-        if owner_event is None:
+        # DOCUMENT_SUBMITTED는 위 표에 넣지 않고, 이 예외로 RIBBON 결과만 통과시킨다.
+        if owner_event is None and history.source != "DOCUMENT_SUBMITTED":
             continue
-        logs.append(_log("OWNER", owner_event, history.created_at))
+        # 올린 사실은 CaseDocumentHistory가 남긴다. 서류 재판단은 리본 결과만 기록한다.
+        if owner_event is not None:
+            logs.append(_log("OWNER", owner_event, history.created_at))
         if history.judged_at is not None and history.judgment_status in _LOG_RIBBON_EVENTS:
             logs.append(_log(
                 "RIBBON", _LOG_RIBBON_EVENTS[history.judgment_status], history.judged_at,

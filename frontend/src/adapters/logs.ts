@@ -23,11 +23,8 @@ const EVENT_TEXT: Record<string, { actor: LogActor; text: string }> = {
   SUPPORT_RESULT_REPORTED: { actor: 'OWNER', text: '점포철거비 1차 심사 결과를 알려주셨어요' },
   // 어떤 서류인지는 아래 줄에 서류함과 같은 이름으로 붙인다(`toDetail`)
   DOCUMENT_UPLOADED: { actor: 'OWNER', text: '서류를 올리셨어요' },
-  /*
-   * 올린 서류로 원상복구 조항이 새로 생기거나 바뀌어 다음 할 일을 다시 정한 때(#173). 같은 순간에
-   * "서류를 올리셨어요"가 함께 남아서, 같은 말을 두 번 하지 않게 무엇이 바뀌었는지를 적는다(11/04 시우님)
-   */
-  DOCUMENT_SUBMITTED: { actor: 'OWNER', text: '올린 서류로 계약 내용이 바뀌었어요' },
+  // 이전 서버가 보낸 재판단 접수 기록도 판단 성공·계약 변경으로 단정하지 않는다.
+  DOCUMENT_SUBMITTED: { actor: 'OWNER', text: '서류를 올리셨어요' },
   NEXT_ACTION_DECIDED: { actor: 'RIBBON', text: '다음 할 일을 정했어요' },
   MORE_INFO_REQUESTED: { actor: 'RIBBON', text: '더 여쭤볼 것을 정리했어요' },
   CONFLICT_FOUND: { actor: 'RIBBON', text: '기록과 다른 부분을 찾았어요' },
