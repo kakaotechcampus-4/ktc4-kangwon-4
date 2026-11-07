@@ -21,7 +21,7 @@ import { isReadableText } from './case'
 /**
  * 서류에서 꺼낸 값 이름 → 화면 말.
  *
- * FE 자동 배포·BE 수동 배포 사이의 예전 응답에 label 키가 없을 때만 쓴다(#159 후속).
+ * FE와 BE가 따로 반영되는 동안 예전 응답에 label 키가 없을 때만 쓴다(#159 후속).
  * 새 서버의 이름을 이 표로 덮지 않는다. 모르는 칸은 값을 보존하되 영어 이름을 화면에 내지 않는다.
  */
 const FIELD_LABEL: Record<string, string> = {
@@ -80,6 +80,7 @@ function toFields(fields: unknown, confirmed: unknown, legacy: boolean): Documen
   for (const item of fields) {
     const row = asRow(item)
     if (row === null || !isReadableText(row.name) || typeof row.value !== 'string') return null
+    if (!legacy && !Object.hasOwn(row, 'label')) return null
     const label = Object.hasOwn(row, 'label') ? row.label : FIELD_LABEL[row.name] ?? null
     if (Object.hasOwn(row, 'label') && (!isReadableText(label) || !label.trim())) return null
     if (!values.has(row.name)) {
@@ -168,7 +169,7 @@ function toCheck(value: unknown): DocumentCheckView | null | undefined {
 export function toDocumentsView(body: unknown): DocumentsView | null {
   const row = asRow(body)
   if (row === null || !Array.isArray(row.documents)) return null
-  // FE 자동 배포와 BE 수동 배포 사이에는 예전 응답이 올 수 있다(#251). 키가 없을 때만 이름을 비운다.
+  // FE와 BE가 따로 반영되는 동안 예전 응답이 올 수 있다(#251). 키가 없을 때만 이름을 비운다.
   const storeName = Object.hasOwn(row, 'store_name') ? row.store_name : null
   if (storeName !== null && typeof storeName !== 'string') return null
   const documentKinds = toDocumentKinds(row)

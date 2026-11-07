@@ -68,6 +68,12 @@ describe('toDocumentsView', () => {
     expect(toDocumentsView({ document_kinds: [], documents: [], check: null })?.documentKinds).toEqual([])
   })
 
+  it('새 종류 목록을 준 응답에 필드 이름이 빠졌으면 깨진 새 계약으로 거절한다', () => {
+    expect(toDocumentsView({
+      document_kinds: [{ kind: 'TRANSFER', label: '이체서류' }], documents: [serverDocument()], check: null,
+    })).toBeNull()
+  })
+
   it.each([null, undefined, 1, true, {}, [], '', ' '])('명시된 잘못된 label은 예전 사전으로 덮지 않는다: %j', (label) => {
     expect(toDocumentsView({ documents: [serverDocument({ fields: [{ name: 'amount', label, value: '1원' }] })] })).toBeNull()
   })
