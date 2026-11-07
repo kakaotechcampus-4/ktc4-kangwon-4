@@ -81,11 +81,11 @@ from zipfile import ZipFile
 import pymupdf
 from sqlmodel import Session, create_engine
 from app.be.models.case import Case
-from app.be.services.document import document_case_id
+from app.be.models.case_document_context import CaseDocumentContext
 with Session(create_engine(os.environ['E2E_DATABASE_URL'])) as session:
     case = session.get(Case, int(sys.argv[2]))
     assert case.store_name == '봄날개인카페'
-    context = json.loads((Path(sys.argv[1]) / str(document_case_id(case)) / 'case_documents.json').read_text())
+    context = session.get(CaseDocumentContext, case.id).context
 with pymupdf.open(Path(sys.argv[1]) / 'CONSTRUCTION_STATEMENT.pdf') as source:
     assert '8001011234567' in re.sub(r'[\\s-]', '', ''.join(page.get_text() for page in source))
 with ZipFile(sys.argv[3]) as archive:
