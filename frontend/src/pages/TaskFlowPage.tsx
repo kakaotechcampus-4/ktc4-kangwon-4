@@ -176,16 +176,22 @@ export function CheckFlow({ task, attach = false }: { task: RoadmapTaskView; att
         </p>
       )}
       {waiting && (
-        <InfoBox title="아직 기록할 수 없는 할 일이에요.">필요한 내용이 확인되면 기록할 수 있어요.</InfoBox>
+        // 무엇이 비었는지는 서버가 주지 않는다. 사장님이 할 수 있는 일(결과 알려주기)을 알린다(#237)
+        <InfoBox title="아직 확인되지 않은 정보가 있어서 기록할 수 없어요.">
+          알게 되면 결과 알려주기에서 알려 주세요.
+        </InfoBox>
       )}
       <SaveNotice save={save} />
       <div className="mt-auto flex flex-col gap-2">
-        {checked ? (
+        {/* 기록할 수 없는 동안에는 꺼진 [다 했어요] 대신 할 수 있는 일을 주요 버튼으로 둔다(주요 버튼은 하나) */}
+        {waiting && !checked ? (
+          <Button onClick={() => navigate({ pathname: '/results', search }, { viewTransition: true })}>결과 알려주기</Button>
+        ) : checked ? (
           <Button variant="outline" disabled={save === 'SAVING' || save === 'REJECTED'} onClick={toggle}>
             완료 취소하기
           </Button>
         ) : (
-          <Button disabled={waiting || save === 'SAVING' || save === 'REJECTED'} onClick={toggle}>
+          <Button disabled={save === 'SAVING' || save === 'REJECTED'} onClick={toggle}>
             다 했어요
           </Button>
         )}
