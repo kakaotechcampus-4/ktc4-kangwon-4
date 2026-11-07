@@ -652,23 +652,34 @@ def test_batch_review_failure_returns_no_changes_and_preserves_the_original_inpu
     assert request.model_dump_json() == before
 
 
-@pytest.mark.parametrize(("path", "target", "review_calls"), [
+@pytest.mark.parametrize(("path", "target", "review_calls", "missing_evidence"), [
     # 코드가 정한 전체 blockers 목록은 Supervisor 재작업으로 바뀌지 않으므로 바로 멈춘다
-    ("/supervisor_draft/decision/blockers", "SUPERVISOR", 1),
+    ("/supervisor_draft/decision/blockers", "SUPERVISOR", 1, False),
+    # F03 진단처럼 목록 안의 고정 설명을 반려해도 선택만 다시 해서는 바뀌지 않는다.
+    ("/supervisor_draft/decision/blockers/0/description", "SUPERVISOR", 1, False),
+    ("/supervisor_draft/decision/blockers/0/candidate_id", "SUPERVISOR", 1, False),
+    (["/supervisor_draft/decision/blockers", "/supervisor_draft/decision/blockers/0/description"], "SUPERVISOR", 1, False),
     # 우선 blocker 선택은 Supervisor가 고칠 수 있어 기존처럼 다시 돌린다
-    ("/supervisor_draft/decision/blocker", "SUPERVISOR", 3),
+    ("/supervisor_draft/decision/blocker", "SUPERVISOR", 3, False),
+    ("/supervisor_draft/decision/blocker/description", "SUPERVISOR", 3, False),
     # 목록 반려와 Supervisor가 고칠 수 있는 반려가 섞이면 기존처럼 다시 돌린다
-    (["/supervisor_draft/decision/blockers", "/supervisor_draft/decision/blocker"], "SUPERVISOR", 3),
+    (["/supervisor_draft/decision/blockers", "/supervisor_draft/decision/blocker"], "SUPERVISOR", 3, False),
+    # 새 근거가 필요한 경우에는 기존 재작업 경로를 유지한다.
+    ("/supervisor_draft/decision/blockers/0/description", "SUPERVISOR", 3, True),
 ])
-def test_review_rejection_supervisor_cannot_fix_stops_without_rework(path, target, review_calls):
+def test_review_rejection_supervisor_cannot_fix_stops_without_rework(path, target, review_calls, missing_evidence):
     graph, request, _, _ = batch_conflict_graph()
+    before = request.model_dump_json()
 
     async def reject(subject):
         return ReviewResult(
             reviewed_subject_id=subject.review_subject_id,
-            reviewed_subject_digest=subject.subject_digest, verdict="REVISE", missing_evidence=[],
+            reviewed_subject_digest=subject.subject_digest, verdict="REVISE", missing_evidence=[{
+                "claim_path": "/supervisor_draft/decision/blockers/0/description",
+                "required_source_types": ["OFFICIAL_DOCUMENT"], "reason_summary": "합성 근거 부족",
+            }] if missing_evidence else [],
             issues=[{
-                "issue_code": "CONTRACT_VIOLATION", "category": "CONTRACT", "severity": "BLOCKING",
+                "issue_code": "CASE_MISMATCH", "category": "FACTUALITY", "severity": "BLOCKING",
                 "target_component": target, "target_call_id": None, "target_path": item,
                 "reason_summary": "합성 검수 반려", "evidence_refs": [],
             } for item in ([path] if isinstance(path, str) else path)],
@@ -680,7 +691,44 @@ def test_review_rejection_supervisor_cannot_fix_stops_without_rework(path, targe
     outcome = asyncio.run(graph.run(request))
     assert outcome.outcome_type == "SAFE_FAILURE"
     assert outcome.failure_code == "REVIEW_RETRY_EXHAUSTED"
+    assert outcome.failed_component == "REVIEW_TOOL" and outcome.retryable is False
     assert graph._review_tool.review.await_count == review_calls
+    assert graph._supervisor._llm.calls == review_calls
+    assert request.model_dump_json() == before
+
+
+@pytest.mark.parametrize("target", ["INFO_AGENT", "PROCEDURE_TOOL"])
+def test_fixed_blocker_rejection_still_allows_requested_upstream_rework(target):
+    graph, request, procedure, info, _ = graph_run_inputs("RESULT_SUBMITTED")
+    reviewer = AsyncMock()
+
+    async def review(subject):
+        if reviewer.review.await_count > 1:
+            return await ReviewTool(StubModel()).review(subject)
+        index, source = next((index, source) for index, source in enumerate(subject.source_results)
+                             if source.meta.component == target)
+        return ReviewResult(
+            reviewed_subject_id=subject.review_subject_id,
+            reviewed_subject_digest=subject.subject_digest, verdict="REVISE", missing_evidence=[],
+            issues=[{
+                "issue_code": "CASE_MISMATCH", "category": "FACTUALITY", "severity": "BLOCKING",
+                "target_component": component, "target_call_id": call_id, "target_path": path,
+                "reason_summary": "합성 자료와 고정 설명 재검토", "evidence_refs": [],
+            } for component, call_id, path in [
+                ("SUPERVISOR", None, "/supervisor_draft/decision/blockers/0/description"),
+                (target, source.meta.call_id, f"/source_results/{index}/output"),
+            ]], recommended_rework_targets=[target, "SUPERVISOR"], resolution_reason="합성 상위 재작업",
+        )
+
+    reviewer.review.side_effect = review
+    graph._review_tool = reviewer
+    outcome = asyncio.run(graph.run(request))
+    assert outcome.outcome_type == "REVIEWED_PLAN", outcome
+    outcome.assert_integrity()
+    assert procedure.lookup.await_count == (2 if target == "PROCEDURE_TOOL" else 1)
+    assert info.analyze.await_count == 2
+    assert graph._supervisor._llm.calls == 2
+    assert reviewer.review.await_count == 2
 
 
 @pytest.mark.parametrize("invalid", ["missing", "duplicate", "unknown_ref", "numeric_boolean"])
