@@ -47,19 +47,16 @@ from app.be.crud.member import create_member  # noqa: E402
 from app.be.db import get_engine, reset_all_tables  # noqa: E402
 from app.be.services import auth as auth_service  # noqa: E402
 from app.main import app  # noqa: E402
-from app.be.routers.document import get_document_tool  # noqa: E402
+from app.be.routers import document as document_router  # noqa: E402
 from document_fixtures import DocumentClient, document_pdf  # noqa: E402
 
 
-async def synthetic_documents():
+async def synthetic_documents(directory: Path, *, submission_policy: str):
     client = DocumentClient()
     client.needs_confirmation = True
-    tool = DocumentTool(DocumentService(Path(os.environ["AGENT_DOCUMENT_DIR"]), client,
-        reviewer=client, safety=ContentSafetyGuard(client), submission_policy="RRN_BACK_ONLY"))
-    try:
-        yield tool
-    finally:
-        await tool.aclose()
+    # 실제 라우터가 고른 제출 가림 정책과 도구 종료 경로도 브라우저에서 검증한다.
+    return DocumentTool(DocumentService(directory, client,
+        reviewer=client, safety=ContentSafetyGuard(client), submission_policy=submission_policy))
 
 
 def document_files(directory):
@@ -139,13 +136,13 @@ def main() -> None:
     port = int(os.environ.get("E2E_BE_PORT", "8765"))
     with TemporaryDirectory(prefix="reborn-e2e-documents-") as directory, \
          patch.object(runtime_module.StructuredLLMClient, "from_env", FirstCandidateModel.from_env), \
-         patch.object(runtime_module.LangfuseTraceSink, "from_env", lambda *a, **k: None):
+         patch.object(runtime_module.LangfuseTraceSink, "from_env", lambda *a, **k: None), \
+         patch.object(document_router, "build_document_tool", synthetic_documents):
         os.environ["AGENT_DOCUMENT_DIR"] = directory
         tokens = {**_signed_in_member(), "restoration_members": [_signed_in_member() for _ in range(6)],
                   "document_member": _signed_in_member(), "document_directory": directory,
                   "document_files": document_files(directory)}
         Path(os.environ["E2E_TOKEN_FILE"]).write_text(json.dumps(tokens), encoding="utf-8")
-        app.dependency_overrides[get_document_tool] = synthetic_documents
         uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
 
 
