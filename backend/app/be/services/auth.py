@@ -82,8 +82,9 @@ def _fetch_kakao_token(code: str) -> str:
             response.raise_for_status()
             return response.json()["access_token"]
     except httpx.HTTPStatusError as error:
-        # 4xx는 잘못되거나 이미 쓴 code다(#257). 사장님이 다시 로그인하면 풀린다
-        if error.response.is_client_error:
+        # 4xx는 잘못되거나 이미 쓴 code다(#257). 사장님이 다시 로그인하면 풀린다.
+        # 401만은 앱 키·시크릿이 틀린 우리 설정 문제라(카카오 KOE010·KOE101) 다시 눌러도 안 풀린다
+        if error.response.is_client_error and error.response.status_code != 401:
             logger.warning("카카오 토큰 요청 거절: %s", error.response.status_code)
             raise HTTPException(status_code=400, detail="로그인 요청이 올바르지 않습니다. 다시 로그인해 주세요.") from None
         raise _kakao_unavailable("토큰", error) from None
@@ -110,9 +111,10 @@ def _fetch_kakao_user_info(kakao_access_token: str) -> tuple[str, str]:
 
 
 def _kakao_unavailable(step: str, error: Exception) -> HTTPException:
-    # 응답 본문은 남기지 않는다. 상태 코드나 오류 종류만 있으면 카카오 장애인지 구분할 수 있다
+    # 응답 본문은 남기지 않는다. 상태 코드나 오류 종류만 있으면 카카오 장애인지 우리 설정 문제인지 구분할 수 있다.
+    # 사장님이 풀 수 없는 실패라 우리가 알아채도록 error로 남긴다
     status = error.response.status_code if isinstance(error, httpx.HTTPStatusError) else type(error).__name__
-    logger.warning("카카오 %s 요청 실패: %s", step, status)
+    logger.error("카카오 %s 요청 실패: %s", step, status)
     return HTTPException(status_code=502, detail="카카오 로그인 서버에 문제가 있습니다. 잠시 뒤 다시 시도해 주세요.")
 
 
