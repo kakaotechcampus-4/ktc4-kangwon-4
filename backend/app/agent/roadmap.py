@@ -57,7 +57,7 @@ TASKS = (
     (2, "support_approval", "1차 적격심사 결과 확인", "demolition", ()),
     (2, "choose_contractor", "철거 업체 정하기", "demolition", ()),
     (2, "before_photo", "철거 전 사진", "demolition", ()),
-    (2, "restoration_work", "원상복구·철거 작업", "lease", ("PERFORM_RESTORATION",)),
+    (2, "restoration_work", "영업 마무리 후 원상복구·철거 작업", "lease", ("PERFORM_RESTORATION",)),
     (2, "contractor_documents", "철거 후 서류 받기", "demolition", ()),
     (3, "dispose_stock", "재고·장비 처분", "always", ()),
     (3, "terminate_contracts", "렌탈·공과금 해지", "contracts", ()),
