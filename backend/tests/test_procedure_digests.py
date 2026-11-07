@@ -1095,6 +1095,7 @@ def test_conflict_confirmation_fills_info_from_digest_and_keeps_the_review_model
     ("RETURN_PREMISES", "CONFIRM_PREMISES_RETURN_REQUIREMENTS"),
     ("SETTLE_EMPLOYEE_PAYMENTS", "CONFIRM_EMPLOYEE_SETTLEMENT_REQUIREMENTS"),
     ("REPORT_EMPLOYEE_INSURANCE_LOSS", "CONFIRM_EMPLOYEE_INSURANCE_LOSS_REQUIREMENTS"),
+    ("REPORT_WORKPLACE_INSURANCE_CLOSURE", "CONFIRM_WORKPLACE_INSURANCE_CLOSURE_REQUIREMENTS"),
 ])
 @pytest.mark.parametrize("mode", ["same_judgment", "stored", "held", "completion_report"])
 def test_preparation_report_updates_readiness_without_changing_snapshot_status(code, confirmation, mode):
@@ -1122,6 +1123,11 @@ def test_preparation_report_updates_readiness_without_changing_snapshot_status(c
         store = ev.SnapshotStore(REVIEWED)
         registry = ev.build_registry(store, cafe_registry=True)
         text = "해당 절차의 준비사항을 확인했습니다."
+        if code == "REPORT_WORKPLACE_INSURANCE_CLOSURE":
+            text = (
+                "담당 기관에 사업장 보험 탈퇴·소멸 신고 대상과 필요한 서류, 제출 방법을 모두 확인했고 "
+                "준비할 자료도 갖췄어요. 아직 탈퇴·소멸 신고서는 제출하지 않았어요."
+            )
         if mode == "completion_report":
             text = "해당 절차의 처리를 모두 마쳤습니다."
         payload = ev.CASES["benchmark_case1"] | {"had_employees": True, "pension_enrolled": True,
