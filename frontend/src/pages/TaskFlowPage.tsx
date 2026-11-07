@@ -645,12 +645,31 @@ export function AddressSheet({
   )
 }
 
-/** 사장님이 따로 할 것이 없는 할 일(가입 때 정한 것 등) */
-function InfoFlow({ task }: { task: RoadmapTaskView }) {
+/**
+ * 가게 정보로 정해지는 할 일(가입 때 정한 것 등). 정해져 있으면 따로 할 것이 없다.
+ *
+ * 확인 필요면 "할 것 없음"이라 하지 않는다. 폐업 날짜를 "아직 안 정했어요"로 고른 가게가 여기 온다.
+ * 정해지면 결과 알려주기로 알려 주게 한다 — 판단이 가게 정보를 고친다(#237).
+ */
+export function InfoFlow({ task }: { task: RoadmapTaskView }) {
+  const navigate = useNavigate()
+  const { search } = useLocation()
+  if (task.status !== 'NEEDS_CONFIRMATION') {
+    return (
+      <TaskFrame>
+        <TaskHeader task={task} />
+        <InfoBox>이 일은 여기서 따로 하실 것이 없어요. 리본이 가게 정보로 확인해요.</InfoBox>
+      </TaskFrame>
+    )
+  }
   return (
     <TaskFrame>
       <TaskHeader task={task} />
-      <InfoBox>이 일은 여기서 따로 하실 것이 없어요. 리본이 가게 정보로 확인해요.</InfoBox>
+      {/* TODO(#237): 문구는 PM 확인 전 임시 */}
+      <InfoBox>아직 정해지지 않았어요. 정해지면 결과 알려주기로 알려 주세요.</InfoBox>
+      <div className="mt-auto">
+        <Button onClick={() => navigate({ pathname: '/results', search }, { viewTransition: true })}>결과 알려주기</Button>
+      </div>
     </TaskFrame>
   )
 }

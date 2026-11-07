@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { saveTokens } from '../lib/auth'
 import type { RoadmapTaskView } from '../types/view'
-import { CheckFlow, ClosureReportFlow, DepositFlow, SupportResultFlow, TaskFlowPage } from './TaskFlowPage'
+import { CheckFlow, ClosureReportFlow, DepositFlow, InfoFlow, SupportResultFlow, TaskFlowPage } from './TaskFlowPage'
 
 function renderAt(path: string) {
   const router = createMemoryRouter(
@@ -154,6 +154,36 @@ describe('TaskFlowPage — 장면 고르기', () => {
 })
 
 /** Mock 은 Preview 에서 화면을 보려고 둔다. 서버를 부르지 않고 열리는지, 다음 화면에 Mock 표시를 잇는지만 본다 */
+/**
+ * 폐업 날짜를 "아직 안 정했어요"로 고른 가게는 이 할 일이 확인 필요다.
+ * 그때 "따로 하실 것이 없어요"라고 하면 사장님은 정할 필요가 없는 줄 안다
+ */
+describe('InfoFlow', () => {
+  const closureDateTask: RoadmapTaskView = { id: 'closure_date', title: '폐업 날짜 정하기', kind: 'CASE_FACT', status: 'NEEDS_CONFIRMATION' }
+
+  function renderInfo(task: RoadmapTaskView) {
+    const router = createMemoryRouter(
+      [
+        { path: '/flow', element: <InfoFlow task={task} /> },
+        { path: '/results', element: <p>결과 입력</p> },
+      ],
+      { initialEntries: ['/flow'] },
+    )
+    render(<RouterProvider router={router} />)
+  }
+
+  it('확인이 필요하면 결과 알려주기로 보낸다', async () => {
+    renderInfo(closureDateTask)
+    fireEvent.click(screen.getByRole('button', { name: '결과 알려주기' }))
+    expect(await screen.findByText('결과 입력')).toBeInTheDocument()
+  })
+
+  it('정해져 있으면 할 일을 내밀지 않는다', () => {
+    renderInfo({ ...closureDateTask, status: 'COMPLETED' })
+    expect(screen.queryByRole('button', { name: '결과 알려주기' })).not.toBeInTheDocument()
+  })
+})
+
 describe('TaskFlowPage — Mock', () => {
   it('?mock= 이면 서버를 부르지 않고 할 일을 열고, 다음 화면에 Mock 표시를 잇는다', () => {
     const fetchMock = serve(json(SCENE_ROADMAP))
