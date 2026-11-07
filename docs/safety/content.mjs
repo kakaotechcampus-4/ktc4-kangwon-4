@@ -21,9 +21,10 @@ export const questions = [
 const section = (id, title, text, extra = {}) => ({ id, title, text, ...extra })
 export const pages = [
   { id: 'home', nav: '홈', title: '리본 안심가이드', description: '가게의 마무리와 사장님의 다음 시작을 위한 리본의 원칙과 이용 안내.', sources: [] },
-  { id: 'philosophy', nav: '운영철학', eyebrow: '리본의 운영철학', title: '사장님의 선택을 존중하며,\n다음 한 걸음을 함께해요.', description: '가게를 마무리하는 과정에서도 사장님이 자신의 상황을 이해하고 결정할 수 있도록 돕습니다.', icon: 'choice', sources: ['backend/app/agent/roadmap.py', 'backend/app/be/services/conflict_decision.py', 'backend/app/agent/review_tool/tool.py', 'frontend/src/pages/ReplanPage.tsx'], sections: [
+  { id: 'philosophy', nav: '운영철학', eyebrow: '리본의 운영철학', title: '사장님의 선택을 존중하며,\n다음 한 걸음을 함께해요.', description: '40~50대 개인 카페 사장님을 핵심 대상으로, 가게를 마무리하는 상황을 이해하고 결정하도록 돕습니다.', icon: 'choice', sources: ['backend/app/agent/roadmap.py', 'backend/app/be/services/conflict_decision.py', 'backend/app/agent/review_tool/tool.py', 'frontend/src/pages/ReplanPage.tsx', 'frontend/docs/ui-guidelines.md', 'frontend/src/components/ui/Button.tsx', 'frontend/src/components/ui/TaskCard.tsx'], sections: [
     section('choice', '결정의 중심에는 사장님이 있어요', '리본은 폐업을 결심한 사장님이 무엇부터 확인하고 실행할지 정리해요. 폐업을 권유하거나 중요한 결정을 대신하지 않아요. 새 답변이 기존 사실과 다르면 확인을 요청하고, 잘못 이해한 내용은 바로잡을 수 있게 해요.'),
     section('one-step', '복잡한 절차를 지금 할 일로 나눠요', '모든 일을 한꺼번에 끝내도록 재촉하지 않아요. 홈에서는 지금 할 일 하나와 이유를, 로드맵에서는 전체 진행을 보여줘요. 상황이 달라지면 다음 행동도 다시 검토해요.'),
+    section('readable', '읽고 고르는 부담도 줄이고 싶어요', '리본은 폐업을 직접 챙기는 40~50대 개인 카페 사장님을 핵심 대상으로 화면을 설계했어요. 일관된 한글 글꼴과 큰 할 일 제목·주요 버튼, 나눠서 보여주는 질문으로 지금 확인할 내용을 구분해요. 보기에 맞는 답이 없으면 직접 적고, 아직 모르는 것은 모름으로 남길 수 있어요. 나이에 따라 이용을 제한하지 않으며 실제 읽기와 사용의 어려움은 사장님들의 확인을 통해 더 다듬어야 해요.', { links: [['글자·버튼·배치의 설계 근거', '/developers/ko/guide/ui-ux/']] }),
     section('evidence', '모르는 것을 아는 것처럼 말하지 않아요', '확인한 사실과 아직 모르는 사실을 구분해요. 필요한 정보가 부족하면 다시 묻고, 안내를 검수한 뒤 상태에 반영해요. 지원금 지급이나 계약 분쟁의 결론처럼 리본이 확정할 수 없는 일은 해당 기관과 전문가에게 확인하도록 안내해요.'),
     section('care', '가게의 정보와 사장님의 안전을 살펴요', '폐업 서류에는 계약 내용과 개인 정보가 함께 담겨 있어요. 필요한 자료만 다루도록 안내하고, 자동 처리를 계속하기 어려운 경우에는 멈춤과 확인 방법을 설명해요. 위기 도움 요청으로 판정된 상황에서는 폐업 절차보다 사람의 안전과 공식 상담 안내를 먼저 보여줘요.'),
     section('open', '할 수 있는 일과 한계도 함께 알려요', '현재 제공 범위, 자동 검수의 한계와 변경 이력을 공개해요. 서비스가 달라지면 설명도 함께 확인해요. 사장님이 안내의 의미와 한계를 알고 사용할 수 있는 서비스를 지향해요.', { links: [['현재 서비스 운영 기준', '/safety/standards/'], ['검증과 변경 기록', '/developers/ko/reference/changes/']] }),
