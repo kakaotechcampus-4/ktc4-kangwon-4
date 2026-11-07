@@ -7,8 +7,8 @@
   .env의 DATABASE_URL(개발 DB)을 그대로 쓰면 그 DB가 지워진다.
 - 판단은 진짜 AI 그래프를 그대로 돌리고, 모델 자리에만 가짜를 끼운다. 가입 첫 판단은 정리본을
   써서 Supervisor 모델만 부르고 검수는 코드로 한다(AI팀 test_first_judgment_reviews_with_code_only…).
-  그래서 가짜는 "첫 번째 후보를 고른다"만 하면 되고, 판단 저장·화면 조회는 운영과 같은 길을 탄다.
-- 로그인은 우회 API를 만들지 않는다. 회원 한 명을 만들고 그 토큰을 E2E_TOKEN_FILE에 쓴다.
+  충돌 선택 뒤 검수 모델도 고정 PASS로 대체한다. 충돌 생성·선택·저장 검사는 실제 코드를 탄다.
+- 로그인은 우회 API를 만들지 않는다. 독립된 합성 회원과 그 토큰을 E2E_TOKEN_FILE에 쓴다.
   브라우저 검사가 이걸 sessionStorage에 넣고 시작한다.
 
 pytest가 모으지 않는다(test_로 시작하지 않음). 이름은 다물님 E2E 제안을 따랐다.
@@ -52,6 +52,14 @@ class FirstCandidateModel:
         return cls()
 
     async def generate(self, response_model, messages, **kwargs):
+        if kwargs.get("schema_name") == "reborn_review_output":
+            # 충돌 확인 뒤 재판단의 모델 검수만 대체한다. 선택·저장 제약은 실제 코드를 탄다.
+            subject = json.loads(messages[1]["content"].removeprefix("INPUT_JSON="))
+            assert subject["trigger"]["trigger_type"] == "CONFLICT_CONFIRMED"
+            return response_model.model_validate({
+                "verdict": "PASS", "issues": [], "missing_evidence": [],
+                "recommended_rework_targets": [], "resolution_reason": "합성 충돌 선택 검수 대역",
+            })
         # 가입 첫 판단에서 다른 모델이 불리면 이 E2E가 가정한 길이 아니다. 조용히 넘기지 않는다.
         if kwargs.get("schema_name") != "reborn_supervisor_draft":
             raise AssertionError(f"E2E 가짜 모델은 Supervisor만 받는다: {kwargs.get('schema_name')}")
@@ -81,7 +89,8 @@ def _signed_in_member() -> dict[str, str]:
 
 def main() -> None:
     reset_all_tables()
-    Path(os.environ["E2E_TOKEN_FILE"]).write_text(json.dumps(_signed_in_member()), encoding="utf-8")
+    tokens = {**_signed_in_member(), "conflict_members": [_signed_in_member() for _ in range(2)]}
+    Path(os.environ["E2E_TOKEN_FILE"]).write_text(json.dumps(tokens), encoding="utf-8")
     port = int(os.environ.get("E2E_BE_PORT", "8765"))
     with patch.object(runtime_module.StructuredLLMClient, "from_env", FirstCandidateModel.from_env), \
          patch.object(runtime_module.LangfuseTraceSink, "from_env", lambda *a, **k: None):
