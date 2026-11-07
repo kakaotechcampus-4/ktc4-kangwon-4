@@ -76,14 +76,24 @@ def backup(tmp_path, case_engine, case_world):  # noqa: F811
     return dump, documents, {"rows": source_rows, "case_id": case_id}
 
 
+def run_script(dump: Path, documents: Path) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, "scripts/verify_backup.py", "--dump", str(dump), "--documents", str(documents)],
+        cwd=Path(__file__).resolve().parents[1], env={**os.environ, "PYTHONPATH": "."},
+        capture_output=True, text=True,
+    )
+
+
 def test_truncated_dump_is_refused_before_restoring(backup, tmp_path):
     dump, documents, _ = backup
     cut = tmp_path / "cut.sql"
     cut.write_text(dump.read_text(encoding="utf-8")[:2000], encoding="utf-8")
 
-    files = verify_backup.check_files(cut, documents)
+    result = run_script(cut, documents)
 
-    assert files["dump_complete"] is False
+    # 셸에서 `&&`로 이어 쓸 때 실패를 알아채야 한다(현석님 #278)
+    assert result.returncode != 0
+    assert json.loads(result.stdout)["restored"] is False
 
 
 def test_real_dump_restores_and_counts_match(backup, case_engine):  # noqa: F811
@@ -91,11 +101,7 @@ def test_real_dump_restores_and_counts_match(backup, case_engine):  # noqa: F811
     files = verify_backup.check_files(dump, documents)
     assert files["dump_complete"] is True
 
-    result = subprocess.run(
-        [sys.executable, "scripts/verify_backup.py", "--dump", str(dump), "--documents", str(documents)],
-        cwd=Path(__file__).resolve().parents[1], env={**os.environ, "PYTHONPATH": "."},
-        capture_output=True, text=True,
-    )
+    result = run_script(dump, documents)
     assert result.returncode == 0, result.stderr[-2000:]
     report = json.loads(result.stdout)
 

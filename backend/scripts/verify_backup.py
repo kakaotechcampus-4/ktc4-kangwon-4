@@ -12,12 +12,14 @@ backend에서
 import argparse
 import json
 import subprocess
+import sys
 import tarfile
 from pathlib import Path
 
 from sqlmodel import Session, create_engine, select
 from testcontainers.community.mysql import MySqlContainer
 
+from app.be.db import MYSQL_IMAGE
 from app.be.models.case import Case
 from app.be.services.document import document_case_id
 
@@ -96,9 +98,10 @@ def main() -> None:
         print(json.dumps({"files": files, "restored": False,
                           "reason": "덤프 마지막 줄이 완료 표시가 아니다. 복원하지 않는다"},
                          ensure_ascii=False, indent=2))
-        return
+        # 셸에서 `&&`로 이어 쓸 때 실패를 알아채게 한다(현석님 #278).
+        sys.exit(1)
 
-    with MySqlContainer("mysql:8.0", dialect="pymysql", username="test", password="test",
+    with MySqlContainer(MYSQL_IMAGE, dialect="pymysql", username="test", password="test",
                         root_password="test", dbname="backup_check").with_env("TZ", "Asia/Seoul") as container:
         restore(container, args.dump)
         engine = create_engine(container.get_connection_url() + "?charset=utf8mb4")
