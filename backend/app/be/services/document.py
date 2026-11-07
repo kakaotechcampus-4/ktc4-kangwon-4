@@ -90,6 +90,7 @@ async def upload_document(
     except DocumentError as error:
         raise _rejected(error) from None
     except SafetyBlockedError as error:
+        logger.warning("서류 안전 검사 차단: %s", error.code)
         raise HTTPException(status_code=422, detail={
             "code": error.code, "message": _SAFETY_MESSAGES.get(error.code, _SAFETY_MESSAGES["AGENT_SAFETY_REFUSE"]),
         }) from None
