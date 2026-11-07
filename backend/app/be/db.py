@@ -9,6 +9,12 @@ from sqlmodel import Session, SQLModel, create_engine
 import app.be.models  # noqa: F401 — 모든 모델을 SQLModel 메타데이터에 등록
 from app.common.config import get_settings
 
+# 운영 DB(docker-compose.prod.yml)와 같은 MySQL. 테스트·SQL 뽑기(scripts/dump_schema_sql.py)가 이걸 띄운다.
+# 8.0처럼 열어 두면 받을 때마다 그때 최신판이 깔려 운영과 테스트가 모르게 갈린다(다물님 #217).
+# 운영보다 낮추면 안 된다. MySQL은 데이터 폴더를 낮은 버전으로 되돌리지 못해서 운영 DB가 안 뜬다.
+# 바꿀 때는 docker-compose.prod.yml·docker-compose.yml의 image도 같이 바꾼다.
+MYSQL_IMAGE = "mysql:8.0.46"
+
 
 @lru_cache
 def get_engine() -> Engine:

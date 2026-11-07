@@ -15,6 +15,7 @@ import pytest
 from sqlmodel import Session, SQLModel, create_engine
 from testcontainers.community.mysql import MySqlContainer
 
+from app.be.db import MYSQL_IMAGE
 from app.be.crud.member import create_member
 from app.be.schemas.case import CaseCreateRequest
 from app.be.services import procedure_registry
@@ -27,7 +28,7 @@ RETRIEVED = datetime(2026, 10, 4, 1, 2, 3, tzinfo=timezone.utc)
 @pytest.fixture(scope="module")
 def mysql_engine():
     container = MySqlContainer(
-        "mysql:8.0", dialect="pymysql", username="test", password="test",
+        MYSQL_IMAGE, dialect="pymysql", username="test", password="test",
         root_password="test", dbname="official_document_test",
     ).with_env("TZ", "Asia/Seoul")
     with container:

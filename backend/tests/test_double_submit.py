@@ -14,6 +14,7 @@ from fastapi import HTTPException
 from sqlmodel import Session, SQLModel, create_engine, select
 from testcontainers.community.mysql import MySqlContainer
 
+from app.be.db import MYSQL_IMAGE
 from app.be.crud import case as case_crud
 from app.be.crud import case_history as case_history_crud
 from app.be.crud.case_history import get_case_created_history
@@ -34,7 +35,7 @@ from app.be.services.case import create_case, submit_case_conflicts_decision, su
 @pytest.fixture(scope="module")
 def mysql_engine():
     container = MySqlContainer(
-        "mysql:8.0", dialect="pymysql", username="test", password="test",
+        MYSQL_IMAGE, dialect="pymysql", username="test", password="test",
         root_password="test", dbname="double_submit_test",
     ).with_env("TZ", "Asia/Seoul")
     with container:

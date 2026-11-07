@@ -1,11 +1,12 @@
 # RE:BORN 로컬 개발용 MySQL 전용 docker-compose.
 # 합의된 범위대로 이 파일은 DB만 띄웁니다. backend와 Agent는 로컬 Python
 # 프로세스 또는 별도 배포 runtime에서 실행하며 이 Compose에 포함하지 않습니다.
-# 테스트 DB는 testcontainers를 별도로 사용하되 MySQL 8.0 버전을 맞춥니다.
+# 테스트 DB는 testcontainers를 별도로 사용하되 MySQL 버전을 맞춥니다(backend/app/be/db.py MYSQL_IMAGE).
 
 services:
   db:
-    image: mysql:8.0
+    # 운영·테스트와 같은 버전. 바꿀 때는 docker-compose.prod.yml과 backend/app/be/db.py의 MYSQL_IMAGE도 같이 바꾼다.
+    image: mysql:8.0.46
     restart: always
     environment:
       MYSQL_DATABASE: closure_agent

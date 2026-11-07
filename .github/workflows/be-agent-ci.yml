@@ -6,6 +6,8 @@ on:
       - "backend/app/**"
       - "backend/tests/**"
       - "backend/scripts/**"
+      - "backend/sql/**"
+      - "docker-compose*.yml"
       - "backend/requirements*.txt"
       - ".github/workflows/be-agent-ci.yml"
   # PR에서 통과해도 머지한 결과(develop)가 깨질 수 있다. 다른 PR이 먼저 들어가 둘이 함께 깨지는 경우다.

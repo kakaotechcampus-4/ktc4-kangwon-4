@@ -18,6 +18,7 @@ import pytest
 from sqlmodel import Session, SQLModel, create_engine, select
 from testcontainers.community.mysql import MySqlContainer
 
+from app.be.db import MYSQL_IMAGE
 from app.agent import runtime as runtime_module
 from app.agent.action_catalog import PROCEDURE_LABELS
 from app.agent.procedure_tool.store import ProcedureStoreError
@@ -77,7 +78,7 @@ def case_creation_clock(monkeypatch):
 @pytest.fixture(scope="module")
 def mysql_engine():
     container = MySqlContainer(
-        "mysql:8.0", dialect="pymysql", username="test", password="test",
+        MYSQL_IMAGE, dialect="pymysql", username="test", password="test",
         root_password="test", dbname="reviewed_procedures_test",
     ).with_env("TZ", "Asia/Seoul")
     with container:

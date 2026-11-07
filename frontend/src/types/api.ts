@@ -299,6 +299,16 @@ export interface CaseResultsSubmitAcceptedResponse {
 }
 
 /**
+ * `POST /cases/retry` 의 응답(#196). 본문 없이 보낸다.
+ *
+ * 실패한 가입·서류 판단을 **새로 만들지 않고 되돌려** 다시 돌린다. 그래서 번호는 실패했던 그 판단의
+ * 번호와 같다. 화면은 이 번호로 기다리지 않고 `GET /cases` 를 다시 불러 `PENDING` 을 본다.
+ */
+export interface CaseRetryResponse {
+  case_history_id: number
+}
+
+/**
  * 보낸 결과를 판단한 상태.
  *
  *   PENDING          아직 판단 중 — 잠시 후 다시 물어봐야 한다

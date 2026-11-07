@@ -104,6 +104,26 @@ describe('DocsPage — 서버', () => {
     expect(screen.getAllByRole('listitem')).toHaveLength(1)
   })
 
+  /** 안전 검사가 막은 서류는 다시 올려도 같은 판정이다. 다시 올리라 하지 않고 판정에 맞게 알린다 */
+  it.each([
+    ['AGENT_SAFETY_REFUSE', '이 파일은 자동으로 읽지 않았어요.'],
+    ['AGENT_SAFETY_CRISIS_SUPPORT', '지금 많이 힘드시다면, 혼자 견디지 않으셔도 돼요.'],
+  ])('올리기가 안전 검사(%s)에 막히면 그 판정에 맞게 안내한다', async (code, title) => {
+    const blocked = () => new Response(JSON.stringify({ detail: { code, message: '서버 문구' } }), { status: 422 })
+    serve(json(serverList([serverDocument()])), blocked)
+    renderAt('/docs')
+    await screen.findByText('transfer.pdf')
+
+    pick(new File(['%PDF'], 'scan.pdf', { type: 'application/pdf' }))
+
+    expect(await screen.findByText(title)).toBeInTheDocument()
+    expect(screen.queryByText('이 파일은 올릴 수 없어요.')).not.toBeInTheDocument()
+    expect(screen.getAllByRole('listitem')).toHaveLength(1)
+    if (code === 'AGENT_SAFETY_CRISIS_SUPPORT') {
+      expect(screen.getByRole('link', { name: '자살예방상담전화 109' })).toHaveAttribute('href', 'tel:109')
+    }
+  })
+
   /** 서버는 끊긴 뒤에도 읽기를 마치고 저장해 둔다. 같은 파일을 다시 올리면 된다고 알린다 */
   it('올리기를 오래 기다리다 끊기면 다시 올리라고 알린다', async () => {
     vi.useFakeTimers()
