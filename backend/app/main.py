@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
@@ -14,8 +15,12 @@ from app.be.routers.case import router as case_router
 from app.be.routers.document import router as document_router
 from app.be.db import get_engine, get_health_engine, reset_all_tables
 from app.be.services import judgment as judgment_service
+from app.be.services import official_document
 from app.be.services import procedure_registry
+from app.be.services import reviewed_procedure
 from app.common.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -28,6 +33,16 @@ async def lifespan(app: FastAPI):
     with Session(get_engine()) as session:
         procedure_registry.ensure_cafe_procedure_registry(session)
         session.commit()
+    # 공식 자료 본문도 전체가 함께 쓰는 한 벌이라 같은 이유로 여기서 넣는다(official_document 머리말).
+    # 가입 때 넣으면 빈 DB에 동시 가입이 오면 같은 문서를 둘 다 넣다 unique에 걸려 판단이 실패한다.
+    # 우리 쪽 자료 문제로 서버가 못 뜨면 안 되므로 실패는 남기기만 하고, 그때는 가입 때 다시 넣는다.
+    with Session(get_engine()) as session:
+        try:
+            official_document.ensure_official_documents(session, reviewed_procedure.load_reviewed_procedures())
+            session.commit()
+        except Exception:
+            session.rollback()
+            logger.exception("공식 자료 본문 적재 실패 — 가입 때 다시 시도한다")
     # 지난번에 꺼질 때 돌고 있던 판단은 결과 없이 PENDING으로 남는다. 그대로 두면 그 사장님은
     # 새 제출이 409로 막혀 영영 못 빠져나온다.
     judgment_service.release_abandoned_judgments()
