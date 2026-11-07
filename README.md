@@ -10,7 +10,7 @@
 ## 로컬 실행
 
 - FE: Node.js 버전·설치·로컬 API 연결은 [Frontend README](frontend/README.md)를 따릅니다.
-- BE: Python 3.12에서 `backend/requirements.txt`를 설치하고, 서류 기능은 `backend/app/agent/document_tool/requirements.txt`도 설치한 뒤 `backend/`에서 `python scripts/setup_agent_ocr.py`를 실행합니다. 루트의 `docker compose up -d db`는 개발용 MySQL만 실행합니다.
+- BE: Python 3.12에서 `backend/requirements.txt`를 설치하고, 서류 기능은 `backend/`에서 `python scripts/setup_agent_ocr.py`를 실행해 OCR을 준비합니다. 루트의 `docker compose up -d db`는 개발용 MySQL만 실행합니다.
 - 설정: AI 연결은 [루트 환경변수 예시](.env.example), 서버 인증·DB는 [backend 환경변수 예시](backend/.env.example)를 참고해 각각 `.env`와 `backend/.env`를 채웁니다. 비밀값은 커밋하지 않습니다.
 - BE는 `backend/`에서 `uvicorn app.main:app --reload`로 실행합니다. **`ENVIRONMENT=dev`는 서버 시작 때 연결된 DB 테이블을 초기화하므로 개발 전용 DB를 사용합니다.**
 
