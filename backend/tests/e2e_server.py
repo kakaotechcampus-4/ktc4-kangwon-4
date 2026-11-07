@@ -19,6 +19,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -39,10 +40,41 @@ import uvicorn  # noqa: E402
 from sqlmodel import Session  # noqa: E402
 
 import app.agent.runtime as runtime_module  # noqa: E402
+from app.agent.document_tool.documents import DocumentService  # noqa: E402
+from app.agent.document_tool.safety import ContentSafetyGuard  # noqa: E402
+from app.agent.document_tool.tool import DocumentTool  # noqa: E402
 from app.be.crud.member import create_member  # noqa: E402
 from app.be.db import get_engine, reset_all_tables  # noqa: E402
 from app.be.services import auth as auth_service  # noqa: E402
 from app.main import app  # noqa: E402
+from app.be.routers.document import get_document_tool  # noqa: E402
+from document_fixtures import DocumentClient, document_pdf  # noqa: E402
+
+
+async def synthetic_documents():
+    client = DocumentClient()
+    client.needs_confirmation = True
+    tool = DocumentTool(DocumentService(Path(os.environ["AGENT_DOCUMENT_DIR"]), client,
+        reviewer=client, safety=ContentSafetyGuard(client), submission_policy="RRN_BACK_ONLY"))
+    try:
+        yield tool
+    finally:
+        await tool.aclose()
+
+
+def document_files(directory):
+    # 텍스트 PDF 합성 자료다. 사진/OCR·실제 모델의 판독 품질을 검증하지 않는다.
+    fields = {
+        "CONSTRUCTION_STATEMENT": dict(amount="3,300,000원\n주민번호 800101-1234567", supplier="그린철거", buyer="봄날개인카페"),
+        "TAX_INVOICE": dict(supply_amount="3,000,000원", tax_amount="300,000원", supplier="그린철거", buyer="봄날개인카페"),
+        "BEFORE_PHOTO": {}, "AFTER_PHOTO": {},
+        "CLOSURE_CERTIFICATE": dict(closure_date="2026-10-31"),
+        "TRANSFER": dict(amount="3,300,000원", sender="김리본", recipient="그린철거"),
+    }
+    files = {kind: str(Path(directory) / f"{kind}.pdf") for kind in fields}
+    for kind, values in fields.items():
+        Path(files[kind]).write_bytes(document_pdf(kind, **values))
+    return files
 
 
 class FirstCandidateModel:
@@ -104,12 +136,16 @@ def _signed_in_member() -> dict[str, str]:
 
 def main() -> None:
     reset_all_tables()
-    # 가입 E2E와 결과 입력 경계 6건이 같은 Case를 덮어쓰지 않게 회원을 나눈다.
-    tokens = {**_signed_in_member(), "restoration_members": [_signed_in_member() for _ in range(6)]}
-    Path(os.environ["E2E_TOKEN_FILE"]).write_text(json.dumps(tokens), encoding="utf-8")
     port = int(os.environ.get("E2E_BE_PORT", "8765"))
-    with patch.object(runtime_module.StructuredLLMClient, "from_env", FirstCandidateModel.from_env), \
+    with TemporaryDirectory(prefix="reborn-e2e-documents-") as directory, \
+         patch.object(runtime_module.StructuredLLMClient, "from_env", FirstCandidateModel.from_env), \
          patch.object(runtime_module.LangfuseTraceSink, "from_env", lambda *a, **k: None):
+        os.environ["AGENT_DOCUMENT_DIR"] = directory
+        tokens = {**_signed_in_member(), "restoration_members": [_signed_in_member() for _ in range(6)],
+                  "document_member": _signed_in_member(), "document_directory": directory,
+                  "document_files": document_files(directory)}
+        Path(os.environ["E2E_TOKEN_FILE"]).write_text(json.dumps(tokens), encoding="utf-8")
+        app.dependency_overrides[get_document_tool] = synthetic_documents
         uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
 
 
