@@ -1,12 +1,7 @@
-"""화면에 돌려줄 때만 가림 문구를 원래 글자로 되돌린다.
+"""과거 가림 값의 출처를 확인한다. 화면 응답은 이 복원 함수를 사용하지 않는다.
 
-AI는 가린 글을 보고 판단하므로, 자유 글 칸에 들어가는 값에 가림 문구가 그대로 섞여
-나온다(실측: restoration_scope_detail = "서울특별시 마포구 [주소] 전체"). 그 값을
-그대로 보여주면 사장님은 자기가 쓴 주소 대신 [주소]를 보게 된다.
-
-**저장은 가린 채로 둔다.** 되돌려 저장하면 다음 판단 때 그 Case 값이 사실로 다시 AI에
-넘어가면서(case_snapshot._build_fact) 이번에 가린 개인정보가 그대로 나간다. 또 같은 주소를
-다시 말했을 때 한쪽만 되돌아 있으면 같은 주소가 다른 값으로 보여 충돌로 잡힌다.
+기존 고정 표식에 유일하게 대응하는 원문이 증명될 때만 내부 번호 호환에 사용한다.
+DB 값이나 화면 응답을 원문으로 되돌리지는 않는다.
 """
 
 from collections.abc import Iterable
@@ -16,7 +11,11 @@ from sqlmodel import Session
 from app.be.crud import case_field_history as case_field_history_crud
 from app.be.crud import case_history as case_history_crud
 from app.be.crud import conflict_reference as conflict_reference_crud
-from app.be.services.redaction import hidden_originals
+from app.be.services.redaction import (
+    fixed_placeholders,
+    hidden_originals,
+    numbered_placeholders,
+)
 
 
 class HiddenTextRestorer:
@@ -143,4 +142,30 @@ def restore_hidden_text(value: str, raw_input: str) -> str:
     return restored
 
 
-__all__ = ["HiddenTextRestorer", "build_restorer", "restore_hidden_text"]
+def build_case_placeholders(session: Session, case_id: int) -> tuple[dict[tuple[str, str], str], bool]:
+    """보존된 입력으로 번호를 재구성하고, 출처가 불명확한 과거 표식이 있는지도 돌려준다."""
+
+    histories = sorted(case_history_crud.get_case_histories_by_case_id(session, case_id), key=lambda h: h.id)
+    rows = case_field_history_crud.get_case_field_histories_by_case_id(session, case_id)
+    legacy = [(row, fixed_placeholders(row.after_value or "")) for row in rows]
+    originals: dict[str, set[str]] = {}
+    unclear: set[str] = set()
+    if any(placeholders for _, placeholders in legacy):
+        restorer = HiddenTextRestorer(session, case_id)
+        for row, placeholders in legacy:
+            for placeholder in placeholders:
+                original = restorer.restore(placeholder, row.case_history_id)
+                if original == placeholder:
+                    unclear.add(placeholder)
+                else:
+                    originals.setdefault(placeholder, set()).add(original)
+    aliases = {}
+    for placeholder, values in originals.items():
+        if len(values) == 1 and placeholder not in unclear:
+            aliases[(placeholder, next(iter(values)))] = placeholder
+        else:
+            unclear.add(placeholder)
+    return numbered_placeholders((h.raw_input for h in histories), aliases=aliases), bool(unclear)
+
+
+__all__ = ["HiddenTextRestorer", "build_case_placeholders", "build_restorer", "restore_hidden_text"]

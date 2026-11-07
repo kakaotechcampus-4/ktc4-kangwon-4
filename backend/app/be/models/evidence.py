@@ -162,8 +162,8 @@ class ConflictReference(CreatedAtMixin, table=True):
         ),
         description=(
             "이 충돌을 닫은 결정 이력. 위 case_history_id(충돌을 일으킨 제출)와 짝이다."
-            " 결정 이력에는 사장님이 쓴 글이 없어서, 그 결정이 바꾼 값의 가림 문구를 되돌릴 때"
-            " 이 칸을 거쳐 제출의 원문을 찾는다(services.unmasking). 결정 전이거나 이 칸이"
+            " 결정 이력에는 글이 없어 과거 고정 표식의 출처를 확인할 때 이 칸으로 제출을"
+            " 추적한다(services.unmasking). 화면 원문 복원은 하지 않는다. 결정 전이거나 이 칸이"
             " 생기기 전에 닫힌 충돌은 NULL"
         ),
     )
