@@ -1,0 +1,120 @@
+{
+  "code_sha": "0dfdd0deb5ec6f8524dfe9e0e8dd23e4330f3b8f",
+  "samples": 10,
+  "successes": 10,
+  "scope": "same diagnosis button choices in independent synthetic Cases, local real FE/BE/graph/MySQL and actual model, synthetic login",
+  "timings": {
+    "elapsed_ms": {
+      "p50_ms": 2610.956449999321,
+      "p95_ms": 5341.4187189991935,
+      "mean_ms": 2961.080040699744,
+      "min_ms": 2373.4029090010154,
+      "max_ms": 5341.4187189991935
+    },
+    "http_acceptance_ms": {
+      "p50_ms": 71.08112900000015,
+      "p95_ms": 118.41739999999982,
+      "mean_ms": 78.3401562,
+      "min_ms": 65.10608000000002,
+      "max_ms": 118.41739999999982
+    },
+    "screen_complete_ms": {
+      "p50_ms": 3203.737961,
+      "p95_ms": 6310.875156,
+      "mean_ms": 3966.1767728,
+      "min_ms": 3180.148148,
+      "max_ms": 6310.875156
+    },
+    "fresh_db_complete_ms": {
+      "p50_ms": 3556.5610195,
+      "p95_ms": 6640.452143999999,
+      "mean_ms": 4308.4735951,
+      "min_ms": 3516.0433709999998,
+      "max_ms": 6640.452143999999
+    },
+    "fresh_db_after_screen_ms": {
+      "p50_ms": 334.00809599999957,
+      "p95_ms": 383.13378399999965,
+      "mean_ms": 342.29848159999995,
+      "min_ms": 327.71397999999954,
+      "max_ms": 383.13378399999965
+    }
+  },
+  "cost": {
+    "runs": 10,
+    "successful_runs": 10,
+    "success_rate": 1.0,
+    "http_attempts": 10,
+    "usage_complete": true,
+    "attempts_with_reported_usage": 10,
+    "reported_tokens": {
+      "prompt_tokens": 154186,
+      "completion_tokens": 1234
+    },
+    "total_tokens": 155420,
+    "tokens_per_success": 15542.0,
+    "estimated_cost_krw": 22.613898,
+    "cost_per_success_krw": 2.2613898,
+    "uncached_cost_krw": 22.613898,
+    "cache_usage_complete": true,
+    "unpriced_models": [],
+    "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+    "mean_latency_ms": 2961.080040699744,
+    "median_latency_ms": 2610.956449999321,
+    "p95_latency_ms": 5341.4187189991935,
+    "max_latency_ms": 5341.4187189991935,
+    "transport_retries": 0,
+    "review_revise_count": null
+  },
+  "additional9_cost_krw": 20.377640999999997,
+  "observed_action_codes": [
+    "CONFIRM_RESTORATION_SCOPE"
+  ],
+  "method_notes": [
+    "n=10 nearest-rank p95 is the sample maximum, not a population estimate.",
+    "Screen time ends when Playwright confirms the stored next-action heading after an independent API completion check; this is observed UI readiness, not browser first-paint instrumentation.",
+    "Fresh DB completion includes starting a separate Python process and opening a new SQL session after screen confirmation; it is not pure SQL latency.",
+    "First judgment only. No before/after comparison or actual customer accuracy/OCR/safety classification claim.",
+    "Local timings include frontend polling at 3000ms; machine/network/provider cache and concurrent local work were not controlled as a load test."
+  ],
+  "scenario_source": {
+    "path": "frontend/e2e/case-create.spec.ts",
+    "sha256": "c3f315587d25f94c79658757e3a7eed3ad24394c3e85aaf5302acb1463b7528b"
+  },
+  "production_changes": 0,
+  "cumulative_actual_provider_calls_in_session": 69,
+  "cumulative_estimated_cost_in_session_krw": 2266.225068,
+  "harness_provenance": [
+    {
+      "cohort": "pilot",
+      "runs": 1,
+      "max_provider_calls": 3,
+      "harness_sha256": {
+        "reborn-service-timing-driver-20261107.py": "c1fc6f9c1f356ad97ab646dffa75244c8286187c9de150f2c9c3af93e5c4dbce",
+        "reborn-service-timing-server-20261107.py": "31c4553ee391e71f5df379d0f005bdefa6e4ac77e0ac8d9bec9363c381da79fc"
+      },
+      "instrumented_test_sha256": "5f6a5477b21816126b88b3e0977b999c99e3bbd0c77fd7314698c223e6b617f4"
+    },
+    {
+      "cohort": "additional9",
+      "runs": 9,
+      "max_provider_calls": 27,
+      "harness_sha256": {
+        "reborn-service-timing-driver-20261107.py": "323c7d86d3c27e84dc6b9aafb5fe7c484201c21231db82dda14c215568db2ea0",
+        "reborn-service-timing-server-20261107.py": "729a32b05536210e6dbe763facfd73109edf29bbdf0e4671efae717dadac0885"
+      },
+      "instrumented_test_sha256": "b89dd4de804333bf990c627b871108677fa19d3a930f895ca232c9f30599f3ea"
+    }
+  ],
+  "procedure_source": {
+    "path": "backend/app/common/reviewed-procedures.ko-KR.json",
+    "sha256": "2da204f302d2fd177000f00fa1957d881664b623f790d162c1e7fbd08bf04c7a"
+  },
+  "price_rates_krw_per_million": {
+    "gpt-6-luna": {
+      "input": 141.0,
+      "cached_input": 14.0,
+      "output": 708.0
+    }
+  }
+}
