@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 import jwt
 from fastapi import HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session
 
 from app.be.crud import member as member_crud
@@ -15,9 +16,14 @@ def login(session: Session, code: str) -> tuple[str, str, str]:
 
     member = member_crud.get_member_by_oauth_id(session, oauth_id)
     if member is None:
-        member = member_crud.create_member(session, oauth_id, nickname)
-    else:
-        member.nickname = nickname
+        try:
+            member = member_crud.create_member(session, oauth_id, nickname)
+        except IntegrityError:
+            # 같은 카카오 계정의 첫 로그인이 동시에 와서 다른 요청이 먼저 만들었다(#257).
+            # 되돌리고 그 회원으로 이어서 로그인한다
+            session.rollback()
+            member = member_crud.get_member_by_oauth_id(session, oauth_id)
+    member.nickname = nickname
 
     access_token = _create_access_token(member.id)
     refresh_token = _create_refresh_token(member.id)
