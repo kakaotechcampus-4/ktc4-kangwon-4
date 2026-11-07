@@ -96,6 +96,8 @@ for (const [index, scenario] of scenarios.entries()) {
       // 같은 Case에서 한 번 더 실제 진행 보고→상태 반영→다음 판단을 이어간다.
       await page.goto('/results')
       const progressText = '원상복구 작업을 시작했습니다.'
+      // 범위를 알린 뒤 할 일은 철거 준비 확인이라 [준비했어요] 버튼이 먼저 뜬다. 진행 보고는 직접 쓴다
+      await page.getByRole('button', { name: '직접 쓸게요', exact: true }).click()
       await page.getByRole('textbox').fill(progressText)
       const next = page.waitForResponse(response => response.url() === `${BE_URL}/cases/results`
         && response.request().method() === 'POST')

@@ -29,7 +29,13 @@ export interface RestorationAnswer {
   demolition_required: DemolitionRequired
 }
 
-export type ResultInputKind = 'TEXT' | 'RESTORATION_ANSWER'
+/** [준비했어요]를 눌렀다. [아직 안 했어요]는 보내지 않으므로 true만 있다 */
+export interface RequirementsConfirmed {
+  requirements_confirmed: true
+}
+
+/** 결과를 어떻게 받을지 서버가 정한다. 준비 확인 할 일은 [준비했어요 / 아직 안 했어요]로 받는다 */
+export type ResultInputKind = 'TEXT' | 'RESTORATION_ANSWER' | 'REQUIREMENTS_CONFIRMATION'
 
 /** 임대차계약서에 원상복구 조항이 있는지. 가입 때 사장님이 답한다 */
 export type RestorationClause = 'EXISTS' | 'NOT_EXISTS' | 'UNKNOWN'
@@ -267,8 +273,9 @@ export interface CaseResultsEntryResponse {
 
 /** `POST /cases/results` 로 보내는 것 */
 export type CaseResultsSubmitRequest = { case_history_id: number } & (
-  | { raw_input: string; restoration_answer?: never }
-  | { restoration_answer: RestorationAnswer; raw_input?: never }
+  | { raw_input: string; restoration_answer?: never; requirements_confirmed?: never }
+  | { restoration_answer: RestorationAnswer; raw_input?: never; requirements_confirmed?: never }
+  | (RequirementsConfirmed & { raw_input?: never; restoration_answer?: never })
 )
 
 /**
