@@ -176,6 +176,8 @@ describe('CurrentCasePage', () => {
       expect(
         screen.getByText('철거가 필요한지 판단하려면 원상복구 범위를 먼저 알아야 합니다.'),
       ).toBeInTheDocument()
+      // 할 일과 이유는 AI가 정한 것이라 고지를 붙인다
+      expect(screen.getByText(/리본\(AI\)이 정리한 안내예요/)).toBeInTheDocument()
     })
 
     it('물어볼 내용 보기를 누르면 할 일 상세로 간다', async () => {
@@ -227,6 +229,8 @@ describe('CurrentCasePage', () => {
       expect(
         await screen.findByRole('heading', { level: 2, name: '다음 할 일을 정하지 못했어요' }),
       ).toBeInTheDocument()
+      // AI가 정한 안내가 없는 카드에는 고지를 붙이지 않는다
+      expect(screen.queryByText(/리본\(AI\)이 정리한 안내예요/)).not.toBeInTheDocument()
     })
 
     /**

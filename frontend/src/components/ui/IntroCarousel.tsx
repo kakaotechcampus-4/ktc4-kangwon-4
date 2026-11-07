@@ -12,6 +12,8 @@ import {
 } from '@karrotmarket/react-monochrome-icon'
 import { useState, type ReactNode } from 'react'
 
+import { AiNotice } from './AiNotice'
+
 /**
  * 소개 한 장. 제목은 앞 · 강조 · 뒤 세 조각으로 나눠 강조만 주황으로 칠한다.
  * 줄바꿈 자리는 `\n`으로 적고 `whitespace-pre-line`으로 살린다.
@@ -21,6 +23,8 @@ interface Slide {
   highlight: string
   post: string
   sub: string
+  /** 처음 쓸 때 한 번 AI 사용을 알린다. 마지막 장에만 둔다(#237) */
+  aiNotice?: boolean
   picture: ReactNode
 }
 
@@ -216,6 +220,7 @@ const SLIDES: Slide[] = [
     highlight: '사장님이 직접',
     post: ',\n준비는 함께해요',
     sub: '제출할 파일을 한 번에 묶어드려요',
+    aiNotice: true,
     picture: <SubmitPicture />,
   },
 ]
@@ -270,6 +275,7 @@ export function IntroCarousel() {
               {slide.post}
             </h1>
             <p className="mt-2.5 text-17 text-fg-neutral-muted">{slide.sub}</p>
+            {slide.aiNotice && <AiNotice className="mt-2 justify-center" />}
           </div>
           <div className="motion-safe:animate-picture-in">{slide.picture}</div>
         </div>
