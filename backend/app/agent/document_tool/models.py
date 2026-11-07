@@ -45,6 +45,14 @@ DocumentFieldName = Literal[
 ]
 
 
+DOCUMENT_FIELD_LABELS: dict[DocumentFieldName, str] = {
+    "business_name": "상호", "supplier": "공급자", "buyer": "공급받는 자",
+    "sender": "보낸 사람", "recipient": "받는 사람", "account_holder": "예금주",
+    "amount": "금액", "supply_amount": "공급가액", "tax_amount": "세액",
+    "date": "날짜", "closure_date": "폐업일", "restoration_clause": "원상복구 조항",
+}
+
+
 class ExtractedField(Model):
     name: DocumentFieldName
     value: str = Field(min_length=1)
@@ -85,8 +93,11 @@ class CheckStep(Model):
     status: Literal["WAITING", "RUNNING", "DONE", "NEEDS_CONFIRMATION", "ERROR"]
 
 
+DocumentCheckStatus = Literal["COMPLETE", "ISSUES", "ERROR"]
+
+
 class DocumentCheck(Model):
-    status: Literal["COMPLETE", "ISSUES", "ERROR"]
+    status: DocumentCheckStatus
     steps: list[CheckStep]
     issues: list[Issue]
     document_digest: str
@@ -111,7 +122,8 @@ class ReviewDecision(Model):
 # 날짜(일반 날짜·폐업일)도 넣지 않는다. AI가 저장하는 날짜는 폐업 예정일뿐이라, 이미 지난
 # 폐업일이 예정일로 들어갈 수 있다(#137 승준님 리뷰). 날짜 대조는 서류 점검(checks.py)이 한다.
 REPLAN_FIELD_LABELS: dict[DocumentFieldName, str] = {
-    "amount": "금액", "supply_amount": "공급가액", "tax_amount": "세액", "restoration_clause": "원상복구 조항",
+    name: DOCUMENT_FIELD_LABELS[name]
+    for name in ("amount", "supply_amount", "tax_amount", "restoration_clause")
 }
 
 

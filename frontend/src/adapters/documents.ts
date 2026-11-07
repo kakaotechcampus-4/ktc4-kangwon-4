@@ -15,15 +15,14 @@ import { isReadableText } from './case'
  * 점검 규칙이 두 곳에 생긴다(FE 규칙 1).
  *
  * 응답 모양은 `types/api.ts` 의 `DocumentListResponse`(#159)다. 그래도 `unknown` 으로 받아 칸마다 본다 —
- * `check.status` 처럼 서버가 글자로 열어 둔 칸이 있고, 깨진 목록을 빈 서류함으로 그리면 안 된다.
+ * 깨진 목록을 빈 서류함으로 그리면 안 된다.
  */
 
 /**
  * 서류에서 꺼낸 값 이름 → 화면 말.
  *
- * 서버가 값마다 이름(`label`)을 주기로 했지만(#159 리뷰, 승준님 동의) 아직 들어가지 않았다.
- * 서버가 주면 그것을 쓰고, 없을 때만 이 표를 쓴다. 표에도 없으면 그 값은 보여주지 않는다 —
- * 영어 칸 이름을 사장님께 보여줄 수 없다.
+ * FE와 BE가 따로 반영되는 동안 예전 응답에 label 키가 없을 때만 쓴다(#159 후속).
+ * 새 서버의 이름을 이 표로 덮지 않는다. 모르는 칸은 값을 보존하되 영어 이름을 화면에 내지 않는다.
  */
 const FIELD_LABEL: Record<string, string> = {
   business_name: '상호',
@@ -43,9 +42,7 @@ const FIELD_LABEL: Record<string, string> = {
 /**
  * 사장님이 고를 수 있는 서류 종류. 서버 `DOCUMENT_LABELS`(#128 문서 Tool)와 같은 순서·이름이다.
  *
- * 종류를 모르는(`UNKNOWN`) 서류는 사장님이 여기서 골라 확인한다. 서버가 종류 목록을 응답에 싣기로
- * 했지만(#159 리뷰, 승준님 동의) 아직 들어가지 않아 FE가 들고 있다. 서버가 주게 되면 그쪽으로
- * 바꾼다. "종류 확인 필요"(`UNKNOWN`)는 고를 것이 아니라 뺐다.
+ * document_kinds 키가 없는 예전 BE 응답과 Mock에만 쓴다. 새 서버의 선택 목록은 그대로 사용한다.
  */
 export const DOCUMENT_KINDS: readonly { kind: string; label: string }[] = [
   { kind: 'LEASE', label: '임대차계약서' },
@@ -76,37 +73,43 @@ const asRow = (value: unknown): Row | null =>
  * 꺼낸 값들. 사장님이 확인한 값이 있으면 그것이 맞는 값이라 그쪽을 쓴다.
  * 서버가 같은 칸을 여러 쪽에서 꺼냈으면(여러 페이지) 처음 것만 둔다.
  */
-function toFields(fields: unknown, confirmed: unknown): DocumentFieldView[] | null {
+function toFields(fields: unknown, confirmed: unknown, legacy: boolean): DocumentFieldView[] | null {
   if (!Array.isArray(fields)) return null
 
-  const values = new Map<string, { value: string; label?: string }>()
+  const values = new Map<string, { value: string; label: string | null }>()
   for (const item of fields) {
     const row = asRow(item)
     if (row === null || !isReadableText(row.name) || typeof row.value !== 'string') return null
+    if (!legacy && !Object.hasOwn(row, 'label')) return null
+    const label = Object.hasOwn(row, 'label') ? row.label : FIELD_LABEL[row.name] ?? null
+    if (Object.hasOwn(row, 'label') && (!isReadableText(label) || !label.trim())) return null
     if (!values.has(row.name)) {
-      values.set(row.name, { value: row.value, label: isReadableText(row.label) ? row.label : undefined })
+      values.set(row.name, { value: row.value, label: label as string | null })
     }
   }
 
   const confirmedRow = asRow(confirmed)
   if (confirmedRow !== null) {
+    const labels = new Map([...values].map(([name, field]) => [name, field.label]))
     values.clear()
     for (const [name, value] of Object.entries(confirmedRow)) {
-      if (typeof value === 'string') values.set(name, { value })
+      if (typeof value === 'string') {
+        values.set(name, { value, label: labels.get(name) ?? (legacy ? FIELD_LABEL[name] ?? null : null) })
+      }
     }
   }
 
   // 이름을 모르는 칸도 버리지 않는다. 화면에는 안 보이지만, 확인할 때 원래 값 그대로 같이 보내야
   // 서버가 그 칸을 "값 없음"으로 저장하지 않는다(#159: 받은 값만 확인한 값으로 남긴다)
-  return [...values].map(([name, { value, label }]) => ({ name, label: label ?? FIELD_LABEL[name] ?? null, value }))
+  return [...values].map(([name, { value, label }]) => ({ name, label, value }))
 }
 
-function toDocument(value: unknown): DocumentView | null {
+function toDocument(value: unknown, legacy: boolean): DocumentView | null {
   const row = asRow(value)
   if (row === null) return null
 
   const { document_id, filename, kind, kind_label, needs_confirmation } = row
-  const fields = toFields(row.fields, row.confirmed_fields)
+  const fields = toFields(row.fields, row.confirmed_fields, legacy)
   if (
     !isReadableText(document_id) ||
     typeof filename !== 'string' ||
@@ -119,6 +122,19 @@ function toDocument(value: unknown): DocumentView | null {
   }
 
   return { id: document_id, filename, kind, kindLabel: kind_label, needsConfirmation: needs_confirmation, fields }
+}
+
+function toDocumentKinds(row: Row): DocumentsView['documentKinds'] | null {
+  if (!Object.hasOwn(row, 'document_kinds')) return DOCUMENT_KINDS
+  if (!Array.isArray(row.document_kinds)) return null
+  const kinds: { kind: string; label: string }[] = []
+  for (const value of row.document_kinds) {
+    const item = asRow(value)
+    if (item === null || !isReadableText(item.kind) || !item.kind.trim() || !isReadableText(item.label) || !item.label.trim() ||
+        kinds.some((option) => option.kind === item.kind)) return null
+    kinds.push({ kind: item.kind, label: item.label })
+  }
+  return kinds
 }
 
 function toCheck(value: unknown): DocumentCheckView | null | undefined {
@@ -153,13 +169,15 @@ function toCheck(value: unknown): DocumentCheckView | null | undefined {
 export function toDocumentsView(body: unknown): DocumentsView | null {
   const row = asRow(body)
   if (row === null || !Array.isArray(row.documents)) return null
-  // FE 자동 배포와 BE 수동 배포 사이에는 예전 응답이 올 수 있다(#251). 키가 없을 때만 이름을 비운다.
+  // FE와 BE가 따로 반영되는 동안 예전 응답이 올 수 있다(#251). 키가 없을 때만 이름을 비운다.
   const storeName = Object.hasOwn(row, 'store_name') ? row.store_name : null
   if (storeName !== null && typeof storeName !== 'string') return null
+  const documentKinds = toDocumentKinds(row)
+  if (documentKinds === null) return null
 
   const documents: DocumentView[] = []
   for (const item of row.documents) {
-    const document = toDocument(item)
+    const document = toDocument(item, !Object.hasOwn(row, 'document_kinds'))
     if (document === null) return null
     documents.push(document)
   }
@@ -167,5 +185,5 @@ export function toDocumentsView(body: unknown): DocumentsView | null {
   const check = toCheck(row.check ?? null)
   if (check === undefined) return null
 
-  return { storeName, documents, check }
+  return { storeName, documentKinds, documents, check }
 }
