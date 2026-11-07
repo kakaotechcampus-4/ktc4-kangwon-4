@@ -288,6 +288,27 @@ INPUTS = Path(__file__).resolve().parents[2] / "docs/agent/evaluations/2026-11-0
 HELD_OUT = INPUTS.with_name("2026-11-07-planning-held-out.jsonl")
 
 
+@pytest.mark.parametrize("field,value", [
+    ("difficulty", ...), ("expected_branch", ...), ("raw_input", ...),
+    ("difficulty", None), ("difficulty", 1), ("difficulty", ""),
+    ("expected_branch", None), ("expected_branch", "NORMAL"),
+    ("raw_input", None), ("raw_input", 1), ("raw_input", "  "),
+    ("case_create_request", []), ("current_facts", []),
+    ("expected_fact_changes", []), ("must_not", {}), ("must_not", [{}]),
+])
+def test_invalid_dataset_row_is_rejected_before_building_graph_input(tmp_path, monkeypatch, field, value):
+    data = json.loads(INPUTS.read_text().splitlines()[0])
+    if value is ...:
+        data.pop(field)
+    else:
+        data[field] = value
+    path = tmp_path / "invalid.jsonl"
+    path.write_text(json.dumps(data, ensure_ascii=False) + "\n")
+    monkeypatch.setattr("scripts.evaluate_planning.build_graph_input", lambda *a, **kw: pytest.fail("input built"))
+    with pytest.raises(SystemExit, match=rf"S01 \(line 1\):.*{field}"):
+        load_dataset(path)
+
+
 def test_frozen_planning_inputs_keep_held_out_cases_separate_and_cover_the_buttons():
     main, held_out = load_dataset(INPUTS), load_dataset(HELD_OUT)
     assert len(main) == 20 and len(held_out) == 4 and not main.keys() & held_out.keys()
