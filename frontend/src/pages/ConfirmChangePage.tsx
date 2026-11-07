@@ -205,9 +205,9 @@ export function ConfirmChangePage() {
           </p>
         </div>
 
-        {/* 어느 문장 때문에 이 화면이 떴는지 모르면 무엇을 고르는지도 알 수 없다 */}
+        {/* 어떤 새 내용과 기록이 다른지 알 수 있도록 확인할 내용을 함께 보여준다 */}
         <figure className="rounded-2xl p-4.5 ring-1 ring-stroke-neutral-muted ring-inset">
-          <figcaption className="sr-only">이번에 하신 말씀</figcaption>
+          <figcaption className="sr-only">새로 확인한 내용</figcaption>
           <blockquote className="text-15 text-fg-neutral-subtle">“{rawInput}”</blockquote>
         </figure>
 

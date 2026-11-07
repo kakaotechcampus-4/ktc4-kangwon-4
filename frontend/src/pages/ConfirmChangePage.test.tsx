@@ -84,6 +84,14 @@ afterEach(() => {
  * 기본 선택을 두지 않는 것과 같은 이유다.
  */
 describe('ConfirmChangePage', () => {
+  it('서류에서 온 충돌 인용에는 중립적인 제목을 쓴다', () => {
+    const rawInput = '확인한 임대차계약서: 원상복구는 일부만 필요합니다.'
+    renderWith({ ...TWO_CONFLICTS, rawInput })
+
+    expect(screen.getByRole('figure')).toHaveTextContent(/^새로 확인한 내용/)
+    expect(screen.getByRole('figure')).toHaveTextContent(rawInput)
+  })
+
   it('고르기 전에는 진행할 수 없다', () => {
     renderWith(TWO_CONFLICTS)
 
