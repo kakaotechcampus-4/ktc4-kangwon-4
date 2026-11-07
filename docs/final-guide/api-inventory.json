@@ -1,0 +1,211 @@
+{
+  "/login/form": {
+    "get": {
+      "operation_id": "login_form_login_form_get",
+      "responses": [
+        "200",
+        "422"
+      ]
+    }
+  },
+  "/login": {
+    "post": {
+      "operation_id": "login_login_post",
+      "responses": [
+        "200",
+        "422"
+      ]
+    }
+  },
+  "/logout": {
+    "post": {
+      "operation_id": "logout_logout_post",
+      "responses": [
+        "200",
+        "422"
+      ]
+    }
+  },
+  "/reissue": {
+    "post": {
+      "operation_id": "reissue_reissue_post",
+      "responses": [
+        "200",
+        "422"
+      ]
+    }
+  },
+  "/cases": {
+    "post": {
+      "operation_id": "create_case_cases_post",
+      "responses": [
+        "200",
+        "422"
+      ]
+    },
+    "get": {
+      "operation_id": "get_case_cases_get",
+      "responses": [
+        "200",
+        "422"
+      ]
+    }
+  },
+  "/cases/logs": {
+    "get": {
+      "operation_id": "get_case_logs_cases_logs_get",
+      "responses": [
+        "200",
+        "422"
+      ]
+    }
+  },
+  "/cases/results": {
+    "get": {
+      "operation_id": "get_case_results_cases_results_get",
+      "responses": [
+        "200",
+        "422"
+      ]
+    },
+    "post": {
+      "operation_id": "submit_case_results_cases_results_post",
+      "responses": [
+        "200",
+        "422"
+      ]
+    }
+  },
+  "/cases/retry": {
+    "post": {
+      "operation_id": "retry_case_judgment_cases_retry_post",
+      "responses": [
+        "200",
+        "422"
+      ]
+    }
+  },
+  "/cases/results/decision": {
+    "post": {
+      "operation_id": "submit_case_conflicts_decision_cases_results_decision_post",
+      "responses": [
+        "200",
+        "422"
+      ]
+    }
+  },
+  "/cases/results/status": {
+    "get": {
+      "operation_id": "get_case_results_submit_status_cases_results_status_get",
+      "responses": [
+        "200",
+        "422"
+      ]
+    }
+  },
+  "/cases/roadmap": {
+    "get": {
+      "operation_id": "get_case_roadmap_cases_roadmap_get",
+      "responses": [
+        "200",
+        "422"
+      ]
+    }
+  },
+  "/cases/checklists/{task_id}": {
+    "put": {
+      "operation_id": "update_case_checklist_cases_checklists__task_id__put",
+      "responses": [
+        "200",
+        "422"
+      ]
+    }
+  },
+  "/cases/support-approval": {
+    "put": {
+      "operation_id": "update_case_support_approval_cases_support_approval_put",
+      "responses": [
+        "200",
+        "422"
+      ]
+    }
+  },
+  "/cases/closure-report": {
+    "put": {
+      "operation_id": "update_case_closure_report_cases_closure_report_put",
+      "responses": [
+        "200",
+        "422"
+      ]
+    }
+  },
+  "/cases/deposit-return": {
+    "put": {
+      "operation_id": "update_case_deposit_return_cases_deposit_return_put",
+      "responses": [
+        "200",
+        "422"
+      ]
+    }
+  },
+  "/cases/documents": {
+    "get": {
+      "operation_id": "list_documents_cases_documents_get",
+      "responses": [
+        "200",
+        "422"
+      ]
+    },
+    "post": {
+      "operation_id": "upload_document_cases_documents_post",
+      "responses": [
+        "200",
+        "422"
+      ]
+    }
+  },
+  "/cases/documents/{document_id}/confirm": {
+    "post": {
+      "operation_id": "confirm_document_cases_documents__document_id__confirm_post",
+      "responses": [
+        "200",
+        "422"
+      ]
+    }
+  },
+  "/cases/documents/{document_id}": {
+    "delete": {
+      "operation_id": "remove_document_cases_documents__document_id__delete",
+      "responses": [
+        "200",
+        "422"
+      ]
+    }
+  },
+  "/cases/documents/check": {
+    "post": {
+      "operation_id": "check_documents_cases_documents_check_post",
+      "responses": [
+        "200",
+        "422"
+      ]
+    }
+  },
+  "/cases/documents/settlement.zip": {
+    "get": {
+      "operation_id": "download_settlement_cases_documents_settlement_zip_get",
+      "responses": [
+        "200",
+        "422"
+      ]
+    }
+  },
+  "/health": {
+    "get": {
+      "operation_id": "health_health_get",
+      "responses": [
+        "200"
+      ]
+    }
+  }
+}

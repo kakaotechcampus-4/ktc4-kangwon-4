@@ -80,6 +80,14 @@ export function LoginPage() {
             가짜로 로그인 (미리보기용)
           </Button>
         )}
+        <div className="flex items-center justify-center gap-4 text-12 text-fg-neutral-muted">
+          <a href="/safety/" className="py-1 underline underline-offset-4">
+            운영철학과 안심 이용
+          </a>
+          <a href="/developers/" className="py-1 underline underline-offset-4">
+            서비스 안내와 개발 문서
+          </a>
+        </div>
       </div>
     </div>
   )

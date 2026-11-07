@@ -1,0 +1,4112 @@
+{
+  "checked_at": "2026-11-07T13:05:49+09:00",
+  "maintain_through": "2026-11-11",
+  "openapi": {
+    "components": {
+      "schemas": {
+        "Body_upload_document_cases_documents_post": {
+          "properties": {
+            "file": {
+              "contentMediaType": "application/octet-stream",
+              "title": "File",
+              "type": "string"
+            },
+            "kind": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/DocumentKind"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "file"
+          ],
+          "title": "Body_upload_document_cases_documents_post",
+          "type": "object"
+        },
+        "CaseChecklistResponse": {
+          "properties": {
+            "completed": {
+              "title": "Completed",
+              "type": "boolean"
+            },
+            "task_id": {
+              "enum": [
+                "before_photo",
+                "check_loan",
+                "choose_contractor",
+                "closure_certificate",
+                "contractor_documents",
+                "deposit_settlement",
+                "dispose_stock",
+                "income_tax",
+                "notify_employees",
+                "notify_landlord",
+                "post_closure_support",
+                "settlement_submission",
+                "support_application",
+                "support_conditions",
+                "terminate_contracts",
+                "vat_submission"
+              ],
+              "title": "Task Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "task_id",
+            "completed"
+          ],
+          "title": "CaseChecklistResponse",
+          "type": "object"
+        },
+        "CaseChecklistUpdateRequest": {
+          "properties": {
+            "completed": {
+              "title": "Completed",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "completed"
+          ],
+          "title": "CaseChecklistUpdateRequest",
+          "type": "object"
+        },
+        "CaseClosureReportRequest": {
+          "properties": {
+            "address_detail": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Address Detail"
+            },
+            "closure_date": {
+              "format": "date",
+              "title": "Closure Date",
+              "type": "string"
+            },
+            "closure_reason": {
+              "enum": [
+                "BUSINESS_SLUMP",
+                "PERSONAL",
+                "OTHER"
+              ],
+              "title": "Closure Reason",
+              "type": "string"
+            },
+            "road_address": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Road Address",
+              "type": "string"
+            }
+          },
+          "required": [
+            "closure_date",
+            "closure_reason",
+            "road_address"
+          ],
+          "title": "CaseClosureReportRequest",
+          "type": "object"
+        },
+        "CaseClosureReportResponse": {
+          "properties": {
+            "address_detail": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Address Detail"
+            },
+            "closure_date": {
+              "format": "date",
+              "title": "Closure Date",
+              "type": "string"
+            },
+            "closure_reason": {
+              "enum": [
+                "BUSINESS_SLUMP",
+                "PERSONAL",
+                "OTHER"
+              ],
+              "title": "Closure Reason",
+              "type": "string"
+            },
+            "road_address": {
+              "title": "Road Address",
+              "type": "string"
+            }
+          },
+          "required": [
+            "closure_date",
+            "closure_reason",
+            "road_address",
+            "address_detail"
+          ],
+          "title": "CaseClosureReportResponse",
+          "type": "object"
+        },
+        "CaseConflictsDecisionItem": {
+          "properties": {
+            "conflict_reference_id": {
+              "title": "Conflict Reference Id",
+              "type": "integer"
+            },
+            "side": {
+              "enum": [
+                "PROPOSED",
+                "STORED"
+              ],
+              "title": "Side",
+              "type": "string"
+            }
+          },
+          "required": [
+            "conflict_reference_id",
+            "side"
+          ],
+          "title": "CaseConflictsDecisionItem",
+          "type": "object"
+        },
+        "CaseConflictsDecisionRequest": {
+          "properties": {
+            "decisions": {
+              "items": {
+                "$ref": "#/components/schemas/CaseConflictsDecisionItem"
+              },
+              "title": "Decisions",
+              "type": "array"
+            }
+          },
+          "required": [
+            "decisions"
+          ],
+          "title": "CaseConflictsDecisionRequest",
+          "type": "object"
+        },
+        "CaseCreateRequest": {
+          "properties": {
+            "business_type": {
+              "enum": [
+                "CAFE",
+                "RESTAURANT"
+              ],
+              "title": "Business Type",
+              "type": "string"
+            },
+            "employee_count": {
+              "anyOf": [
+                {
+                  "maximum": 1000.0,
+                  "minimum": 0.0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Employee Count"
+            },
+            "employment_insurance_enrolled": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Employment Insurance Enrolled"
+            },
+            "franchise_status": {
+              "title": "Franchise Status",
+              "type": "boolean"
+            },
+            "had_employees": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Had Employees"
+            },
+            "has_business_loan": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Has Business Loan"
+            },
+            "has_service_contracts": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Has Service Contracts"
+            },
+            "health_insurance_enrolled": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Health Insurance Enrolled"
+            },
+            "industrial_accident_insurance_enrolled": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Industrial Accident Insurance Enrolled"
+            },
+            "lease_status": {
+              "enum": [
+                "LEASED_PAID",
+                "LEASED_FREE",
+                "OWNED"
+              ],
+              "title": "Lease Status",
+              "type": "string"
+            },
+            "pension_enrolled": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Pension Enrolled"
+            },
+            "planned_closure_date": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Planned Closure Date"
+            },
+            "planned_closure_month": {
+              "anyOf": [
+                {
+                  "pattern": "^\\d{4}-(0[1-9]|1[0-2])$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Planned Closure Month"
+            },
+            "restoration_clause": {
+              "default": "UNKNOWN",
+              "enum": [
+                "EXISTS",
+                "NOT_EXISTS",
+                "UNKNOWN"
+              ],
+              "title": "Restoration Clause",
+              "type": "string"
+            },
+            "store_name": {
+              "anyOf": [
+                {
+                  "maxLength": 50,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Store Name"
+            }
+          },
+          "required": [
+            "business_type",
+            "franchise_status",
+            "lease_status"
+          ],
+          "title": "CaseCreateRequest",
+          "type": "object"
+        },
+        "CaseCreateResponse": {
+          "properties": {
+            "business_type": {
+              "title": "Business Type",
+              "type": "string"
+            },
+            "case_status": {
+              "enum": [
+                "IN_PROGRESS",
+                "COMPLETED"
+              ],
+              "title": "Case Status",
+              "type": "string"
+            },
+            "completed_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Completed At"
+            },
+            "created_at": {
+              "format": "date-time",
+              "title": "Created At",
+              "type": "string"
+            },
+            "demolition_required": {
+              "enum": [
+                "UNKNOWN",
+                "REQUIRED",
+                "NOT_REQUIRED"
+              ],
+              "title": "Demolition Required",
+              "type": "string"
+            },
+            "employee_count": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Employee Count"
+            },
+            "franchise_status": {
+              "title": "Franchise Status",
+              "type": "boolean"
+            },
+            "has_business_loan": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Has Business Loan"
+            },
+            "has_service_contracts": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Has Service Contracts"
+            },
+            "id": {
+              "title": "Id",
+              "type": "integer"
+            },
+            "lease_status": {
+              "enum": [
+                "LEASED_PAID",
+                "LEASED_FREE",
+                "OWNED"
+              ],
+              "title": "Lease Status",
+              "type": "string"
+            },
+            "member_id": {
+              "title": "Member Id",
+              "type": "integer"
+            },
+            "planned_closure_date": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Planned Closure Date"
+            },
+            "planned_closure_month": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Planned Closure Month"
+            },
+            "restoration_clause": {
+              "enum": [
+                "EXISTS",
+                "NOT_EXISTS",
+                "UNKNOWN"
+              ],
+              "title": "Restoration Clause",
+              "type": "string"
+            },
+            "restoration_scope": {
+              "enum": [
+                "UNKNOWN",
+                "PARTIAL",
+                "FULL",
+                "NOT_REQUIRED"
+              ],
+              "title": "Restoration Scope",
+              "type": "string"
+            },
+            "restoration_scope_detail": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Restoration Scope Detail"
+            },
+            "restoration_status": {
+              "enum": [
+                "UNKNOWN",
+                "NOT_STARTED",
+                "IN_PROGRESS",
+                "COMPLETED",
+                "NOT_REQUIRED"
+              ],
+              "title": "Restoration Status",
+              "type": "string"
+            },
+            "store_name": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Store Name"
+            },
+            "updated_at": {
+              "format": "date-time",
+              "title": "Updated At",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "member_id",
+            "store_name",
+            "business_type",
+            "franchise_status",
+            "employee_count",
+            "has_business_loan",
+            "has_service_contracts",
+            "case_status",
+            "lease_status",
+            "restoration_clause",
+            "restoration_status",
+            "restoration_scope",
+            "restoration_scope_detail",
+            "demolition_required",
+            "planned_closure_date",
+            "planned_closure_month",
+            "completed_at",
+            "created_at",
+            "updated_at"
+          ],
+          "title": "CaseCreateResponse",
+          "type": "object"
+        },
+        "CaseDepositReturnRequest": {
+          "properties": {
+            "result": {
+              "enum": [
+                "FULL",
+                "PARTIAL",
+                "NONE"
+              ],
+              "title": "Result",
+              "type": "string"
+            }
+          },
+          "required": [
+            "result"
+          ],
+          "title": "CaseDepositReturnRequest",
+          "type": "object"
+        },
+        "CaseDepositReturnResponse": {
+          "properties": {
+            "result": {
+              "enum": [
+                "FULL",
+                "PARTIAL",
+                "NONE"
+              ],
+              "title": "Result",
+              "type": "string"
+            }
+          },
+          "required": [
+            "result"
+          ],
+          "title": "CaseDepositReturnResponse",
+          "type": "object"
+        },
+        "CaseGetDetailResponse": {
+          "properties": {
+            "address_detail": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Address Detail"
+            },
+            "business_type": {
+              "title": "Business Type",
+              "type": "string"
+            },
+            "case_status": {
+              "enum": [
+                "IN_PROGRESS",
+                "COMPLETED"
+              ],
+              "title": "Case Status",
+              "type": "string"
+            },
+            "closure_date": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Closure Date"
+            },
+            "closure_reason": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "BUSINESS_SLUMP",
+                    "PERSONAL",
+                    "OTHER"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Closure Reason"
+            },
+            "completed_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Completed At"
+            },
+            "demolition_required": {
+              "enum": [
+                "UNKNOWN",
+                "REQUIRED",
+                "NOT_REQUIRED"
+              ],
+              "title": "Demolition Required",
+              "type": "string"
+            },
+            "deposit_return_result": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "FULL",
+                    "PARTIAL",
+                    "NONE"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Deposit Return Result"
+            },
+            "employee_count": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Employee Count"
+            },
+            "franchise_status": {
+              "title": "Franchise Status",
+              "type": "boolean"
+            },
+            "has_business_loan": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Has Business Loan"
+            },
+            "has_service_contracts": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Has Service Contracts"
+            },
+            "id": {
+              "title": "Id",
+              "type": "integer"
+            },
+            "lease_status": {
+              "enum": [
+                "LEASED_PAID",
+                "LEASED_FREE",
+                "OWNED"
+              ],
+              "title": "Lease Status",
+              "type": "string"
+            },
+            "member_id": {
+              "title": "Member Id",
+              "type": "integer"
+            },
+            "planned_closure_date": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Planned Closure Date"
+            },
+            "planned_closure_month": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Planned Closure Month"
+            },
+            "restoration_clause": {
+              "enum": [
+                "EXISTS",
+                "NOT_EXISTS",
+                "UNKNOWN"
+              ],
+              "title": "Restoration Clause",
+              "type": "string"
+            },
+            "restoration_scope": {
+              "enum": [
+                "UNKNOWN",
+                "PARTIAL",
+                "FULL",
+                "NOT_REQUIRED"
+              ],
+              "title": "Restoration Scope",
+              "type": "string"
+            },
+            "restoration_scope_detail": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Restoration Scope Detail"
+            },
+            "restoration_status": {
+              "enum": [
+                "UNKNOWN",
+                "NOT_STARTED",
+                "IN_PROGRESS",
+                "COMPLETED",
+                "NOT_REQUIRED"
+              ],
+              "title": "Restoration Status",
+              "type": "string"
+            },
+            "road_address": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Road Address"
+            },
+            "store_name": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Store Name"
+            }
+          },
+          "required": [
+            "id",
+            "member_id",
+            "store_name",
+            "business_type",
+            "franchise_status",
+            "employee_count",
+            "has_business_loan",
+            "has_service_contracts",
+            "lease_status",
+            "restoration_clause",
+            "restoration_status",
+            "restoration_scope",
+            "restoration_scope_detail",
+            "demolition_required",
+            "planned_closure_date",
+            "planned_closure_month",
+            "case_status",
+            "completed_at",
+            "closure_date",
+            "closure_reason",
+            "road_address",
+            "address_detail",
+            "deposit_return_result"
+          ],
+          "title": "CaseGetDetailResponse",
+          "type": "object"
+        },
+        "CaseGetResponse": {
+          "properties": {
+            "blocker": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Blocker"
+            },
+            "case": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/CaseGetDetailResponse"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "case_history_id": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Case History Id"
+            },
+            "changes": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/components/schemas/FieldChangeResponse"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Changes"
+            },
+            "judgment_status": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "PENDING",
+                    "DONE",
+                    "NEEDS_MORE_INFO",
+                    "CONFLICT",
+                    "FAILED"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Judgment Status"
+            },
+            "next_action": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/NextActionResponse"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "questions_for_user": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Questions For User"
+            },
+            "recovery_action_code": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "RETRY",
+                    "RESUBMIT_INPUT",
+                    "CONTACT_SUPPORT",
+                    "NONE"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Recovery Action Code"
+            },
+            "requested_field_paths": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Requested Field Paths"
+            },
+            "retryable": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Retryable"
+            }
+          },
+          "required": [
+            "case",
+            "blocker",
+            "next_action",
+            "judgment_status",
+            "case_history_id",
+            "questions_for_user",
+            "recovery_action_code",
+            "requested_field_paths",
+            "retryable",
+            "changes"
+          ],
+          "title": "CaseGetResponse",
+          "type": "object"
+        },
+        "CaseLogItem": {
+          "properties": {
+            "actor": {
+              "enum": [
+                "OWNER",
+                "RIBBON"
+              ],
+              "title": "Actor",
+              "type": "string"
+            },
+            "detail": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Detail"
+            },
+            "event": {
+              "enum": [
+                "CASE_CREATED",
+                "RESULT_SUBMITTED",
+                "CONFLICT_DECIDED",
+                "DOCUMENT_SUBMITTED",
+                "CHECKLIST_COMPLETED",
+                "CHECKLIST_UNCHECKED",
+                "SUPPORT_RESULT_REPORTED",
+                "DOCUMENT_UPLOADED",
+                "NEXT_ACTION_DECIDED",
+                "MORE_INFO_REQUESTED",
+                "CONFLICT_FOUND",
+                "JUDGMENT_FAILED",
+                "DOCUMENTS_CHECKED",
+                "ROADMAP_TASKS_ADDED"
+              ],
+              "title": "Event",
+              "type": "string"
+            },
+            "occurred_at": {
+              "format": "date-time",
+              "title": "Occurred At",
+              "type": "string"
+            },
+            "task_id": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "before_photo",
+                    "check_loan",
+                    "choose_contractor",
+                    "closure_certificate",
+                    "contractor_documents",
+                    "deposit_settlement",
+                    "dispose_stock",
+                    "income_tax",
+                    "notify_employees",
+                    "notify_landlord",
+                    "post_closure_support",
+                    "settlement_submission",
+                    "support_application",
+                    "support_conditions",
+                    "terminate_contracts",
+                    "vat_submission"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Task Id"
+            }
+          },
+          "required": [
+            "actor",
+            "event",
+            "occurred_at",
+            "task_id",
+            "detail"
+          ],
+          "title": "CaseLogItem",
+          "type": "object"
+        },
+        "CaseLogResponse": {
+          "properties": {
+            "logs": {
+              "items": {
+                "$ref": "#/components/schemas/CaseLogItem"
+              },
+              "title": "Logs",
+              "type": "array"
+            }
+          },
+          "required": [
+            "logs"
+          ],
+          "title": "CaseLogResponse",
+          "type": "object"
+        },
+        "CaseResultsEntryResponse": {
+          "properties": {
+            "case_history_id": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Case History Id"
+            },
+            "conflicts": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/components/schemas/ConflictItemResponse"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Conflicts"
+            },
+            "judgment_status": {
+              "enum": [
+                "PENDING",
+                "DONE",
+                "NEEDS_MORE_INFO",
+                "CONFLICT",
+                "FAILED"
+              ],
+              "title": "Judgment Status",
+              "type": "string"
+            },
+            "next_action": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/NextActionResponse"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "questions_for_user": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Questions For User"
+            },
+            "raw_input": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Raw Input"
+            },
+            "recovery_action_code": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "RETRY",
+                    "RESUBMIT_INPUT",
+                    "CONTACT_SUPPORT",
+                    "NONE"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Recovery Action Code"
+            },
+            "requested_field_paths": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Requested Field Paths"
+            },
+            "result_input_kind": {
+              "default": "TEXT",
+              "enum": [
+                "TEXT",
+                "RESTORATION_ANSWER"
+              ],
+              "title": "Result Input Kind",
+              "type": "string"
+            },
+            "retryable": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Retryable"
+            }
+          },
+          "required": [
+            "judgment_status"
+          ],
+          "title": "CaseResultsEntryResponse",
+          "type": "object"
+        },
+        "CaseResultsSubmitAcceptedResponse": {
+          "properties": {
+            "case_history_id": {
+              "title": "Case History Id",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "case_history_id"
+          ],
+          "title": "CaseResultsSubmitAcceptedResponse",
+          "type": "object"
+        },
+        "CaseResultsSubmitRequest": {
+          "additionalProperties": false,
+          "properties": {
+            "case_history_id": {
+              "title": "Case History Id",
+              "type": "integer"
+            },
+            "raw_input": {
+              "anyOf": [
+                {
+                  "maxLength": 2000,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Raw Input"
+            },
+            "restoration_answer": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/RestorationAnswer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "case_history_id"
+          ],
+          "title": "CaseResultsSubmitRequest",
+          "type": "object"
+        },
+        "CaseResultsSubmitResponse": {
+          "properties": {
+            "blocker": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Blocker"
+            },
+            "changes": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/components/schemas/FieldChangeResponse"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Changes"
+            },
+            "conflicts": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/components/schemas/ConflictItemResponse"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Conflicts"
+            },
+            "new_tasks": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/components/schemas/NewTaskResponse"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "New Tasks"
+            },
+            "next_action": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/NextActionResponse"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "questions_for_user": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Questions For User"
+            },
+            "raw_input": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Raw Input"
+            },
+            "recovery_action_code": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "RETRY",
+                    "RESUBMIT_INPUT",
+                    "CONTACT_SUPPORT",
+                    "NONE"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Recovery Action Code"
+            },
+            "requested_field_paths": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Requested Field Paths"
+            },
+            "result": {
+              "enum": [
+                "PENDING",
+                "UPDATED",
+                "NO_CHANGE",
+                "NEEDS_MORE_INFO",
+                "CONFLICT",
+                "FAILED"
+              ],
+              "title": "Result",
+              "type": "string"
+            },
+            "retryable": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Retryable"
+            }
+          },
+          "required": [
+            "result"
+          ],
+          "title": "CaseResultsSubmitResponse",
+          "type": "object"
+        },
+        "CaseRetryResponse": {
+          "properties": {
+            "case_history_id": {
+              "title": "Case History Id",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "case_history_id"
+          ],
+          "title": "CaseRetryResponse",
+          "type": "object"
+        },
+        "CaseSupportApprovalRequest": {
+          "properties": {
+            "approved": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Approved"
+            }
+          },
+          "required": [
+            "approved"
+          ],
+          "title": "CaseSupportApprovalRequest",
+          "type": "object"
+        },
+        "CaseSupportApprovalResponse": {
+          "properties": {
+            "approved": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Approved"
+            }
+          },
+          "required": [
+            "approved"
+          ],
+          "title": "CaseSupportApprovalResponse",
+          "type": "object"
+        },
+        "CheckStep": {
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "title": "Name",
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "WAITING",
+                "RUNNING",
+                "DONE",
+                "NEEDS_CONFIRMATION",
+                "ERROR"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "status"
+          ],
+          "title": "CheckStep",
+          "type": "object"
+        },
+        "ConflictItemResponse": {
+          "properties": {
+            "field": {
+              "title": "Field",
+              "type": "string"
+            },
+            "id": {
+              "title": "Id",
+              "type": "integer"
+            },
+            "proposed_value": {
+              "title": "Proposed Value",
+              "type": "string"
+            },
+            "stored_value": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Stored Value"
+            }
+          },
+          "required": [
+            "id",
+            "field",
+            "stored_value",
+            "proposed_value"
+          ],
+          "title": "ConflictItemResponse",
+          "type": "object"
+        },
+        "DocumentCheckRequest": {
+          "properties": {
+            "applicant_name": {
+              "maxLength": 50,
+              "minLength": 1,
+              "title": "Applicant Name",
+              "type": "string"
+            },
+            "closure_date": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Closure Date"
+            }
+          },
+          "required": [
+            "applicant_name"
+          ],
+          "title": "DocumentCheckRequest",
+          "type": "object"
+        },
+        "DocumentCheckResponse": {
+          "properties": {
+            "checked_at": {
+              "format": "date-time",
+              "title": "Checked At",
+              "type": "string"
+            },
+            "issues": {
+              "items": {
+                "$ref": "#/components/schemas/Issue"
+              },
+              "title": "Issues",
+              "type": "array"
+            },
+            "status": {
+              "title": "Status",
+              "type": "string"
+            },
+            "steps": {
+              "items": {
+                "$ref": "#/components/schemas/CheckStep"
+              },
+              "title": "Steps",
+              "type": "array"
+            }
+          },
+          "required": [
+            "status",
+            "steps",
+            "issues",
+            "checked_at"
+          ],
+          "title": "DocumentCheckResponse",
+          "type": "object"
+        },
+        "DocumentConfirmRequest": {
+          "properties": {
+            "confirmed_fields": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "propertyNames": {
+                "enum": [
+                  "business_name",
+                  "supplier",
+                  "buyer",
+                  "sender",
+                  "recipient",
+                  "account_holder",
+                  "amount",
+                  "supply_amount",
+                  "tax_amount",
+                  "date",
+                  "closure_date",
+                  "restoration_clause"
+                ]
+              },
+              "title": "Confirmed Fields",
+              "type": "object"
+            },
+            "kind": {
+              "$ref": "#/components/schemas/DocumentKind"
+            }
+          },
+          "required": [
+            "kind",
+            "confirmed_fields"
+          ],
+          "title": "DocumentConfirmRequest",
+          "type": "object"
+        },
+        "DocumentFieldResponse": {
+          "properties": {
+            "name": {
+              "enum": [
+                "business_name",
+                "supplier",
+                "buyer",
+                "sender",
+                "recipient",
+                "account_holder",
+                "amount",
+                "supply_amount",
+                "tax_amount",
+                "date",
+                "closure_date",
+                "restoration_clause"
+              ],
+              "title": "Name",
+              "type": "string"
+            },
+            "page": {
+              "title": "Page",
+              "type": "integer"
+            },
+            "value": {
+              "title": "Value",
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "value",
+            "page"
+          ],
+          "title": "DocumentFieldResponse",
+          "type": "object"
+        },
+        "DocumentKind": {
+          "enum": [
+            "LEASE",
+            "BUSINESS_REGISTRATION",
+            "BUSINESS_LICENSE",
+            "CONSTRUCTION_STATEMENT",
+            "TAX_INVOICE",
+            "BEFORE_PHOTO",
+            "AFTER_PHOTO",
+            "TRANSFER",
+            "CLOSURE_CERTIFICATE",
+            "BANK_COPY",
+            "CLOSURE_RECEIPT",
+            "CARD_SALES",
+            "CASH_SALES",
+            "PURCHASE_INVOICE",
+            "DEPOSIT_STATEMENT",
+            "UNKNOWN"
+          ],
+          "title": "DocumentKind",
+          "type": "string"
+        },
+        "DocumentListResponse": {
+          "properties": {
+            "check": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/DocumentCheckResponse"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "documents": {
+              "items": {
+                "$ref": "#/components/schemas/DocumentResponse"
+              },
+              "title": "Documents",
+              "type": "array"
+            }
+          },
+          "required": [
+            "documents",
+            "check"
+          ],
+          "title": "DocumentListResponse",
+          "type": "object"
+        },
+        "DocumentResponse": {
+          "properties": {
+            "confirmed_fields": {
+              "anyOf": [
+                {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "propertyNames": {
+                    "enum": [
+                      "business_name",
+                      "supplier",
+                      "buyer",
+                      "sender",
+                      "recipient",
+                      "account_holder",
+                      "amount",
+                      "supply_amount",
+                      "tax_amount",
+                      "date",
+                      "closure_date",
+                      "restoration_clause"
+                    ]
+                  },
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Confirmed Fields"
+            },
+            "document_id": {
+              "format": "uuid",
+              "title": "Document Id",
+              "type": "string"
+            },
+            "fields": {
+              "items": {
+                "$ref": "#/components/schemas/DocumentFieldResponse"
+              },
+              "title": "Fields",
+              "type": "array"
+            },
+            "filename": {
+              "title": "Filename",
+              "type": "string"
+            },
+            "kind": {
+              "$ref": "#/components/schemas/DocumentKind"
+            },
+            "kind_label": {
+              "title": "Kind Label",
+              "type": "string"
+            },
+            "needs_confirmation": {
+              "title": "Needs Confirmation",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "document_id",
+            "filename",
+            "kind",
+            "kind_label",
+            "needs_confirmation",
+            "fields",
+            "confirmed_fields"
+          ],
+          "title": "DocumentResponse",
+          "type": "object"
+        },
+        "FieldChangeResponse": {
+          "properties": {
+            "field": {
+              "title": "Field",
+              "type": "string"
+            },
+            "new_value": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "New Value"
+            },
+            "stored_value": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Stored Value"
+            }
+          },
+          "required": [
+            "field",
+            "stored_value",
+            "new_value"
+          ],
+          "title": "FieldChangeResponse",
+          "type": "object"
+        },
+        "GuidanceSource": {
+          "additionalProperties": false,
+          "description": "설명의 근거. 사람이 원문과 대조해 검수한 기록만 둔다.",
+          "properties": {
+            "authority_name": {
+              "title": "Authority Name",
+              "type": "string"
+            },
+            "canonical_url": {
+              "title": "Canonical Url",
+              "type": "string"
+            },
+            "content_hash": {
+              "title": "Content Hash",
+              "type": "string"
+            },
+            "excerpt": {
+              "title": "Excerpt",
+              "type": "string"
+            },
+            "retrieved_at": {
+              "title": "Retrieved At",
+              "type": "string"
+            },
+            "reviewed_at": {
+              "title": "Reviewed At",
+              "type": "string"
+            },
+            "reviewed_by": {
+              "title": "Reviewed By",
+              "type": "string"
+            },
+            "title": {
+              "title": "Title",
+              "type": "string"
+            }
+          },
+          "required": [
+            "authority_name",
+            "title",
+            "canonical_url",
+            "excerpt",
+            "content_hash",
+            "retrieved_at",
+            "reviewed_by",
+            "reviewed_at"
+          ],
+          "title": "GuidanceSource",
+          "type": "object"
+        },
+        "HTTPValidationError": {
+          "properties": {
+            "detail": {
+              "items": {
+                "$ref": "#/components/schemas/ValidationError"
+              },
+              "title": "Detail",
+              "type": "array"
+            }
+          },
+          "title": "HTTPValidationError",
+          "type": "object"
+        },
+        "Issue": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "title": "Code",
+              "type": "string"
+            },
+            "document_ids": {
+              "items": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "title": "Document Ids",
+              "type": "array"
+            },
+            "message": {
+              "title": "Message",
+              "type": "string"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "Issue",
+          "type": "object"
+        },
+        "LoginRequest": {
+          "properties": {
+            "code": {
+              "title": "Code",
+              "type": "string"
+            }
+          },
+          "required": [
+            "code"
+          ],
+          "title": "LoginRequest",
+          "type": "object"
+        },
+        "NewTaskResponse": {
+          "properties": {
+            "task_id": {
+              "title": "Task Id",
+              "type": "string"
+            },
+            "title": {
+              "title": "Title",
+              "type": "string"
+            }
+          },
+          "required": [
+            "task_id",
+            "title"
+          ],
+          "title": "NewTaskResponse",
+          "type": "object"
+        },
+        "NextAction": {
+          "additionalProperties": false,
+          "properties": {
+            "action_code": {
+              "enum": [
+                "CONFIRM_RESTORATION_SCOPE",
+                "CONFIRM_TAX_CLOSURE_REQUIREMENTS",
+                "FILE_TAX_BUSINESS_CLOSURE",
+                "CONFIRM_FOOD_SERVICE_CLOSURE_REQUIREMENTS",
+                "FILE_FOOD_SERVICE_CLOSURE",
+                "CONFIRM_WORKPLACE_INSURANCE_CLOSURE_REQUIREMENTS",
+                "REPORT_WORKPLACE_INSURANCE_CLOSURE",
+                "CONFIRM_SUPPORT_PROGRAM_REQUIREMENTS",
+                "CONFIRM_RESTORATION_REQUIREMENTS",
+                "PERFORM_RESTORATION",
+                "CONFIRM_PREMISES_RETURN_REQUIREMENTS",
+                "RETURN_PREMISES",
+                "CONFIRM_EMPLOYEE_SETTLEMENT_REQUIREMENTS",
+                "SETTLE_EMPLOYEE_PAYMENTS",
+                "CONFIRM_EMPLOYEE_INSURANCE_LOSS_REQUIREMENTS",
+                "REPORT_EMPLOYEE_INSURANCE_LOSS",
+                "CONFIRM_PROCEDURE_COMPLETION"
+              ],
+              "title": "Action Code",
+              "type": "string"
+            },
+            "evidence_refs": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "minItems": 1,
+              "title": "Evidence Refs",
+              "type": "array"
+            },
+            "questions_to_ask": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "title": "Questions To Ask",
+              "type": "array"
+            },
+            "reason": {
+              "minLength": 1,
+              "title": "Reason",
+              "type": "string"
+            },
+            "sequence": {
+              "exclusiveMinimum": 0.0,
+              "title": "Sequence",
+              "type": "integer"
+            },
+            "target": {
+              "discriminator": {
+                "mapping": {
+                  "PROCEDURE": "#/components/schemas/ProcedureActionTarget",
+                  "SUPPORT_PROGRAM": "#/components/schemas/SupportActionTarget"
+                },
+                "propertyName": "target_kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/ProcedureActionTarget"
+                },
+                {
+                  "$ref": "#/components/schemas/SupportActionTarget"
+                }
+              ],
+              "title": "Target"
+            },
+            "title": {
+              "minLength": 1,
+              "title": "Title",
+              "type": "string"
+            }
+          },
+          "required": [
+            "action_code",
+            "sequence",
+            "title",
+            "reason",
+            "questions_to_ask",
+            "target",
+            "evidence_refs"
+          ],
+          "title": "NextAction",
+          "type": "object"
+        },
+        "NextActionResponse": {
+          "properties": {
+            "questions_to_ask": {
+              "items": {
+                "type": "string"
+              },
+              "title": "Questions To Ask",
+              "type": "array"
+            },
+            "reason": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Reason"
+            },
+            "title": {
+              "title": "Title",
+              "type": "string"
+            }
+          },
+          "required": [
+            "title",
+            "reason",
+            "questions_to_ask"
+          ],
+          "title": "NextActionResponse",
+          "type": "object"
+        },
+        "ProcedureActionTarget": {
+          "additionalProperties": false,
+          "properties": {
+            "procedure_step": {
+              "$ref": "#/components/schemas/ProcedureStepRef"
+            },
+            "target_kind": {
+              "const": "PROCEDURE",
+              "title": "Target Kind",
+              "type": "string"
+            }
+          },
+          "required": [
+            "target_kind",
+            "procedure_step"
+          ],
+          "title": "ProcedureActionTarget",
+          "type": "object"
+        },
+        "ProcedureStepRef": {
+          "additionalProperties": false,
+          "properties": {
+            "procedure_step_id": {
+              "exclusiveMinimum": 0.0,
+              "title": "Procedure Step Id",
+              "type": "integer"
+            },
+            "step_code": {
+              "minLength": 1,
+              "pattern": "^[A-Z][A-Z0-9_]*$",
+              "title": "Step Code",
+              "type": "string"
+            }
+          },
+          "required": [
+            "procedure_step_id",
+            "step_code"
+          ],
+          "title": "ProcedureStepRef",
+          "type": "object"
+        },
+        "RestorationAnswer": {
+          "additionalProperties": false,
+          "description": "사장님이 직접 고른 값. 법적 판단이나 철거 여부를 추론하지 않는다.",
+          "properties": {
+            "demolition_required": {
+              "enum": [
+                "REQUIRED",
+                "NOT_REQUIRED",
+                "UNKNOWN"
+              ],
+              "title": "Demolition Required",
+              "type": "string"
+            },
+            "restoration_scope": {
+              "enum": [
+                "FULL",
+                "PARTIAL",
+                "NOT_REQUIRED",
+                "UNKNOWN"
+              ],
+              "title": "Restoration Scope",
+              "type": "string"
+            }
+          },
+          "required": [
+            "restoration_scope",
+            "demolition_required"
+          ],
+          "title": "RestorationAnswer",
+          "type": "object"
+        },
+        "Roadmap": {
+          "additionalProperties": false,
+          "properties": {
+            "case_id": {
+              "title": "Case Id",
+              "type": "integer"
+            },
+            "current_stage": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Current Stage"
+            },
+            "next_action": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/NextAction"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "next_task_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Next Task Id"
+            },
+            "questions_for_user": {
+              "items": {
+                "type": "string"
+              },
+              "title": "Questions For User",
+              "type": "array"
+            },
+            "snapshot_id": {
+              "format": "uuid",
+              "title": "Snapshot Id",
+              "type": "string"
+            },
+            "stages": {
+              "items": {
+                "$ref": "#/components/schemas/RoadmapStage"
+              },
+              "title": "Stages",
+              "type": "array"
+            },
+            "supported": {
+              "default": true,
+              "title": "Supported",
+              "type": "boolean"
+            },
+            "unsupported_reason": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Unsupported Reason"
+            }
+          },
+          "required": [
+            "case_id",
+            "snapshot_id",
+            "stages",
+            "next_action",
+            "next_task_id",
+            "questions_for_user"
+          ],
+          "title": "Roadmap",
+          "type": "object"
+        },
+        "RoadmapStage": {
+          "additionalProperties": false,
+          "properties": {
+            "stage": {
+              "title": "Stage",
+              "type": "integer"
+            },
+            "tasks": {
+              "items": {
+                "$ref": "#/components/schemas/RoadmapTask"
+              },
+              "title": "Tasks",
+              "type": "array"
+            },
+            "title": {
+              "title": "Title",
+              "type": "string"
+            }
+          },
+          "required": [
+            "stage",
+            "title",
+            "tasks"
+          ],
+          "title": "RoadmapStage",
+          "type": "object"
+        },
+        "RoadmapTask": {
+          "additionalProperties": false,
+          "properties": {
+            "guidance": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Guidance"
+            },
+            "guidance_source": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/GuidanceSource"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "kind": {
+              "enum": [
+                "CHECKLIST",
+                "PROCEDURE",
+                "DOCUMENT_CHECK",
+                "CASE_FACT"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "procedure_steps": {
+              "items": {
+                "$ref": "#/components/schemas/ProcedureStepRef"
+              },
+              "title": "Procedure Steps",
+              "type": "array"
+            },
+            "status": {
+              "enum": [
+                "NOT_STARTED",
+                "IN_PROGRESS",
+                "COMPLETED",
+                "NOT_APPLICABLE",
+                "NEEDS_CONFIRMATION"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "task_id": {
+              "title": "Task Id",
+              "type": "string"
+            },
+            "title": {
+              "title": "Title",
+              "type": "string"
+            }
+          },
+          "required": [
+            "task_id",
+            "title",
+            "kind",
+            "status"
+          ],
+          "title": "RoadmapTask",
+          "type": "object"
+        },
+        "SupportActionTarget": {
+          "additionalProperties": false,
+          "properties": {
+            "support_program": {
+              "$ref": "#/components/schemas/SupportProgramRef"
+            },
+            "target_kind": {
+              "const": "SUPPORT_PROGRAM",
+              "title": "Target Kind",
+              "type": "string"
+            }
+          },
+          "required": [
+            "target_kind",
+            "support_program"
+          ],
+          "title": "SupportActionTarget",
+          "type": "object"
+        },
+        "SupportProgramRef": {
+          "additionalProperties": false,
+          "properties": {
+            "support_program_id": {
+              "exclusiveMinimum": 0.0,
+              "title": "Support Program Id",
+              "type": "integer"
+            },
+            "wiki_uuid": {
+              "format": "uuid",
+              "title": "Wiki Uuid",
+              "type": "string"
+            }
+          },
+          "required": [
+            "support_program_id",
+            "wiki_uuid"
+          ],
+          "title": "SupportProgramRef",
+          "type": "object"
+        },
+        "ValidationError": {
+          "properties": {
+            "ctx": {
+              "title": "Context",
+              "type": "object"
+            },
+            "input": {
+              "title": "Input"
+            },
+            "loc": {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "integer"
+                  }
+                ]
+              },
+              "title": "Location",
+              "type": "array"
+            },
+            "msg": {
+              "title": "Message",
+              "type": "string"
+            },
+            "type": {
+              "title": "Error Type",
+              "type": "string"
+            }
+          },
+          "required": [
+            "loc",
+            "msg",
+            "type"
+          ],
+          "title": "ValidationError",
+          "type": "object"
+        }
+      }
+    },
+    "info": {
+      "title": "FastAPI",
+      "version": "0.1.0"
+    },
+    "openapi": "3.1.0",
+    "paths": {
+      "/cases": {
+        "get": {
+          "operationId": "get_case_cases_get",
+          "parameters": [
+            {
+              "in": "header",
+              "name": "Access-Token",
+              "required": false,
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Access-Token"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/CaseGetResponse"
+                  }
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "summary": "Get Case"
+        },
+        "post": {
+          "operationId": "create_case_cases_post",
+          "parameters": [
+            {
+              "in": "header",
+              "name": "Access-Token",
+              "required": false,
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Access-Token"
+              }
+            }
+          ],
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaseCreateRequest"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/CaseCreateResponse"
+                  }
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "summary": "Create Case"
+        }
+      },
+      "/cases/checklists/{task_id}": {
+        "put": {
+          "operationId": "update_case_checklist_cases_checklists__task_id__put",
+          "parameters": [
+            {
+              "in": "path",
+              "name": "task_id",
+              "required": true,
+              "schema": {
+                "enum": [
+                  "before_photo",
+                  "check_loan",
+                  "choose_contractor",
+                  "closure_certificate",
+                  "contractor_documents",
+                  "deposit_settlement",
+                  "dispose_stock",
+                  "income_tax",
+                  "notify_employees",
+                  "notify_landlord",
+                  "post_closure_support",
+                  "settlement_submission",
+                  "support_application",
+                  "support_conditions",
+                  "terminate_contracts",
+                  "vat_submission"
+                ],
+                "title": "Task Id",
+                "type": "string"
+              }
+            },
+            {
+              "in": "header",
+              "name": "Access-Token",
+              "required": false,
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Access-Token"
+              }
+            }
+          ],
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaseChecklistUpdateRequest"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/CaseChecklistResponse"
+                  }
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "summary": "Update Case Checklist"
+        }
+      },
+      "/cases/closure-report": {
+        "put": {
+          "operationId": "update_case_closure_report_cases_closure_report_put",
+          "parameters": [
+            {
+              "in": "header",
+              "name": "Access-Token",
+              "required": false,
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Access-Token"
+              }
+            }
+          ],
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaseClosureReportRequest"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/CaseClosureReportResponse"
+                  }
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "summary": "Update Case Closure Report"
+        }
+      },
+      "/cases/deposit-return": {
+        "put": {
+          "operationId": "update_case_deposit_return_cases_deposit_return_put",
+          "parameters": [
+            {
+              "in": "header",
+              "name": "Access-Token",
+              "required": false,
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Access-Token"
+              }
+            }
+          ],
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaseDepositReturnRequest"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/CaseDepositReturnResponse"
+                  }
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "summary": "Update Case Deposit Return"
+        }
+      },
+      "/cases/documents": {
+        "get": {
+          "operationId": "list_documents_cases_documents_get",
+          "parameters": [
+            {
+              "in": "header",
+              "name": "Access-Token",
+              "required": false,
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Access-Token"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/DocumentListResponse"
+                  }
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "summary": "List Documents"
+        },
+        "post": {
+          "operationId": "upload_document_cases_documents_post",
+          "parameters": [
+            {
+              "in": "header",
+              "name": "Access-Token",
+              "required": false,
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Access-Token"
+              }
+            }
+          ],
+          "requestBody": {
+            "content": {
+              "multipart/form-data": {
+                "schema": {
+                  "$ref": "#/components/schemas/Body_upload_document_cases_documents_post"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/DocumentListResponse"
+                  }
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "summary": "Upload Document"
+        }
+      },
+      "/cases/documents/check": {
+        "post": {
+          "operationId": "check_documents_cases_documents_check_post",
+          "parameters": [
+            {
+              "in": "header",
+              "name": "Access-Token",
+              "required": false,
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Access-Token"
+              }
+            }
+          ],
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentCheckRequest"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/DocumentListResponse"
+                  }
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "summary": "Check Documents"
+        }
+      },
+      "/cases/documents/settlement.zip": {
+        "get": {
+          "operationId": "download_settlement_cases_documents_settlement_zip_get",
+          "parameters": [
+            {
+              "in": "header",
+              "name": "Access-Token",
+              "required": false,
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Access-Token"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "summary": "Download Settlement"
+        }
+      },
+      "/cases/documents/{document_id}": {
+        "delete": {
+          "operationId": "remove_document_cases_documents__document_id__delete",
+          "parameters": [
+            {
+              "in": "path",
+              "name": "document_id",
+              "required": true,
+              "schema": {
+                "format": "uuid",
+                "title": "Document Id",
+                "type": "string"
+              }
+            },
+            {
+              "in": "header",
+              "name": "Access-Token",
+              "required": false,
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Access-Token"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/DocumentListResponse"
+                  }
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "summary": "Remove Document"
+        }
+      },
+      "/cases/documents/{document_id}/confirm": {
+        "post": {
+          "operationId": "confirm_document_cases_documents__document_id__confirm_post",
+          "parameters": [
+            {
+              "in": "path",
+              "name": "document_id",
+              "required": true,
+              "schema": {
+                "format": "uuid",
+                "title": "Document Id",
+                "type": "string"
+              }
+            },
+            {
+              "in": "header",
+              "name": "Access-Token",
+              "required": false,
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Access-Token"
+              }
+            }
+          ],
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentConfirmRequest"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/DocumentListResponse"
+                  }
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "summary": "Confirm Document"
+        }
+      },
+      "/cases/logs": {
+        "get": {
+          "operationId": "get_case_logs_cases_logs_get",
+          "parameters": [
+            {
+              "in": "header",
+              "name": "Access-Token",
+              "required": false,
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Access-Token"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/CaseLogResponse"
+                  }
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "summary": "Get Case Logs"
+        }
+      },
+      "/cases/results": {
+        "get": {
+          "operationId": "get_case_results_cases_results_get",
+          "parameters": [
+            {
+              "in": "header",
+              "name": "Access-Token",
+              "required": false,
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Access-Token"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/CaseResultsEntryResponse"
+                  }
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "summary": "Get Case Results"
+        },
+        "post": {
+          "operationId": "submit_case_results_cases_results_post",
+          "parameters": [
+            {
+              "in": "header",
+              "name": "Access-Token",
+              "required": false,
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Access-Token"
+              }
+            }
+          ],
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaseResultsSubmitRequest"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/CaseResultsSubmitAcceptedResponse"
+                  }
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "summary": "Submit Case Results"
+        }
+      },
+      "/cases/results/decision": {
+        "post": {
+          "operationId": "submit_case_conflicts_decision_cases_results_decision_post",
+          "parameters": [
+            {
+              "in": "header",
+              "name": "Access-Token",
+              "required": false,
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Access-Token"
+              }
+            }
+          ],
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaseConflictsDecisionRequest"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/CaseResultsSubmitAcceptedResponse"
+                  }
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "summary": "Submit Case Conflicts Decision"
+        }
+      },
+      "/cases/results/status": {
+        "get": {
+          "operationId": "get_case_results_submit_status_cases_results_status_get",
+          "parameters": [
+            {
+              "in": "query",
+              "name": "case_history_id",
+              "required": true,
+              "schema": {
+                "title": "Case History Id",
+                "type": "integer"
+              }
+            },
+            {
+              "in": "header",
+              "name": "Access-Token",
+              "required": false,
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Access-Token"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/CaseResultsSubmitResponse"
+                  }
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "summary": "Get Case Results Submit Status"
+        }
+      },
+      "/cases/retry": {
+        "post": {
+          "operationId": "retry_case_judgment_cases_retry_post",
+          "parameters": [
+            {
+              "in": "header",
+              "name": "Access-Token",
+              "required": false,
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Access-Token"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/CaseRetryResponse"
+                  }
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "summary": "Retry Case Judgment"
+        }
+      },
+      "/cases/roadmap": {
+        "get": {
+          "operationId": "get_case_roadmap_cases_roadmap_get",
+          "parameters": [
+            {
+              "in": "header",
+              "name": "Access-Token",
+              "required": false,
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Access-Token"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/Roadmap"
+                  }
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "summary": "Get Case Roadmap"
+        }
+      },
+      "/cases/support-approval": {
+        "put": {
+          "operationId": "update_case_support_approval_cases_support_approval_put",
+          "parameters": [
+            {
+              "in": "header",
+              "name": "Access-Token",
+              "required": false,
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Access-Token"
+              }
+            }
+          ],
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaseSupportApprovalRequest"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/CaseSupportApprovalResponse"
+                  }
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "summary": "Update Case Support Approval"
+        }
+      },
+      "/health": {
+        "get": {
+          "operationId": "health_health_get",
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            }
+          },
+          "summary": "Health"
+        }
+      },
+      "/login": {
+        "post": {
+          "operationId": "login_login_post",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginRequest"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "summary": "Login"
+        }
+      },
+      "/login/form": {
+        "get": {
+          "operationId": "login_form_login_form_get",
+          "parameters": [
+            {
+              "in": "query",
+              "name": "state",
+              "required": false,
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "State"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "summary": "Login Form"
+        }
+      },
+      "/logout": {
+        "post": {
+          "operationId": "logout_logout_post",
+          "parameters": [
+            {
+              "in": "header",
+              "name": "Access-Token",
+              "required": false,
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Access-Token"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "summary": "Logout"
+        }
+      },
+      "/reissue": {
+        "post": {
+          "operationId": "reissue_reissue_post",
+          "parameters": [
+            {
+              "in": "header",
+              "name": "Refresh-Token",
+              "required": false,
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Refresh-Token"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              },
+              "description": "Successful Response"
+            },
+            "422": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              },
+              "description": "Validation Error"
+            }
+          },
+          "summary": "Reissue"
+        }
+      }
+    }
+  },
+  "request_examples": {
+    "CaseChecklistUpdateRequest": {
+      "completed": true
+    },
+    "CaseClosureReportRequest": {
+      "address_detail": "예시 주소",
+      "closure_date": "2026-11-07",
+      "closure_reason": "PERSONAL",
+      "road_address": "강원특별자치도 춘천시 강원대학길 1"
+    },
+    "CaseConflictsDecisionRequest": {
+      "decisions": [
+        {
+          "conflict_reference_id": 1,
+          "side": "PROPOSED"
+        }
+      ]
+    },
+    "CaseCreateRequest": {
+      "business_type": "CAFE",
+      "employee_count": 0,
+      "employment_insurance_enrolled": false,
+      "franchise_status": false,
+      "had_employees": false,
+      "has_business_loan": false,
+      "has_service_contracts": false,
+      "health_insurance_enrolled": false,
+      "industrial_accident_insurance_enrolled": false,
+      "lease_status": "LEASED_PAID",
+      "pension_enrolled": false,
+      "restoration_clause": "EXISTS"
+    },
+    "CaseDepositReturnRequest": {
+      "result": "PARTIAL"
+    },
+    "CaseResultsSubmitRequest": {
+      "case_history_id": 12,
+      "restoration_answer": {
+        "demolition_required": "REQUIRED",
+        "restoration_scope": "PARTIAL"
+      }
+    },
+    "CaseSupportApprovalRequest": {
+      "approved": null
+    },
+    "DocumentCheckRequest": {
+      "applicant_name": "예시 신청인",
+      "closure_date": "2026-11-07"
+    },
+    "DocumentConfirmRequest": {
+      "confirmed_fields": {},
+      "kind": "BEFORE_PHOTO"
+    },
+    "LoginRequest": {
+      "code": "KAKAO_AUTHORIZATION_CODE"
+    }
+  },
+  "roadmap": [
+    {
+      "condition": "always",
+      "procedure_codes": [],
+      "stage": 1,
+      "stage_title": "폐업 준비",
+      "task_id": "intake",
+      "title": "상황 진단"
+    },
+    {
+      "condition": "always",
+      "procedure_codes": [],
+      "stage": 1,
+      "stage_title": "폐업 준비",
+      "task_id": "closure_date",
+      "title": "폐업 날짜 정하기"
+    },
+    {
+      "condition": "lease",
+      "procedure_codes": [],
+      "stage": 1,
+      "stage_title": "폐업 준비",
+      "task_id": "notify_landlord",
+      "title": "임대인에게 폐업 알리고 계약 종료일 맞추기"
+    },
+    {
+      "condition": "staff",
+      "procedure_codes": [],
+      "stage": 1,
+      "stage_title": "폐업 준비",
+      "task_id": "notify_employees",
+      "title": "직원에게 폐업 알리기"
+    },
+    {
+      "condition": "loan",
+      "procedure_codes": [],
+      "stage": 1,
+      "stage_title": "폐업 준비",
+      "task_id": "check_loan",
+      "title": "은행에 폐업 후 상환 조건 확인"
+    },
+    {
+      "condition": "lease",
+      "procedure_codes": [
+        "CONFIRM_RESTORATION_SCOPE"
+      ],
+      "stage": 2,
+      "stage_title": "원상복구·철거",
+      "task_id": "restoration",
+      "title": "원상복구 범위 확인"
+    },
+    {
+      "condition": "demolition",
+      "procedure_codes": [],
+      "stage": 2,
+      "stage_title": "원상복구·철거",
+      "task_id": "support_conditions",
+      "title": "점포철거비 조건 확인"
+    },
+    {
+      "condition": "demolition",
+      "procedure_codes": [],
+      "stage": 2,
+      "stage_title": "원상복구·철거",
+      "task_id": "support_application",
+      "title": "소상공인24 사전 신청"
+    },
+    {
+      "condition": "demolition",
+      "procedure_codes": [],
+      "stage": 2,
+      "stage_title": "원상복구·철거",
+      "task_id": "support_approval",
+      "title": "1차 적격심사 결과 확인"
+    },
+    {
+      "condition": "demolition",
+      "procedure_codes": [],
+      "stage": 2,
+      "stage_title": "원상복구·철거",
+      "task_id": "choose_contractor",
+      "title": "철거 업체 정하기"
+    },
+    {
+      "condition": "demolition",
+      "procedure_codes": [],
+      "stage": 2,
+      "stage_title": "원상복구·철거",
+      "task_id": "before_photo",
+      "title": "철거 전 사진"
+    },
+    {
+      "condition": "lease",
+      "procedure_codes": [
+        "PERFORM_RESTORATION"
+      ],
+      "stage": 2,
+      "stage_title": "원상복구·철거",
+      "task_id": "restoration_work",
+      "title": "원상복구·철거 작업"
+    },
+    {
+      "condition": "demolition",
+      "procedure_codes": [],
+      "stage": 2,
+      "stage_title": "원상복구·철거",
+      "task_id": "contractor_documents",
+      "title": "철거 후 서류 받기"
+    },
+    {
+      "condition": "always",
+      "procedure_codes": [],
+      "stage": 3,
+      "stage_title": "영업 마무리·폐업 신고",
+      "task_id": "dispose_stock",
+      "title": "재고·장비 처분"
+    },
+    {
+      "condition": "contracts",
+      "procedure_codes": [],
+      "stage": 3,
+      "stage_title": "영업 마무리·폐업 신고",
+      "task_id": "terminate_contracts",
+      "title": "렌탈·공과금 해지"
+    },
+    {
+      "condition": "always",
+      "procedure_codes": [
+        "SETTLE_EMPLOYEE_PAYMENTS"
+      ],
+      "stage": 3,
+      "stage_title": "영업 마무리·폐업 신고",
+      "task_id": "employee_payments",
+      "title": "직원 임금·퇴직급여 정산"
+    },
+    {
+      "condition": "always",
+      "procedure_codes": [
+        "REPORT_EMPLOYEE_INSURANCE_LOSS",
+        "REPORT_WORKPLACE_INSURANCE_CLOSURE"
+      ],
+      "stage": 3,
+      "stage_title": "영업 마무리·폐업 신고",
+      "task_id": "employee_insurance",
+      "title": "4대보험 상실·탈퇴 신고"
+    },
+    {
+      "condition": "always",
+      "procedure_codes": [
+        "FILE_TAX_BUSINESS_CLOSURE",
+        "FILE_FOOD_SERVICE_CLOSURE"
+      ],
+      "stage": 3,
+      "stage_title": "영업 마무리·폐업 신고",
+      "task_id": "closure_submission",
+      "title": "통합 폐업 신고"
+    },
+    {
+      "condition": "settlement",
+      "procedure_codes": [],
+      "stage": 4,
+      "stage_title": "지원금 정산·가게 반환",
+      "task_id": "closure_certificate",
+      "title": "폐업사실증명원 발급"
+    },
+    {
+      "condition": "settlement",
+      "procedure_codes": [],
+      "stage": 4,
+      "stage_title": "지원금 정산·가게 반환",
+      "task_id": "document_check",
+      "title": "AI 서류 점검"
+    },
+    {
+      "condition": "settlement",
+      "procedure_codes": [],
+      "stage": 4,
+      "stage_title": "지원금 정산·가게 반환",
+      "task_id": "settlement_submission",
+      "title": "소상공인24 정산 제출"
+    },
+    {
+      "condition": "lease",
+      "procedure_codes": [
+        "RETURN_PREMISES"
+      ],
+      "stage": 4,
+      "stage_title": "지원금 정산·가게 반환",
+      "task_id": "return_premises",
+      "title": "가게 반환"
+    },
+    {
+      "condition": "lease",
+      "procedure_codes": [],
+      "stage": 4,
+      "stage_title": "지원금 정산·가게 반환",
+      "task_id": "deposit_settlement",
+      "title": "보증금 정산 기록"
+    },
+    {
+      "condition": "always",
+      "procedure_codes": [],
+      "stage": 5,
+      "stage_title": "세금·마무리",
+      "task_id": "vat_submission",
+      "title": "부가세 폐업 확정신고"
+    },
+    {
+      "condition": "always",
+      "procedure_codes": [],
+      "stage": 5,
+      "stage_title": "세금·마무리",
+      "task_id": "income_tax",
+      "title": "종합소득세 신고 여부 확인"
+    },
+    {
+      "condition": "always",
+      "procedure_codes": [],
+      "stage": 5,
+      "stage_title": "세금·마무리",
+      "task_id": "post_closure_support",
+      "title": "폐업 후 지원 안내 확인"
+    }
+  ],
+  "source_hashes": {
+    "backend/app/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "backend/app/agent/__init__.py": "c4d06792da4ff09e07e8c980458f98f6607a42d9443044e02cbce790cca52b37",
+    "backend/app/agent/action_catalog.py": "f4e07850f199c64ca0405395a3b455dc2fa3c489625bd80a7f0f59eb545f00de",
+    "backend/app/agent/blocker_candidates.py": "364c49f14c8f1a01f4b19316d5b379e4619469c9095794fbb52965e0f15a69d2",
+    "backend/app/agent/claim_safety.py": "16a0c03e0af2f3cb8103fd7b2249688e0a222d1df78952f8e1c0454d26005f72",
+    "backend/app/agent/document_tool/__init__.py": "e224c6b50e1c00b1029d7d6f0e7467b4b88c036106bc7a4bd2ede6fc5e78f113",
+    "backend/app/agent/document_tool/checks.py": "abc3fd6040023ab5a79824e0b5c8366bb8e9969110465a7d8fcc5be217f6e107",
+    "backend/app/agent/document_tool/documents.py": "513d86b131c3915b48bea60bbdd955b6026219a119d8c4613396289880fbc5fa",
+    "backend/app/agent/document_tool/models.py": "0cc354ae00ecfdc00dba13071096b4a636502abbe7093bf31a204b4026391708",
+    "backend/app/agent/document_tool/preparation.py": "13e9786e79f994520a8fa5c2c61f754a77ffdf20bf2eff8d4973639936abcf43",
+    "backend/app/agent/document_tool/safety.py": "a802e5d84eb3ed9c0d5c803d3cc870f7556901ecb8e037dfa862f225e33ad70a",
+    "backend/app/agent/document_tool/tool.py": "a346653285d45a22f922bbf0d01d787c77d617f5f2692d0e3d53440b474fa909",
+    "backend/app/agent/enrichment.py": "89f7800969a9ca2b368717ee9846e0f081e10fcaf988dc5ab3dcee45cf7c7873",
+    "backend/app/agent/graph.py": "5d9dcf6485d4b22b53542f4126c93cbec6a5ecb3d1b220c29903286ae08abca9",
+    "backend/app/agent/guardrails.py": "5acc6e311cfee5f0c65c795a73934e749b58b902c2bf18de24fe1c7fe7a6c95f",
+    "backend/app/agent/info_agent/__init__.py": "e5d7bc62d476dcc142fdd76fcc067afb4ac3ccc6534d8ff6a1fdc9681c8d2faf",
+    "backend/app/agent/info_agent/agent.py": "66cabb24417dfdbe2da0d43bca4854f5bd948c360e920a11bf7cbdcbbc77c501",
+    "backend/app/agent/info_agent/procedure_digests.py": "64510ec04d8ce20d25340b6272414223d1f0abf1ac7ba2ffe1ffdb2905a8ec78",
+    "backend/app/agent/llm.py": "0212a5f8271453d9e4ddd51fe41606e6a662dd86f8f99db58ac3b7ff8dd9629d",
+    "backend/app/agent/procedure_tool/__init__.py": "6e46154e007ea876946316efeb7854a59aa9482531f24504411ebf514d4d598b",
+    "backend/app/agent/procedure_tool/cafe.py": "8a645beb3768d5f4ce39fa0bc7c107f3f15d5091d6f6a6ae9ad3a796bb59d7d0",
+    "backend/app/agent/procedure_tool/rules.py": "d596c7d56f42e66cadf86d07019d2dc3d9324d84cf519f312e9a0ba05c869c39",
+    "backend/app/agent/procedure_tool/store.py": "16a0002383d989aa4a8ab1dc94ebc16c4ce35afda66d22bc18a7769ed42b6d1a",
+    "backend/app/agent/procedure_tool/stored_tool.py": "b59ed2b343d6276d2031e530e8dd589c5d80a401b1e6580f512d31e475f8487a",
+    "backend/app/agent/projection.py": "e03c003d371a5d2db351cb5378a977534e90ef080147e7492d7dc288372da7f2",
+    "backend/app/agent/prompts.py": "a6cd0176f124facb7cab8d8a3731552b5fb2c3e5f02a294681cb3a6453234c85",
+    "backend/app/agent/review_tool/__init__.py": "31053c8258b934a58e76031de18972e45c5f2c2d7aba5f3d2a8a62e7743786b8",
+    "backend/app/agent/review_tool/models.py": "72222f50255b8d0d98e9e4675ee9e33736342905b491c322e6d931e9822bd15c",
+    "backend/app/agent/review_tool/tool.py": "427457e95b4491e73657e8c0b23c992edc3b9d6b8bfc1b0a36a6c1249bee00c6",
+    "backend/app/agent/roadmap.py": "5ce5a97a43896e89defd438639b16209acad302e1ef01efc6b823e53d2ec86da",
+    "backend/app/agent/run_scope.py": "cb267f2ded59ec540a11ea0d69a05ac204bdd406763d65bad9f6f77e0fe6f747",
+    "backend/app/agent/runtime.py": "35659c4009ee240eec5a7d1c54b3d559283d5b6401e008069ceb23b93c9f87fe",
+    "backend/app/agent/schemas.py": "440b6cbf9c1f0efdeaad87915ff25d06c8ac81b245742015dd0fbd5ea2e6390e",
+    "backend/app/agent/state.py": "c61ad1666b040918f6e2dcb9d5828f84af35d617be92e81b51683f9a4eb26b44",
+    "backend/app/agent/supervisor/__init__.py": "f3f52fda1ecbb167732e362de7179e196f72caa0106504cb46a2379f8c6ad129",
+    "backend/app/agent/supervisor/agent.py": "1f63de5c594942426d41fea1b890c1fe7a3f31fe5a7c1c3bf8dea19455e6d629",
+    "backend/app/agent/support_agent/__init__.py": "7317447fb9b4c7f89f459991d95405a2a473396c574fe85ba5d05a332fb9da6a",
+    "backend/app/agent/support_agent/agent.py": "8d562741d504e35516b227f56d3fd32873f006d161d11ca8ebc3d6e36106ced9",
+    "backend/app/agent/support_agent/models.py": "5a59d8d74b52bc3090bef2570c2d748e652963fc2122645ea724f70add869f57",
+    "backend/app/agent/support_agent/wiki/__init__.py": "dce5fac5b29e7a14048640c6dc91092a4e8ae29d73251b929353ede540151c48",
+    "backend/app/agent/tracing.py": "54838cb5978098523555f5b4b15d9bdfafec0d2d3308eb432b718c5e1e020c45",
+    "backend/app/be/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "backend/app/be/crud/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "backend/app/be/crud/blocker.py": "0ab5a141a976b1b85e690eaf2da355907da841490604193451a6ecd55337e366",
+    "backend/app/be/crud/case.py": "3c71bf321b0a3ede028f2b9ea522c6c25358b1c689ad8537d1b47901d3d12766",
+    "backend/app/be/crud/case_checklist.py": "0ede9a06f3d4e563b8f5dd6e78db1f3c69d6b98c65f0ec369a3bd674858c303b",
+    "backend/app/be/crud/case_document_history.py": "6eeef256e630223942de0652e3e774486bd940488b6fc17b51d6024ea5157d82",
+    "backend/app/be/crud/case_field_history.py": "bcc084f9950e04f76d813d3c29a253d4eb27ef3fc0f7389649fb28279f0d53fb",
+    "backend/app/be/crud/case_history.py": "9b23e6a522cd77838fc4991a7f597d7f09332cfea49ce20038fc86828b06131f",
+    "backend/app/be/crud/conflict_reference.py": "ff979614f63f3bf442a409749799f20543322da742f95ad6bae9c00a9cda1aca",
+    "backend/app/be/crud/evidence.py": "4af469caffca3b12d224ec2f1d5e098b119b24f476c18222d7e0501fcda5ae7a",
+    "backend/app/be/crud/member.py": "8beea1f73e7603161bc71e50a4abdf3793d469ac7eca8ad80597b67a20aadcd1",
+    "backend/app/be/crud/procedure_step.py": "7ce5cdb4f4256d29dedffe0dc905388ddb7da80d403c7ce4d5b3779dc0c1a15e",
+    "backend/app/be/crud/support_item.py": "106b4402e1b250731e63e97131326eab4a50a584d8b1f960d1c3e91ba73beb35",
+    "backend/app/be/db.py": "9bf88d0748b74e8a82ba84bdc029da9e9fccf07a9d66b978f8327d3dee5f5c87",
+    "backend/app/be/dependencies/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "backend/app/be/dependencies/auth.py": "1e375f898d5c5bf5343295960e08e6eab384880202aa109621215e9d077ceec3",
+    "backend/app/be/models/__init__.py": "e7cd734f6d97f86e0227bdc4744c9140ce570f230de102e12e656ed009976715",
+    "backend/app/be/models/blocker.py": "a99b1f72fcebb3102fca573987dcc3054959bc346d893d9ff68a6332742da4d6",
+    "backend/app/be/models/case.py": "26a50c50f83c8c36185c57987854499290412bd7bb078ba07b04072745329d08",
+    "backend/app/be/models/case_checklist.py": "e4228616399c60dd50028a94d508bf696277ddd249974207c939b8fe02f84a34",
+    "backend/app/be/models/case_document_history.py": "620c2a382e07f482ebafcda58524431453a66946f26dead89ba4a950bad51554",
+    "backend/app/be/models/case_field_history.py": "0927f3ffa061afb6df630cc49357c08bd6be1550e8c75a9d89472bd96253cb49",
+    "backend/app/be/models/case_history.py": "fbafd7212b6ab9a708a6fc71c43de965db595495cbcdd4b36133c3088fb8945d",
+    "backend/app/be/models/evidence.py": "55ff6a572efbb9ba22fb7c88ee0b9ffa6113f71c471e98a4d8ce5153c42a163b",
+    "backend/app/be/models/member.py": "c58d7c241d2e1e7f51f8baf4496aed8e4d54c8108eede1c62a4a8820544f716b",
+    "backend/app/be/models/mixins.py": "188866e43ffeeea055c255ecf236ffa87dbd94868e73690d2e655f274e894e3f",
+    "backend/app/be/models/procedure_step.py": "d3afa28485df5e46f45fdb24275d43e589f297132e0ff7372d1afbf161ffe50b",
+    "backend/app/be/models/support_item.py": "1d988351a583da9736cadac0259ad6f44aaa12b2d562cbdc35b9168495821655",
+    "backend/app/be/routers/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "backend/app/be/routers/auth.py": "05c99567bb13a5177be0a369e92c43b8aacb31f685ec59408d6af802ab75f7a2",
+    "backend/app/be/routers/case.py": "2e2f1a58b11c7d748ff0f40e2e432de7eaae4f9ddbf47b3b333659251d36bba5",
+    "backend/app/be/routers/document.py": "ec52548b06d71ac9c3142148a606ebbad1e529c2eb4215cf8d5c476237d2774e",
+    "backend/app/be/schemas/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "backend/app/be/schemas/auth.py": "f1b34a14a386b8301b9335bdaa160caa5894e6b473a4d79f06761b6713a6c58b",
+    "backend/app/be/schemas/case.py": "5d5506aa4e9f76bd3984712ce98cb4314a583f01393f4ad0d15664ac2531131b",
+    "backend/app/be/schemas/document.py": "5f0c913b4bb257adb350f9ea0c0fd0de867839fad296af50e1056465466f82b5",
+    "backend/app/be/services/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "backend/app/be/services/agent_runtime.py": "95707c6ee56c9b37c4a1223e36fbb585de43a05136f47b28424f3fae2f636f42",
+    "backend/app/be/services/auth.py": "90d3d2c2b40736618c9c02faf3fbcfddc5c30457a5b2b1fc7bde4555a62a5bdd",
+    "backend/app/be/services/case.py": "0cb89e0814ed1e39c004d99834b8a267daf62c2b239f227215be9709fc350d03",
+    "backend/app/be/services/case_snapshot.py": "ca58c04bd41dc9cd175c8b5bab5b7a18e30061c10e6acc65f062f072c963b6a3",
+    "backend/app/be/services/conflict_decision.py": "5c6b4b95286cfe476d8015e7a7e0018a69b6e108a50991a8bec95332c9a7b555",
+    "backend/app/be/services/decision_record.py": "fd8e615bb1f304b9cba899cd142cefbcea2df5b7d02c41a01d75596e92400f12",
+    "backend/app/be/services/document.py": "cc5d4925d0c4832b3857e7ce24de51066a81621bb020ab9c545fc7e11a2050ef",
+    "backend/app/be/services/judgment.py": "c818b189770414c7991cd5d0457e708526aa713c1cbdb7aa876659b9f56ba550",
+    "backend/app/be/services/official_document.py": "6c2d076a8fb092c6d12fd781f879c14c41a1814b439c154a8ef96fc4a4e61f62",
+    "backend/app/be/services/procedure_registry.py": "fddacc4d6361ecdd3636e29a80cb47394e448381f9fc8337f22a53b4457ef77d",
+    "backend/app/be/services/redaction.py": "ceb4ad8f89f18d670a4e811e1bae9196260c438b93a215b9b0885742db49da0e",
+    "backend/app/be/services/reviewed_procedure.py": "2ae9d18fbff86b764d7e6edaa98a33e363c37e9e82ee9899d29ae4b73c23bb06",
+    "backend/app/be/services/roadmap.py": "ed95606372076d1b8b1560e1b096e9606cff6f1714ae6bf51901e3a12a10e4f1",
+    "backend/app/be/services/unmasking.py": "d536aa8f4d6fc26413b3680a8ce391569757664736a7e95c4d4e6b6c8e4281e8",
+    "backend/app/common/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "backend/app/common/agent_data.py": "a3f5435c208dbe2962945becf9f8339d16e04bd73a503e4b7ab7179ef948f092",
+    "backend/app/common/agent_dto.py": "c8c162fc83bb67b081a2992cddce936db1fbd7e629b4a9e16e2a46b2cdd66bd7",
+    "backend/app/common/agent_service.py": "30c79377771107c265755707043ec6ffdcb491b122789a9fa6f8587410e14d8a",
+    "backend/app/common/config.py": "a89eeabcdd478a7991dd186a54f1c7421219299c02a9795096bda58e93cecf0e",
+    "backend/app/common/procedure-digests.ko-KR.json": "8df285b76f00488bf9c07333e1025151e0b5abbf9468a667a7173b535d1fc952",
+    "backend/app/common/reviewed-procedures.ko-KR.json": "2da204f302d2fd177000f00fa1957d881664b623f790d162c1e7fbd08bf04c7a",
+    "backend/app/main.py": "1b4466556eca2eaa3a2d861830e7175744d5cc82529beb6716b583e6be463559",
+    "backend/requirements.txt": "326f57043c631a91af2799351bc378a98f0cb699b1d3694e27470084dd43cece",
+    "backend/sql/001_schema.sql": "8c97936387160126d16cb98096df79da85ff18c29eccda143f7ad538ae30476d",
+    "backend/sql/002_case_history_source_document_submitted.sql": "4183aab2f72d6296472054d20791c41fdbaf792b82aa4bcf834ad5888835a5e8",
+    "backend/sql/reset_member_case.sql": "e260b78219adbc425118100ff3778a9599affafefc15cd22060d44f66706a28f",
+    "docker-compose.prod.yml": "7425078f6a6298b192790eb6247aad4d9e1e6c636a572b3bfc204e639424e151",
+    "frontend/package.json": "c77b489d27e0e87977d06a69318cb5a6ef3434ee25d9640406bfa81593e7eaa5",
+    "frontend/src/App.tsx": "8223684420789b9755c6994b972226c7450d7af21a98806d53e0b9e57c37930b",
+    "frontend/src/adapters/case.ts": "0df1ed9b30ff54c0c5347b96d15f64b74561a8e7a646cb031e11d24156ad9016",
+    "frontend/src/adapters/documents.ts": "167409e681196816056d66990031509af91535e546bbae8dfd74ec467bf27a79",
+    "frontend/src/adapters/logs.ts": "7ff9dcf336c456dfa4bb0ec1c4a100349b75e2b318c7a011587998fb055d3bca",
+    "frontend/src/adapters/results.ts": "60e9121803901da051cabf789278b9215ba13daabdd78a160e276d8f96063d30",
+    "frontend/src/adapters/roadmap.ts": "c26d2c4a53018f5d4c46be9d2a86d727849ae5e3000d870380feeaef9070871b",
+    "frontend/src/components/RequireAuth.tsx": "86c1fcf2ca8a5bb4dae8c12c57b75b9247cea827fb52d6ca1a91ad17946948ef",
+    "frontend/src/components/ui/Badge.tsx": "f7ec6c75fcc174a0eb5d283c6b62b35db09df9b0b471b75ac15152e56eada7e0",
+    "frontend/src/components/ui/BottomSheet.tsx": "789e7201d56be6a8d1b4de6ef292c9b9c44d4f5a44cc0f9c16af7d3b987c4704",
+    "frontend/src/components/ui/Button.tsx": "ad655be8332d1ff1a346c86c97d2c407706d8e8ae32732f7a0b6a119a177dae3",
+    "frontend/src/components/ui/EmptyState.tsx": "76f755f3cfbb031a11686acb74489aaaddc90c62c6efd42f47700dc310603c10",
+    "frontend/src/components/ui/HammerLoader.tsx": "2471b43e0a4541d5fac7a9229ac9917eb047f5a12aedfd1510f2a822c02bd668",
+    "frontend/src/components/ui/HomeBanner.tsx": "f49686027322443ac443a28791d70fe60a8f71384388296400804d64ccc53fe1",
+    "frontend/src/components/ui/HomeStageCard.tsx": "08f61a9a0e96b01b623df7659368e73a067c8f0949d878e643561b4bd6c46916",
+    "frontend/src/components/ui/InfoBox.tsx": "d2d4d509397c1116c457ba6e32c5fcba0b2d85a12d7806e3a419c8312311ee4a",
+    "frontend/src/components/ui/IntroCarousel.tsx": "c98e59b3a785574eefb2e5d1e823dcb4d722bc2dab8b094760f5ccc2e465d3b0",
+    "frontend/src/components/ui/ProcessSteps.tsx": "15b6920f4c833e25fc89c6e40f896b4f757fbe210bb7a917eecc343727da216a",
+    "frontend/src/components/ui/ProcessingScreen.tsx": "f9418df9ecdfa19c22ce017afbd5a806764f467bf40e1a43e242690d722a89e4",
+    "frontend/src/components/ui/QuestionScreen.tsx": "fff17190b8d083da6a89542d7a81f034bb16470b73382749592aaa50f2b168a0",
+    "frontend/src/components/ui/TabBar.tsx": "37f01d66461dc517a01ccfea7adc8728dea67b4d81a566f4b5afd076d9a36e46",
+    "frontend/src/components/ui/TabLayout.tsx": "fefac9580f3797e00725757d3496129d3dcfe306b45f3684043eb74350b3b92f",
+    "frontend/src/components/ui/TaskCard.tsx": "3141f352eb6afde822ffb81208ef7a8d24128bd93f2bf312bdaa01a891588337",
+    "frontend/src/components/ui/TopBar.tsx": "4021e5ca0e46c3bcccba4b9b1c7e7b92dd6c5a736a82f7233fedd222f3c68e3d",
+    "frontend/src/hooks/useCase.ts": "c811d2b47887a79e5699848f07039c29b8ae16cda566690d04a73ed3d4e804d0",
+    "frontend/src/hooks/useDocuments.ts": "a320d9236813082d1fb540c76410e2bb83d70e639129c2ce66a8562b7c633c02",
+    "frontend/src/hooks/useLogs.ts": "7dfaea31f2e5b571c0da79f9870580bbaa5295b5faa87f4002c954e3ce092908",
+    "frontend/src/hooks/useRoadmap.ts": "eed95e8fb4472d9890d95784f66e46813ee21eb0f04c6e3f3d9179127472de54",
+    "frontend/src/index.css": "33c2f14da276be3b5f58c0b013c3a48691a1e903745c6f7c4dc8abbf0c99e3a4",
+    "frontend/src/lib/api.ts": "d79f876feaaeeb9c1fb0cd7c4233d612f371639fda91c5265ff07502ffa50f71",
+    "frontend/src/lib/auth.ts": "a6157e8d03eee60313904f6d790ffb7e81243e9c8719d0a9aa2e97e31aa211c5",
+    "frontend/src/lib/caseOptions.ts": "87ddf56599271b5a5054d7f3f7ba4cbb3d8ded7fd50b78dbfc86e4065579a38a",
+    "frontend/src/lib/diagnosisSteps.ts": "d4e7778c8dbb9fa42ec5fb8238cf91682c4dcdeca02516d891453b3b6e986732",
+    "frontend/src/lib/documentsApi.ts": "0aadacef7900cec6e7cede48678892be4025fb4d9569c88a9490fad635d78510",
+    "frontend/src/lib/judgmentRetry.ts": "b1742f997f6c396c2d3262c565281069c41a9456ed25157db8fa1a1607905eb4",
+    "frontend/src/lib/mockSwitch.ts": "b0fa2679b4ef409860c78c2f006bb1d82c722de077372e9ddb19bb6e9eabfd4b",
+    "frontend/src/lib/motionFeatures.ts": "a6d0f0baf55e3d6e6b5923d9022adbba7b57be0762aaa0d2bdd2c6c2c0e68be0",
+    "frontend/src/lib/postcode.ts": "46f4d3df50d605bdbe948065b22d4fec218da1e03a137765d86af17c59738a82",
+    "frontend/src/lib/resultSubmit.ts": "0c439794686f41e5b70b53a1233347fd14291610f34582d795d0218ffc453b06",
+    "frontend/src/lib/roadmapActions.ts": "dae918aa9afc0aa23e8d6fcc05951a2b56edc9ccb4fa4f31317c69332db33041",
+    "frontend/src/lib/sessionStore.ts": "d1293894ad6923ca3646fbced9c9ae80168ed13dd1ecffb24e354d10c2173232",
+    "frontend/src/lib/taskFlows.ts": "9feaae4ab80dcd481dec52f6ef08f646f5ed31a82e586a00426f4261fa07a988",
+    "frontend/src/lib/viewTransition.ts": "e5dcf28495e50e084509a02bf71646064e795a381be44be60232f652131064cf",
+    "frontend/src/main.tsx": "e75aafc9c5e2322e707b7f8936fff570c97bcdf176816dc2d1624116e650f342",
+    "frontend/src/mocks/currentCase.ts": "0a7ac6481fb8e8ac361e75de5ba26755626f7bb86b63422631f3539d2915942f",
+    "frontend/src/mocks/documents.ts": "d7cc66f0c7963259bd721b40f5e840b1cc138af311720d828dae90dc01265b27",
+    "frontend/src/mocks/logs.ts": "29efae98c1c866f9f3ab0c2c1e6a231db5d9e521e6958c7148e5ecab6ea0e769",
+    "frontend/src/mocks/resultFlow.ts": "75252ca4be1f58810f90e00a273069af03395eab58da34b34f4b4b6e1a498936",
+    "frontend/src/mocks/roadmap.ts": "6a9b1523cebf5dbc5d114720d16d14f566e2accdc9c8a41e11bf0b0aac9e792b",
+    "frontend/src/pages/CaseCreatePage.tsx": "c0b30ff46ca564e0286af70c8cfa7141411cf83d675472c0666c4e67cde5f42c",
+    "frontend/src/pages/ConfirmChangePage.tsx": "ab0a18f7692cdbe1fb47d0327ffc1953489942d962c682ec9d2c27ef3bb2256e",
+    "frontend/src/pages/CurrentCasePage.tsx": "27d76d5875cc590928a33bf4e30ebc5b36e05b1c08c578fce9396dea0e089997",
+    "frontend/src/pages/DocsCheckPage.tsx": "d897412c313aed879bf18b01cfc0c2ccdb9b0fa499491748a9f71f1a12ff461e",
+    "frontend/src/pages/DocsDonePage.tsx": "fc39239d2f62a99a925c5d1a66f911cfd261630fe685a92fa43b110207e135da",
+    "frontend/src/pages/DocsPage.tsx": "635b7db66f9467cb35948498afe0f745e71fb58c9bdf1c736b40cbe52b658ef7",
+    "frontend/src/pages/EntryPage.tsx": "6bbd3c417d20198dab26f7e405abccd4a5581af1e7ba228c8cd9c6cd3cf1c289",
+    "frontend/src/pages/LogPage.tsx": "266b495a07945a995236f3ce98f85ee6811709336070ac5be6ce1678c313d016",
+    "frontend/src/pages/LoginCallbackPage.tsx": "d94de9a6774431a3736f84bf361a6e2adcf37296bfd3257b07f702ec0dcbf321",
+    "frontend/src/pages/LoginPage.tsx": "5808071868c90dbfbd4f94ecc81ea2a052dd23a1df29399ee2c54877d8e4652f",
+    "frontend/src/pages/NotificationsPage.tsx": "fa1a1619c9fd0bba0305f612f51fbff10aa2597127b7b017f58a581281b7109b",
+    "frontend/src/pages/ReplanPage.tsx": "8de654215c8120ac04c79b529e9f557ea7b497308ad870659b3eb0adaf4e2091",
+    "frontend/src/pages/ResultInputPage.tsx": "469599394094fd9caa0d81cbe5e6bf47bca59e5cd8f45ac459008fbcf4f64911",
+    "frontend/src/pages/RoadmapPage.tsx": "f535f27d88865d7b85ae8382e29fbe2f9c612ebdad4d7cb1162ab34b7d338dbe",
+    "frontend/src/pages/TaskFlowPage.tsx": "b0a29bf527e085b215fd6376c40f8e3241cf95a90e2c3bba914a6a36cd6d5d75",
+    "frontend/src/pages/TaskPage.tsx": "41d789755f12e29c90932f0b2295183f0727726850bd7a26ff9398b022db29be",
+    "frontend/src/pages/docsTestServer.ts": "201a3d6958849e91d5b8dbff3284a2f730f958c9827cfec9bd65ae0f136aa45b",
+    "frontend/src/routes.tsx": "ba7f9bce99c05a0e64c8daa43235e08a1479dd4a4788f93e6135c621b1dcdd9e",
+    "frontend/src/setupTests.ts": "e21d12550201c791de27aa00c4f57a56d0cb6258420b0c4bf048a80533003f9a",
+    "frontend/src/stores/useDiagnosisStore.ts": "ffbae0509f5fab05f66fc4bc3a15db6cdd7611c76283fe2d1a7182833e511284",
+    "frontend/src/styles/tokens.css": "ac9fc68080e3efe75b7f5ddb35f5b9c64f5408374fc612c2d93aebfd91d8bee5",
+    "frontend/src/types/api.ts": "98ff6b08438f24167daa007c437cd378d66b400b364fd18afbffdc33d3007a4c",
+    "frontend/src/types/view.ts": "eaaa27ad2a652e6ac2b7811f8e7b23e55bd27fbcc42530ddb2b7d6e5b6dcefb2",
+    "frontend/src/vite-env.d.ts": "918a0674786e414c2501b27954c72740e7565b0fcd52a214484c69e68ac2b8b4",
+    "frontend/vercel.json": "1549d197267d93234cfe0fdf05eaa2dc680f192acc2cac0dcb3f80fe22867808",
+    "frontend/vite.config.ts": "a4cc0e8a26c6b429ed80e0b70a6880ea2f558f05da802f5bb7ea9561e0f4c77e"
+  },
+  "source_revision": "366617abdc0b85dc779c27f5260269d60746c365"
+}

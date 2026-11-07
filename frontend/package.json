@@ -4,12 +4,16 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "predev": "npm run docs:build",
     "dev": "vite",
+    "prebuild": "npm run docs:check && npm run docs:build",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "docs:build": "node ../scripts/build-docs.mjs",
+    "docs:check": "node ../scripts/build-docs.mjs --check"
   },
   "dependencies": {
     "@karrotmarket/react-monochrome-icon": "1.30.0",

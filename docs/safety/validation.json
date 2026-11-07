@@ -1,0 +1,44 @@
+{
+  "checked_at": "2026-11-07",
+  "source_revision": "366617abdc0b85dc779c27f5260269d60746c365",
+  "scope": "운영철학·안심 이용 정적 안내와 진입 링크. Backend 기능 변경 없음.",
+  "results": {
+    "safety_pages": 7,
+    "questions": 9,
+    "public_pages_link_checked": 36,
+    "viewports": [
+      1440,
+      768,
+      390,
+      320
+    ],
+    "render_checks": 28,
+    "local_assets_checked": 22,
+    "search": "passed",
+    "keyboard": "passed",
+    "question_filters": "passed",
+    "mobile_menu": "passed",
+    "login_page_tests": "5 passed",
+    "lint": "passed",
+    "typescript_and_build": "passed",
+    "documentation_contract_check": "passed",
+    "browser_console_errors": 0,
+    "production_build_preview": {
+      "pages": 7,
+      "viewports": [
+        1440,
+        390,
+        320
+      ],
+      "render_checks": 21,
+      "all_36_public_page_links_and_anchors": "passed"
+    }
+  },
+  "notes": [
+    "카카오톡의 정책·운영 통계를 리본의 기능이나 성과로 제시하지 않음.",
+    "서류함 삭제와 저장 파일 영구 삭제의 차이를 코드에서 확인해 안내.",
+    "개발 문서의 이전 전체 FE 660개·BE 1112개 결과를 이번 신규 실행으로 계산하지 않음. 이번 영향 범위는 LoginPage 5개와 정적 문서·브라우저 검증.",
+    "Orca 스크롤 캡처가 빈 이미지로 저장돼 해당 화면 배치는 Headless Chrome으로 추가 렌더링해 확인. 실제 서비스 오류나 JavaScript 오류는 관찰되지 않음.",
+    "실제 모델 호출·운영 계정 초기화·실제 카카오 로그인은 실행하지 않음."
+  ]
+}
