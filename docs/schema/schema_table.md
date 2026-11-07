@@ -42,7 +42,7 @@ MEMBERS ──1:1──► CASE ──1:N──► CASE_FIELD_HISTORY
 | nickname | VARCHAR | | NOT NULL | `"승준카페"` | 카카오 닉네임 |
 | refresh_token | VARCHAR | | NULLABLE | `"eyJhbGciOiJIUzI1NiIs..."` | |
 | created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-09-01 10:23:00` | |
-| updated_at | DATETIME | | NOT NULL, ON UPDATE CURRENT_TIMESTAMP | `2026-09-05 14:02:00` | |
+| updated_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP, ON UPDATE CURRENT_TIMESTAMP | `2026-09-05 14:02:00` | |
 
 ### CASE
 
@@ -81,7 +81,7 @@ MEMBERS ──1:1──► CASE ──1:N──► CASE_FIELD_HISTORY
 | address_detail | VARCHAR(100) | | NULLABLE | `"1층"` | 상세 주소. 없을 수 있음 |
 | deposit_return_result | ENUM | | NULLABLE | `PARTIAL` | 보증금 반환 결과. `FULL`(다 받음) / `PARTIAL`(일부 빼고 받음) / `NONE`(아직 못 받음). 리본은 기록만 하고 판단하지 않음 |
 | created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-09-01 10:24:00` | |
-| updated_at | DATETIME | | NOT NULL, ON UPDATE CURRENT_TIMESTAMP | `2026-09-10 09:11:00` | |
+| updated_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP, ON UPDATE CURRENT_TIMESTAMP | `2026-09-10 09:11:00` | |
 
 ### CASE_FIELD_HISTORY
 
@@ -190,14 +190,14 @@ CASE 진행을 막는 이슈. CASE_HISTORY에서 생성/해소된다.
 |---|---|---|---|---|---|
 | id | BIGINT | PK | NOT NULL, AUTO_INCREMENT | 1 | |
 | case_id | BIGINT | FK | NOT NULL | 1 | |
-| candidate_id | TEXT | | NULLABLE | `NULL` | AI가 붙인 블로커 후보 식별자. 다음 판단 때 아직 남아 있는 블로커를 AI에 알려 주는 데 쓴다(`active_blocker_candidate_ids`). 이 필드가 생기기 전 판단에는 없어서 NULL로 두고 임의로 만들지 않는다 |
+| candidate_id | TEXT | | NULLABLE | `"3f2504e0-4f89-11d3-9a0c-0305e82c3301"` | AI 런타임이 붙인 블로커 후보 식별자(UUID, 모델이 만들지 않음). 다음 판단 때 아직 남아 있는 블로커를 AI에 알려 주는 데 쓴다(`active_blocker_candidate_ids`). 이 필드가 생기기 전 판단에는 없어서 NULL로 두고 임의로 만들지 않는다 |
 | created_from_case_history_id | BIGINT | FK | NOT NULL | 5 | 이 blocker를 생성시킨 판단 로그 |
 | resolved_from_case_history_id | BIGINT | FK | NULLABLE | `NULL` | 이 blocker를 해소시킨 판단 로그 |
 | description | TEXT | | NOT NULL | `"원상복구 범위가 아직 확정되지 않았습니다"` | 블로커 내용 본문 — 사용자에게 보여줄 핵심 필드 (AI 문장은 길이 제한이 없어 TEXT) |
 | blocker_evidence_refs | JSON | | NULLABLE | `["case_1_creation_form"]` | 이 블로커 판단의 근거 evidence_id 목록 |
 | status | ENUM | | NOT NULL, DEFAULT `ACTIVE` | `ACTIVE` | `ACTIVE` / `RESOLVED` |
 | created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-09-10 09:10:05` | |
-| updated_at | DATETIME | | NOT NULL, ON UPDATE CURRENT_TIMESTAMP | `2026-09-10 09:10:05` | |
+| updated_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP, ON UPDATE CURRENT_TIMESTAMP | `2026-09-10 09:10:05` | |
 | resolved_at | DATETIME | | NULLABLE | `NULL` | 해소 시각  |
 
 ---
@@ -235,7 +235,7 @@ PROCEDURE_STEP ◄──┬── STEP_DEPENDENCY   (단계 간 순서 규칙)
 | caution_note | TEXT | | NULLABLE | `"미신고 시 가산세 부과"` | 주의사항 |
 | applicable_business_type | ENUM | | NOT NULL, DEFAULT `ALL` | `ALL` | `ALL`=공통 절차 / `CAFE`=카페 전용 |
 | created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-08-01 00:00:00` | |
-| updated_at | DATETIME | | NOT NULL, ON UPDATE CURRENT_TIMESTAMP | `2026-08-01 00:00:00` | |
+| updated_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP, ON UPDATE CURRENT_TIMESTAMP | `2026-08-01 00:00:00` | |
 
 ### STEP_DEPENDENCY
 
@@ -248,7 +248,7 @@ PROCEDURE_STEP ◄──┬── STEP_DEPENDENCY   (단계 간 순서 규칙)
 | prerequisite_procedure_step_id | BIGINT | FK | NOT NULL | 3 | 선행되어야 하는 절차 |
 | dependency_type | VARCHAR | | NOT NULL | `"SEQUENTIAL"` | 의존 관계 유형, 기본값 없음(생성 시 명시적으로 채워야 함) |
 | created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-08-01 00:00:00` | |
-| updated_at | DATETIME | | NOT NULL, ON UPDATE CURRENT_TIMESTAMP | `2026-08-01 00:00:00` | |
+| updated_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP, ON UPDATE CURRENT_TIMESTAMP | `2026-08-01 00:00:00` | |
 
 ### STEP_ELIGIBILITY
 
@@ -261,7 +261,7 @@ PROCEDURE_STEP ◄──┬── STEP_DEPENDENCY   (단계 간 순서 규칙)
 | condition_key | VARCHAR | | NOT NULL | `"has_employee"` | 조건 키 |
 | condition_value | VARCHAR | | NOT NULL | `"true"` | 조건 값 |
 | created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-08-01 00:00:00` | |
-| updated_at | DATETIME | | NOT NULL, ON UPDATE CURRENT_TIMESTAMP | `2026-08-01 00:00:00` | |
+| updated_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP, ON UPDATE CURRENT_TIMESTAMP | `2026-08-01 00:00:00` | |
 
 ---
 
@@ -291,7 +291,7 @@ CASE_PROCEDURE_STEP ──1:N──► CASE_PROCEDURE_STEP_HISTORY   (상태 변
 | submitted | BOOLEAN | | NOT NULL, DEFAULT `false` | `false` | 담당 기관에 신고를 제출했는지. 처리 완료(`status = COMPLETED`)와 구분한다 |
 | evidence_refs | JSON | | NULLABLE | `["input:case_history:7:0:12:a3f2d8"]` | 이 진행 상태의 근거 evidence_id 목록. `COMPLETED`인 절차는 근거가 있어야 Agent 스냅샷에 담을 수 있다 |
 | created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-09-01 10:30:00` | |
-| updated_at | DATETIME | | NOT NULL, ON UPDATE CURRENT_TIMESTAMP | `2026-09-10 09:11:00` | |
+| updated_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP, ON UPDATE CURRENT_TIMESTAMP | `2026-09-10 09:11:00` | |
 
 **제약조건**
 - UNIQUE (`case_id`, `procedure_step_id`) — Case 하나당 절차 하나에 대해 진행상태 row는 1개만 존재해야 함
@@ -347,7 +347,7 @@ SUPPORT_ITEM.uuid ──► Wiki 노트와 매핑 (자격조건/금액 등 서�
 | application_end_date | DATE | | NULLABLE | `2026-12-31` | 신청 기간 종료 |
 | source_file_location | VARCHAR | | NULLABLE | `"s3://katecamp-docs/2026/hope-return.pdf"` | S3 원본 파일 위치  |
 | created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-08-01 00:00:00` | |
-| updated_at | DATETIME | | NOT NULL, ON UPDATE CURRENT_TIMESTAMP | `2026-08-01 00:00:00` | |
+| updated_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP, ON UPDATE CURRENT_TIMESTAMP | `2026-08-01 00:00:00` | |
 
 ### SUPPORT_MATCH
 
@@ -361,7 +361,7 @@ CASE와 SUPPORT_ITEM 간 자격 비교 결과.
 | match_status | ENUM | | NOT NULL | `NEEDS_CONFIRMATION` | `POSSIBLY_RELEVANT`(가능성 있음) / `NEEDS_CONFIRMATION`(확인 필요) / `NOT_RELEVANT`(관련없음) / `STALE`(정보 오래됨) / `UNVERIFIABLE`(검증 불가) |
 | catalog_version | VARCHAR | | NULLABLE | `"v3"` | 매칭 시점의 카탈로그 버전 |
 | created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-09-10 10:00:00` | |
-| updated_at | DATETIME | | NOT NULL, ON UPDATE CURRENT_TIMESTAMP | `2026-09-10 10:00:00` | |
+| updated_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP, ON UPDATE CURRENT_TIMESTAMP | `2026-09-10 10:00:00` | |
 
 ### SUPPORT_ITEM_APPLICATION
 
@@ -375,7 +375,7 @@ CASE와 SUPPORT_ITEM 간 자격 비교 결과.
 | application_status | ENUM | | NOT NULL, DEFAULT `NOT_STARTED` | `APPLIED` | `NOT_STARTED`(미신청) / `APPLIED`(신청함) / `SUPPLEMENT_REQUIRED`(보완요청) / `RESUBMITTED`(재제출) / `APPROVED`(승인) / `REJECTED`(거절) |
 | applied_at | DATETIME | | NULLABLE | `NULL` | 신청 시각  |
 | created_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP | `2026-09-05 11:00:00` | |
-| updated_at | DATETIME | | NOT NULL, ON UPDATE CURRENT_TIMESTAMP | `2026-09-05 11:00:00` | |
+| updated_at | DATETIME | | NOT NULL, DEFAULT CURRENT_TIMESTAMP, ON UPDATE CURRENT_TIMESTAMP | `2026-09-05 11:00:00` | |
 
 ---
 
