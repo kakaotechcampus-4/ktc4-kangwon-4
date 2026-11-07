@@ -255,7 +255,10 @@ export function SupportResultFlow({ task }: { task: RoadmapTaskView }) {
       </div>
       {savedLabel && save !== 'SAVING' && (
         <p className="flex items-center gap-2 text-17 font-bold">
-          <IconCheckmarkCircleFill size={22} className="text-fg-brand motion-safe:animate-pop" aria-hidden="true" />
+          {/* "아직 몰라요"에는 완료 체크를 달지 않는다. 할 일은 확인 필요로 남는다(#237, ui-guidelines "모름은 모름으로") */}
+          {saved !== null && (
+            <IconCheckmarkCircleFill size={22} className="text-fg-brand motion-safe:animate-pop" aria-hidden="true" />
+          )}
           &ldquo;{savedLabel}&rdquo;로 기록했어요
         </p>
       )}

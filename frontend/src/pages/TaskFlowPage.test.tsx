@@ -286,6 +286,16 @@ describe('SupportResultFlow — 서버', () => {
     expect(screen.queryByText('이 할 일은 지금 기록할 수 없어요.')).not.toBeInTheDocument()
   })
 
+  it('결과를 알면 완료 체크와 함께 알린다', async () => {
+    serve(json({ approved: true }))
+    renderFlow(<SupportResultFlow task={supportTask} />)
+
+    fireEvent.click(screen.getByRole('radio', { name: '승인됐어요' }))
+    fireEvent.click(screen.getByRole('button', { name: '기록하기' }))
+
+    expect((await screen.findByText(/승인됐어요.*로 기록했어요/)).querySelector('svg')).not.toBeNull()
+  })
+
   /** "아직 몰라요"는 키를 빼지 않고 null 로 보낸다. 빠지면 서버가 422 로 막는다 */
   it('아직 몰라요를 null 로 보내고 저장된 결과를 알린다', async () => {
     const fetchMock = serve(json({ approved: null }))
@@ -294,7 +304,9 @@ describe('SupportResultFlow — 서버', () => {
     fireEvent.click(screen.getByRole('radio', { name: '아직 몰라요' }))
     fireEvent.click(screen.getByRole('button', { name: '기록하기' }))
 
-    expect(await screen.findByText(/아직 몰라요.*로 기록했어요/)).toBeInTheDocument()
+    const notice = await screen.findByText(/아직 몰라요.*로 기록했어요/)
+    // 모르는 것을 기록했을 뿐 끝난 일이 아니라 완료 체크를 달지 않는다
+    expect(notice.querySelector('svg')).toBeNull()
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
     expect(url).toMatch(/\/cases\/support-approval$/)
     expect(JSON.parse(init.body as string)).toEqual({ approved: null })
