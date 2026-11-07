@@ -564,7 +564,7 @@ def verdict(rows: list[dict]) -> dict:
 
     Two different questions are reported separately, because a provider outage
     and a model changing its mind are not the same problem:
-      reliability -- did every repeat produce a reviewed plan at all
+      reliability -- did every repeat produce a plan or an expected conflict
       consistency -- did the repeats that DID produce one agree with each other
     Mixing them would let one HTTP 503 read as "the answer was unstable".
     """
@@ -573,13 +573,17 @@ def verdict(rows: list[dict]) -> dict:
         row for row in rows
         if row["status"] == "REVIEWED_PLAN" and "error" not in row
     ]
+    completed = [row for row in rows if "error" not in row and (
+        row["status"] == "REVIEWED_PLAN"
+        or (row["status"] == "CONFLICT" and row.get("score", {}).get("result") == "PASS")
+    )]
 
     def same(key: str) -> bool:
         return len({canonical(row.get(key)) for row in planned}) <= 1
 
     checks = {
         "no_errors": all("error" not in row for row in rows),
-        "all_reviewed_plan": len(planned) == len(rows),
+        "all_expected_outcomes": len(completed) == len(rows),
         "same_graph_input": len({row["graph_input_digest"] for row in rows}) == 1,
         "same_decision_type": same("decision_type"),
         "same_blocker": same("blocker_digest"),
@@ -592,10 +596,11 @@ def verdict(rows: list[dict]) -> dict:
     return {
         "repeats": len(rows),
         "reviewed_plans": len(planned),
+        "all_reviewed_plan": len(planned) == len(rows),
         # What the repeats that succeeded agreed on.
         "consistency": "PASS" if all(checks[key] for key in consistency) else "FAIL",
         # Whether every repeat got that far at all.
-        "reliability": "PASS" if checks["all_reviewed_plan"] else "FAIL",
+        "reliability": "PASS" if checks["all_expected_outcomes"] else "FAIL",
         "verdict": "PASS" if all(checks.values()) else "FAIL",
         **checks,
     }

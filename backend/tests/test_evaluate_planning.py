@@ -241,6 +241,17 @@ def test_zero_provider_calls_do_not_replace_outcome_validation(status, error, ex
     assert item["calls_by_role"] == {}
 
 
+@pytest.mark.parametrize("expected", [False, True])
+def test_only_expected_dataset_conflicts_pass_and_count_as_successful(expected):
+    item = {"status": "CONFLICT", "case": "conflict", "graph_input_digest": "same",
+            "score": {"result": "PASS" if expected else "WRONG"},
+            "calls_by_role": {}, "provider_usage": []}
+    per_case = {"conflict": verdict([item])}
+    assert overall_verdict(per_case, [item]) == ("PASS" if expected else "FAIL")
+    assert per_case["conflict"]["all_reviewed_plan"] is False
+    assert metrics_by_case([item], {})["conflict"]["successful_runs"] == int(expected)
+
+
 def test_metrics_keep_different_cases_separate_without_hiding_failures():
     base = {
         "status": "REVIEWED_PLAN", "calls_by_role": {"all": 1},

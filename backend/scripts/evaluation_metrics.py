@@ -72,11 +72,14 @@ def load_prices(*, env_file=None, environ=None) -> dict[str, tuple[float, float,
 
 
 def summarize_metrics(rows: list[dict], prices: dict | None = None) -> dict:
-    """Include failed attempts in cost, and divide only by successful tasks."""
+    """Charge all attempts per reviewed plan or correctly scored conflict."""
     prices = prices or {}
     usage = [call for row in rows for call in row.get("provider_usage", [])]
     attempts = sum(sum(row.get("calls_by_role", {}).values()) for row in rows)
-    complete = bool(usage) and len(usage) == attempts and all(
+    recorded = bool(rows) and all(
+        "calls_by_role" in row and "provider_usage" in row for row in rows
+    )
+    complete = recorded and len(usage) == attempts and all(
         call.get("prompt_tokens") is not None and call.get("completion_tokens") is not None
         for call in usage
     )
@@ -85,13 +88,15 @@ def summarize_metrics(rows: list[dict], prices: dict | None = None) -> dict:
         for key in ("prompt_tokens", "completion_tokens")
     }
     successful = sum(
-        row.get("status") == "REVIEWED_PLAN" and "error" not in row
+        (row.get("status") == "REVIEWED_PLAN"
+         or (row.get("status") == "CONFLICT" and row.get("score", {}).get("result") == "PASS"))
+        and "error" not in row
         and row.get("behavior_passed", True)
         and row.get("score", {}).get("result", "PASS") == "PASS" for row in rows
     )
     cost = uncached_cost = 0.0 if complete else None
     unpriced_models = set()
-    cache_complete = bool(usage) and all(
+    cache_complete = complete and all(
         call.get("prompt_tokens") is not None and call.get("cached_prompt_tokens") is not None
         and 0 <= call["cached_prompt_tokens"] <= call["prompt_tokens"] for call in usage
     )

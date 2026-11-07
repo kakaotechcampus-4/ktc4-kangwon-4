@@ -88,3 +88,15 @@ def test_wrong_dataset_answers_are_not_successes_but_their_cost_is_included():
     assert report["successful_runs"] == 1 and report["http_attempts"] == 3
     assert report["cost_per_success_krw"] == pytest.approx(1.37772)
     assert report["estimated_cost_krw"] == report["cost_per_success_krw"]
+
+
+@pytest.mark.parametrize("missing", [None, "calls_by_role", "provider_usage"])
+def test_zero_cost_requires_explicit_zero_call_telemetry(missing):
+    row = {"status": "REVIEWED_PLAN", "calls_by_role": {}, "provider_usage": []}
+    if missing:
+        del row[missing]
+    report = summarize_metrics([row])
+    assert report["estimated_cost_krw"] == (None if missing else 0)
+    assert report["total_tokens"] == (None if missing else 0)
+    assert report["usage_complete"] is (missing is None)
+    assert summarize_metrics([trial(), row])["usage_complete"] is (missing is None)
