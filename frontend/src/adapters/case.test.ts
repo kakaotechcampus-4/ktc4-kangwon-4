@@ -110,6 +110,17 @@ describe('toFacts', () => {
     expect(factFor(SERVER_CASE, 'planned_closure_date').value).toBe('2026.12.31')
   })
 
+  /** 진단에서 "이번 달 안에"·"다음 달"을 고르면 날짜 없이 달만 저장된다. 그걸 미확인으로 보이면 답한 게 사라진 줄 안다 */
+  it('날짜 없이 예상 달만 있으면 그 달을 보여준다', () => {
+    const fact = factFor(
+      { ...SERVER_CASE, planned_closure_date: null, planned_closure_month: '2026-11' },
+      'planned_closure_date',
+    )
+
+    expect(fact.status).toBe('CONFIRMED')
+    expect(fact.value).toBe('2026.11 중')
+  })
+
   it.each([
     ['비어 있으면', null],
     ['칸 자체가 안 오면', undefined],

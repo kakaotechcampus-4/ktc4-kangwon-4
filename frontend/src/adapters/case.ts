@@ -115,7 +115,9 @@ export function toFacts(serverCase: CaseResponse): Fact[] {
     toFact(
       'planned_closure_date',
       FIELD_LABEL.planned_closure_date,
-      toDateLabel(serverCase.planned_closure_date),
+      // 날짜를 못 정하고 예상 달만 고른 가게도 미확인이 아니다. 고른 달을 보여준다(#237)
+      toDateLabel(serverCase.planned_closure_date) ??
+        (serverCase.planned_closure_month ? `${toDateLabel(serverCase.planned_closure_month)} 중` : null),
     ),
     toFact(
       'restoration_scope',
