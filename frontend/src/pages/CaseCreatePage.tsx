@@ -210,9 +210,19 @@ function questionOf(
           options: [
             { value: 'YES', label: '네, 있어요' },
             { value: 'NO', label: '아니요, 없어요' },
+            // 모르는 사장님이 [아니요]를 누르면 직원 정산·보험 신고 할 일이 "해당 없음"으로 빠진다(#237)
+            { value: 'UNKNOWN', label: '잘 모르겠어요' },
           ],
-          selected: answers.hadEmployees === null ? null : answers.hadEmployees ? 'YES' : 'NO',
-          onSelect: (value) => setAnswers({ hadEmployees: value === 'YES' }),
+          selected:
+            answers.hadEmployees === null
+              ? null
+              : answers.hadEmployees === 'UNKNOWN'
+                ? 'UNKNOWN'
+                : answers.hadEmployees
+                  ? 'YES'
+                  : 'NO',
+          onSelect: (value) =>
+            setAnswers({ hadEmployees: value === 'UNKNOWN' ? 'UNKNOWN' : value === 'YES' }),
         },
         action: plainNext,
       }

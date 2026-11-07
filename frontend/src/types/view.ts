@@ -395,8 +395,11 @@ export interface DiagnosisAnswers {
   /** 직원이 있을 때만 묻는다. 정직원 + 아르바이트가 보낼 직원 수가 된다 */
   fullTimeCount: number
   partTimeCount: number
-  /** 지금 직원이 없을 때만 묻는다 */
-  hadEmployees: boolean | null
+  /**
+   * 지금 직원이 없을 때만 묻는다. `UNKNOWN`은 "잘 모르겠어요"다.
+   * "아니요"와 나누는 것은 서버에서 뜻이 달라서다 — 없음은 직원 정산·보험 신고를 빼고, 모름은 확인 필요로 남긴다
+   */
+  hadEmployees: boolean | 'UNKNOWN' | null
   /**
    * 고른 보험. 빈 목록은 "가입한 적 없어요", `UNKNOWN`은 "잘 모르겠어요"다.
    * 둘을 나누는 것은 서버에서 뜻이 달라서다 — 없음은 보험 할 일을 빼고, 모름은 확인 필요로 남긴다

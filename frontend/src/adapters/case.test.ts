@@ -673,6 +673,14 @@ describe('toCaseCreateRequest', () => {
     expect(request(diagnosis({ hadEmployees: null }))).toBeNull()
   })
 
+  /** "아니요"(false)로 보내면 직원 정산·보험 신고가 "해당 없음"으로 빠진다. 모름은 비워 보내 확인 필요로 남긴다 */
+  it('예전 직원을 잘 모르겠다고 하면 비워 보내고, 답한 것으로 본다', () => {
+    const sent = request(diagnosis({ hadEmployees: 'UNKNOWN' }))
+    expect(sent).not.toBeNull()
+    expect(sent?.had_employees).toBeNull()
+    expect(sent?.employee_count).toBe(0)
+  })
+
   /** 하나라도 비면 서버가 넷을 다 "모름"으로 본다. "가입한 적 없어요"가 "해당 없음"이 되려면 넷 다 false여야 한다 */
   it('보험 네 칸을 늘 같이 채워 보낸다', () => {
     expect(request(diagnosis({ insurances: ['PENSION', 'EMPLOYMENT'] }))).toMatchObject({
