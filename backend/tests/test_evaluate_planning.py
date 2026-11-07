@@ -321,3 +321,29 @@ def test_structured_dataset_rejects_text_that_disagrees_with_the_selected_values
     path.write_text(json.dumps(data, ensure_ascii=False) + "\n")
     with pytest.raises(ValueError):
         load_dataset(path)
+
+
+def test_contradictory_scope_can_also_ask_about_the_still_unknown_demolition():
+    _, expected = load_dataset(INPUTS)["F04"]
+    result = {**plan(), "decision_type": "NEEDS_MORE_INFO", "action_code": None,
+              "questions_for_user": ["확인한 원상복구 범위가 있으면 알려주세요.", "철거가 필요한가요?"]}
+    assert score(expected, result)["result"] == "PASS"
+    result["fact_changes"] = [{"field_path": "restoration_scope", "proposed_value": "FULL"}]
+    assert score(expected, result)["result"] == "WRONG"
+
+
+@pytest.mark.parametrize("broken", ["omitted", "status", "submitted"])
+def test_submission_is_not_completion_checks_the_recorded_progress_and_submission(broken):
+    _, expected = load_dataset(INPUTS)["F06"]
+    progress = {"step_code": "FILE_TAX_BUSINESS_CLOSURE", "proposed_status": "IN_PROGRESS",
+                "proposed_submitted": True}
+    result = {**plan(), "action_code": "CONFIRM_PROCEDURE_COMPLETION",
+              "procedure_progress_changes": [progress]}
+    assert score(expected, result)["result"] == "PASS"
+    if broken == "omitted":
+        result["procedure_progress_changes"] = []
+    elif broken == "status":
+        progress["proposed_status"] = "COMPLETED"
+    else:
+        progress["proposed_submitted"] = False
+    assert score(expected, result)["result"] == "WRONG"

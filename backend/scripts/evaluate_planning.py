@@ -504,6 +504,7 @@ def decision_summary(outcome) -> dict:
                 "step_code": change.procedure_step.step_code,
                 "before_status": as_text(change.before_status),
                 "proposed_status": as_text(change.proposed_status),
+                "proposed_submitted": change.proposed_submitted,
             }
             for change in subject.supervisor_draft.mutations.procedure_progress_changes
         ],
@@ -682,6 +683,12 @@ def score(row: dict, result: dict) -> dict:
         conflict["field_path"] for conflict in result.get("conflicts", [])
     } != set(row["expected_conflict_fields"]):
         reasons.append("unexpected conflict fields")
+    for expected in row.get("expected_procedure_progress", []):
+        if not any(
+            all(change.get(key) == value for key, value in expected.items())
+            for change in result.get("procedure_progress_changes", [])
+        ):
+            reasons.append("expected procedure progress missing")
     return {
         "result": "WRONG" if reasons else "PASS",
         "reasons": reasons,
