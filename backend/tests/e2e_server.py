@@ -44,7 +44,9 @@ from sqlmodel import Session  # noqa: E402
 import app.agent.runtime as runtime_module  # noqa: E402
 from app.agent.document_tool.documents import DocumentService  # noqa: E402
 from app.agent.document_tool.safety import ContentSafetyGuard  # noqa: E402
+from app.agent.document_tool.safety import SafetyDecision  # noqa: E402
 from app.agent.document_tool.tool import DocumentTool  # noqa: E402
+from app.agent.llm import LLMRequestError  # noqa: E402
 from app.be.crud.member import create_member  # noqa: E402
 from app.be.db import get_engine, reset_all_tables  # noqa: E402
 from app.be.services import auth as auth_service  # noqa: E402
@@ -53,8 +55,23 @@ from app.be.routers import document as document_router  # noqa: E402
 from document_fixtures import DocumentClient, document_pdf  # noqa: E402
 
 
+class DocumentSafetyModel(DocumentClient):
+    """합성 표식에만 안전 판정/제공자 장애를 주고, 실제 Guard→HTTP 경로는 유지한다."""
+
+    async def generate(self, model, messages, **kwargs):
+        if model is SafetyDecision:
+            text = messages[-1]["content"]
+            for decision in ("REFUSE", "CRISIS_SUPPORT", "UNAVAILABLE"):
+                if f"E2E_SAFETY_{decision}" not in text:
+                    continue
+                if decision == "UNAVAILABLE":
+                    raise LLMRequestError("synthetic provider outage", code="PROVIDER_UNAVAILABLE", retryable=True)
+                return SafetyDecision(decision=decision)
+        return await super().generate(model, messages, **kwargs)
+
+
 async def synthetic_documents(directory: Path, *, submission_policy: str):
-    client = DocumentClient()
+    client = DocumentSafetyModel()
     client.needs_confirmation = True
     # 실제 라우터가 고른 제출 가림 정책과 도구 종료 경로도 브라우저에서 검증한다.
     return DocumentTool(DocumentService(directory, client,
@@ -86,6 +103,16 @@ def replan_files(directory):
         path = Path(directory) / f"{name}.pdf"
         path.write_bytes(document_pdf("LEASE", restoration_clause=clause, date=day))
         files[name] = str(path)
+    return files
+
+
+def document_safety_files(directory):
+    files = {}
+    for decision in ("REFUSE", "CRISIS_SUPPORT", "UNAVAILABLE"):
+        path = Path(directory) / f"safety-{decision}.pdf"
+        path.write_bytes(document_pdf("TRANSFER", amount="3,300,000원",
+                                      sender=f"E2E_SAFETY_{decision}", recipient="그린철거"))
+        files[decision] = str(path)
     return files
 
 
@@ -168,8 +195,10 @@ def main() -> None:
                   "conflict_members": [_signed_in_member() for _ in range(2)],
                   "replan_members": [_signed_in_member() for _ in range(3)],
                   "replan_files": replan_files(directory),
-                  "document_member": _signed_in_member(), "document_directory": directory,
-                  "document_files": document_files(directory)}
+                  "document_member": _signed_in_member(), "document_other_member": _signed_in_member(),
+                  "document_safety_members": [_signed_in_member() for _ in range(3)],
+                  "document_directory": directory, "document_files": document_files(directory),
+                  "document_safety_files": document_safety_files(directory)}
         Path(os.environ["E2E_TOKEN_FILE"]).write_text(json.dumps(tokens), encoding="utf-8")
         uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
 

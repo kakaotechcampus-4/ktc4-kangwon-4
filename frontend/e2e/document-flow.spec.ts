@@ -3,9 +3,9 @@ import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { BE_URL, TOKEN_FILE } from '../playwright.config.ts'
 
-test('같은 Case의 이체 누락을 보완·확인하고 점검한 뒤 ZIP을 받는다', async ({ page, request }) => {
+test('같은 Case의 이체 누락을 보완·확인하고 점검한 뒤 ZIP을 받는다', async ({ page, request, browser }) => {
   test.setTimeout(120_000)
-  const { document_member: member, document_directory: directory, document_files: files } = JSON.parse(readFileSync(TOKEN_FILE, 'utf-8'))
+  const { document_member: member, document_other_member: other, document_directory: directory, document_files: files } = JSON.parse(readFileSync(TOKEN_FILE, 'utf-8'))
   const headers = { 'Access-Token': member.access_token }
   // #230 진단 화면의 이름 입력을 완료했다고 보지 않는다. 알려진 상호는 합성 Case 준비값이다.
   const created = await request.post(`${BE_URL}/cases`, { headers, data: {
@@ -103,4 +103,42 @@ print(json.dumps(dict(ids=[d['document_id'] for d in context['documents']], stat
 `, directory, String(caseId), (await download.path())!], { cwd: '../backend', env: { ...process.env, PYTHONPATH: '.' }, encoding: 'utf-8' }))
   expect(stored.status).toBe('COMPLETE')
   expect(stored.ids.sort()).toEqual(complete.documents.map((d: { document_id: string }) => d.document_id).sort())
+
+  // 새로고침·다른 화면을 거친 재진입도 서버의 같은 목록/점검 상태를 다시 읽는다.
+  await page.goto('/docs')
+  await page.reload()
+  await expect(page.getByRole('listitem')).toHaveCount(6)
+  await expect(page.getByText('점검 완료', { exact: true })).toHaveCount(6)
+  await page.goto('/case')
+  await page.goto('/docs')
+  await expect(page.getByRole('button', { name: '정산 제출 파일 보기', exact: true })).toBeVisible()
+  expect(await (await request.get(`${BE_URL}/cases/documents`, { headers })).json()).toEqual(complete)
+
+  const otherHeaders = { 'Access-Token': other.access_token }
+  expect((await request.post(`${BE_URL}/cases`, { headers: otherHeaders, data: {
+    store_name: '다른합성카페', business_type: 'CAFE', franchise_status: false,
+    lease_status: 'OWNED', employee_count: 0, had_employees: false,
+    pension_enrolled: false, health_insurance_enrolled: false,
+    employment_insurance_enrolled: false, industrial_accident_insurance_enrolled: false,
+  } })).ok()).toBe(true)
+  const stranger = await browser.newPage()
+  await stranger.addInitScript(([access, refresh]) => {
+    sessionStorage.setItem('reborn:access-token', access)
+    sessionStorage.setItem('reborn:refresh-token', refresh)
+  }, [other.access_token, other.refresh_token])
+  await stranger.goto(new URL('/docs', page.url()).href)
+  await expect(stranger.getByText('아직 모인 서류가 없어요', { exact: true })).toBeVisible()
+  const foreignId = complete.documents[0].document_id
+  expect((await request.post(`${BE_URL}/cases/documents/${foreignId}/confirm`, {
+    headers: otherHeaders, data: { kind: 'TRANSFER', confirmed_fields: { amount: '1원' } },
+  })).status()).toBe(422)
+  expect((await request.delete(`${BE_URL}/cases/documents/${foreignId}`, { headers: otherHeaders })).status()).toBe(422)
+  expect((await request.get(`${BE_URL}/cases/documents/settlement.zip`, { headers: otherHeaders })).status()).toBe(422)
+  const empty = await (await request.get(`${BE_URL}/cases/documents`, { headers: otherHeaders })).json()
+  expect(empty.documents).toEqual([])
+  expect(empty.check).toBeNull()
+  await stranger.close()
+  // 타회원의 확인/삭제 실패가 원래 Case의 파일/완료 점검을 건드리지 않았는지도 본다.
+  expect(await (await request.get(`${BE_URL}/cases/documents`, { headers })).json()).toEqual(complete)
+  expect((await request.get(`${BE_URL}/cases/documents/settlement.zip`, { headers })).status()).toBe(200)
 })
