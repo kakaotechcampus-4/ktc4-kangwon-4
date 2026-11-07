@@ -2,7 +2,20 @@
 
 2026년 11월 1일 개인 카페 폐업 시안에 맞춘 Agent와 실제 LLM 호출을 검증했고, 11월 2일 Langfuse 모니터링 조회 기능을 추가했다. 같은 입력으로 모델과 추론 강도인 `effort`를 바꿔 품질·토큰·시간·비용을 비교한다. 아래 수치는 합성 입력에 대한 결과이며, 실제 고객 서류의 정확도나 전체 서비스의 응답 속도로 일반화하지 않는다.
 
-## 현재 Agent 실제 정확도 검증 (2026-11-02 추가)
+## 현재 코드와 과거 측정 구분 (2026-11-07)
+
+확인 기준은 develop `764f3c2`다. 아래 11/1~11/2의 모델 설정·수치·작업 범위는 당시 기록이며 현재 배포 상태를 뜻하지 않는다.
+
+- 서류 업로드·목록·확인·삭제·점검·ZIP은 [BE 라우터](../../backend/app/be/routers/document.py)에 연결돼 있다(#159). FE 서류 화면 연결은 #170에 반영됐다. [서류 서비스](../../backend/app/be/services/document.py)는 Case별 Context를 파일에 보관하고, 아직 판단에 반영하지 않은 원상복구 조항이 있으면 재판단을 접수한다(#173). 브라우저 전체 흐름 검증은 #232, 운영 반영 확인은 #229·#240에서 추적한다.
+- [현재 실행 경로](architecture.md)는 지원금 Agent를 호출하지 않는다. 아래 Support 결과는 해당 Agent를 따로 평가한 기록이며 현재 서비스의 지원 자격 판정 실적으로 세지 않는다.
+- [정산 점검 코드](../../backend/app/agent/document_tool/checks.py)의 필수 목록에서 통장 사본은 제외됐다(#140). 아래 7개 파일·ZIP 9항목은 통장 사본을 포함했던 초기 합성 평가의 구성이다.
+- 서류 안전 거절·위기 판정은 일반 처리 실패와 구분해 422 코드와 화면 안내를 반환한다(#227). 남은 실패 경로 검증은 #228에서 추적한다.
+- [멘토 리뷰 반영 #218](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/218)은 부분 원상복구의 세부 질문·중복 방지 검사를 보강했다. 후속 저장·화면 검증은 #233에서 추적한다.
+- 서버 과거 관측과 로컬 Agent 측정은 입력·측정 구간을 맞춘 전후 비교로 확인되지 않았다. HTTP·DB·화면 완료까지의 재측정은 #234에서 추적하며, 서로 다른 구간의 시간을 개선율로 합치지 않는다.
+
+이 절은 코드와 기존 PR을 대조한 설명이다. 실제 모델 재측정이나 운영 배포 확인 결과를 새로 추가한 것은 아니다.
+
+## Agent 실제 정확도 검증 (2026-11-02 기록)
 
 실행 전에 기대값을 고정한 합성 입력을 각 3회 실제 호출했다. 미게시 모바일 초안이 아닌 현재 Info·Support·Supervisor·Review와 문서 입력 안전 검사를 사용했다. 모델·effort·프롬프트는 바꾸지 않았다.
 
@@ -24,7 +37,7 @@ Review의6/6은 **독립 LLM과 코드 검사를 합친 Tool의 최종 차단 �
 
 최종 자동 테스트는 MySQL 통합을 포함해625개/30.38초, 변경 Python의 Ruff도 통과했다. FE·BE·common·규칙 파일은 수정하지 않았다. [고정 입력](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/blob/feature/agent-evaluation-artifacts/docs/agent/evaluations/2026-11-02-agent-accuracy-inputs.json), [모델별 결과·재시도·요청별 사용량](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/blob/feature/agent-evaluation-artifacts/docs/agent/evaluations/2026-11-02-agent-accuracy.json), [Langfuse 대조 원본](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/blob/feature/agent-evaluation-artifacts/docs/agent/evaluations/2026-11-02-agent-accuracy-langfuse.json)은 #130에 보존한다.
 
-## 코드 기준과 변경 범위
+## 당시 코드 기준과 변경 범위 (2026-11-02)
 
 - 작업 브랜치: `feature/agent-monitoring-mobile`
 - 현재 기준 커밋: `2c6a574140b63cf31635f6e4497e637e84a10cbc` (PR 120 머지). 이전 측정의 기준 `d630255...`는 각 원본 기록에 보존한다.
@@ -70,7 +83,7 @@ JSON·CSV는 실제 고객 제출 서류 원본이 아니라 합성 평가 입�
 
 [실제 요청별 사용량·실패·필드별 결과·코드 지문 원본](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/blob/feature/agent-evaluation-artifacts/docs/agent/evaluations/2026-11-02-document-quality.json)은 #130, 문서 구현과 상세 결과는 #128에서 확인한다. 아래 이전 측정은 당시의 결과로 보존한다.
 
-## 현재 Agent·Tool별 정확도 검증 범위
+## Agent·Tool별 정확도 검증 범위 (2026-11-02 기록)
 
 실제 호출 성공과 정확도 검증 완료는 구분한다. 모든 구성요소를 같은 깊이로 검증한 상태는 아니다.
 
@@ -85,9 +98,9 @@ JSON·CSV는 실제 고객 제출 서류 원본이 아니라 합성 평가 입�
 
 Info의13/13 원본은 미게시 모바일 초안의 `reborn_mobile_facts`/`reborn_mobile_review` 호출이다. 기존 Info의 `reborn_info_analysis` 호출과 혼동하지 않는다. 이전 자동 테스트622개 통과는 실제 LLM 정확도 측정 횟수가 아니며, 이전 Support의1건 확인을 전체 지원 자격 검증으로 일반화하지 않는다. 이전 범위 대조에서는 새 LLM을 호출하지 않았으며, 이후 추가 실제 호출 결과는 맨 위 표로 구분한다.
 
-## 현재 담당 범위와 구현
+## 문서 Tool 초기 구현 범위 (2026-11-02 기록)
 
-사용자의 최신 지시 **“일단 구현하고 pr올리자 구현해”**, **“Agent 기능과 호출 계약을 완성해 PR (기존 범위 유지)”**에 따라 문서 Tool를 구현했다. 이전 PM 대기 지시는 이 요청으로 변경됐다. FE 서류함은 빈 화면이고 BE 업로드·목록 API는 아직 없으므로 앱 연결 완료를 주장하지 않는다. 아래 Python 계약을 BE에서 호출하고 반환된 상태를 저장하는 부분이 다음 연동 작업이다.
+당시에는 독립 문서 Tool과 Python 호출 계약만 구현했고 FE·BE 연결 전이었다. 이후 연결 상태는 맨 위 11/7 코드 기준을 따른다. 아래는 초기 구현과 평가 기록이다.
 
 [document_tool](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/blob/feature/document-agent-runtime/backend/app/agent/document_tool/tool.py)는 추출·확인·점검·ZIP만 담당한다. [models.py](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/blob/feature/document-agent-runtime/backend/app/agent/document_tool/models.py)의 `DocumentContext`가 호출 계약이며 DB·인증·HTTP 서버를 추가하지 않았다. 기존 LangGraph의 상황 진단·결과 입력·Supervisor·Review 계약은 유지한다. 과거 모바일 전체 흐름 초안은 로컬에 보존하고 이번 게시 코드에 포함하지 않는다. 아래 모바일 측정은 그 초안의 **과거 평가 이력**이다.
 
@@ -116,7 +129,7 @@ Info의13/13 원본은 미게시 모바일 초안의 `reborn_mobile_facts`/`rebo
 
 [요청별 사용량·코드 지문·산출물 검사](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/blob/feature/agent-evaluation-artifacts/docs/agent/evaluations/2026-11-02-document-implementation.json)에 성공·실패를 함께 보존한다. 이전 로컬 보관분과 합친 범위는 **967회·확인된 2,164,685토큰·단가 확인 소계 7,025.941381원·비용 미확인 19회**다. Langfuse 24시간 조회와는 다른 집계 범위이므로 더하지 않는다.
 
-### BE에서 호출할 Python 계약
+### 초기 Python 호출 예시
 
 ```python
 from pathlib import Path
@@ -138,7 +151,7 @@ finally:
     await agent.aclose()
 ```
 
-각 함수는 받은 Context를 직접 변경하지 않고 새 Context를 반환한다. 현재 기존 LangGraph가 이 Tool을 호출하는 연결은 없으며 별도 연동 작업이 필요하다. `confirm_document`는 문서 종류와 확인한 필드 전체를 받으며 사진 확인은 `{}`를 사용한다. 신청인·상호·폐업일과 필수 서류가 부족하면 `ISSUES`로 남는다. BE는 사용자/Case 권한, 파일 저장 위치 접근 통제, 업로드와 목록 API, 확인 화면, 상태 저장과 삭제를 담당한다. 개인정보 가림 정책은 제출 기관의 실제 요구에 맞춰 명시적으로 선택해야 한다.
+각 함수는 받은 Context를 직접 변경하지 않고 새 Context를 반환한다. 현재는 BE 서류 라우터가 Tool을 호출하고, 원상복구 조항 변화에 따른 재판단은 BE가 접수한다. LangGraph가 문서 Tool을 직접 호출하는 방식은 아니다. `confirm_document`는 문서 종류와 확인한 필드 전체를 받으며 사진 확인은 `{}`를 사용한다. 신청인·상호·폐업일과 필수 서류가 부족하면 `ISSUES`로 남는다. 개인정보 가림 정책은 제출 기관의 실제 요구에 맞춰 명시적으로 선택해야 한다.
 
 ## Langfuse에서 기록하는 값
 
