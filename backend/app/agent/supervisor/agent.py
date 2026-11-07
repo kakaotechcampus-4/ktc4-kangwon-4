@@ -259,6 +259,11 @@ class SupervisorAgent:
             known_procedure_steps=request.known_procedure_steps,
         )
         information_blockers = information_fields["blockers"] if information_fields else []
+        decision_types = (["ACTION"] if action_candidates else []) + (
+            ["NEEDS_MORE_INFO"] if information_blockers else []
+        )
+        if not decision_types:
+            raise SupervisorGuardrailError("Supervisor has no available action or information question")
         prompt_input = {
             "trigger": to_model_projection(request.trigger),
             "case_snapshot": to_model_projection(request.case_snapshot),
@@ -362,6 +367,7 @@ class SupervisorAgent:
                         # has no sampling-level determinism guarantee. Runtime reuse
                         # separately checks the full request, evidence and configuration.
                         enum_constraints={
+                            "decision_type": decision_types,
                             "action_code": [
                                 action["action_code"] for action in action_candidates
                             ],

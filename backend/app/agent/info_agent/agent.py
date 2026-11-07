@@ -928,7 +928,9 @@ class InfoAnalysisAgent:
                 ),
                 reason_summary=semantic.reason_summary,
             ))
-        procedure_findings = self._procedure_findings(request, draft, known_steps)
+        procedure_findings = self._procedure_findings(
+            request, draft, known_steps, observations=observations,
+        )
         if not conflicts:
             self._validate_procedure_coverage(request, draft, procedure_bindings)
 
@@ -1084,6 +1086,8 @@ class InfoAnalysisAgent:
         request: InfoAnalysisInput,
         draft: InfoAnalysisDraft,
         known_steps: dict[str, Any],
+        *,
+        observations: Sequence[ProcedureProgressObservation],
     ) -> list[ProcedureFinding]:
         evidence_by_id = {
             item.evidence_id: item
@@ -1110,6 +1114,13 @@ class InfoAnalysisAgent:
             for item in request.case_snapshot.procedure_progress
             if item.requirements_confirmed
         }
+        # These reports already passed source-span checks; held reports cannot
+        # advance readiness. Current status still comes from the snapshot.
+        ready_steps.update(
+            (item.procedure_step.procedure_step_id, item.procedure_step.step_code)
+            for item in observations
+            if item.requirements_confirmed and not item.requires_confirmation
+        )
         findings: list[ProcedureFinding] = []
         seen_steps: set[str] = set()
         invalid_summary_steps = [
