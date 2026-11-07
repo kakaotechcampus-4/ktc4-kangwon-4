@@ -31,7 +31,7 @@ const STEP_STATUS: Record<DocumentCheckView['steps'][number]['status'], StepStat
  * 점검은 서버(#159 `POST /cases/documents/check`)가 한다. 화면은 결과 상태(통과·확인할 것 있음·
  * 멈춤)와 서버가 쓴 단계 이름·문제 문구를 그대로 보여준다.
  *
- * 점검 직전에 신청인 이름과 실제 폐업일을 묻는다. 서비스에 사장님 이름 칸이 없고, 예상 달만
+ * 점검 직전에 가게 이름·신청인 이름과 실제 폐업일을 묻는다. 서비스에 사장님 이름 칸이 없고, 예상 달만
  * 정한 Case 에는 폐업일이 없어서다(#159). 시안에 없는 장면이라 아래 시트로 둔다(11/03 시우님).
  *
  * 시안 아래쪽 "글자 인식(OCR)과 기관 연동은 쓰지 않아요"는 뺐다. 서버 문서 Tool 은 OCR 을 쓴다(#159).
@@ -88,13 +88,15 @@ export function DocsCheckPage() {
   }
 
   const startCheck = () => setAsking(true)
+  // 각 결과 분기에서 시트를 다시 그려, 열 때마다 저장된 가게 이름을 초기값으로 받는다.
   const askSheet = (
     <ApplicantSheet
       open={asking}
+      initialStoreName={query.view.storeName}
       onClose={() => setAsking(false)}
-      onSubmit={(name, date) => {
+      onSubmit={(storeName, name, date) => {
         setAsking(false)
-        void runCheck(name, date)
+        void runCheck(storeName, name, date)
       }}
     />
   )
@@ -210,25 +212,31 @@ function Header({ icon, title, sub }: { icon: ReactNode; title: string; sub: str
 }
 
 /**
- * 점검 직전에 신청인 이름과 실제 폐업일을 묻는 시트.
+ * 점검 직전에 가게 이름·신청인 이름과 실제 폐업일을 묻는 시트.
  *
  * 이름은 이체확인증의 보낸 사람과, 폐업일은 폐업사실증명원과 맞춰 본다(#159). 이름은 꼭 받고
  * (서버가 1~50자만 받음), 폐업일은 모르면 비워도 된다 — 비우면 서버가 "폐업일 미확인"으로 알려 준다.
  */
 export function ApplicantSheet({
   open,
+  initialStoreName,
   onClose,
   onSubmit,
 }: {
   open: boolean
+  initialStoreName: string | null
   onClose: () => void
-  onSubmit: (name: string, closureDate: string | null) => void
+  onSubmit: (storeName: string, name: string, closureDate: string | null) => void
 }) {
+  const [storeName, setStoreName] = useState(initialStoreName ?? '')
   const [name, setName] = useState('')
   const [date, setDate] = useState('')
+  const storeNameId = useId()
   const nameId = useId()
   const dateId = useId()
   const trimmed = name.trim()
+  const trimmedStore = storeName.trim()
+  const valid = trimmedStore.length > 0 && [...trimmedStore].length <= 50 && trimmed.length > 0 && [...trimmed].length <= 50
 
   return (
     <BottomSheet open={open} onClose={onClose} title="점검 전에 알려 주세요" description="서류에 적힌 것과 맞춰 볼게요.">
@@ -236,10 +244,24 @@ export function ApplicantSheet({
         className="flex flex-col gap-4"
         onSubmit={(event) => {
           event.preventDefault()
-          if (trimmed.length === 0) return
-          onSubmit(trimmed, date === '' ? null : date)
+          if (!valid) return
+          onSubmit(trimmedStore, trimmed, date === '' ? null : date)
         }}
       >
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor={storeNameId} className="text-15 font-medium text-fg-neutral-muted">
+            가게 이름
+          </label>
+          <input
+            id={storeNameId}
+            value={storeName}
+            maxLength={50}
+            autoComplete="organization"
+            onChange={(event) => setStoreName(event.target.value)}
+            className="h-13 rounded-xl px-3 text-17 ring-1 ring-stroke-neutral-weak ring-inset"
+          />
+          <p className="text-14 text-fg-neutral-muted">상호를 확인하고 가게 정보에 저장해요. 신청인 이름과 구분해 주세요.</p>
+        </div>
         <div className="flex flex-col gap-1.5">
           <label htmlFor={nameId} className="text-15 font-medium text-fg-neutral-muted">
             신청인 이름
@@ -267,7 +289,7 @@ export function ApplicantSheet({
           />
           <p className="text-14 text-fg-neutral-muted">폐업사실증명원에 적힌 날짜예요. 모르면 비워 두세요.</p>
         </div>
-        <Button type="submit" disabled={trimmed.length === 0}>
+        <Button type="submit" disabled={!valid}>
           점검하기
         </Button>
       </form>

@@ -127,6 +127,7 @@ def check_documents(
     case = _current_case(session, member_id)
     context = document_service.check_documents(
         session, tool, directory, case, check_request.applicant_name, check_request.closure_date,
+        store_name=check_request.store_name,
     )
     return document_list_response(context)
 

@@ -153,6 +153,9 @@ function toCheck(value: unknown): DocumentCheckView | null | undefined {
 export function toDocumentsView(body: unknown): DocumentsView | null {
   const row = asRow(body)
   if (row === null || !Array.isArray(row.documents)) return null
+  // FE 자동 배포와 BE 수동 배포 사이에는 예전 응답이 올 수 있다(#251). 키가 없을 때만 이름을 비운다.
+  const storeName = Object.hasOwn(row, 'store_name') ? row.store_name : null
+  if (storeName !== null && typeof storeName !== 'string') return null
 
   const documents: DocumentView[] = []
   for (const item of row.documents) {
@@ -164,5 +167,5 @@ export function toDocumentsView(body: unknown): DocumentsView | null {
   const check = toCheck(row.check ?? null)
   if (check === undefined) return null
 
-  return { documents, check }
+  return { storeName, documents, check }
 }
