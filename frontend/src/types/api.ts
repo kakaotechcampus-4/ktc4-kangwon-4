@@ -550,7 +550,7 @@ export interface DocumentResponse {
   kind_label: string
   /** 종류를 모르거나 사진·글자 인식처럼 확신하지 못한 서류. 사장님이 확인해야 점검이 끝난다 */
   needs_confirmation: boolean
-  fields: { name: DocumentFieldName; value: string; page: number }[]
+  fields: { name: DocumentFieldName; label: string; value: string; page: number }[]
   /** 사장님이 확인한 값. 확인 전이면 `null` */
   confirmed_fields: Partial<Record<DocumentFieldName, string>> | null
 }
@@ -558,11 +558,10 @@ export interface DocumentResponse {
 /**
  * 정산 서류 점검 결과(#159).
  *
- * `status` 는 서버 응답에 글자(`str`)로 열려 있어 그대로 적는다. 문서 Tool 이 내는 값은
- * `COMPLETE` · `ISSUES` · `ERROR` 셋이고(#159 승준님), 그 밖의 값은 어댑터가 읽지 못한 것으로 둔다.
+ * 서버와 문서 Tool이 같은 상태 세 가지를 사용한다.
  */
 export interface DocumentCheckResponse {
-  status: string
+  status: 'COMPLETE' | 'ISSUES' | 'ERROR'
   steps: { name: string; status: 'WAITING' | 'RUNNING' | 'DONE' | 'NEEDS_CONFIRMATION' | 'ERROR' }[]
   issues: { code: string; document_ids: string[]; message: string }[]
   checked_at: string
@@ -575,6 +574,8 @@ export interface DocumentCheckResponse {
 export interface DocumentListResponse {
   /** 사장님이 확인해 Case에 저장한 가게 이름. 서류에서 읽은 값과 구분한다 */
   store_name: string | null
+  /** 확인 화면에서 고를 수 있는 종류와 이름. UNKNOWN은 선택 목록에 포함하지 않는다 */
+  document_kinds: { kind: DocumentKind; label: string }[]
   documents: DocumentResponse[]
   check: DocumentCheckResponse | null
 }

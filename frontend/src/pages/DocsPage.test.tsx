@@ -217,7 +217,7 @@ const RECEIPT = serverDocument({
   kind: 'CLOSURE_RECEIPT',
   kind_label: '폐업신고 접수증',
   needs_confirmation: true,
-  fields: [{ name: 'date', value: '2026-10-31', page: 1 }],
+  fields: [{ name: 'date', label: '날짜', value: '2026-10-31', page: 1 }],
 })
 const UNKNOWN = serverDocument({
   document_id: 'doc-unknown',
@@ -361,10 +361,30 @@ describe('DocsPage — Mock', () => {
  * 화면에 안 보이는 칸을 빼고 보내면 그 칸이 점검에서 "값 없음"이 된다.
  */
 describe('ConfirmSheet', () => {
+  it('서버의 종류 선택 목록과 확인된 값의 필드 이름으로 보여 주고 원래 코드로 보낸다', async () => {
+    const document = serverDocument({
+      kind_label: '서버 이체서류', needs_confirmation: true,
+      fields: [{ name: 'amount', label: '서버 송금액', value: '1원', page: 1 }],
+      confirmed_fields: { amount: '2원' },
+    })
+    const { calls } = serve(json({
+      ...serverList([document]), document_kinds: [{ kind: 'TRANSFER', label: '서버 이체서류' }],
+    }))
+    renderAt('/docs')
+    fireEvent.click(await screen.findByRole('button', { name: '서버 이체서류 확인하기' }))
+    const ask = screen.getByRole('dialog', { name: '서류 확인하기' })
+    expect(within(ask).getAllByRole('option').map((option) => option.textContent)).toEqual(['종류를 골라 주세요', '서버 이체서류'])
+    expect(within(ask).getByLabelText('서버 송금액')).toHaveValue('2원')
+    fireEvent.click(within(ask).getByRole('button', { name: '맞아요, 확인했어요' }))
+    await waitFor(() => expect(calls()).toHaveLength(2))
+    expect(JSON.parse(calls()[1].body as string)).toEqual({ kind: 'TRANSFER', confirmed_fields: { amount: '2원' } })
+  })
+
   it('화면에 안 보이는 칸도 원래 값 그대로 같이 보낸다', () => {
     const onConfirm = vi.fn()
     render(
       <ConfirmSheet
+        documentKinds={[{ kind: 'TRANSFER', label: '이체확인증' }]}
         document={{
           id: 'doc-1',
           filename: 'transfer.jpg',
@@ -393,6 +413,7 @@ describe('ConfirmSheet', () => {
   it('안 보이는 칸이 비어 있어도 확인할 수 있다', () => {
     render(
       <ConfirmSheet
+        documentKinds={[{ kind: 'CLOSURE_RECEIPT', label: '폐업신고 접수증' }]}
         document={{
           id: 'doc-2',
           filename: 'receipt.jpg',

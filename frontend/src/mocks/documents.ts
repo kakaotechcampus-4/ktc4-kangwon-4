@@ -1,3 +1,4 @@
+import { DOCUMENT_KINDS } from '../adapters/documents'
 import type { DocumentsView, DocumentView } from '../types/view'
 
 /**
@@ -60,6 +61,7 @@ const DOCUMENTS: DocumentView[] = [
 /** `?mock=docs-issues`: 점검에서 빠진 서류가 나온 상태 */
 export const mockDocumentsWithIssues: DocumentsView = {
   storeName: '봄날개인카페',
+  documentKinds: DOCUMENT_KINDS,
   documents: DOCUMENTS,
   check: {
     status: 'ISSUES',
@@ -72,7 +74,7 @@ export const mockDocumentsWithIssues: DocumentsView = {
 }
 
 /** 기본: 서류를 모았고 아직 점검하지 않은 상태 */
-export const mockDocuments: DocumentsView = { storeName: '봄날개인카페', documents: DOCUMENTS, check: null }
+export const mockDocuments: DocumentsView = { storeName: '봄날개인카페', documentKinds: DOCUMENT_KINDS, documents: DOCUMENTS, check: null }
 
 /** 가짜 올리기가 걸리는 시간. 실제로는 서류 한 장에 수십 초가 걸릴 수 있다(#159) */
 export const MOCK_UPLOAD_MS = 1_500
@@ -96,6 +98,7 @@ export function simulateUpload(view: DocumentsView, file: File): Promise<Documen
 /** `?mock=docs-complete`: 점검을 통과해 제출 파일을 받을 수 있는 상태 */
 export const mockDocumentsComplete: DocumentsView = {
   storeName: '봄날개인카페',
+  documentKinds: DOCUMENT_KINDS,
   documents: DOCUMENTS.map((document) => ({ ...document, needsConfirmation: false })),
   check: {
     status: 'COMPLETE',
