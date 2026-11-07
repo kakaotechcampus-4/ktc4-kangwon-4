@@ -14,6 +14,7 @@ import pytest
 from sqlmodel import Session, SQLModel, create_engine
 from testcontainers.community.mysql import MySqlContainer
 
+from app.be.db import MYSQL_IMAGE
 from app.be.crud.case_history import get_case_created_history
 from app.be.crud.member import create_member
 from app.be.models.blocker import Blocker
@@ -28,7 +29,7 @@ from app.be.services.case import create_case
 @pytest.fixture(scope="module")
 def case_engine():
     container = MySqlContainer(
-        "mysql:8.0", dialect="pymysql", username="test", password="test",
+        MYSQL_IMAGE, dialect="pymysql", username="test", password="test",
         root_password="test", dbname="case_service_test",
     ).with_env("TZ", "Asia/Seoul")
     with container:

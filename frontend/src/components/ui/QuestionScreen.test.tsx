@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
-import { QuestionScreen } from './QuestionScreen'
+import { PillChoices, QuestionScreen } from './QuestionScreen'
 
 const TITLE = { pre: '', highlight: '어떤 가게', post: '를\n정리하시나요?' }
 const OPTIONS = [
@@ -106,5 +106,47 @@ describe('QuestionScreen', () => {
     )
 
     expect(screen.queryByRole('button', { name: '뒤로' })).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * 진단 질문 밖(결과 입력의 원상복구 답, #197)에서도 쓰는 글자 보기. 묶음 제목으로 무엇을 고르는지
+ * 읽혀야 하고, 보내는 중에는 고른 것을 바꿀 수 없어야 한다 — 바뀌면 보낸 것과 화면이 어긋난다.
+ */
+describe('PillChoices', () => {
+  function renderPills({ selected = null, disabled }: { selected?: 'A' | 'B' | null; disabled?: boolean } = {}) {
+    const onSelect = vi.fn()
+    render(
+      <>
+        <p id="pill-title">원상복구 범위</p>
+        <PillChoices
+          options={OPTIONS as { value: 'A' | 'B'; label: string }[]}
+          selected={selected}
+          onSelect={onSelect}
+          labelledBy="pill-title"
+          disabled={disabled}
+        />
+      </>,
+    )
+    return onSelect
+  }
+
+  it('묶음 제목으로 읽히고, 고른 것만 선택됨으로 표시하고, 누른 보기를 알린다', () => {
+    const onSelect = renderPills({ selected: 'A' })
+
+    expect(screen.getByRole('radiogroup', { name: '원상복구 범위' })).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: '개인 카페' })).toBeChecked()
+    expect(screen.getByRole('radio', { name: '다른 음식점' })).not.toBeChecked()
+
+    fireEvent.click(screen.getByRole('radio', { name: '다른 음식점' }))
+    expect(onSelect).toHaveBeenCalledWith('B')
+  })
+
+  it('잠그면 고를 수 없다', () => {
+    const onSelect = renderPills({ disabled: true })
+
+    fireEvent.click(screen.getByRole('radio', { name: '다른 음식점' }))
+    expect(screen.getByRole('radio', { name: '다른 음식점' })).toBeDisabled()
+    expect(onSelect).not.toHaveBeenCalled()
   })
 })

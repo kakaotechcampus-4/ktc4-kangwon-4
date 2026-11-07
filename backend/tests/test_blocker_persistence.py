@@ -5,6 +5,7 @@ import json
 from uuid import uuid4
 
 import pytest
+from app.be.db import MYSQL_IMAGE
 from app.agent.review_tool import ReviewTool
 from app.agent.schemas import (
     ReviewedPlanOutcome,
@@ -29,7 +30,7 @@ from testcontainers.community.mysql import MySqlContainer
 @pytest.fixture(scope="module")
 def mysql_engine():
     with MySqlContainer(
-        "mysql:8.0", dialect="pymysql", username="test", password="test",
+        MYSQL_IMAGE, dialect="pymysql", username="test", password="test",
         root_password="test", dbname="blocker_persistence_test",
     ).with_env("TZ", "Asia/Seoul") as container:
         engine = create_engine(container.get_connection_url() + "?charset=utf8mb4")
