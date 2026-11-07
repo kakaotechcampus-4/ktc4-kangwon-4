@@ -118,7 +118,7 @@ def test_list_keeps_saved_documents_and_hides_other_cases(api):
     assert [d["document_id"] for d in client.get("/cases/documents").json()["documents"]] == [uploaded["document_id"]]
 
     member["id"] = 2
-    assert client.get("/cases/documents").json() == {"documents": [], "check": None}
+    assert client.get("/cases/documents").json() == {"store_name": "다른가게", "documents": [], "check": None}
     other = client.post(f"/cases/documents/{uploaded['document_id']}/confirm",
                         json={"kind": "TRANSFER", "confirmed_fields": {"amount": "1원"}})
     assert other.status_code == 422
@@ -138,6 +138,35 @@ def test_owner_confirms_uncertain_values_and_can_remove_document(api):
     assert confirmed["confirmed_fields"]["amount"] == "3,000,000원"
 
     assert client.delete(f"/cases/documents/{record['document_id']}").json()["documents"] == []
+
+
+def test_nameless_case_asks_for_a_name_then_returns_the_explicit_input(api):
+    client, _, _ = api
+    case = case_crud.get_case_by_member_id(None, 1)
+    case.store_name = None
+    # 업로드에서 읽은 상호로 Case를 채우지 않는다.
+    upload(client, DocumentKind.TAX_INVOICE, SETTLEMENT[DocumentKind.TAX_INVOICE])
+    assert client.get("/cases/documents").json()["store_name"] is None
+    missing = client.post("/cases/documents/check", json=OWNER)
+    assert missing.status_code == 422 and "가게 이름" in missing.json()["detail"]
+
+    checked = client.post("/cases/documents/check", json={**OWNER, "store_name": " 봄날개인카페 "})
+    assert checked.status_code == 200 and checked.json()["store_name"] == "봄날개인카페"
+    assert client.get("/cases/documents").json()["store_name"] == "봄날개인카페"
+
+
+@pytest.mark.parametrize("name", ["", " \t ", "가" * 51])
+def test_invalid_store_name_does_not_replace_the_saved_name(api, name):
+    client, _, _ = api
+    response = client.post("/cases/documents/check", json={**OWNER, "store_name": name})
+    assert response.status_code == 422
+    assert client.get("/cases/documents").json()["store_name"] == "봄날개인카페"
+
+
+def test_store_name_accepts_fifty_characters_after_trimming(api):
+    client, _, _ = api
+    response = client.post("/cases/documents/check", json={**OWNER, "store_name": " " + "가" * 50 + " "})
+    assert response.status_code == 200 and response.json()["store_name"] == "가" * 50
 
 
 def test_case_is_required_and_empty_upload_is_rejected(api):

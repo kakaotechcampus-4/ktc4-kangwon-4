@@ -15,6 +15,7 @@ from app.agent.document_tool.tool import DocumentTool
 from app.be.crud import case as case_crud
 from app.be.services import document as document_service
 from app.be.services.case import get_case_logs
+from app.be.schemas.document import document_list_response
 from case_world import case_engine, case_world  # noqa: F401
 from document_fixtures import DocumentClient, document_pdf
 
@@ -118,3 +119,45 @@ def test_only_passed_check_is_logged_as_ribbon(documents):
     assert logs.count(("RIBBON", "DOCUMENTS_CHECKED", None)) == 1
     assert [detail for actor, event, detail in logs if event == "DOCUMENT_UPLOADED"].count("TRANSFER") == 1
     assert all(actor == "OWNER" for actor, event, _ in logs if event == "DOCUMENT_UPLOADED")
+
+
+@pytest.mark.parametrize("initial_name", [None, "예전 가게"])
+def test_explicit_store_name_is_saved_reloaded_and_used_without_changing_documents(documents, initial_name):
+    engine, member_id, tool, directory = documents
+    with Session(engine) as session:
+        case = case_crud.get_case_by_member_id(session, member_id)
+        case.store_name = initial_name
+        session.commit()
+    for kind, fields in {**SETTLEMENT, DocumentKind.TRANSFER: TRANSFER}.items():
+        context = _upload(engine, member_id, tool, directory, kind, fields)
+    with Session(engine) as session:
+        case = case_crud.get_case_by_member_id(session, member_id)
+        for document in context.documents:
+            if document.analysis.needs_confirmation:
+                document_service.confirm_document(
+                    tool, directory, case, document.document_id, document.analysis.kind,
+                    {field.name: field.value for field in document.analysis.fields},
+                )
+        checked = document_service.check_documents(
+            session, tool, directory, case, "김리본", date(2026, 10, 31), store_name="봄날개인카페",
+        )
+        assert checked.document_check.status == "COMPLETE"
+        original_documents = [row.model_dump_json() for row in checked.documents]
+
+    # 새 DB 세션으로 읽어도 Case 이름이 남고, 서류에서 읽은 상호·신청인과 구분된다.
+    with Session(engine) as session:
+        case = case_crud.get_case_by_member_id(session, member_id)
+        assert case.store_name == "봄날개인카페"
+        loaded = document_service.load_context(directory, case)
+        assert document_list_response(loaded).store_name == "봄날개인카페"
+        assert loaded.applicant_name == "김리본"
+        assert document_service.check_documents(
+            session, tool, directory, case, "김리본", date(2026, 10, 31),
+        ).document_check.status == "COMPLETE"  # 이름을 생략한 기존 클라이언트도 이어 간다.
+        mismatched = document_service.check_documents(
+            session, tool, directory, case, "김리본", date(2026, 10, 31), store_name="다른 가게",
+        )
+        assert "BUYER_MISMATCH" in {issue.code for issue in mismatched.document_check.issues}
+        assert [row.model_dump_json() for row in mismatched.documents] == original_documents
+    with Session(engine) as session:
+        assert case_crud.get_case_by_member_id(session, member_id).store_name == "다른 가게"

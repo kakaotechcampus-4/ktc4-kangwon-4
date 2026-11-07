@@ -23,7 +23,8 @@ export const serverDocument = (overrides: Partial<DocumentResponse> = {}): Docum
 export const serverList = (
   documents: DocumentResponse[],
   check: DocumentListResponse['check'] = null,
-): DocumentListResponse => ({ documents, check })
+  storeName: string | null = '봄날개인카페',
+): DocumentListResponse => ({ store_name: storeName, documents, check })
 
 export const completeCheck: DocumentListResponse['check'] = {
   status: 'COMPLETE',

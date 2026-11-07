@@ -61,8 +61,8 @@ export async function removeDocument(id: string): Promise<DocumentsView> {
   return readList(await request(`/cases/documents/${encodeURIComponent(id)}`, { method: 'DELETE' }))
 }
 
-export async function checkDocuments(applicantName: string, closureDate: string | null): Promise<DocumentsView> {
-  const body: DocumentCheckRequest = { applicant_name: applicantName, closure_date: closureDate }
+export async function checkDocuments(storeName: string, applicantName: string, closureDate: string | null): Promise<DocumentsView> {
+  const body: DocumentCheckRequest = { store_name: storeName, applicant_name: applicantName, closure_date: closureDate }
   return readList(await request('/cases/documents/check', { method: 'POST', body }))
 }
 

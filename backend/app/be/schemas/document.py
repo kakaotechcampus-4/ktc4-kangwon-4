@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.agent.document_tool.models import (
     DOCUMENT_LABELS,
@@ -22,10 +22,17 @@ class DocumentConfirmRequest(BaseModel):
 
 
 class DocumentCheckRequest(BaseModel):
+    # 서류 점검 직전에 사장님이 직접 확인한 가게 이름. 생략하면 기존 Case 이름을 쓴다.
+    store_name: str | None = Field(default=None, min_length=1, max_length=50)
     # 정산 서류를 내는 사람(사장님) 이름. 이체확인증의 보낸 사람과 맞춰 본다
     applicant_name: str = Field(min_length=1, max_length=50)
     # 사장님이 확인한 실제 폐업일. 폐업 예정일로 대신하지 않으며, 비우면 점검에서 CLOSURE_DATE_UNCONFIRMED가 된다
     closure_date: date | None = None
+
+    @field_validator("store_name", mode="before")
+    @classmethod
+    def trim_store_name(cls, value):
+        return value.strip() if isinstance(value, str) else value
 
 
 class DocumentFieldResponse(BaseModel):
@@ -53,6 +60,7 @@ class DocumentCheckResponse(BaseModel):
 
 
 class DocumentListResponse(BaseModel):
+    store_name: str | None
     documents: list[DocumentResponse]
     # 서류를 더하거나 빼거나 확인하면 지난 점검은 지워진다(null). 다시 점검해야 제출 파일을 받을 수 있다.
     check: DocumentCheckResponse | None
@@ -75,6 +83,7 @@ def _document(record: DocumentRecord) -> DocumentResponse:
 def document_list_response(context: DocumentContext) -> DocumentListResponse:
     check = context.document_check
     return DocumentListResponse(
+        store_name=context.business_name,
         documents=[_document(record) for record in context.documents],
         check=None if check is None else DocumentCheckResponse(
             status=check.status, steps=check.steps, issues=check.issues, checked_at=check.checked_at,

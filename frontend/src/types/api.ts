@@ -74,9 +74,8 @@ export interface CaseResponse {
   id: number
   member_id: number
   /**
-   * 가게 이름. 진단에서 묻지 않아 지금은 늘 `null` 이다(#156).
-   * 서류 점검이 이 값을 서류의 "공급받는 자"와 맞춰 보므로, 비어 있으면 그 확인을 하지 못한다
-   * (#160 `BUYER_UNCONFIRMED`). 점검 때 따로 받을지는 아직 정하지 않았다(#175 현종님).
+   * 가게 이름. 진단에서는 비워 두고, 서류 점검 직전에 사장님이 확인한 이름을 저장한다(#230).
+   * 서류의 "공급받는 자"와 대조하며 신청인 이름과 구분한다.
    */
   store_name: string | null
   business_type: string
@@ -574,6 +573,8 @@ export interface DocumentCheckResponse {
  * 서류를 더하거나 빼거나 확인하면 지난 점검은 지워진다(`check: null`).
  */
 export interface DocumentListResponse {
+  /** 사장님이 확인해 Case에 저장한 가게 이름. 서류에서 읽은 값과 구분한다 */
+  store_name: string | null
   documents: DocumentResponse[]
   check: DocumentCheckResponse | null
 }
@@ -589,6 +590,8 @@ export interface DocumentConfirmRequest {
  * 폐업일을 비우면 예정일로 대신하지 않고 "폐업일 미확인"으로 점검이 끝나지 않는다
  */
 export interface DocumentCheckRequest {
+  /** 1~50자. 이미 저장한 이름이 있는 구형 호출자는 생략할 수 있다 */
+  store_name?: string | null
   /** 1~50자 */
   applicant_name: string
   /** `YYYY-MM-DD` */

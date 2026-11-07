@@ -153,6 +153,7 @@ function toCheck(value: unknown): DocumentCheckView | null | undefined {
 export function toDocumentsView(body: unknown): DocumentsView | null {
   const row = asRow(body)
   if (row === null || !Array.isArray(row.documents)) return null
+  if (row.store_name !== null && typeof row.store_name !== 'string') return null
 
   const documents: DocumentView[] = []
   for (const item of row.documents) {
@@ -164,5 +165,5 @@ export function toDocumentsView(body: unknown): DocumentsView | null {
   const check = toCheck(row.check ?? null)
   if (check === undefined) return null
 
-  return { documents, check }
+  return { storeName: row.store_name, documents, check }
 }

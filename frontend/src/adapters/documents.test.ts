@@ -18,8 +18,15 @@ const serverDocument = (overrides: Record<string, unknown> = {}) => ({
  * 사장님이 확인한 값 대신 처음 읽은 값이 다시 뜬다.
  */
 describe('toDocumentsView', () => {
+  it('가게 이름은 서류에서 추측하지 않고 서버가 저장한 값만 옮긴다', () => {
+    expect(toDocumentsView({ store_name: '확인한 가게', documents: [serverDocument()], check: null })?.storeName).toBe('확인한 가게')
+    expect(toDocumentsView({ documents: [], check: null })).toBeNull()
+    expect(toDocumentsView({ store_name: 123, documents: [], check: null })).toBeNull()
+  })
+
   it('서버가 정한 종류 이름과 확인 필요 여부를 그대로 옮긴다', () => {
-    expect(toDocumentsView({ documents: [serverDocument()], check: null })).toEqual({
+    expect(toDocumentsView({ store_name: null, documents: [serverDocument()], check: null })).toEqual({
+      storeName: null,
       documents: [
         {
           id: '0b9f…-1',
@@ -37,6 +44,7 @@ describe('toDocumentsView', () => {
   /** 사장님이 고친 값이 맞는 값이다. 처음 읽은 값을 다시 보여주면 고친 것이 사라진 줄 안다 */
   it('사장님이 확인한 값이 있으면 그것을 쓴다', () => {
     const view = toDocumentsView({
+      store_name: null,
       documents: [serverDocument({ confirmed_fields: { amount: '3,000,000원', sender: '김리본' } })],
       check: null,
     })
@@ -53,6 +61,7 @@ describe('toDocumentsView', () => {
    */
   it('서버가 준 값 이름을 먼저 쓰고, 모르는 칸은 이름 없이 남긴다', () => {
     const view = toDocumentsView({
+      store_name: null,
       documents: [
         serverDocument({
           fields: [
@@ -72,13 +81,14 @@ describe('toDocumentsView', () => {
 
   /** 깨진 한 장만 빼면 사장님은 그 서류를 다시 올리고, 점검의 "빠진 서류"와도 어긋난다 */
   it('한 장이라도 모양이 깨지면 통째로 읽지 못한 것으로 둔다', () => {
-    expect(toDocumentsView({ documents: [serverDocument(), serverDocument({ kind_label: '' })], check: null })).toBeNull()
-    expect(toDocumentsView({ documents: 'none' })).toBeNull()
+    expect(toDocumentsView({ store_name: null, documents: [serverDocument(), serverDocument({ kind_label: '' })], check: null })).toBeNull()
+    expect(toDocumentsView({ store_name: null, documents: 'none' })).toBeNull()
     expect(toDocumentsView(null)).toBeNull()
   })
 
   it('점검 결과의 단계와 서버 문구를 옮긴다', () => {
     const view = toDocumentsView({
+      store_name: null,
       documents: [],
       check: {
         status: 'ISSUES',
@@ -97,6 +107,6 @@ describe('toDocumentsView', () => {
 
   /** 모르는 점검 상태를 "완료"나 "없음"으로 읽으면 제출 파일 버튼이 잘못 열린다 */
   it('모르는 점검 상태면 읽지 못한 것으로 둔다', () => {
-    expect(toDocumentsView({ documents: [], check: { status: 'OK', steps: [], issues: [] } })).toBeNull()
+    expect(toDocumentsView({ store_name: null, documents: [], check: { status: 'OK', steps: [], issues: [] } })).toBeNull()
   })
 })
