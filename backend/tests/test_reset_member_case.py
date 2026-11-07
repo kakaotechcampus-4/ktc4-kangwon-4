@@ -146,6 +146,16 @@ def test_reset_of_a_member_without_a_case_changes_nothing(case_world):
     assert _rows_of(case_world.engine, case_id) == before
 
 
+def test_reset_waits_while_a_judgment_is_running(case_world):
+    # 뒤에서 돌던 판단이 지워진 기록에 저장하려다 실패하지 않게, 판단 중이면 손대지 않는다(다물님 #224)
+    member_id, case_id, _ = case_world.sign_up()
+    case_world.add_history(case_id, "USER_INPUT", "PENDING")
+    before = _rows_of(case_world.engine, case_id)
+
+    assert _reset(case_world.engine, member_id) == (member_id, None)
+    assert _rows_of(case_world.engine, case_id) == before
+
+
 def test_reset_without_a_member_id_changes_nothing(case_world):
     # --init-command를 빠뜨려도 아무것도 지우지 않는다
     _, case_id, _ = case_world.sign_up()

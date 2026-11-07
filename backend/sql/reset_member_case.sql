@@ -6,7 +6,9 @@
 --   docker compose -f docker-compose.prod.yml exec -T mysql mysql --defaults-extra-file=/run/secrets/mysql_health_cnf --init-command="SET @member_id = 7" closure_agent < backend/sql/reset_member_case.sql
 -- 회원 번호 찾기: SELECT m.id, m.nickname, c.id AS case_id FROM members m LEFT JOIN `case` c ON c.member_id = m.id;
 -- 번호를 안 넘기면 @member_id가 비어 있어 아무것도 지우지 않는다.
--- 끝에 지운 회원·Case 번호를 한 줄 보여 준다. case_id가 NULL이면 지운 게 없다(번호를 안 넘겼거나 Case가 없는 회원).
+-- 판단이 도는 중(PENDING)이면 지우지 않는다. 뒤에서 돌던 판단이 지워진 기록에 저장하려다 실패한다(다물님 #224).
+-- 끝에 지운 회원·Case 번호를 한 줄 보여 준다. case_id가 NULL이면 지운 게 없다
+-- (번호를 안 넘겼거나, Case가 없는 회원이거나, 판단 중). 판단 중이면 끝난 뒤 다시 넣는다.
 --
 -- 한 트랜잭션이라 중간에 실패하면 아무것도 지워지지 않는다. Case가 없는 회원이면 아무 일도 없다.
 -- 올린 서류 파일(document_data 볼륨)은 지우지 않는다. 새 Case는 다른 폴더를 써서 섞이지 않는다.
@@ -14,7 +16,11 @@
 
 START TRANSACTION;
 
-SET @case_id = (SELECT id FROM `case` WHERE member_id = @member_id);
+SET @case_id = (
+  SELECT c.id FROM `case` c
+  WHERE c.member_id = @member_id
+    AND NOT EXISTS (SELECT 1 FROM case_history h WHERE h.case_id = c.id AND h.judgment_status = 'PENDING')
+);
 
 -- case_history ↔ blocker가 서로를 가리켜서, 판단 이력이 가리키는 우선 Blocker를 먼저 비운다
 UPDATE case_history SET priority_blocker_id = NULL WHERE case_id = @case_id;
