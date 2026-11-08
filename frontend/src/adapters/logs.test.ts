@@ -24,8 +24,8 @@ describe('toLogEntries', () => {
         ),
       ),
     ).toEqual([
-      { key: '0-MORE_INFO_REQUESTED', actor: 'RIBBON', text: '더 여쭤볼 것을 정리했어요', date: '10.18' },
-      { key: '1-RESULT_SUBMITTED', actor: 'OWNER', text: '할 일 결과를 알려주셨어요', date: '10.17' },
+      { key: '0-MORE_INFO_REQUESTED', actor: 'RIBBON', event: 'MORE_INFO_REQUESTED', occurredAt: '2026-10-18T09:00:00+09:00', text: '더 여쭤볼 것을 정리했어요', date: '10.18' },
+      { key: '1-RESULT_SUBMITTED', actor: 'OWNER', event: 'RESULT_SUBMITTED', occurredAt: '2026-10-17T14:02:11+09:00', text: '할 일 결과를 알려주셨어요', date: '10.17' },
     ])
   })
 
@@ -99,7 +99,7 @@ describe('toLogEntries', () => {
   /** 판단으로 로드맵 할 일이 늘었다(#184). 시안의 "답변대로"는 충돌에서 고른 뒤에도 생겨 뺀다 */
   it('새로 생긴 할 일 개수를 문장에 넣는다', () => {
     expect(toLogEntries(logsOf(log('RIBBON', 'ROADMAP_TASKS_ADDED', { detail: '3' })))).toEqual([
-      { key: '0-ROADMAP_TASKS_ADDED', actor: 'RIBBON', text: '할 일 3개를 새로 추가했어요', date: '10.17' },
+      { key: '0-ROADMAP_TASKS_ADDED', actor: 'RIBBON', event: 'ROADMAP_TASKS_ADDED', occurredAt: '2026-10-17T14:02:11+09:00', text: '할 일 3개를 새로 추가했어요', date: '10.17' },
     ])
   })
 
@@ -130,21 +130,21 @@ describe('toLogEntries', () => {
         ),
       ),
     ).toEqual([
-      { key: '0-DOCUMENT_UPLOADED', actor: 'OWNER', text: '서류를 올리셨어요', detail: '이체확인증', date: '10.17' },
-      { key: '1-DOCUMENT_UPLOADED', actor: 'OWNER', text: '서류를 올리셨어요', date: '10.17' },
+      { key: '0-DOCUMENT_UPLOADED', actor: 'OWNER', event: 'DOCUMENT_UPLOADED', occurredAt: '2026-10-17T14:02:11+09:00', text: '서류를 올리셨어요', detail: '이체확인증', date: '10.17' },
+      { key: '1-DOCUMENT_UPLOADED', actor: 'OWNER', event: 'DOCUMENT_UPLOADED', occurredAt: '2026-10-17T14:02:11+09:00', text: '서류를 올리셨어요', date: '10.17' },
     ])
   })
 
   /** 이전 서버는 재판단 중이거나 실패해도 이 사건을 보낸다. 접수만으로 계약 변경을 단정하지 않는다 */
   it('이전 서버의 서류 재판단 기록은 업로드 사실만 적는다', () => {
     expect(toLogEntries(logsOf(log('OWNER', 'DOCUMENT_SUBMITTED')))).toEqual([
-      { key: '0-DOCUMENT_SUBMITTED', actor: 'OWNER', text: '서류를 올리셨어요', date: '10.17' },
+      { key: '0-DOCUMENT_SUBMITTED', actor: 'OWNER', event: 'DOCUMENT_SUBMITTED', occurredAt: '2026-10-17T14:02:11+09:00', text: '서류를 올리셨어요', date: '10.17' },
     ])
   })
 
   it('서류 점검 통과는 리본이 한 일로 적는다', () => {
     expect(toLogEntries(logsOf(log('RIBBON', 'DOCUMENTS_CHECKED')))).toEqual([
-      { key: '0-DOCUMENTS_CHECKED', actor: 'RIBBON', text: '서류를 점검하고 제출 파일을 만들었어요', date: '10.17' },
+      { key: '0-DOCUMENTS_CHECKED', actor: 'RIBBON', event: 'DOCUMENTS_CHECKED', occurredAt: '2026-10-17T14:02:11+09:00', text: '서류를 점검하고 제출 파일을 만들었어요', date: '10.17' },
     ])
   })
 })
@@ -162,7 +162,7 @@ describe('withTaskTitles', () => {
     const entries = toLogEntries(logsOf(log('OWNER', 'CHECKLIST_COMPLETED', { task_id: 'dispose_stock' })))!
 
     expect(withTaskTitles(entries, roadmap)).toEqual([
-      { key: '0-CHECKLIST_COMPLETED', actor: 'OWNER', text: '할 일 하나를 마치셨어요', detail: '재고·장비 처분', taskId: 'dispose_stock', date: '10.17' },
+      { key: '0-CHECKLIST_COMPLETED', actor: 'OWNER', event: 'CHECKLIST_COMPLETED', occurredAt: '2026-10-17T14:02:11+09:00', text: '할 일 하나를 마치셨어요', detail: '재고·장비 처분', taskId: 'dispose_stock', date: '10.17' },
     ])
   })
 

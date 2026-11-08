@@ -104,6 +104,9 @@ export function toLogEntries(body: CaseLogResponse | null): LogEntry[] | null {
     entries.push({
       key: `${index}-${event}`,
       actor: known.actor,
+      event,
+      // 날짜를 읽었으니 글자다(`toDateLabel`)
+      occurredAt: row?.occurred_at as string,
       text: toText(event, row?.detail, known.text),
       detail: toDetail(event, row?.detail),
       ...(event.startsWith('CHECKLIST_') && typeof row?.task_id === 'string' && row.task_id.length > 0

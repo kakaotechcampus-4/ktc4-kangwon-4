@@ -5,7 +5,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { LogEntry } from '../../types/view'
 import { BANNER_INTERVAL_MS, HomeBanner } from './HomeBanner'
 
-const entry = (text: string, date = '10.17'): LogEntry => ({ key: text, actor: 'RIBBON', text, date })
+const entry = (text: string, date = '10.17'): LogEntry => ({
+  key: text,
+  actor: 'RIBBON',
+  event: 'NEXT_ACTION_DECIDED',
+  occurredAt: '2026-10-17T14:02:11+09:00',
+  text,
+  date,
+})
 
 function renderBanner(items?: LogEntry[]) {
   render(

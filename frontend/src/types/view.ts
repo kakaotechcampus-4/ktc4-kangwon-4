@@ -416,6 +416,10 @@ export type LogActor = 'OWNER' | 'RIBBON'
 export interface LogEntry {
   key: string
   actor: LogActor
+  /** 서버 사건 코드(`NEXT_ACTION_DECIDED` 등). 알림이 누르면 갈 곳을 고를 때 쓴다 */
+  event: string
+  /** 서버가 준 시각 글자 그대로(`2026-10-17T14:02:11+09:00`). 알림을 봤는지 견줄 때 쓴다 */
+  occurredAt: string
   text: string
   /** 덧붙이는 한 줄. 정한 할 일 제목, 사장님이 알려 준 심사 결과, 마친 할 일 이름 등. 없으면 그리지 않는다 */
   detail?: string
@@ -423,6 +427,12 @@ export interface LogEntry {
   taskId?: string
   /** `10.17` 처럼 월.일. 서버가 준 날짜 글자를 그대로 잘라 쓴다 */
   date: string
+}
+
+/** 알림 한 줄. 기록 가운데 리본이 한 일에 누르면 갈 화면을 붙인 것이다(`adapters/notifications.ts`) */
+export interface NotificationEntry extends LogEntry {
+  /** 누르면 갈 화면 주소 */
+  to: string
 }
 
 /** 서류에서 꺼낸 값 하나. 이름은 화면 말로 바꿔 둔다 */
