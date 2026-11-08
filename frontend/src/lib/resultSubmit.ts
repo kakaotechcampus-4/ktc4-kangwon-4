@@ -4,7 +4,7 @@ import type {
   CaseResultsSubmitAcceptedResponse,
   CaseResultsSubmitRequest,
   CaseResultsSubmitResponse,
-  RequirementsConfirmed,
+  ActionDone,
   RestorationAnswer,
 } from '../types/api'
 import { ApiError, request, UnauthorizedError } from './api'
@@ -58,12 +58,12 @@ export async function fetchResultsEntry(): Promise<CaseResultsEntryResponse | nu
  */
 export async function submitResult(
   historyId: number,
-  input: string | RestorationAnswer | RequirementsConfirmed,
+  input: string | RestorationAnswer | ActionDone,
 ): Promise<number> {
   const body: CaseResultsSubmitRequest = typeof input === 'string'
     ? { raw_input: input, case_history_id: historyId }
-    : 'requirements_confirmed' in input
-      ? { requirements_confirmed: true, case_history_id: historyId }
+    : 'action_done' in input
+      ? { action_done: true, case_history_id: historyId }
       : { restoration_answer: input, case_history_id: historyId }
   return readAcceptedId(await request('/cases/results', { method: 'POST', body }))
 }
