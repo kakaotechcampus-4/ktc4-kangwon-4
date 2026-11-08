@@ -5,6 +5,8 @@
 - GET /cases/results/status — 제출 뒤 처리 상태 조회
 """
 
+import asyncio
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -17,7 +19,7 @@ from app.be.crud import procedure_step as procedure_step_crud
 from app.be.models.case import Case
 from app.be.models.case_history import CaseHistory
 from app.be.schemas.case import CaseResultsSubmitRequest
-from app.be.services import decision_record
+from app.be.services import decision_record, judgment
 from app.be.services.case import (
     get_case_results_entry,
     get_case_results_submit_status,
@@ -148,6 +150,93 @@ def _set_next_action(case_engine, history_id, action_code, candidate_id="procedu
         history.next_action_code = action_code
         session.get(Blocker, history.priority_blocker_id).candidate_id = candidate_id
         session.commit()
+
+
+def _legacy_preparation(case_engine, case_world, status="FAILED"):
+    member_id, case_id, prior_id = case_world.sign_up()
+    code = "CONFIRM_EMPLOYEE_SETTLEMENT_REQUIREMENTS"
+    with Session(case_engine) as session:
+        step = next(row for row in procedure_step_crud.get_all_procedure_steps(session)
+                    if row.step_code == "SETTLE_EMPLOYEE_PAYMENTS")
+        step_id = step.id
+    _set_next_action(case_engine, prior_id, code, f"procedure:{step_id}")
+    history_id = case_world.add_history(case_id, "USER_INPUT", status)
+    with Session(case_engine) as session:
+        history = session.get(CaseHistory, history_id)
+        history.action_done = {"action_code": code}  # #298의 저장값: SQL004도 JSON은 그대로 둔다
+        history.raw_input = "준비사항 확인을 마쳤어요."
+        session.commit()
+    return member_id, history_id, prior_id, step_id
+
+
+@pytest.mark.parametrize("mode", ["resubmit", "retry", "pending"])
+def test_legacy_preparation_reaches_ai_with_its_saved_procedure(case_engine, case_world, mode):
+    member_id, history_id, _, step_id = _legacy_preparation(
+        case_engine, case_world, "PENDING" if mode == "pending" else "FAILED",
+    )
+    with Session(case_engine) as session:
+        original = session.get(CaseHistory, history_id)
+        stored_input = original.action_done.copy()
+        if mode == "resubmit":
+            accepted = submit_case_results(session, member_id, CaseResultsSubmitRequest(
+                case_history_id=history_id, action_done=True,
+            ))
+            target_id = accepted.case_history_id
+        elif mode == "retry":
+            target_id = retry_case_judgment(session, member_id).case_history_id
+        else:
+            target_id = history_id
+        graph_input, _ = judgment._read_judgment_input(session, target_id)
+        assert graph_input.trigger.action_done.model_dump() == {
+            "action_code": stored_input["action_code"], "procedure_step_id": step_id,
+        }
+        assert graph_input.trigger.action_done.kind == "PREPARATION"
+        assert all(step.status == "NOT_STARTED" for step in graph_input.case_snapshot.procedure_progress)
+        assert session.get(CaseHistory, history_id).action_done == stored_input
+
+
+@pytest.mark.parametrize("changes", [
+    {"action_done": 42},
+    {"action_done": [{"action_code": "CONFIRM_EMPLOYEE_SETTLEMENT_REQUIREMENTS"}]},
+    {"raw_input": "기관 처리가 끝났어요."},
+    {"action_done": {"action_code": "CONFIRM_EMPLOYEE_SETTLEMENT_REQUIREMENTS", "extra": True}},
+    {"action_done": {"action_code": "CONFIRM_EMPLOYEE_SETTLEMENT_REQUIREMENTS", "procedure_step_id": 0}},
+    {"previous_action": "CONFIRM_TAX_CLOSURE_REQUIREMENTS"},
+    {"candidate_id": None},
+    {"candidate_id": "support:1"},
+    {"action_done": {"action_code": "SETTLE_EMPLOYEE_PAYMENTS"},
+     "previous_action": "SETTLE_EMPLOYEE_PAYMENTS"},
+])
+def test_legacy_preparation_does_not_invent_a_procedure(case_engine, case_world, changes):
+    member_id, history_id, prior_id, step_id = _legacy_preparation(case_engine, case_world)
+    _set_next_action(case_engine, prior_id, changes.get("previous_action", "CONFIRM_EMPLOYEE_SETTLEMENT_REQUIREMENTS"),
+                     changes.get("candidate_id", f"procedure:{step_id}"))
+    with Session(case_engine) as session:
+        original = session.get(CaseHistory, history_id)
+        for key in ("raw_input", "action_done"):
+            if key in changes:
+                setattr(original, key, changes[key])
+        session.commit()
+        request = CaseResultsSubmitRequest(case_history_id=history_id, action_done=True)
+        assert error_of(lambda: submit_case_results(session, member_id, request))[0] == 422
+        assert session.get(CaseHistory, history_id).judgment_status == "FAILED"
+
+
+def test_unrecoverable_legacy_preparation_stops_retrying_before_ai(case_engine, case_world, monkeypatch):
+    _, history_id, prior_id, _ = _legacy_preparation(case_engine, case_world, "PENDING")
+    _set_next_action(case_engine, prior_id, "CONFIRM_TAX_CLOSURE_REQUIREMENTS")
+    ask_agent = AsyncMock()
+    monkeypatch.setattr(judgment, "get_engine", lambda: case_engine)
+    monkeypatch.setattr(judgment, "_ask_agent", ask_agent)
+    monkeypatch.setattr(judgment, "judge_owed_documents", AsyncMock())
+    asyncio.run(judgment.run_judgment_in_background(history_id))
+    ask_agent.assert_not_awaited()
+    with Session(case_engine) as session:
+        history = session.get(CaseHistory, history_id)
+        assert (history.judgment_status, history.recovery_action_code, history.retryable) == (
+            "FAILED", "CONTACT_SUPPORT", False,
+        )
+        assert history.action_done == {"action_code": "CONFIRM_EMPLOYEE_SETTLEMENT_REQUIREMENTS"}
 
 
 @pytest.mark.parametrize("action_code,candidate_id,kind,done_kind", [

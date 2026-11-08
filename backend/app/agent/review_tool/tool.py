@@ -1459,9 +1459,11 @@ def _finalize_result(
     deterministic: _SafetyFindings,
 ) -> ReviewResult:
     # 막힌 일 목록은 코드가 후보로 정하고, 같은지는 위 결정적 검사(candidate_decision_violations)가
-    # 이미 확인한다. 모델이 이 목록에 단 반려는 재작업해도 같은 목록이 나와 판단만 멈춘다
+    # 이미 확인한다. 모델의 목록 계약 지적만 제외하고, 같은 위치의 근거·안전 반려는 유지한다.
     # (11/01~11/08 운영 기록: 모델 반려 뒤 재작업 성공 24건 중 1건). 판정에서 빼고 서버 로그에만 남긴다.
-    ignored = [issue for issue in model_output.issues if _targets_code_fixed_blockers(issue.target_path)]
+    ignored = [issue for issue in model_output.issues
+               if issue.issue_code == "CONTRACT_VIOLATION" and issue.category == "CONTRACT"
+               and _targets_code_fixed_blockers(issue.target_path)]
     if ignored:
         logger.warning(
             "review model issues on code-fixed blockers ignored for %s: %s",
