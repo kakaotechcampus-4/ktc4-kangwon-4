@@ -16,6 +16,21 @@ export interface SessionValue {
 }
 
 export function createSessionValue(key: string): SessionValue {
+  return createStoredValue(key, () => window.sessionStorage)
+}
+
+/**
+ * 브라우저를 껐다 켜도 남는 값(`localStorage`). 실패를 다루는 방식은 위와 같다.
+ *
+ * 로그인처럼 남으면 곤란한 값에는 쓰지 않는다. 지금은 알림을 어디까지 봤는지 하나뿐이다
+ * (`notificationSeen.ts`) — 탭을 닫을 때마다 지우면 들어올 때마다 모든 알림이 새것으로 뜬다.
+ */
+export function createLocalValue(key: string): SessionValue {
+  return createStoredValue(key, () => window.localStorage)
+}
+
+/** 저장소를 꺼내는 것도 실패할 수 있어(저장소 차단) 꺼내기까지 `try` 안에서 한다 */
+function createStoredValue(key: string, storage: () => Storage): SessionValue {
   let fallback: string | null = null
   let storageUsable = true
 
@@ -24,7 +39,7 @@ export function createSessionValue(key: string): SessionValue {
       if (!storageUsable) return fallback
 
       try {
-        return window.sessionStorage.getItem(key)
+        return storage().getItem(key)
       } catch {
         storageUsable = false
         return fallback
@@ -36,8 +51,8 @@ export function createSessionValue(key: string): SessionValue {
       if (!storageUsable) return
 
       try {
-        if (value === null) window.sessionStorage.removeItem(key)
-        else window.sessionStorage.setItem(key, value)
+        if (value === null) storage().removeItem(key)
+        else storage().setItem(key, value)
       } catch {
         storageUsable = false
       }

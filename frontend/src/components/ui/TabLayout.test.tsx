@@ -1,8 +1,9 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { RouterProvider, createMemoryRouter } from 'react-router'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { saveTokens } from '../../lib/auth'
 import { DocsPage } from '../../pages/DocsPage'
 import { LogPage } from '../../pages/LogPage'
 import { NotificationsPage } from '../../pages/NotificationsPage'
@@ -66,5 +67,57 @@ describe('TabLayout', () => {
 
     await userEvent.click(screen.getByRole('button', { name: '뒤로' }))
     expect(await screen.findByRole('heading', { level: 1, name: '서류함' })).toBeInTheDocument()
+  })
+})
+
+/** 종 버튼의 점. 기록(`GET /cases/logs`)에서 리본이 한 일이 본 시각보다 늦으면 찍는다 */
+describe('TabLayout — 새 알림 점', () => {
+  const logs = {
+    logs: [
+      { actor: 'RIBBON', event: 'NEXT_ACTION_DECIDED', occurred_at: '2026-10-18T09:00:00+09:00', task_id: null, detail: null },
+    ],
+  }
+
+  afterEach(() => {
+    localStorage.clear()
+    vi.unstubAllGlobals()
+  })
+
+  function serveLogs() {
+    saveTokens('access-1', 'refresh-1')
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) =>
+        new Response(JSON.stringify(url.includes('/cases/logs') ? logs : { documents: [], check: null }), { status: 200 }),
+      ),
+    )
+  }
+
+  it('안 본 알림이 있으면 종 버튼이 새 알림이 있다고 알린다', async () => {
+    serveLogs()
+    renderAt('/docs')
+
+    expect(await screen.findByRole('link', { name: '알림, 새 알림 있음' })).toBeInTheDocument()
+  })
+
+  it('이미 본 알림뿐이면 알리지 않는다', async () => {
+    localStorage.setItem('reborn:notifications-seen-at', '2026-10-18T09:00:00+09:00')
+    serveLogs()
+    renderAt('/docs')
+
+    // 기록을 받은 뒤에도 이름이 그대로인지 본다. 서류함 목록이 뜰 때쯤이면 기록도 받았다
+    expect(await screen.findByRole('heading', { level: 2 })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '알림' })).toBeInTheDocument()
+  })
+
+  it('알림 화면을 보고 돌아오면 점이 사라진다', async () => {
+    serveLogs()
+    renderAt('/docs')
+
+    await userEvent.click(await screen.findByRole('link', { name: '알림, 새 알림 있음' }))
+    expect(await screen.findByRole('link', { name: /다음 할 일을 정했어요/ })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '뒤로' }))
+
+    expect(await screen.findByRole('link', { name: '알림' })).toBeInTheDocument()
   })
 })

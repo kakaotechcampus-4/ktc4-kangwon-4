@@ -1,12 +1,15 @@
 import { IconBellLine, IconChevronRightLine, IconSparkle2Fill } from '@karrotmarket/react-monochrome-icon'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router'
 
 import { toNotifications } from '../adapters/notifications'
+import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { EmptyState } from '../components/ui/EmptyState'
 import { HammerLoader } from '../components/ui/HammerLoader'
 import { TopBar } from '../components/ui/TopBar'
 import { useLogs } from '../hooks/useLogs'
+import { isNewSince, markSeen, readSeenAt } from '../lib/notificationSeen'
 
 /**
  * 알림. 탭 화면 머리말의 종 버튼으로 들어온다.
@@ -27,6 +30,17 @@ export function NotificationsPage() {
 
 function NotificationList() {
   const { query, reload } = useLogs()
+  /**
+   * 들어올 때 읽어 둔 본 시각. "새" 표시는 이 값으로 가른다 — 목록을 받자마자 본 시각을 새로 적으므로,
+   * 적은 값으로 가르면 방금 들어온 화면에서 "새" 표시가 바로 사라진다.
+   */
+  const [seenBefore] = useState(readSeenAt)
+  const notifications = query.status === 'READY' ? toNotifications(query.entries) : null
+
+  // 목록을 보여줬으면 본 것이다. 종 버튼의 점이 이 값으로 꺼진다
+  useEffect(() => {
+    if (notifications) markSeen(notifications)
+  }, [notifications])
 
   if (query.status === 'LOADING') {
     return (
@@ -47,8 +61,7 @@ function NotificationList() {
     )
   }
 
-  const notifications = toNotifications(query.entries)
-  if (notifications.length === 0) {
+  if (notifications === null || notifications.length === 0) {
     return (
       <EmptyState
         icon={<IconBellLine size={32} />}
@@ -73,7 +86,10 @@ function NotificationList() {
               <IconSparkle2Fill size={20} />
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block text-17 font-medium">{item.text}</span>
+              <span className="flex items-center gap-1.5">
+                <span className="text-17 font-medium">{item.text}</span>
+                {isNewSince(seenBefore, item.occurredAt) && <Badge tone="brand">새 알림</Badge>}
+              </span>
               {item.detail && <span className="mt-0.5 block text-15 text-fg-neutral">{item.detail}</span>}
               <span className="mt-0.5 block text-14 text-fg-neutral-muted">{item.date}</span>
             </span>

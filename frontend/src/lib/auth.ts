@@ -1,4 +1,5 @@
 import { MOCK_SWITCH_ENABLED, readMockKey } from './mockSwitch'
+import { forgetSeen } from './notificationSeen'
 import { createSessionValue } from './sessionStore'
 
 /**
@@ -67,10 +68,12 @@ export function getRefreshToken(): string | null {
 
 /**
  * Refresh 토큰도 같이 지운다. 남아 있으면 로그아웃한 사용자가 다시 받기로 되살아난다.
+ * 알림을 어디까지 봤는지도 지운다 — 브라우저에 남는 값이라, 공용 PC에서 다음 사람에게 이어지지 않게 한다.
  */
 export function logOut(): void {
   accessToken.write(null)
   refreshToken.write(null)
+  forgetSeen()
 }
 
 /**

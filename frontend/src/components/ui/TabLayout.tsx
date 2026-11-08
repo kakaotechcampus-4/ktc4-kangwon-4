@@ -3,6 +3,7 @@ import { Link, Outlet, useLocation } from 'react-router'
 
 import hammerUrl from '../../assets/brand/reborn-hammer.svg'
 import wordmarkUrl from '../../assets/brand/reborn-wordmark.svg'
+import { useUnreadNotifications } from '../../hooks/useUnreadNotifications'
 import { TabBar } from './TabBar'
 
 /** 홈 탭의 경로. 홈만 머리말에 이름 대신 망치와 워드마크를 둔다 */
@@ -25,6 +26,7 @@ const TAB_TITLE: Record<string, string> = {
  */
 export function TabLayout() {
   const { pathname } = useLocation()
+  const unread = useUnreadNotifications()
 
   return (
     <div className="screen-frame mx-auto flex h-dvh max-w-[402px] flex-col bg-bg-layer-default">
@@ -40,10 +42,12 @@ export function TabLayout() {
         )}
         <Link
           to="/notifications"
-          aria-label="알림"
-          className="grid size-12 place-items-center rounded-lg text-fg-neutral active:bg-bg-transparent-pressed"
+          aria-label={unread ? '알림, 새 알림 있음' : '알림'}
+          className="relative grid size-12 place-items-center rounded-lg text-fg-neutral active:bg-bg-transparent-pressed"
         >
           <IconBellLine size={24} aria-hidden="true" />
+          {/* 점은 꾸밈이다. 새 알림이 있다는 것은 버튼 이름이 말한다 */}
+          {unread && <span aria-hidden="true" className="absolute top-3 right-3 size-2 rounded-full bg-bg-critical-solid" />}
         </Link>
       </header>
 

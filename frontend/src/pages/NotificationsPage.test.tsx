@@ -42,6 +42,7 @@ const item = (overrides: Partial<CaseLogItem>): CaseLogItem => ({
 })
 
 afterEach(() => {
+  localStorage.clear()
   vi.unstubAllGlobals()
 })
 
@@ -94,5 +95,36 @@ describe('NotificationsPage', () => {
 
     expect(await screen.findByRole('link')).toHaveAttribute('href', '/case')
     expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+})
+
+/** 지난번에 본 뒤로 생긴 알림에만 "새 알림"을 붙이고, 보여준 뒤에는 본 것으로 적는다 */
+describe('NotificationsPage — 새 알림', () => {
+  it('지난번에 본 뒤로 생긴 알림에만 새 알림 표시를 붙인다', async () => {
+    saveTokens('access-1', 'refresh-1')
+    localStorage.setItem('reborn:notifications-seen-at', '2026-10-17T12:00:00+09:00')
+    serve(
+      json({
+        logs: [
+          item({ occurred_at: '2026-10-18T09:00:00+09:00' }),
+          item({ event: 'CONFLICT_FOUND', detail: null, occurred_at: '2026-10-17T09:00:00+09:00' }),
+        ],
+      }),
+    )
+    renderAt('/notifications')
+
+    const [fresh, old] = await screen.findAllByRole('link')
+    expect(fresh).toHaveTextContent('새 알림')
+    expect(old).not.toHaveTextContent('새 알림')
+  })
+
+  /** 목록을 받자마자 본 시각을 적어도, 이번에 들어온 화면의 표시는 그대로 둔다 */
+  it('보여준 알림은 본 것으로 적되 이번 화면의 표시는 지우지 않는다', async () => {
+    saveTokens('access-1', 'refresh-1')
+    serve(json({ logs: [item({ occurred_at: '2026-10-18T09:00:00+09:00' })] }))
+    renderAt('/notifications')
+
+    expect(await screen.findByRole('link')).toHaveTextContent('새 알림')
+    expect(localStorage.getItem('reborn:notifications-seen-at')).toBe('2026-10-18T09:00:00+09:00')
   })
 })
