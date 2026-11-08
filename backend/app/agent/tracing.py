@@ -49,6 +49,11 @@ class TraceEvent:
     review_count: int | None = None
     review_revise_count: int | None = None
     rework_count: int | None = None
+    case_id: int | None = None
+    review_issue_count: int | None = None
+    review_issues: tuple[dict[str, str], ...] | None = None
+    draft_action_code: str | None = None
+    recommended_rework_targets: tuple[str, ...] | None = None
 
 
 def _repo_root() -> Path:

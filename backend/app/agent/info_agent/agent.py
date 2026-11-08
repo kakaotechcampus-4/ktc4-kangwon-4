@@ -954,7 +954,9 @@ class InfoAnalysisAgent:
                 ),
                 reason_summary=semantic.reason_summary,
             ))
-        procedure_findings = self._procedure_findings(request, draft, known_steps)
+        procedure_findings = self._procedure_findings(
+            request, draft, known_steps, observations=observations,
+        )
         if not conflicts:
             self._validate_procedure_coverage(request, draft, procedure_bindings)
 
@@ -1110,6 +1112,8 @@ class InfoAnalysisAgent:
         request: InfoAnalysisInput,
         draft: InfoAnalysisDraft,
         known_steps: dict[str, Any],
+        *,
+        observations: Sequence[ProcedureProgressObservation],
     ) -> list[ProcedureFinding]:
         evidence_by_id = {
             item.evidence_id: item
@@ -1136,14 +1140,14 @@ class InfoAnalysisAgent:
             for item in request.case_snapshot.procedure_progress
             if item.requirements_confirmed
         }
-        if request.requirements_confirmation is not None:
-            # 버튼으로 받은 준비 확인은 이번 판단부터 준비된 절차로 본다. 그래야 같은 준비 안내를
-            # 한 번 더 고르지 않는다. 글로 쓴 보고는 지금처럼 저장된 뒤 다음 판단부터 반영된다.
-            ready_steps.update(
-                (known_steps[item.step_code].procedure_step_id, item.step_code)
-                for item in draft.procedure_observations
-                if item.requirements_confirmed and item.step_code in known_steps
-            )
+        # These reports already passed source-span checks; held reports cannot
+        # advance readiness. Current status still comes from the snapshot.
+        # [준비했어요] 버튼 답도 확인 보류 없는 보고로 만들어져 여기서 같은 판단부터 반영된다.
+        ready_steps.update(
+            (item.procedure_step.procedure_step_id, item.procedure_step.step_code)
+            for item in observations
+            if item.requirements_confirmed and not item.requires_confirmation
+        )
         findings: list[ProcedureFinding] = []
         seen_steps: set[str] = set()
         invalid_summary_steps = [
