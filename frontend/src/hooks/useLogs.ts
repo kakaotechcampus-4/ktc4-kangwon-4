@@ -9,6 +9,16 @@ import { mockLogEntries } from '../mocks/logs'
 import type { CaseLogResponse } from '../types/api'
 import type { LogEntry } from '../types/view'
 
+/**
+ * 기록이 늘었을 수 있다고 알리는 신호의 이름. 판단이 끝난 것을 본 쪽(`JudgmentWatcher`)이 보낸다.
+ * 받은 화면은 기록을 조용히 다시 묻는다 — 종 버튼의 점이 화면을 옮기지 않아도 켜진다.
+ */
+const LOGS_CHANGED = 'reborn:logs-changed'
+
+export function announceLogsChanged(): void {
+  window.dispatchEvent(new Event(LOGS_CHANGED))
+}
+
 /** 기록을 불러온 상태 */
 export type LogsQuery =
   | { status: 'LOADING' }
@@ -62,6 +72,13 @@ export function useLogs(): { query: LogsQuery; reload: () => void } {
       current = false
     }
   }, [usesMock, attempt, navigate])
+
+  // 기록이 늘었다는 신호를 받으면 다시 묻는다. 불러오는 중 화면으로 바꾸지 않아 지금 목록은 그대로 둔다
+  useEffect(() => {
+    const refetch = () => setAttempt((count) => count + 1)
+    window.addEventListener(LOGS_CHANGED, refetch)
+    return () => window.removeEventListener(LOGS_CHANGED, refetch)
+  }, [])
 
   const reload = useCallback(() => {
     setQuery({ status: 'LOADING' })

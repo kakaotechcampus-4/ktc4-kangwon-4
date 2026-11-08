@@ -2,6 +2,7 @@ import { IconSparkle2Fill } from '@karrotmarket/react-monochrome-icon'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router'
 
+import { prefersReducedMotion } from '../../lib/reducedMotion'
 import type { LogEntry } from '../../types/view'
 
 /** 한 줄을 보여주는 시간. 시안과 같다 */
@@ -60,8 +61,4 @@ export function HomeBanner({ items = [] }: HomeBannerProps) {
       )}
     </Link>
   )
-}
-
-function prefersReducedMotion(): boolean {
-  return typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
 }

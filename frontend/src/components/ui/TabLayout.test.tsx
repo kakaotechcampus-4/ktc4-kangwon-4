@@ -1,8 +1,9 @@
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { RouterProvider, createMemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { announceLogsChanged } from '../../hooks/useLogs'
 import { saveTokens } from '../../lib/auth'
 import { DocsPage } from '../../pages/DocsPage'
 import { LogPage } from '../../pages/LogPage'
@@ -119,5 +120,25 @@ describe('TabLayout — 새 알림 점', () => {
     await userEvent.click(screen.getByRole('button', { name: '뒤로' }))
 
     expect(await screen.findByRole('link', { name: '알림' })).toBeInTheDocument()
+  })
+
+  /** 다른 화면에 있을 때 판단이 끝나면(`JudgmentWatcher`) 화면을 옮기지 않아도 점이 켜져야 한다 */
+  it('기록이 늘었다는 신호를 받으면 다시 물어 점을 찍는다', async () => {
+    saveTokens('access-1', 'refresh-1')
+    let answer: unknown = { logs: [] }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) =>
+        new Response(JSON.stringify(url.includes('/cases/logs') ? answer : { documents: [], check: null }), { status: 200 }),
+      ),
+    )
+    renderAt('/docs')
+    expect(await screen.findByRole('heading', { level: 2 })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '알림' })).toBeInTheDocument()
+
+    answer = logs
+    act(() => announceLogsChanged())
+
+    expect(await screen.findByRole('link', { name: '알림, 새 알림 있음' })).toBeInTheDocument()
   })
 })

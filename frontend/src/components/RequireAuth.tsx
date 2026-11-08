@@ -2,6 +2,7 @@ import { Navigate, Outlet, useLocation } from 'react-router'
 
 import { isLoggedIn } from '../lib/auth'
 import { useNavigationDirection } from '../lib/viewTransition'
+import { JudgmentWatcher } from './JudgmentWatcher'
 
 /**
  * 로그인한 사용자만 지나갈 수 있는 문.
@@ -16,6 +17,8 @@ import { useNavigationDirection } from '../lib/viewTransition'
  * 로그인으로 보낸다(`UnauthorizedError`).
  *
  * 화면 이동 방향도 여기서 한 번 적는다(`useNavigationDirection`). 움직이는 화면이 모두 이 아래에 있다.
+ *
+ * 판단이 끝나면 알리는 띠(`JudgmentWatcher`)도 여기 둔다. 로그인한 화면 어디에 있든 떠야 한다.
  */
 export function RequireAuth() {
   const { search } = useLocation()
@@ -23,5 +26,10 @@ export function RequireAuth() {
 
   if (!isLoggedIn(search)) return <Navigate to={{ pathname: '/login', search }} replace />
 
-  return <Outlet />
+  return (
+    <>
+      <Outlet />
+      <JudgmentWatcher />
+    </>
+  )
 }
