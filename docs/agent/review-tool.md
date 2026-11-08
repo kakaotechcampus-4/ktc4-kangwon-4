@@ -18,7 +18,7 @@ Supervisor의 응답이나 대화 이력을 재사용하지 않고 `ReviewSubjec
 
 1. **결정적 검사(코드, 우회 불가)** — `_validate_integrity` 뒤 `_deterministic_safety_review`를 수행한다
    - `_validate_integrity`: subject 자체의 구조적 일관성
-   - `_validate_mutation_provenance`: 모든 변경 후보가 실제 하위 결과에서 나왔는지(근거·digest 추적). 완료 변경은 `completion_confirmed`로 별도 확인 또는 같은 절차의 고정 완료 버튼을 검사한다
+   - `_validate_mutation_provenance`: 변경 후보의 출처·근거·digest를 검사한다. 절차 완료는 `completion_confirmed`로 별도 확인 또는 같은 절차의 고정 완료 버튼을 검사한다. 충돌 확인에서 채택한 원상복구 완료는 `confirmed_restoration_progress`가 원래 충돌·현재 절차·근거의 일치를 확인한 변경만 인정한다
    - `_validate_procedure_analysis_provenance`: 절차 finding의 출처 추적
    - `_validate_action_shape`: ACTION/NEEDS_MORE_INFO 모양 규칙(Blocker/NextAction 존재 여부 등)
    - `procedure_plan_constraints`([procedure-tool.md](./procedure-tool.md))도 여기서 다시 검사
