@@ -49,6 +49,9 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      args:
+        # 빌드한 커밋을 /health에 싣는다. 배포 명령이 GIT_SHA를 넘기고, 빠뜨리면 unknown으로 뜬다(docs/deploy.md)
+        GIT_SHA: ${GIT_SHA:-unknown}
     restart: always
     env_file:
       - .env.prod
