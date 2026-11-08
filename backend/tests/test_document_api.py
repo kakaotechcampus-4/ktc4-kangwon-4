@@ -6,15 +6,16 @@
 test_case_document_log.py(저장)와 test_double_submit.py(겹침)다.
 """
 
+import asyncio
 import io
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
+from threading import Event
 from types import SimpleNamespace
 from zipfile import ZipFile
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlmodel import Session
-
 from app.agent.document_tool.documents import DocumentService
 from app.agent.document_tool.models import DOCUMENT_FIELD_LABELS, DOCUMENT_LABELS, DocumentKind
 from app.agent.document_tool.tool import DocumentTool
@@ -45,8 +46,8 @@ OWNER = {"applicant_name": "김리본", "closure_date": "2026-10-31"}
 class FakeSession:
     """서류함 줄(case_document_context)만 기억하는 세션. 서비스가 쓰는 것은 이 네 가지뿐이다.
 
-    commit은 "지금까지 더한 줄을 확정"이고 rollback은 "버림"이다. 잠금(with_for_update)은
-    요청을 하나씩 보내는 TestClient에서는 기다릴 일이 없어 읽기와 같다.
+    commit은 "지금까지 더한 줄을 확정"이고 rollback은 "버림"이다. 실제 잠금은 흉내 내지
+    않으며, 두 세션의 저장 순서는 test_document_concurrency.py가 MySQL에서 확인한다.
     """
 
     def __init__(self):
@@ -65,6 +66,10 @@ class FakeSession:
         self.staged.clear()
 
     def flush(self):
+        pass
+
+    def refresh(self, _row, **_kwargs):
+        # Case 객체는 이 준비물에서 하나를 공유한다. 실제 점검 잠금은 MySQL 회귀로 검사한다.
         pass
 
     def rollback(self):
@@ -205,6 +210,74 @@ def test_owner_confirms_uncertain_values_and_can_remove_document(api):
     assert confirmed["confirmed_fields"]["amount"] == "3,000,000원"
 
     assert client.delete(f"/cases/documents/{record['document_id']}").json()["documents"] == []
+
+
+@pytest.mark.parametrize("during_analysis", ["remove", "confirm", "upload", "check", "remove_reupload", "confirm_reupload"])
+def test_upload_keeps_changes_saved_while_analysis_runs(api, monkeypatch, during_analysis):
+    client, _, _, session = api
+    content = document_pdf(DocumentKind.TRANSFER, **TRANSFER)
+    first = client.post("/cases/documents", files={"file": ("first.pdf", content, "application/pdf")}).json()["documents"][0]
+    started, resume = Event(), Event()
+    original = DocumentTool.add_document
+
+    async def paused(tool, context, filename, content, **kwargs):
+        updated = await original(tool, context, filename, content, **kwargs)
+        if filename == "pending.pdf":
+            started.set()
+            assert await asyncio.to_thread(resume.wait, 10), "동시 변경 후 분석을 재개하지 못했습니다."
+        return updated
+
+    monkeypatch.setattr(DocumentTool, "add_document", paused)
+    pending_content = content if during_analysis.endswith("reupload") else document_pdf(DocumentKind.BUSINESS_REGISTRATION)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        pending = pool.submit(client.post, "/cases/documents", files={"file": ("pending.pdf", pending_content, "application/pdf")})
+        try:
+            assert started.wait(10), "서류 분석이 시작되지 않았습니다."
+            if during_analysis.startswith("remove"):
+                response = client.delete(f"/cases/documents/{first['document_id']}")
+            elif during_analysis.startswith("confirm"):
+                response = client.post(f"/cases/documents/{first['document_id']}/confirm", json={
+                    "kind": "TRANSFER", "confirmed_fields": {**TRANSFER, "amount": "3,000,000원"},
+                })
+            elif during_analysis == "upload":
+                response = upload(client, DocumentKind.BANK_COPY, {})
+            else:
+                response = client.post("/cases/documents/check", json=OWNER)
+            assert response.status_code == 200
+        finally:
+            resume.set()
+        uploaded = pending.result(timeout=10)
+    assert uploaded.status_code == 200
+    restored = client.get("/cases/documents").json()
+    assert uploaded.json() == restored
+    records = {document["document_id"]: document for document in restored["documents"]}
+    if during_analysis.startswith("remove"):
+        assert first["document_id"] not in records
+    elif during_analysis.startswith("confirm"):
+        assert records[first["document_id"]]["confirmed_fields"]["amount"] == "3,000,000원"
+    elif during_analysis == "upload":
+        assert len(records) == 3
+        assert {item["kind"] for item in records.values()} == {"TRANSFER", "BANK_COPY", "BUSINESS_REGISTRATION"}
+    else:
+        case = case_crud.get_case_by_member_id(None, 1)
+        context = document_service.load_context(session, case)
+        assert context.applicant_name == OWNER["applicant_name"]
+        assert context.closure_date == date(2026, 10, 31)
+    assert restored["check"] is None
+
+
+def test_reanalysis_replaces_only_the_current_document(api):
+    client, _, model, session = api
+    content = document_pdf(DocumentKind.TRANSFER, **TRANSFER)
+    first = client.post("/cases/documents", files={"file": ("first.pdf", content, "application/pdf")}).json()["documents"][0]
+    case = case_crud.get_case_by_member_id(None, 1)
+    before = document_service.load_context(session, case).documents[0]
+    model.config.reasoning_effort = "medium"
+    again = client.post("/cases/documents", files={"file": ("first.pdf", content, "application/pdf")})
+    assert again.status_code == 200
+    assert [document["document_id"] for document in again.json()["documents"]] == [first["document_id"]]
+    after = document_service.load_context(session, case).documents[0]
+    assert after.cache_key != before.cache_key
 
 
 @pytest.mark.parametrize("legacy_fields", [{}, {"store_name": None}])
