@@ -213,16 +213,15 @@ def effective_procedure_progress(
     facts.update({item.field_path: (item.proposed_status, item.proposed_value, item.source_evidence_refs)
                   for item in mutations.fact_changes})
     completed = facts.get("restoration_status")
-    demolition = facts.get("demolition_required")
     restoration = resolve_procedure_bindings(known_steps, procedure_bindings).get("PERFORM_RESTORATION")
-    if (restoration is not None and completed is not None and demolition is not None
-            and completed[:2] == ("CONFIRMED", "COMPLETED")
-            and demolition[:2] == ("CONFIRMED", "NOT_REQUIRED")):
+    # 필요했던 철거를 끝내도 필요 여부는 REQUIRED로 남는다. 확인된 완료 사실로 후속 반환을 연다.
+    if (restoration is not None and completed is not None
+            and completed[:2] == ("CONFIRMED", "COMPLETED")):
         previous = progress.get(_step_key(restoration))
         if previous is None or previous.status != "COMPLETED":
             progress[_step_key(restoration)] = ProcedureProgress(
                 procedure_step=restoration, status="COMPLETED",
-                evidence_refs=list(dict.fromkeys([*completed[2], *demolition[2]])),
+                evidence_refs=list(completed[2]),
                 updated_at=snapshot.captured_at,
             )
     return list(progress.values())
