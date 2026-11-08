@@ -21,6 +21,17 @@ def kst_now() -> datetime:
     return datetime.now(KST).replace(tzinfo=None)
 
 
+def kst_db_time(value: datetime | None) -> datetime | None:
+    """밖에서 받은 시각을 DB에 적을 모양으로 바꾼다.
+
+    MySQL DATETIME은 시간대도 1초 미만도 못 담는다. 한국 시각으로 맞춘 뒤 떼어낸다.
+    공식 자료를 저장하는 쪽이 둘(evidence, official_document)이라, 규칙이 한 벌이어야
+    같은 문서인데 수집 시각이 9시간 어긋나는 일이 없다.
+    """
+
+    return None if value is None else value.astimezone(KST).replace(tzinfo=None, microsecond=0)
+
+
 class CreatedAtMixin(SQLModel):
     # 생성·수정 시각은 MySQL이 직접 넣는다(CURRENT_TIMESTAMP). 파이썬이 값을 만들어 넣으면
     # ORM을 거치지 않는 수정(직접 SQL, DB 툴, 배치)에서 시각이 안 바뀌기 때문이다.

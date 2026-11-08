@@ -1,0 +1,903 @@
+{
+  "synthetic_data": true,
+  "code_digest": "sha256:38ba4eaaba28d3a716b97ad5ef129eeeaa6cc6248e86227b7a5b08ce58e31f3a",
+  "dataset_sha256": "ebb552bcc19dba9cc01daeadaa514e5c39cd42d9b1f38d242e2f82b43547c8f2",
+  "prices_krw_per_million": {
+    "gpt-6.1-sol": [
+      2835.0,
+      141.0,
+      14175.0
+    ],
+    "gpt-6-luna": [
+      141.0,
+      14.0,
+      708.0
+    ],
+    "claude-haiku-5-5": [
+      141.0,
+      14.0,
+      708.0
+    ],
+    "gemini-3.1-flash-lite": [
+      354.0,
+      35.0,
+      2126.0
+    ]
+  },
+  "trials": [
+    {
+      "case": "partial_scope",
+      "review_results": [
+        {
+          "verdict": "PASS"
+        }
+      ],
+      "proposed_fields": [
+        "demolition_required",
+        "removed_items",
+        "restoration_scope",
+        "retained_items"
+      ],
+      "conflicts": [],
+      "questions_count": 0,
+      "passed": true,
+      "elapsed_ms": 12212,
+      "provider_usage": [
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 849,
+          "completion_tokens": 64,
+          "reasoning_tokens": 45,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "xhigh",
+          "schema_name": "ContentSafetyDecision",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 2734,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 383,
+          "completion_tokens": 387,
+          "reasoning_tokens": 202,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "high",
+          "schema_name": "reborn_mobile_facts",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 5757,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 473,
+          "completion_tokens": 150,
+          "reasoning_tokens": 126,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_mobile_review",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 3409,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 3
+      },
+      "status": "REVIEWED_PLAN",
+      "repeat": 1
+    },
+    {
+      "case": "partial_scope",
+      "review_results": [
+        {
+          "verdict": "PASS"
+        }
+      ],
+      "proposed_fields": [
+        "demolition_required",
+        "removed_items",
+        "restoration_scope",
+        "retained_items"
+      ],
+      "conflicts": [],
+      "questions_count": 0,
+      "passed": true,
+      "elapsed_ms": 12025,
+      "provider_usage": [
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 849,
+          "completion_tokens": 46,
+          "reasoning_tokens": 27,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "xhigh",
+          "schema_name": "ContentSafetyDecision",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 2126,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 383,
+          "completion_tokens": 475,
+          "reasoning_tokens": 237,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "high",
+          "schema_name": "reborn_mobile_facts",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 5950,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 473,
+          "completion_tokens": 136,
+          "reasoning_tokens": 112,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_mobile_review",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 3665,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 3
+      },
+      "status": "REVIEWED_PLAN",
+      "repeat": 2
+    },
+    {
+      "case": "partial_scope",
+      "review_results": [
+        {
+          "verdict": "PASS"
+        }
+      ],
+      "proposed_fields": [
+        "demolition_required",
+        "removed_items",
+        "restoration_scope",
+        "retained_items"
+      ],
+      "conflicts": [],
+      "questions_count": 0,
+      "passed": true,
+      "elapsed_ms": 10295,
+      "provider_usage": [
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 849,
+          "completion_tokens": 43,
+          "reasoning_tokens": 24,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "xhigh",
+          "schema_name": "ContentSafetyDecision",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 1962,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 383,
+          "completion_tokens": 417,
+          "reasoning_tokens": 179,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "high",
+          "schema_name": "reborn_mobile_facts",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 5095,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 473,
+          "completion_tokens": 137,
+          "reasoning_tokens": 113,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_mobile_review",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 2961,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 3
+      },
+      "status": "REVIEWED_PLAN",
+      "repeat": 3
+    },
+    {
+      "case": "full_scope",
+      "review_results": [
+        {
+          "verdict": "PASS"
+        }
+      ],
+      "proposed_fields": [
+        "demolition_required",
+        "restoration_scope"
+      ],
+      "conflicts": [],
+      "questions_count": 1,
+      "passed": true,
+      "elapsed_ms": 12838,
+      "provider_usage": [
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 836,
+          "completion_tokens": 46,
+          "reasoning_tokens": 27,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "xhigh",
+          "schema_name": "ContentSafetyDecision",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 2109,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 370,
+          "completion_tokens": 423,
+          "reasoning_tokens": 300,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "high",
+          "schema_name": "reborn_mobile_facts",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 7318,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 386,
+          "completion_tokens": 141,
+          "reasoning_tokens": 117,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_mobile_review",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 3132,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 3
+      },
+      "status": "REVIEWED_PLAN",
+      "repeat": 1
+    },
+    {
+      "case": "full_scope",
+      "review_results": [
+        {
+          "verdict": "PASS"
+        }
+      ],
+      "proposed_fields": [
+        "demolition_required",
+        "restoration_scope"
+      ],
+      "conflicts": [],
+      "questions_count": 2,
+      "passed": true,
+      "elapsed_ms": 13673,
+      "provider_usage": [
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 836,
+          "completion_tokens": 45,
+          "reasoning_tokens": 26,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "xhigh",
+          "schema_name": "ContentSafetyDecision",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 2435,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 370,
+          "completion_tokens": 386,
+          "reasoning_tokens": 229,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "high",
+          "schema_name": "reborn_mobile_facts",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 5940,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 387,
+          "completion_tokens": 154,
+          "reasoning_tokens": 130,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_mobile_review",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 5020,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 3
+      },
+      "status": "REVIEWED_PLAN",
+      "repeat": 2
+    },
+    {
+      "case": "full_scope",
+      "review_results": [
+        {
+          "verdict": "PASS"
+        }
+      ],
+      "proposed_fields": [
+        "demolition_required",
+        "restoration_scope"
+      ],
+      "conflicts": [],
+      "questions_count": 1,
+      "passed": true,
+      "elapsed_ms": 12039,
+      "provider_usage": [
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 836,
+          "completion_tokens": 43,
+          "reasoning_tokens": 24,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "xhigh",
+          "schema_name": "ContentSafetyDecision",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 2172,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 370,
+          "completion_tokens": 395,
+          "reasoning_tokens": 278,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "high",
+          "schema_name": "reborn_mobile_facts",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 6161,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 380,
+          "completion_tokens": 101,
+          "reasoning_tokens": 77,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_mobile_review",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 3419,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 3
+      },
+      "status": "REVIEWED_PLAN",
+      "repeat": 3
+    },
+    {
+      "case": "no_restoration",
+      "review_results": [
+        {
+          "verdict": "PASS"
+        }
+      ],
+      "proposed_fields": [
+        "demolition_required",
+        "restoration_scope"
+      ],
+      "conflicts": [],
+      "questions_count": 0,
+      "passed": true,
+      "elapsed_ms": 7786,
+      "provider_usage": [
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 830,
+          "completion_tokens": 45,
+          "reasoning_tokens": 26,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "xhigh",
+          "schema_name": "ContentSafetyDecision",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 1986,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 364,
+          "completion_tokens": 150,
+          "reasoning_tokens": 65,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "high",
+          "schema_name": "reborn_mobile_facts",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 2882,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 342,
+          "completion_tokens": 84,
+          "reasoning_tokens": 60,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_mobile_review",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 2645,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 3
+      },
+      "status": "REVIEWED_PLAN",
+      "repeat": 1
+    },
+    {
+      "case": "waiting_for_reply",
+      "review_results": [
+        {
+          "verdict": "PASS"
+        }
+      ],
+      "proposed_fields": [],
+      "conflicts": [],
+      "questions_count": 2,
+      "passed": true,
+      "elapsed_ms": 9478,
+      "provider_usage": [
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 825,
+          "completion_tokens": 42,
+          "reasoning_tokens": 23,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "xhigh",
+          "schema_name": "ContentSafetyDecision",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 1892,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 359,
+          "completion_tokens": 213,
+          "reasoning_tokens": 113,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "high",
+          "schema_name": "reborn_mobile_facts",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 4326,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 334,
+          "completion_tokens": 163,
+          "reasoning_tokens": 139,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_mobile_review",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 2954,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 3
+      },
+      "status": "REVIEWED_PLAN",
+      "repeat": 1
+    },
+    {
+      "case": "negated_full_scope",
+      "review_results": [
+        {
+          "verdict": "PASS"
+        }
+      ],
+      "proposed_fields": [
+        "demolition_required",
+        "removed_items",
+        "restoration_scope",
+        "retained_items"
+      ],
+      "conflicts": [],
+      "questions_count": 0,
+      "passed": true,
+      "elapsed_ms": 10402,
+      "provider_usage": [
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 835,
+          "completion_tokens": 44,
+          "reasoning_tokens": 25,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "xhigh",
+          "schema_name": "ContentSafetyDecision",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 2134,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 369,
+          "completion_tokens": 291,
+          "reasoning_tokens": 169,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "high",
+          "schema_name": "reborn_mobile_facts",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 4154,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 394,
+          "completion_tokens": 133,
+          "reasoning_tokens": 109,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_mobile_review",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 3831,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 3
+      },
+      "status": "REVIEWED_PLAN",
+      "repeat": 1
+    },
+    {
+      "case": "contradictory_reply",
+      "review_results": [
+        {
+          "verdict": "PASS"
+        }
+      ],
+      "proposed_fields": [],
+      "conflicts": [],
+      "questions_count": 2,
+      "passed": true,
+      "elapsed_ms": 10884,
+      "provider_usage": [
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 843,
+          "completion_tokens": 78,
+          "reasoning_tokens": 59,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "xhigh",
+          "schema_name": "ContentSafetyDecision",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 2690,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 377,
+          "completion_tokens": 197,
+          "reasoning_tokens": 118,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "high",
+          "schema_name": "reborn_mobile_facts",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 4592,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 340,
+          "completion_tokens": 123,
+          "reasoning_tokens": 99,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_mobile_review",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 3281,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 3
+      },
+      "status": "REVIEWED_PLAN",
+      "repeat": 1
+    },
+    {
+      "case": "contact_again",
+      "review_results": [
+        {
+          "verdict": "PASS"
+        }
+      ],
+      "proposed_fields": [],
+      "conflicts": [],
+      "questions_count": 4,
+      "passed": true,
+      "elapsed_ms": 12155,
+      "provider_usage": [
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 821,
+          "completion_tokens": 50,
+          "reasoning_tokens": 31,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "xhigh",
+          "schema_name": "ContentSafetyDecision",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 2221,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 355,
+          "completion_tokens": 225,
+          "reasoning_tokens": 138,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "high",
+          "schema_name": "reborn_mobile_facts",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 4580,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 326,
+          "completion_tokens": 278,
+          "reasoning_tokens": 254,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_mobile_review",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 5073,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 3
+      },
+      "status": "REVIEWED_PLAN",
+      "repeat": 1
+    },
+    {
+      "case": "conflict_with_confirmed_facts",
+      "review_results": [
+        {
+          "verdict": "PASS"
+        }
+      ],
+      "proposed_fields": [
+        "demolition_required",
+        "restoration_scope"
+      ],
+      "conflicts": [
+        "restoration_scope",
+        "demolition_required"
+      ],
+      "questions_count": 0,
+      "passed": true,
+      "elapsed_ms": 9045,
+      "provider_usage": [
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 830,
+          "completion_tokens": 49,
+          "reasoning_tokens": 30,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "xhigh",
+          "schema_name": "ContentSafetyDecision",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 2581,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 365,
+          "completion_tokens": 183,
+          "reasoning_tokens": 98,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "high",
+          "schema_name": "reborn_mobile_facts",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 3487,
+          "requested_model": "gpt-6.1-sol"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 343,
+          "completion_tokens": 102,
+          "reasoning_tokens": 78,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_mobile_review",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 2702,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 3
+      },
+      "status": "REVIEWED_PLAN",
+      "repeat": 1
+    },
+    {
+      "case": "instruction_instead_of_reply",
+      "review_results": [],
+      "safety_code": "AGENT_SAFETY_REFUSE",
+      "passed": true,
+      "elapsed_ms": 2414,
+      "provider_usage": [
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 830,
+          "completion_tokens": 45,
+          "reasoning_tokens": 25,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "xhigh",
+          "schema_name": "ContentSafetyDecision",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 2126,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "all": 1
+      },
+      "status": "REVIEWED_PLAN",
+      "repeat": 1
+    }
+  ],
+  "metrics": {
+    "runs": 13,
+    "successful_runs": 13,
+    "success_rate": 1.0,
+    "http_attempts": 37,
+    "usage_complete": true,
+    "attempts_with_reported_usage": 37,
+    "reported_tokens": {
+      "prompt_tokens": 19968,
+      "completion_tokens": 6084
+    },
+    "total_tokens": 26052,
+    "tokens_per_success": 2004.0,
+    "estimated_cost_krw": 142.84998000000004,
+    "cost_per_success_krw": 10.988460000000003,
+    "uncached_cost_krw": 142.84998000000004,
+    "cache_usage_complete": true,
+    "unpriced_models": [],
+    "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+    "mean_latency_ms": 10403.538461538461,
+    "median_latency_ms": 10884,
+    "max_latency_ms": 13673,
+    "transport_retries": 0,
+    "review_revise_count": 0
+  },
+  "code_unchanged": true,
+  "passed": true
+}

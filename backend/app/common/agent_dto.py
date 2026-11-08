@@ -4,7 +4,8 @@ BE는 이 모듈에서 import하며, 필드 이름은 snake_case를 사용한다
 필드 정의와 검증은 app.agent.schemas 한 곳에서 관리한다.
 
 요청 — AgentGraphInput
-    trigger: CaseCreatedTrigger / ResultSubmittedTrigger / ConflictConfirmedTrigger.
+    trigger: CaseCreatedTrigger / ResultSubmittedTrigger / DocumentSubmittedTrigger /
+        ConflictConfirmedTrigger.
     case_snapshot: BE가 접근 권한을 확인한 Case의 현재 값·진행 상태·근거.
     trace_id: 호출 추적용 식별자. 없으면 None.
     미확인 사실은 status="UNKNOWN", value=None, evidence_refs=[]로 보낸다.
@@ -18,6 +19,8 @@ BE는 이 모듈에서 import하며, 필드 이름은 snake_case를 사용한다
         MVP의 정상 판단은 Blocker 1개 필수. ACTION은 Next Action도 1개 반환.
         BE는 저장 직전 outcome.assert_integrity()와 현재 Case 상태를 재확인한다.
     CONFLICT: conflicts와 evidence_records를 보관하고 사용자 확인을 받는다.
+        retained_info_result가 있으면 함께 보관하고 build_conflict_input에 그대로 돌려준다.
+        당시 비식별 입력은 인용 검증에만 쓰고 새 사실 추출 입력으로 재사용하지 않는다.
         확인 전에는 Case를 변경하지 않는다.
     SAFE_FAILURE: failure_code / retryable / recovery_action_code를 처리한다.
         검수되지 않은 판단이나 변경 후보는 반환하지 않는다.
@@ -35,10 +38,16 @@ DB 칸에 맞추기
     Agent에서 status="UNKNOWN", value=None으로 표현한다. BE는 저장할 때 "UNKNOWN"
     문자열로 바꾸고, snapshot을 만들 때 다시 status="UNKNOWN", value=None으로 되돌린다.
 
+서류를 올린 뒤 다시 판단 (서류 추출·점검 자체는 app.agent.document_tool의 DocumentTool)
+    서류가 바뀌면 document_replan_text(바뀌기 전, 바뀐 뒤 DocumentContext)가 돌려준 글을
+    RedactedInput(USER_INPUT)에 담아 build_planning_input(trigger_type="DOCUMENT_SUBMITTED", ...)으로
+    다시 판단한다. None이면(원상복구 조항이 새로 생기거나 바뀌지 않음) 부르지 않는다.
+
 JSON 응답을 다시 읽을 때는 Pydantic TypeAdapter(AgentGraphOutput)을 쓴다.
 이 DTO는 내부 Python 호출용이며 FE HTTP 응답이나 DB 저장 완료를 뜻하지 않는다.
 """
 
+from app.agent.document_tool.models import DocumentContext, document_input_text, document_replan_text
 from app.agent.schemas import (
     AgentGraphInput,
     AgentGraphOutput,
@@ -48,12 +57,16 @@ from app.agent.schemas import (
     ConflictCandidate,
     ConflictConfirmedTrigger,
     ConflictOutcome,
+    ConflictSelection,
+    DocumentSubmittedTrigger,
     EvidenceRecord,
     ProcedureCompletionConfirmation,
     ProcedureProgress,
     RedactedInput,
     Redaction,
     ResultSubmittedTrigger,
+    RestorationAnswer,
+    RetainedInfoResult,
     ReviewedPlanOutcome,
     SafeFailureOutcome,
 )
@@ -67,12 +80,19 @@ __all__ = [
     "ConflictCandidate",
     "ConflictConfirmedTrigger",
     "ConflictOutcome",
+    "ConflictSelection",
+    "DocumentContext",
+    "DocumentSubmittedTrigger",
     "EvidenceRecord",
     "ProcedureCompletionConfirmation",
     "ProcedureProgress",
     "RedactedInput",
     "Redaction",
     "ResultSubmittedTrigger",
+    "RestorationAnswer",
+    "RetainedInfoResult",
     "ReviewedPlanOutcome",
     "SafeFailureOutcome",
+    "document_input_text",
+    "document_replan_text",
 ]

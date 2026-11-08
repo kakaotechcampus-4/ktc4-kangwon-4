@@ -1,6 +1,12 @@
 from sqlmodel import Session, select
 
-from app.be.models.evidence import ConflictReference, DecisionRecord, Evidence, EvidenceLineage
+from app.be.models.evidence import (
+    ConflictReference,
+    DecisionRecord,
+    Evidence,
+    EvidenceLineage,
+    OfficialDocument,
+)
 
 
 def case_history_evidence_id(case_id: int, case_history_id: int) -> str:
@@ -62,3 +68,12 @@ def create_conflict_reference(session: Session, conflict_reference: ConflictRefe
     session.add(conflict_reference)
     session.flush()
     return conflict_reference
+
+
+def get_official_document_bodies(session: Session, document_ids: list[int]) -> dict[int, str]:
+    """공식 자료 id → 본문. 스냅샷을 만들 때 근거마다 따로 읽지 않으려고 한 번에 가져온다."""
+
+    if not document_ids:
+        return {}
+    rows = session.exec(select(OfficialDocument).where(OfficialDocument.id.in_(set(document_ids))))
+    return {row.id: row.excerpt for row in rows}

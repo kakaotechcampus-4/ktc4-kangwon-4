@@ -1,0 +1,12 @@
+{
+  "captured_at": "2026-11-01T08:36:14.293129+00:00",
+  "secret_values_checked": 11,
+  "secret_matches": [],
+  "json_files_validated": 42,
+  "diff_check_passed": true,
+  "protected_paths_changed": [],
+  "original_unrelated_files_changed": [],
+  "missing_document_links": [],
+  "dotenv_ignored": true,
+  "remaining_implementation_deferred_to_todo": true
+}

@@ -1,0 +1,87 @@
+{
+  "evaluation_only": true,
+  "human_review_claimed": false,
+  "source_snapshot_sha256": "b0c79b927df47415cd9d6bea813eb26412ec3bb96128776393abc12441fec683",
+  "code_digest": "sha256:d007044808a4d1e0804c2c17de812a8f9fc3ca4c9569f0f2adc9fac1d47401d3",
+  "code_unchanged": true,
+  "trials": [
+    {
+      "case": "benchmark_case1",
+      "trigger": "CASE_CREATED",
+      "graph_input_digest": "sha256:8139c94d109822497d7e7f50b5794ea3e20214a8990320bcb32399e8574d7f95",
+      "status": "SAFE_FAILURE",
+      "calls": [
+        {
+          "role": "info",
+          "model": "gpt-6.1-sol",
+          "schema_name": "reborn_info_analysis",
+          "reasoning_effort": "xhigh",
+          "max_completion_tokens": 16000,
+          "stream": true,
+          "request_without_model_digest": "32995d50418844c63007f165a13642d88cb21061d9224378b8d0878af169f409",
+          "http_status": 200,
+          "headers_latency_ms": 20243
+        }
+      ],
+      "limits": {
+        "max_llm_calls_per_run": 40,
+        "run_deadline_seconds": 420.0
+      },
+      "failure_code": "STRUCTURED_OUTPUT_FAILED",
+      "failed_component": "INFO_AGENT",
+      "message_code": "AGENT_STRUCTURED_OUTPUT_FAILED",
+      "recovery_action_code": "NONE",
+      "requested_field_paths": [],
+      "retryable": false,
+      "conflicts": [],
+      "elapsed_ms": 176037,
+      "calls_by_role": {
+        "info": 1
+      },
+      "provider_usage": [
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": null,
+          "completion_tokens": null,
+          "reasoning_tokens": null,
+          "cached_prompt_tokens": null,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_info_analysis",
+          "attempt": 1,
+          "status": "ERROR",
+          "status_code": 200,
+          "error_code": "PROVIDER_RESPONSE_TOO_LARGE",
+          "latency_ms": 175841,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "passed": false,
+      "metrics": {
+        "runs": 1,
+        "successful_runs": 0,
+        "success_rate": 0.0,
+        "http_attempts": 1,
+        "usage_complete": false,
+        "attempts_with_reported_usage": 0,
+        "reported_tokens": {
+          "prompt_tokens": 0,
+          "completion_tokens": 0
+        },
+        "total_tokens": null,
+        "tokens_per_success": null,
+        "estimated_cost_krw": null,
+        "cost_per_success_krw": null,
+        "uncached_cost_krw": null,
+        "cache_usage_complete": false,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 176037,
+        "median_latency_ms": 176037,
+        "max_latency_ms": 176037,
+        "transport_retries": 0,
+        "review_revise_count": 0
+      }
+    }
+  ],
+  "passed": false
+}

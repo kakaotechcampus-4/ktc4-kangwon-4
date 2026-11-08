@@ -14,24 +14,39 @@ from fastapi import HTTPException
 from sqlmodel import Session, SQLModel, create_engine, select
 from testcontainers.community.mysql import MySqlContainer
 
+from app.be.db import MYSQL_IMAGE
+from app.be.crud import case as case_crud
 from app.be.crud import case_history as case_history_crud
 from app.be.crud.case_history import get_case_created_history
 from app.be.crud.member import create_member
 from app.be.models.case_history import CaseHistory
-from app.be.schemas.case import CaseCreateRequest, CaseResultsSubmitRequest
-from app.be.services.case import create_case, submit_case_results
+from app.be.models.evidence import ConflictReference
+from app.be.schemas.case import (
+    CaseConflictsDecisionRequest,
+    CaseCreateRequest,
+    CaseResultsSubmitRequest,
+)
+from app.be.models.case import Case
+from app.be.services import document as document_service
+from app.be.services import procedure_registry
+from app.be.services.case import create_case, submit_case_conflicts_decision, submit_case_results
 
 
 @pytest.fixture(scope="module")
 def mysql_engine():
     container = MySqlContainer(
-        "mysql:8.0", dialect="pymysql", username="test", password="test",
+        MYSQL_IMAGE, dialect="pymysql", username="test", password="test",
         root_password="test", dbname="double_submit_test",
     ).with_env("TZ", "Asia/Seoul")
     with container:
         engine = create_engine(container.get_connection_url() + "?charset=utf8mb4")
         try:
             SQLModel.metadata.create_all(engine)
+            # 앱이 뜰 때 하는 적재를 그대로 한다(main.lifespan). 요청 경로는 읽기만 하므로
+            # 이게 없으면 Case 생성이 ProcedureRegistryMissingError로 멈춘다.
+            with Session(engine) as session:
+                procedure_registry.ensure_cafe_procedure_registry(session)
+                session.commit()
             yield engine
         finally:
             engine.dispose()
@@ -44,7 +59,7 @@ def case_ready_for_a_result(mysql_engine):
     with Session(mysql_engine) as session:
         member = create_member(session, oauth_id=str(uuid4()), nickname="합성 사용자")
         case, _ = create_case(session, member.id, CaseCreateRequest(
-            business_type="카페", franchise_status=False, employee_count=2,
+            business_type="CAFE", franchise_status=False, employee_count=2,
             lease_status="LEASED_PAID",
         ))
         history = get_case_created_history(session, case.id)
@@ -116,3 +131,150 @@ def test_two_submissions_at_the_same_time_accept_only_one(
         ).all()
 
     assert len(pending) == 1
+
+
+@pytest.fixture
+def case_waiting_for_a_decision(mysql_engine):
+    """결과 제출이 충돌로 끝나 사장님 결정을 기다리는 Case 하나."""
+
+    with Session(mysql_engine) as session:
+        member = create_member(session, oauth_id=str(uuid4()), nickname="합성 사용자")
+        case, _ = create_case(session, member.id, CaseCreateRequest(
+            business_type="CAFE", franchise_status=False, employee_count=2,
+            lease_status="LEASED_PAID",
+        ))
+        get_case_created_history(session, case.id).judgment_status = "DONE"
+        submitted = case_history_crud.create_case_history(session, CaseHistory(
+            case_id=case.id, raw_input="전체 철거래요", source="USER_INPUT",
+            judgment_status="CONFLICT",
+        ))
+        conflict = ConflictReference(
+            conflict_ref=str(uuid4()), case_id=case.id, case_history_id=submitted.id,
+            canonical_field="restoration_scope", committed_value="PARTIAL", proposed_value="FULL",
+        )
+        session.add(conflict)
+        session.commit()
+        return member.id, conflict.id, case.id
+
+
+def decide(engine, member_id: int, conflict_reference_id: int) -> str:
+    with Session(engine) as session:
+        try:
+            submit_case_conflicts_decision(
+                session, member_id,
+                CaseConflictsDecisionRequest(
+                    decisions=[{"conflict_reference_id": conflict_reference_id, "side": "PROPOSED"}]
+                ),
+            )
+            return "접수됨"
+        except HTTPException as error:
+            return f"거절됨 {error.status_code}"
+
+
+def test_two_decisions_at_the_same_time_accept_only_one(
+    mysql_engine, case_waiting_for_a_decision, both_threads_pass_the_checks_first
+):
+    """결정도 둘 다 접수되면 판단이 두 번 돌아 서로의 결과를 덮는다."""
+
+    member_id, conflict_reference_id, case_id = case_waiting_for_a_decision
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = sorted(
+            future.result()
+            for future in [
+                pool.submit(decide, mysql_engine, member_id, conflict_reference_id) for _ in range(2)
+            ]
+        )
+
+    assert results == ["거절됨 409", "접수됨"]
+
+    with Session(mysql_engine) as session:
+        pending = session.exec(
+            select(CaseHistory).where(
+                CaseHistory.case_id == case_id, CaseHistory.source == "CONFLICT_DECISION",
+                CaseHistory.judgment_status == "PENDING",
+            )
+        ).all()
+
+    assert len(pending) == 1
+
+
+@pytest.mark.parametrize("meanwhile", ["nothing", "result_submitted", "case_completed"])
+def test_document_judgment_sees_what_happened_while_the_document_was_read(
+    mysql_engine, case_ready_for_a_result, monkeypatch, tmp_path, meanwhile
+):
+    """서류 API는 OCR을 기다리기 전에 Case를 읽는다. 그 사이 바뀐 상태를 못 보면 판단이 겹친다(#173 리뷰).
+
+    MySQL은 한 트랜잭션 안에서 처음 읽은 시점을 계속 보여 주므로, 흉내 낸 DB로는 재현되지 않는다.
+    """
+
+    member_id, case_history_id, case_id = case_ready_for_a_result
+    # 서류 내용은 이 검사의 관심사가 아니다. 판단할 조항이 늘 있다고 둔다
+    monkeypatch.setattr(document_service, "_pending_replan_text", lambda *_args: "원상복구 조항: 전부 원래대로")
+
+    with Session(mysql_engine) as upload_session:
+        # ① 서류 API가 Case를 먼저 읽고(라우터 _current_case) 서류 처리를 기다린다
+        case = case_crud.get_case_by_member_id(upload_session, member_id)
+        assert case.case_status == "IN_PROGRESS"
+
+        # ② 그 사이 다른 요청이 결과를 제출하거나 폐업 정리를 마친다
+        with Session(mysql_engine) as other:
+            if meanwhile == "result_submitted":
+                submit_case_results(other, member_id, CaseResultsSubmitRequest(
+                    raw_input="철거해야 한대요", case_history_id=case_history_id,
+                ))
+            elif meanwhile == "case_completed":
+                other.get(Case, case_id).case_status = "COMPLETED"
+                other.commit()
+
+        # ③ 서류 처리가 끝나 판단을 넣으려 한다
+        queued = document_service.queue_document_judgment(upload_session, tmp_path, case)
+
+    with Session(mysql_engine) as session:
+        pending = session.exec(select(CaseHistory.source).where(
+            CaseHistory.case_id == case_id, CaseHistory.judgment_status == "PENDING",
+        )).all()
+
+    expected = {"nothing": ["DOCUMENT_SUBMITTED"], "result_submitted": ["USER_INPUT"], "case_completed": []}
+    assert sorted(pending) == expected[meanwhile]
+    assert (queued is not None) == (meanwhile == "nothing")
+
+
+def test_a_failed_baseline_write_leaves_no_pending_and_recovers(mysql_engine, case_ready_for_a_result, monkeypatch, tmp_path):
+    """기준 파일(judged_documents.json)을 못 쓰면 PENDING을 남기지 않고, 쓸 수 있게 되면 다시 판단을 넣는다(#173 리뷰).
+
+    PENDING만 남으면 실행할 작업이 없어 홈이 계속 "판단 중"이고, 다음 업로드도 그 PENDING에 막힌다.
+    """
+
+    member_id, _, case_id = case_ready_for_a_result
+    # 기준 파일이 없을 때만 판단할 조항이 있다고 둔다(실제 비교와 같은 성질). 서류 내용은 관심사가 아니다
+    monkeypatch.setattr(
+        document_service, "_pending_replan_text",
+        lambda directory, case, *_: None if document_service._judged_context_path(directory, case).is_file()
+        else "원상복구 조항: 전부 원래대로",
+    )
+
+    def pending_document_judgments() -> int:
+        with Session(mysql_engine) as session:
+            return len(session.exec(select(CaseHistory).where(
+                CaseHistory.case_id == case_id, CaseHistory.source == "DOCUMENT_SUBMITTED",
+                CaseHistory.judgment_status == "PENDING",
+            )).all())
+
+    def queue() -> int | None:
+        with Session(mysql_engine) as session:
+            case = case_crud.get_case_by_member_id(session, member_id)
+            return document_service.queue_document_judgment(session, tmp_path, case)
+
+    with Session(mysql_engine) as session:
+        judged_path = document_service._judged_context_path(tmp_path, case_crud.get_case_by_member_id(session, member_id))
+    # 임시 파일 자리에 폴더를 두어 기준 쓰기만 실패하게 한다(권한과 달리 어느 계정으로 돌려도 실패한다)
+    blocker = judged_path.with_suffix(".tmp")
+    blocker.mkdir(parents=True)
+
+    assert queue() is None
+    assert pending_document_judgments() == 0 and not judged_path.exists()
+
+    blocker.rmdir()
+    assert queue() is not None
+    assert pending_document_judgments() == 1 and judged_path.is_file()

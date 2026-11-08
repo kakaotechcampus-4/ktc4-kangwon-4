@@ -1,0 +1,70 @@
+{
+  "synthetic_case": true,
+  "source_subject_sha256": "7eb49e83a19c39dd11d3abbfc7b043dab9ca8e1bbd05b605a5ad8d9f9520273a",
+  "code_digest": "sha256:38ba4eaaba28d3a716b97ad5ef129eeeaa6cc6248e86227b7a5b08ce58e31f3a",
+  "code_unchanged": true,
+  "trials": [
+    {
+      "passed": true,
+      "review_results": [
+        {
+          "reviewed_subject_id": "e659a091-e524-4f95-9996-4cca84da7e64",
+          "reviewed_subject_digest": "sha256:829dd758822498f2bf5a358d140bf6706527563e36f3a77307ff4d6e8f724fbc",
+          "verdict": "PASS",
+          "issues": [],
+          "missing_evidence": [],
+          "recommended_rework_targets": [],
+          "resolution_reason": "전체 blocker와 우선 blocker가 미확인 상태 및 제공된 근거에 부합합니다. 단일 ACTION은 원상복구 범위·철거 필요 여부를 확인하는 실행 가능한 행동이며, 코드·절차 target·Info finding의 근거가 일치합니다."
+        }
+      ],
+      "status": "REVIEWED_PLAN",
+      "elapsed_ms": 14157,
+      "provider_usage": [
+        {
+          "model": "gpt-6.1-sol",
+          "prompt_tokens": 33123,
+          "completion_tokens": 754,
+          "reasoning_tokens": 649,
+          "cached_prompt_tokens": 0,
+          "reasoning_effort": "xhigh",
+          "schema_name": "reborn_review_output",
+          "attempt": 1,
+          "status": "SUCCESS",
+          "status_code": 200,
+          "error_code": null,
+          "latency_ms": 13333,
+          "requested_model": "gpt-6.1-sol"
+        }
+      ],
+      "calls_by_role": {
+        "review": 1
+      },
+      "metrics": {
+        "runs": 1,
+        "successful_runs": 1,
+        "success_rate": 1.0,
+        "http_attempts": 1,
+        "usage_complete": true,
+        "attempts_with_reported_usage": 1,
+        "reported_tokens": {
+          "prompt_tokens": 33123,
+          "completion_tokens": 754
+        },
+        "total_tokens": 33877,
+        "tokens_per_success": 33877.0,
+        "estimated_cost_krw": 104.591655,
+        "cost_per_success_krw": 104.591655,
+        "uncached_cost_krw": 104.591655,
+        "cache_usage_complete": true,
+        "unpriced_models": [],
+        "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+        "mean_latency_ms": 14157,
+        "median_latency_ms": 14157,
+        "max_latency_ms": 14157,
+        "transport_retries": 0,
+        "review_revise_count": 0
+      }
+    }
+  ],
+  "passed": true
+}

@@ -9,13 +9,20 @@ import type {
   CaseCreateRequest,
   CaseResponse,
   CasesEnvelope,
+  ClosureReason,
   DemolitionRequired,
+  DepositReturnResult,
+  LeaseStatus,
   NextActionResponse,
   RestorationScope,
 } from '../types/api'
 import type {
-  CaseDraft,
+  ClosureReportView,
   CurrentCaseView,
+  DiagnosisAnswers,
+  DiagnosisBusiness,
+  DiagnosisClosure,
+  DiagnosisInsurance,
   Fact,
   FailureNotice,
   JudgmentView,
@@ -108,7 +115,9 @@ export function toFacts(serverCase: CaseResponse): Fact[] {
     toFact(
       'planned_closure_date',
       FIELD_LABEL.planned_closure_date,
-      toDateLabel(serverCase.planned_closure_date),
+      // 날짜를 못 정하고 예상 달만 고른 가게도 미확인이 아니다. 고른 달을 보여준다(#237)
+      toDateLabel(serverCase.planned_closure_date) ??
+        (serverCase.planned_closure_month ? `${toDateLabel(serverCase.planned_closure_month)} 중` : null),
     ),
     toFact(
       'restoration_scope',
@@ -289,40 +298,155 @@ function toJudgmentView(envelope: CasesEnvelope): JudgmentView {
   }
 }
 
-/** 현재 Case 화면이 필요한 전체 데이터 */
-export function toCurrentCaseView(envelope: CasesEnvelope, serverCase: CaseResponse): CurrentCaseView {
-  return { facts: toFacts(serverCase), judgment: toJudgmentView(envelope) }
+const CLOSURE_REASONS: readonly ClosureReason[] = ['BUSINESS_SLUMP', 'PERSONAL', 'OTHER']
+const DEPOSIT_RETURN_RESULTS: readonly DepositReturnResult[] = ['FULL', 'PARTIAL', 'NONE']
+
+/**
+ * 저장해 둔 통합 폐업 신고 정보. 폐업일·사유·도로명 주소가 **다 있어야** 저장된 것으로 본다.
+ *
+ * 서버는 셋을 한 번에 받아 저장한다(#168). 하나라도 비어 있으면 저장 전이거나 모양이 어긋난
+ * 것이라, 일부만 채워 열지 않고 빈 칸에서 시작한다 — 반쯤 채운 칸은 사장님이 저장한 적 없는 조합이다.
+ */
+function toClosureReport(serverCase: CaseResponse): ClosureReportView | null {
+  const { closure_date, closure_reason, road_address, address_detail } = serverCase
+  if (!closure_date || !road_address || !closure_reason || !CLOSURE_REASONS.includes(closure_reason)) return null
+
+  return {
+    closureDate: closure_date,
+    closureReason: closure_reason,
+    roadAddress: road_address,
+    addressDetail: address_detail || null,
+  }
+}
+
+/** 기록해 둔 보증금 결과. 모르는 값이면 기록 전처럼 아무것도 골라 두지 않는다 */
+function toDepositReturn(serverCase: CaseResponse): DepositReturnResult | null {
+  const result = serverCase.deposit_return_result
+  return result && DEPOSIT_RETURN_RESULTS.includes(result) ? result : null
 }
 
 /**
- * 생성 폼의 값을 요청 모양으로 바꾼다.
+ * 현재 Case 화면이 필요한 전체 데이터
  *
- * 필수 항목이 비어 있으면 `null`을 돌려준다. 폼이 이미 막고 있지만, 보내는 쪽에서 한 번 더
- * 걸러야 잘못된 요청이 서버까지 가지 않는다. 예외를 던지지 않는 것은 화면이 멈추는 것보다
- * 조용히 막고 버튼을 잠그는 편이 낫기 때문이다.
- *
- * 선택 항목은 빈 문자열이 아니라 `null`로 보낸다. 빈 문자열을 보내면 "모른다"와 "없다"가
- * 서버에서 같아진다.
+ * 완료는 `case_status` 하나로 본다. `completed_at` 이 비어 와도 완료다 — 서버가 상태로 완료라고 했고,
+ * 화면은 그 시각을 쓰지 않는다. 반대로 `IN_PROGRESS` 나 우리가 모르는 값이면 진행 중이다. 진행 중인
+ * 가게에 완료 화면을 띄우면 [결과 알려주기]가 사라져 사장님이 할 일을 놓친다.
  */
-export function toCaseCreateRequest(draft: CaseDraft): CaseCreateRequest | null {
-  const businessType = draft.businessType.trim()
-  const employeeCount = draft.employeeCount.trim()
+export function toCurrentCaseView(envelope: CasesEnvelope, serverCase: CaseResponse): CurrentCaseView {
+  return {
+    facts: toFacts(serverCase),
+    judgment: toJudgmentView(envelope),
+    completed: serverCase.case_status === 'COMPLETED',
+    closureReport: toClosureReport(serverCase),
+    depositReturn: toDepositReturn(serverCase),
+  }
+}
 
-  if (businessType.length === 0) return null
-  if (draft.franchiseStatus === null) return null
-  if (draft.leaseStatus === null) return null
+/**
+ * 직원 수 상한. 서버가 0~1000명만 받는다(#119 입력 검사).
+ *
+ * 업무 판단에 쓰는 숫자가 아니라 서버가 거절하는 경계라 여기 둔다(FE 규칙 7과 다르다).
+ * 진단 화면의 더하기 버튼도 이 값에서 잠근다.
+ */
+export const MAX_EMPLOYEE_COUNT = 1000
 
-  // 비운 것은 "모른다"라 그대로 보내지만, 숫자가 아닌 값은 보내지 않는다.
-  // `Number()`가 `NaN`을 내면 JSON으로 바뀌며 `null`이 되어, 잘못 적은 값이 "모른다"로 저장된다
-  const parsedEmployeeCount = employeeCount.length === 0 ? null : Number(employeeCount)
-  if (parsedEmployeeCount !== null && (!Number.isInteger(parsedEmployeeCount) || parsedEmployeeCount < 0))
-    return null
+/** 한국 시간의 연·월. 밤 9시 이후 UTC로는 아직 전날이라, 그냥 읽으면 달 마지막 날 밤에 지난달이 나온다 */
+const KOREA_MONTH = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', year: 'numeric', month: 'numeric' })
+
+/**
+ * 폐업 시기 보기 → 예상 달 `YYYY-MM`. "아직"이면 `null`.
+ *
+ * 사장님이 고른 달을 달 표기로 옮기는 것이지 기한 계산이 아니다(FE 규칙 7). 그 달로
+ * 무엇을 언제 할지는 서버가 정하고, 날짜(1일·말일)로 바꾸지도 않는다(#153).
+ */
+function closureMonthOf(closure: DiagnosisClosure, now: Date): string | null {
+  if (closure === 'UNDECIDED') return null
+
+  const parts = KOREA_MONTH.formatToParts(now)
+  const year = Number(parts.find((part) => part.type === 'year')?.value)
+  const month = Number(parts.find((part) => part.type === 'month')?.value)
+
+  // 1~12월을 0부터 세어 넘김을 처리한다. 12월의 다음 달은 다음 해 1월이다
+  const index = month - 1 + (closure === 'NEXT_MONTH' ? 1 : 0)
+  const targetYear = year + Math.floor(index / 12)
+  const targetMonth = (index % 12) + 1
+  return `${targetYear}-${String(targetMonth).padStart(2, '0')}`
+}
+
+/** 업종 보기 → 서버 업종 코드와 프랜차이즈 여부. 카페는 보기에서 이미 둘 다 정해진다 */
+const BUSINESS_REQUEST: Record<DiagnosisBusiness, { business_type: string; franchise_status: boolean | null }> = {
+  PERSONAL_CAFE: { business_type: 'CAFE', franchise_status: false },
+  FRANCHISE_CAFE: { business_type: 'CAFE', franchise_status: true },
+  // 다른 음식점은 프랜차이즈 여부를 따로 묻는다
+  RESTAURANT: { business_type: 'RESTAURANT', franchise_status: null },
+}
+
+/**
+ * 상황 진단 답을 가입 요청 모양으로 바꾼다.
+ *
+ * 시안의 답과 서버 칸이 1:1이 아니라서 여기서 한 번에 옮긴다. 옮기는 규칙은 아래와 같다.
+ *
+ * - 업종: 개인 카페 `CAFE`+`false`, 프랜차이즈 카페 `CAFE`+`true`, 다른 음식점 `RESTAURANT`+따로 받은 답
+ * - 점포: 빌린 가게면 월세 답으로 `LEASED_PAID`/`LEASED_FREE`, 안 골랐으면 `OWNED`
+ *   ("해당하는 것 모두"에서 안 고른 것은 해당 없음이다)
+ * - 원상복구 조항: 빌린 가게면 고른 답, 자가면 `UNKNOWN`(서버 기본값이다. 자가면 원상복구
+ *   할 일이 통째로 빠져서 서버가 이 값을 보지 않는다)
+ * - 직원 수: 직원을 골랐으면 정직원 + 아르바이트, 안 골랐으면 0
+ * - 예전 직원: 직원을 안 골랐을 때만 답을 보낸다. 지금 직원이 있으면 `null`이다 —
+ *   서버가 직원 수로 "둔 적 있음"을 안다. "잘 모르겠어요"도 `null`이다(서버가 "모름"으로 본다)
+ * - 대출·배달앱: 골랐으면 `true`, 안 골랐으면 `false`
+ * - 보험: 네 칸을 늘 같이 `true`/`false`로 보낸다. 하나라도 `null`이면 서버는 "해당 없음"이
+ *   아니라 "모름"으로 본다. "잘 모르겠어요"면 네 칸 모두 `null`
+ * - 폐업 시기: "이번 달 안에"·"다음 달"은 예상 달(`planned_closure_month`), "아직"은 비워 보낸다.
+ *   정확한 날짜는 묻지 않아 늘 비운다 — 둘을 같이 보내면 서버가 거절한다(#145)
+ * - 가게 이름: 진단에서 묻지 않아 비워 보낸다
+ *
+ * 화면에서 답해야 넘어가는 질문에 답이 없으면 `null`이다. 화면이 이미 순서로 막고 있지만,
+ * 보내는 쪽에서 한 번 더 걸러 빈 값이 서버까지 가지 않게 한다.
+ *
+ * 앞 답을 바꿔 빠진 질문의 답(빌린 가게를 해제한 뒤의 월세 답 등)은 여기서 버린다.
+ * 저장소에는 남겨 두어, 다시 켜면 고른 것이 그대로 보인다.
+ */
+export function toCaseCreateRequest(answers: DiagnosisAnswers, now: Date): CaseCreateRequest | null {
+  if (answers.business === null || answers.situations === null || answers.closure === null) return null
+
+  const business = BUSINESS_REQUEST[answers.business]
+  const franchiseStatus = business.franchise_status ?? answers.franchise
+  if (franchiseStatus === null) return null
+
+  const leased = answers.situations.includes('LEASE')
+  if (leased && answers.paysRent === null) return null
+  const leaseStatus: LeaseStatus = !leased ? 'OWNED' : answers.paysRent ? 'LEASED_PAID' : 'LEASED_FREE'
+
+  const restorationClause = leased ? answers.restorationClause : 'UNKNOWN'
+  if (restorationClause === null) return null
+
+  const staffed = answers.situations.includes('STAFF')
+  const employeeCount = staffed ? answers.fullTimeCount + answers.partTimeCount : 0
+  // 직원이 있다고 골랐는데 0명이거나, 서버가 받지 않는 수면 보내지 않는다
+  if (staffed && (employeeCount < 1 || employeeCount > MAX_EMPLOYEE_COUNT)) return null
+  if (!staffed && answers.hadEmployees === null) return null
+
+  const { insurances } = answers
+  if (insurances === null) return null
+  const enrolled = (insurance: DiagnosisInsurance) =>
+    insurances === 'UNKNOWN' ? null : insurances.includes(insurance)
 
   return {
-    business_type: businessType,
-    franchise_status: draft.franchiseStatus,
-    employee_count: parsedEmployeeCount,
-    lease_status: draft.leaseStatus,
-    planned_closure_date: draft.plannedClosureDate || null,
+    store_name: null,
+    business_type: business.business_type,
+    franchise_status: franchiseStatus,
+    employee_count: employeeCount,
+    has_business_loan: answers.situations.includes('LOAN'),
+    has_service_contracts: answers.situations.includes('CONTRACT'),
+    lease_status: leaseStatus,
+    restoration_clause: restorationClause,
+    planned_closure_date: null,
+    planned_closure_month: closureMonthOf(answers.closure, now),
+    had_employees: staffed || answers.hadEmployees === 'UNKNOWN' ? null : answers.hadEmployees,
+    pension_enrolled: enrolled('PENSION'),
+    health_insurance_enrolled: enrolled('HEALTH'),
+    employment_insurance_enrolled: enrolled('EMPLOYMENT'),
+    industrial_accident_insurance_enrolled: enrolled('INDUSTRIAL_ACCIDENT'),
   }
 }

@@ -13,11 +13,12 @@ import math
 import os
 import re
 from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from contextvars import ContextVar
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
+from time import monotonic
 from typing import Any, Self, TypeVar
 from urllib.parse import urlsplit, urlunsplit
 
@@ -25,7 +26,8 @@ import httpx
 from dotenv import dotenv_values
 from pydantic import BaseModel, ValidationError
 
-from app.agent.run_scope import current_deadline
+from app.agent.run_scope import RunDeadlineExceededError, current_deadline
+from app.agent.tracing import observation_scope, record_provider_usage
 
 ResponseModelT = TypeVar("ResponseModelT", bound=BaseModel)
 SleepCallable = Callable[[float], Awaitable[None]]
@@ -93,6 +95,16 @@ class LLMUsage:
     model: str
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
+    reasoning_tokens: int | None = None
+    cached_prompt_tokens: int | None = None
+    reasoning_effort: str | None = None
+    schema_name: str | None = None
+    attempt: int = 1
+    status: str = "SUCCESS"
+    status_code: int | None = None
+    error_code: str | None = None
+    latency_ms: int = 0
+    requested_model: str | None = None
 
 
 class LLMCallBudget:
@@ -301,6 +313,7 @@ class LLMConfig:
         env_file: str | Path | None = None,
         environ: Mapping[str, str] | None = None,
         env_prefix: str = "",
+        inherit_shared: bool = True,
     ) -> LLMConfig:
         """Load settings with process environment taking precedence over `.env`.
 
@@ -313,6 +326,9 @@ class LLMConfig:
         ``SUPERVISOR_REASONING_EFFORT`` overrides ``OPENAI_REASONING_EFFORT``.
         Each key falls back on its own, so a component can override only the
         model or effort — but overriding the endpoint requires its own token.
+        ``inherit_shared=False`` requires the prefix's own endpoint, token and
+        model, and omits an empty effort. ``AGENT_INFO_MODEL_PREFIX`` selects a
+        complete comparison configuration for Info without copying credentials.
         """
 
         environment = os.environ if environ is None else environ
@@ -343,7 +359,22 @@ class LLMConfig:
         def overridable(shared_key: str, override_suffix: str) -> str | None:
             if not env_prefix:
                 return value(shared_key)
+            if not inherit_shared:
+                return value(f"{env_prefix}{override_suffix}")
             return value(f"{env_prefix}{override_suffix}", shared_key)
+
+        if env_prefix in {"INFO_", "SUPERVISOR_"}:
+            selector = "AGENT_" + env_prefix + "MODEL_PREFIX"
+            selected = value(selector) or env_prefix
+            if selected not in {env_prefix, "LUNA_", "LUNA6_", "HAIKU_", "GEMINI_"}:
+                raise configuration_error(
+                    f"{selector} must be {env_prefix}, LUNA_, LUNA6_, HAIKU_ or GEMINI_"
+                )
+            if selected != env_prefix:
+                return cls.from_env(
+                    env_file=env_file, environ=environ, env_prefix=selected,
+                    inherit_shared=False,
+                )
 
         base_url = overridable("CHAT_PROXY_URL", "CHAT_PROXY_URL")
         api_token = overridable("PROXY_TOKEN", "PROXY_TOKEN")
@@ -422,6 +453,23 @@ class LLMConfig:
         )
 
 
+def candidate_config(
+    prefix: str, *, env_file: str | Path | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> LLMConfig | None:
+    """Optional comparison endpoint, with no shared model/token/effort fallback."""
+    path = Path(env_file) if env_file is not None else _repo_root() / ".env"
+    values = dict(dotenv_values(path)) if path.is_file() else {}
+    values.update(os.environ if environ is None else environ)
+    if not any(str(values.get(prefix + suffix) or "").strip() for suffix in (
+        "CHAT_PROXY_URL", "PROXY_TOKEN", "MODEL",
+    )):
+        return None
+    return LLMConfig.from_env(
+        env_file=env_file, environ=environ, env_prefix=prefix, inherit_shared=False,
+    )
+
+
 class StructuredLLMClient:
     """Async structured-output client for an OpenAI-compatible chat endpoint."""
 
@@ -493,8 +541,13 @@ class StructuredLLMClient:
         max_retries: int | None = None,
         temperature: float | None = None,
         enum_constraints: Mapping[str, Sequence[str]] | None = None,
+        max_completion_tokens: int | None = None,
     ) -> ResponseModelT:
         """Return a locally validated Pydantic model.
+
+        ``max_completion_tokens`` can only lower the configured output cap for this
+        call (e.g. a short extraction whose normal output is far below it), so a
+        runaway answer is cut early. It never raises the configured cost cap.
 
         Provider schema sanitization only affects the schema sent over HTTP.
         The original Pydantic model performs the final validation on every
@@ -509,12 +562,17 @@ class StructuredLLMClient:
                 f"max_retries must be between 0 and {_MAX_ALLOWED_RETRIES}"
             )
 
+        if max_completion_tokens is not None and (
+            type(max_completion_tokens) is not int or max_completion_tokens <= 0
+        ):
+            raise ValueError("max_completion_tokens must be a positive integer")
         payload = self._build_payload(
             response_model=response_model,
             messages=normalized_messages,
             schema_name=schema_name,
             temperature=temperature,
             enum_constraints=enum_constraints,
+            max_completion_tokens=max_completion_tokens,
         )
         total_attempts = retries + 1
         last_status_code: int | None = None
@@ -525,6 +583,12 @@ class StructuredLLMClient:
             attempt = attempt_index + 1
             response: httpx.Response | None = None
             should_retry = False
+            usage = LLMUsage(model=self.config.model)
+            error_code = None
+            succeeded = False
+            sent = False
+            started = monotonic()
+            observations = ExitStack()
             try:
                 # Checked before the budget is charged: a call that cannot
                 # finish inside the run's remaining time should not cost one.
@@ -534,6 +598,10 @@ class StructuredLLMClient:
                     attempt_timeout = min(attempt_timeout, deadline.remaining_seconds())
                 if self._call_budget is not None:
                     self._call_budget.consume()
+                observations.enter_context(observation_scope(
+                    "LLM", as_type="generation", model=self.config.model,
+                    model_parameters={"reasoning_effort": self.config.reasoning_effort},
+                ))
                 async with asyncio.timeout(attempt_timeout):
                     request = self._client.build_request(
                         "POST",
@@ -546,9 +614,22 @@ class StructuredLLMClient:
                         json=payload,
                         timeout=attempt_timeout,
                     )
+                    sent = True
                     response = await self._client.send(request, stream=True)
                     last_status_code = response.status_code
+                    body = await _read_bounded_response_body(
+                        response, max_bytes=self.config.max_response_bytes,
+                    )
+                    if response.is_success and self.config.stream:
+                        body = _assemble_streamed_response(body)
+                    try:
+                        envelope = json.loads(body)
+                        if isinstance(envelope, Mapping):
+                            usage = _extract_usage(envelope, self.config.model)
+                    except (ValueError, UnicodeDecodeError):
+                        pass
                     if not response.is_success:
+                        error_code = "UPSTREAM_HTTP_ERROR"
                         retryable = _is_transient_status(response.status_code)
                         if retryable and attempt < total_attempts:
                             should_retry = True
@@ -562,19 +643,14 @@ class StructuredLLMClient:
                                 status_code=response.status_code,
                             )
                     else:
-                        body = await _read_bounded_response_body(
-                            response,
-                            max_bytes=self.config.max_response_bytes,
-                        )
-                        if self.config.stream:
-                            body = _assemble_streamed_response(body)
                         parsed, usage = _parse_response(
                             body, response_model, self.config.model
                         )
-                        self._report_usage(usage)
+                        succeeded = True
                         return parsed
             except (TimeoutError, httpx.TimeoutException, httpx.TransportError):
                 last_failure_code = "UPSTREAM_UNAVAILABLE"
+                error_code = last_failure_code
                 if attempt < total_attempts:
                     should_retry = True
                 else:
@@ -586,6 +662,7 @@ class StructuredLLMClient:
                     ) from None
             except _InvalidStructuredResponse as exc:
                 last_failure_code = exc.code
+                error_code = exc.code
                 if exc.retryable and attempt < total_attempts:
                     should_retry = True
                 else:
@@ -598,8 +675,23 @@ class StructuredLLMClient:
                         status_code=last_status_code,
                     ) from None
             finally:
-                if response is not None:
-                    await response.aclose()
+                try:
+                    if sent:
+                        self._report_usage(replace(
+                            usage,
+                            reasoning_effort=self.config.reasoning_effort,
+                            schema_name=payload["response_format"]["json_schema"]["name"],
+                            attempt=attempt,
+                            status="SUCCESS" if succeeded else "ERROR",
+                            status_code=response.status_code if response is not None else None,
+                            error_code=error_code or (None if succeeded else "CALL_INTERRUPTED"),
+                            latency_ms=max(0, int((monotonic() - started) * 1000)),
+                            requested_model=self.config.model,
+                        ))
+                    if response is not None:
+                        await response.aclose()
+                finally:
+                    observations.close()
 
             if should_retry:
                 await self._backoff(attempt_index)
@@ -623,6 +715,7 @@ class StructuredLLMClient:
         schema_name: str | None,
         temperature: float | None,
         enum_constraints: Mapping[str, Sequence[str]] | None = None,
+        max_completion_tokens: int | None = None,
     ) -> dict[str, Any]:
         schema = sanitize_json_schema(
             response_model.model_json_schema(mode="validation")
@@ -645,8 +738,11 @@ class StructuredLLMClient:
         }
         if temperature is not None:
             payload["temperature"] = temperature
-        if self.config.max_completion_tokens is not None:
-            payload["max_completion_tokens"] = self.config.max_completion_tokens
+        limit = self.config.max_completion_tokens
+        if max_completion_tokens is not None:
+            limit = max_completion_tokens if limit is None else min(limit, max_completion_tokens)
+        if limit is not None:
+            payload["max_completion_tokens"] = limit
         if self.config.stream:
             payload["stream"] = True
         if self.config.reasoning_effort:
@@ -654,18 +750,30 @@ class StructuredLLMClient:
         return payload
 
     def _report_usage(self, usage: LLMUsage | None) -> None:
-        if self._usage_sink is None:
-            return
         reported = usage or LLMUsage(model=self.config.model)
         try:
-            self._usage_sink(reported)
+            record_provider_usage(reported)
+            if self._usage_sink is not None:
+                self._usage_sink(reported)
         except Exception:  # noqa: BLE001 - telemetry must not change call results
             return
 
     async def _backoff(self, attempt_index: int) -> None:
         delay = self.config.retry_backoff_seconds * (2**attempt_index)
+        deadline = current_deadline()
+        expires_during_wait = False
+        if deadline is not None:
+            deadline.check()
+            remaining = deadline.remaining_seconds()
+            expires_during_wait = delay >= remaining
+            delay = min(delay, remaining)
         if delay > 0:
             await self._sleep(delay)
+        # 짧게 자른 대기가 조금 일찍 끝나도, 원래 대기 뒤에는 재시도할 시간이 없다.
+        if expires_during_wait:
+            raise RunDeadlineExceededError()
+        if deadline is not None:
+            deadline.check()
 
 
 def restrict_string_enums(
@@ -809,6 +917,12 @@ def _extract_usage(body: Mapping[str, Any], fallback_model: str) -> LLMUsage:
         model=model,
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
+        reasoning_tokens=_coerce_token_count(
+            (usage.get("completion_tokens_details") or {}).get("reasoning_tokens")
+        ) if isinstance(usage.get("completion_tokens_details", {}), Mapping) else None,
+        cached_prompt_tokens=_coerce_token_count(
+            usage.get("cached_prompt_tokens", (usage.get("prompt_tokens_details") or {}).get("cached_tokens"))
+        ) if isinstance(usage.get("prompt_tokens_details", {}), Mapping) else None,
     )
 
 
@@ -853,6 +967,11 @@ def _assemble_streamed_response(body: bytes) -> bytes:
         if not isinstance(choices, list):
             raise _InvalidStructuredResponse("INVALID_PROVIDER_STREAM")
         if not choices:  # A final usage-only chunk may follow the finish chunk.
+            continue
+        if (finish_reason and isinstance(chunk.get("usage"), Mapping)
+                and choices == [{"index": 0, "delta": {}, "finish_reason": None}]):
+            # Elice's Haiku endpoint wraps its final usage in an empty choice.
+            # Accept that metadata-only variant, never content after completion.
             continue
         if len(choices) != 1 or not isinstance(choices[0], Mapping) or finish_reason:
             raise _InvalidStructuredResponse("INVALID_PROVIDER_STREAM")

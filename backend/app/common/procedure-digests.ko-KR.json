@@ -1,0 +1,150 @@
+{
+  "digest_version": "procedure-digests/2026-11-05-reviewed2",
+  "based_on_snapshot_version": "cafe-official-sources/2026-11-04-reviewed1",
+  "reviewed_by": "healthy27",
+  "reviewed_at": "2026-11-05T00:00:00+09:00",
+  "source_hashes": {
+    "CAFE_CLOSURE_AND_TAX_FOLLOWUP": "sha256:3864664b0c2e4f512d9791e2342b9c05d7b91866cfa230d0d142f693c278a7d7",
+    "DEMOLITION_SUPPORT_2026": "sha256:685b4c778f9e5e10c7b3261e414a8e83c9b9cf3a07f93e9fa8fc08293de92dd6",
+    "EMPLOYEE_FINAL_SETTLEMENT": "sha256:22064dc3c739dad827086cd12f61b41b1639e2e97b4fab713c5bd5336ab55618",
+    "EMPLOYEE_RETIREMENT_BENEFITS": "sha256:5c145182c64ceba9d20630f7fc9d46a5600772e8e033d969006da19963e32228",
+    "LEASE_RESTORATION_AND_RETURN": "sha256:9b5bc5632bf322e099395fede7c6b4a132a6b483726e8afa091d51f3d6811855",
+    "SOCIAL_INSURANCE_COMMON_CLOSURE_AND_LOSS": "sha256:97c9f4c7dd06c3224df23d98c520621ee6d41f3117af169fdbe55c29b39a34d3",
+    "TAX_BUSINESS_CLOSURE": "sha256:5b456edeeb9b3abef4ca7c4ff3592b391c8bfc82d6075cd046b2b3e528a46780"
+  },
+  "steps": {
+    "FILE_TAX_BUSINESS_CLOSURE": {
+      "decision_authority": "OFFICIAL_AGENCY",
+      "summary": {
+        "record_id": "TAX_BUSINESS_CLOSURE",
+        "text": "사업자등록을 한 사업자가 휴업 또는 폐업하거나 사업개시일 전에 등록한 자가 사실상 사업을 개시하지 아니하게 되는 때에는 지체없이「휴업(폐업)신고서」에 사업자등록증을 첨부하여 사업장 관할세무서 또는 가까운 세무서 민원봉사실에 제출하여야 함"
+      },
+      "required_actions": [
+        {
+          "record_id": "TAX_BUSINESS_CLOSURE",
+          "text": "음식업, 이미용 등 공중위생업종, 의료기기업종 등 138개 인,허가 업종(대상업종은 아래 '[별표3]통합 폐업신고로 접수할 수 있는 민원의 종류' 참고)은 아래 「통합폐업신고서」[별지7호서식]를 작성하여 시군구 또는 세무서 중 한 곳에 제출하면 인허가와 사업자등록 폐업신고를 한 번에 할 수 있습니다."
+        }
+      ],
+      "required_documents": []
+    },
+    "FILE_FOOD_SERVICE_CLOSURE": {
+      "decision_authority": "OFFICIAL_AGENCY",
+      "summary": {
+        "record_id": "CAFE_CLOSURE_AND_TAX_FOLLOWUP",
+        "text": "폐업신고를 하려는 자는 폐업신고서에 영업허가증 또는 영업신고증을 첨부해 식품의약품안전처장 또는 특별자치시장·특별자치도지사·시장·군수·구청장에게 제출해야 합니다"
+      },
+      "required_actions": [
+        {
+          "record_id": "CAFE_CLOSURE_AND_TAX_FOLLOWUP",
+          "text": "폐업신고를 하려는 사람이 사업자등록의 폐업신고도 함께 하려는 경우에는 음식점 등의 폐업신고서에 사업자등록 폐업신고서를 함께 제출해야 합니다"
+        }
+      ],
+      "required_documents": []
+    },
+    "CONFIRM_RESTORATION_SCOPE": {
+      "decision_authority": "LANDLORD",
+      "summary": {
+        "record_id": "LEASE_RESTORATION_AND_RETURN",
+        "text": "이 경우 임차상가건물을 원래의 상태로 회복하여 반환해야 합니다"
+      },
+      "required_actions": [
+        {
+          "record_id": "LEASE_RESTORATION_AND_RETURN",
+          "text": "이 경우 임차상가건물을 원래의 상태로 회복하여 반환해야 합니다"
+        }
+      ],
+      "required_documents": []
+    },
+    "PERFORM_RESTORATION": {
+      "decision_authority": "USER",
+      "summary": {
+        "record_id": "LEASE_RESTORATION_AND_RETURN",
+        "text": "이 경우 임차상가건물을 원래의 상태로 회복하여 반환해야 합니다"
+      },
+      "required_actions": [
+        {
+          "record_id": "DEMOLITION_SUPPORT_2026",
+          "text": "철거여부 확인을 위한 철거공사 전·후 사업장 내·외부 사진"
+        }
+      ],
+      "required_documents": [
+        {
+          "record_id": "DEMOLITION_SUPPORT_2026",
+          "name": "점포철거 전·후 사진"
+        },
+        {
+          "record_id": "DEMOLITION_SUPPORT_2026",
+          "name": "공사내역서"
+        },
+        {
+          "record_id": "DEMOLITION_SUPPORT_2026",
+          "name": "전자세금계산서\n또는 카드전표"
+        },
+        {
+          "record_id": "DEMOLITION_SUPPORT_2026",
+          "name": "이체확인증 또는\n카드대금\n완납확인증\n(이용대금명세서)"
+        }
+      ]
+    },
+    "RETURN_PREMISES": {
+      "decision_authority": "USER",
+      "summary": {
+        "record_id": "LEASE_RESTORATION_AND_RETURN",
+        "text": "임차인은 임대차계약이 종료하면 임대인에게 그 상가건물을 반환해야 합니다."
+      },
+      "required_actions": [
+        {
+          "record_id": "LEASE_RESTORATION_AND_RETURN",
+          "text": "임차인은 임대차계약이 종료하면 임대인에게 그 상가건물을 반환해야 합니다."
+        }
+      ],
+      "required_documents": []
+    },
+    "SETTLE_EMPLOYEE_PAYMENTS": {
+      "decision_authority": "USER",
+      "summary": {
+        "record_id": "EMPLOYEE_FINAL_SETTLEMENT",
+        "text": "근로기준법 제36조에 따라, 사용자는 근로자가 퇴직한 경우에는 그 지급사유가 발생한 때부터 14일 이내에 임금, 보상금, 그 밖의 모든 금품을 지급하여야 하나, 특별한 사정이 있을 경우에는 당사자 사이의 합의에 의하여 기일을 연장할 수 있습니다."
+      },
+      "required_actions": [
+        {
+          "record_id": "EMPLOYEE_FINAL_SETTLEMENT",
+          "text": "근로기준법 제36조에 따라, 사용자는 근로자가 퇴직한 경우에는 그 지급사유가 발생한 때부터 14일 이내에 임금, 보상금, 그 밖의 모든 금품을 지급하여야 하나, 특별한 사정이 있을 경우에는 당사자 사이의 합의에 의하여 기일을 연장할 수 있습니다."
+        },
+        {
+          "record_id": "EMPLOYEE_RETIREMENT_BENEFITS",
+          "text": "퇴직금 지급사유가 발생한 날부터 14일 이내에 지급해야 합니다."
+        }
+      ],
+      "required_documents": []
+    },
+    "REPORT_WORKPLACE_INSURANCE_CLOSURE": {
+      "decision_authority": "OFFICIAL_AGENCY",
+      "summary": {
+        "record_id": "SOCIAL_INSURANCE_COMMON_CLOSURE_AND_LOSS",
+        "text": "국민연금, 건강보험, 고용/산재보험에 동시신고가 가능한 신고업무"
+      },
+      "required_actions": [
+        {
+          "record_id": "SOCIAL_INSURANCE_COMMON_CLOSURE_AND_LOSS",
+          "text": "사업장 탈퇴(소멸)신고서(국민연금, 건강보험, 고용보험, 산재보험)"
+        }
+      ],
+      "required_documents": []
+    },
+    "REPORT_EMPLOYEE_INSURANCE_LOSS": {
+      "decision_authority": "OFFICIAL_AGENCY",
+      "summary": {
+        "record_id": "SOCIAL_INSURANCE_COMMON_CLOSURE_AND_LOSS",
+        "text": "국민연금, 건강보험, 고용/산재보험에 동시신고가 가능한 신고업무"
+      },
+      "required_actions": [
+        {
+          "record_id": "SOCIAL_INSURANCE_COMMON_CLOSURE_AND_LOSS",
+          "text": "사업장가입자 자격취득/상실신고서(국민연금, 건강보험, 고용보험, 산재보험)"
+        }
+      ],
+      "required_documents": []
+    }
+  }
+}

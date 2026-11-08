@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest'
 
 import type { CaseResultsEntryResponse, CaseResultsSubmitResponse } from '../types/api'
-import { toChanges, toConflicts, toResultsEntry, toSubmitOutcome, toValueLabel } from './results'
+import {
+  toAnswerInput,
+  toChanges,
+  toConflicts,
+  toDecisionRequest,
+  toResultsEntry,
+  toResultSteps,
+  toSubmitOutcome,
+  toValueLabel,
+} from './results'
 
 /**
  * 서버가 값을 파이썬 표기 그대로 보낸다(`"True"`, `"FULL"`). 여기가 틀리면 사장님 화면에
@@ -131,10 +140,36 @@ describe('toConflicts', () => {
   })
 })
 
+const CONFLICT_ITEMS = toConflicts([
+  { id: 4, field: 'lease_status', stored_value: 'OWNED', proposed_value: 'LEASED_PAID' },
+  { id: 7, field: 'demolition_required', stored_value: 'NOT_REQUIRED', proposed_value: 'REQUIRED' },
+])!
+
+/**
+ * 고른 쪽이 뒤집혀 나가면 사장님이 버린 값이 Case에 저장된다. 되돌릴 수 있는 자리는
+ * 이 화면뿐이라(`rollback` 없음) 여기서 틀리면 고칠 길이 없다.
+ */
+describe('toDecisionRequest', () => {
+  it('충돌마다 서버 번호와 고른 쪽을 서버 말로 싣는다', () => {
+    expect(toDecisionRequest(CONFLICT_ITEMS, { 'conflict-4': 'INCOMING', 'conflict-7': 'STORED' })).toEqual({
+      decisions: [
+        { conflict_reference_id: 4, side: 'PROPOSED' },
+        { conflict_reference_id: 7, side: 'STORED' },
+      ],
+    })
+  })
+
+  /** 서버는 남은 충돌을 전부 받아야 한다. 반쪽 요청은 422로 돌아온다 */
+  it('하나라도 고르지 않았으면 만들지 않는다', () => {
+    expect(toDecisionRequest(CONFLICT_ITEMS, { 'conflict-4': 'INCOMING' })).toBeNull()
+  })
+})
+
 /** 들어올 때 받는 응답. 칸은 모두 비워 두고 테스트마다 필요한 것만 채운다 */
 function entry(overrides: Partial<CaseResultsEntryResponse>): CaseResultsEntryResponse {
   return {
     judgment_status: 'DONE',
+    result_input_kind: 'TEXT',
     case_history_id: null,
     raw_input: null,
     conflicts: null,
@@ -149,11 +184,22 @@ function entry(overrides: Partial<CaseResultsEntryResponse>): CaseResultsEntryRe
 const NEXT_ACTION = { title: '임대인에게 원상복구 범위 묻기', reason: '', questions_to_ask: [] }
 
 describe('toResultsEntry', () => {
+  it('서버가 선택형 입력을 지정하면 그대로 화면에 전달한다', () => {
+    expect(toResultsEntry(entry({ case_history_id: 12, next_action: NEXT_ACTION, result_input_kind: 'RESTORATION_ANSWER' })))
+      .toMatchObject({ kind: 'READY', inputKind: 'RESTORATION_ANSWER' })
+  })
+
+  it.each([undefined, 'OTHER'])('입력 종류 %s 는 추측해서 표시하지 않는다', (kind) => {
+    const body = { ...entry({ case_history_id: 12, next_action: NEXT_ACTION }), result_input_kind: kind }
+    expect(toResultsEntry(body as CaseResultsEntryResponse)).toEqual({ kind: 'UNRECOGNIZED' })
+  })
+
   it('판단이 끝났으면 폼을 열 할 일과 판단 번호를 담는다', () => {
     expect(toResultsEntry(entry({ case_history_id: 12, next_action: NEXT_ACTION }))).toEqual({
       kind: 'READY',
       nextAction: { title: '임대인에게 원상복구 범위 묻기', reason: '', questions: [] },
       historyId: 12,
+      inputKind: 'TEXT',
     })
   })
 
@@ -174,10 +220,50 @@ describe('toResultsEntry', () => {
     expect(toResultsEntry(null)).toEqual({ kind: 'UNRECOGNIZED' })
   })
 
-  it.each(['PENDING', 'NEEDS_MORE_INFO', 'FAILED'] as const)('%s 면 다른 화면으로 보낸다', (status) => {
+  it('되물은 것이 있으면 답을 받을 질문과 판단 번호를 담는다', () => {
+    expect(
+      toResultsEntry(
+        entry({ judgment_status: 'NEEDS_MORE_INFO', case_history_id: 12, questions_for_user: ['직원이 몇 명인가요?'] }),
+      ),
+    ).toEqual({ kind: 'ANSWER', questions: ['직원이 몇 명인가요?'], historyId: 12 })
+  })
+
+  it.each(['PENDING', 'FAILED'] as const)('%s 면 다른 화면으로 보낸다', (status) => {
     expect(toResultsEntry(entry({ judgment_status: status, case_history_id: 12 }))).toEqual({
       kind: 'ELSEWHERE',
     })
+  })
+
+  it('더 알려주셔야 풀리는 실패면 무엇이 필요한지와 판단 번호를 담는다', () => {
+    expect(
+      toResultsEntry(
+        entry({
+          judgment_status: 'FAILED',
+          case_history_id: 12,
+          recovery_action_code: 'RESUBMIT_INPUT',
+          requested_field_paths: ['restoration_scope'],
+        }),
+      ),
+    ).toEqual({
+      kind: 'RESUBMIT',
+      notice: { kind: 'NEEDS_DETAIL', fields: ['원상복구 범위'], partial: false },
+      historyId: 12,
+    })
+  })
+
+  /** 번호가 없으면 다 적고 보낸 뒤에야 막힌다 */
+  it('더 알려주셔야 하는 실패인데 판단 번호가 없으면 알 수 없는 응답으로 둔다', () => {
+    expect(
+      toResultsEntry(entry({ judgment_status: 'FAILED', recovery_action_code: 'RESUBMIT_INPUT' })),
+    ).toEqual({ kind: 'UNRECOGNIZED' })
+  })
+
+  it('NONE 실패는 이전 질문 없이 새 글을 받고 판단 번호가 없으면 열지 않는다', () => {
+    const failed = entry({ judgment_status: 'FAILED', recovery_action_code: 'NONE',
+      requested_field_paths: ['restoration_scope'], questions_for_user: ['예전 질문'],
+      result_input_kind: 'RESTORATION_ANSWER' })
+    expect(toResultsEntry({ ...failed, case_history_id: 12 })).toEqual({ kind: 'NEW_INPUT', historyId: 12 })
+    expect(toResultsEntry(failed)).toEqual({ kind: 'UNRECOGNIZED' })
   })
 
   /**
@@ -196,6 +282,11 @@ describe('toResultsEntry', () => {
         conflicts: [{ id: 3, field: 'demolition_required', stored_value: 'NOT_REQUIRED', proposed_value: 'REQUIRED' }],
       }),
     ],
+    [
+      '되묻는다면서 판단 번호가 없다',
+      entry({ judgment_status: 'NEEDS_MORE_INFO', questions_for_user: ['직원이 몇 명인가요?'] }),
+    ],
+    ['되묻는다면서 질문이 없다', entry({ judgment_status: 'NEEDS_MORE_INFO', case_history_id: 12 })],
     ['모르는 상태다', entry({ judgment_status: 'ARCHIVED' as never, case_history_id: 12 })],
   ])('%s 면 알 수 없는 응답으로 둔다', (_, body) => {
     expect(toResultsEntry(body)).toEqual({ kind: 'UNRECOGNIZED' })
@@ -214,6 +305,7 @@ function judged(overrides: Partial<CaseResultsSubmitResponse>): CaseResultsSubmi
     conflicts: null,
     recovery_action_code: null,
     requested_field_paths: null,
+    new_tasks: null,
     ...overrides,
   }
 }
@@ -240,8 +332,52 @@ describe('toSubmitOutcome', () => {
         ],
         blocker: { title: '철거 전에 지원 조건을 확인해야 합니다.' },
         nextAction: { title: '임대인에게 원상복구 범위 묻기', reason: '', questions: [] },
+        newTasks: [],
       },
     })
+  })
+
+  /** 시안 "할 일 3개가 새로 생겼어요"(#182). 로드맵 순서 그대로 둔다 */
+  it('새로 생긴 할 일을 서버가 준 순서대로 싣는다', () => {
+    const outcome = toSubmitOutcome(
+      judged({
+        ...REPLANNED,
+        new_tasks: [
+          { task_id: 'support_application', title: '소상공인24 사전 신청' },
+          { task_id: 'before_photo', title: '철거 전 사진' },
+        ],
+      }),
+    )
+
+    expect(outcome).toMatchObject({
+      kind: 'REPLAN',
+      view: {
+        newTasks: [
+          { id: 'support_application', title: '소상공인24 사전 신청' },
+          { id: 'before_photo', title: '철거 전 사진' },
+        ],
+      },
+    })
+  })
+
+  /** 그사이 알려 준 심사 결과로 할 일이 늘었을 수 있다. 바뀐 게 없어도 오는 대로 싣는다(현석님 #182) */
+  it('바뀐 것이 없어도 새로 생긴 할 일은 싣는다', () => {
+    const outcome = toSubmitOutcome(
+      judged({ ...REPLANNED, result: 'NO_CHANGE', changes: [], new_tasks: [{ task_id: 'support_application', title: '소상공인24 사전 신청' }] }),
+    )
+
+    expect(outcome).toMatchObject({ kind: 'REPLAN', view: { newTasks: [{ id: 'support_application' }] } })
+  })
+
+  /** 덤인 칸 하나 때문에 멀쩡한 반영 결과를 못 보여주면 더 큰 손해다 */
+  it('새로 생긴 할 일을 읽지 못해도 반영 결과는 보여주고, 빈 줄만 뺀다', () => {
+    const broken = toSubmitOutcome(judged({ ...REPLANNED, new_tasks: 'three' as unknown as null }))
+    expect(broken).toMatchObject({ kind: 'REPLAN', view: { newTasks: [] } })
+
+    const partly = toSubmitOutcome(
+      judged({ ...REPLANNED, new_tasks: [{ task_id: '', title: '이름 없음' }, { task_id: 'before_photo', title: '철거 전 사진' }] }),
+    )
+    expect(partly).toMatchObject({ kind: 'REPLAN', view: { newTasks: [{ id: 'before_photo', title: '철거 전 사진' }] } })
   })
 
   it('바뀐 것이 없어도 재계획으로 보내고 변경 목록은 비운다', () => {
@@ -306,5 +442,56 @@ describe('toSubmitOutcome', () => {
 
   it('본문이 비어 있어도 알 수 없는 응답으로 둔다', () => {
     expect(toSubmitOutcome(null)).toEqual(UNRECOGNIZED)
+  })
+})
+
+/**
+ * 재판단 때 AI는 직전에 무엇을 물었는지 모른다. 질문이 빠지면 "2명이요"가 무엇의 답인지
+ * 알 수 없어, 사장님이 답했는데도 같은 질문을 또 받게 된다.
+ */
+describe('toAnswerInput', () => {
+  it('질문과 답을 짝으로 적는다', () => {
+    expect(toAnswerInput([{ question: '직원이 몇 명인가요?', answer: '2명이요' }])).toBe(
+      '[리본이 물어본 것] 직원이 몇 명인가요?\n[사장님 답] 2명이요',
+    )
+  })
+
+  it('질문이 여러 개면 빈 줄로 나눈다', () => {
+    expect(
+      toAnswerInput([
+        { question: '직원이 몇 명인가요?', answer: '2명이요' },
+        { question: '프랜차이즈 가게인가요?', answer: '아니요' },
+      ]),
+    ).toBe(
+      '[리본이 물어본 것] 직원이 몇 명인가요?\n[사장님 답] 2명이요\n\n' +
+        '[리본이 물어본 것] 프랜차이즈 가게인가요?\n[사장님 답] 아니요',
+    )
+  })
+
+  /** 답이 없는 질문까지 보내면 AI가 "모른다"는 답으로 읽을 수 있다 */
+  it('답을 적지 않은 질문은 빼고, 앞뒤 빈칸은 지운다', () => {
+    expect(
+      toAnswerInput([
+        { question: '직원이 몇 명인가요?', answer: '  2명이요 ' },
+        { question: '프랜차이즈 가게인가요?', answer: '   ' },
+      ]),
+    ).toBe('[리본이 물어본 것] 직원이 몇 명인가요?\n[사장님 답] 2명이요')
+  })
+})
+
+/**
+ * 충돌 확인에서 보낸 것은 글을 정리하는 판단이 아니다. 문구는 달라도 기다리는 사건은 같아서,
+ * 줄이 끝나는 때까지 달라지면 같은 기다림이 다른 속도로 보인다.
+ */
+describe('toResultSteps', () => {
+  it('충돌 결정은 둘째 줄 문구만 다르고 끝나는 때는 같다', () => {
+    for (const stage of ['SENDING', 'WAITING', 'DONE'] as const) {
+      const result = toResultSteps(stage)
+      const decision = toResultSteps(stage, 'DECISION')
+
+      expect(decision.map((step) => step.status)).toEqual(result.map((step) => step.status))
+      expect(decision[1].label).toBe('고르신 내용을 반영하고 있어요')
+      expect([decision[0].label, decision[2].label]).toEqual([result[0].label, result[2].label])
+    }
   })
 })

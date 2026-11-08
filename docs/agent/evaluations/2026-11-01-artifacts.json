@@ -1,0 +1,170 @@
+{
+  "synthetic_documents": true,
+  "visual_inspection": {
+    "application_summary": "Korean text readable, no clipping",
+    "transfer_in_settlement_zip": "Synthetic resident-registration back digits fully blacked out; original identity line remains readable under RRN_BACK_ONLY policy",
+    "source": "Rendered actual generated PDFs; visual inspection of first pages"
+  },
+  "previous_info_xhigh_artifacts": [
+    {
+      "path": "latest-full-flow-luna6-v2/baseline-1/application-summary.pdf",
+      "sha256": "4db51e29310cde6cf0e327124770fd88a2abfdae7b46cdb1a51ba5372c6b8331",
+      "bytes": 1361,
+      "readable_pages": 1
+    },
+    {
+      "path": "latest-full-flow-luna6-v2/baseline-1/closure-summary.pdf",
+      "sha256": "e71c2b9f8ec30cb3d457b5bcdd1f65539fdff6d0fac3bf6c91af6fbdda806878",
+      "bytes": 1385,
+      "readable_pages": 1
+    },
+    {
+      "path": "latest-full-flow-luna6-v2/baseline-1/settlement.zip",
+      "sha256": "4449d74b6e65a482c9338f0049d0c60dd16bb4ec91c66299a72e9e5688051816",
+      "bytes": 151473,
+      "zip_integrity_passed": true,
+      "entries": [
+        {
+          "name": "BEFORE_PHOTO_8b7ab5d5-5698-5828-8fe6-f8e432106328.pdf",
+          "sha256": "8e2031daf2ecc23a79b1fab877f3843b7a1d7e679c7d11dc81c91c02fd3eccd3",
+          "bytes": 21681,
+          "readable_pages": 1
+        },
+        {
+          "name": "TAX_INVOICE_193913d4-eda5-5592-85eb-338d4c9a4ad2.pdf",
+          "sha256": "9b0982d2d667ee10c38c466579e89f950791fd285ecdce31f0ab9dae40a3cc34",
+          "bytes": 35274,
+          "readable_pages": 1
+        },
+        {
+          "name": "CONSTRUCTION_STATEMENT_9a5e597c-5dbf-5024-a69d-7ea0f04b3566.pdf",
+          "sha256": "b8ee7ff049061af5dfb44c04c92ba2ed0b58b3e2f6f11f4ffc7af2ad9093fcff",
+          "bytes": 32867,
+          "readable_pages": 1
+        },
+        {
+          "name": "AFTER_PHOTO_d29139cc-32a1-5d25-83ee-018608aca294.pdf",
+          "sha256": "101fb3b1dd5c86920c8cc522c8a45fa6e6d3553a2d5a74d25e646646f227fe20",
+          "bytes": 22043,
+          "readable_pages": 1
+        },
+        {
+          "name": "CLOSURE_CERTIFICATE_451e670f-29f6-5cdd-a209-1700cb3e4216.pdf",
+          "sha256": "040e018dcbe39600295f1afcd1a95a4f1b505763c4f6cf48ff8d1e67bd880f51",
+          "bytes": 25926,
+          "readable_pages": 1
+        },
+        {
+          "name": "BANK_COPY_4984d064-9dc0-5f66-a6d9-ea194a4f8566.pdf",
+          "sha256": "3e10dbce3b6b96571985df3ecc5624ccd8a0ac3e7297d2f91445b1a396fd9616",
+          "bytes": 24621,
+          "readable_pages": 1
+        },
+        {
+          "name": "TRANSFER_77a46230-3c90-5e99-998d-2d0d2cc81421.pdf",
+          "sha256": "c4b1553e07e2c0dd6959fa83bc7a16da1a75eddc85d0aefabffa333359f17f94",
+          "bytes": 34976,
+          "readable_pages": 1
+        },
+        {
+          "name": "점검결과.json",
+          "sha256": "3bb84b9d3c279697500981945e6e6aac75c6eabfb4dd0196bccf85976f95eef1",
+          "bytes": 681
+        },
+        {
+          "name": "제출안내.pdf",
+          "sha256": "26490329701cfe86e377fba8d7aac76721dabad0a94cbb3e53eae60e8dcbe3b2",
+          "bytes": 1428,
+          "readable_pages": 1
+        }
+      ]
+    },
+    {
+      "path": "latest-full-flow-luna6-v2/baseline-1/vat-summary.pdf",
+      "sha256": "838d6e59777d79a01c3bed355b3dfa01c7055be75a0fe5514ce6ad3c1854e6dc",
+      "bytes": 1410,
+      "readable_pages": 1
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "final-full-flow/baseline-1/application-summary.pdf",
+      "sha256": "3dfcdb864ca4a067f7af43c4e00ee4e4547e513ffe01b6c89dc9cb5e2c65e87a",
+      "bytes": 1361,
+      "readable_pages": 1
+    },
+    {
+      "path": "final-full-flow/baseline-1/closure-summary.pdf",
+      "sha256": "a18311ce482019ce064f22c088b9fb034299486d8b2c0ef8e6a284d6303b62c8",
+      "bytes": 1385,
+      "readable_pages": 1
+    },
+    {
+      "path": "final-full-flow/baseline-1/settlement.zip",
+      "sha256": "405f585f00983137dd3eebcefff77a81bb93cbad8465e31fdbe4001f2abf3d9d",
+      "bytes": 151458,
+      "zip_integrity_passed": true,
+      "entries": [
+        {
+          "name": "CONSTRUCTION_STATEMENT_fab6354e-09dc-51f7-9df4-46195a1a8125.pdf",
+          "sha256": "0e05f0497fae548ee1d8b6e95153dfc6fc75d4f767fd5d1711070ede19c64f00",
+          "bytes": 32867,
+          "readable_pages": 1
+        },
+        {
+          "name": "TAX_INVOICE_74752339-eff8-565a-a25e-75c0abf4b1c4.pdf",
+          "sha256": "59b0997e9e79d9fd8aedbb2e7a309ad672af121ff676c67039babf31423d8782",
+          "bytes": 35274,
+          "readable_pages": 1
+        },
+        {
+          "name": "AFTER_PHOTO_4b16d447-50ab-5df9-bfb7-d635aea7b733.pdf",
+          "sha256": "3f469155d12bd5d3123a3114afc3da66c2b652bc173525b1a709e4a3d0e75a56",
+          "bytes": 22043,
+          "readable_pages": 1
+        },
+        {
+          "name": "BEFORE_PHOTO_fc224851-3341-585f-8687-95515203366f.pdf",
+          "sha256": "38576fa757b8c5adb9f71e6118808891fa4686a05d13c28313bb58c5959e266b",
+          "bytes": 21681,
+          "readable_pages": 1
+        },
+        {
+          "name": "CLOSURE_CERTIFICATE_87de1682-ad2f-56b1-910c-ddc326b22367.pdf",
+          "sha256": "c70aceabdf3230d2aa51384ca01e2c6fc9502855e17493c929ac9b872ffa60c2",
+          "bytes": 25926,
+          "readable_pages": 1
+        },
+        {
+          "name": "BANK_COPY_bc6f701c-67f7-5956-b5cb-8ee06738f52d.pdf",
+          "sha256": "0a9ea4cc1e01c350c8ae388bc7f3227fd99954fc8a5b07992acfba7e76876c77",
+          "bytes": 24621,
+          "readable_pages": 1
+        },
+        {
+          "name": "TRANSFER_25f3b47b-862a-547b-8938-bcc0f2829949.pdf",
+          "sha256": "c7f2d0f6a56364f7fc4319c6eeb9a9f33dab679534c4c3b4b70bd5fc7bba95bf",
+          "bytes": 34976,
+          "readable_pages": 1
+        },
+        {
+          "name": "점검결과.json",
+          "sha256": "d6bd193b9be768c26fa2a082ca6f7d83177b65c5e90c25d2f870113d316eaca0",
+          "bytes": 681
+        },
+        {
+          "name": "제출안내.pdf",
+          "sha256": "2ed9ed51917b3013b4a9f89101cf1b32a875b137b3ff4354705666db93042887",
+          "bytes": 1428,
+          "readable_pages": 1
+        }
+      ]
+    },
+    {
+      "path": "final-full-flow/baseline-1/vat-summary.pdf",
+      "sha256": "fec7069b9dd0604441d85d56d8c729d683c7658a43069c8c59d55ef8b54ac7c0",
+      "bytes": 1410,
+      "readable_pages": 1
+    }
+  ]
+}

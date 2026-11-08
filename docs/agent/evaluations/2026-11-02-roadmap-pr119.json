@@ -1,0 +1,383 @@
+{
+  "code_commit": "d2d90d440e175aa3414397f8abb28ddd93bc9883",
+  "code_files_sha256": {
+    "backend/app/agent/roadmap.py": "537323216912bc045955dc1a1980f7de42422c94d821e108ea59ca64816c2261",
+    "backend/tests/test_roadmap.py": "1773f3224dafc8cf7f653183d0f7202f71fc294cf893bddcb4221fa4d3f57a2c",
+    "docs/agent/README.md": "854622e3807eed2e3a97be6b5cf83c3d61bf30b4b8684928b3b76ca3f27cf7f8"
+  },
+  "input_type": "SYNTHETIC_TEST_FIXTURE_AND_PREVIOUS_PROVIDER_RESPONSES",
+  "pr119_comment_audit": {
+    "human_comments_and_reviews": [
+      {
+        "id": 5727622246,
+        "user": "blackwellSW",
+        "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/119#pullrequestreview-5727622246",
+        "updated_at": null,
+        "review": "APPROVED"
+      },
+      {
+        "id": 6568052103,
+        "user": "Louie-03",
+        "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/119#issuecomment-6568052103",
+        "updated_at": "2026-11-02T03:05:39Z",
+        "review": null
+      },
+      {
+        "id": 6568120793,
+        "user": "leehyunjong12",
+        "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/119#issuecomment-6568120793",
+        "updated_at": "2026-11-02T03:34:45Z",
+        "review": null
+      },
+      {
+        "id": 6569169800,
+        "user": "tokengeoji",
+        "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/119#issuecomment-6569169800",
+        "updated_at": "2026-11-02T04:49:13Z",
+        "review": null
+      },
+      {
+        "id": 6569185954,
+        "user": "tokengeoji",
+        "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/119#issuecomment-6569185954",
+        "updated_at": "2026-11-02T04:48:52Z",
+        "review": null
+      },
+      {
+        "id": 6569748961,
+        "user": "blackwellSW",
+        "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/119#issuecomment-6569748961",
+        "updated_at": "2026-11-02T05:24:30Z",
+        "review": null
+      },
+      {
+        "id": 6569990165,
+        "user": "tokengeoji",
+        "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/119#issuecomment-6569990165",
+        "updated_at": "2026-11-02T05:40:17Z",
+        "review": null
+      },
+      {
+        "id": 6570113049,
+        "user": "leehyunjong12",
+        "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/119#issuecomment-6570113049",
+        "updated_at": "2026-11-02T05:49:41Z",
+        "review": null
+      },
+      {
+        "id": 6570403720,
+        "user": "tokengeoji",
+        "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/119#issuecomment-6570403720",
+        "updated_at": "2026-11-02T06:10:29Z",
+        "review": null
+      }
+    ],
+    "issue_comments_including_one_bot": 9,
+    "reviews": 1,
+    "inline_comments": 0,
+    "latest_agreement_comment_id": 6570403720
+  },
+  "unsupported_business": [
+    {
+      "input_facts_override": {
+        "business_type": "RESTAURANT"
+      },
+      "output": {
+        "case_id": 1,
+        "snapshot_id": "00000000-0000-0000-0000-000000000004",
+        "supported": false,
+        "unsupported_reason": "현재 로드맵은 업종 코드 CAFE인 개인 카페만 지원합니다. 프랜차이즈 카페와 일반 음식점은 지원 준비 중입니다.",
+        "stages": [],
+        "next_action": null,
+        "next_task_id": null,
+        "questions_for_user": []
+      }
+    },
+    {
+      "input_facts_override": {
+        "franchise_status": true
+      },
+      "output": {
+        "case_id": 1,
+        "snapshot_id": "00000000-0000-0000-0000-000000000004",
+        "supported": false,
+        "unsupported_reason": "현재 로드맵은 업종 코드 CAFE인 개인 카페만 지원합니다. 프랜차이즈 카페와 일반 음식점은 지원 준비 중입니다.",
+        "stages": [],
+        "next_action": null,
+        "next_task_id": null,
+        "questions_for_user": []
+      }
+    },
+    {
+      "input_facts_override": {
+        "business_type": "개인 카페"
+      },
+      "output": {
+        "case_id": 1,
+        "snapshot_id": "00000000-0000-0000-0000-000000000004",
+        "supported": false,
+        "unsupported_reason": "현재 로드맵은 업종 코드 CAFE인 개인 카페만 지원합니다. 프랜차이즈 카페와 일반 음식점은 지원 준비 중입니다.",
+        "stages": [],
+        "next_action": null,
+        "next_task_id": null,
+        "questions_for_user": []
+      }
+    }
+  ],
+  "onboarding_applicability": [
+    {
+      "input_facts_override": {
+        "employee_count": 2,
+        "had_employees": null,
+        "restoration_scope": null,
+        "demolition_required": null,
+        "pension_enrolled": null,
+        "health_insurance_enrolled": null,
+        "employment_insurance_enrolled": null,
+        "industrial_accident_insurance_enrolled": null
+      },
+      "procedure_applicability": {
+        "CONFIRM_RESTORATION_SCOPE": true,
+        "PERFORM_RESTORATION": null,
+        "RETURN_PREMISES": true,
+        "FILE_TAX_BUSINESS_CLOSURE": true,
+        "FILE_FOOD_SERVICE_CLOSURE": true,
+        "SETTLE_EMPLOYEE_PAYMENTS": true,
+        "REPORT_EMPLOYEE_INSURANCE_LOSS": null,
+        "REPORT_WORKPLACE_INSURANCE_CLOSURE": null
+      },
+      "counts_order": [
+        "applicable",
+        "not_applicable",
+        "unknown"
+      ],
+      "actual_counts": [
+        5,
+        0,
+        3
+      ],
+      "expected_counts": [
+        5,
+        0,
+        3
+      ],
+      "passed": true
+    },
+    {
+      "input_facts_override": {
+        "employee_count": 0,
+        "had_employees": null,
+        "restoration_scope": null,
+        "demolition_required": null,
+        "pension_enrolled": null,
+        "health_insurance_enrolled": null,
+        "employment_insurance_enrolled": null,
+        "industrial_accident_insurance_enrolled": null
+      },
+      "procedure_applicability": {
+        "CONFIRM_RESTORATION_SCOPE": true,
+        "PERFORM_RESTORATION": null,
+        "RETURN_PREMISES": true,
+        "FILE_TAX_BUSINESS_CLOSURE": true,
+        "FILE_FOOD_SERVICE_CLOSURE": true,
+        "SETTLE_EMPLOYEE_PAYMENTS": null,
+        "REPORT_EMPLOYEE_INSURANCE_LOSS": null,
+        "REPORT_WORKPLACE_INSURANCE_CLOSURE": null
+      },
+      "counts_order": [
+        "applicable",
+        "not_applicable",
+        "unknown"
+      ],
+      "actual_counts": [
+        4,
+        0,
+        4
+      ],
+      "expected_counts": [
+        4,
+        0,
+        4
+      ],
+      "passed": true
+    },
+    {
+      "input_facts_override": {
+        "employee_count": 0,
+        "had_employees": null,
+        "restoration_scope": null,
+        "demolition_required": null,
+        "pension_enrolled": false,
+        "health_insurance_enrolled": false,
+        "employment_insurance_enrolled": false,
+        "industrial_accident_insurance_enrolled": false
+      },
+      "procedure_applicability": {
+        "CONFIRM_RESTORATION_SCOPE": true,
+        "PERFORM_RESTORATION": null,
+        "RETURN_PREMISES": true,
+        "FILE_TAX_BUSINESS_CLOSURE": true,
+        "FILE_FOOD_SERVICE_CLOSURE": true,
+        "SETTLE_EMPLOYEE_PAYMENTS": null,
+        "REPORT_EMPLOYEE_INSURANCE_LOSS": false,
+        "REPORT_WORKPLACE_INSURANCE_CLOSURE": false
+      },
+      "counts_order": [
+        "applicable",
+        "not_applicable",
+        "unknown"
+      ],
+      "actual_counts": [
+        4,
+        2,
+        2
+      ],
+      "expected_counts": [
+        4,
+        2,
+        2
+      ],
+      "passed": true
+    },
+    {
+      "input_facts_override": {
+        "employee_count": 0,
+        "had_employees": false,
+        "restoration_scope": null,
+        "demolition_required": null,
+        "pension_enrolled": false,
+        "health_insurance_enrolled": false,
+        "employment_insurance_enrolled": false,
+        "industrial_accident_insurance_enrolled": false
+      },
+      "procedure_applicability": {
+        "CONFIRM_RESTORATION_SCOPE": true,
+        "PERFORM_RESTORATION": null,
+        "RETURN_PREMISES": true,
+        "FILE_TAX_BUSINESS_CLOSURE": true,
+        "FILE_FOOD_SERVICE_CLOSURE": true,
+        "SETTLE_EMPLOYEE_PAYMENTS": false,
+        "REPORT_EMPLOYEE_INSURANCE_LOSS": false,
+        "REPORT_WORKPLACE_INSURANCE_CLOSURE": false
+      },
+      "counts_order": [
+        "applicable",
+        "not_applicable",
+        "unknown"
+      ],
+      "actual_counts": [
+        4,
+        3,
+        1
+      ],
+      "expected_counts": [
+        4,
+        3,
+        1
+      ],
+      "passed": true
+    },
+    {
+      "input_facts_override": {
+        "employee_count": 2,
+        "had_employees": null,
+        "restoration_scope": null,
+        "demolition_required": null,
+        "pension_enrolled": true,
+        "health_insurance_enrolled": true,
+        "employment_insurance_enrolled": true,
+        "industrial_accident_insurance_enrolled": true
+      },
+      "procedure_applicability": {
+        "CONFIRM_RESTORATION_SCOPE": true,
+        "PERFORM_RESTORATION": null,
+        "RETURN_PREMISES": true,
+        "FILE_TAX_BUSINESS_CLOSURE": true,
+        "FILE_FOOD_SERVICE_CLOSURE": true,
+        "SETTLE_EMPLOYEE_PAYMENTS": true,
+        "REPORT_EMPLOYEE_INSURANCE_LOSS": true,
+        "REPORT_WORKPLACE_INSURANCE_CLOSURE": true
+      },
+      "counts_order": [
+        "applicable",
+        "not_applicable",
+        "unknown"
+      ],
+      "actual_counts": [
+        7,
+        0,
+        1
+      ],
+      "expected_counts": [
+        7,
+        0,
+        1
+      ],
+      "passed": true
+    }
+  ],
+  "replay": {
+    "input_artifact": "docs/agent/evaluations/2026-11-02-roadmap-live.json",
+    "input_artifact_sha256": "2b1f166d0746fe9cf8453fc74e6a9214e8accb82bb50199afee27e59eff19f50",
+    "original_model_run_commit": "f5d1b2e01a9a773bd397854f83e1258baa9f0d2a",
+    "checks": [
+      {
+        "case": "graph",
+        "existing_fields_unchanged": true,
+        "supported": true
+      },
+      {
+        "case": "replan",
+        "existing_fields_unchanged": true,
+        "supported": true
+      },
+      {
+        "case": "documents_missing",
+        "existing_fields_unchanged": true,
+        "supported": true
+      },
+      {
+        "case": "documents_complete",
+        "existing_fields_unchanged": true,
+        "supported": true
+      }
+    ],
+    "new_provider_requests": 0,
+    "new_tokens": 0,
+    "new_estimated_cost_krw": 0
+  },
+  "pytest": {
+    "focused_command": "PYTHONPATH=backend python -m pytest -q backend/tests/test_roadmap.py backend/tests/test_info_replanning.py -k 'roadmap or staff_history_guides_this_plan_without_becoming_case_changes'",
+    "focused_stdout_tail": "41 passed, 88 deselected in 1.29s",
+    "roadmap_tests": 38,
+    "existing_persistence_guard_tests": 3,
+    "full_command": "PYTHONPATH=backend python -m pytest -q backend/tests",
+    "full_stdout_tail": "663 passed in 33.72s",
+    "mysql_included": true
+  },
+  "static_checks": {
+    "ruff": "passed",
+    "git_diff_check": "passed"
+  },
+  "new_provider_requests": 0,
+  "new_tokens": 0,
+  "new_estimated_cost_krw": 0,
+  "scope": {
+    "agent_only": true,
+    "fe_be_common_changed": false,
+    "app_e2e_claimed": false,
+    "models_effort_changed": false,
+    "human_source_review_claimed": false
+  },
+  "ci": {
+    "run_id": 41404991364,
+    "url": "https://github.com/kakaotechcampus-4/ktc4-kangwon-4/actions/runs/41404991364",
+    "head_sha": "d2d90d440e175aa3414397f8abb28ddd93bc9883",
+    "conclusion": "success",
+    "stdout_tail": "653 passed in 40.37s",
+    "excluded": [
+      "backend/tests/test_reviewed_procedure_db.py"
+    ],
+    "job_log_sha256": "d1f3e5be49aa8e97afc5e5e688a1e240a8ec06b5e6263d56ac966e2462798351"
+  }
+}

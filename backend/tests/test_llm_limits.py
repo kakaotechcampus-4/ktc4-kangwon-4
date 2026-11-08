@@ -6,23 +6,186 @@ from dataclasses import replace
 
 import httpx
 import pytest
-from pydantic import BaseModel
-
 from app.agent.llm import (
+    LLMCallBudget,
     LLMConfig,
     LLMConfigurationError,
     LLMRequestError,
     LLMResponseError,
     StructuredLLMClient,
+    candidate_config,
     restrict_string_enums,
     sanitize_json_schema,
 )
+from app.agent.run_scope import (
+    RunDeadline,
+    RunDeadlineExceededError,
+    run_deadline_scope,
+)
 from app.agent.runtime import resolve_run_deadline_seconds
 from app.agent.supervisor.agent import SupervisorModelOutput
+from app.agent.tracing import capture_usage
+from pydantic import BaseModel
 
 
 class Answer(BaseModel):
     ok: bool
+
+
+def test_supervisor_model_selector_preserves_strong_review_and_requires_own_key(tmp_path):
+    env = tmp_path / ".env"
+    text = (
+        "CHAT_PROXY_URL=https://proxy.example.org/shared/v1\nPROXY_TOKEN=shared-synthetic-key\n"
+        "OPENAI_MODEL=gpt-6.1-sol\nOPENAI_REASONING_EFFORT=xhigh\n"
+        "AGENT_SUPERVISOR_MODEL_PREFIX=LUNA6_\n"
+        "LUNA6_CHAT_PROXY_URL=https://proxy.example.org/luna6/v1\n"
+        "LUNA6_PROXY_TOKEN=luna6-synthetic-key\nLUNA6_MODEL=gpt-6-luna\n"
+        "LUNA6_REASONING_EFFORT=low\n"
+    )
+    env.write_text(text)
+    supervisor = LLMConfig.from_env(env_file=env, environ={}, env_prefix="SUPERVISOR_")
+    review = LLMConfig.from_env(env_file=env, environ={})
+    assert supervisor.model == "gpt-6-luna" and supervisor.reasoning_effort == "low"
+    assert supervisor.api_token == "luna6-synthetic-key"
+    assert review.model == "gpt-6.1-sol" and review.reasoning_effort == "xhigh"
+    env.write_text(text.replace("LUNA6_PROXY_TOKEN=luna6-synthetic-key", "LUNA6_PROXY_TOKEN="))
+    with pytest.raises(LLMConfigurationError):
+        LLMConfig.from_env(env_file=env, environ={}, env_prefix="SUPERVISOR_")
+
+
+def test_failed_schema_attempt_is_counted_with_its_tokens_before_retry():
+    attempts = []
+
+    def handler(request):
+        attempts.append(request)
+        return httpx.Response(200, json={
+            "model": "actual-model",
+            "choices": [{"message": {"content": '{"wrong":true}' if len(attempts) == 1 else '{"ok":true}'}}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 7,
+                      "completion_tokens_details": {"reasoning_tokens": 3},
+                      "prompt_tokens_details": {"cached_tokens": 4}},
+        })
+
+    with capture_usage() as calls:
+        assert generate(config(reasoning_effort="low"), handler).ok
+    assert len(calls) == 2
+    assert sum(call.prompt_tokens for call in calls) == 20
+    assert calls[0].status == "ERROR" and calls[0].error_code == "SCHEMA_VALIDATION_FAILED"
+    assert calls[1].status == "SUCCESS" and calls[1].attempt == 2
+    assert all(call.model == "actual-model" and call.requested_model == "gpt-5.6-sol" for call in calls)
+    assert calls[0].reasoning_tokens == 3 and calls[0].cached_prompt_tokens == 4
+    assert "synthetic-test-token" not in repr(calls) and "example.org" not in repr(calls)
+
+
+def test_http_retry_and_refusal_record_unknown_and_known_usage_once_each():
+    count = 0
+
+    def handler(_):
+        nonlocal count
+        count += 1
+        if count == 1:
+            return httpx.Response(503, json={"error": "private provider message"})
+        return httpx.Response(200, json={
+            "choices": [{"finish_reason": "length", "message": {"content": ""}}],
+            "usage": {"prompt_tokens": 20, "completion_tokens": 30},
+        })
+
+    with capture_usage() as calls, pytest.raises(LLMResponseError):
+        generate(config(), handler)
+    assert len(calls) == 2
+    assert calls[0].prompt_tokens is None and calls[0].status_code == 503
+    assert calls[1].completion_tokens == 30 and calls[1].error_code == "OUTPUT_TOKEN_LIMIT"
+    assert "private provider message" not in repr(calls)
+
+
+@pytest.mark.parametrize("remaining", [None, 5.0, 0.25, 0.0])
+@pytest.mark.parametrize("wake_fraction", [1.0, 0.99])
+def test_retry_wait_preserves_success_and_stops_at_the_run_deadline(monkeypatch, remaining, wake_fraction):
+    now, requests, waits = [0.0], [], []
+    monkeypatch.setattr(RunDeadline, "remaining_seconds", lambda deadline: deadline.expires_at - now[0])
+    budget = LLMCallBudget(3)
+
+    def handler(request):
+        requests.append(request)
+        if len(requests) == 1:
+            if remaining is not None:
+                now[0] = 10.0 - remaining
+            return httpx.Response(503, json={"error": "synthetic unavailable"})
+        return httpx.Response(200, json={"choices": [{"message": {"content": '{"ok":true}'}}]})
+
+    async def sleep(delay):
+        waits.append(delay)
+        now[0] += delay * wake_fraction
+
+    expires = remaining is not None and remaining <= 2.0
+
+    async def run():
+        with run_deadline_scope(RunDeadline(10.0) if remaining is not None else None), capture_usage() as calls:
+            async with StructuredLLMClient(
+                replace(config(), retry_backoff_seconds=2.0),
+                transport=httpx.MockTransport(handler), sleep=sleep, call_budget=budget,
+            ) as client:
+                if expires:
+                    with pytest.raises(RunDeadlineExceededError):
+                        await client.generate(Answer, [{"role": "user", "content": "test"}])
+                else:
+                    assert (await client.generate(Answer, [{"role": "user", "content": "test"}])).ok
+            return calls
+
+    calls = asyncio.run(run())
+    expected_wait = 2.0 if remaining is None else min(2.0, remaining)
+    assert waits == ([expected_wait] if expected_wait > 0 else [])
+    assert len(requests) == budget.spent == len(calls) == (1 if expires else 2)
+    assert calls[0].status == "ERROR" and calls[0].status_code == 503
+    if not expires:
+        assert calls[1].status == "SUCCESS"
+
+
+def test_cancellation_during_retry_wait_never_sends_another_request():
+    budget = LLMCallBudget(3)
+
+    async def cancel_wait(_delay):
+        raise asyncio.CancelledError
+
+    async def run():
+        with run_deadline_scope(RunDeadline.after(10)), capture_usage() as calls:
+            async with StructuredLLMClient(
+                replace(config(), retry_backoff_seconds=2.0),
+                transport=httpx.MockTransport(lambda _: httpx.Response(503)),
+                sleep=cancel_wait, call_budget=budget,
+            ) as client:
+                with pytest.raises(asyncio.CancelledError):
+                    await client.generate(Answer, [{"role": "user", "content": "test"}])
+            return calls
+
+    calls = asyncio.run(run())
+    assert len(calls) == budget.spent == 1
+    assert calls[0].status == "ERROR" and calls[0].status_code == 503
+
+
+def test_candidate_does_not_inherit_shared_credentials_model_or_effort(tmp_path):
+    env = {"CHAT_PROXY_URL": "https://shared.example", "PROXY_TOKEN": "shared-secret",
+           "OPENAI_MODEL": "shared", "OPENAI_REASONING_EFFORT": "xhigh"}
+    options = {"env_file": tmp_path / "absent", "environ": env}
+    assert candidate_config("HAIKU_", **options) is None
+    env["HAIKU_MODEL"] = "haiku"
+    with pytest.raises(LLMConfigurationError):
+        candidate_config("HAIKU_", **options)
+    env.update(HAIKU_CHAT_PROXY_URL="https://haiku.example", HAIKU_PROXY_TOKEN="own-secret")
+    candidate = candidate_config("HAIKU_", **options)
+    assert candidate.api_token == "own-secret" and candidate.reasoning_effort is None
+    env["AGENT_INFO_MODEL_PREFIX"] = "HAIKU_"
+    assert LLMConfig.from_env(env_prefix="INFO_", **options) == candidate
+
+
+def test_capture_of_cancelled_attempt_is_error_with_unknown_usage():
+    async def handler(_):
+        raise asyncio.CancelledError
+
+    with capture_usage() as calls, pytest.raises(asyncio.CancelledError):
+        generate(config(), handler)
+    assert len(calls) == 1 and calls[0].status == "ERROR"
+    assert calls[0].error_code == "CALL_INTERRUPTED" and calls[0].prompt_tokens is None
 
 
 def config(**changes):
@@ -49,7 +212,7 @@ def test_time_limits(tmp_path, seconds):
     assert resolve_run_deadline_seconds(**options) == (30 if seconds else 420)
 
 
-def generate(settings, handler, response_model=Answer, enum_constraints=None):
+def generate(settings, handler, response_model=Answer, enum_constraints=None, max_completion_tokens=None):
     async def run():
         async with StructuredLLMClient(
             settings, transport=httpx.MockTransport(handler)
@@ -57,6 +220,7 @@ def generate(settings, handler, response_model=Answer, enum_constraints=None):
             return await client.generate(
                 response_model, [{"role": "user", "content": "test"}],
                 enum_constraints=enum_constraints,
+                max_completion_tokens=max_completion_tokens,
             )
 
     return asyncio.run(run())
@@ -154,6 +318,21 @@ def event(delta=None, finish=None):
         )
         + "\n\n"
     )
+
+
+@pytest.mark.parametrize("extra_content", [False, True])
+def test_elice_haiku_usage_tail_allows_only_an_empty_choice(extra_content):
+    tail = {"choices": [{"index": 0, "delta": {"content": "injected"} if extra_content else {},
+                          "finish_reason": None}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 3}}
+    body = event({"content": '{"ok":true}'}, "stop") + "data: " + json.dumps(tail) + "\n\ndata: [DONE]\n\n"
+    with capture_usage() as calls:
+        if extra_content:
+            with pytest.raises(LLMResponseError):
+                generate(config(stream=True, max_retries=0), lambda _: httpx.Response(200, text=body))
+        else:
+            assert generate(config(stream=True), lambda _: httpx.Response(200, text=body)).ok
+            assert len(calls) == 1 and calls[0].completion_tokens == 3
 
 
 class ChunkedBody(httpx.AsyncByteStream):
@@ -339,3 +518,16 @@ def test_enum_restrictions_preserve_shared_definitions_and_evidence_items():
     assert json.dumps(schema, sort_keys=True) == original
     with pytest.raises(ValueError, match="no supported values"):
         restrict_string_enums(schema, {"decision_type": ["UNSUPPORTED"]})
+
+
+@pytest.mark.parametrize(("configured", "requested", "sent"), [(16000, 4000, 4000), (None, 4000, 4000), (3000, 4000, 3000)])
+def test_a_call_can_only_lower_the_completion_limit(configured, requested, sent):
+    # 값 꺼내기처럼 출력이 짧은 호출은 상한을 낮춰 폭주를 일찍 끊는다. 설정된 비용 상한보다 높일 수는 없다
+    payloads = []
+
+    def handler(request):
+        payloads.append(json.loads(request.content))
+        return httpx.Response(200, json={"choices": [{"message": {"content": '{"ok":true}'}}]})
+
+    assert generate(config(max_completion_tokens=configured), handler, max_completion_tokens=requested).ok is True
+    assert payloads[0]["max_completion_tokens"] == sent

@@ -58,6 +58,8 @@ def evidence(evidence_id: str) -> SimpleNamespace:
         retrieved_at=SUBMITTED_AT,
         freshness_status="CURRENT",
         content_hash=None,
+        # 공식 자료만 공용 줄을 가리킨다. 이 검사는 사용자 입력 근거를 본다.
+        official_document_id=None,
     )
 
 

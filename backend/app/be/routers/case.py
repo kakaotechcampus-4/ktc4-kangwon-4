@@ -1,20 +1,35 @@
 from fastapi import APIRouter, BackgroundTasks, Depends
 from sqlmodel import Session
 
+from app.be import db
 from app.be.db import get_db
 from app.be.dependencies.auth import get_current_member_id
 from app.be.schemas.case import (
+    CaseClosureReportRequest,
+    CaseClosureReportResponse,
+    CaseDepositReturnRequest,
+    CaseDepositReturnResponse,
+    CaseChecklistResponse,
+    CaseChecklistUpdateRequest,
     CaseConflictsDecisionRequest,
     CaseCreateRequest,
     CaseCreateResponse,
     CaseGetResponse,
+    CaseLogResponse,
     CaseResultsEntryResponse,
     CaseResultsSubmitAcceptedResponse,
     CaseResultsSubmitRequest,
     CaseResultsSubmitResponse,
+    CaseRetryResponse,
+    CaseSupportApprovalRequest,
+    CaseSupportApprovalResponse,
+    ChecklistTaskId,
 )
+from app.agent.roadmap import Roadmap
 from app.be.services import case as case_service
+from app.be.services import conflict_decision as conflict_decision_service
 from app.be.services import judgment as judgment_service
+from app.be.services import roadmap as roadmap_service
 
 router = APIRouter()
 
@@ -32,6 +47,7 @@ def create_case(
     # 중간에 끊기거나 사용자가 화면을 떠났을 때 결과를 못 보므로, Case만 저장하고 바로
     # 응답한다. 판단은 뒤에서 돌면서 case_history.judgment_status를 갱신하고,
     # 화면은 GET /cases로 다시 물어본다.
+    db.release_request_connection(session)
     background_tasks.add_task(judgment_service.run_judgment_in_background, case_history_id)
 
     return case
@@ -43,6 +59,14 @@ def get_case(
     session: Session = Depends(get_db),
 ):
     return case_service.get_case(session, member_id)
+
+
+@router.get("/cases/logs", response_model=CaseLogResponse)
+def get_case_logs(
+    member_id: int = Depends(get_current_member_id),
+    session: Session = Depends(get_db),
+):
+    return case_service.get_case_logs(session, member_id)
 
 
 @router.get("/cases/results", response_model=CaseResultsEntryResponse)
@@ -65,6 +89,7 @@ def submit_case_results(
     # Case 생성 때와 같은 이유로 뒤에서 돌린다(create_case 주석). 이걸 걸지 않으면
     # 접수만 되고 아무도 판단을 부르지 않아서, 그 이력은 PENDING에서 영영 안 바뀐다.
     # 화면은 GET /cases/results/status로 다시 물어본다.
+    db.release_request_connection(session)
     background_tasks.add_task(
         judgment_service.run_judgment_in_background, response.case_history_id
     )
@@ -72,16 +97,40 @@ def submit_case_results(
     return response
 
 
+@router.post("/cases/retry", response_model=CaseRetryResponse)
+def retry_case_judgment(
+    background_tasks: BackgroundTasks,
+    member_id: int = Depends(get_current_member_id),
+    session: Session = Depends(get_db),
+):
+    response = case_service.retry_case_judgment(session, member_id)
+
+    # 가입 때와 같은 이유로 뒤에서 돌린다(create_case 주석). 되돌린 그 이력을 다시 판단하고,
+    # 화면은 가입 때처럼 GET /cases로 다시 물어본다.
+    db.release_request_connection(session)
+    background_tasks.add_task(judgment_service.run_judgment_in_background, response.case_history_id)
+
+    return response
+
+
 @router.post("/cases/results/decision", response_model=CaseResultsSubmitAcceptedResponse)
 def submit_case_conflicts_decision(
     decision_request: CaseConflictsDecisionRequest,
+    background_tasks: BackgroundTasks,
     member_id: int = Depends(get_current_member_id),
     session: Session = Depends(get_db),
 ):
     response = case_service.submit_case_conflicts_decision(session, member_id, decision_request)
 
-    # TODO(AI팀 연동): 여기서 충돌 결정 판단을 백그라운드로 실행하는 부분이 이어져야 한다.
-    # 사용자 선택(decision_request.decisions)은 DB에 저장하지 않으므로 이 호출에 인자로 넘긴다.
+    # 사용자 선택은 DB에 남기지 않기로 해서(현석님 #108) 인자로 넘긴다. 접수 응답을 먼저
+    # 보내고 판단은 뒤에서 돈다 — 결과 제출(/results)과 같은 방식이고, 화면은
+    # GET /cases/results/status로 받아 간다.
+    db.release_request_connection(session)
+    background_tasks.add_task(
+        conflict_decision_service.run_conflict_decision_in_background,
+        response.case_history_id,
+        {item.conflict_reference_id: item.side for item in decision_request.decisions},
+    )
 
     return response
 
@@ -93,3 +142,48 @@ def get_case_results_submit_status(
     session: Session = Depends(get_db),
 ):
     return case_service.get_case_results_submit_status(session, member_id, case_history_id)
+
+
+@router.get("/cases/roadmap", response_model=Roadmap)
+def get_case_roadmap(
+    member_id: int = Depends(get_current_member_id),
+    session: Session = Depends(get_db),
+):
+    return roadmap_service.get_case_roadmap(session, member_id)
+
+
+@router.put("/cases/checklists/{task_id}", response_model=CaseChecklistResponse)
+def update_case_checklist(
+    task_id: ChecklistTaskId,
+    checklist_request: CaseChecklistUpdateRequest,
+    member_id: int = Depends(get_current_member_id),
+    session: Session = Depends(get_db),
+):
+    return case_service.update_case_checklist(session, member_id, task_id, checklist_request.completed)
+
+
+@router.put("/cases/support-approval", response_model=CaseSupportApprovalResponse)
+def update_case_support_approval(
+    approval_request: CaseSupportApprovalRequest,
+    member_id: int = Depends(get_current_member_id),
+    session: Session = Depends(get_db),
+):
+    return case_service.update_case_support_approval(session, member_id, approval_request.approved)
+
+
+@router.put("/cases/closure-report", response_model=CaseClosureReportResponse)
+def update_case_closure_report(
+    report_request: CaseClosureReportRequest,
+    member_id: int = Depends(get_current_member_id),
+    session: Session = Depends(get_db),
+):
+    return case_service.update_case_closure_report(session, member_id, report_request)
+
+
+@router.put("/cases/deposit-return", response_model=CaseDepositReturnResponse)
+def update_case_deposit_return(
+    deposit_request: CaseDepositReturnRequest,
+    member_id: int = Depends(get_current_member_id),
+    session: Session = Depends(get_db),
+):
+    return case_service.update_case_deposit_return(session, member_id, deposit_request.result)

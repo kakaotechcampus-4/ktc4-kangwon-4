@@ -21,11 +21,12 @@ from app.agent.procedure_tool.store import (
 )
 from app.be.crud import case as case_crud
 from app.be.crud import evidence as evidence_crud
+from app.be.services import official_document
 from app.be.models.evidence import Evidence
-from app.be.models.mixins import KST
+from app.be.models.mixins import KST, kst_db_time
 from app.common.agent_data import load_reviewed_procedures
 
-__all__ = ["import_reviewed_procedures", "load_reviewed_procedures"]
+__all__ = ["import_reviewed_procedures", "load_reviewed_procedures", "procedure_db_time"]
 
 
 def import_reviewed_procedures(
@@ -47,6 +48,9 @@ def import_reviewed_procedures(
     version = store.snapshot_version
     if not isinstance(version, str) or not version:
         raise ProcedureStoreError("검수 자료 버전이 필요합니다.")
+    # 본문은 전체가 함께 쓰는 official_document 한 줄에 두고, Case 쪽은 그 줄을 가리킨다.
+    # 적재가 비어 있으면 여기서 멈춘다 — 본문 없는 근거를 넘기면 AI가 자료를 못 읽는다.
+    documents = official_document.ensure_official_documents(session, store)
     rows: list[Evidence] = []
     seen: set[str] = set()
     for item in store.records():
@@ -65,9 +69,10 @@ def import_reviewed_procedures(
             "source_ref": record.canonical_url,
             "source_version": version,
             "locator": record.canonical_url,
-            "excerpt": record.excerpt,
-            "published_at": _procedure_db_time(record.published_at),
-            "retrieved_at": _procedure_db_time(record.retrieved_at),
+            # 본문은 안 적는다. Case마다 같은 글을 다시 쓰지 않으려고 뺀 자리다.
+            "official_document_id": documents[record.content_hash.removeprefix("sha256:")],
+            "published_at": kst_db_time(record.published_at),
+            "retrieved_at": kst_db_time(record.retrieved_at),
             "freshness_status": record.freshness(as_of).value,
             "content_hash": record.content_hash.removeprefix("sha256:"),
         }
@@ -99,9 +104,3 @@ def import_reviewed_procedures(
     ]
 
 
-def _procedure_db_time(value: datetime | None) -> datetime | None:
-    return (
-        None
-        if value is None
-        else value.astimezone(KST).replace(tzinfo=None, microsecond=0)
-    )

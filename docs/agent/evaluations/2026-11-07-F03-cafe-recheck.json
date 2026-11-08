@@ -1,0 +1,272 @@
+{
+  "recorded_date": "2026-11-07",
+  "synthetic_data": true,
+  "registry_mode": "cafe",
+  "code_version": {
+    "git_commit": "aa2eb982c16ab1891da8c7d2ad1d232edda2144a",
+    "uncommitted_changes": false,
+    "code_sha256": "sha256:46d6c85f8292191756ac1ad1f32ba747d02249a4467acf354a448c7157e22618"
+  },
+  "fingerprints": {
+    "row": "sha256:1f0623df55de74e100acd179bbba7591107040ab33d41140130018673eb25973",
+    "request": "sha256:dc4595a850095143f05ae575a77002b8139125c5815239879d56df27d1d606f5",
+    "graph": "sha256:622672d2e568e7ebd008aa94542eda538583591818d82be07ec82fc885974fcb",
+    "source": "sha256:2da204f302d2fd177000f00fa1957d881664b623f790d162c1e7fbd08bf04c7a",
+    "registry": "sha256:8a7ab1782a59ecbdcac8806db196e6e5bf9468997bdef887a1aaca6dbddcfa73"
+  },
+  "configured_models_and_efforts": {
+    "shared": {
+      "model": "gpt-6.1-sol",
+      "effort": "xhigh"
+    },
+    "supervisor": {
+      "model": "gpt-6-luna",
+      "effort": "high"
+    },
+    "info": {
+      "model": "gpt-6.1-sol",
+      "effort": "high"
+    }
+  },
+  "limits": {
+    "max_llm_calls_per_run": 6,
+    "run_deadline_seconds": 420.0
+  },
+  "procedure_snapshot_version": "cafe-official-sources/2026-11-04-reviewed1",
+  "procedure_records_count": 9,
+  "scope": "Local Agent only; no DB, FE, production, historical rescore or full prompts retained",
+  "approval": {
+    "cases": 1,
+    "expected_calls": 3,
+    "maximum_calls": 6,
+    "estimated_cost_krw": 200,
+    "estimate_with_retry_margin_krw": 300
+  },
+  "interpretation": [
+    "The runtime completed with one Review PASS and no rework. The new early-stop branch was not exercised by this live trial.",
+    "The frozen F03 score remains WRONG: restoration_status=NOT_REQUIRED was proposed as well as the two expected fields.",
+    "The current schema and Guard accept either the two or three proposed fields; the third field is a model proposal, not a mandatory code derivation. The expected answer needs confirmation and the frozen score is not changed.",
+    "The original legacy-registry CASE_MISMATCH and its rejected text cannot be reconstructed from retained metadata. This run uses the current cafe registry and is not proof of the original rejection cause.",
+    "No production deployment, FE, database persistence, quality percentage or before/after performance claim is established by this one local Agent run."
+  ],
+  "cost_basis": {
+    "currency": "KRW",
+    "rate_unit": "per 1000000 tokens",
+    "columns": [
+      "input",
+      "cached_input",
+      "output"
+    ],
+    "user_provided_rates": {
+      "gpt-6.1-sol": [
+        2835,
+        141,
+        14175
+      ],
+      "gpt-6-luna": [
+        141,
+        14,
+        708
+      ]
+    },
+    "invoice_reconciled": false
+  },
+  "trial": {
+    "case": "F03",
+    "trigger": "RESULT_SUBMITTED",
+    "graph_input_digest": "sha256:dc4595a850095143f05ae575a77002b8139125c5815239879d56df27d1d606f5",
+    "status": "REVIEWED_PLAN",
+    "calls": [
+      {
+        "role": "info",
+        "model": "gpt-6.1-sol",
+        "schema_name": "reborn_info_analysis",
+        "reasoning_effort": "high",
+        "max_completion_tokens": 4000,
+        "stream": true,
+        "request_without_model_digest": "3017a02539a0bf0d69a395c6882ac1596f01cb7699fc10a51a94538758bc0bc4",
+        "http_status": 200,
+        "headers_latency_ms": 10606
+      },
+      {
+        "role": "supervisor",
+        "model": "gpt-6-luna",
+        "schema_name": "reborn_supervisor_draft",
+        "reasoning_effort": "high",
+        "max_completion_tokens": 16000,
+        "stream": true,
+        "request_without_model_digest": "3a220706bd38cbef951ef34367926283276880857e53ebdd790c9b0722f4dcbd",
+        "http_status": 200,
+        "headers_latency_ms": 7982
+      },
+      {
+        "role": "shared",
+        "model": "gpt-6.1-sol",
+        "schema_name": "reborn_review_output",
+        "reasoning_effort": "xhigh",
+        "max_completion_tokens": 16000,
+        "stream": true,
+        "request_without_model_digest": "e6eb70a90aaea7e3c5458da4c8a309c9645565d1ab2f5d38e77b7dcbf18a2ab5",
+        "http_status": 200,
+        "headers_latency_ms": 22045
+      }
+    ],
+    "review_results": [
+      {
+        "verdict": "PASS",
+        "issue_codes": [],
+        "review_attempt": 1,
+        "draft_decision_type": "ACTION",
+        "draft_action_code": "CONFIRM_EMPLOYEE_SETTLEMENT_REQUIREMENTS",
+        "draft_fact_changes": [
+          {
+            "field_path": "restoration_scope",
+            "operation": "SET",
+            "proposed_status": "CONFIRMED",
+            "proposed_value": "NOT_REQUIRED"
+          },
+          {
+            "field_path": "restoration_status",
+            "operation": "SET",
+            "proposed_status": "CONFIRMED",
+            "proposed_value": "NOT_REQUIRED"
+          },
+          {
+            "field_path": "demolition_required",
+            "operation": "SET",
+            "proposed_status": "CONFIRMED",
+            "proposed_value": "NOT_REQUIRED"
+          }
+        ],
+        "issues": [],
+        "missing_evidence_paths": [],
+        "recommended_rework_targets": []
+      }
+    ],
+    "limits": {
+      "max_llm_calls_per_run": 6,
+      "run_deadline_seconds": 420.0
+    },
+    "decision_type": "ACTION",
+    "blocker_digest": "sha256:8b48542ae513c2c9556ea358e34acb9d920477ed1ad2e56c3d6431f16ce98b98",
+    "next_action_digest": "sha256:c35de7c59360816191634f20bbbbdd7b6a35d5480f49e8e41eac8a604738810a",
+    "action_code": "CONFIRM_EMPLOYEE_SETTLEMENT_REQUIREMENTS",
+    "questions_for_user": [],
+    "fact_changes": [
+      {
+        "field_path": "restoration_scope",
+        "before_status": "UNKNOWN",
+        "before_value": null,
+        "proposed_status": "CONFIRMED",
+        "proposed_value": "NOT_REQUIRED"
+      },
+      {
+        "field_path": "restoration_status",
+        "before_status": "UNKNOWN",
+        "before_value": null,
+        "proposed_status": "CONFIRMED",
+        "proposed_value": "NOT_REQUIRED"
+      },
+      {
+        "field_path": "demolition_required",
+        "before_status": "UNKNOWN",
+        "before_value": null,
+        "proposed_status": "CONFIRMED",
+        "proposed_value": "NOT_REQUIRED"
+      }
+    ],
+    "procedure_progress_changes": [],
+    "review_attempt": 1,
+    "draft_version": 1,
+    "elapsed_ms": 57392,
+    "calls_by_role": {
+      "info": 1,
+      "supervisor": 1,
+      "shared": 1
+    },
+    "provider_usage": [
+      {
+        "model": "gpt-6.1-sol",
+        "prompt_tokens": 4181,
+        "completion_tokens": 1497,
+        "reasoning_tokens": 598,
+        "cached_prompt_tokens": 0,
+        "reasoning_effort": "high",
+        "schema_name": "reborn_info_analysis",
+        "attempt": 1,
+        "status": "SUCCESS",
+        "status_code": 200,
+        "error_code": null,
+        "latency_ms": 15435,
+        "requested_model": "gpt-6.1-sol"
+      },
+      {
+        "model": "gpt-6-luna",
+        "prompt_tokens": 16330,
+        "completion_tokens": 735,
+        "reasoning_tokens": 685,
+        "cached_prompt_tokens": 0,
+        "reasoning_effort": "high",
+        "schema_name": "reborn_supervisor_draft",
+        "attempt": 1,
+        "status": "SUCCESS",
+        "status_code": 200,
+        "error_code": null,
+        "latency_ms": 8297,
+        "requested_model": "gpt-6-luna"
+      },
+      {
+        "model": "gpt-6.1-sol",
+        "prompt_tokens": 25161,
+        "completion_tokens": 1802,
+        "reasoning_tokens": 1685,
+        "cached_prompt_tokens": 0,
+        "reasoning_effort": "xhigh",
+        "schema_name": "reborn_review_output",
+        "attempt": 1,
+        "status": "SUCCESS",
+        "status_code": 200,
+        "error_code": null,
+        "latency_ms": 33584,
+        "requested_model": "gpt-6.1-sol"
+      }
+    ],
+    "metrics": {
+      "runs": 1,
+      "successful_runs": 0,
+      "success_rate": 0.0,
+      "http_attempts": 3,
+      "usage_complete": true,
+      "attempts_with_reported_usage": 3,
+      "reported_tokens": {
+        "prompt_tokens": 45672,
+        "completion_tokens": 4034
+      },
+      "total_tokens": 49706,
+      "tokens_per_success": null,
+      "estimated_cost_krw": 132.770805,
+      "cost_per_success_krw": null,
+      "uncached_cost_krw": 132.770805,
+      "cache_usage_complete": true,
+      "unpriced_models": [],
+      "cost_basis": "User-provided Elice Serverless KRW rates; cached input is counted once",
+      "mean_latency_ms": 57392,
+      "median_latency_ms": 57392,
+      "p95_latency_ms": 57392,
+      "max_latency_ms": 57392,
+      "transport_retries": 0,
+      "review_revise_count": 0
+    },
+    "score": {
+      "result": "WRONG",
+      "reasons": [
+        "changes {'restoration_scope': 'NOT_REQUIRED', 'restoration_status': 'NOT_REQUIRED', 'demolition_required': 'NOT_REQUIRED'} != expected {'restoration_scope': 'NOT_REQUIRED', 'demolition_required': 'NOT_REQUIRED'}",
+        "forbidden fact change"
+      ],
+      "human_check": [],
+      "detail_changed": false
+    },
+    "behavior_passed": false
+  },
+  "privacy": "Only synthetic enum changes, validated paths, hashes, fixed metadata and usage are published. Full prompts, provider endpoints, credentials and local review text are excluded."
+}

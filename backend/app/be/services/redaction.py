@@ -8,11 +8,13 @@ AI 입구(app/agent/guardrails.py)는 주민등록번호·사업자등록번호�
 가림 문구로 구분한다. 위치(start_offset/end_offset)는 가린 뒤 글에서 가림 문구가 차지하는
 자리이고 끝자리는 포함하지 않는다.
 
-사람 이름은 가리지 않는다. 전화번호·이메일과 달리 "김철수"는 다른 두세 글자 말과 모양이
-같아서 규칙으로 찾을 수 없다. 넣으려면 찾아주는 모델이 따로 필요하다.
+사람 이름은 "이름은 김철수입니다"처럼 이름임을 밝히고 쓴 경우만 가린다(아래 [이름] 규칙).
+문장 속에 그냥 나온 "김철수"는 다른 두세 글자 말과 모양이 같아서 규칙으로 찾을 수 없다.
+그것까지 가리려면 찾아주는 모델이 따로 필요하다.
 """
 
 import re
+from collections.abc import Iterable, Mapping
 
 from app.agent.schemas import Redaction, RedactionType
 
@@ -125,7 +127,9 @@ _ADDRESS = re.compile(
 )
 
 
-def redact(text: str) -> tuple[str, list[Redaction]]:
+def redact(
+    text: str, *, placeholders: Mapping[tuple[str, str], str] | None = None,
+) -> tuple[str, list[Redaction]]:
     """가린 글과, 가린 자리 목록을 함께 돌려준다.
 
     목록의 위치는 **가린 뒤** 글 기준이다. AI 쪽 계약이 가림 문구와 그 자리 글자가
@@ -139,6 +143,9 @@ def redact(text: str) -> tuple[str, list[Redaction]]:
     cursor = 0
     length = 0
     for start, end, redaction_type, placeholder, _ in spans:
+        if placeholders is not None:
+            # 근거에만 있는 원문은 번호를 추가하지 않고 기존 표식으로 가린다.
+            placeholder = placeholders.get((placeholder, text[start:end]), placeholder)
         kept = text[cursor:start]
         masked_parts.append(kept)
         length += len(kept)
@@ -206,11 +213,43 @@ def _without_overlaps(
 def hidden_originals(text: str) -> list[tuple[str, str]]:
     """이 글에서 무엇을 가렸는지를 (가림 문구, 원래 글자) 짝으로, 나온 순서대로 돌려준다.
 
-    화면에 돌려줄 때 되돌리는 쪽이 쓴다(services.unmasking). redact가 주는 위치는 가린 뒤
+    Case 안의 번호와 과거 고정 표식의 출처를 확인할 때 쓴다. redact가 주는 위치는 가린 뒤
     글 기준이라 원래 글자를 못 찾는다. 같은 규칙으로 한 번 더 훑어 원문 쪽 자리를 준다.
     """
 
     return [(placeholder, text[start:end]) for start, end, _, placeholder, _ in _find_spans(text)]
 
 
-__all__ = ["hidden_originals", "redact"]
+def fixed_placeholders(text: str) -> set[str]:
+    """과거 값에 남은 번호 없는 표식만 찾는다."""
+
+    return {p for p in {"[주소]", *(rule[1] for rule in _RULES)} if p in text}
+
+
+def has_numbered_placeholders(text: str) -> bool:
+    """이미 번호로 구분한 값은 과거 고정 표식 방식으로 비교하지 않는다."""
+
+    return any(re.search(re.escape(p[:-1]) + r"#[1-9]\d*\]", text)
+               for p in {"[주소]", *(rule[1] for rule in _RULES)})
+
+
+def numbered_placeholders(
+    raw_inputs: Iterable[str | None], *, aliases: Mapping[tuple[str, str], str] | None = None,
+) -> dict[tuple[str, str], str]:
+    """입력 순서로 종류별 번호를 정한다. 같은 원문은 재등장해도 같은 표식을 쓴다."""
+
+    result = dict(aliases or {})
+    seen: set[tuple[str, str]] = set()
+    counts: dict[str, int] = {}
+    for raw_input in raw_inputs:
+        for placeholder, original in hidden_originals(raw_input or ""):
+            key = (placeholder, original)
+            if key in seen:
+                continue
+            seen.add(key)
+            counts[placeholder] = counts.get(placeholder, 0) + 1
+            result.setdefault(key, f"{placeholder[:-1]}#{counts[placeholder]}]")
+    return result
+
+
+__all__ = ["fixed_placeholders", "has_numbered_placeholders", "hidden_originals", "numbered_placeholders", "redact"]

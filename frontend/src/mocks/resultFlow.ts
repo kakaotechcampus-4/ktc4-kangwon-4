@@ -28,24 +28,6 @@ export const resultInput: ResultInputView = {
   },
 }
 
-/**
- * 처리 중에 순서대로 보여줄 문구. ③과 ④가 함께 쓴다.
- *
- * Mock 이 아니라 실서버에서도 쓰는 문구다. 두 화면이 같은 말을 해야 해서 여기 남겨 둔다.
- *
- * **과정을 특정하지 않는다.** 서버가 지금 어느 단계인지 내려주지 않아서, "지원을 찾는 중"
- * 처럼 적으면 지원을 찾지 않는 판단에도 그 말이 뜬다. 진행 중이라는 것만 전한다.
- *
- * 떠나도 된다는 말을 마지막에 둔다. 판단은 몇 분이 걸릴 수 있는데, 화면을 떠나면 결과가
- * 사라지는 줄 알면 사장님이 그동안 화면에 묶인다. 서버는 뒤에서 판단을 이어가고(#107),
- * 끝난 결과는 `/case` 에서 보인다.
- */
-export const pendingMessages = [
-  '말씀하신 내용을 확인하고 있습니다',
-  '다음에 하실 일을 정리하고 있습니다',
-  '화면을 떠나셔도 보내 주신 내용은 계속 처리됩니다',
-]
-
 /** ⑤ 정상 — 철거가 필요하다고 확인되어 다음 할 일이 바뀐 상태 */
 export const updatedReplan: ReplanView = {
   changes: [
@@ -73,6 +55,12 @@ export const updatedReplan: ReplanView = {
       '철거가 필요하다고 확인되어 점포철거비 지원이 검토 대상이 되었습니다. 신청 조건에 철거 전 증빙이 포함될 수 있습니다.',
     questions: ['신청하려면 어떤 서류가 필요한가요?', '철거 전에 받아둬야 할 것이 있나요?'],
   },
+  // 철거가 필요하다고 정해지면 로드맵의 철거비 할 일이 "확인 필요"에서 해야 할 일로 바뀐다(#182). 제목은 AI 로드맵 그대로
+  newTasks: [
+    { id: 'support_application', title: '소상공인24 사전 신청' },
+    { id: 'choose_contractor', title: '철거 업체 정하기' },
+    { id: 'before_photo', title: '철거 전 사진' },
+  ],
 }
 
 /**
@@ -84,6 +72,7 @@ export const noChangeReplan: ReplanView = {
   changes: [],
   blocker: updatedReplan.blocker,
   nextAction: updatedReplan.nextAction,
+  newTasks: [],
 }
 
 /**
@@ -99,6 +88,7 @@ export const keptReplan: ReplanView = {
     description: '이 내용이 확인되면 다음 순서를 바로 알려드릴 수 있어요.',
   },
   nextAction: resultInput.nextAction,
+  newTasks: [],
 }
 
 /**
@@ -119,6 +109,8 @@ export const confirmedReplan: ReplanView = {
   ],
   blocker: updatedReplan.blocker,
   nextAction: updatedReplan.nextAction,
+  // 철거가 필요하다고 고르셨으니 정상 반영과 같은 할 일이 생긴다
+  newTasks: updatedReplan.newTasks,
 }
 
 /** ④ — 기존 기록과 어긋나 사용자에게 되묻는 상태 */
@@ -162,6 +154,7 @@ const OUTCOMES: Record<string, SubmitOutcome> = {
   'failed-none': { kind: 'STAY', state: { kind: 'FAILED', notice: { kind: 'NO_RECOVERY' } } },
   'failed-unknown': { kind: 'STAY', state: { kind: 'FAILED', notice: { kind: 'UNKNOWN_CAUSE' } } },
   'send-failed': { kind: 'STAY', state: { kind: 'SEND_FAILED' } },
+  'send-rejected': { kind: 'STAY', state: { kind: 'SEND_REJECTED' } },
   stale: { kind: 'STAY', state: { kind: 'STALE' } },
   'too-long': { kind: 'STAY', state: { kind: 'WAITED_TOO_LONG' } },
   unrecognized: { kind: 'STAY', state: { kind: 'UNRECOGNIZED' } },
@@ -193,9 +186,8 @@ export function simulateSubmit(mockKey: string, rawInput: string): Promise<Submi
 /**
  * 처리 중 지연.
  *
- * `PendingCard`의 문구 전환이 누적 5.4초(`STEP_MS` 1200+1800+2400)다. 이보다 짧으면
- * 뒤쪽 문구가 읽히기 전에 화면이 넘어가므로 넉넉하게 둔다. 실제 응답도 여러 Agent와
- * 필수 Review를 거쳐 수 초가 걸린다.
+ * 처리 화면(단계 줄·떠나도 된다는 안내)을 눈으로 볼 시간을 준다. 실제 판단은 이보다
+ * 훨씬 길다(36~120초, BE #47).
  */
 const PENDING_MS = 7000
 
@@ -207,10 +199,8 @@ const PENDING_MS = 7000
  * 선택을 필드별로 받지만 지금은 "전부 유지했는가"만 본다. 충돌이 둘 이상이고 선택이
  * 엇갈리면 화면이 실제 선택과 달라진다 — Mock이 1건만 내려주는 동안은 드러나지 않는다.
  *
- * TODO(API): POST /cases/{caseId}/results/confirm 호출로 바꾼다. 요청 본문은
- * `rawInput`과 `confirmedChanges: [{ field, value }]` 라, 여기 오는 STORED/INCOMING을
- * 실제 값으로 바꾸고 입력 문장을 함께 넘기는 변환이 그때 필요하다.
- * 실패 응답과 네트워크 오류 처리도 그때 함께 넣는다.
+ * Mock 전용이다. 실서버는 `POST /cases/results/decision`(#136 · #163)으로 고른 쪽을 보내고
+ * (`lib/resultSubmit.ts` `submitDecision`), 판단 결과를 기다린다.
  */
 export function simulateConfirm(choices: Record<string, ConflictSide>): Promise<ReplanView> {
   const sides = Object.values(choices)

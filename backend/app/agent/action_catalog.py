@@ -5,7 +5,11 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
 
-from app.agent.claim_safety import REQUIRED_CLAIM_SOURCES, expand_evidence
+from app.agent.claim_safety import (
+    REQUIRED_CLAIM_SOURCES,
+    demolition_preparation_only,
+    expand_evidence,
+)
 from app.agent.schemas import (
     CaseSnapshot,
     EvidenceRecord,
@@ -311,7 +315,12 @@ def build_action_candidates(
                         "procedure_step": finding.procedure_step.model_dump(mode="json"),
                     }, logical_code=logical_code)
                     continue
-                ready = not finding.requires_confirmation
+                preparation_only = demolition_preparation_only(logical_code, evidence)
+                # A grant notice cannot authorize demolition. Once the owner has
+                # confirmed its preparation, it cannot repeat that task either.
+                if preparation_only and progress is not None and progress.requirements_confirmed:
+                    continue
+                ready = not finding.requires_confirmation and not preparation_only
                 for code, definition in ACTION_DEFINITIONS.items():
                     bound_step = (
                         resolved_bindings.get(definition.procedure_logical_code)

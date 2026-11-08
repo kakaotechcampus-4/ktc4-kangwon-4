@@ -1,4 +1,10 @@
-"""BE 저장 함수로 검수 자료를 재적재: python -m scripts.import_reviewed_procedures --case-id 1."""
+"""BE 저장 함수로 검수 자료를 재적재: python -m scripts.import_reviewed_procedures --case-id 1.
+
+본문 자체는 official_document 한 줄에만 있으므로(2026-11), 문서 글자를 고치려고 Case마다
+돌릴 일은 없어졌다. 남은 쓰임은 **버전을 올렸을 때 예전 Case를 새 버전으로 옮기는 것**이다 —
+절차조회가 Case 근거의 source_version이 지금 검수 목록 버전과 같은 자료만 고르기 때문에
+(stored_tool.py:73), 옮기지 않으면 그 Case는 조용히 "자료 없음"이 된다.
+"""
 
 from __future__ import annotations
 

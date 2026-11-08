@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
 from types import MappingProxyType
@@ -19,18 +20,27 @@ from pydantic import (
 )
 
 from app.agent.action_catalog import ProcedureBindings, resolve_procedure_bindings
+from app.agent.claim_safety import demolition_preparation_only
+from app.agent.enrichment import build_fact_overlays
 from app.agent.guardrails import (
     GuardrailViolation,
     ensure_no_sensitive_text,
     exact_span,
     resolve_evidence_aliases,
 )
+from app.agent.info_agent.procedure_digests import (
+    digest_draft_fields,
+    load_digests,
+    with_digest_findings,
+)
+from app.agent.llm import LLMResponseError
 from app.agent.procedure_tool.rules import (
     business_type_code,
     employment_history_conflicts,
+    procedure_applicability,
 )
 from app.agent.projection import ensure_projection_has_no_obvious_sensitive_text
-from app.agent.prompts import info_messages
+from app.agent.prompts import info_fact_messages, info_messages
 from app.agent.schemas import (
     CASE_FIELD_SPECS,
     REQUIRED_CASE_FIELDS,
@@ -62,6 +72,9 @@ from app.agent.schemas import (
     VerifiedTextSpan,
     validate_case_field_value,
     validate_restoration_state,
+)
+from app.agent.schemas import (
+    case_field_values_equal as same_fact_value,
 )
 
 
@@ -207,6 +220,20 @@ class InfoProviderOutput(AgentSchema):
     uncertainties: list[Uncertainty]
 
 
+# 값 꺼내기 모드의 출력 상한. 정상 출력 최대(약 2천 토큰)의 2배. 폭주를 101초가 아니라 약 25초에 끊는다.
+FACT_OUTPUT_TOKEN_LIMIT = 4000
+
+
+class InfoFactProviderOutput(AgentSchema):
+    """사장님 글에서 값만 꺼낼 때의 모델 출력. 절차 정리(procedure_findings)는 검수 정리본이 채운다."""
+
+    completion_status: InfoCompletionStatus
+    facts: list[ExtractedFactModelOutput]
+    procedure_observations: list[ProcedureObservationDraft]
+    missing_fields: list[MissingFieldDraft]
+    uncertainties: list[Uncertainty]
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -242,11 +269,114 @@ class InfoAnalysisAgent:
         self._parser_version = parser_version
         self._max_local_attempts = max_local_attempts
 
+    def analyze_from_digests(self, request: InfoAnalysisInput) -> InfoAnalysisResult | None:
+        """읽을 글이 없는 판단(첫 판단·충돌 확인 후 재판단)에서 모델 대신 검수 정리본으로 결과를 만든다.
+
+        모델 결과와 같은 검사(_materialize: 원문 인용·근거·절차 범위)를 그대로 거친다.
+        정리본으로 다 채울 수 없거나 검사에 걸리면 None이고, 그때는 analyze()가 모델을 부른다.
+        """
+
+        procedure_bindings = resolve_procedure_bindings(
+            request.known_procedure_steps, self._procedure_bindings
+        )
+        fields = self._digest_fields(request, procedure_bindings)
+        if fields is None:
+            return None
+        try:
+            return self._materialize(request, InfoAnalysisDraft.model_validate(fields), procedure_bindings)
+        except (GuardrailViolation, ValueError):
+            return None
+
+    def _digest_fields(self, request: InfoAnalysisInput, procedure_bindings: ProcedureBindings) -> dict[str, Any] | None:
+        digests = load_digests()
+        if digests is None:
+            return None
+        fields = digest_draft_fields(request, digests, self._analysis_step_codes(request, procedure_bindings))
+        if fields is not None and request.conflict_confirmation is not None and any(
+            conflict.field_path == AgentFieldKey.RESTORATION_SCOPE
+            for conflict, _ in request.conflict_confirmation.choices()
+        ):
+            # 범위 충돌을 확인한 뒤에도, 실제로 선택한 값에 필요한 질문은 다시 만든다.
+            question = self._restoration_detail_question(request)
+            if question is not None:
+                fields["missing_fields"].append(question)
+                fields["completion_status"] = InfoCompletionStatus.NEEDS_USER_INPUT
+        return fields
+
+    @staticmethod
+    def _restoration_detail_question(request: InfoAnalysisInput, scope: str | None = None) -> dict[str, Any] | None:
+        step = next((item for item in request.known_procedure_steps
+                     if item.procedure_step.step_code == "CONFIRM_RESTORATION_SCOPE"), None)
+        if step is not None and procedure_applicability(step, request.case_snapshot, request.fact_overlays) is False:
+            return None
+        values = {item.field_path: item.value for item in request.case_snapshot.facts
+                  if item.status == FactStatus.CONFIRMED}
+        values.update({item.field_path: item.proposed_value for item in request.fact_overlays})
+        scope = values.get(AgentFieldKey.RESTORATION_SCOPE) if scope is None else scope
+        if scope != "PARTIAL" or values.get(AgentFieldKey.RESTORATION_SCOPE_DETAIL):
+            return None
+        return {
+            "field_path": AgentFieldKey.RESTORATION_SCOPE_DETAIL,
+            "reason_summary": "일부 원상복구의 구체적인 대상은 아직 확인되지 않았습니다.",
+            "blocks": [MissingFieldBlock.SUPERVISOR_DECISION],
+            "question": "원상복구가 필요한 부분은 구체적으로 어디인가요?",
+        }
+
+    def _analyze_restoration_answer(
+        self, request: InfoAnalysisInput, procedure_bindings: ProcedureBindings,
+    ) -> InfoAnalysisResult:
+        fields = self._digest_fields(request, procedure_bindings)
+        if fields is None:
+            # 선택형 입력은 모델이 다시 해석하지 않는다. 절차 근거가 낡으면 안전하게 실패한다.
+            raise InfoAnalysisGuardrailError("restoration answer requires current reviewed procedure digests")
+        answer = request.restoration_answer
+        facts, missing = [], []
+        questions = ("원상복구해야 할 범위는 어디까지인가요?", "철거가 필요한가요?")
+        for (field, value), text, question in zip(
+            answer.model_dump().items(), answer.to_input_text().splitlines(), questions, strict=True,
+        ):
+            if value == "UNKNOWN":
+                missing.append({
+                    "field_path": field, "reason_summary": "사용자가 아직 확인하지 못한 항목입니다.",
+                    "blocks": [MissingFieldBlock.SUPERVISOR_DECISION], "question": question,
+                })
+            else:
+                facts.append({
+                    "field_path": field, "operation": FactOperation.SET, "value_type": FactValueType.ENUM,
+                    "value": value, "source_text": text, "confidence_bps": 10_000,
+                    "requires_confirmation": False, "reason_summary": "사용자가 직접 고른 답변입니다.",
+                })
+        question = self._restoration_detail_question(request, answer.restoration_scope)
+        if question is not None:
+            missing.append(question)
+        draft = InfoAnalysisDraft.model_validate(with_digest_findings({
+            "completion_status": InfoCompletionStatus.NEEDS_USER_INPUT if missing else InfoCompletionStatus.COMPLETE,
+            "facts": facts, "procedure_observations": [], "missing_fields": missing, "uncertainties": [],
+        }, fields))
+        return self._materialize(request, draft, procedure_bindings)
+
     async def analyze(self, request: InfoAnalysisInput) -> InfoAnalysisResult:
         procedure_bindings = resolve_procedure_bindings(
             request.known_procedure_steps, self._procedure_bindings
         )
+        if request.restoration_answer is not None:
+            return self._analyze_restoration_answer(request, procedure_bindings)
         prompt_input = self._prompt_input(request, procedure_bindings)
+        # 사장님 글이 있고 절차 정리를 정리본으로 채울 수 있으면, 모델에는 값 꺼내기만 맡긴다.
+        # 절차 원문 9건과 절차 범위를 보내지 않아 입력·출력이 크게 준다(info_fact_messages).
+        digest_fields = (
+            self._digest_fields(request, procedure_bindings)
+            if request.input is not None and request.conflict_confirmation is None
+            else None
+        )
+        if digest_fields is not None:
+            for key in ("procedure_analysis_step_codes", "procedure_evidence_by_step", "procedure_lookup"):
+                prompt_input.pop(key, None)
+            # 값 추출에는 절차 이름과 사용자 표현만 필요하다. 적용 조건·선후관계는 원본으로 검사한다.
+            prompt_input["known_procedure_steps"] = [
+                step.model_dump(mode="json", include={"procedure_step", "step_name", "utterance_aliases", "deprecated_at"})
+                for step in request.known_procedure_steps
+            ]
         evidence_by_alias = {
             alias: evidence_id
             for evidence_id, alias in self._procedure_evidence_aliases(request).items()
@@ -272,7 +402,7 @@ class InfoAnalysisAgent:
         rejected_observation_codes: tuple[str, ...] = ()
         fact_errors: tuple[str, ...] = ()
         for attempt in range(1, self._max_local_attempts + 1):
-            messages = info_messages(prompt_input)
+            messages = (info_fact_messages if digest_fields is not None else info_messages)(prompt_input)
             if attempt > 1:
                 if fact_errors:
                     messages.append(
@@ -347,23 +477,33 @@ class InfoAnalysisAgent:
                         ),
                     }
                 )
-            provider_output = await self._llm.generate(
-                InfoProviderOutput,
-                messages,
-                schema_name="reborn_info_analysis",
-                # The provider cannot emit a reference we did not offer, so a
-                # made-up or mistyped one is never generated. Validation below
-                # is unchanged; this only stops the wasted generation.
-                enum_constraints={
-                    "evidence_refs": sorted(evidence_by_alias),
-                    # A finding may only bind to a step one of the supplied
-                    # documents actually covers. Offering the union here stops
-                    # the model naming a step no document supports; the
-                    # per-document check below still rejects a mismatched pair.
-                    "step_code": permitted_step_codes,
-                },
-            )
             try:
+                provider_output = await self._llm.generate(
+                    InfoFactProviderOutput if digest_fields is not None else InfoProviderOutput,
+                    messages,
+                    schema_name="reborn_info_analysis",
+                    # The provider cannot emit a reference we did not offer, so a
+                    # made-up or mistyped one is never generated. Validation below
+                    # is unchanged; this only stops the wasted generation.
+                    enum_constraints={
+                        "evidence_refs": sorted(evidence_by_alias),
+                        # A finding may only bind to a step one of the supplied
+                        # documents actually covers. Offering the union here stops
+                        # the model naming a step no document supports; the
+                        # per-document check below still rejects a mismatched pair.
+                        "step_code": permitted_step_codes,
+                    },
+                    **({"max_completion_tokens": FACT_OUTPUT_TOKEN_LIMIT} if digest_fields is not None else {}),
+                )
+            except LLMResponseError as exc:
+                # 값 꺼내기 출력은 정상 868~1,960토큰이었다(2026-11-05 실측 14회). 상한에 닿으면 같은 글을
+                # 반복하는 폭주라(G01: 16,000토큰·101초) 일찍 끊고 같은 요청을 다시 보낸다.
+                if digest_fields is not None and exc.code == "OUTPUT_TOKEN_LIMIT" and attempt < self._max_local_attempts:
+                    continue
+                raise
+            try:
+                if digest_fields is not None:
+                    provider_output = with_digest_findings(provider_output.model_dump(mode="python"), digest_fields)
                 draft = InfoAnalysisDraft.model_validate(
                     resolve_evidence_aliases(
                         self._validated_draft(provider_output).model_dump(
@@ -372,7 +512,21 @@ class InfoAnalysisAgent:
                         evidence_by_alias,
                     )
                 )
-                return self._materialize(request, draft, procedure_bindings)
+                result = self._materialize(request, draft, procedure_bindings)
+                if digest_fields is not None:
+                    # 원문·충돌·확인 필요 검사를 통과한 새 사실로 적용 여부를 다시 계산한다.
+                    overlays = [*request.fact_overlays, *build_fact_overlays(
+                        request.case_snapshot, result, request.source_call_id,
+                    )]
+                    steps = {step.procedure_step.step_code: step for step in request.known_procedure_steps}
+                    evidence = {item.evidence_id: item for item in request.procedure_lookup_result.evidence_records}
+                    for finding in result.procedure_findings:
+                        code = finding.procedure_step.step_code
+                        if not demolition_preparation_only(code, [evidence[ref] for ref in finding.evidence_refs]):
+                            applies = procedure_applicability(steps[code], request.case_snapshot, overlays)
+                            finding.relevance = (ProcedureRelevance.RELEVANT if applies is True
+                                                 else ProcedureRelevance.POSSIBLY_RELEVANT)
+                return result
             except (GuardrailViolation, ValueError) as exc:
                 fact_errors = getattr(exc, "fact_errors", ())
                 omitted_procedure_codes = getattr(exc, "omitted_procedure_codes", ())
@@ -659,7 +813,7 @@ class InfoAnalysisAgent:
                 current is not None
                 and current.status == FactStatus.CONFIRMED
                 and semantic.operation == FactOperation.SET
-                and self._same_value(current.value, semantic.value)
+                and same_fact_value(semantic.field_path, current.value, semantic.value)
             ):
                 continue
             if (
@@ -774,7 +928,9 @@ class InfoAnalysisAgent:
                 ),
                 reason_summary=semantic.reason_summary,
             ))
-        procedure_findings = self._procedure_findings(request, draft, known_steps)
+        procedure_findings = self._procedure_findings(
+            request, draft, known_steps, observations=observations,
+        )
         if not conflicts:
             self._validate_procedure_coverage(request, draft, procedure_bindings)
 
@@ -930,6 +1086,8 @@ class InfoAnalysisAgent:
         request: InfoAnalysisInput,
         draft: InfoAnalysisDraft,
         known_steps: dict[str, Any],
+        *,
+        observations: Sequence[ProcedureProgressObservation],
     ) -> list[ProcedureFinding]:
         evidence_by_id = {
             item.evidence_id: item
@@ -956,6 +1114,13 @@ class InfoAnalysisAgent:
             for item in request.case_snapshot.procedure_progress
             if item.requirements_confirmed
         }
+        # These reports already passed source-span checks; held reports cannot
+        # advance readiness. Current status still comes from the snapshot.
+        ready_steps.update(
+            (item.procedure_step.procedure_step_id, item.procedure_step.step_code)
+            for item in observations
+            if item.requirements_confirmed and not item.requires_confirmation
+        )
         findings: list[ProcedureFinding] = []
         seen_steps: set[str] = set()
         invalid_summary_steps = [
@@ -985,7 +1150,13 @@ class InfoAnalysisAgent:
             known = known_steps.get(semantic.step_code)
             if known is None or semantic.step_code in seen_steps:
                 raise InfoAnalysisGuardrailError(
-                    "model returned an unknown or duplicate procedure step"
+                    "model returned an unknown or duplicate procedure step",
+                    procedure_source_errors=(
+                        "Use only step_code values from known_procedure_steps: "
+                        + ", ".join(sorted(known_steps))
+                        + ". Return at most one finding per step_code; duplicate step_code values are forbidden. "
+                        "Keep summaries and details as exact quotations from that step's allowed documents.",
+                    ),
                 )
             seen_steps.add(semantic.step_code)
             refs = set(semantic.evidence_refs)
@@ -1027,6 +1198,9 @@ class InfoAnalysisAgent:
                 )
             semantic = self._retain_exact_procedure_details(semantic, evidence_by_id)
             self._validate_procedure_details(semantic, evidence_by_id)
+            preparation_only = demolition_preparation_only(
+                semantic.step_code, [evidence_by_id[ref] for ref in refs],
+            )
             findings.append(
                 ProcedureFinding(
                     finding_id=self._uuid(),
@@ -1037,18 +1211,20 @@ class InfoAnalysisAgent:
                         if item.procedure_step == known
                     ),
                     summary=semantic.summary,
-                    relevance=semantic.relevance,
+                    relevance=(ProcedureRelevance.POSSIBLY_RELEVANT
+                               if preparation_only and semantic.relevance == ProcedureRelevance.RELEVANT
+                               else semantic.relevance),
                     current_status=progress_by_step.get(
                         (known.procedure_step_id, known.step_code),
                         ProcedureProgressStatus.NOT_STARTED,
                     ),
                     decision_authority=semantic.decision_authority,
-                    requires_confirmation=(known.procedure_step_id, known.step_code) not in ready_steps,
+                    requires_confirmation=preparation_only or (known.procedure_step_id, known.step_code) not in ready_steps,
                     required_actions=semantic.required_actions,
                     required_documents=semantic.required_documents,
-                    application_channel=semantic.application_channel,
-                    application_url=semantic.application_url,
-                    deadline=semantic.deadline,
+                    application_channel=None if preparation_only else semantic.application_channel,
+                    application_url=None if preparation_only else semantic.application_url,
+                    deadline=None if preparation_only else semantic.deadline,
                     evidence_refs=semantic.evidence_refs,
                 )
             )
@@ -1204,7 +1380,29 @@ class InfoAnalysisAgent:
     ) -> tuple[VerifiedTextSpan, EvidenceRecord]:
         if request.input is None:
             raise InfoAnalysisGuardrailError("source text requires redacted input")
-        start, end = exact_span(request.input.redacted_text, source_text)
+        text = request.input.redacted_text
+        if text.startswith("[리본이 물어본 것] "):
+            markers = list(re.finditer(r"(?m)^\[(리본이 물어본 것|사장님 답)\] ", text))
+            for index, marker in enumerate(markers):
+                if marker[1] != "사장님 답":
+                    continue
+                boundary = markers[index + 1].start() if index + 1 < len(markers) else len(text)
+                try:
+                    start, end = exact_span(text[marker.end():boundary], source_text)
+                except GuardrailViolation:
+                    continue
+                start, end = start + marker.end(), end + marker.end()
+                break
+            else:
+                raise InfoAnalysisGuardrailError(
+                    "source text must be inside an owner's answer",
+                    fact_errors=((
+                        "For labeled question-answer input, quote only the owner's answer; "
+                        "questions and labels are context, not reported facts."
+                    ),),
+                )
+        else:
+            start, end = exact_span(text, source_text)
         span = VerifiedTextSpan(
             input_event_id=request.input.input_event_id,
             text=source_text,
@@ -1256,10 +1454,6 @@ class InfoAnalysisAgent:
             source_evidence_refs=[evidence_id],
             source_call_id=source_call_id,
         )
-
-    @staticmethod
-    def _same_value(left: StrictScalar, right: StrictScalar) -> bool:
-        return type(left) is type(right) and left == right
 
 
 __all__ = [
