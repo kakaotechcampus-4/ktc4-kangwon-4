@@ -429,8 +429,7 @@ export function toCaseCreateRequest(answers: DiagnosisAnswers, now: Date): CaseC
 
   const { insurances } = answers
   if (insurances === null) return null
-  const enrolled = (insurance: DiagnosisInsurance) =>
-    insurances === 'UNKNOWN' ? null : insurances.includes(insurance)
+  const enrolled = (insurance: DiagnosisInsurance) => insurances.includes(insurance)
 
   return {
     store_name: null,
@@ -443,7 +442,7 @@ export function toCaseCreateRequest(answers: DiagnosisAnswers, now: Date): CaseC
     restoration_clause: restorationClause,
     planned_closure_date: null,
     planned_closure_month: closureMonthOf(answers.closure, now),
-    had_employees: staffed || answers.hadEmployees === 'UNKNOWN' ? null : answers.hadEmployees,
+    had_employees: staffed ? null : answers.hadEmployees,
     pension_enrolled: enrolled('PENSION'),
     health_insurance_enrolled: enrolled('HEALTH'),
     employment_insurance_enrolled: enrolled('EMPLOYMENT'),

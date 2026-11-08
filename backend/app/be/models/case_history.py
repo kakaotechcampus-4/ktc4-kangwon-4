@@ -18,6 +18,9 @@ class CaseHistory(CreatedAtMixin, table=True):
     # 들어갈 수 있다. 문장 없이 고른 값만 있는 CONFLICT_DECISION만 NULL이다.
     raw_input: str | None = Field(default=None, sa_column=Column(Text, nullable=True), description="입력 원문")
     restoration_answer: dict | None = Field(default=None, sa_column=Column(JSON, nullable=True))
+    # [준비했어요] 버튼 답. 어느 준비 확인 할 일에 답했는지 남긴다({"action_code": ...}). 판단 결과가
+    # next_action_code를 새 행동으로 덮어쓰기 때문에 따로 둔다. 버튼으로 답하지 않은 이력은 NULL
+    requirements_confirmation: dict | None = Field(default=None, sa_column=Column(JSON, nullable=True))
     conflict_snapshot: dict | None = Field(
         default=None,
         sa_column=Column(JSON, nullable=True),

@@ -249,6 +249,48 @@ describe('ResultInputPage — 서버', () => {
     expect(screen.getByRole('textbox')).toHaveValue('간판만 떼면 된대요')
   })
 
+  /**
+   * 준비 확인 할 일은 "확인하세요" 같은 지시문이라 글로 답하기 어렵다. 운영에서 "넵 다 확인 완료했어요"가
+   * 준비 확인으로 저장되지 않아 같은 안내가 반복됐다(2026-11-07). [준비했어요]는 고정 값으로 보낸다
+   */
+  it('준비 확인 할 일은 [준비했어요]를 누르면 글 없이 준비 확인만 보낸다', async () => {
+    const fetchMock = serve({
+      entry: [json(entryBody({ result_input_kind: 'REQUIREMENTS_CONFIRMATION' }))],
+      submit: [ACCEPTED], judged: [json(judgedBody({ result: 'PENDING' }))],
+    })
+    renderFlow()
+    await advance()
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '보내기' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '준비했어요' }))
+    await advance()
+    expect(sentBodies(fetchMock)).toEqual([{ case_history_id: 12, requirements_confirmed: true }])
+  })
+
+  /** 바뀌는 것이 없으니 판단(AI)을 부르지 않는다. 할 일은 그대로 홈에 남는다 */
+  it('[아직 안 했어요]는 아무것도 보내지 않고 홈으로 돌아간다', async () => {
+    const fetchMock = serve({ entry: [json(entryBody({ result_input_kind: 'REQUIREMENTS_CONFIRMATION' }))] })
+    const router = renderFlow()
+    await advance()
+    fireEvent.click(screen.getByRole('button', { name: '아직 안 했어요' }))
+    await advance()
+    expect(sentBodies(fetchMock)).toEqual([])
+    expect(router.state.location.pathname).toBe('/case')
+  })
+
+  it('준비 확인 할 일도 직접 쓰면 적은 글을 보낸다', async () => {
+    const fetchMock = serve({
+      entry: [json(entryBody({ result_input_kind: 'REQUIREMENTS_CONFIRMATION' }))], submit: [status(422)],
+    })
+    renderFlow()
+    await advance()
+    fireEvent.click(screen.getByRole('button', { name: '직접 쓸게요' }))
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '우리 가게는 해당이 없대요' } })
+    fireEvent.click(screen.getByRole('button', { name: '보내기' }))
+    await advance()
+    expect(sentBodies(fetchMock)).toEqual([{ case_history_id: 12, raw_input: '우리 가게는 해당이 없대요' }])
+  })
+
   /** 다시 보낼 수 없는 실패에서 보기만 바뀌면, 안내와 폼이 서로 다른 말을 한다 */
   it('다시 보낼 수 없는 실패면 보기도 잠근다', async () => {
     serve({

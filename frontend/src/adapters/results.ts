@@ -213,7 +213,7 @@ export function toResultsEntry(body: CaseResultsEntryResponse | null): ResultsEn
       // 번호가 없으면 결과를 보낼 수 없고, 할 일이 없으면 무엇에 대한 결과인지 보여줄 수 없다
       const nextAction = toNextAction(body.next_action)
       if (!Number.isInteger(body.case_history_id) || nextAction === null) return { kind: 'UNRECOGNIZED' }
-      if (body.result_input_kind !== 'TEXT' && body.result_input_kind !== 'RESTORATION_ANSWER') {
+      if (!['TEXT', 'RESTORATION_ANSWER', 'REQUIREMENTS_CONFIRMATION'].includes(body.result_input_kind)) {
         return { kind: 'UNRECOGNIZED' }
       }
       return { kind: 'READY', nextAction, historyId: body.case_history_id as number, inputKind: body.result_input_kind }

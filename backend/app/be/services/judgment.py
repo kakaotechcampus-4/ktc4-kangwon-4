@@ -147,6 +147,7 @@ def _read_judgment_input(
         # TODO: 프론트가 자기 쪽 이벤트 식별자를 보내주기로 하면 그 값을 넣는다. 아직 미협의.
         client_event_id=None,
         restoration_answer=history.restoration_answer,
+        requirements_confirmation=history.requirements_confirmation,
     )
     return graph_input, agent_runtime_service.build_known_procedure_steps(session)
 

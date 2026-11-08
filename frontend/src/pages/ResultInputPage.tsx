@@ -20,7 +20,13 @@ import {
 } from '../lib/resultSubmit'
 import { judgmentNeedsDetailCase, moreInfoCase } from '../mocks/currentCase'
 import { resultInput, simulateSubmit } from '../mocks/resultFlow'
-import type { DemolitionRequired, RestorationAnswer, RestorationScope, ResultInputKind } from '../types/api'
+import type {
+  DemolitionRequired,
+  RequirementsConfirmed,
+  RestorationAnswer,
+  RestorationScope,
+  ResultInputKind,
+} from '../types/api'
 import type { FailureNotice, NextAction, SubmitOutcome, SubmitState } from '../types/view'
 
 /**
@@ -231,9 +237,12 @@ export function ResultInputPage() {
   const resubmitNotice = entry.status === 'READY' && entry.ask.kind === 'RESUBMIT' ? entry.ask.notice : null
   const latestDetail = state.kind === 'FAILED' && state.notice.kind === 'NEEDS_DETAIL' ? state.notice : null
   const askedFields = latestDetail ?? resubmitNotice
-  const canChoose = entry.status === 'READY' && entry.ask.kind === 'RESULT'
-    && entry.ask.inputKind === 'RESTORATION_ANSWER' && !correcting && questions === null && !askedFields
+  const choiceKind = entry.status === 'READY' && entry.ask.kind === 'RESULT'
+    && !correcting && questions === null && !askedFields ? entry.ask.inputKind : 'TEXT'
+  const canChoose = choiceKind !== 'TEXT'
   const usingChoices = canChoose && !directInput
+  // 준비 확인 할 일은 지시문이라 글로 답하기 어렵다. [준비했어요]면 서버가 모델 해석 없이 준비 확인으로 저장한다
+  const confirmingRequirements = usingChoices && choiceKind === 'REQUIREMENTS_CONFIRMATION'
   const selectionInput: RestorationAnswer | null = restorationAnswer.restoration_scope && restorationAnswer.demolition_required
     ? { restoration_scope: restorationAnswer.restoration_scope, demolition_required: restorationAnswer.demolition_required }
     : null
@@ -258,8 +267,11 @@ export function ResultInputPage() {
     (state.kind === 'FAILED' && (state.notice.kind === 'SERVICE_SIDE' || state.notice.kind === 'NO_RECOVERY'))
   // 너무 긴 글은 자르지 않고 보내기를 막는다. 소리 없이 잘라 보내면 사장님이 적은 뒷부분이 사라진다.
   // 아래 [보내기]와 실패 안내의 [다시 보내기]가 같은 조건을 쓴다
+  const choiceInput: RestorationAnswer | RequirementsConfirmed | null = confirmingRequirements
+    ? { requirements_confirmed: true }
+    : selectionInput
   const tooLong = !usingChoices && draft.length > MAX_RESULT_LENGTH
-  const canRetry = usingChoices ? selectionInput !== null : draft.length > 0 && !tooLong
+  const canRetry = usingChoices ? choiceInput !== null : draft.length > 0 && !tooLong
   const goToCase = { label: '지금 상황 보기', onClick: () => navigate({ pathname: '/case', search }) }
   const notice = stayNotice(
     state,
@@ -274,7 +286,10 @@ export function ResultInputPage() {
    * 보내기와 기다리기의 실패를 따로 받는다. 보내다 실패하면 서버가 받았는지조차 모르고,
    * 기다리다 실패하면 접수는 된 것이라 사장님에게 할 말이 다르다.
    */
-  async function submitToServer(historyId: number, input: string | RestorationAnswer): Promise<SubmitOutcome | null> {
+  async function submitToServer(
+    historyId: number,
+    input: string | RestorationAnswer | RequirementsConfirmed,
+  ): Promise<SubmitOutcome | null> {
     let acceptedId: number
     try {
       acceptedId = await submitResult(historyId, input)
@@ -333,7 +348,7 @@ export function ResultInputPage() {
 
     const outcome = usesMock
       ? await simulateSubmit(readMockKey(search), draft)
-      : await submitToServer(entry.historyId, usingChoices && selectionInput ? selectionInput : draft)
+      : await submitToServer(entry.historyId, usingChoices && choiceInput ? choiceInput : draft)
     if (!alive.current || outcome === null) return
 
     switch (outcome.kind) {
@@ -494,7 +509,17 @@ export function ResultInputPage() {
             submitIfReady()
           }}
         >
-          {usingChoices ? (
+          {confirmingRequirements ? (
+            // [아직 안 했어요]는 바뀌는 것이 없어 보내지 않는다. 판단(AI)을 부르지 않고 할 일을 그대로 둔다
+            <div className="flex flex-col gap-3">
+              <Button disabled={formLocked} onClick={submitIfReady}>
+                준비했어요
+              </Button>
+              <Button variant="outline" disabled={formLocked} onClick={goToCase.onClick}>
+                아직 안 했어요
+              </Button>
+            </div>
+          ) : usingChoices ? (
             <>
               <div className="flex flex-col gap-3">
                 <p id={scopeTitleId} className="text-17 font-bold">원상복구 범위</p>
@@ -560,9 +585,11 @@ export function ResultInputPage() {
           */}
           {partlyAnswered && <InfoBox>답하지 않은 질문은 비워 두셔도 돼요. 필요하면 다시 여쭤볼게요.</InfoBox>}
           {!usingChoices && <LengthNotice length={draft.length} withQuestions={questions !== null} />}
-          <Button type="submit" disabled={!canSubmit}>
-            보내기
-          </Button>
+          {!confirmingRequirements && (
+            <Button type="submit" disabled={!canSubmit}>
+              보내기
+            </Button>
+          )}
         </form>
       </main>
     </ResultFrame>

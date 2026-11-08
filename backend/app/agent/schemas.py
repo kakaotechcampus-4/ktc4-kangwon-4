@@ -946,6 +946,28 @@ class RestorationAnswer(AgentSchema):
         return scope[self.restoration_scope] + "\n" + demolition[self.demolition_required]
 
 
+# [준비했어요] 버튼으로 답하는 할 일. 지원사업 확인(MVP 밖)과 원상복구 범위(자체 선택지)는 뺀다.
+RequirementsActionCode: TypeAlias = Literal[
+    "CONFIRM_TAX_CLOSURE_REQUIREMENTS",
+    "CONFIRM_FOOD_SERVICE_CLOSURE_REQUIREMENTS",
+    "CONFIRM_WORKPLACE_INSURANCE_CLOSURE_REQUIREMENTS",
+    "CONFIRM_RESTORATION_REQUIREMENTS",
+    "CONFIRM_PREMISES_RETURN_REQUIREMENTS",
+    "CONFIRM_EMPLOYEE_SETTLEMENT_REQUIREMENTS",
+    "CONFIRM_EMPLOYEE_INSURANCE_LOSS_REQUIREMENTS",
+]
+
+
+class RequirementsConfirmation(AgentSchema):
+    """사장님이 [준비했어요]를 누른 준비 확인. 실행·제출·완료를 뜻하지 않는다."""
+
+    action_code: RequirementsActionCode
+
+    @staticmethod
+    def to_input_text() -> str:
+        return "준비사항 확인을 마쳤어요."
+
+
 class InfoAnalysisInput(AgentSchema):
     """Complete request schema accepted by ``InfoAnalysisAgent.analyze``."""
 
@@ -957,6 +979,9 @@ class InfoAnalysisInput(AgentSchema):
     )
     # 없던 칸을 null로 직렬화하면 과거 검수·충돌 기록의 지문이 달라진다.
     restoration_answer: RestorationAnswer | None = Field(default=None, exclude_if=lambda value: value is None)
+    requirements_confirmation: RequirementsConfirmation | None = Field(
+        default=None, exclude_if=lambda value: value is None,
+    )
     case_snapshot: CaseSnapshot = Field(
         description="Immutable Case read view used as the analysis baseline."
     )
@@ -996,6 +1021,13 @@ class InfoAnalysisInput(AgentSchema):
             or self.input.redacted_text != self.restoration_answer.to_input_text()
         ):
             raise ValueError("restoration answer requires its exact USER_INPUT text")
+        if self.requirements_confirmation is not None and (
+            self.input is None or self.conflict_confirmation is not None
+            or self.restoration_answer is not None
+            or self.input.source_type != InputSourceType.USER_INPUT
+            or self.input.redacted_text != self.requirements_confirmation.to_input_text()
+        ):
+            raise ValueError("requirements confirmation requires its exact USER_INPUT text only")
         if self.conflict_confirmation is not None:
             if self.input is not None:
                 raise ValueError("confirmation must not replay the rejected user text")
@@ -1854,6 +1886,9 @@ class CaseCreatedTrigger(AgentSchema):
 class ResultSubmittedTrigger(AgentSchema):
     trigger_type: Literal["RESULT_SUBMITTED"]
     restoration_answer: RestorationAnswer | None = Field(default=None, exclude_if=lambda value: value is None)
+    requirements_confirmation: RequirementsConfirmation | None = Field(
+        default=None, exclude_if=lambda value: value is None,
+    )
     procedure_completion_confirmation: ProcedureCompletionConfirmation | None = None
     input_event_id: NonEmptyStr
     client_event_id: NonEmptyStr | None = Field(
@@ -1875,6 +1910,13 @@ class ResultSubmittedTrigger(AgentSchema):
             or self.procedure_completion_confirmation is not None
         ):
             raise ValueError("restoration answer requires its exact USER_INPUT text only")
+        if self.requirements_confirmation is not None and (
+            self.input.source_type != InputSourceType.USER_INPUT
+            or self.input.redacted_text != self.requirements_confirmation.to_input_text()
+            or self.restoration_answer is not None
+            or self.procedure_completion_confirmation is not None
+        ):
+            raise ValueError("requirements confirmation requires its exact USER_INPUT text only")
         if (
             self.procedure_completion_confirmation is not None
             and self.procedure_completion_confirmation.input.input_event_id == self.input_event_id
@@ -2734,6 +2776,8 @@ __all__ = [
     "RedactionType",
     "RequiredDocument",
     "ResultSubmittedTrigger",
+    "RequirementsActionCode",
+    "RequirementsConfirmation",
     "RestorationAnswer",
     "RetainedInfoResult",
     "ReviewIssue",

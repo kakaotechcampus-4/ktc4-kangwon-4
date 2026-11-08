@@ -355,6 +355,7 @@ class AgentGraph:
         component_input = InfoAnalysisInput(
             input=trigger_input,
             restoration_answer=getattr(request.trigger, "restoration_answer", None),
+            requirements_confirmation=getattr(request.trigger, "requirements_confirmation", None),
             case_snapshot=request.case_snapshot,
             fact_overlays=analysis_overlays,
             conflict_confirmation=(request.trigger if isinstance(request.trigger, ConflictConfirmedTrigger) else None),
@@ -390,7 +391,11 @@ class AgentGraph:
             # 정리본으로 채웠거나 선택형 답변이면 Info 모델을 부르지 않는다(info_agent.analyze 참고)
             # 보관된 사실은 이전 판단에서 Info 모델이 글에서 꺼냈고 아직 Review를 거치지 않았다. Review 모델을 유지한다
             used_model = (
-                (output is None and component_input.restoration_answer is None)
+                (
+                    output is None
+                    and component_input.restoration_answer is None
+                    and component_input.requirements_confirmation is None
+                )
                 or retained is not None
             )
             if output is None:

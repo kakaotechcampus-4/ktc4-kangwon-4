@@ -1,6 +1,7 @@
 import hashlib
 import json
 import logging
+from typing import get_args
 
 from fastapi import HTTPException
 from sqlmodel import Session
@@ -46,6 +47,10 @@ from app.agent.roadmap import TASKS as ROADMAP_TASKS, record_checklist
 from app.be.services import procedure_registry
 from app.be.services import reviewed_procedure as reviewed_procedure_service
 from app.be.services import roadmap as roadmap_service
+from app.common.agent_dto import RequirementsActionCode, RequirementsConfirmation
+
+# [준비했어요 / 아직 안 했어요]로 답하는 준비 확인 할 일(AI 쪽 RequirementsActionCode와 같은 목록)
+_REQUIREMENTS_ACTION_CODES = frozenset(get_args(RequirementsActionCode))
 
 logger = logging.getLogger(__name__)
 
@@ -276,7 +281,9 @@ def get_case_results_entry(session: Session, member_id: int) -> CaseResultsEntry
         return CaseResultsEntryResponse(
             judgment_status="DONE",
             result_input_kind=(
-                "RESTORATION_ANSWER" if latest_history.next_action_code == "CONFIRM_RESTORATION_SCOPE" else "TEXT"
+                "RESTORATION_ANSWER" if latest_history.next_action_code == "CONFIRM_RESTORATION_SCOPE"
+                else "REQUIREMENTS_CONFIRMATION" if latest_history.next_action_code in _REQUIREMENTS_ACTION_CODES
+                else "TEXT"
             ),
             case_history_id=latest_history.id,
             next_action=(
@@ -402,18 +409,46 @@ def submit_case_results(
         if not (current_action or retrying_same_answer):
             raise HTTPException(status_code=422, detail="현재 할 일에는 선택형 원상복구 답변을 보낼 수 없습니다.")
 
+    confirmation = _requirements_confirmation(latest_history) if submit_request.requirements_confirmed else None
+
     history = case_history_crud.create_case_history(
         session,
         CaseHistory(
             case_id=case.id,
-            raw_input=answer.to_input_text() if answer is not None else submit_request.raw_input,
+            raw_input=(
+                answer.to_input_text() if answer is not None
+                else confirmation.to_input_text() if confirmation is not None
+                else submit_request.raw_input
+            ),
             restoration_answer=answer.model_dump(mode="json") if answer is not None else None,
+            requirements_confirmation=confirmation.model_dump(mode="json") if confirmation is not None else None,
             source="USER_INPUT",
             judgment_status="PENDING",
         ),
     )
     session.commit()
     return CaseResultsSubmitAcceptedResponse(case_history_id=history.id)
+
+
+def _requirements_confirmation(latest_history: CaseHistory) -> RequirementsConfirmation:
+    """[준비했어요]가 어느 할 일에 대한 답인지 서버가 정한다. 화면이 보낸 할 일 이름은 믿지 않는다."""
+    if (
+        latest_history.judgment_status == "DONE"
+        and latest_history.next_action_code in _REQUIREMENTS_ACTION_CODES
+        and latest_history.next_action is not None
+    ):
+        return RequirementsConfirmation(action_code=latest_history.next_action_code)
+    # 실패 이력에는 다음 행동이 없다. 이미 접수한 버튼 답을 그대로 다시 보낼 때만 허용한다.
+    if (
+        latest_history.source == "USER_INPUT"
+        and latest_history.judgment_status == "FAILED"
+        and latest_history.recovery_action_code == "RETRY"
+        and latest_history.retryable is True
+        and latest_history.requirements_confirmation is not None
+        and latest_history.raw_input == RequirementsConfirmation.to_input_text()
+    ):
+        return RequirementsConfirmation.model_validate(latest_history.requirements_confirmation)
+    raise HTTPException(status_code=422, detail="현재 할 일에는 준비 확인 답변을 보낼 수 없습니다.")
 
 
 def retry_case_judgment(session: Session, member_id: int) -> CaseRetryResponse:

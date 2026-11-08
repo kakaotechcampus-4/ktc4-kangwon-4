@@ -163,7 +163,7 @@ class ConflictItemResponse(BaseModel):
 
 class CaseResultsEntryResponse(BaseModel):
     judgment_status: JudgmentStatus
-    result_input_kind: Literal["TEXT", "RESTORATION_ANSWER"] = "TEXT"
+    result_input_kind: Literal["TEXT", "RESTORATION_ANSWER", "REQUIREMENTS_CONFIRMATION"] = "TEXT"
     case_history_id: int | None = None
     raw_input: str | None = None
     conflicts: list[ConflictItemResponse] | None = None
@@ -179,12 +179,15 @@ class CaseResultsSubmitRequest(BaseModel):
 
     raw_input: str | None = Field(default=None, min_length=1, max_length=2000)
     restoration_answer: RestorationAnswer | None = None
+    # [준비했어요]를 눌렀다. [아직 안 했어요]는 화면이 보내지 않으므로 true만 받는다
+    requirements_confirmed: Literal[True] | None = None
     case_history_id: int
 
     @model_validator(mode="after")
     def validate_input(self) -> "CaseResultsSubmitRequest":
-        if (self.raw_input is None) == (self.restoration_answer is None):
-            raise ValueError("raw_input과 restoration_answer는 하나만 보낸다")
+        sent = [self.raw_input, self.restoration_answer, self.requirements_confirmed]
+        if sum(value is not None for value in sent) != 1:
+            raise ValueError("raw_input, restoration_answer, requirements_confirmed 중 하나만 보낸다")
         if self.raw_input is not None and not self.raw_input.strip():
             raise ValueError("raw_input은 빈 글일 수 없다")
         return self

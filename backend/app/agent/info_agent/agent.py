@@ -19,7 +19,7 @@ from pydantic import (
     model_validator,
 )
 
-from app.agent.action_catalog import ProcedureBindings, resolve_procedure_bindings
+from app.agent.action_catalog import ACTION_DEFINITIONS, ProcedureBindings, resolve_procedure_bindings
 from app.agent.claim_safety import demolition_preparation_only
 from app.agent.enrichment import build_fact_overlays
 from app.agent.guardrails import (
@@ -355,12 +355,38 @@ class InfoAnalysisAgent:
         }, fields))
         return self._materialize(request, draft, procedure_bindings)
 
+    def _analyze_requirements_confirmation(
+        self, request: InfoAnalysisInput, procedure_bindings: ProcedureBindings,
+    ) -> InfoAnalysisResult:
+        fields = self._digest_fields(request, procedure_bindings)
+        if fields is None:
+            # 버튼 답은 모델이 다시 해석하지 않는다. 절차 근거가 낡으면 안전하게 실패한다.
+            raise InfoAnalysisGuardrailError("requirements confirmation requires current reviewed procedure digests")
+        confirmation = request.requirements_confirmation
+        step = procedure_bindings.get(ACTION_DEFINITIONS[confirmation.action_code].procedure_logical_code)
+        if step is None:
+            raise InfoAnalysisGuardrailError("requirements confirmation targets an unknown procedure")
+        # 준비 확인만 남긴다. 실행·제출·완료는 버튼 하나로 정하지 않는다.
+        draft = InfoAnalysisDraft.model_validate(with_digest_findings({
+            "completion_status": InfoCompletionStatus.COMPLETE,
+            "facts": [], "missing_fields": [], "uncertainties": [],
+            "procedure_observations": [{
+                "step_code": step.step_code, "observed_status": ProcedureProgressStatus.IN_PROGRESS,
+                "source_text": confirmation.to_input_text(), "requires_confirmation": False,
+                "requirements_confirmed": True, "submitted": False,
+                "reason_summary": "사용자가 [준비했어요]를 직접 눌렀습니다.",
+            }],
+        }, fields))
+        return self._materialize(request, draft, procedure_bindings)
+
     async def analyze(self, request: InfoAnalysisInput) -> InfoAnalysisResult:
         procedure_bindings = resolve_procedure_bindings(
             request.known_procedure_steps, self._procedure_bindings
         )
         if request.restoration_answer is not None:
             return self._analyze_restoration_answer(request, procedure_bindings)
+        if request.requirements_confirmation is not None:
+            return self._analyze_requirements_confirmation(request, procedure_bindings)
         prompt_input = self._prompt_input(request, procedure_bindings)
         # 사장님 글이 있고 절차 정리를 정리본으로 채울 수 있으면, 모델에는 값 꺼내기만 맡긴다.
         # 절차 원문 9건과 절차 범위를 보내지 않아 입력·출력이 크게 준다(info_fact_messages).
@@ -1116,6 +1142,7 @@ class InfoAnalysisAgent:
         }
         # These reports already passed source-span checks; held reports cannot
         # advance readiness. Current status still comes from the snapshot.
+        # [준비했어요] 버튼 답도 확인 보류 없는 보고로 만들어져 여기서 같은 판단부터 반영된다.
         ready_steps.update(
             (item.procedure_step.procedure_step_id, item.procedure_step.step_code)
             for item in observations
