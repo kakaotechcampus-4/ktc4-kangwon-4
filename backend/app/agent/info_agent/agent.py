@@ -355,26 +355,31 @@ class InfoAnalysisAgent:
         }, fields))
         return self._materialize(request, draft, procedure_bindings)
 
-    def _analyze_requirements_confirmation(
+    def _analyze_action_done(
         self, request: InfoAnalysisInput, procedure_bindings: ProcedureBindings,
     ) -> InfoAnalysisResult:
         fields = self._digest_fields(request, procedure_bindings)
         if fields is None:
             # 버튼 답은 모델이 다시 해석하지 않는다. 절차 근거가 낡으면 안전하게 실패한다.
-            raise InfoAnalysisGuardrailError("requirements confirmation requires current reviewed procedure digests")
-        confirmation = request.requirements_confirmation
-        step = procedure_bindings.get(ACTION_DEFINITIONS[confirmation.action_code].procedure_logical_code)
-        if step is None:
-            raise InfoAnalysisGuardrailError("requirements confirmation targets an unknown procedure")
-        # 준비 확인만 남긴다. 실행·제출·완료는 버튼 하나로 정하지 않는다.
+            raise InfoAnalysisGuardrailError("action done answer requires current reviewed procedure digests")
+        answer = request.action_done
+        step = next((item.procedure_step for item in request.known_procedure_steps
+                     if item.procedure_step.procedure_step_id == answer.procedure_step_id), None)
+        logical_code = ACTION_DEFINITIONS[answer.action_code].procedure_logical_code
+        # 처리 결과 확인은 할 일 코드만으로 절차를 모른다. 나머지는 코드와 절차가 맞아야 한다
+        if step is None or (logical_code is not None and procedure_bindings.get(logical_code) != step):
+            raise InfoAnalysisGuardrailError("action done answer targets another procedure")
+        completed = answer.kind in {"PROCESSING", "WORK"}
+        # 준비 확인은 준비만, 신고 제출은 제출까지 남긴다. 처리 결과 확인·직접 하는 일은 완료다
         draft = InfoAnalysisDraft.model_validate(with_digest_findings({
             "completion_status": InfoCompletionStatus.COMPLETE,
             "facts": [], "missing_fields": [], "uncertainties": [],
             "procedure_observations": [{
-                "step_code": step.step_code, "observed_status": ProcedureProgressStatus.IN_PROGRESS,
-                "source_text": confirmation.to_input_text(), "requires_confirmation": False,
-                "requirements_confirmed": True, "submitted": False,
-                "reason_summary": "사용자가 [준비했어요]를 직접 눌렀습니다.",
+                "step_code": step.step_code,
+                "observed_status": ProcedureProgressStatus.COMPLETED if completed else ProcedureProgressStatus.IN_PROGRESS,
+                "source_text": answer.to_input_text(), "requires_confirmation": False,
+                "requirements_confirmed": True, "submitted": answer.kind in {"SUBMISSION", "PROCESSING"},
+                "reason_summary": f"사용자가 지금 할 일({answer.action_code})에 [했어요] 버튼을 직접 눌렀습니다.",
             }],
         }, fields))
         return self._materialize(request, draft, procedure_bindings)
@@ -385,8 +390,8 @@ class InfoAnalysisAgent:
         )
         if request.restoration_answer is not None:
             return self._analyze_restoration_answer(request, procedure_bindings)
-        if request.requirements_confirmation is not None:
-            return self._analyze_requirements_confirmation(request, procedure_bindings)
+        if request.action_done is not None:
+            return self._analyze_action_done(request, procedure_bindings)
         prompt_input = self._prompt_input(request, procedure_bindings)
         # 사장님 글이 있고 절차 정리를 정리본으로 채울 수 있으면, 모델에는 값 꺼내기만 맡긴다.
         # 절차 원문 9건과 절차 범위를 보내지 않아 입력·출력이 크게 준다(info_fact_messages).
@@ -942,18 +947,21 @@ class InfoAnalysisAgent:
                     rejected_observation_codes=[semantic.step_code],
                 ) from exc
             evidence_by_span[(span.start_offset, span.end_offset)] = evidence
-            observations.append(ProcedureProgressObservation(
+            observation = ProcedureProgressObservation(
                 observation_id=self._uuid(), procedure_step=step,
                 observed_status=semantic.observed_status, source_span=span,
                 source_evidence_refs=[evidence.evidence_id],
                 requirements_confirmed=semantic.requirements_confirmed,
                 submitted=semantic.submitted,
-                requires_confirmation=(
-                    semantic.requires_confirmation
-                    or semantic.observed_status == ProcedureProgressStatus.COMPLETED
-                ),
+                requires_confirmation=semantic.requires_confirmation,
                 reason_summary=semantic.reason_summary,
-            ))
+            )
+            # 완료 보고는 다시 묻는다. 같은 절차에 누른 완료 버튼은 그 자체가 사장님의 확인이다
+            if observation.observed_status == ProcedureProgressStatus.COMPLETED and not (
+                request.action_done is not None and request.action_done.completes(observation)
+            ):
+                observation.requires_confirmation = True
+            observations.append(observation)
         procedure_findings = self._procedure_findings(
             request, draft, known_steps, observations=observations,
         )

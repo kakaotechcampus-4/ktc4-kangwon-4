@@ -170,6 +170,7 @@ function entry(overrides: Partial<CaseResultsEntryResponse>): CaseResultsEntryRe
   return {
     judgment_status: 'DONE',
     result_input_kind: 'TEXT',
+    action_done_kind: null,
     case_history_id: null,
     raw_input: null,
     conflicts: null,
@@ -200,7 +201,18 @@ describe('toResultsEntry', () => {
       nextAction: { title: '임대인에게 원상복구 범위 묻기', reason: '', questions: [] },
       historyId: 12,
       inputKind: 'TEXT',
+      doneKind: null,
     })
+  })
+
+  /** 버튼 문구는 서버가 준 할 일 종류로 고른다. 종류가 없거나 모르는 값이면 지어내지 않는다 */
+  it('[했어요] 할 일이면 버튼 종류를 담고, 종류를 모르면 읽지 못했다고 본다', () => {
+    const body = { case_history_id: 12, next_action: NEXT_ACTION, result_input_kind: 'ACTION_DONE' as const }
+    expect(toResultsEntry(entry({ ...body, action_done_kind: 'SUBMISSION' }))).toMatchObject({
+      kind: 'READY', inputKind: 'ACTION_DONE', doneKind: 'SUBMISSION',
+    })
+    expect(toResultsEntry(entry({ ...body, action_done_kind: null }))).toEqual({ kind: 'UNRECOGNIZED' })
+    expect(toResultsEntry(entry({ ...body, action_done_kind: 'MAYBE' as never }))).toEqual({ kind: 'UNRECOGNIZED' })
   })
 
   it('충돌이 있으면 사장님이 한 말과 충돌 목록을 담는다', () => {

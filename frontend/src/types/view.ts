@@ -6,7 +6,7 @@
  */
 
 // 폐업 사유·보증금 결과는 서버 값을 그대로 고르는 보기라, 같은 값을 여기 한 벌 더 적지 않는다
-import type { ClosureReason, DepositReturnResult, ResultInputKind } from './api'
+import type { ActionDoneKind, ClosureReason, DepositReturnResult, ResultInputKind } from './api'
 
 /** fact 하나의 확인 상태 */
 export type FactStatus =
@@ -186,7 +186,7 @@ export interface ResultInputView {
  */
 export type ResultsEntry =
   /** 결과를 받을 수 있다. `historyId` 는 이 결과가 어느 판단에 대한 것인지 가리킨다 */
-  | { kind: 'READY'; nextAction: NextAction; historyId: number; inputKind: ResultInputKind }
+  | { kind: 'READY'; nextAction: NextAction; historyId: number; inputKind: ResultInputKind; doneKind: ActionDoneKind | null }
   /** 확인을 기다리는 충돌이 있다. 그것부터 풀어야 해서 ④로 보낸다 */
   | { kind: 'CONFIRM'; view: ConfirmView }
   /**

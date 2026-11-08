@@ -139,61 +139,81 @@ def test_restoration_answer_is_persisted_with_its_literal_text(case_engine, case
         assert (saved.source, saved.judgment_status) == ("USER_INPUT", "PENDING")
 
 
-def _set_next_action(case_engine, history_id, action_code):
+def _set_next_action(case_engine, history_id, action_code, candidate_id="procedure:5"):
+    """지금 할 일과, 그 할 일을 고른 막힌 일 후보("procedure:{절차 번호}")를 저장해 둔다."""
+    from app.be.models.blocker import Blocker
+
     with Session(case_engine) as session:
-        session.get(CaseHistory, history_id).next_action_code = action_code
+        history = session.get(CaseHistory, history_id)
+        history.next_action_code = action_code
+        session.get(Blocker, history.priority_blocker_id).candidate_id = candidate_id
         session.commit()
 
 
-@pytest.mark.parametrize("action_code,kind", [
-    ("CONFIRM_FOOD_SERVICE_CLOSURE_REQUIREMENTS", "REQUIREMENTS_CONFIRMATION"),
-    ("CONFIRM_EMPLOYEE_INSURANCE_LOSS_REQUIREMENTS", "REQUIREMENTS_CONFIRMATION"),
-    ("CONFIRM_RESTORATION_SCOPE", "RESTORATION_ANSWER"),
-    # 실행 행동과 지원사업 확인(MVP 밖)은 글로 받는다
-    ("FILE_FOOD_SERVICE_CLOSURE", "TEXT"),
-    ("CONFIRM_SUPPORT_PROGRAM_REQUIREMENTS", "TEXT"),
+@pytest.mark.parametrize("action_code,candidate_id,kind,done_kind", [
+    ("CONFIRM_FOOD_SERVICE_CLOSURE_REQUIREMENTS", "procedure:5", "ACTION_DONE", "PREPARATION"),
+    ("FILE_FOOD_SERVICE_CLOSURE", "procedure:5", "ACTION_DONE", "SUBMISSION"),
+    ("CONFIRM_PROCEDURE_COMPLETION", "procedure:5", "ACTION_DONE", "PROCESSING"),
+    ("RETURN_PREMISES", "procedure:3", "ACTION_DONE", "WORK"),
+    ("CONFIRM_RESTORATION_SCOPE", "procedure:1", "RESTORATION_ANSWER", None),
+    # 지원사업 확인(MVP 밖)이나 절차를 모르는 막힌 일은 글로 받는다
+    ("CONFIRM_SUPPORT_PROGRAM_REQUIREMENTS", "support:1", "TEXT", None),
+    ("FILE_FOOD_SERVICE_CLOSURE", "missing:had_employees", "TEXT", None),
+    ("FILE_FOOD_SERVICE_CLOSURE", None, "TEXT", None),
 ])
-def test_results_entry_tells_which_input_the_current_action_takes(case_engine, case_world, action_code, kind):
+def test_results_entry_tells_which_input_the_current_action_takes(
+    case_engine, case_world, action_code, candidate_id, kind, done_kind,
+):
     member_id, _, history_id = case_world.sign_up()
-    _set_next_action(case_engine, history_id, action_code)
-    assert entry(case_engine, member_id).result_input_kind == kind
+    _set_next_action(case_engine, history_id, action_code, candidate_id)
+    response = entry(case_engine, member_id)
+    assert (response.result_input_kind, response.action_done_kind) == (kind, done_kind)
 
 
-def test_requirements_confirmation_is_persisted_with_the_action_it_answers(case_engine, case_world):
+@pytest.mark.parametrize("action_code,text", [
+    ("CONFIRM_FOOD_SERVICE_CLOSURE_REQUIREMENTS", "준비사항 확인을 마쳤어요."),
+    ("FILE_FOOD_SERVICE_CLOSURE", "신고서를 제출했어요."),
+    ("CONFIRM_PROCEDURE_COMPLETION", "기관 처리가 끝났어요."),
+    ("SETTLE_EMPLOYEE_PAYMENTS", "이 일을 끝냈어요."),
+])
+def test_action_done_is_persisted_with_the_action_and_procedure_it_answers(case_engine, case_world, action_code, text):
     member_id, _, history_id = case_world.sign_up()
-    _set_next_action(case_engine, history_id, "CONFIRM_FOOD_SERVICE_CLOSURE_REQUIREMENTS")
+    _set_next_action(case_engine, history_id, action_code, "procedure:5")
     with Session(case_engine) as session:
         accepted = submit_case_results(session, member_id, CaseResultsSubmitRequest(
-            case_history_id=history_id, requirements_confirmed=True,
+            case_history_id=history_id, action_done=True,
         ))
     with Session(case_engine) as session:
         saved = session.get(CaseHistory, accepted.case_history_id)
-        # 어느 할 일에 답했는지는 화면이 아니라 서버가 지금 할 일에서 정한다
-        assert saved.requirements_confirmation == {"action_code": "CONFIRM_FOOD_SERVICE_CLOSURE_REQUIREMENTS"}
-        assert saved.raw_input == "준비사항 확인을 마쳤어요."
+        # 어느 할 일·절차에 답했는지는 화면이 아니라 서버가 지금 할 일에서 정한다
+        assert saved.action_done == {"action_code": action_code, "procedure_step_id": 5}
+        assert saved.raw_input == text
         assert (saved.source, saved.judgment_status, saved.restoration_answer) == ("USER_INPUT", "PENDING", None)
 
 
-@pytest.mark.parametrize("action_code", ["FILE_FOOD_SERVICE_CLOSURE", "CONFIRM_RESTORATION_SCOPE", None])
-def test_requirements_confirmation_for_another_action_is_422(case_engine, case_world, action_code):
+@pytest.mark.parametrize("action_code,candidate_id", [
+    ("CONFIRM_RESTORATION_SCOPE", "procedure:1"), ("CONFIRM_SUPPORT_PROGRAM_REQUIREMENTS", "support:1"),
+    (None, "procedure:5"), ("FILE_FOOD_SERVICE_CLOSURE", "missing:had_employees"),
+])
+def test_action_done_for_an_action_without_buttons_is_422(case_engine, case_world, action_code, candidate_id):
     member_id, _, history_id = case_world.sign_up()
-    _set_next_action(case_engine, history_id, action_code)
+    _set_next_action(case_engine, history_id, action_code, candidate_id)
     with Session(case_engine) as session:
-        request = CaseResultsSubmitRequest(case_history_id=history_id, requirements_confirmed=True)
+        request = CaseResultsSubmitRequest(case_history_id=history_id, action_done=True)
         assert error_of(lambda: submit_case_results(session, member_id, request)) == (
-            422, "현재 할 일에는 준비 확인 답변을 보낼 수 없습니다.")
+            422, "현재 할 일에는 [했어요] 답변을 보낼 수 없습니다.")
 
 
 @pytest.mark.parametrize("changes", [
-    {}, {"requirements_confirmation": None}, {"raw_input": "다른 입력"},
+    {}, {"action_done": None}, {"raw_input": "다른 입력"},
     {"recovery_action_code": "RESUBMIT_INPUT"}, {"retryable": False},
 ])
-def test_retrying_a_requirements_confirmation_keeps_the_same_action(case_engine, case_world, changes):
+def test_retrying_an_action_done_keeps_the_same_action_and_procedure(case_engine, case_world, changes):
     member_id, _, history_id = case_world.sign_up()
-    _set_next_action(case_engine, history_id, "CONFIRM_TAX_CLOSURE_REQUIREMENTS")
+    _set_next_action(case_engine, history_id, "FILE_TAX_BUSINESS_CLOSURE", "procedure:4")
     with Session(case_engine) as session:
         accepted = submit_case_results(session, member_id, CaseResultsSubmitRequest(
-            case_history_id=history_id, requirements_confirmed=True,
+            case_history_id=history_id, action_done=True,
         ))
     with Session(case_engine) as session:
         failed = session.get(CaseHistory, accepted.case_history_id)
@@ -202,15 +222,15 @@ def test_retrying_a_requirements_confirmation_keeps_the_same_action(case_engine,
             setattr(failed, field, value)
         session.commit()
     with Session(case_engine) as session:
-        request = CaseResultsSubmitRequest(case_history_id=accepted.case_history_id, requirements_confirmed=True)
+        request = CaseResultsSubmitRequest(case_history_id=accepted.case_history_id, action_done=True)
         if changes:
             assert error_of(lambda: submit_case_results(session, member_id, request))[0] == 422
             return
         retried = submit_case_results(session, member_id, request)
     with Session(case_engine) as session:
         saved = session.get(CaseHistory, retried.case_history_id)
-        assert saved.requirements_confirmation == {"action_code": "CONFIRM_TAX_CLOSURE_REQUIREMENTS"}
-        assert saved.raw_input == "준비사항 확인을 마쳤어요."
+        assert saved.action_done == {"action_code": "FILE_TAX_BUSINESS_CLOSURE", "procedure_step_id": 4}
+        assert saved.raw_input == "신고서를 제출했어요."
 
 
 @pytest.mark.parametrize("changes", [
@@ -275,9 +295,9 @@ def test_restoration_answer_requires_the_current_supported_action(case_engine, c
     {"restoration_answer": {"restoration_scope": "PARTIAL", "demolition_required": "REQUIRED", "detail": "글"}},
     {"raw_input": "추가 글", "restoration_answer": {"restoration_scope": "FULL", "demolition_required": "REQUIRED"}},
     # [아직 안 했어요]는 보내지 않는다. 버튼 답에 글이나 다른 선택을 섞을 수 없다
-    {"requirements_confirmed": False},
-    {"requirements_confirmed": True, "raw_input": "넵 다 확인 완료했어요"},
-    {"requirements_confirmed": True,
+    {"action_done": False},
+    {"action_done": True, "raw_input": "넵 다 확인 완료했어요"},
+    {"action_done": True,
      "restoration_answer": {"restoration_scope": "FULL", "demolition_required": "REQUIRED"}},
 ])
 def test_restoration_answer_rejects_incomplete_or_mixed_requests(payload):

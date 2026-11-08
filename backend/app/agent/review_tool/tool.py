@@ -48,6 +48,7 @@ from app.agent.projection import (
 )
 from app.agent.prompts import review_messages
 from app.agent.schemas import (
+    completion_confirmed,
     CaseFieldKey,
     ClaimType,
     Component,
@@ -603,8 +604,7 @@ def _validate_mutation_provenance(
             candidate.before_status != ProcedureProgressStatus.COMPLETED
             and candidate.proposed_status == ProcedureProgressStatus.COMPLETED
         ):
-            confirmation = getattr(subject.trigger, "procedure_completion_confirmation", None)
-            if confirmation is None or not confirmation.matches(matching_observations[0]):
+            if not completion_confirmed(subject.trigger, matching_observations[0]):
                 raise ReviewIntegrityError("procedure completion requires explicit user confirmation")
 
     for candidate in mutations.support_match_updates:

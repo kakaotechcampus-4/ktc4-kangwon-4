@@ -47,7 +47,7 @@ from app.agent.document_tool.safety import ContentSafetyGuard  # noqa: E402
 from app.agent.document_tool.safety import SafetyDecision  # noqa: E402
 from app.agent.document_tool.tool import DocumentTool  # noqa: E402
 from app.agent.llm import LLMRequestError  # noqa: E402
-from app.agent.schemas import RequirementsConfirmation  # noqa: E402
+from app.agent.schemas import ActionDoneAnswer  # noqa: E402
 from app.be.crud.member import create_member  # noqa: E402
 from app.be.db import get_engine, reset_all_tables  # noqa: E402
 from app.be.services import auth as auth_service  # noqa: E402
@@ -123,7 +123,7 @@ OUTAGE_TEXT = "다시 확인해 보니 원상복구는 일부이고 카운터만
 PREPARATION_SCOPE_TEXT = "원상복구 범위는 전부이고 철거가 필요합니다. 작업은 아직 시작하지 않았습니다."
 PREPARATION_TEXT = "철거 전 사진을 찍고, 업체와 증빙 준비사항을 확인했습니다."
 # [준비했어요] 버튼이 남기는 고정 문장. 모델 해석 없이 코드가 준비 확인으로 저장한다
-PREPARATION_BUTTON_TEXT = RequirementsConfirmation.to_input_text()
+PREPARATION_BUTTON_TEXT = ActionDoneAnswer(action_code="CONFIRM_RESTORATION_REQUIREMENTS", procedure_step_id=1).to_input_text()
 
 
 class FirstCandidateModel:
