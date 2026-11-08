@@ -124,10 +124,10 @@ def candidate_decision_fields(
     return _decision_fields(candidate, action)
 
 
-def _completion_questions(snapshot, sources, mutations, bindings):
+def _completion_questions(snapshot, sources, mutations, bindings, known_steps):
     completed = {
         (item.procedure_step.procedure_step_id, item.procedure_step.step_code)
-        for item in effective_procedure_progress(snapshot, mutations)
+        for item in effective_procedure_progress(snapshot, mutations, known_steps=known_steps, procedure_bindings=bindings)
         if item.status == "COMPLETED"
     }
     questions = {}
@@ -183,7 +183,7 @@ def build_blocker_candidates(
     resolved_bindings = resolve_procedure_bindings(steps, procedure_bindings)
     pending_completions = {
         item["candidate_id"]
-        for item in _completion_questions(snapshot, sources, mutations, resolved_bindings)
+        for item in _completion_questions(snapshot, sources, mutations, resolved_bindings, steps)
     }
     values = _values(snapshot, mutations)
     history_question = missing_info_fields(
@@ -477,7 +477,7 @@ def missing_info_fields(
 ) -> dict[str, Any] | None:
     """Ask about one unresolved decision blocker in the existing question order."""
     completion_questions = _completion_questions(
-        snapshot, sources, mutations, procedure_bindings or {}
+        snapshot, sources, mutations, procedure_bindings or {}, known_procedure_steps,
     )
     values = _values(snapshot, mutations)
     restoration_detail_unnecessary = (

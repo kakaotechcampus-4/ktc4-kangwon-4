@@ -12,6 +12,7 @@ from pydantic import Field, StrictBool, StrictStr, model_validator
 from app.agent.action_catalog import (
     ProcedureBindings,
     build_action_candidates,
+    confirmed_restoration_progress,
     effective_procedure_progress,
     resolve_procedure_bindings,
 )
@@ -833,6 +834,14 @@ class SupervisorAgent:
                             procedure_analysis_call_id=source.meta.call_id,
                         )
                     )
+
+        completed = confirmed_restoration_progress(
+            snapshot, request.trigger, sources, fact_changes, request.known_procedure_steps,
+            procedure_bindings=self._bindings(request), uuid_factory=self._uuid,
+        )
+        if completed is not None:
+            progress_changes = [item for item in progress_changes if item.procedure_step != completed.procedure_step]
+            progress_changes.append(completed)
 
         return MutationSet(
             fact_changes=fact_changes,
