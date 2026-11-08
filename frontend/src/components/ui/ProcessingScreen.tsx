@@ -36,9 +36,13 @@ export function ProcessingScreen({ title, loaderLabel, steps }: ProcessingScreen
       <ProcessSteps steps={steps} />
       {/*
         판단은 길면 2분 넘게 걸린다. 떠나면 결과가 사라지는 줄 알면 그동안 화면에 묶인다.
-        서버는 뒤에서 판단을 이어가고(#107), 끝난 결과는 홈(`/case`)에서 보인다
+        서버는 뒤에서 판단을 이어가고(#107), 다른 화면에 있으면 끝날 때 위쪽 띠로 알린다(`JudgmentWatcher`).
+        홈(`/case`)은 스스로 기다려 결과를 보여준다.
+
+        걸리는 시간은 적지 않는다. 잰 값(`docs/agent/monitoring-results.md`)은 로컬 실행 몇 건이라
+        운영에서 얼마나 걸린다고 약속할 근거가 아니다 — 문서도 그렇게 쓰지 말라고 적었다
       */}
-      <InfoBox>화면을 떠나셔도 계속 처리돼요. 끝나면 홈에서 보실 수 있어요.</InfoBox>
+      <InfoBox>화면을 떠나셔도 계속 처리돼요. 다른 화면에 가 계셔도 끝나면 알려드려요.</InfoBox>
       {/* 시안대로 꺼진 버튼을 둔다. 누를 것이 없다는 것을 버튼 자리에서도 말한다 */}
       <Button disabled>처리 중이에요</Button>
     </main>

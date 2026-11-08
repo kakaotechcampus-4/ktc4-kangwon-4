@@ -711,7 +711,7 @@ describe('ResultInputPage — 서버', () => {
       expect(screen.queryByRole('button', { name: '보내기' })).not.toBeInTheDocument()
       expect(screen.getByRole('button', { name: '처리 중이에요' })).toBeDisabled()
       // 판단은 몇 분이 걸릴 수 있다. 떠나면 결과가 사라지는 줄 알면 그동안 화면에 묶인다
-      expect(screen.getByText('화면을 떠나셔도 계속 처리돼요. 끝나면 홈에서 보실 수 있어요.')).toBeInTheDocument()
+      expect(screen.getByText('화면을 떠나셔도 계속 처리돼요. 다른 화면에 가 계셔도 끝나면 알려드려요.')).toBeInTheDocument()
     })
   })
 
