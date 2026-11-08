@@ -195,6 +195,7 @@ class AgentGraph:
             _REVIEW_TRACE_COUNTERS.reset(counter_scope)
         self._emit_run_summary(
             run_id=run_id,
+            case_id=owned_request.case_snapshot.case_id,
             started=run_started,
             outcome=outcome,
             review_counters=review_counters,
@@ -205,6 +206,7 @@ class AgentGraph:
         self,
         *,
         run_id: UUID,
+        case_id: int,
         started: float,
         outcome: AgentGraphOutput,
         review_counters: _ReviewTraceCounters,
@@ -230,6 +232,7 @@ class AgentGraph:
             review_count=review_counters.review_count,
             review_revise_count=review_counters.review_revise_count,
             rework_count=len(review_counters.started_rework_rounds),
+            case_id=case_id,
             error_code=(
                 outcome.failure_code if outcome.outcome_type == "SAFE_FAILURE" else None
             ),
@@ -712,9 +715,13 @@ class AgentGraph:
             if "meta" in locals():
                 self._emit(meta, started, "ERROR", exc)
             return self._failure(exc, Component.REVIEW_TOOL)
+        draft_action = subject.supervisor_draft.decision.next_action
         if Component.SUPPORT_AGENT in result.recommended_rework_targets:
             exc = ValueError("Support analysis is outside the closure MVP")
-            self._emit(meta, started, "ERROR", exc)
+            self._emit(
+                meta, started, "ERROR", exc, review_result=result,
+                draft_action_code=draft_action.action_code if draft_action else None,
+            )
             return {
                 **self._failure(exc, Component.REVIEW_TOOL),
                 "recovery_action_code": "CONTACT_SUPPORT",
@@ -725,6 +732,8 @@ class AgentGraph:
             "SUCCESS",
             review_verdict="PASS" if result.verdict == ReviewVerdict.PASS else "REVISE",
             review_mode="CODE_ONLY" if code_only else "MODEL",
+            review_result=result,
+            draft_action_code=draft_action.action_code if draft_action else None,
         )
         update: dict[str, Any] = {
             "phase": "REVIEWING",
@@ -1158,6 +1167,8 @@ class AgentGraph:
         *,
         review_verdict: Literal["PASS", "REVISE"] | None = None,
         review_mode: Literal["MODEL", "CODE_ONLY"] | None = None,
+        review_result: ReviewResult | None = None,
+        draft_action_code: str | None = None,
     ) -> None:
         counters = _REVIEW_TRACE_COUNTERS.get()
         if counters is not None and review_verdict is not None:
@@ -1176,6 +1187,16 @@ class AgentGraph:
             attempt=meta.attempt,
             review_verdict=review_verdict,
             review_mode=review_mode,
+            case_id=meta.case_id,
+            review_issue_count=len(review_result.issues) if review_result is not None else None,
+            review_issues=tuple(
+                issue.model_dump(mode="json", include={"issue_code", "target_path", "severity", "target_component"})
+                for issue in review_result.issues[:20]
+            ) if review_result is not None else None,
+            draft_action_code=draft_action_code,
+            recommended_rework_targets=tuple(
+                target.value for target in review_result.recommended_rework_targets
+            ) if review_result is not None else None,
             model=model,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,

@@ -1,8 +1,10 @@
 """Real span lifetime, parentage and usage accounting without a remote backend."""
 
 import asyncio
+import json
 from contextlib import contextmanager
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from app.agent.llm import LLMUsage
@@ -202,3 +204,73 @@ def test_concurrent_roles_and_requested_model_remain_separate():
         await asyncio.gather(one("INFO_AGENT"), one("REVIEW_TOOL"))
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("broken_sink", [False, True])
+@pytest.mark.parametrize("reject_review", [False, True])
+def test_review_trace_preserves_outcome_and_records_bounded_metadata_without_private_text(broken_sink, reject_review):
+    from test_procedure_only_graph import graph_run_inputs
+
+    from app.agent.schemas import ReviewResult
+
+    graph, request, _, _, _ = graph_run_inputs("RESULT_SUBMITTED")
+    client = Client()
+    private = "PRIVATE_REVIEW_REASON_MUST_NOT_BE_TRACED"
+
+    class BrokenSink:
+        def emit(self, event):
+            raise RuntimeError(private)
+
+    graph._trace_sink = BrokenSink() if broken_sink else LangfuseTraceSink(client)
+
+    async def reject(subject):
+        return ReviewResult(
+            reviewed_subject_id=subject.review_subject_id, reviewed_subject_digest=subject.subject_digest,
+            verdict="REVISE", issues=[{
+                "issue_code": "CASE_MISMATCH", "category": "FACTUALITY", "severity": "BLOCKING",
+                "target_component": "SUPERVISOR", "target_call_id": None,
+                "target_path": "/supervisor_draft/decision/blockers/0/description",
+                "reason_summary": private, "evidence_refs": [],
+            } for _ in range(25)], missing_evidence=[], recommended_rework_targets=["SUPERVISOR"],
+            resolution_reason=private,
+        )
+
+    reviewer = AsyncMock()
+    reviewer.review.side_effect = reject
+    if reject_review:
+        graph._review_tool = reviewer
+    before = request.model_dump_json()
+    outcome = asyncio.run(graph.run(request))
+    assert request.model_dump_json() == before
+    if not reject_review:
+        assert outcome.outcome_type == "REVIEWED_PLAN"
+        if not broken_sink:
+            run = next(item for item in client.observations if item.name == "RUN")
+            assert run.updates[-1]["metadata"]["case_id"] == request.case_snapshot.case_id
+        return
+    assert outcome.outcome_type == "SAFE_FAILURE"
+    assert outcome.failure_code == "REVIEW_RETRY_EXHAUSTED"
+    assert reviewer.review.await_count == graph._supervisor._llm.calls == 1
+    if broken_sink:
+        return
+
+    review = next(item for item in client.observations if item.name == "REVIEW_TOOL")
+    metadata = review.updates[-1]["metadata"]
+    assert metadata["case_id"] == request.case_snapshot.case_id
+    assert metadata["review_verdict"] == "REVISE"
+    assert metadata["draft_action_code"] == "CONFIRM_TAX_CLOSURE_REQUIREMENTS"
+    assert metadata["recommended_rework_targets"] == ("SUPERVISOR",)
+    assert metadata["review_issue_count"] == 25
+    assert len(metadata["review_issues"]) == 20
+    assert all(issue == {
+        "issue_code": "CASE_MISMATCH", "target_path": "/supervisor_draft/decision/blockers/0/description",
+        "severity": "BLOCKING", "target_component": "SUPERVISOR",
+    } for issue in metadata["review_issues"])
+    run = next(item for item in client.observations if item.name == "RUN")
+    assert run.updates[-1]["metadata"]["case_id"] == request.case_snapshot.case_id
+    assert run.updates[-1]["metadata"]["review_count"] == 1
+    assert run.updates[-1]["metadata"]["rework_count"] == 0
+    recorded = json.dumps([(item.options, item.updates) for item in client.observations])
+    assert private not in recorded
+    assert request.trigger.input.redacted_text not in recorded
+    assert all("input" not in item.options and "output" not in item.options for item in client.observations)

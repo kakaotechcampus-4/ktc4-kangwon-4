@@ -358,6 +358,63 @@ class ChoiceModel(StubModel):
         })
 
 
+@pytest.mark.parametrize("actions,questions,prefer_question", [
+    (False, True, False), (True, False, False), (True, True, False),
+    (True, True, True), (False, False, False),
+], ids=["questions-only", "actions-only", "mixed-action", "mixed-question", "no-candidates"])
+def test_supervisor_request_limits_decision_type_to_available_candidates(actions, questions, prefer_question):
+    import httpx
+
+    from app.agent.llm import LLMConfig, StructuredLLMClient
+
+    request = supervisor_request()
+    if not actions:
+        step = request.known_procedure_steps[0].procedure_step
+        request.case_snapshot.procedure_progress.append(ProcedureProgress(
+            procedure_step=step, status="COMPLETED", requirements_confirmed=True,
+            submitted=True, evidence_refs=[REF], updated_at=NOW))
+        request.source_results[1].output.procedure_findings[0].current_status = "COMPLETED"
+        request.source_results[1] = source(request.source_results[1].output)
+    if questions:
+        request.case_snapshot.facts = [fact for fact in request.case_snapshot.facts if fact.field_path != "employee_count"]
+        missing_questions(request, "employee_count")
+    sent = []
+
+    def respond(http_request):
+        payload = json.loads(http_request.content)
+        schema = payload["response_format"]["json_schema"]["schema"]
+        decision = schema["properties"]["decision_type"]
+        if "$ref" in decision:
+            decision = schema["$defs"][decision["$ref"].rsplit("/", 1)[1]]
+        sent.append(decision["enum"])
+        contract = json.loads(payload["messages"][1]["content"].removeprefix("INPUT_JSON="))["contract"]
+        rows, missing = contract["blocker_candidates"], contract["information_blockers"]
+        assert bool(rows) is actions and bool(missing) is questions
+        # 제한이 없으면 ACTION을 고르는 대역. 질문만 있을 때의 잘못된 선택을 실제 검증으로 잡는다.
+        if "ACTION" in decision["enum"] and not prefer_question:
+            reply = {"decision_type": "ACTION", "blocker_candidate_id": rows[0]["candidate_id"] if rows else None,
+                     "action_code": rows[0]["actions"][0]["action_code"] if rows else "CONFIRM_TAX_CLOSURE_REQUIREMENTS"}
+        else:
+            reply = {"decision_type": "NEEDS_MORE_INFO", "blocker_candidate_id": missing[0]["candidate_id"], "action_code": None}
+        return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps(reply)}}]})
+
+    async def run():
+        config = LLMConfig(base_url="https://example.org/synthetic", api_token="synthetic", model="synthetic", max_retries=0)
+        async with StructuredLLMClient(config, transport=httpx.MockTransport(respond)) as client:
+            if not actions and not questions:
+                with pytest.raises(SupervisorGuardrailError):
+                    await SupervisorAgent(client, clock=lambda: NOW).draft(request)
+                assert sent == []
+                return
+            draft = await SupervisorAgent(client, clock=lambda: NOW).draft(request)
+        expected_types = (["ACTION"] if actions else []) + (["NEEDS_MORE_INFO"] if questions else [])
+        assert sent == [expected_types]
+        assert draft.decision.decision_type == ("NEEDS_MORE_INFO" if prefer_question or not actions else "ACTION")
+        assert (draft.decision.next_action is None) is (prefer_question or not actions)
+
+    asyncio.run(run())
+
+
 def test_selection_only_output_preserves_verified_text_target_and_evidence():
     class SelectionOnlyModel(ChoiceModel):
         async def generate(self, model, messages, **kwargs):

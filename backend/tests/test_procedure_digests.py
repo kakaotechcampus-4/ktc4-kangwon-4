@@ -1089,3 +1089,100 @@ def test_conflict_confirmation_fills_info_from_digest_and_keeps_the_review_model
     assert outcome.outcome_type == "REVIEWED_PLAN", (outcome.failure_code, getattr(outcome, "failure_message_code", None), calls)
     # Info 모델은 부르지 않는다. 보관된 사실(모델이 꺼내 아직 Review 전)이 있으면 Review 모델을 유지한다
     assert calls == ["reborn_supervisor_draft", "reborn_review_output"] if with_retained else ["reborn_supervisor_draft"]
+
+
+@pytest.mark.parametrize("code,confirmation", [
+    ("RETURN_PREMISES", "CONFIRM_PREMISES_RETURN_REQUIREMENTS"),
+    ("SETTLE_EMPLOYEE_PAYMENTS", "CONFIRM_EMPLOYEE_SETTLEMENT_REQUIREMENTS"),
+    ("REPORT_EMPLOYEE_INSURANCE_LOSS", "CONFIRM_EMPLOYEE_INSURANCE_LOSS_REQUIREMENTS"),
+    ("REPORT_WORKPLACE_INSURANCE_CLOSURE", "CONFIRM_WORKPLACE_INSURANCE_CLOSURE_REQUIREMENTS"),
+])
+@pytest.mark.parametrize("mode", ["same_judgment", "stored", "held", "completion_report"])
+def test_preparation_report_updates_readiness_without_changing_snapshot_status(code, confirmation, mode):
+    from uuid import UUID
+
+    from test_action_codes import StubModel, source
+    from test_blocker_candidates import ChoiceModel
+    from test_info_replanning import Responses
+
+    from app.agent.blocker_candidates import build_blocker_candidates
+    from app.agent.procedure_tool.stored_tool import StoredProcedureLookupTool
+    from app.agent.review_tool import ReviewTool
+    from app.agent.schemas import (
+        CASE_FIELD_SPECS,
+        CaseFact,
+        InfoAnalysisInput,
+        ProcedureLookupInput,
+        ProcedureProgress,
+        ReviewSubject,
+        SupervisorAgentInput,
+    )
+    from app.agent.supervisor.agent import SupervisorAgent
+
+    async def run():
+        store = ev.SnapshotStore(REVIEWED)
+        registry = ev.build_registry(store, cafe_registry=True)
+        text = "해당 절차의 준비사항을 확인했습니다."
+        if code == "REPORT_WORKPLACE_INSURANCE_CLOSURE":
+            text = (
+                "담당 기관에 사업장 보험 탈퇴·소멸 신고 대상과 필요한 서류, 제출 방법을 모두 확인했고 "
+                "준비할 자료도 갖췄어요. 아직 탈퇴·소멸 신고서는 제출하지 않았어요."
+            )
+        if mode == "completion_report":
+            text = "해당 절차의 처리를 모두 마쳤습니다."
+        payload = ev.CASES["benchmark_case1"] | {"had_employees": True, "pension_enrolled": True,
+            "health_insurance_enrolled": True, "employment_insurance_enrolled": True,
+            "industrial_accident_insurance_enrolled": True}
+        request = ev.attach_fixture_sources(ev.build_graph_input(payload, result_text=text,
+            prior_facts={"restoration_scope": "FULL", "demolition_required": "NOT_REQUIRED",
+                         "restoration_status": "COMPLETED"}), store)
+        snapshot = request.case_snapshot
+        ref = snapshot.evidence_records[0].evidence_id
+        for key in ["had_employees", "pension_enrolled", "health_insurance_enrolled",
+                    "employment_insurance_enrolled", "industrial_accident_insurance_enrolled"]:
+            snapshot.facts.append(CaseFact(field_path=key, value_type="BOOLEAN", value=True,
+                status="CONFIRMED", evidence_refs=[ref], updated_at=ev.FIXED_TIME))
+        step = next(item.procedure_step for item in registry if item.procedure_step.step_code == code)
+        snapshot.procedure_progress.append(ProcedureProgress(procedure_step=step, status="IN_PROGRESS",
+            requirements_confirmed=mode == "stored", submitted=False, evidence_refs=[ref], updated_at=ev.FIXED_TIME))
+        before = snapshot.model_dump_json()
+        lookup = await StoredProcedureLookupTool(store).lookup(ProcedureLookupInput(
+            lookup_goal="BUSINESS_CLOSURE", procedure_step_codes=[item.procedure_step.step_code for item in registry],
+            evidence_records=snapshot.evidence_records, search_queries=["폐업 절차"], as_of=ev.FIXED_TIME.date(),
+            locale="ko-KR", source_policy="OFFICIAL_ONLY", max_results_per_query=10,
+            based_on_snapshot_id=snapshot.snapshot_id, review_feedback=[]))
+        raw = {"completion_status": "COMPLETE", "facts": [], "missing_fields": [], "uncertainties": [],
+            "procedure_observations": [{"step_code": code, "observed_status": "COMPLETED" if mode == "completion_report" else "IN_PROGRESS",
+                "source_text": text, "requirements_confirmed": True, "submitted": False,
+                "requires_confirmation": mode == "held", "reason_summary": "사용자의 절차 진행 보고"}]}
+        info = await info_module.InfoAnalysisAgent(Responses(raw), clock=lambda: ev.FIXED_TIME, max_local_attempts=1).analyze(
+            InfoAnalysisInput(input=request.trigger.input, case_snapshot=snapshot, allowed_field_paths=list(CASE_FIELD_SPECS),
+                known_procedure_steps=registry, source_call_id=UUID(int=40), procedure_lookup_call_id=UUID(int=5),
+                procedure_lookup_result=lookup, review_feedback=[]))
+        finding = next(item for item in info.procedure_findings if item.procedure_step == step)
+        assert finding.current_status == "IN_PROGRESS"
+        assert finding.requires_confirmation is (mode in {"held", "completion_report"})
+        supervisor_input = SupervisorAgentInput(trigger=request.trigger, case_snapshot=snapshot, known_procedure_steps=registry,
+            source_results=[source(lookup, "PROCEDURE_TOOL", 5), source(info, "INFO_AGENT", 40)])
+        supervisor = SupervisorAgent(ChoiceModel(), clock=lambda: ev.FIXED_TIME, max_local_attempts=1)
+        changes = supervisor._build_mutations(supervisor_input, supervisor_input.source_results, fact_overlays=[])
+        rows = build_blocker_candidates(snapshot, registry, supervisor_input.source_results, changes,
+                                        supervisor._evidence(supervisor_input.source_results, supervisor_input))
+        choice = 0 if mode == "completion_report" else next(i for i, row in enumerate(rows)
+            if row["candidate_id"] == f"procedure:{step.procedure_step_id}")
+        draft = await SupervisorAgent(ChoiceModel(choice=choice, information=mode == "completion_report"),
+                                      clock=lambda: ev.FIXED_TIME, max_local_attempts=1).draft(supervisor_input)
+        if mode == "completion_report":
+            assert draft.decision.next_action is None
+        else:
+            assert draft.decision.next_action.action_code == (code if mode in {"same_judgment", "stored"} else confirmation)
+        assert len(draft.mutations.procedure_progress_changes) == int(mode == "same_judgment")
+        for change in draft.mutations.procedure_progress_changes:
+            assert (change.proposed_status, change.proposed_requirements_confirmed, change.proposed_submitted) == ("IN_PROGRESS", True, False)
+        subject = ReviewSubject.create(schema_version="agent-io/2.0", review_subject_id=UUID(int=500), review_attempt=1,
+            run_id=supervisor_input.source_results[0].meta.run_id, case_id=1, trigger=request.trigger,
+            snapshot=snapshot, known_procedure_steps=registry, source_results=supervisor_input.source_results, supervisor_draft=draft)
+        assert (await ReviewTool(StubModel()).review(subject)).verdict == "PASS"
+        assert snapshot.model_dump_json() == before
+
+    asyncio.run(run())
