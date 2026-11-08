@@ -70,8 +70,8 @@ def ensure_context_row(session: Session, case: Case) -> None:
 def load_context(session: Session, case: Case, *, for_update: bool = False) -> DocumentContext:
     """서류함을 읽는다. `for_update`면 저장할 때까지 그 줄을 잠근다.
 
-    느린 작업(서류 분석·점검)은 **잠그지 않고** 하고, 반영하기 직전에만 `for_update`로
-    다시 읽는다. 그 사이 사장님이 다른 서류를 지웠으면 여기서 그 결과가 보인다(멘토님 #187).
+    모델을 쓰는 서류 분석은 **잠그지 않고** 하고, 반영하기 직전에 `for_update`로 다시 읽는다.
+    모델 없는 점검은 잠근 최신 목록으로 계산한다. 분석 중 저장된 삭제도 이 조회에 보인다.
     """
 
     # with_for_update면 세션이 들고 있던 값을 믿지 않고 DB에서 다시 읽는다 — 잠금이 목적이라 그래야 한다
@@ -89,7 +89,8 @@ def load_context(session: Session, case: Case, *, for_update: bool = False) -> D
 def save_context(session: Session, case: Case, context: DocumentContext) -> None:
     """서류함을 적는다. 커밋은 부른 쪽이 한다 — 판단 이력과 같은 트랜잭션에 들어가야 한다."""
 
-    row = session.get(CaseDocumentContext, case.id)
+    # 일반 재조회는 MySQL의 이전 읽기 시점을 볼 수 있어 변경 비교도 잠근 최신 행으로 한다.
+    row = session.get(CaseDocumentContext, case.id, with_for_update=True)
     payload = context.model_dump(mode="json")
     if row is None:
         session.add(CaseDocumentContext(case_id=case.id, context=payload))
@@ -155,29 +156,37 @@ async def upload_document(
         logger.exception("서류 처리 실패")
         raise HTTPException(status_code=502, detail="서류를 읽지 못했어요. 잠시 뒤 다시 올려 주세요.") from None
     # 여기부터 임계구역이다. 분석이 도는 수십 초 사이에 사장님이 다른 서류를 지웠을 수 있다.
-    # 그때 읽어 둔 목록에 얹어 저장하면 그 삭제가 사라진다(멘토님 #187).
-    # 바뀌었으면 최신 목록 위에 다시 얹는다 — 뜯어낸 결과는 캐시에 있어 다시 읽지 않는다.
+    # 이번 분석이 바꾼 서류만 최신 목록에 합친다. 그사이 삭제·확인된 같은 서류는 보존한다.
+    # 이력 INSERT도 Case의 FK 잠금을 쓰므로 모든 저장은 Case→서류함 순서로 잠근다.
+    session.refresh(case, with_for_update=True)
     fresh = load_context(session, case, for_update=True)
-    if fresh.documents != context.documents:
-        updated = await tool.add_document(fresh, filename, content, kind_hint=kind)
-    save_context(session, case, updated)
-
-    # 같은 파일을 다시 올리면 도구가 같은 서류로 보고 목록에 더하지 않는다. 새로 생긴 서류만 기록한다.
-    before = {document.document_id for document in fresh.documents}
+    before = {document.document_id: document for document in context.documents}
+    records = {document.document_id: document for document in fresh.documents}
+    changed = False
     for document in updated.documents:
-        if document.document_id not in before:
+        previous = before.get(document.document_id)
+        if document == previous or records.get(document.document_id) != previous:
+            continue
+        records[document.document_id] = document
+        changed = True
+        if previous is None:
             case_document_history_crud.create_case_document_history(
                 session,
                 CaseDocumentHistory(case_id=case.id, action="UPLOADED", document_kind=document.analysis.kind),
             )
+    if changed:
+        fresh.documents = list(records.values())
+        fresh.document_check = None
+    save_context(session, case, fresh)
     session.commit()
-    return updated
+    return fresh
 
 
 def confirm_document(
     session: Session, tool: DocumentTool, case: Case, document_id: UUID,
     kind: DocumentKind, confirmed_fields: dict[DocumentFieldName, str],
 ) -> DocumentContext:
+    session.refresh(case, with_for_update=True)
     try:
         updated = tool.confirm_document(
             load_context(session, case, for_update=True), document_id, kind, confirmed_fields=confirmed_fields,
@@ -190,6 +199,7 @@ def confirm_document(
 
 
 def remove_document(session: Session, tool: DocumentTool, case: Case, document_id: UUID) -> DocumentContext:
+    session.refresh(case, with_for_update=True)
     try:
         updated = tool.remove_document(load_context(session, case, for_update=True), document_id)
     except DocumentError as error:
@@ -205,12 +215,15 @@ def check_documents(
 ) -> DocumentContext:
     # 서류함 줄을 먼저 만든다 — 그 안의 commit/rollback이 아래 store_name 변경을 되돌리지 않게.
     ensure_context_row(session, case)
+    # 모델을 부르지 않는 점검끼리는 Case→서류함 순서로 잠근다. 이전 상호·신청인으로 계산한
+    # 결과가 나중 점검을 덮지 않게, 여기서 최신 Case를 읽고 점검 저장까지 순서를 지킨다.
+    session.refresh(case, with_for_update=True)
     # 서류에서 읽은 상호로 덮어쓰지 않는다. 사장님이 이 요청에 직접 보낸 이름만 저장한다.
     if store_name is not None:
         case.store_name = store_name
         session.add(case)
     # #251 순차 배포 중 구형 화면은 이름을 보내지 않는다. 기존 점검의 미확인 안내를 유지한다.
-    context = load_context(session, case)
+    context = load_context(session, case, for_update=True)
     # 이체확인증의 보낸 사람과 맞춰 볼 신청인 이름은 서비스가 받는 칸이 없어 점검 직전에 사장님께 묻는다.
     # 폐업사실증명원과 맞춰 볼 폐업일은 사장님이 실제 날짜라고 확인한 값만 쓴다.
     # 가입 때 정한 폐업 예정일(planned_closure_date)은 실제 폐업일과 다른 사실이라 대신 쓰지 않는다.
