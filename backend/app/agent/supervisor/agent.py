@@ -12,6 +12,7 @@ from pydantic import Field, StrictBool, StrictStr, model_validator
 from app.agent.action_catalog import (
     ProcedureBindings,
     build_action_candidates,
+    confirmed_restoration_progress,
     effective_procedure_progress,
     resolve_procedure_bindings,
 )
@@ -44,6 +45,7 @@ from app.agent.projection import (
 )
 from app.agent.prompts import supervisor_messages
 from app.agent.schemas import (
+    completion_confirmed,
     ActionCode,
     ActionDecisionDraft,
     AgentSchema,
@@ -259,6 +261,11 @@ class SupervisorAgent:
             known_procedure_steps=request.known_procedure_steps,
         )
         information_blockers = information_fields["blockers"] if information_fields else []
+        decision_types = (["ACTION"] if action_candidates else []) + (
+            ["NEEDS_MORE_INFO"] if information_blockers else []
+        )
+        if not decision_types:
+            raise SupervisorGuardrailError("Supervisor has no available action or information question")
         prompt_input = {
             "trigger": to_model_projection(request.trigger),
             "case_snapshot": to_model_projection(request.case_snapshot),
@@ -362,6 +369,7 @@ class SupervisorAgent:
                         # has no sampling-level determinism guarantee. Runtime reuse
                         # separately checks the full request, evidence and configuration.
                         enum_constraints={
+                            "decision_type": decision_types,
                             "action_code": [
                                 action["action_code"] for action in action_candidates
                             ],
@@ -778,11 +786,15 @@ class SupervisorAgent:
                     )
                     if observation.observed_status == ProcedureProgressStatus.COMPLETED:
                         confirmation = getattr(request.trigger, "procedure_completion_confirmation", None)
-                        if before_status != ProcedureProgressStatus.COMPLETED and (
-                            confirmation is None or not confirmation.matches(observation)
+                        if before_status != ProcedureProgressStatus.COMPLETED and not completion_confirmed(
+                            request.trigger, observation,
                         ):
                             continue
-                        if before_status != ProcedureProgressStatus.COMPLETED:
+                        if (
+                            before_status != ProcedureProgressStatus.COMPLETED
+                            and confirmation is not None
+                            and confirmation.matches(observation)
+                        ):
                             confirmation.assert_current(snapshot)
                     if finding.current_status != before_status:
                         raise SupervisorGuardrailError(
@@ -822,6 +834,14 @@ class SupervisorAgent:
                             procedure_analysis_call_id=source.meta.call_id,
                         )
                     )
+
+        completed = confirmed_restoration_progress(
+            snapshot, request.trigger, sources, fact_changes, request.known_procedure_steps,
+            procedure_bindings=self._bindings(request), uuid_factory=self._uuid,
+        )
+        if completed is not None:
+            progress_changes = [item for item in progress_changes if item.procedure_step != completed.procedure_step]
+            progress_changes.append(completed)
 
         return MutationSet(
             fact_changes=fact_changes,

@@ -20,7 +20,14 @@ import {
 } from '../lib/resultSubmit'
 import { judgmentNeedsDetailCase, moreInfoCase } from '../mocks/currentCase'
 import { resultInput, simulateSubmit } from '../mocks/resultFlow'
-import type { DemolitionRequired, RestorationAnswer, RestorationScope, ResultInputKind } from '../types/api'
+import type {
+  ActionDone,
+  ActionDoneKind,
+  DemolitionRequired,
+  RestorationAnswer,
+  RestorationScope,
+  ResultInputKind,
+} from '../types/api'
 import type { FailureNotice, NextAction, SubmitOutcome, SubmitState } from '../types/view'
 
 /**
@@ -46,6 +53,17 @@ const DEMOLITION_OPTIONS: { value: DemolitionRequired; label: string }[] = [
 ]
 
 /**
+ * [했어요] 버튼 문구. 할 일 종류는 서버가 정하고(`action_done_kind`), 화면은 문구만 고른다.
+ * [아직 …]은 아무것도 보내지 않고 홈으로 돌아간다. 할 일은 그대로 남는다.
+ */
+const DONE_LABELS: Record<ActionDoneKind, { done: string; notYet: string }> = {
+  PREPARATION: { done: '준비했어요', notYet: '아직 안 했어요' },
+  SUBMISSION: { done: '제출했어요', notYet: '아직 안 했어요' },
+  PROCESSING: { done: '처리 끝났어요', notYet: '아직이에요' },
+  WORK: { done: '끝냈어요', notYet: '아직이에요' },
+}
+
+/**
  * 이 화면이 받는 것.
  *
  * - `RESULT` 할 일을 하고 온 결과
@@ -55,7 +73,7 @@ const DEMOLITION_OPTIONS: { value: DemolitionRequired; label: string }[] = [
  * 둘 다 같은 길(`POST /cases/results`)로 보낸다. 다른 것은 화면에 띄울 물음과 보낼 글 모양뿐이다.
  */
 type Ask =
-  | { kind: 'RESULT'; nextAction: NextAction; inputKind: ResultInputKind }
+  | { kind: 'RESULT'; nextAction: NextAction; inputKind: ResultInputKind; doneKind: ActionDoneKind | null }
   | { kind: 'ANSWER'; questions: string[] }
   | { kind: 'RESUBMIT'; notice: Extract<FailureNotice, { kind: 'NEEDS_DETAIL' }> }
   | { kind: 'NEW_INPUT' }
@@ -86,6 +104,7 @@ function mockEntry(mockKey: string): EntryQuery {
             nextAction: resultInput.nextAction,
             // `?mock=result-choice` 는 서버가 원상복구 답을 골라서 받겠다고 한 화면(#197). 보내면 기본 반영 결과로 간다
             inputKind: mockKey === 'result-choice' ? 'RESTORATION_ANSWER' : 'TEXT',
+            doneKind: null,
           }
   return { status: 'READY', ask, historyId: 0 }
 }
@@ -165,7 +184,7 @@ export function ResultInputPage() {
           case 'READY':
             setFetched({
               status: 'READY',
-              ask: { kind: 'RESULT', nextAction: entry.nextAction, inputKind: entry.inputKind },
+              ask: { kind: 'RESULT', nextAction: entry.nextAction, inputKind: entry.inputKind, doneKind: entry.doneKind },
               historyId: entry.historyId,
             })
             return
@@ -231,9 +250,14 @@ export function ResultInputPage() {
   const resubmitNotice = entry.status === 'READY' && entry.ask.kind === 'RESUBMIT' ? entry.ask.notice : null
   const latestDetail = state.kind === 'FAILED' && state.notice.kind === 'NEEDS_DETAIL' ? state.notice : null
   const askedFields = latestDetail ?? resubmitNotice
-  const canChoose = entry.status === 'READY' && entry.ask.kind === 'RESULT'
-    && entry.ask.inputKind === 'RESTORATION_ANSWER' && !correcting && questions === null && !askedFields
+  const choiceKind = entry.status === 'READY' && entry.ask.kind === 'RESULT'
+    && !correcting && questions === null && !askedFields ? entry.ask.inputKind : 'TEXT'
+  const canChoose = choiceKind !== 'TEXT'
   const usingChoices = canChoose && !directInput
+  // 할 일 대부분은 지시문이라 글로 답하기 어렵다. [했어요]면 서버가 모델 해석 없이 그 할 일의 진행으로 저장한다
+  const doneKind = usingChoices && choiceKind === 'ACTION_DONE' && entry.status === 'READY' && entry.ask.kind === 'RESULT'
+    ? entry.ask.doneKind
+    : null
   const selectionInput: RestorationAnswer | null = restorationAnswer.restoration_scope && restorationAnswer.demolition_required
     ? { restoration_scope: restorationAnswer.restoration_scope, demolition_required: restorationAnswer.demolition_required }
     : null
@@ -258,8 +282,11 @@ export function ResultInputPage() {
     (state.kind === 'FAILED' && (state.notice.kind === 'SERVICE_SIDE' || state.notice.kind === 'NO_RECOVERY'))
   // 너무 긴 글은 자르지 않고 보내기를 막는다. 소리 없이 잘라 보내면 사장님이 적은 뒷부분이 사라진다.
   // 아래 [보내기]와 실패 안내의 [다시 보내기]가 같은 조건을 쓴다
+  const choiceInput: RestorationAnswer | ActionDone | null = doneKind
+    ? { action_done: true }
+    : selectionInput
   const tooLong = !usingChoices && draft.length > MAX_RESULT_LENGTH
-  const canRetry = usingChoices ? selectionInput !== null : draft.length > 0 && !tooLong
+  const canRetry = usingChoices ? choiceInput !== null : draft.length > 0 && !tooLong
   const goToCase = { label: '지금 상황 보기', onClick: () => navigate({ pathname: '/case', search }) }
   const notice = stayNotice(
     state,
@@ -274,7 +301,10 @@ export function ResultInputPage() {
    * 보내기와 기다리기의 실패를 따로 받는다. 보내다 실패하면 서버가 받았는지조차 모르고,
    * 기다리다 실패하면 접수는 된 것이라 사장님에게 할 말이 다르다.
    */
-  async function submitToServer(historyId: number, input: string | RestorationAnswer): Promise<SubmitOutcome | null> {
+  async function submitToServer(
+    historyId: number,
+    input: string | RestorationAnswer | ActionDone,
+  ): Promise<SubmitOutcome | null> {
     let acceptedId: number
     try {
       acceptedId = await submitResult(historyId, input)
@@ -333,7 +363,7 @@ export function ResultInputPage() {
 
     const outcome = usesMock
       ? await simulateSubmit(readMockKey(search), draft)
-      : await submitToServer(entry.historyId, usingChoices && selectionInput ? selectionInput : draft)
+      : await submitToServer(entry.historyId, usingChoices && choiceInput ? choiceInput : draft)
     if (!alive.current || outcome === null) return
 
     switch (outcome.kind) {
@@ -494,7 +524,17 @@ export function ResultInputPage() {
             submitIfReady()
           }}
         >
-          {usingChoices ? (
+          {doneKind ? (
+            // [아직 안 했어요]는 바뀌는 것이 없어 보내지 않는다. 판단(AI)을 부르지 않고 할 일을 그대로 둔다
+            <div className="flex flex-col gap-3">
+              <Button disabled={formLocked} onClick={submitIfReady}>
+                {DONE_LABELS[doneKind].done}
+              </Button>
+              <Button variant="outline" disabled={formLocked} onClick={goToCase.onClick}>
+                {DONE_LABELS[doneKind].notYet}
+              </Button>
+            </div>
+          ) : usingChoices ? (
             <>
               <div className="flex flex-col gap-3">
                 <p id={scopeTitleId} className="text-17 font-bold">원상복구 범위</p>
@@ -560,9 +600,11 @@ export function ResultInputPage() {
           */}
           {partlyAnswered && <InfoBox>답하지 않은 질문은 비워 두셔도 돼요. 필요하면 다시 여쭤볼게요.</InfoBox>}
           {!usingChoices && <LengthNotice length={draft.length} withQuestions={questions !== null} />}
-          <Button type="submit" disabled={!canSubmit}>
-            보내기
-          </Button>
+          {!doneKind && (
+            <Button type="submit" disabled={!canSubmit}>
+              보내기
+            </Button>
+          )}
         </form>
       </main>
     </ResultFrame>

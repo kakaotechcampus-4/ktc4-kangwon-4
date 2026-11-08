@@ -47,6 +47,7 @@ from app.agent.document_tool.safety import ContentSafetyGuard  # noqa: E402
 from app.agent.document_tool.safety import SafetyDecision  # noqa: E402
 from app.agent.document_tool.tool import DocumentTool  # noqa: E402
 from app.agent.llm import LLMRequestError  # noqa: E402
+from app.agent.schemas import ActionDoneAnswer  # noqa: E402
 from app.be.crud.member import create_member  # noqa: E402
 from app.be.db import get_engine, reset_all_tables  # noqa: E402
 from app.be.services import auth as auth_service  # noqa: E402
@@ -121,6 +122,8 @@ def document_safety_files(directory):
 OUTAGE_TEXT = "다시 확인해 보니 원상복구는 일부이고 카운터만 철거해야 합니다."
 PREPARATION_SCOPE_TEXT = "원상복구 범위는 전부이고 철거가 필요합니다. 작업은 아직 시작하지 않았습니다."
 PREPARATION_TEXT = "철거 전 사진을 찍고, 업체와 증빙 준비사항을 확인했습니다."
+# [준비했어요] 버튼이 남기는 고정 문장. 모델 해석 없이 코드가 준비 확인으로 저장한다
+PREPARATION_BUTTON_TEXT = ActionDoneAnswer(action_code="CONFIRM_RESTORATION_REQUIREMENTS", procedure_step_id=1).to_input_text()
 
 
 class FirstCandidateModel:
@@ -203,7 +206,7 @@ class FirstCandidateModel:
             raise AssertionError(f"지원하지 않는 E2E 모델 호출: {name}")
         contract = json.loads(messages[1]["content"].removeprefix("INPUT_JSON="))["contract"]
         first = contract["blocker_candidates"][0]
-        if any(text in prompt for text in (PREPARATION_SCOPE_TEXT, PREPARATION_TEXT)):
+        if any(text in prompt for text in (PREPARATION_SCOPE_TEXT, PREPARATION_TEXT, PREPARATION_BUTTON_TEXT)):
             # 이 시나리오는 준비 확인 후보가 남아 있으면 고른다. 후보 제거가 깨지면
             # 다른 후보를 우연히 골라 통과하지 않고, 실제 반복 행동이 드러난다.
             first = next((row for row in contract["blocker_candidates"]
@@ -242,6 +245,7 @@ def main() -> None:
                   "conflict_members": [_signed_in_member() for _ in range(2)],
                   "retry_member": _signed_in_member(), "session_members": [_signed_in_member() for _ in range(3)],
                   "preparation_member": _signed_in_member(),
+                  "preparation_button_member": _signed_in_member(),
                   "replan_members": [_signed_in_member() for _ in range(3)],
                   "replan_files": replan_files(directory),
                   "document_member": _signed_in_member(), "document_other_member": _signed_in_member(),

@@ -19,11 +19,18 @@ git log -1 --oneline                 # 지금 올라가 있는 커밋. 되돌릴
 grep '^ENVIRONMENT' .env.prod        # prod여야 한다. dev면 서버를 켤 때마다 표가 전부 지워진다
 ```
 
-**표가 바뀌는 배포인지 본다.** 지금 커밋과 올릴 develop 사이에 모델이 바뀌었으면 SQL이 필요합니다.
+**올릴 커밋을 정해 `SHA`에 넣습니다.** develop 최신이 아니라 팀이 정한 커밋입니다. 그사이 develop에 머지된 것까지 딸려 올라가지 않게, 이후 단계는 모두 이 값을 씁니다.
 
 ```bash
 git fetch origin
-git diff --stat HEAD origin/develop -- backend/app/be/models backend/sql
+SHA=<올릴 커밋>                      # 예: bcf99d0. 버전을 고정했으면 그 커밋
+git log -1 --oneline $SHA            # 올릴 커밋이 맞는지
+```
+
+**표가 바뀌는 배포인지 본다.** 지금 커밋과 올릴 커밋 사이에 모델이 바뀌었으면 SQL이 필요합니다.
+
+```bash
+git diff --stat HEAD $SHA -- backend/app/be/models backend/sql
 ```
 
 - 모델에서 칸·ENUM 값이 바뀌었는데(`001_schema.sql`도 같이 바뀜) 새 `00N_*.sql`이 없으면, **운영 DB를 고칠 SQL이 빠진 것**입니다. 배포를 멈추고 PR을 확인합니다. CI는 이걸 잡지 못합니다(`001` 머리말)
@@ -36,6 +43,7 @@ DB와 서류 폴더를 **같은 시점으로** 받습니다. DB만 되돌리면 
 
 ```bash
 mkdir -p /home/ubuntu/backup && TS=$(date +%Y%m%d-%H%M) && echo $TS    # TS는 되돌릴 때 쓰니 적어 둔다
+$C logs --no-color fastapi > /home/ubuntu/backup/fastapi-$TS.log         # 3단계에서 컨테이너를 새로 만들면 지금까지 로그가 사라진다
 $C stop fastapi
 $C exec -T mysql mysqldump --defaults-extra-file=/run/secrets/mysql_health_cnf \
   --single-transaction --default-character-set=utf8mb4 closure_agent > /home/ubuntu/backup/db-$TS.sql
@@ -58,28 +66,32 @@ tar tzf /home/ubuntu/backup/documents-$TS.tgz | head
 
 ```bash
 # 표가 바뀌지 않는 배포(1단계에서 새 00N_*.sql 없음)
-git pull && $C up -d --build
+git merge --ff-only $SHA && GIT_SHA=$(git rev-parse --short HEAD) $C up -d --build
 
 # 새 00N_*.sql이 있으면 번호 순서대로 이어서, 전부 성공했을 때만 켠다
-git pull && \
+git merge --ff-only $SHA && \
   $MYSQL closure_agent < backend/sql/00N_xxx.sql && \
-  $C up -d --build
+  GIT_SHA=$(git rev-parse --short HEAD) $C up -d --build
 ```
 
 중간에 멈추면 FastAPI는 멈춘 채로 남습니다. 원인을 고치고 다시 하거나, 5단계로 되돌립니다.
 
+- `GIT_SHA=…`는 지금 커밋을 이미지에 넣어 `/health`가 보여 주게 합니다(4단계에서 확인). 빠뜨려도 서버는 뜨지만 버전이 `unknown`으로 나옵니다
+- `git pull`이 아니라 `git merge --ff-only $SHA`인 이유: `pull`은 그 순간의 develop 최신을 받아서, 정하지 않은 커밋까지 올라갈 수 있습니다. `--ff-only`는 서버 저장소에 다른 커밋이 끼어 있으면 합치지 않고 멈춥니다
 - `.env.prod`만 바꿨을 때도 `restart`가 아니라 `$C up -d fastapi`입니다. `restart`는 바뀐 환경 변수를 읽지 않습니다
+- mysql도 `.env.prod`를 읽어서(`env_file`), 이 파일을 바꾸고 `up -d`를 하면 **mysql 컨테이너도 새로 만들어집니다.** DB 데이터는 `mysql_data` 볼륨에 있어 그대로 남고, 다시 healthy가 될 때까지 몇 초 걸립니다
 - 서버가 켜질 때 지난번에 꺼지며 남은 판단(`PENDING`)을 실패(`RETRY`)로 풀어 줍니다(#194). 사장님은 홈의 [다시 판단하기]로 이어 갈 수 있습니다
 
 ## 4. 확인
 
 ```bash
 $C ps                                                # fastapi·mysql 둘 다 healthy
-curl -s https://reborn-ktc.duckdns.org/health        # {"status":"ok"}
+curl -s https://reborn-ktc.duckdns.org/health        # {"status":"ok","version":"<올린 커밋>"}
 $C logs --tail 50 fastapi                            # 시작 오류가 없는지
 ```
 
-- `/health`는 DB에 `SELECT 1`까지 보냅니다(#219). DB가 안 되면 503 `{"status":"unavailable"}`이고 fastapi가 `unhealthy`로 보입니다. 그때는 `$C logs mysql`부터 봅니다
+- `/health`는 DB에 `SELECT 1`까지 보냅니다(#219). DB가 안 되면 503 `{"status":"unavailable","version":…}`이고 fastapi가 `unhealthy`로 보입니다. 그때는 `$C logs mysql`부터 봅니다
+- `version`이 `git log -1 --oneline`의 커밋과 같아야 새 코드가 떠 있는 것입니다. `unknown`이면 `GIT_SHA=`를 빠뜨린 것이라 3단계의 마지막 명령만 다시 칩니다. 이 주소는 누구나 볼 수 있어, 팀원도 서버에 들어가지 않고 운영 버전을 확인할 수 있습니다
 - 화면에서 로그인 → 홈까지 한 번 들어가 봅니다
 
 **AI 설정 확인(모델 호출 없음).** `.env.prod.example`의 Sol·Luna 6 endpoint/키를 실제 `.env.prod`에 채웁니다. Info는 Sol high, Supervisor는 Luna 6 high, 독립 Review·서류 판독은 Sol xhigh입니다. `/health`는 AI 설정이나 모델 연결을 검사하지 않으므로 별도로 확인합니다. 아래는 설정만 읽으며 endpoint·키를 출력하지 않습니다.
@@ -104,8 +116,8 @@ PY
 
 ```bash
 git checkout <1단계에서 적은 커밋>
-$C up -d --build
-# 고친 뒤 다시 올릴 때는 git checkout develop && git pull
+GIT_SHA=$(git rev-parse --short HEAD) $C up -d --build
+# 고친 뒤 다시 올릴 때는 git checkout develop && git merge --ff-only <새로 올릴 커밋>
 ```
 
 **DB·서류까지 되돌리기** — DB·서류가 백업 시점으로 **통째로** 바뀝니다. 백업 뒤에 사장님이 넣은 내용은 사라집니다.
@@ -123,7 +135,7 @@ tail -n 1 /home/ubuntu/backup/db-$TS.sql | grep -q '^-- Dump completed' && \
   $MYSQL closure_agent < /home/ubuntu/backup/db-$TS.sql && \
   $C run --rm --no-deps -T fastapi sh -c 'find /data/documents -mindepth 1 -delete && tar xzf - -C /data/documents' \
     < /home/ubuntu/backup/documents-$TS.tgz && \
-  $C up -d --build
+  GIT_SHA=$(git rev-parse --short HEAD) $C up -d --build
 ```
 
 - 잘린 DB 백업을 넣으면 앞쪽 표만 지우고 다시 만든 채 멈춰 일부 표가 빕니다. 그래서 마지막 줄을 먼저 봅니다
@@ -157,7 +169,7 @@ cp .env.prod.example .env.prod        # 그다음 값을 채운다
 chmod 600 mysql_health.cnf            # 머리말대로 만든 뒤
 $C up -d --wait mysql && \
   $MYSQL closure_agent < backend/sql/001_schema.sql && \
-  $C up -d --build fastapi            # 절차 기준 표는 서버가 켜질 때 채운다
+  GIT_SHA=$(git rev-parse --short HEAD) $C up -d --build fastapi   # 절차 기준 표는 서버가 켜질 때 채운다
 ```
 
 ### 검수 자료 버전을 올렸을 때

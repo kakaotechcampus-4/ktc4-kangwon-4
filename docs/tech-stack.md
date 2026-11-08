@@ -56,7 +56,7 @@
 
 - **상태:** 추적 인터페이스 + credential이 있을 때 Langfuse 전송 사용
 - **용도:** 실행·호출 metadata를 받을 수 있는 경계
-- **현재:** credential이 없으면 아무 곳에도 보내지 않는 `NullTraceSink`, 있으면 `LangfuseTraceSink`가 구성요소별 상태·지연 시간·시도 횟수·model·token 수를 전송한다. prompt 원문과 evidence는 보내지 않는다.
+- **현재:** credential이 없으면 아무 곳에도 보내지 않는 `NullTraceSink`, 있으면 `LangfuseTraceSink`가 구성요소별 상태·지연 시간·시도 횟수·model·token 수와 `case_id`·선택 행동 코드·검수 이슈 코드/경로/심각도/담당 구성요소·재작업 대상을 전송한다. `case_id`는 외부 추적 기록을 해당 Case와 연결하는 값이다. 검수 이슈는 앞 20개와 전체 개수를 기록하며, prompt·evidence·사장님 글·검수의 자유 이유 문장은 보내지 않는다.
 - **제한:** token 수는 보내지만 비용 금액은 계산하지 않는다. 실행당 LLM 호출 횟수 상한(`llm.py`의 `LLMCallBudget`, 기본 40회)은 호출 수를 세어 막는 장치이지 비용 측정이 아니다.
 
 현재 구조를 “LangChain과 LangGraph를 함께 사용한다”고 설명하면 부정확하다. 실행 순서 관리는 LangGraph, LLM HTTP 통신은 `httpx`가 담당한다.

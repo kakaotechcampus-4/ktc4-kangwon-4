@@ -124,10 +124,10 @@ def candidate_decision_fields(
     return _decision_fields(candidate, action)
 
 
-def _completion_questions(snapshot, sources, mutations, bindings):
+def _completion_questions(snapshot, sources, mutations, bindings, known_steps):
     completed = {
         (item.procedure_step.procedure_step_id, item.procedure_step.step_code)
-        for item in effective_procedure_progress(snapshot, mutations)
+        for item in effective_procedure_progress(snapshot, mutations, known_steps=known_steps, procedure_bindings=bindings)
         if item.status == "COMPLETED"
     }
     questions = {}
@@ -183,7 +183,7 @@ def build_blocker_candidates(
     resolved_bindings = resolve_procedure_bindings(steps, procedure_bindings)
     pending_completions = {
         item["candidate_id"]
-        for item in _completion_questions(snapshot, sources, mutations, resolved_bindings)
+        for item in _completion_questions(snapshot, sources, mutations, resolved_bindings, steps)
     }
     values = _values(snapshot, mutations)
     history_question = missing_info_fields(
@@ -335,7 +335,8 @@ def build_blocker_candidates(
                 if applicability_unknown
                 else [f"{label}에 필요한 서류와 제출 방법을 확인해 주시겠습니까?"]
                 if confirmation
-                else ["제출한 신고서와 첨부서류가 접수되었는지 확인해 주시겠습니까?"]
+                # "진행하세요" 할 일에 접수 확인을 물으면 어긋난다. 접수·처리는 제출 뒤 처리 결과 확인이 묻는다
+                else [f"{label}를 제출하셨나요?"]
             )
             if logical_code in {
                 "PERFORM_RESTORATION", "RETURN_PREMISES", "SETTLE_EMPLOYEE_PAYMENTS",
@@ -476,7 +477,7 @@ def missing_info_fields(
 ) -> dict[str, Any] | None:
     """Ask about one unresolved decision blocker in the existing question order."""
     completion_questions = _completion_questions(
-        snapshot, sources, mutations, procedure_bindings or {}
+        snapshot, sources, mutations, procedure_bindings or {}, known_procedure_steps,
     )
     values = _values(snapshot, mutations)
     restoration_detail_unnecessary = (

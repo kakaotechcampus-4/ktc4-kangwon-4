@@ -7,6 +7,7 @@
 
 
 import logging
+import re
 from collections.abc import Mapping
 from datetime import datetime
 
@@ -15,6 +16,7 @@ from sqlmodel import Session
 from app.agent.roadmap import build_roadmap
 from app.agent.schemas import (
     CaseFieldKey,
+    CaseSnapshot,
     ConflictOutcome,
     EvidenceRecord,
     FactChangeCandidate,
@@ -34,6 +36,7 @@ from app.be.crud import evidence as evidence_crud
 from app.be.crud import procedure_step as procedure_step_crud
 from app.be.crud import support_item as support_item_crud
 from app.be.models.blocker import Blocker
+from app.be.models.case import Case
 from app.be.models.case_field_history import CaseFieldHistory
 from app.be.models.case_history import CaseHistory
 from app.be.models.evidence import ConflictReference, DecisionRecord, Evidence, EvidenceLineage
@@ -62,6 +65,13 @@ def save_reviewed_plan(
 
     # 저장 직전에 검수 증거를 다시 대조한다(AI팀 스펙의 처리 설명).
     outcome.assert_integrity()
+    if trace_id is None:
+        source_trace_ids = {source.meta.trace_id for source in outcome.review_subject.source_results
+                            if source.meta.trace_id is not None}
+        if len(source_trace_ids) == 1:
+            candidate = source_trace_ids.pop()
+            if re.fullmatch(r"[0-9a-f]{32}", candidate) and candidate != "0" * 32:
+                trace_id = candidate
     # 대조 전에 읽기 트랜잭션을 끊는다. 이 세션은 판단 시작 때 스냅샷을 읽고 그대로 36~120초를
     # 기다렸는데, MySQL 기본 격리 수준(REPEATABLE READ)에서는 같은 트랜잭션 안의 재조회가 처음
     # 읽은 시점을 계속 본다. SQLAlchemy도 이미 읽어둔 객체를 그대로 돌려준다. 끊지 않으면 그
@@ -69,7 +79,10 @@ def save_reviewed_plan(
     # 여기까지 읽기만 했으므로 되돌릴 것이 없고, 대조와 쓰기는 그다음 트랜잭션에 함께 들어간다.
     session.rollback()
     # 쓰기 전에 본다. 하나라도 어긋나면 아무것도 반영하지 않는다.
-    _assert_changes_are_current(session, history, outcome.review_subject.supervisor_draft.mutations)
+    _assert_changes_are_current(
+        session, history, outcome.review_subject.supervisor_draft.mutations,
+        snapshot=outcome.review_subject.snapshot,
+    )
 
     decision = outcome.review_subject.supervisor_draft.decision
     proof = outcome.review_proof
@@ -330,7 +343,9 @@ class StaleJudgmentError(RuntimeError):
     """판단이 도는 사이 Case가 바뀌어, 그 판단을 반영하면 최신 값을 덮어쓰게 되는 상태."""
 
 
-def _assert_changes_are_current(session: Session, history: CaseHistory, mutations: MutationSet) -> None:
+def _assert_changes_are_current(
+    session: Session, history: CaseHistory, mutations: MutationSet, *, snapshot: CaseSnapshot,
+) -> None:
     """AI가 보고 판단한 "바뀌기 전 값"이 지금도 그대로인지 확인한다.
 
     판단은 실측 36~120초 걸린다. 그 사이 다른 입력이 반영되면 AI가 들고 있는 값은 이미
@@ -345,6 +360,14 @@ def _assert_changes_are_current(session: Session, history: CaseHistory, mutation
     case = case_crud.get_case_by_id(session, history.case_id)
     if case is None:
         raise ValueError(f"case {history.case_id} not found")
+
+    if _full_restoration_change(case, mutations.fact_changes) is not None:
+        # 범위 확정에 따라 함께 비울 세부값도 잠근 최신 행과 판단 당시 값이 같아야 한다.
+        session.refresh(case, with_for_update=True)
+        detail = next((fact for fact in snapshot.facts
+                       if fact.field_path == CaseFieldKey.RESTORATION_SCOPE_DETAIL), None)
+        if detail is None or case.restoration_scope_detail != detail.value:
+            raise StaleJudgmentError("전체 범위 확정 전 세부 설명이 판단 당시와 다릅니다")
 
     for change in mutations.fact_changes:
         stored = _comparable_case_value(case, change.field_path)
@@ -401,7 +424,11 @@ def _apply_fact_changes(
     if case is None:
         raise ValueError(f"case {history.case_id} not found")
 
+    full_change = _full_restoration_change(case, fact_changes)
+    old_detail = case.restoration_scope_detail if full_change is not None else None
     for change in fact_changes:
+        if full_change is not None and change.field_path == CaseFieldKey.RESTORATION_SCOPE_DETAIL:
+            continue  # 같은 묶음의 SET/CLEAR 순서와 관계없이 전체 전환의 정리를 한 번만 남긴다.
         # AI가 대화 중에 바꾸겠다고 보낼 수 있는 필드는 14개(AgentFieldKey)지만, 저장하는
         # 것은 9개(CaseFieldKey)뿐이다. 나머지 5개(직원 고용 이력·4대보험 가입 이력)는
         # 가입 폼으로만 채우기로 했다 — 사장님이 직접 답한 값을 AI가 대화 중에 추정한
@@ -441,6 +468,23 @@ def _apply_fact_changes(
                 reason=change.reason_summary,
             ),
         )
+
+    if full_change is not None and old_detail is not None:
+        case.restoration_scope_detail = None
+        case_field_history_crud.create_case_field_history(session, CaseFieldHistory(
+            case_id=case.id, case_history_id=history.id,
+            canonical_field=CaseFieldKey.RESTORATION_SCOPE_DETAIL.value,
+            before_value=old_detail, after_value=None,
+            source=full_change.source_type.value, source_evidence_refs=list(full_change.source_evidence_refs),
+            reason="전체 범위 확정 시 세부 설명을 비우기로 한 사용자 정책을 적용했습니다.",
+        ))
+
+
+def _full_restoration_change(case: Case, changes: list[FactChangeCandidate]) -> FactChangeCandidate | None:
+    return next((change for change in changes
+                 if change.field_path == CaseFieldKey.RESTORATION_SCOPE
+                 and change.operation == FactOperation.SET and change.proposed_value == "FULL"
+                 and case.restoration_scope != "FULL"), None)
 
 
 def _column_value(change: FactChangeCandidate) -> object | None:

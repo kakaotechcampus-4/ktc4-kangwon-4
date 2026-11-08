@@ -6,7 +6,7 @@
  */
 
 // 폐업 사유·보증금 결과는 서버 값을 그대로 고르는 보기라, 같은 값을 여기 한 벌 더 적지 않는다
-import type { ClosureReason, DepositReturnResult, ResultInputKind } from './api'
+import type { ActionDoneKind, ClosureReason, DepositReturnResult, ResultInputKind } from './api'
 
 /** fact 하나의 확인 상태 */
 export type FactStatus =
@@ -186,7 +186,7 @@ export interface ResultInputView {
  */
 export type ResultsEntry =
   /** 결과를 받을 수 있다. `historyId` 는 이 결과가 어느 판단에 대한 것인지 가리킨다 */
-  | { kind: 'READY'; nextAction: NextAction; historyId: number; inputKind: ResultInputKind }
+  | { kind: 'READY'; nextAction: NextAction; historyId: number; inputKind: ResultInputKind; doneKind: ActionDoneKind | null }
   /** 확인을 기다리는 충돌이 있다. 그것부터 풀어야 해서 ④로 보낸다 */
   | { kind: 'CONFIRM'; view: ConfirmView }
   /**
@@ -397,16 +397,10 @@ export interface DiagnosisAnswers {
   /** 직원이 있을 때만 묻는다. 정직원 + 아르바이트가 보낼 직원 수가 된다 */
   fullTimeCount: number
   partTimeCount: number
-  /**
-   * 지금 직원이 없을 때만 묻는다. `UNKNOWN`은 "잘 모르겠어요"다.
-   * "아니요"와 나누는 것은 서버에서 뜻이 달라서다 — 없음은 직원 정산·보험 신고를 빼고, 모름은 확인 필요로 남긴다
-   */
-  hadEmployees: boolean | 'UNKNOWN' | null
-  /**
-   * 고른 보험. 빈 목록은 "가입한 적 없어요", `UNKNOWN`은 "잘 모르겠어요"다.
-   * 둘을 나누는 것은 서버에서 뜻이 달라서다 — 없음은 보험 할 일을 빼고, 모름은 확인 필요로 남긴다
-   */
-  insurances: DiagnosisInsurance[] | 'UNKNOWN' | null
+  /** 지금 직원이 없을 때만 묻는다. 없음이면 직원 정산·보험 신고를 뺀다 */
+  hadEmployees: boolean | null
+  /** 고른 보험. 빈 목록은 "가입한 적 없어요"이고 보험 할 일을 뺀다 */
+  insurances: DiagnosisInsurance[] | null
   closure: DiagnosisClosure | null
 }
 

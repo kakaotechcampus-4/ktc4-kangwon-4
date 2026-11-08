@@ -19,4 +19,9 @@ ENV AGENT_OCR_TESSDATA_DIR=/opt/reborn/tessdata \
 # 검수 자료 버전이 바뀌면 기존 Case에 다시 적재하는 명령을 배포 이미지에서도 쓴다.
 COPY ./scripts/import_reviewed_procedures.py ./scripts/import_reviewed_procedures.py
 
+# 이 이미지를 빌드한 커밋. /health가 그대로 보여 줘서 서버에 들어가지 않고 운영 버전을 확인한다.
+# 배포 명령이 넘긴다(docs/deploy.md). 커밋마다 값이 바뀌므로 맨 아래에 둬서, 위의 패키지 설치·OCR 받기는 캐시를 쓴다.
+ARG GIT_SHA=unknown
+ENV APP_VERSION=$GIT_SHA
+
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

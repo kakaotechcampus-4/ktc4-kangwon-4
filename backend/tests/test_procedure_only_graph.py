@@ -667,7 +667,7 @@ def test_batch_review_failure_returns_no_changes_and_preserves_the_original_inpu
     # 새 근거가 필요한 경우에는 기존 재작업 경로를 유지한다.
     ("/supervisor_draft/decision/blockers/0/description", "SUPERVISOR", 3, True),
 ])
-def test_review_rejection_supervisor_cannot_fix_stops_without_rework(path, target, review_calls, missing_evidence):
+def test_review_rejection_supervisor_cannot_fix_stops_without_rework(path, target, review_calls, missing_evidence, caplog):
     graph, request, _, _ = batch_conflict_graph()
     before = request.model_dump_json()
 
@@ -688,10 +688,14 @@ def test_review_rejection_supervisor_cannot_fix_stops_without_rework(path, targe
 
     graph._review_tool = AsyncMock()
     graph._review_tool.review.side_effect = reject
-    outcome = asyncio.run(graph.run(request))
+    with caplog.at_level("WARNING", logger="app.agent.graph"):
+        outcome = asyncio.run(graph.run(request))
     assert outcome.outcome_type == "SAFE_FAILURE"
     assert outcome.failure_code == "REVIEW_RETRY_EXHAUSTED"
     assert outcome.failed_component == "REVIEW_TOOL" and outcome.retryable is False
+    # 왜 멈췄는지는 이 서버 로그에만 남긴다(외부 추적에는 이유 문장을 보내지 않는다)
+    [stopped] = [record.getMessage() for record in caplog.records if "review stopped run" in record.getMessage()]
+    assert "합성 검수 반려" in stopped and "CASE_MISMATCH" in stopped
     assert graph._review_tool.review.await_count == review_calls
     assert graph._supervisor._llm.calls == review_calls
     assert request.model_dump_json() == before

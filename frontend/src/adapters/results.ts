@@ -213,10 +213,19 @@ export function toResultsEntry(body: CaseResultsEntryResponse | null): ResultsEn
       // 번호가 없으면 결과를 보낼 수 없고, 할 일이 없으면 무엇에 대한 결과인지 보여줄 수 없다
       const nextAction = toNextAction(body.next_action)
       if (!Number.isInteger(body.case_history_id) || nextAction === null) return { kind: 'UNRECOGNIZED' }
-      if (body.result_input_kind !== 'TEXT' && body.result_input_kind !== 'RESTORATION_ANSWER') {
+      if (!['TEXT', 'RESTORATION_ANSWER', 'ACTION_DONE'].includes(body.result_input_kind)) {
         return { kind: 'UNRECOGNIZED' }
       }
-      return { kind: 'READY', nextAction, historyId: body.case_history_id as number, inputKind: body.result_input_kind }
+      // [했어요] 버튼인데 종류가 없거나 모르는 값이면 어떤 버튼을 보여 줄지 정할 수 없다
+      const doneKind = body.result_input_kind === 'ACTION_DONE' ? body.action_done_kind : null
+      if (body.result_input_kind === 'ACTION_DONE'
+        && !['PREPARATION', 'SUBMISSION', 'PROCESSING', 'WORK'].includes(doneKind as string)) {
+        return { kind: 'UNRECOGNIZED' }
+      }
+      return {
+        kind: 'READY', nextAction, historyId: body.case_history_id as number,
+        inputKind: body.result_input_kind, doneKind,
+      }
     }
 
     case 'CONFLICT': {

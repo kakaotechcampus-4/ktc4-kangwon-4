@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 import app.agent.runtime as runtime_module
 import pytest
-from app.agent.action_catalog import PROCEDURE_LABELS
+from app.agent.action_catalog import ACTION_DEFINITIONS, PROCEDURE_LABELS
 from app.agent.info_agent import agent as info_module
 from app.agent.info_agent import procedure_digests
 from app.agent.schemas import AgentGraphInput, RestorationAnswer
@@ -1089,3 +1089,290 @@ def test_conflict_confirmation_fills_info_from_digest_and_keeps_the_review_model
     assert outcome.outcome_type == "REVIEWED_PLAN", (outcome.failure_code, getattr(outcome, "failure_message_code", None), calls)
     # Info 모델은 부르지 않는다. 보관된 사실(모델이 꺼내 아직 Review 전)이 있으면 Review 모델을 유지한다
     assert calls == ["reborn_supervisor_draft", "reborn_review_output"] if with_retained else ["reborn_supervisor_draft"]
+
+
+# ── [했어요] 버튼: 지금 할 일의 답을 모델 해석 없이 코드로 받는다 ──
+# 운영에서 "넵 다 확인 완료했어요"·"전/후 사진 찍었어요"가 준비 확인으로 저장되지 않아 같은 안내가
+# 반복되거나 판단이 멈췄고(2026-11-07), "식품영업 폐업신고 했어요"도 판단이 멈췄다(11-08).
+# 준비 확인은 준비만, 신고 제출은 제출까지, 처리 결과 확인·직접 하는 일은 완료로 그 판단에서 반영한다.
+
+def _action_done_outcome(action_code, prior_facts, *, insured=False, step_code=None, progress=None, prefer=None):
+    from app.agent.procedure_tool.cafe import build_cafe_procedure_steps
+    from app.agent.schemas import ActionDoneAnswer
+
+    # 테스트용 ev.build_registry에는 선후 규칙이 없다. 운영과 같은 카페 절차 목록으로 돌린다
+    registry = build_cafe_procedure_steps({code: i + 1 for i, code in enumerate(PROCEDURE_LABELS)})
+    step = next(item.procedure_step for item in registry
+                if item.procedure_step.step_code == (step_code or ACTION_DEFINITIONS[action_code].procedure_logical_code))
+    answer = ActionDoneAnswer(action_code=action_code, procedure_step_id=step.procedure_step_id)
+    store = ev.SnapshotStore(REVIEWED)
+    request = ev.attach_fixture_sources(ev.build_graph_input(ev.CASES["benchmark_case1"],
+        result_text=answer.to_input_text(), prior_facts=prior_facts), store)
+    payload = request.model_dump(mode="json")
+    base = next(fact for fact in payload["case_snapshot"]["facts"] if fact["field_path"] == "franchise_status")
+    if insured:
+        # 준비 데이터는 보험 칸을 옮기지 않는다. 가게 만들기에서 고른 값처럼 확정 사실로 넣는다
+        payload["case_snapshot"]["facts"].extend(dict(base, field_path=field, value=True) for field in _INSURED_FIELDS)
+    if progress:
+        # 지금 할 일이 나오기 직전까지의 진행 상태(상태, 준비 확인, 제출)
+        status, prepared, submitted = progress
+        payload["case_snapshot"]["procedure_progress"].append({
+            "procedure_step": step.model_dump(mode="json"), "status": status, "requirements_confirmed": prepared,
+            "submitted": submitted, "evidence_refs": base["evidence_refs"], "updated_at": base["updated_at"],
+        })
+    request = AgentGraphInput.model_validate(payload)
+    request.trigger.action_done = answer
+    calls, seen = [], {}
+    prefer = prefer or ACTION_DEFINITIONS[action_code].procedure_logical_code
+
+    class SelectionModel(NoModel):
+        async def generate(self, response_model, messages, **kwargs):
+            calls.append(kwargs["schema_name"])
+            contract = json.loads(messages[1]["content"].removeprefix("INPUT_JSON="))["contract"]
+            seen["rows"] = {row["candidate_id"]: [action["action_code"] for action in row["actions"]]
+                            for row in contract["blocker_candidates"]}
+            row = next((row for row in contract["blocker_candidates"]
+                        if any(action["action_code"] == prefer for action in row["actions"])),
+                       contract["blocker_candidates"][0])
+            action = next((item for item in row["actions"] if item["action_code"] == prefer), row["actions"][0])
+            return response_model.model_validate({"decision_type": "ACTION", "blocker_candidate_id": row["candidate_id"],
+                                                  "action_code": action["action_code"]})
+
+    async def run():
+        with patch.object(runtime_module.StructuredLLMClient, "from_env", classmethod(lambda cls, *a, **k: SelectionModel())):
+            runtime = await runtime_module.build_runtime(known_procedure_steps=registry,
+                procedure_store=store, support_catalog=ev.load_catalog(None))
+            try:
+                return await runtime.run_planning(request)
+            finally:
+                await runtime.aclose()
+
+    return asyncio.run(run()), calls, seen.get("rows", {}), answer
+
+
+def _change(outcome, answer):
+    [change] = outcome.review_subject.supervisor_draft.mutations.procedure_progress_changes
+    assert change.procedure_step.procedure_step_id == answer.procedure_step_id
+    return change.proposed_status, change.proposed_requirements_confirmed, change.proposed_submitted
+
+
+_SCOPE_CONFIRMED = {"restoration_scope": "FULL", "demolition_required": "REQUIRED"}
+_RESTORATION_DONE = {"restoration_scope": "FULL", "demolition_required": "NOT_REQUIRED", "restoration_status": "COMPLETED"}
+# 가게 만들기에서 가게 이름으로 낸 보험을 고른 상태. "잘 모르겠어요"는 화면에서 고를 수 없다
+_INSURED_FIELDS = ("pension_enrolled", "health_insurance_enrolled",
+                   "employment_insurance_enrolled", "industrial_accident_insurance_enrolled")
+
+
+@pytest.mark.parametrize("action_code,prior_facts,insured", [
+    ("CONFIRM_TAX_CLOSURE_REQUIREMENTS", _SCOPE_CONFIRMED, False),
+    ("CONFIRM_FOOD_SERVICE_CLOSURE_REQUIREMENTS", _SCOPE_CONFIRMED, False),
+    ("CONFIRM_WORKPLACE_INSURANCE_CLOSURE_REQUIREMENTS", _SCOPE_CONFIRMED, True),
+    ("CONFIRM_EMPLOYEE_SETTLEMENT_REQUIREMENTS", _SCOPE_CONFIRMED, False),
+    ("CONFIRM_EMPLOYEE_INSURANCE_LOSS_REQUIREMENTS", _SCOPE_CONFIRMED, True),
+    # 점포 반환은 철거가 끝나야 할 일로 나온다(카페 절차 선후 규칙)
+    ("CONFIRM_PREMISES_RETURN_REQUIREMENTS", _RESTORATION_DONE, False),
+])
+def test_preparation_done_moves_to_execution_in_the_same_judgment(action_code, prior_facts, insured):
+    outcome, calls, rows, answer = _action_done_outcome(action_code, prior_facts, insured=insured)
+    execution = ACTION_DEFINITIONS[action_code].procedure_logical_code
+
+    assert outcome.outcome_type == "REVIEWED_PLAN", outcome
+    outcome.assert_integrity()
+    # 버튼 답은 Info·Review 모델 없이, Supervisor 선택 한 번과 코드 검사로 끝난다
+    assert calls == ["reborn_supervisor_draft"]
+    # 같은 준비 안내를 다시 고를 수 없고, 그 절차는 실행 행동으로 넘어간다
+    assert rows[f"procedure:{answer.procedure_step_id}"] == [execution]
+    assert outcome.review_subject.supervisor_draft.decision.next_action.action_code == execution
+    # 준비 확인만 남긴다. 제출·완료는 준비 버튼으로 정하지 않는다
+    assert _change(outcome, answer) == ("IN_PROGRESS", True, False)
+    assert outcome.review_subject.trigger.action_done == answer
+
+
+def test_preparation_done_for_demolition_saves_preparation_without_ordering_demolition():
+    # 철거 준비는 지원금 증빙 안내라 확인해도 철거 실행을 지시하지 않는다(#290). 다른 절차로 넘어간다
+    outcome, calls, rows, answer = _action_done_outcome("CONFIRM_RESTORATION_REQUIREMENTS", _SCOPE_CONFIRMED)
+
+    assert outcome.outcome_type == "REVIEWED_PLAN", outcome
+    assert calls == ["reborn_supervisor_draft"]
+    assert f"procedure:{answer.procedure_step_id}" not in rows
+    assert _change(outcome, answer) == ("IN_PROGRESS", True, False)
+
+
+@pytest.mark.parametrize("action_code,insured", [
+    ("FILE_TAX_BUSINESS_CLOSURE", False),
+    ("FILE_FOOD_SERVICE_CLOSURE", False),
+    ("REPORT_WORKPLACE_INSURANCE_CLOSURE", True),
+    ("REPORT_EMPLOYEE_INSURANCE_LOSS", True),
+])
+def test_submission_done_moves_to_the_processing_check_in_the_same_judgment(action_code, insured):
+    # 11-08 운영: "식품영업 폐업신고 했어요"를 글로 보내자 Review가 막힌 일 목록을 거절해 판단이 멈췄다
+    outcome, calls, rows, answer = _action_done_outcome(
+        action_code, _SCOPE_CONFIRMED, insured=insured, progress=("IN_PROGRESS", True, False),
+        prefer="CONFIRM_PROCEDURE_COMPLETION")
+
+    assert outcome.outcome_type == "REVIEWED_PLAN", outcome
+    outcome.assert_integrity()
+    assert calls == ["reborn_supervisor_draft"]
+    # 제출까지만 남기고, 그 절차는 같은 판단에서 기관 처리 결과 확인으로 넘어간다. 완료로 정하지 않는다
+    assert _change(outcome, answer) == ("IN_PROGRESS", True, True)
+    assert rows[f"procedure:{answer.procedure_step_id}"] == ["CONFIRM_PROCEDURE_COMPLETION"]
+    assert outcome.review_subject.supervisor_draft.decision.next_action.action_code == "CONFIRM_PROCEDURE_COMPLETION"
+
+
+@pytest.mark.parametrize("action_code,step_code,prior_facts,progress", [
+    # 처리 결과 확인: 제출한 신고의 기관 처리가 끝났다
+    ("CONFIRM_PROCEDURE_COMPLETION", "FILE_FOOD_SERVICE_CLOSURE", _SCOPE_CONFIRMED, ("IN_PROGRESS", True, True)),
+    ("CONFIRM_PROCEDURE_COMPLETION", "FILE_TAX_BUSINESS_CLOSURE", _SCOPE_CONFIRMED, ("IN_PROGRESS", True, True)),
+    # 직접 하는 일: 점포 반환·직원 정산을 끝냈다
+    ("RETURN_PREMISES", None, _RESTORATION_DONE, ("IN_PROGRESS", True, False)),
+    ("SETTLE_EMPLOYEE_PAYMENTS", None, _SCOPE_CONFIRMED, ("IN_PROGRESS", True, False)),
+])
+def test_completion_button_records_completion_without_asking_again(action_code, step_code, prior_facts, progress):
+    # 글로 쓴 완료 보고는 "완료로 기록해도 될까요?"를 다시 묻는다. 같은 절차의 완료 버튼은 그 자체가 확인이다
+    outcome, calls, rows, answer = _action_done_outcome(
+        action_code, prior_facts, step_code=step_code, progress=progress, prefer="__none__")
+
+    assert outcome.outcome_type == "REVIEWED_PLAN", outcome
+    outcome.assert_integrity()
+    assert calls == ["reborn_supervisor_draft"]
+    status, prepared, submitted = _change(outcome, answer)
+    assert (status, prepared) == ("COMPLETED", True)
+    # 끝난 절차는 다음 할 일 후보에서 빠지고, 다시 완료를 묻지 않는다
+    assert f"procedure:{answer.procedure_step_id}" not in rows
+    assert not outcome.review_subject.supervisor_draft.decision.questions_for_user
+
+
+def test_action_done_for_another_procedure_fails_without_calling_a_model():
+    # 서버가 할 일과 절차를 함께 정한다. 둘이 어긋난 답은 저장하지 않고 안전하게 멈춘다
+    outcome, calls, _, _ = _action_done_outcome(
+        "FILE_FOOD_SERVICE_CLOSURE", _SCOPE_CONFIRMED, step_code="FILE_TAX_BUSINESS_CLOSURE",
+        progress=("IN_PROGRESS", True, False))
+
+    assert outcome.outcome_type == "SAFE_FAILURE" and calls == []
+
+
+def test_action_done_codes_are_every_procedure_action():
+    from typing import get_args
+
+    from app.agent.schemas import ActionDoneCode
+
+    # 할 일이 새로 생기면 버튼 대상에도 넣을지 여기서 드러난다. 범위 확인(자체 선택지)·지원사업(MVP 밖)만 뺀다
+    procedure_actions = set(ACTION_DEFINITIONS) - {"CONFIRM_RESTORATION_SCOPE", "CONFIRM_SUPPORT_PROGRAM_REQUIREMENTS"}
+    assert set(get_args(ActionDoneCode)) == procedure_actions
+
+
+def test_action_done_requires_its_own_text_only():
+    from pydantic import ValidationError
+
+    from app.agent.schemas import ActionDoneAnswer
+
+    answer = ActionDoneAnswer(action_code="FILE_TAX_BUSINESS_CLOSURE", procedure_step_id=1)
+    request = ev.build_graph_input(ev.CASES["benchmark_case1"], result_text="넵 다 했어요")
+    payload = request.model_dump(mode="json")
+    payload["trigger"]["action_done"] = answer.model_dump()
+    # 버튼 답에 다른 글을 붙여 모델 해석 없이 들어오게 할 수 없다
+    with pytest.raises(ValidationError):
+        AgentGraphInput.model_validate(payload)
+    payload["trigger"]["input"]["redacted_text"] = answer.to_input_text()
+    payload["trigger"]["restoration_answer"] = {"restoration_scope": "FULL", "demolition_required": "REQUIRED"}
+    with pytest.raises(ValidationError):
+        AgentGraphInput.model_validate(payload)
+    del payload["trigger"]["restoration_answer"]
+    assert AgentGraphInput.model_validate(payload).trigger.action_done == answer
+
+
+@pytest.mark.parametrize("code,confirmation", [
+    ("RETURN_PREMISES", "CONFIRM_PREMISES_RETURN_REQUIREMENTS"),
+    ("SETTLE_EMPLOYEE_PAYMENTS", "CONFIRM_EMPLOYEE_SETTLEMENT_REQUIREMENTS"),
+    ("REPORT_EMPLOYEE_INSURANCE_LOSS", "CONFIRM_EMPLOYEE_INSURANCE_LOSS_REQUIREMENTS"),
+    ("REPORT_WORKPLACE_INSURANCE_CLOSURE", "CONFIRM_WORKPLACE_INSURANCE_CLOSURE_REQUIREMENTS"),
+])
+@pytest.mark.parametrize("mode", ["same_judgment", "stored", "held", "completion_report"])
+def test_preparation_report_updates_readiness_without_changing_snapshot_status(code, confirmation, mode):
+    from uuid import UUID
+
+    from test_action_codes import StubModel, source
+    from test_blocker_candidates import ChoiceModel
+    from test_info_replanning import Responses
+
+    from app.agent.blocker_candidates import build_blocker_candidates
+    from app.agent.procedure_tool.stored_tool import StoredProcedureLookupTool
+    from app.agent.review_tool import ReviewTool
+    from app.agent.schemas import (
+        CASE_FIELD_SPECS,
+        CaseFact,
+        InfoAnalysisInput,
+        ProcedureLookupInput,
+        ProcedureProgress,
+        ReviewSubject,
+        SupervisorAgentInput,
+    )
+    from app.agent.supervisor.agent import SupervisorAgent
+
+    async def run():
+        store = ev.SnapshotStore(REVIEWED)
+        registry = ev.build_registry(store, cafe_registry=True)
+        text = "해당 절차의 준비사항을 확인했습니다."
+        if code == "REPORT_WORKPLACE_INSURANCE_CLOSURE":
+            text = (
+                "담당 기관에 사업장 보험 탈퇴·소멸 신고 대상과 필요한 서류, 제출 방법을 모두 확인했고 "
+                "준비할 자료도 갖췄어요. 아직 탈퇴·소멸 신고서는 제출하지 않았어요."
+            )
+        if mode == "completion_report":
+            text = "해당 절차의 처리를 모두 마쳤습니다."
+        payload = ev.CASES["benchmark_case1"] | {"had_employees": True, "pension_enrolled": True,
+            "health_insurance_enrolled": True, "employment_insurance_enrolled": True,
+            "industrial_accident_insurance_enrolled": True}
+        request = ev.attach_fixture_sources(ev.build_graph_input(payload, result_text=text,
+            prior_facts={"restoration_scope": "FULL", "demolition_required": "NOT_REQUIRED",
+                         "restoration_status": "COMPLETED"}), store)
+        snapshot = request.case_snapshot
+        ref = snapshot.evidence_records[0].evidence_id
+        for key in ["had_employees", "pension_enrolled", "health_insurance_enrolled",
+                    "employment_insurance_enrolled", "industrial_accident_insurance_enrolled"]:
+            snapshot.facts.append(CaseFact(field_path=key, value_type="BOOLEAN", value=True,
+                status="CONFIRMED", evidence_refs=[ref], updated_at=ev.FIXED_TIME))
+        step = next(item.procedure_step for item in registry if item.procedure_step.step_code == code)
+        snapshot.procedure_progress.append(ProcedureProgress(procedure_step=step, status="IN_PROGRESS",
+            requirements_confirmed=mode == "stored", submitted=False, evidence_refs=[ref], updated_at=ev.FIXED_TIME))
+        before = snapshot.model_dump_json()
+        lookup = await StoredProcedureLookupTool(store).lookup(ProcedureLookupInput(
+            lookup_goal="BUSINESS_CLOSURE", procedure_step_codes=[item.procedure_step.step_code for item in registry],
+            evidence_records=snapshot.evidence_records, search_queries=["폐업 절차"], as_of=ev.FIXED_TIME.date(),
+            locale="ko-KR", source_policy="OFFICIAL_ONLY", max_results_per_query=10,
+            based_on_snapshot_id=snapshot.snapshot_id, review_feedback=[]))
+        raw = {"completion_status": "COMPLETE", "facts": [], "missing_fields": [], "uncertainties": [],
+            "procedure_observations": [{"step_code": code, "observed_status": "COMPLETED" if mode == "completion_report" else "IN_PROGRESS",
+                "source_text": text, "requirements_confirmed": True, "submitted": False,
+                "requires_confirmation": mode == "held", "reason_summary": "사용자의 절차 진행 보고"}]}
+        info = await info_module.InfoAnalysisAgent(Responses(raw), clock=lambda: ev.FIXED_TIME, max_local_attempts=1).analyze(
+            InfoAnalysisInput(input=request.trigger.input, case_snapshot=snapshot, allowed_field_paths=list(CASE_FIELD_SPECS),
+                known_procedure_steps=registry, source_call_id=UUID(int=40), procedure_lookup_call_id=UUID(int=5),
+                procedure_lookup_result=lookup, review_feedback=[]))
+        finding = next(item for item in info.procedure_findings if item.procedure_step == step)
+        assert finding.current_status == "IN_PROGRESS"
+        assert finding.requires_confirmation is (mode in {"held", "completion_report"})
+        supervisor_input = SupervisorAgentInput(trigger=request.trigger, case_snapshot=snapshot, known_procedure_steps=registry,
+            source_results=[source(lookup, "PROCEDURE_TOOL", 5), source(info, "INFO_AGENT", 40)])
+        supervisor = SupervisorAgent(ChoiceModel(), clock=lambda: ev.FIXED_TIME, max_local_attempts=1)
+        changes = supervisor._build_mutations(supervisor_input, supervisor_input.source_results, fact_overlays=[])
+        rows = build_blocker_candidates(snapshot, registry, supervisor_input.source_results, changes,
+                                        supervisor._evidence(supervisor_input.source_results, supervisor_input))
+        choice = 0 if mode == "completion_report" else next(i for i, row in enumerate(rows)
+            if row["candidate_id"] == f"procedure:{step.procedure_step_id}")
+        draft = await SupervisorAgent(ChoiceModel(choice=choice, information=mode == "completion_report"),
+                                      clock=lambda: ev.FIXED_TIME, max_local_attempts=1).draft(supervisor_input)
+        if mode == "completion_report":
+            assert draft.decision.next_action is None
+        else:
+            assert draft.decision.next_action.action_code == (code if mode in {"same_judgment", "stored"} else confirmation)
+        assert len(draft.mutations.procedure_progress_changes) == int(mode == "same_judgment")
+        for change in draft.mutations.procedure_progress_changes:
+            assert (change.proposed_status, change.proposed_requirements_confirmed, change.proposed_submitted) == ("IN_PROGRESS", True, False)
+        subject = ReviewSubject.create(schema_version="agent-io/2.0", review_subject_id=UUID(int=500), review_attempt=1,
+            run_id=supervisor_input.source_results[0].meta.run_id, case_id=1, trigger=request.trigger,
+            snapshot=snapshot, known_procedure_steps=registry, source_results=supervisor_input.source_results, supervisor_draft=draft)
+        assert (await ReviewTool(StubModel()).review(subject)).verdict == "PASS"
+        assert snapshot.model_dump_json() == before
+
+    asyncio.run(run())

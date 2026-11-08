@@ -91,6 +91,8 @@ test('판단 중 확인한 업로드를 보존하고 앞 판단 뒤 서류를 �
   await upload(page, files.LEASE)
   await documentJudgmentsDone(caseId, directory, 1)
   await page.goto('/results')
+  // 지금 할 일이 준비 확인이면 [준비했어요] 버튼이 먼저 뜬다. 이 시나리오는 자유글 진행 보고를 쓴다
+  await page.getByRole('button', { name: '직접 쓸게요', exact: true }).click()
   await page.getByRole('textbox').fill('원상복구 작업을 시작했습니다. 서류 대기 검증입니다.')
   const sent = page.waitForResponse(r => r.url() === `${BE_URL}/cases/results` && r.request().method() === 'POST')
   await page.getByRole('button', { name: '보내기', exact: true }).click()
@@ -124,7 +126,8 @@ test('충돌 대기 중 확인한 서류는 저장하고 사용자 선택이 끝
   await documentJudgmentsDone(caseId, directory, 1)
   databaseState(caseId, directory, true) // 이전에 전부로 확인한 합성 기록만 준비한다.
   await page.goto('/results')
-  // 이전 행동이 자유글이므로 실제 TEXT 계약으로 충돌을 만든다.
+  // 자유글로 충돌을 만든다. 준비 확인 할 일이면 버튼이 먼저 떠서 직접 쓰기로 바꾼다
+  await page.getByRole('button', { name: '직접 쓸게요', exact: true }).click()
   await page.getByRole('textbox').fill('원상복구는 일부이고 카운터만 철거해야 합니다.')
   await page.getByRole('button', { name: '보내기', exact: true }).click()
   await expect(page).toHaveURL(/\/confirm$/)

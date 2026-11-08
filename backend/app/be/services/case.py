@@ -1,8 +1,10 @@
 import hashlib
 import json
 import logging
+from typing import get_args
 
 from fastapi import HTTPException
+from pydantic import ValidationError
 from sqlmodel import Session
 
 from app.be.crud import case as case_crud
@@ -46,6 +48,10 @@ from app.agent.roadmap import TASKS as ROADMAP_TASKS, record_checklist
 from app.be.services import procedure_registry
 from app.be.services import reviewed_procedure as reviewed_procedure_service
 from app.be.services import roadmap as roadmap_service
+from app.common.agent_dto import ActionDoneAnswer, ActionDoneCode
+
+# [했어요 / 아직 안 했어요]로 답하는 할 일(AI 쪽 ActionDoneCode와 같은 목록)
+_ACTION_DONE_CODES = frozenset(get_args(ActionDoneCode))
 
 logger = logging.getLogger(__name__)
 
@@ -273,11 +279,15 @@ def get_case_results_entry(session: Session, member_id: int) -> CaseResultsEntry
     _assert_judgment_is_showable(latest_history)
 
     if latest_history.judgment_status == "DONE":
+        done = _current_action_done(latest_history)
         return CaseResultsEntryResponse(
             judgment_status="DONE",
             result_input_kind=(
-                "RESTORATION_ANSWER" if latest_history.next_action_code == "CONFIRM_RESTORATION_SCOPE" else "TEXT"
+                "RESTORATION_ANSWER" if latest_history.next_action_code == "CONFIRM_RESTORATION_SCOPE"
+                else "ACTION_DONE" if done is not None
+                else "TEXT"
             ),
+            action_done_kind=done.kind if done is not None else None,
             case_history_id=latest_history.id,
             next_action=(
                 NextActionResponse(
@@ -402,18 +412,91 @@ def submit_case_results(
         if not (current_action or retrying_same_answer):
             raise HTTPException(status_code=422, detail="현재 할 일에는 선택형 원상복구 답변을 보낼 수 없습니다.")
 
+    confirmation = _submitted_action_done(session, latest_history) if submit_request.action_done else None
+
     history = case_history_crud.create_case_history(
         session,
         CaseHistory(
             case_id=case.id,
-            raw_input=answer.to_input_text() if answer is not None else submit_request.raw_input,
+            raw_input=(
+                answer.to_input_text() if answer is not None
+                else confirmation.to_input_text() if confirmation is not None
+                else submit_request.raw_input
+            ),
             restoration_answer=answer.model_dump(mode="json") if answer is not None else None,
+            action_done=confirmation.model_dump(mode="json") if confirmation is not None else None,
             source="USER_INPUT",
             judgment_status="PENDING",
         ),
     )
     session.commit()
     return CaseResultsSubmitAcceptedResponse(case_history_id=history.id)
+
+
+def _current_action_done(history: CaseHistory) -> ActionDoneAnswer | None:
+    """지금 할 일을 [했어요] 버튼으로 받을 수 있으면 그 답의 할 일·절차. 아니면 None(글로 받는다).
+
+    어느 절차인지는 할 일과 함께 저장한 막힌 일 후보("procedure:{절차 번호}")에서 정한다.
+    처리 결과 확인처럼 할 일 코드만으로는 어느 신고인지 모르는 경우가 있어서다.
+    """
+    if history.next_action_code not in _ACTION_DONE_CODES or history.next_action is None:
+        return None
+    candidate = history.priority_blocker.candidate_id if history.priority_blocker is not None else None
+    prefix, _, step_id = (candidate or "").partition(":")
+    if prefix != "procedure" or not step_id.isdigit():
+        return None
+    return ActionDoneAnswer(action_code=history.next_action_code, procedure_step_id=int(step_id))
+
+
+class InvalidActionDoneError(ValueError):
+    """저장된 버튼의 절차 근거가 없으면 같은 입력을 반복해도 복원되지 않는다."""
+
+    retryable = False
+
+
+def read_action_done(session: Session, history: CaseHistory) -> dict | None:
+    """#298 준비 버튼은 당시 저장한 판단의 절차를 확인해 #304 입력으로 읽는다."""
+    payload = history.action_done
+    if payload is None:
+        return None
+    if not isinstance(payload, dict):
+        raise InvalidActionDoneError("저장된 버튼 답변의 형식이 올바르지 않습니다.")
+    try:
+        if (history.source == "USER_INPUT" and set(payload) == {"action_code"}
+                and history.raw_input == "준비사항 확인을 마쳤어요."):
+            prior = max((row for row in case_history_crud.get_case_histories_by_case_id(session, history.case_id)
+                         if row.id < history.id and row.judgment_status == "DONE" and row.source != "SYSTEM_BATCH"),
+                        key=lambda row: row.id, default=None)
+            if prior is not None and prior.next_action_code == payload["action_code"]:
+                answer = _current_action_done(prior)
+                if answer is not None and answer.kind == "PREPARATION":
+                    return answer.model_dump(mode="json")
+        return ActionDoneAnswer.model_validate(payload).model_dump(mode="json")
+    except ValidationError:
+        raise InvalidActionDoneError("저장된 버튼 답변의 절차를 확인할 수 없습니다.") from None
+
+
+def _submitted_action_done(session: Session, latest_history: CaseHistory) -> ActionDoneAnswer:
+    """[했어요]가 어느 할 일에 대한 답인지 서버가 정한다. 화면이 보낸 할 일 이름은 믿지 않는다."""
+    if latest_history.judgment_status == "DONE":
+        done = _current_action_done(latest_history)
+        if done is not None:
+            return done
+    # 실패 이력에는 다음 행동이 없다. 이미 접수한 버튼 답을 그대로 다시 보낼 때만 허용한다.
+    if (
+        latest_history.source == "USER_INPUT"
+        and latest_history.judgment_status == "FAILED"
+        and latest_history.recovery_action_code == "RETRY"
+        and latest_history.retryable is True
+        and latest_history.action_done is not None
+    ):
+        try:
+            retried = ActionDoneAnswer.model_validate(read_action_done(session, latest_history))
+        except InvalidActionDoneError:
+            raise HTTPException(status_code=422, detail="저장된 버튼 답변의 절차를 확인할 수 없습니다.") from None
+        if latest_history.raw_input == retried.to_input_text():
+            return retried
+    raise HTTPException(status_code=422, detail="현재 할 일에는 [했어요] 답변을 보낼 수 없습니다.")
 
 
 def retry_case_judgment(session: Session, member_id: int) -> CaseRetryResponse:
