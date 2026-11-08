@@ -335,7 +335,8 @@ def build_blocker_candidates(
                 if applicability_unknown
                 else [f"{label}에 필요한 서류와 제출 방법을 확인해 주시겠습니까?"]
                 if confirmation
-                else ["제출한 신고서와 첨부서류가 접수되었는지 확인해 주시겠습니까?"]
+                # "진행하세요" 할 일에 접수 확인을 물으면 어긋난다. 접수·처리는 제출 뒤 처리 결과 확인이 묻는다
+                else [f"{label}를 제출하셨나요?"]
             )
             if logical_code in {
                 "PERFORM_RESTORATION", "RETURN_PREMISES", "SETTLE_EMPLOYEE_PAYMENTS",

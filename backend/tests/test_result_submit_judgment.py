@@ -30,13 +30,13 @@ HISTORY_ID = 42
 SUBMITTED_AT = datetime(2026, 10, 20, 9, 0, 0)
 
 
-def history(source: str, restoration_answer=None, requirements_confirmation=None) -> SimpleNamespace:
+def history(source: str, restoration_answer=None, action_done=None) -> SimpleNamespace:
     return SimpleNamespace(
         id=HISTORY_ID,
         case_id=CASE_ID,
         raw_input="원상복구 끝냈어요",
         restoration_answer=restoration_answer,
-        requirements_confirmation=requirements_confirmation,
+        action_done=action_done,
         source=source,
         created_at=SUBMITTED_AT,
     )
@@ -50,7 +50,7 @@ def trigger_of(monkeypatch):
 
     def fake_build_planning_input(*, trigger_type, **_kwargs):
         captured.update(trigger_type=trigger_type, restoration_answer=_kwargs.get("restoration_answer"),
-                        requirements_confirmation=_kwargs.get("requirements_confirmation"))
+                        action_done=_kwargs.get("action_done"))
         return SimpleNamespace(trigger=trigger_type)
 
     async def fake_run_case_planning(*_args, **_kwargs):
@@ -87,15 +87,15 @@ def test_submitted_result_is_judged_as_a_result_report(trigger_of):
 def test_restoration_answer_survives_the_background_judgment_boundary(trigger_of):
     answer = {"restoration_scope": "PARTIAL", "demolition_required": "NOT_REQUIRED"}
     assert trigger_of("USER_INPUT", answer) == {
-        "trigger_type": "RESULT_SUBMITTED", "restoration_answer": answer, "requirements_confirmation": None,
+        "trigger_type": "RESULT_SUBMITTED", "restoration_answer": answer, "action_done": None,
     }
 
 
-def test_requirements_confirmation_survives_the_background_judgment_boundary(trigger_of):
+def test_action_done_survives_the_background_judgment_boundary(trigger_of):
     # [준비했어요] 답이 여기서 빠지면 AI가 고정 문장을 글로 해석하려다 모델을 부른다
-    confirmation = {"action_code": "CONFIRM_FOOD_SERVICE_CLOSURE_REQUIREMENTS"}
+    confirmation = {"action_code": "FILE_FOOD_SERVICE_CLOSURE", "procedure_step_id": 5}
     assert trigger_of("USER_INPUT", confirmation=confirmation) == {
-        "trigger_type": "RESULT_SUBMITTED", "restoration_answer": None, "requirements_confirmation": confirmation,
+        "trigger_type": "RESULT_SUBMITTED", "restoration_answer": None, "action_done": confirmation,
     }
 
 

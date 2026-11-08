@@ -44,6 +44,7 @@ from app.agent.projection import (
 )
 from app.agent.prompts import supervisor_messages
 from app.agent.schemas import (
+    completion_confirmed,
     ActionCode,
     ActionDecisionDraft,
     AgentSchema,
@@ -784,11 +785,15 @@ class SupervisorAgent:
                     )
                     if observation.observed_status == ProcedureProgressStatus.COMPLETED:
                         confirmation = getattr(request.trigger, "procedure_completion_confirmation", None)
-                        if before_status != ProcedureProgressStatus.COMPLETED and (
-                            confirmation is None or not confirmation.matches(observation)
+                        if before_status != ProcedureProgressStatus.COMPLETED and not completion_confirmed(
+                            request.trigger, observation,
                         ):
                             continue
-                        if before_status != ProcedureProgressStatus.COMPLETED:
+                        if (
+                            before_status != ProcedureProgressStatus.COMPLETED
+                            and confirmation is not None
+                            and confirmation.matches(observation)
+                        ):
                             confirmation.assert_current(snapshot)
                     if finding.current_status != before_status:
                         raise SupervisorGuardrailError(

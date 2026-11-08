@@ -146,7 +146,7 @@ CREATE TABLE `case_history` (
   `case_id` bigint NOT NULL,
   `raw_input` text,
   `restoration_answer` json DEFAULT NULL,
-  `requirements_confirmation` json DEFAULT NULL,
+  `action_done` json DEFAULT NULL,
   `conflict_snapshot` json DEFAULT NULL,
   `retained_info_result` json DEFAULT NULL,
   `source` enum('USER_INPUT','SYSTEM_BATCH','CASE_CREATED','CONFLICT_DECISION','DOCUMENT_SUBMITTED') NOT NULL,

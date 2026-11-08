@@ -1091,40 +1091,52 @@ def test_conflict_confirmation_fills_info_from_digest_and_keeps_the_review_model
     assert calls == ["reborn_supervisor_draft", "reborn_review_output"] if with_retained else ["reborn_supervisor_draft"]
 
 
-# ── [준비했어요] 버튼: 준비 확인 할 일의 답을 모델 해석 없이 코드로 받는다 ──
+# ── [했어요] 버튼: 지금 할 일의 답을 모델 해석 없이 코드로 받는다 ──
 # 운영에서 "넵 다 확인 완료했어요"·"전/후 사진 찍었어요"가 준비 확인으로 저장되지 않아 같은 안내가
-# 반복되거나 판단이 멈췄다(2026-11-07). 버튼 답은 그 판단에서 바로 실행 단계로 넘어가야 한다.
+# 반복되거나 판단이 멈췄고(2026-11-07), "식품영업 폐업신고 했어요"도 판단이 멈췄다(11-08).
+# 준비 확인은 준비만, 신고 제출은 제출까지, 처리 결과 확인·직접 하는 일은 완료로 그 판단에서 반영한다.
 
-def _requirements_outcome(action_code, prior_facts, insured=False):
+def _action_done_outcome(action_code, prior_facts, *, insured=False, step_code=None, progress=None, prefer=None):
     from app.agent.procedure_tool.cafe import build_cafe_procedure_steps
-    from app.agent.schemas import RequirementsConfirmation
+    from app.agent.schemas import ActionDoneAnswer
 
     # 테스트용 ev.build_registry에는 선후 규칙이 없다. 운영과 같은 카페 절차 목록으로 돌린다
     registry = build_cafe_procedure_steps({code: i + 1 for i, code in enumerate(PROCEDURE_LABELS)})
-    confirmation = RequirementsConfirmation(action_code=action_code)
+    step = next(item.procedure_step for item in registry
+                if item.procedure_step.step_code == (step_code or ACTION_DEFINITIONS[action_code].procedure_logical_code))
+    answer = ActionDoneAnswer(action_code=action_code, procedure_step_id=step.procedure_step_id)
     store = ev.SnapshotStore(REVIEWED)
     request = ev.attach_fixture_sources(ev.build_graph_input(ev.CASES["benchmark_case1"],
-        result_text=confirmation.to_input_text(), prior_facts=prior_facts), store)
+        result_text=answer.to_input_text(), prior_facts=prior_facts), store)
+    payload = request.model_dump(mode="json")
+    base = next(fact for fact in payload["case_snapshot"]["facts"] if fact["field_path"] == "franchise_status")
     if insured:
         # 준비 데이터는 보험 칸을 옮기지 않는다. 가게 만들기에서 고른 값처럼 확정 사실로 넣는다
-        payload = request.model_dump(mode="json")
-        base = next(fact for fact in payload["case_snapshot"]["facts"] if fact["field_path"] == "franchise_status")
         payload["case_snapshot"]["facts"].extend(dict(base, field_path=field, value=True) for field in _INSURED_FIELDS)
-        request = AgentGraphInput.model_validate(payload)
-    request.trigger.requirements_confirmation = confirmation
+    if progress:
+        # 지금 할 일이 나오기 직전까지의 진행 상태(상태, 준비 확인, 제출)
+        status, prepared, submitted = progress
+        payload["case_snapshot"]["procedure_progress"].append({
+            "procedure_step": step.model_dump(mode="json"), "status": status, "requirements_confirmed": prepared,
+            "submitted": submitted, "evidence_refs": base["evidence_refs"], "updated_at": base["updated_at"],
+        })
+    request = AgentGraphInput.model_validate(payload)
+    request.trigger.action_done = answer
     calls, seen = [], {}
-    execution = ACTION_DEFINITIONS[action_code].procedure_logical_code
+    prefer = prefer or ACTION_DEFINITIONS[action_code].procedure_logical_code
 
     class SelectionModel(NoModel):
         async def generate(self, response_model, messages, **kwargs):
             calls.append(kwargs["schema_name"])
             contract = json.loads(messages[1]["content"].removeprefix("INPUT_JSON="))["contract"]
-            seen["actions"] = [action["action_code"] for row in contract["blocker_candidates"] for action in row["actions"]]
+            seen["rows"] = {row["candidate_id"]: [action["action_code"] for action in row["actions"]]
+                            for row in contract["blocker_candidates"]}
             row = next((row for row in contract["blocker_candidates"]
-                        if any(action["action_code"] == execution for action in row["actions"])),
+                        if any(action["action_code"] == prefer for action in row["actions"])),
                        contract["blocker_candidates"][0])
+            action = next((item for item in row["actions"] if item["action_code"] == prefer), row["actions"][0])
             return response_model.model_validate({"decision_type": "ACTION", "blocker_candidate_id": row["candidate_id"],
-                                                  "action_code": row["actions"][0]["action_code"]})
+                                                  "action_code": action["action_code"]})
 
     async def run():
         with patch.object(runtime_module.StructuredLLMClient, "from_env", classmethod(lambda cls, *a, **k: SelectionModel())):
@@ -1135,7 +1147,13 @@ def _requirements_outcome(action_code, prior_facts, insured=False):
             finally:
                 await runtime.aclose()
 
-    return asyncio.run(run()), calls, seen.get("actions", []), confirmation
+    return asyncio.run(run()), calls, seen.get("rows", {}), answer
+
+
+def _change(outcome, answer):
+    [change] = outcome.review_subject.supervisor_draft.mutations.procedure_progress_changes
+    assert change.procedure_step.procedure_step_id == answer.procedure_step_id
+    return change.proposed_status, change.proposed_requirements_confirmed, change.proposed_submitted
 
 
 _SCOPE_CONFIRMED = {"restoration_scope": "FULL", "demolition_required": "REQUIRED"}
@@ -1154,8 +1172,8 @@ _INSURED_FIELDS = ("pension_enrolled", "health_insurance_enrolled",
     # 점포 반환은 철거가 끝나야 할 일로 나온다(카페 절차 선후 규칙)
     ("CONFIRM_PREMISES_RETURN_REQUIREMENTS", _RESTORATION_DONE, False),
 ])
-def test_requirements_confirmation_moves_to_execution_in_the_same_judgment(action_code, prior_facts, insured):
-    outcome, calls, actions, confirmation = _requirements_outcome(action_code, prior_facts, insured)
+def test_preparation_done_moves_to_execution_in_the_same_judgment(action_code, prior_facts, insured):
+    outcome, calls, rows, answer = _action_done_outcome(action_code, prior_facts, insured=insured)
     execution = ACTION_DEFINITIONS[action_code].procedure_logical_code
 
     assert outcome.outcome_type == "REVIEWED_PLAN", outcome
@@ -1163,60 +1181,104 @@ def test_requirements_confirmation_moves_to_execution_in_the_same_judgment(actio
     # 버튼 답은 Info·Review 모델 없이, Supervisor 선택 한 번과 코드 검사로 끝난다
     assert calls == ["reborn_supervisor_draft"]
     # 같은 준비 안내를 다시 고를 수 없고, 그 절차는 실행 행동으로 넘어간다
-    assert action_code not in actions and execution in actions
-    draft = outcome.review_subject.supervisor_draft
-    assert draft.decision.next_action.action_code == execution
-    [change] = draft.mutations.procedure_progress_changes
-    assert change.procedure_step.step_code == execution
-    # 준비 확인만 남긴다. 제출·완료는 버튼 하나로 정하지 않는다
-    assert (change.proposed_status, change.proposed_requirements_confirmed, change.proposed_submitted) == (
-        "IN_PROGRESS", True, False)
-    assert outcome.review_subject.trigger.requirements_confirmation == confirmation
+    assert rows[f"procedure:{answer.procedure_step_id}"] == [execution]
+    assert outcome.review_subject.supervisor_draft.decision.next_action.action_code == execution
+    # 준비 확인만 남긴다. 제출·완료는 준비 버튼으로 정하지 않는다
+    assert _change(outcome, answer) == ("IN_PROGRESS", True, False)
+    assert outcome.review_subject.trigger.action_done == answer
 
 
-def test_requirements_confirmation_for_demolition_saves_preparation_without_ordering_demolition():
+def test_preparation_done_for_demolition_saves_preparation_without_ordering_demolition():
     # 철거 준비는 지원금 증빙 안내라 확인해도 철거 실행을 지시하지 않는다(#290). 다른 절차로 넘어간다
-    outcome, calls, actions, _ = _requirements_outcome("CONFIRM_RESTORATION_REQUIREMENTS", _SCOPE_CONFIRMED)
+    outcome, calls, rows, answer = _action_done_outcome("CONFIRM_RESTORATION_REQUIREMENTS", _SCOPE_CONFIRMED)
 
     assert outcome.outcome_type == "REVIEWED_PLAN", outcome
     assert calls == ["reborn_supervisor_draft"]
-    assert "CONFIRM_RESTORATION_REQUIREMENTS" not in actions and "PERFORM_RESTORATION" not in actions
-    [change] = outcome.review_subject.supervisor_draft.mutations.procedure_progress_changes
-    assert change.procedure_step.step_code == "PERFORM_RESTORATION"
-    assert (change.proposed_status, change.proposed_requirements_confirmed, change.proposed_submitted) == (
-        "IN_PROGRESS", True, False)
+    assert f"procedure:{answer.procedure_step_id}" not in rows
+    assert _change(outcome, answer) == ("IN_PROGRESS", True, False)
 
 
-def test_requirements_action_codes_are_every_procedure_preparation_action():
+@pytest.mark.parametrize("action_code,insured", [
+    ("FILE_TAX_BUSINESS_CLOSURE", False),
+    ("FILE_FOOD_SERVICE_CLOSURE", False),
+    ("REPORT_WORKPLACE_INSURANCE_CLOSURE", True),
+    ("REPORT_EMPLOYEE_INSURANCE_LOSS", True),
+])
+def test_submission_done_moves_to_the_processing_check_in_the_same_judgment(action_code, insured):
+    # 11-08 운영: "식품영업 폐업신고 했어요"를 글로 보내자 Review가 막힌 일 목록을 거절해 판단이 멈췄다
+    outcome, calls, rows, answer = _action_done_outcome(
+        action_code, _SCOPE_CONFIRMED, insured=insured, progress=("IN_PROGRESS", True, False),
+        prefer="CONFIRM_PROCEDURE_COMPLETION")
+
+    assert outcome.outcome_type == "REVIEWED_PLAN", outcome
+    outcome.assert_integrity()
+    assert calls == ["reborn_supervisor_draft"]
+    # 제출까지만 남기고, 그 절차는 같은 판단에서 기관 처리 결과 확인으로 넘어간다. 완료로 정하지 않는다
+    assert _change(outcome, answer) == ("IN_PROGRESS", True, True)
+    assert rows[f"procedure:{answer.procedure_step_id}"] == ["CONFIRM_PROCEDURE_COMPLETION"]
+    assert outcome.review_subject.supervisor_draft.decision.next_action.action_code == "CONFIRM_PROCEDURE_COMPLETION"
+
+
+@pytest.mark.parametrize("action_code,step_code,prior_facts,progress", [
+    # 처리 결과 확인: 제출한 신고의 기관 처리가 끝났다
+    ("CONFIRM_PROCEDURE_COMPLETION", "FILE_FOOD_SERVICE_CLOSURE", _SCOPE_CONFIRMED, ("IN_PROGRESS", True, True)),
+    ("CONFIRM_PROCEDURE_COMPLETION", "FILE_TAX_BUSINESS_CLOSURE", _SCOPE_CONFIRMED, ("IN_PROGRESS", True, True)),
+    # 직접 하는 일: 점포 반환·직원 정산을 끝냈다
+    ("RETURN_PREMISES", None, _RESTORATION_DONE, ("IN_PROGRESS", True, False)),
+    ("SETTLE_EMPLOYEE_PAYMENTS", None, _SCOPE_CONFIRMED, ("IN_PROGRESS", True, False)),
+])
+def test_completion_button_records_completion_without_asking_again(action_code, step_code, prior_facts, progress):
+    # 글로 쓴 완료 보고는 "완료로 기록해도 될까요?"를 다시 묻는다. 같은 절차의 완료 버튼은 그 자체가 확인이다
+    outcome, calls, rows, answer = _action_done_outcome(
+        action_code, prior_facts, step_code=step_code, progress=progress, prefer="__none__")
+
+    assert outcome.outcome_type == "REVIEWED_PLAN", outcome
+    outcome.assert_integrity()
+    assert calls == ["reborn_supervisor_draft"]
+    status, prepared, submitted = _change(outcome, answer)
+    assert (status, prepared) == ("COMPLETED", True)
+    # 끝난 절차는 다음 할 일 후보에서 빠지고, 다시 완료를 묻지 않는다
+    assert f"procedure:{answer.procedure_step_id}" not in rows
+    assert not outcome.review_subject.supervisor_draft.decision.questions_for_user
+
+
+def test_action_done_for_another_procedure_fails_without_calling_a_model():
+    # 서버가 할 일과 절차를 함께 정한다. 둘이 어긋난 답은 저장하지 않고 안전하게 멈춘다
+    outcome, calls, _, _ = _action_done_outcome(
+        "FILE_FOOD_SERVICE_CLOSURE", _SCOPE_CONFIRMED, step_code="FILE_TAX_BUSINESS_CLOSURE",
+        progress=("IN_PROGRESS", True, False))
+
+    assert outcome.outcome_type == "SAFE_FAILURE" and calls == []
+
+
+def test_action_done_codes_are_every_procedure_action():
     from typing import get_args
 
-    from app.agent.schemas import RequirementsActionCode
+    from app.agent.schemas import ActionDoneCode
 
-    # 준비 확인 할 일이 새로 생기면 버튼 대상에도 넣을지 여기서 드러난다
-    preparation = {code for code, item in ACTION_DEFINITIONS.items()
-                   if item.confirmation_only and item.procedure_logical_code is not None
-                   and code != "CONFIRM_RESTORATION_SCOPE"}
-    assert set(get_args(RequirementsActionCode)) == preparation
+    # 할 일이 새로 생기면 버튼 대상에도 넣을지 여기서 드러난다. 범위 확인(자체 선택지)·지원사업(MVP 밖)만 뺀다
+    procedure_actions = set(ACTION_DEFINITIONS) - {"CONFIRM_RESTORATION_SCOPE", "CONFIRM_SUPPORT_PROGRAM_REQUIREMENTS"}
+    assert set(get_args(ActionDoneCode)) == procedure_actions
 
 
-def test_requirements_confirmation_requires_its_own_text_only():
+def test_action_done_requires_its_own_text_only():
     from pydantic import ValidationError
 
-    from app.agent.schemas import RequirementsConfirmation
+    from app.agent.schemas import ActionDoneAnswer
 
-    confirmation = RequirementsConfirmation(action_code="CONFIRM_TAX_CLOSURE_REQUIREMENTS")
-    request = ev.build_graph_input(ev.CASES["benchmark_case1"], result_text="넵 다 확인 완료했어요")
+    answer = ActionDoneAnswer(action_code="FILE_TAX_BUSINESS_CLOSURE", procedure_step_id=1)
+    request = ev.build_graph_input(ev.CASES["benchmark_case1"], result_text="넵 다 했어요")
     payload = request.model_dump(mode="json")
-    payload["trigger"]["requirements_confirmation"] = confirmation.model_dump()
+    payload["trigger"]["action_done"] = answer.model_dump()
     # 버튼 답에 다른 글을 붙여 모델 해석 없이 들어오게 할 수 없다
     with pytest.raises(ValidationError):
         AgentGraphInput.model_validate(payload)
-    payload["trigger"]["input"]["redacted_text"] = confirmation.to_input_text()
+    payload["trigger"]["input"]["redacted_text"] = answer.to_input_text()
     payload["trigger"]["restoration_answer"] = {"restoration_scope": "FULL", "demolition_required": "REQUIRED"}
     with pytest.raises(ValidationError):
         AgentGraphInput.model_validate(payload)
     del payload["trigger"]["restoration_answer"]
-    assert AgentGraphInput.model_validate(payload).trigger.requirements_confirmation == confirmation
+    assert AgentGraphInput.model_validate(payload).trigger.action_done == answer
 
 
 @pytest.mark.parametrize("code,confirmation", [

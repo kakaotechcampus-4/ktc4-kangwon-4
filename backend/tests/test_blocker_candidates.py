@@ -684,7 +684,8 @@ def test_registered_filing_keeps_execution_and_confirmation_distinct():
         .required_actions[0]
         .text
     )
-    assert "접수" in filing["questions_to_ask"][0]
+    # 실행 행동은 준비가 아니라 제출을 묻는다. 접수·처리 여부는 제출 뒤 처리 결과 확인이 묻는다
+    assert filing["questions_to_ask"] == ["사업자 폐업신고를 제출하셨나요?"]
 
 
 
