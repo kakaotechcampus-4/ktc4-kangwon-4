@@ -4,25 +4,31 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
+from uuid import uuid4
 
 from app.agent.claim_safety import (
     REQUIRED_CLAIM_SOURCES,
     demolition_preparation_only,
     expand_evidence,
 )
+from app.agent.enrichment import build_conflict_overlays
 from app.agent.schemas import (
     CaseSnapshot,
+    ConflictConfirmedTrigger,
     EvidenceRecord,
+    FactChangeCandidate,
     FreshnessStatus,
     InfoAnalysisResult,
     KnownProcedureStep,
     MutationSet,
     ProcedureProgress,
+    ProcedureProgressChangeCandidate,
     ProcedureRelevance,
     ProcedureStepRef,
     ReviewSourceResult,
     SupportAnalysisResult,
     SupportMatchStatus,
+    canonical_digest,
 )
 
 
@@ -213,18 +219,53 @@ def effective_procedure_progress(
     facts.update({item.field_path: (item.proposed_status, item.proposed_value, item.source_evidence_refs)
                   for item in mutations.fact_changes})
     completed = facts.get("restoration_status")
+    demolition = facts.get("demolition_required")
     restoration = resolve_procedure_bindings(known_steps, procedure_bindings).get("PERFORM_RESTORATION")
-    # 필요했던 철거를 끝내도 필요 여부는 REQUIRED로 남는다. 확인된 완료 사실로 후속 반환을 연다.
-    if (restoration is not None and completed is not None
-            and completed[:2] == ("CONFIRMED", "COMPLETED")):
+    if (restoration is not None and completed is not None and demolition is not None
+            and completed[:2] == ("CONFIRMED", "COMPLETED")
+            and demolition[:2] == ("CONFIRMED", "NOT_REQUIRED")):
         previous = progress.get(_step_key(restoration))
         if previous is None or previous.status != "COMPLETED":
             progress[_step_key(restoration)] = ProcedureProgress(
                 procedure_step=restoration, status="COMPLETED",
-                evidence_refs=list(completed[2]),
+                evidence_refs=list(dict.fromkeys([*completed[2], *demolition[2]])),
                 updated_at=snapshot.captured_at,
             )
     return list(progress.values())
+
+
+def confirmed_restoration_progress(
+    snapshot: CaseSnapshot, trigger: Any, sources: Sequence[ReviewSourceResult],
+    fact_changes: Sequence[FactChangeCandidate], known_steps: Sequence[KnownProcedureStep], *,
+    procedure_bindings: ProcedureBindings | None = None, uuid_factory=uuid4,
+) -> ProcedureProgressChangeCandidate | None:
+    """사용자가 채택한 원상복구 완료를 검수·저장할 절차 변경으로 만든다."""
+    if not isinstance(trigger, ConflictConfirmedTrigger):
+        return None
+    accepted = next((item for item in build_conflict_overlays(snapshot, trigger)
+                     if item.field_path == "restoration_status" and item.proposed_status == "CONFIRMED"
+                     and item.proposed_value == "COMPLETED"), None)
+    if accepted is None or not any(canonical_digest(item, exclude={"candidate_id"})
+                                  == canonical_digest(accepted, exclude={"candidate_id"}) for item in fact_changes):
+        return None
+    step = resolve_procedure_bindings(known_steps, procedure_bindings).get("PERFORM_RESTORATION")
+    if step is None:
+        return None
+    prior = next((item for item in snapshot.procedure_progress if item.procedure_step == step), None)
+    before = prior.status if prior is not None else "NOT_STARTED"
+    matches = [source for source in sources if isinstance(source.output, InfoAnalysisResult)
+               and any(finding.procedure_step == step and finding.current_status == before
+                       for finding in source.output.procedure_findings)]
+    if before == "COMPLETED" or len(matches) != 1:
+        return None
+    return ProcedureProgressChangeCandidate(
+        candidate_id=uuid_factory(), procedure_step=step, before_status=before, proposed_status="COMPLETED",
+        before_requirements_confirmed=prior.requirements_confirmed if prior else False,
+        proposed_requirements_confirmed=prior.requirements_confirmed if prior else False,
+        before_submitted=prior.submitted if prior else False, proposed_submitted=prior.submitted if prior else False,
+        reason_summary=accepted.reason_summary, execution_evidence_refs=list(accepted.source_evidence_refs),
+        procedure_analysis_call_id=matches[0].meta.call_id,
+    )
 
 
 def _source_procedure_bindings(

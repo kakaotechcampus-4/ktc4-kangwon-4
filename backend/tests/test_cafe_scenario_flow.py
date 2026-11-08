@@ -8,12 +8,15 @@ import pytest
 from sqlmodel import Session
 
 from app.agent import runtime
+from app.agent.review_tool import ReviewIntegrityError, ReviewTool
+from app.agent.schemas import ReviewSubject
 from app.be.crud import conflict_reference, member
 from app.be.models.case import Case
 from app.be.models.case_history import CaseHistory
 from app.be.schemas.case import CaseConflictsDecisionRequest, CaseCreateRequest, CaseResultsSubmitRequest
 from app.be.services import case as case_service
 from app.be.services import conflict_decision, judgment
+from app.be.services import roadmap as roadmap_service
 
 from case_world import case_engine  # noqa: F401 — 격리 MySQL 픽스처
 
@@ -30,6 +33,7 @@ class ScenarioModel:
     def __init__(self, *, report_progress=False):
         self.contracts = []
         self.report_progress = report_progress
+        self.review_calls = 0
 
     async def aclose(self):
         pass
@@ -48,6 +52,7 @@ class ScenarioModel:
             return response_model.model_validate({"decision_type": "NEEDS_MORE_INFO",
                 "blocker_candidate_id": contract["information_blockers"][0]["candidate_id"], "action_code": None})
         if name == "reborn_review_output":
+            self.review_calls += 1
             # 운영 자유글 실패처럼 목록 계약 반려를 내도 코드가 확인한 목록은 통과해야 한다.
             return response_model.model_validate({"verdict": "REVISE", "issues": [{
                 "issue_code": "CONTRACT_VIOLATION", "category": "CONTRACT", "severity": "BLOCKING",
@@ -142,6 +147,12 @@ class CafeFlow:
             return {row.procedure_step.step_code: (row.status, row.requirements_confirmed, row.submitted)
                     for row in case.case_procedure_steps}
 
+    def work_status(self):
+        with Session(self.engine) as session:
+            roadmap = roadmap_service.get_case_roadmap(session, self.member_id)
+            return next(task.status for stage in roadmap.stages for task in stage.tasks
+                        if task.task_id == "restoration_work")
+
     def confirm_restored(self):
         assert self.submit(raw_input=RESTORED).outcome_type == "CONFLICT"
         with Session(self.engine) as session:
@@ -154,10 +165,35 @@ class CafeFlow:
                 CaseConflictsDecisionRequest(decisions=[{"conflict_reference_id": key, "side": value}
                                                        for key, value in choices.items()]))
             self.history_id = accepted.case_history_id
-        self.plan(choices=choices)
+        outcome = self.plan(choices=choices)
         with Session(self.engine) as session:
             case = session.get(Case, self.case_id)
             assert (case.restoration_status, case.demolition_required) == ("COMPLETED", "REQUIRED")
+            restoration = next(row for row in case.case_procedure_steps
+                               if row.procedure_step.step_code == "PERFORM_RESTORATION")
+            assert restoration.status == "COMPLETED"
+        return outcome
+
+
+def assert_completion_proof_cannot_be_reused(outcome, fake):
+    for tamper in ("target", "evidence", "selection"):
+        subject = outcome.review_subject.model_copy(deep=True)
+        change = next(item for item in subject.supervisor_draft.mutations.procedure_progress_changes
+                      if item.procedure_step.step_code == "PERFORM_RESTORATION")
+        if tamper == "target":
+            change.procedure_step = next(item.procedure_step for item in subject.known_procedure_steps
+                                         if item.procedure_step.step_code == "RETURN_PREMISES")
+        elif tamper == "evidence":
+            change.execution_evidence_refs = [next(item.evidence_id for item in subject.snapshot.evidence_records
+                                                  if item.evidence_id not in change.execution_evidence_refs)]
+        else:
+            subject.trigger.selections[0].accepted = False
+        subject = ReviewSubject.create(**{key: getattr(subject, key) for key in type(subject).model_fields
+                                          if key != "subject_digest"})
+        before = fake.review_calls
+        with pytest.raises(ReviewIntegrityError):
+            asyncio.run(ReviewTool(fake, max_output_attempts=1).review(subject))
+        assert fake.review_calls == before
 
 
 @pytest.mark.parametrize("free_text_filing,report_progress", [(False, False), (True, True)])
@@ -206,7 +242,8 @@ def test_personal_cafe_submission_and_restoration_continue_in_the_same_case(
         assert history.priority_blocker.candidate_id != f"procedure:{food.procedure_step_id}"
     assert progress["PERFORM_RESTORATION"] == ("IN_PROGRESS", True, False)
     # 작업 완료 글은 이전 NOT_STARTED와 충돌한다. 기존 확인 화면에서 새 값을 골라야 반영한다.
-    flow.confirm_restored()
+    outcome = flow.confirm_restored()
+    assert_completion_proof_cannot_be_reused(outcome, fake)
     allowed = {action["action_code"] for row in fake.contracts[-1]["blocker_candidates"] for action in row["actions"]}
     assert "CONFIRM_PREMISES_RETURN_REQUIREMENTS" in allowed, (flow.turns, allowed)
     assert "PERFORM_RESTORATION" not in allowed
@@ -215,3 +252,42 @@ def test_personal_cafe_submission_and_restoration_continue_in_the_same_case(
                            if row.procedure_step.step_code == "PERFORM_RESTORATION")
         assert all(row["candidate_id"] != f"procedure:{restoration.procedure_step_id}"
                    for row in fake.contracts[-1]["information_blockers"]), fake.contracts[-1]["information_blockers"]
+    flow.submit(action_done=True)
+    assert flow.progress()["PERFORM_RESTORATION"][0] == "COMPLETED"
+    assert flow.work_status() == "COMPLETED"
+    allowed = {action["action_code"] for row in fake.contracts[-1]["blocker_candidates"] for action in row["actions"]}
+    assert "CONFIRM_PREMISES_RETURN_REQUIREMENTS" in allowed
+
+
+def test_new_model_completion_fact_does_not_bypass_pending_owner_confirmation(case_engine, monkeypatch):
+    fake = ScenarioModel(report_progress=True)
+    monkeypatch.setattr(runtime.StructuredLLMClient, "from_env", classmethod(lambda cls, *a, **k: fake))
+    monkeypatch.setattr(runtime.LangfuseTraceSink, "from_env", classmethod(lambda cls, *a, **k: None))
+    flow = CafeFlow(case_engine)
+    flow.plan()
+    flow.submit(restoration_answer={"restoration_scope": "PARTIAL", "demolition_required": "REQUIRED"})
+    flow.submit(raw_input=LANDLORD)
+    assert flow.entry()[1] == "CONFIRM_RESTORATION_REQUIREMENTS"
+    flow.submit(action_done=True)
+    with Session(case_engine) as session:
+        assert session.get(Case, flow.case_id).restoration_status == "UNKNOWN"
+    # 아직 저장된 완료나 충돌 선택이 없다. 모델은 완료 사실과 보류해야 할 완료 관찰을 함께 낸다.
+    outcome = flow.submit(raw_input=RESTORED)
+    assert outcome.outcome_type == "REVIEWED_PLAN"
+    mutations = outcome.review_subject.supervisor_draft.mutations
+    assert all(change.procedure_step.step_code != "PERFORM_RESTORATION"
+               for change in mutations.procedure_progress_changes)
+    allowed = {action["action_code"] for row in fake.contracts[-1]["blocker_candidates"] for action in row["actions"]}
+    assert "CONFIRM_PREMISES_RETURN_REQUIREMENTS" not in allowed
+    with Session(case_engine) as session:
+        restoration = next(row for row in session.get(Case, flow.case_id).case_procedure_steps
+                           if row.procedure_step.step_code == "PERFORM_RESTORATION")
+        assert restoration.status == "IN_PROGRESS"
+        assert any(row["candidate_id"] == f"procedure:{restoration.procedure_step_id}"
+                   for row in fake.contracts[-1]["information_blockers"])
+    assert flow.work_status() == "IN_PROGRESS"
+    # 실제 저장 뒤 다른 준비 버튼을 눌러도 저장된 모델 해석이 사용자 완료 확인으로 변하면 안 된다.
+    flow.submit(action_done=True)
+    allowed = {action["action_code"] for row in fake.contracts[-1]["blocker_candidates"] for action in row["actions"]}
+    assert "CONFIRM_PREMISES_RETURN_REQUIREMENTS" not in allowed
+    assert flow.work_status() == "IN_PROGRESS"

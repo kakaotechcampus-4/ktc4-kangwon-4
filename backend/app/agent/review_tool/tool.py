@@ -15,6 +15,7 @@ from app.agent.action_catalog import (
     ACTION_DEFINITIONS,
     ProcedureBindings,
     build_action_candidates,
+    confirmed_restoration_progress,
     effective_procedure_progress,
     resolve_procedure_bindings,
 )
@@ -161,7 +162,7 @@ class ReviewTool:
 
     async def review_code_only(self, subject: ReviewSubject) -> ReviewResult:
         """모델 없이 무결성·코드 안전 검사만 한다. 어떤 판단에 쓸지는 graph가 정한다."""
-        context = _validate_integrity(subject)
+        context = _validate_integrity(subject, procedure_bindings=self._procedure_bindings)
         deterministic = _deterministic_safety_review(
             subject,
             context,
@@ -177,7 +178,7 @@ class ReviewTool:
         return _finalize_result(subject, no_model, deterministic)
 
     async def review(self, subject: ReviewSubject) -> ReviewResult:
-        context = _validate_integrity(subject)
+        context = _validate_integrity(subject, procedure_bindings=self._procedure_bindings)
         procedure_bindings = resolve_procedure_bindings(
             subject.known_procedure_steps, self._procedure_bindings
         )
@@ -206,6 +207,9 @@ class ReviewTool:
             "null이면, 같은 evidence_id의 원문이 snapshot.evidence_records에 있어 중복을 뺀 것입니다. "
             "원문은 evidence_ref·evidence_id로 snapshot.evidence_records에서 찾아 대조하고, "
             "null이라는 이유만으로 근거가 없다고 보지 마세요."
+            "\n사용자가 충돌 확인에서 restoration_status=COMPLETED를 채택한 경우, 코드가 같은 원상복구 절차의 "
+            "완료 변경을 만들 수 있습니다. 이 경우 Info 완료 관찰이 없다는 이유만으로 반려하지 말고, "
+            "채택된 충돌·절차 대상·근거가 일치하는지 검수하세요. 단독 모델의 완료 사실 제안은 이 확인을 대신하지 않습니다."
         )
         base_messages[0]["content"] += (
             "\n- Every issue.target_path and missing_evidence.claim_path must be an "
@@ -326,7 +330,7 @@ def _coerce_model_output(
         raise ReviewOutputViolation("review model output violates its schema") from exc
 
 
-def _validate_integrity(subject: ReviewSubject) -> _ReviewContext:
+def _validate_integrity(subject: ReviewSubject, *, procedure_bindings=None) -> _ReviewContext:
     try:
         calculated_digest = subject.calculate_digest()
     except (TypeError, ValueError, AttributeError) as exc:
@@ -402,7 +406,7 @@ def _validate_integrity(subject: ReviewSubject) -> _ReviewContext:
         )
 
     _validate_procedure_analysis_provenance(sources_by_call_id)
-    _validate_mutation_provenance(subject, sources_by_call_id)
+    _validate_mutation_provenance(subject, sources_by_call_id, procedure_bindings=procedure_bindings)
     for source in subject.source_results:
         if not isinstance(source.output, InfoAnalysisResult):
             continue
@@ -433,15 +437,21 @@ def _validate_integrity(subject: ReviewSubject) -> _ReviewContext:
 def _validate_mutation_provenance(
     subject: ReviewSubject,
     sources_by_call_id: dict[UUID, Any],
+    *, procedure_bindings=None,
 ) -> None:
     mutations = subject.supervisor_draft.mutations
     expected_changes = {}
+    completed = None
     if isinstance(subject.trigger, ConflictConfirmedTrigger):
         try:
             expected_changes = {
                 item.confirmed_conflict_ref: item
                 for item in build_conflict_overlays(subject.snapshot, subject.trigger)
             }
+            completed = confirmed_restoration_progress(
+                subject.snapshot, subject.trigger, subject.source_results, mutations.fact_changes,
+                subject.known_procedure_steps, procedure_bindings=procedure_bindings,
+            )
         except (AttributeError, TypeError, ValueError) as exc:
             raise ReviewIntegrityError("confirmed-conflict provenance is invalid") from exc
         confirmed = [item for item in mutations.fact_changes
@@ -454,7 +464,8 @@ def _validate_mutation_provenance(
         retained = subject.trigger.retained_info_result
         others = [item for item in mutations.fact_changes if item not in confirmed]
         if retained is None:
-            if others or mutations.procedure_progress_changes:
+            if others or any(completed is None or item != completed.model_copy(update={"candidate_id": item.candidate_id})
+                             for item in mutations.procedure_progress_changes):
                 raise ReviewIntegrityError("conflict confirmation must contain exactly the accepted changes")
         else:
             sources = [item for item in subject.source_results if item.meta.component == Component.INFO_AGENT]
@@ -581,6 +592,9 @@ def _validate_mutation_provenance(
             raise ReviewIntegrityError(
                 "procedure mutation before state differs from snapshot/finding"
             )
+
+        if completed is not None and candidate == completed.model_copy(update={"candidate_id": candidate.candidate_id}):
+            continue  # 사용자가 채택한 완료만 저장한다. 보류 중인 모델 관찰은 승인하지 않는다.
 
         matching_observations = [
             observation
