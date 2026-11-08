@@ -1448,7 +1448,8 @@ def _finalize_result(
     # 이미 확인한다. 모델의 목록 계약 지적만 제외하고, 같은 위치의 근거·안전 반려는 유지한다.
     # (11/01~11/08 운영 기록: 모델 반려 뒤 재작업 성공 24건 중 1건). 판정에서 빼고 서버 로그에만 남긴다.
     ignored = [issue for issue in model_output.issues
-               if issue.issue_code == "CONTRACT_VIOLATION" and _targets_code_fixed_blockers(issue.target_path)]
+               if issue.issue_code == "CONTRACT_VIOLATION" and issue.category == "CONTRACT"
+               and _targets_code_fixed_blockers(issue.target_path)]
     if ignored:
         logger.warning(
             "review model issues on code-fixed blockers ignored for %s: %s",

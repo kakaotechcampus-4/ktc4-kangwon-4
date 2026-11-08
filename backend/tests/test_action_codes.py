@@ -594,6 +594,7 @@ def test_model_rejection_elsewhere_still_revises(path):
     ("HUMAN_CONFIRMATION_OMITTED", "SAFETY"),
     ("INFEASIBLE_ACTION", "ACTIONABILITY"),
     ("CASE_MISMATCH", "FACTUALITY"),
+    ("CONTRACT_VIOLATION", "SAFETY"),
 ])
 def test_model_safety_rejection_of_code_fixed_blockers_still_revises(code, category):
     # 목록 동일성 지적과 달리 근거·안전 반려는 위치가 목록이어도 보존한다.
