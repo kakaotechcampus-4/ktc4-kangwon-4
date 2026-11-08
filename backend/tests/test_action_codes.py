@@ -525,6 +525,78 @@ def test_review_rejects_filing_before_confirmation_even_when_model_passes():
     asyncio.run(run())
 
 
+class RejectingReviewModel(StubModel):
+    """Review 모델이 한 경로에 CONTRACT_VIOLATION을 거는 대역. Supervisor 선택은 StubModel과 같다."""
+
+    def __init__(self, path):
+        super().__init__()
+        self.path = path
+
+    async def generate(self, model, messages, **kwargs):
+        if kwargs["schema_name"] != "reborn_review_output":
+            return await super().generate(model, messages, **kwargs)
+        self.calls += 1
+        return model.model_validate({
+            "verdict": "REVISE",
+            "issues": [{"issue_code": "CONTRACT_VIOLATION", "category": "CONTRACT", "severity": "BLOCKING",
+                        "target_component": "SUPERVISOR", "target_call_id": None, "target_path": self.path,
+                        "reason_summary": "합성 모델 반려", "evidence_refs": []}],
+            "missing_evidence": [], "recommended_rework_targets": ["SUPERVISOR"],
+            "resolution_reason": "합성 모델 반려",
+        })
+
+
+def _review_subject(draft, request):
+    return ReviewSubject.create(
+        schema_version="agent-io/2.0", review_subject_id=UUID(int=9),
+        review_attempt=1, run_id=UUID(int=2), case_id=1, trigger=request.trigger,
+        snapshot=request.case_snapshot, known_procedure_steps=request.known_procedure_steps,
+        source_results=request.source_results, supervisor_draft=draft,
+    )
+
+
+@pytest.mark.parametrize("path", ["/supervisor_draft/decision/blockers", "/supervisor_draft/decision/blockers/0/description"])
+def test_model_rejection_of_code_fixed_blockers_does_not_stop_a_code_verified_plan(path, caplog):
+    # 11/07·08 운영에서 판단이 멈춘 경로. 목록은 코드가 정하고 코드 검사가 같은지 확인한다
+    async def run():
+        request = supervisor_request()
+        draft = await SupervisorAgent(StubModel(), max_local_attempts=1).draft(request)
+        with caplog.at_level("WARNING", logger="app.agent.review_tool.tool"):
+            return await ReviewTool(RejectingReviewModel(path), max_output_attempts=1).review(_review_subject(draft, request))
+
+    result = asyncio.run(run())
+    assert result.verdict == "PASS" and not result.issues and not result.recommended_rework_targets
+    # 판정에서 뺀 모델 지적은 이유와 함께 서버 로그에만 남는다
+    [ignored] = [record.getMessage() for record in caplog.records if "code-fixed blockers ignored" in record.getMessage()]
+    assert "합성 모델 반려" in ignored and path in ignored
+
+
+@pytest.mark.parametrize("path", ["/supervisor_draft/decision/next_action/title", "/supervisor_draft/decision/blocker"])
+def test_model_rejection_elsewhere_still_revises(path):
+    # 화면 문장·우선 blocker 선택처럼 모델이 판단할 몫은 그대로 반려한다
+    async def run():
+        request = supervisor_request()
+        draft = await SupervisorAgent(StubModel(), max_local_attempts=1).draft(request)
+        return await ReviewTool(RejectingReviewModel(path), max_output_attempts=1).review(_review_subject(draft, request))
+
+    result = asyncio.run(run())
+    assert result.verdict == "REVISE"
+    assert [issue.target_path for issue in result.issues] == [path]
+
+
+def test_code_check_still_rejects_a_changed_blocker_list_when_the_model_passes():
+    # 모델 지적을 빼도 목록 자체는 코드 검사가 지킨다
+    async def run():
+        request = supervisor_request()
+        draft = await SupervisorAgent(StubModel(), max_local_attempts=1).draft(request)
+        draft.decision.blockers[0].description = "코드 후보와 다른 설명"
+        return await ReviewTool(StubModel(), max_output_attempts=1).review(_review_subject(draft, request))
+
+    result = asyncio.run(run())
+    assert result.verdict == "REVISE"
+    assert any(issue.target_path.startswith("/supervisor_draft/decision/blocker") for issue in result.issues)
+
+
 @pytest.mark.parametrize("text,expected", [
     ("폐업 시 세금 신고를 함께 하세요.", "TAX"),
     ("폐업일 2026-11-01까지 신고하세요.", "DATE_OR_DEADLINE"),
