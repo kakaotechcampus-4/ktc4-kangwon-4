@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
@@ -78,6 +79,8 @@ from app.agent.schemas import (
 )
 
 from .models import ReviewModelOutput, ReviewProviderOutput
+
+logger = logging.getLogger(__name__)
 
 
 class ReviewToolError(RuntimeError):
@@ -1428,12 +1431,32 @@ def _validate_model_output(
         raise ReviewOutputViolation("review output contains sensitive text") from exc
 
 
+_CODE_FIXED_BLOCKERS_PATH = "/supervisor_draft/decision/blockers"
+
+
+def _targets_code_fixed_blockers(target_path: str) -> bool:
+    """코드가 후보로 정하는 막힌 일 목록(과 그 안의 값)을 가리키는가. 우선 blocker 선택은 아니다."""
+    return target_path == _CODE_FIXED_BLOCKERS_PATH or target_path.startswith(_CODE_FIXED_BLOCKERS_PATH + "/")
+
+
 def _finalize_result(
     subject: ReviewSubject,
     model_output: ReviewModelOutput,
     deterministic: _SafetyFindings,
 ) -> ReviewResult:
-    issues = _deduplicate_models([*model_output.issues, *deterministic.issues])
+    # 막힌 일 목록은 코드가 후보로 정하고, 같은지는 위 결정적 검사(candidate_decision_violations)가
+    # 이미 확인한다. 모델이 이 목록에 단 반려는 재작업해도 같은 목록이 나와 판단만 멈춘다
+    # (11/01~11/08 운영 기록: 모델 반려 뒤 재작업 성공 24건 중 1건). 판정에서 빼고 서버 로그에만 남긴다.
+    ignored = [issue for issue in model_output.issues if _targets_code_fixed_blockers(issue.target_path)]
+    if ignored:
+        logger.warning(
+            "review model issues on code-fixed blockers ignored for %s: %s",
+            subject.review_subject_id,
+            [(issue.issue_code, issue.target_path, issue.reason_summary) for issue in ignored],
+        )
+    issues = _deduplicate_models([
+        *(issue for issue in model_output.issues if issue not in ignored), *deterministic.issues,
+    ])
     missing = _deduplicate_models(
         [*model_output.missing_evidence, *deterministic.missing_evidence]
     )
@@ -1460,6 +1483,8 @@ def _finalize_result(
     resolution_reason = model_output.resolution_reason
     if force_revise and model_output.verdict == ReviewVerdict.PASS:
         resolution_reason = "결정적 안전 검증에서 수정이 필요한 항목을 확인했습니다."
+    elif not force_revise and model_output.verdict == ReviewVerdict.REVISE:
+        resolution_reason = "코드가 확인한 막힌 일 목록에 대한 모델 지적만 있어 통과로 판정했습니다."
 
     return ReviewResult(
         reviewed_subject_id=subject.review_subject_id,
