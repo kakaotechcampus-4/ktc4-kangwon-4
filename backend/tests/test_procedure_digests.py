@@ -1028,69 +1028,6 @@ def test_a_free_text_reply_with_unknown_detail_still_lets_the_supervisor_choose(
     assert all(change.field_path != "restoration_scope_detail" for change in draft.mutations.fact_changes)
 
 
-@pytest.mark.parametrize("with_retained", [False, True])
-def test_conflict_confirmation_fills_info_from_digest_and_keeps_the_review_model(with_retained):
-    # 충돌 확인 후 재판단은 새 사실을 꺼내지 않아 Info를 정리본으로 채운다. 보관된 사실은 이전 판단에서
-    # Info 모델이 글에서 꺼내 아직 Review를 안 거쳤으므로 Review 모델은 유지한다.
-    from datetime import datetime, timezone
-    from app.common.agent_service import build_conflict_input
-
-    lines = ["자가가 아니라 무상 임차예요.", "폐업 예정일은 2026-12-20입니다."]
-    text = " ".join(lines if with_retained else lines[:1])
-    calls = []
-    store = ev.SnapshotStore(REVIEWED)
-    request = ev.attach_fixture_sources(ev.build_graph_input(ev.CASES["benchmark_case1"], result_text=text), store)
-
-    class Model(NoModel):
-        async def generate(self, response_model, messages, **kwargs):
-            name = kwargs["schema_name"]
-            calls.append(name)
-            if name == "reborn_review_output":
-                return response_model.model_validate({"verdict": "PASS", "issues": [], "missing_evidence": [],
-                    "recommended_rework_targets": [], "resolution_reason": "합성 검수"})
-            if name == "reborn_supervisor_draft":
-                contract = json.loads(messages[1]["content"].removeprefix("INPUT_JSON="))["contract"]
-                if contract["blocker_candidates"]:
-                    row = contract["blocker_candidates"][0]
-                    return response_model.model_validate({"decision_type": "ACTION", "blocker_candidate_id": row["candidate_id"],
-                                                          "action_code": row["actions"][0]["action_code"]})
-                return response_model.model_validate({"decision_type": "NEEDS_MORE_INFO",
-                    "blocker_candidate_id": contract["information_blockers"][0]["candidate_id"], "action_code": None})
-            return response_model.model_validate({
-                "completion_status": "COMPLETE",
-                "facts": [{"operation": "SET", "field_path": field, "value_type": kind, "value": value,
-                           "source_text": line, "confidence_bps": 9500, "requires_confirmation": False,
-                           "reason_summary": "합성 사용자 진술"}
-                          for field, kind, value, line in [("lease_status", "ENUM", "LEASED_FREE", lines[0]),
-                                                           ("planned_closure_date", "DATE", "2026-12-20", lines[1])]
-                          if line in text],
-                "procedure_observations": [], "missing_fields": [], "uncertainties": [],
-                **({} if response_model.__name__ == "InfoFactProviderOutput" else {"procedure_findings": []}),
-            })
-
-    async def run():
-        with patch.object(runtime_module.StructuredLLMClient, "from_env", classmethod(lambda cls, *a, **k: Model())):
-            runtime = await runtime_module.build_runtime(known_procedure_steps=ev.build_registry(store),
-                procedure_store=store, support_catalog=ev.load_catalog(None))
-            try:
-                first = await runtime.run_planning(request)
-                assert first.outcome_type == "CONFLICT", first
-                calls.clear()
-                confirmed = build_conflict_input(
-                    case_snapshot=first.conflict_snapshot.model_copy(deep=True), conflicts=first.conflicts,
-                    conflict_snapshot=first.conflict_snapshot, retained_info_result=first.retained_info_result,
-                    selections=[{"conflict_ref": c.conflict_ref, "accepted": True} for c in first.conflicts],
-                    input_event_id="owner-confirmation", confirmed_at=datetime.now(timezone.utc))
-                return await runtime.run_planning(confirmed)
-            finally:
-                await runtime.aclose()
-
-    outcome = asyncio.run(run())
-    assert outcome.outcome_type == "REVIEWED_PLAN", (outcome.failure_code, getattr(outcome, "failure_message_code", None), calls)
-    # Info 모델은 부르지 않는다. 보관된 사실(모델이 꺼내 아직 Review 전)이 있으면 Review 모델을 유지한다
-    assert calls == ["reborn_supervisor_draft", "reborn_review_output"] if with_retained else ["reborn_supervisor_draft"]
-
-
 # ── [준비했어요] 버튼: 준비 확인 할 일의 답을 모델 해석 없이 코드로 받는다 ──
 # 운영에서 "넵 다 확인 완료했어요"·"전/후 사진 찍었어요"가 준비 확인으로 저장되지 않아 같은 안내가
 # 반복되거나 판단이 멈췄다(2026-11-07). 버튼 답은 그 판단에서 바로 실행 단계로 넘어가야 한다.
@@ -1217,3 +1154,163 @@ def test_requirements_confirmation_requires_its_own_text_only():
         AgentGraphInput.model_validate(payload)
     del payload["trigger"]["restoration_answer"]
     assert AgentGraphInput.model_validate(payload).trigger.requirements_confirmation == confirmation
+
+
+@pytest.mark.parametrize("with_retained", [False, True])
+def test_conflict_confirmation_fills_info_from_digest_and_keeps_the_review_model(with_retained):
+    # 충돌 확인 후 재판단은 새 사실을 꺼내지 않아 Info를 정리본으로 채운다. 보관된 사실은 이전 판단에서
+    # Info 모델이 글에서 꺼내 아직 Review를 안 거쳤으므로 Review 모델은 유지한다.
+    from datetime import datetime, timezone
+    from app.common.agent_service import build_conflict_input
+
+    lines = ["자가가 아니라 무상 임차예요.", "폐업 예정일은 2026-12-20입니다."]
+    text = " ".join(lines if with_retained else lines[:1])
+    calls = []
+    store = ev.SnapshotStore(REVIEWED)
+    request = ev.attach_fixture_sources(ev.build_graph_input(ev.CASES["benchmark_case1"], result_text=text), store)
+
+    class Model(NoModel):
+        async def generate(self, response_model, messages, **kwargs):
+            name = kwargs["schema_name"]
+            calls.append(name)
+            if name == "reborn_review_output":
+                return response_model.model_validate({"verdict": "PASS", "issues": [], "missing_evidence": [],
+                    "recommended_rework_targets": [], "resolution_reason": "합성 검수"})
+            if name == "reborn_supervisor_draft":
+                contract = json.loads(messages[1]["content"].removeprefix("INPUT_JSON="))["contract"]
+                if contract["blocker_candidates"]:
+                    row = contract["blocker_candidates"][0]
+                    return response_model.model_validate({"decision_type": "ACTION", "blocker_candidate_id": row["candidate_id"],
+                                                          "action_code": row["actions"][0]["action_code"]})
+                return response_model.model_validate({"decision_type": "NEEDS_MORE_INFO",
+                    "blocker_candidate_id": contract["information_blockers"][0]["candidate_id"], "action_code": None})
+            return response_model.model_validate({
+                "completion_status": "COMPLETE",
+                "facts": [{"operation": "SET", "field_path": field, "value_type": kind, "value": value,
+                           "source_text": line, "confidence_bps": 9500, "requires_confirmation": False,
+                           "reason_summary": "합성 사용자 진술"}
+                          for field, kind, value, line in [("lease_status", "ENUM", "LEASED_FREE", lines[0]),
+                                                           ("planned_closure_date", "DATE", "2026-12-20", lines[1])]
+                          if line in text],
+                "procedure_observations": [], "missing_fields": [], "uncertainties": [],
+                **({} if response_model.__name__ == "InfoFactProviderOutput" else {"procedure_findings": []}),
+            })
+
+    async def run():
+        with patch.object(runtime_module.StructuredLLMClient, "from_env", classmethod(lambda cls, *a, **k: Model())):
+            runtime = await runtime_module.build_runtime(known_procedure_steps=ev.build_registry(store),
+                procedure_store=store, support_catalog=ev.load_catalog(None))
+            try:
+                first = await runtime.run_planning(request)
+                assert first.outcome_type == "CONFLICT", first
+                calls.clear()
+                confirmed = build_conflict_input(
+                    case_snapshot=first.conflict_snapshot.model_copy(deep=True), conflicts=first.conflicts,
+                    conflict_snapshot=first.conflict_snapshot, retained_info_result=first.retained_info_result,
+                    selections=[{"conflict_ref": c.conflict_ref, "accepted": True} for c in first.conflicts],
+                    input_event_id="owner-confirmation", confirmed_at=datetime.now(timezone.utc))
+                return await runtime.run_planning(confirmed)
+            finally:
+                await runtime.aclose()
+
+    outcome = asyncio.run(run())
+    assert outcome.outcome_type == "REVIEWED_PLAN", (outcome.failure_code, getattr(outcome, "failure_message_code", None), calls)
+    # Info 모델은 부르지 않는다. 보관된 사실(모델이 꺼내 아직 Review 전)이 있으면 Review 모델을 유지한다
+    assert calls == ["reborn_supervisor_draft", "reborn_review_output"] if with_retained else ["reborn_supervisor_draft"]
+
+
+@pytest.mark.parametrize("code,confirmation", [
+    ("RETURN_PREMISES", "CONFIRM_PREMISES_RETURN_REQUIREMENTS"),
+    ("SETTLE_EMPLOYEE_PAYMENTS", "CONFIRM_EMPLOYEE_SETTLEMENT_REQUIREMENTS"),
+    ("REPORT_EMPLOYEE_INSURANCE_LOSS", "CONFIRM_EMPLOYEE_INSURANCE_LOSS_REQUIREMENTS"),
+    ("REPORT_WORKPLACE_INSURANCE_CLOSURE", "CONFIRM_WORKPLACE_INSURANCE_CLOSURE_REQUIREMENTS"),
+])
+@pytest.mark.parametrize("mode", ["same_judgment", "stored", "held", "completion_report"])
+def test_preparation_report_updates_readiness_without_changing_snapshot_status(code, confirmation, mode):
+    from uuid import UUID
+
+    from test_action_codes import StubModel, source
+    from test_blocker_candidates import ChoiceModel
+    from test_info_replanning import Responses
+
+    from app.agent.blocker_candidates import build_blocker_candidates
+    from app.agent.procedure_tool.stored_tool import StoredProcedureLookupTool
+    from app.agent.review_tool import ReviewTool
+    from app.agent.schemas import (
+        CASE_FIELD_SPECS,
+        CaseFact,
+        InfoAnalysisInput,
+        ProcedureLookupInput,
+        ProcedureProgress,
+        ReviewSubject,
+        SupervisorAgentInput,
+    )
+    from app.agent.supervisor.agent import SupervisorAgent
+
+    async def run():
+        store = ev.SnapshotStore(REVIEWED)
+        registry = ev.build_registry(store, cafe_registry=True)
+        text = "해당 절차의 준비사항을 확인했습니다."
+        if code == "REPORT_WORKPLACE_INSURANCE_CLOSURE":
+            text = (
+                "담당 기관에 사업장 보험 탈퇴·소멸 신고 대상과 필요한 서류, 제출 방법을 모두 확인했고 "
+                "준비할 자료도 갖췄어요. 아직 탈퇴·소멸 신고서는 제출하지 않았어요."
+            )
+        if mode == "completion_report":
+            text = "해당 절차의 처리를 모두 마쳤습니다."
+        payload = ev.CASES["benchmark_case1"] | {"had_employees": True, "pension_enrolled": True,
+            "health_insurance_enrolled": True, "employment_insurance_enrolled": True,
+            "industrial_accident_insurance_enrolled": True}
+        request = ev.attach_fixture_sources(ev.build_graph_input(payload, result_text=text,
+            prior_facts={"restoration_scope": "FULL", "demolition_required": "NOT_REQUIRED",
+                         "restoration_status": "COMPLETED"}), store)
+        snapshot = request.case_snapshot
+        ref = snapshot.evidence_records[0].evidence_id
+        for key in ["had_employees", "pension_enrolled", "health_insurance_enrolled",
+                    "employment_insurance_enrolled", "industrial_accident_insurance_enrolled"]:
+            snapshot.facts.append(CaseFact(field_path=key, value_type="BOOLEAN", value=True,
+                status="CONFIRMED", evidence_refs=[ref], updated_at=ev.FIXED_TIME))
+        step = next(item.procedure_step for item in registry if item.procedure_step.step_code == code)
+        snapshot.procedure_progress.append(ProcedureProgress(procedure_step=step, status="IN_PROGRESS",
+            requirements_confirmed=mode == "stored", submitted=False, evidence_refs=[ref], updated_at=ev.FIXED_TIME))
+        before = snapshot.model_dump_json()
+        lookup = await StoredProcedureLookupTool(store).lookup(ProcedureLookupInput(
+            lookup_goal="BUSINESS_CLOSURE", procedure_step_codes=[item.procedure_step.step_code for item in registry],
+            evidence_records=snapshot.evidence_records, search_queries=["폐업 절차"], as_of=ev.FIXED_TIME.date(),
+            locale="ko-KR", source_policy="OFFICIAL_ONLY", max_results_per_query=10,
+            based_on_snapshot_id=snapshot.snapshot_id, review_feedback=[]))
+        raw = {"completion_status": "COMPLETE", "facts": [], "missing_fields": [], "uncertainties": [],
+            "procedure_observations": [{"step_code": code, "observed_status": "COMPLETED" if mode == "completion_report" else "IN_PROGRESS",
+                "source_text": text, "requirements_confirmed": True, "submitted": False,
+                "requires_confirmation": mode == "held", "reason_summary": "사용자의 절차 진행 보고"}]}
+        info = await info_module.InfoAnalysisAgent(Responses(raw), clock=lambda: ev.FIXED_TIME, max_local_attempts=1).analyze(
+            InfoAnalysisInput(input=request.trigger.input, case_snapshot=snapshot, allowed_field_paths=list(CASE_FIELD_SPECS),
+                known_procedure_steps=registry, source_call_id=UUID(int=40), procedure_lookup_call_id=UUID(int=5),
+                procedure_lookup_result=lookup, review_feedback=[]))
+        finding = next(item for item in info.procedure_findings if item.procedure_step == step)
+        assert finding.current_status == "IN_PROGRESS"
+        assert finding.requires_confirmation is (mode in {"held", "completion_report"})
+        supervisor_input = SupervisorAgentInput(trigger=request.trigger, case_snapshot=snapshot, known_procedure_steps=registry,
+            source_results=[source(lookup, "PROCEDURE_TOOL", 5), source(info, "INFO_AGENT", 40)])
+        supervisor = SupervisorAgent(ChoiceModel(), clock=lambda: ev.FIXED_TIME, max_local_attempts=1)
+        changes = supervisor._build_mutations(supervisor_input, supervisor_input.source_results, fact_overlays=[])
+        rows = build_blocker_candidates(snapshot, registry, supervisor_input.source_results, changes,
+                                        supervisor._evidence(supervisor_input.source_results, supervisor_input))
+        choice = 0 if mode == "completion_report" else next(i for i, row in enumerate(rows)
+            if row["candidate_id"] == f"procedure:{step.procedure_step_id}")
+        draft = await SupervisorAgent(ChoiceModel(choice=choice, information=mode == "completion_report"),
+                                      clock=lambda: ev.FIXED_TIME, max_local_attempts=1).draft(supervisor_input)
+        if mode == "completion_report":
+            assert draft.decision.next_action is None
+        else:
+            assert draft.decision.next_action.action_code == (code if mode in {"same_judgment", "stored"} else confirmation)
+        assert len(draft.mutations.procedure_progress_changes) == int(mode == "same_judgment")
+        for change in draft.mutations.procedure_progress_changes:
+            assert (change.proposed_status, change.proposed_requirements_confirmed, change.proposed_submitted) == ("IN_PROGRESS", True, False)
+        subject = ReviewSubject.create(schema_version="agent-io/2.0", review_subject_id=UUID(int=500), review_attempt=1,
+            run_id=supervisor_input.source_results[0].meta.run_id, case_id=1, trigger=request.trigger,
+            snapshot=snapshot, known_procedure_steps=registry, source_results=supervisor_input.source_results, supervisor_draft=draft)
+        assert (await ReviewTool(StubModel()).review(subject)).verdict == "PASS"
+        assert snapshot.model_dump_json() == before
+
+    asyncio.run(run())
