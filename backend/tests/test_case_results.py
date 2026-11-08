@@ -196,6 +196,8 @@ def test_legacy_preparation_reaches_ai_with_its_saved_procedure(case_engine, cas
 
 
 @pytest.mark.parametrize("changes", [
+    {"action_done": 42},
+    {"action_done": [{"action_code": "CONFIRM_EMPLOYEE_SETTLEMENT_REQUIREMENTS"}]},
     {"raw_input": "기관 처리가 끝났어요."},
     {"action_done": {"action_code": "CONFIRM_EMPLOYEE_SETTLEMENT_REQUIREMENTS", "extra": True}},
     {"action_done": {"action_code": "CONFIRM_EMPLOYEE_SETTLEMENT_REQUIREMENTS", "procedure_step_id": 0}},

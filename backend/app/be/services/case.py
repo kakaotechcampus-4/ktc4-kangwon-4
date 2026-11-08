@@ -459,6 +459,8 @@ def read_action_done(session: Session, history: CaseHistory) -> dict | None:
     payload = history.action_done
     if payload is None:
         return None
+    if not isinstance(payload, dict):
+        raise InvalidActionDoneError("저장된 버튼 답변의 형식이 올바르지 않습니다.")
     try:
         if (history.source == "USER_INPUT" and set(payload) == {"action_code"}
                 and history.raw_input == "준비사항 확인을 마쳤어요."):
