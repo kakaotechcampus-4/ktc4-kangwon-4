@@ -526,11 +526,13 @@ def test_review_rejects_filing_before_confirmation_even_when_model_passes():
 
 
 class RejectingReviewModel(StubModel):
-    """Review 모델이 한 경로에 CONTRACT_VIOLATION을 거는 대역. Supervisor 선택은 StubModel과 같다."""
+    """Review 모델이 한 경로를 반려하는 대역. Supervisor 선택은 StubModel과 같다."""
 
-    def __init__(self, path):
+    def __init__(self, path, *, code="CONTRACT_VIOLATION", category="CONTRACT"):
         super().__init__()
         self.path = path
+        self.code = code
+        self.category = category
 
     async def generate(self, model, messages, **kwargs):
         if kwargs["schema_name"] != "reborn_review_output":
@@ -538,7 +540,7 @@ class RejectingReviewModel(StubModel):
         self.calls += 1
         return model.model_validate({
             "verdict": "REVISE",
-            "issues": [{"issue_code": "CONTRACT_VIOLATION", "category": "CONTRACT", "severity": "BLOCKING",
+            "issues": [{"issue_code": self.code, "category": self.category, "severity": "BLOCKING",
                         "target_component": "SUPERVISOR", "target_call_id": None, "target_path": self.path,
                         "reason_summary": "합성 모델 반려", "evidence_refs": []}],
             "missing_evidence": [], "recommended_rework_targets": ["SUPERVISOR"],
@@ -582,6 +584,30 @@ def test_model_rejection_elsewhere_still_revises(path):
     result = asyncio.run(run())
     assert result.verdict == "REVISE"
     assert [issue.target_path for issue in result.issues] == [path]
+
+
+@pytest.mark.parametrize("code,category", [
+    ("MISSING_EVIDENCE", "EVIDENCE"),
+    ("UNSUPPORTED_CLAIM", "EVIDENCE"),
+    ("STALE_EVIDENCE", "EVIDENCE"),
+    ("PROCEDURE_CONFLICT", "PROCEDURE"),
+    ("HUMAN_CONFIRMATION_OMITTED", "SAFETY"),
+    ("INFEASIBLE_ACTION", "ACTIONABILITY"),
+    ("CASE_MISMATCH", "FACTUALITY"),
+])
+def test_model_safety_rejection_of_code_fixed_blockers_still_revises(code, category):
+    # 목록 동일성 지적과 달리 근거·안전 반려는 위치가 목록이어도 보존한다.
+    async def run():
+        request = supervisor_request()
+        draft = await SupervisorAgent(StubModel(), max_local_attempts=1).draft(request)
+        model = RejectingReviewModel("/supervisor_draft/decision/blockers/0/description", code=code, category=category)
+        return await ReviewTool(model, max_output_attempts=1).review(_review_subject(draft, request))
+
+    result = asyncio.run(run())
+    assert result.verdict == "REVISE"
+    assert [issue.issue_code for issue in result.issues] == [code]
+    assert not result.missing_evidence  # MISSING_EVIDENCE 이슈만 있어도 반려해야 한다.
+    assert result.recommended_rework_targets == ["SUPERVISOR"]
 
 
 def test_code_check_still_rejects_a_changed_blocker_list_when_the_model_passes():
