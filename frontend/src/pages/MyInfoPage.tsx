@@ -111,10 +111,8 @@ export function MyInfoPage() {
     <MyInfoFrame>
       <main className="flex flex-col gap-3 px-4 pt-2 pb-8">
         <section aria-labelledby="my-store">
-          <h2 id="my-store" className="text-20 font-bold">
-            내 가게
-          </h2>
-          <p className="mt-1.5 text-15 text-pretty text-fg-neutral-muted">
+          <StoreSummary id="my-store" facts={query.view.facts} />
+          <p className="mt-4 text-15 text-pretty text-fg-neutral-muted">
             리본이 판단할 때 쓰는 정보예요. 바뀐 게 있으면 할 일 결과를 알려 주실 때 말씀해 주세요.
           </p>
           <dl className="mt-3 flex flex-col">
@@ -126,6 +124,41 @@ export function MyInfoPage() {
         <div className="mt-4 flex justify-end">{logOutButton}</div>
       </main>
     </MyInfoFrame>
+  )
+}
+
+/**
+ * 맨 위 요약 카드. 이 화면에서 브랜드 색은 여기 한 곳에만 쓴다(FE 규칙 5).
+ *
+ * 아래 목록과 같은 값(업종 · 프랜차이즈 · 직원 수)을 옮겨 적을 뿐 새로 판단하지 않는다.
+ * 업종을 모르면 "업종 확인 필요", 둘째 줄은 확인된 값만 잇는다 — 모르는 값을 지어 채우지 않는다.
+ */
+function StoreSummary({ id, facts }: { id: string; facts: Fact[] }) {
+  const known = (key: string) => {
+    const fact = facts.find((item) => item.key === key)
+    return fact?.status === 'CONFIRMED' ? fact.value : undefined
+  }
+  const business = known('business_type')
+  const details = [known('franchise'), known('employee_count')].filter((value) => value !== undefined)
+
+  return (
+    <div className="flex items-center gap-3.5 rounded-2xl bg-bg-brand-weak px-5 py-4.5">
+      <span
+        aria-hidden="true"
+        className="grid size-12 shrink-0 place-items-center rounded-full bg-bg-brand-solid text-fg-on-brand-solid"
+      >
+        <IconStoreLine size={24} />
+      </span>
+      <div className="min-w-0">
+        <h2 id={id} className="text-14 font-bold text-fg-brand">
+          내 가게
+        </h2>
+        <p className={`mt-0.5 text-20 font-bold ${business ? '' : 'text-fg-neutral-subtle'}`}>
+          {business ?? '업종 확인 필요'}
+        </p>
+        {details.length > 0 && <p className="mt-0.5 text-15 text-fg-neutral-muted">{details.join(' · ')}</p>}
+      </div>
+    </div>
   )
 }
 

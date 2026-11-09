@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { RouterProvider, createMemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -79,6 +79,19 @@ describe('MyInfoPage', () => {
     expect(valueOf('업종')).toHaveTextContent('카페')
     expect(valueOf('직원 수')).toHaveTextContent('3명')
     expect(valueOf('점포 형태')).toHaveTextContent('임차 (월세)')
+  })
+
+  /** 요약은 목록의 확인된 값을 옮겨 적을 뿐이다. 모르는 값을 지어 채우지 않는다 */
+  it('맨 위 요약에 업종과 확인된 프랜차이즈 · 직원 수를 보여준다', async () => {
+    saveTokens('access-1', 'refresh-1')
+    serve([ok(envelope({ ...SERVER_CASE, employee_count: null }))])
+    renderAt('/mypage')
+
+    const title = await screen.findByRole('heading', { level: 2, name: '내 가게' })
+    const summary = title.parentElement as HTMLElement
+    expect(within(summary).getByText('카페')).toBeInTheDocument()
+    // 직원 수를 모르면 그 자리를 비우지 않고 아예 잇지 않는다
+    expect(within(summary).getByText('비프랜차이즈')).toBeInTheDocument()
   })
 
   /** 빈칸으로 숨기면 사장님은 답한 것이 사라진 줄 안다(FE 규칙 6) */
