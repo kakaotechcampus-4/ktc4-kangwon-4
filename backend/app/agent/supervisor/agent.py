@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Annotated, Any, Literal, Protocol
 from uuid import UUID, uuid4
 
-from pydantic import Field, StrictBool, StrictStr, model_validator
+from pydantic import Field, StrictBool, StrictStr, field_validator, model_validator
 
 from app.agent.action_catalog import (
     ProcedureBindings,
@@ -136,9 +136,16 @@ _ASK_FIRST_CANDIDATE = "missing:restoration_scope_detail"
 class SupervisorModelOutput(AgentSchema):
     """Select a verified candidate; runtime owns its text, target and evidence."""
 
-    decision_type: Literal[DecisionType.ACTION, DecisionType.NEEDS_MORE_INFO]
+    decision_type: DecisionType
     blocker_candidate_id: StrictStr | None = None
     action_code: ActionCode | None
+
+    @field_validator("decision_type")
+    @classmethod
+    def require_model_selection(cls, value: DecisionType) -> DecisionType:
+        if value == DecisionType.PROCEDURES_COMPLETED:
+            raise ValueError("procedure completion is determined by code, not model selection")
+        return value
 
 
 class SupervisorSemanticDraft(AgentSchema):
