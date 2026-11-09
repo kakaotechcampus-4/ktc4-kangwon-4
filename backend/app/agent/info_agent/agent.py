@@ -384,12 +384,35 @@ class InfoAnalysisAgent:
         }, fields))
         return self._materialize(request, draft, procedure_bindings)
 
+    def _analyze_restoration_status_answer(
+        self, request: InfoAnalysisInput, procedure_bindings: ProcedureBindings,
+    ) -> InfoAnalysisResult:
+        fields = self._digest_fields(request, procedure_bindings)
+        if fields is None:
+            # 버튼 답은 모델이 다시 해석하지 않는다. 절차 근거가 낡으면 안전하게 실패한다.
+            raise InfoAnalysisGuardrailError("restoration status answer requires current reviewed procedure digests")
+        answer = request.restoration_status_answer
+        # 진행 상태 값만 남긴다. 철거 절차의 완료 처리는 글로 알려줬을 때와 같은 기존 흐름이 맡는다
+        draft = InfoAnalysisDraft.model_validate(with_digest_findings({
+            "completion_status": InfoCompletionStatus.COMPLETE,
+            "facts": [{
+                "field_path": "restoration_status", "operation": FactOperation.SET,
+                "value_type": FactValueType.ENUM, "value": answer.restoration_status,
+                "source_text": answer.to_input_text(), "confidence_bps": 10_000,
+                "requires_confirmation": False, "reason_summary": "사용자가 직접 고른 답변입니다.",
+            }],
+            "procedure_observations": [], "missing_fields": [], "uncertainties": [],
+        }, fields))
+        return self._materialize(request, draft, procedure_bindings)
+
     async def analyze(self, request: InfoAnalysisInput) -> InfoAnalysisResult:
         procedure_bindings = resolve_procedure_bindings(
             request.known_procedure_steps, self._procedure_bindings
         )
         if request.restoration_answer is not None:
             return self._analyze_restoration_answer(request, procedure_bindings)
+        if request.restoration_status_answer is not None:
+            return self._analyze_restoration_status_answer(request, procedure_bindings)
         if request.action_done is not None:
             return self._analyze_action_done(request, procedure_bindings)
         prompt_input = self._prompt_input(request, procedure_bindings)

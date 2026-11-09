@@ -946,6 +946,19 @@ class RestorationAnswer(AgentSchema):
         return scope[self.restoration_scope] + "\n" + demolition[self.demolition_required]
 
 
+class RestorationStatusAnswer(AgentSchema):
+    """사장님이 버튼으로 고른 원상복구 진행 상태. 철거를 권하거나 완료를 추론하지 않는다."""
+
+    restoration_status: Literal["NOT_STARTED", "IN_PROGRESS", "COMPLETED"]
+
+    def to_input_text(self) -> str:
+        return {
+            "NOT_STARTED": "원상복구와 철거 작업은 아직 시작하지 않았어요.",
+            "IN_PROGRESS": "원상복구와 철거 작업을 진행하고 있어요.",
+            "COMPLETED": "원상복구와 철거 작업을 모두 끝냈어요.",
+        }[self.restoration_status]
+
+
 # [했어요] 버튼으로 답하는 할 일과 그 버튼이 남기는 것. 지원사업 확인(MVP 밖)과
 # 원상복구 범위(자체 선택지)는 뺀다. 종류마다 버튼 문구와 저장할 진행 상태가 다르다.
 _ACTION_DONE_KINDS = {
@@ -1044,6 +1057,9 @@ class InfoAnalysisInput(AgentSchema):
     action_done: ActionDoneAnswer | None = Field(
         default=None, exclude_if=lambda value: value is None,
     )
+    restoration_status_answer: RestorationStatusAnswer | None = Field(
+        default=None, exclude_if=lambda value: value is None,
+    )
     case_snapshot: CaseSnapshot = Field(
         description="Immutable Case read view used as the analysis baseline."
     )
@@ -1090,6 +1106,13 @@ class InfoAnalysisInput(AgentSchema):
             or self.input.redacted_text != self.action_done.to_input_text()
         ):
             raise ValueError("action done answer requires its exact USER_INPUT text only")
+        if self.restoration_status_answer is not None and (
+            self.input is None or self.conflict_confirmation is not None
+            or self.restoration_answer is not None or self.action_done is not None
+            or self.input.source_type != InputSourceType.USER_INPUT
+            or self.input.redacted_text != self.restoration_status_answer.to_input_text()
+        ):
+            raise ValueError("restoration status answer requires its exact USER_INPUT text only")
         if self.conflict_confirmation is not None:
             if self.input is not None:
                 raise ValueError("confirmation must not replay the rejected user text")
@@ -1969,6 +1992,9 @@ class ResultSubmittedTrigger(AgentSchema):
     action_done: ActionDoneAnswer | None = Field(
         default=None, exclude_if=lambda value: value is None,
     )
+    restoration_status_answer: RestorationStatusAnswer | None = Field(
+        default=None, exclude_if=lambda value: value is None,
+    )
     procedure_completion_confirmation: ProcedureCompletionConfirmation | None = None
     input_event_id: NonEmptyStr
     client_event_id: NonEmptyStr | None = Field(
@@ -1997,6 +2023,13 @@ class ResultSubmittedTrigger(AgentSchema):
             or self.procedure_completion_confirmation is not None
         ):
             raise ValueError("action done answer requires its exact USER_INPUT text only")
+        if self.restoration_status_answer is not None and (
+            self.input.source_type != InputSourceType.USER_INPUT
+            or self.input.redacted_text != self.restoration_status_answer.to_input_text()
+            or self.restoration_answer is not None or self.action_done is not None
+            or self.procedure_completion_confirmation is not None
+        ):
+            raise ValueError("restoration status answer requires its exact USER_INPUT text only")
         if (
             self.procedure_completion_confirmation is not None
             and self.procedure_completion_confirmation.input.input_event_id == self.input_event_id
