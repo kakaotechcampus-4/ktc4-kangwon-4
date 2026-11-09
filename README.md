@@ -18,4 +18,5 @@
 
 - [BE·Agent CI](.github/workflows/be-agent-ci.yml)는 모델 대역과 격리 MySQL로 검사합니다. [FE CI](.github/workflows/frontend-ci.yml)는 화면 검사와 빌드를 수행합니다.
 - 실제 모델 평가와 과거 수치의 조건·한계는 [모니터링 기록](docs/agent/monitoring-results.md)에 있습니다. 코드 검사 통과와 실제 모델 품질·전체 화면 속도 검증을 구분합니다.
-- [배포 Compose](docker-compose.prod.yml)와 [운영 환경변수 예시](.env.prod.example)를 사용합니다. [배포 절차 PR #225](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/225)는 검토 중이며, 운영 반영과 같은 Case의 전체 시연 확인은 [#229](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/issues/229)·[#240](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/issues/240)에서 추적합니다.
+- [배포 Compose](docker-compose.prod.yml)와 [운영 환경변수 예시](.env.prod.example)를 사용하며, 머지된 [배포 절차 #225](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/225)의 현재 명령은 [배포 문서](docs/deploy.md)를 따릅니다.
+- 2026-11-09 실제 운영 Windows 브라우저에서 개인 카페 1건의 판단 반복·등록 절차 안내 종료·합성 서류 6종 점검·ZIP 다운로드·재진입을 확인했습니다. [운영 검증과 비용](docs/agent/monitoring-results.md#운영-개인-카페-시나리오-2026-11-09)은 과거 평가와 구분합니다. 동시 갱신·장애 복귀 등 남은 리허설은 [#240](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/issues/240)·[#242](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/issues/242)에서 추적합니다.

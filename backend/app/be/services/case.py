@@ -775,7 +775,7 @@ def get_case_results_submit_status(
     changes = _field_changes(session, latest_history.id)
     # 절차 변경 후보는 상태 또는 준비·제출 여부가 앞으로 바뀐 경우만 저장된다.
     # 가게 필드가 같아도 이 제출의 절차 변경이 있으면 반영 결과다.
-    progress_changed = bool(latest_history.procedure_step_histories)
+    progress_changed = procedure_step_crud.has_case_procedure_step_history(session, latest_history.id)
     return CaseResultsSubmitResponse(
         result="UPDATED" if changes or progress_changed else "NO_CHANGE",
         changes=changes,

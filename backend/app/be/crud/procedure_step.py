@@ -1,3 +1,4 @@
+from sqlalchemy import exists
 from sqlalchemy.orm import joinedload
 from sqlmodel import Session, select
 
@@ -52,6 +53,12 @@ def create_case_procedure_step_history(
     session.add(history)
     session.flush()
     return history
+
+
+def has_case_procedure_step_history(session: Session, case_history_id: int) -> bool:
+    return session.exec(
+        select(exists().where(CaseProcedureStepHistory.case_history_id == case_history_id))
+    ).one()
 
 
 def get_all_procedure_steps(session: Session) -> list[ProcedureStep]:
