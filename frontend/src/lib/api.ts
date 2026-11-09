@@ -301,3 +301,14 @@ export async function postLogin(code: string, state: string | null): Promise<Log
 
   return { accessToken, refreshToken, nickname }
 }
+
+/**
+ * 서버에 로그아웃을 알린다(`POST /logout`). 서버는 이 회원의 Refresh 토큰을 지운다.
+ *
+ * 브라우저의 토큰만 지우면 서버에는 Refresh 토큰이 남아, 어딘가 복사돼 있던 값으로 새 로그인을
+ * 계속 받을 수 있다. 그래서 화면은 이것을 부른 **뒤에** 브라우저 토큰도 지운다(`logOut`).
+ * 실패하면 오류를 그대로 올린다 — 그래도 로그아웃할지는 화면이 정한다.
+ */
+export async function logOutFromServer(): Promise<void> {
+  await request('/logout', { method: 'POST' })
+}

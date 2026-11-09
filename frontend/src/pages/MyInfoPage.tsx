@@ -1,5 +1,5 @@
 import { IconExclamationmarkCircleLine, IconStoreLine } from '@karrotmarket/react-monochrome-icon'
-import type { ReactNode } from 'react'
+import { type ReactNode, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 
 import { Button } from '../components/ui/Button'
@@ -7,6 +7,9 @@ import { EmptyState } from '../components/ui/EmptyState'
 import { HammerLoader } from '../components/ui/HammerLoader'
 import { TopBar } from '../components/ui/TopBar'
 import { useCase } from '../hooks/useCase'
+import { logOutFromServer } from '../lib/api'
+import { logOut, usesMockData } from '../lib/auth'
+import { useDiagnosisStore } from '../stores/useDiagnosisStore'
 import type { Fact } from '../types/view'
 
 /**
@@ -26,6 +29,37 @@ export function MyInfoPage() {
   const { search } = useLocation()
   const navigate = useNavigate()
   const { query, refresh, refreshing } = useCase()
+  const [loggingOut, setLoggingOut] = useState(false)
+
+  /**
+   * 서버에 알린 뒤 브라우저 쪽을 지우고 로그인으로 간다. 확인 창은 두지 않는다 — 다시 로그인하면
+   * 그대로 돌아오는 동작이다.
+   *
+   * **서버가 실패해도 화면에서는 로그아웃시킨다.** 누른 사장님이 그대로 남아 있으면 안 된다.
+   * 가짜 세션 · `?mock=` 은 서버가 모르는 토큰이라 부르지 않는다.
+   *
+   * 진단 답(`useDiagnosisStore`)도 지운다. 같은 탭에 남아 있으면 다음에 로그인한 계정이
+   * 앞 사람의 대출 · 직원 답을 이어받는다. `replace` 로 가서 뒤로 가기로 이 화면에 돌아오지 않는다.
+   */
+  async function handleLogOut() {
+    setLoggingOut(true)
+    if (!usesMockData(search)) {
+      try {
+        await logOutFromServer()
+      } catch {
+        // 서버가 못 받았어도 화면에서는 로그아웃시킨다(위 설명)
+      }
+    }
+    logOut()
+    useDiagnosisStore.getState().reset()
+    navigate('/login', { replace: true })
+  }
+
+  const logOutButton = (
+    <Button variant="outline" onClick={handleLogOut} disabled={loggingOut}>
+      로그아웃
+    </Button>
+  )
 
   if (query.status === 'LOADING') {
     return (
@@ -50,6 +84,7 @@ export function MyInfoPage() {
             </Button>
           }
         />
+        <div className="px-4 pb-8">{logOutButton}</div>
       </MyInfoFrame>
     )
   }
@@ -63,6 +98,7 @@ export function MyInfoPage() {
           description="상황 진단을 마치면 여기서 가게 정보를 볼 수 있어요."
           action={<Button onClick={() => navigate({ pathname: '/cases/new', search })}>상황 진단하기</Button>}
         />
+        <div className="px-4 pb-8">{logOutButton}</div>
       </MyInfoFrame>
     )
   }
@@ -83,6 +119,7 @@ export function MyInfoPage() {
             ))}
           </dl>
         </section>
+        <div className="mt-5">{logOutButton}</div>
       </main>
     </MyInfoFrame>
   )

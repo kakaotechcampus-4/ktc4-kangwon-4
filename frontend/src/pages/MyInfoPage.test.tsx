@@ -1,8 +1,9 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { RouterProvider, createMemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { saveTokens } from '../lib/auth'
+import { getAccessToken, getRefreshToken, saveTokens } from '../lib/auth'
+import { EMPTY_DIAGNOSIS, useDiagnosisStore } from '../stores/useDiagnosisStore'
 import type { CaseResponse } from '../types/api'
 import { MyInfoPage } from './MyInfoPage'
 
@@ -41,13 +42,15 @@ function serve(answers: Array<() => Response>) {
   return fetchMock
 }
 
-function renderAt(path: string) {
+function renderAt(path: string, before: string[] = []) {
   const router = createMemoryRouter(
     [
       { path: '/mypage', element: <MyInfoPage /> },
       { path: '/cases/new', element: <p>상황 진단 화면</p> },
+      { path: '/case', element: <p>홈 화면</p> },
+      { path: '/login', element: <p>로그인 화면</p> },
     ],
-    { initialEntries: [path] },
+    { initialEntries: [...before, path], initialIndex: before.length },
   )
 
   render(<RouterProvider router={router} />)
@@ -118,5 +121,113 @@ describe('MyInfoPage', () => {
     expect(await screen.findByRole('heading', { level: 2, name: '내 가게' })).toBeInTheDocument()
     expect(screen.getAllByRole('term')).toHaveLength(7)
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+})
+
+/** `GET /cases` 와 `POST /logout` 을 주소로 나눠 답한다 */
+function serveWithLogout(logout: () => Response | Promise<Response>, cases: unknown = envelope(SERVER_CASE)) {
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    void init
+    return url.endsWith('/logout') ? logout() : new Response(JSON.stringify(cases))
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
+}
+
+const logoutCalls = (fetchMock: ReturnType<typeof serveWithLogout>) =>
+  fetchMock.mock.calls.filter(([url]) => url.endsWith('/logout'))
+
+const offline = () => {
+  throw new TypeError('Failed to fetch')
+}
+
+describe('MyInfoPage — 로그아웃', () => {
+  it('서버에 알리고 브라우저 토큰을 지운 뒤 로그인으로 간다', async () => {
+    saveTokens('access-1', 'refresh-1')
+    const fetchMock = serveWithLogout(() => new Response(JSON.stringify({ message: 'ok' })))
+    const router = renderAt('/mypage')
+
+    fireEvent.click(await screen.findByRole('button', { name: '로그아웃' }))
+
+    expect(await screen.findByText('로그인 화면')).toBeInTheDocument()
+    expect(logoutCalls(fetchMock)).toHaveLength(1)
+    expect(logoutCalls(fetchMock)[0][1]).toMatchObject({ method: 'POST' })
+    expect(getAccessToken()).toBeNull()
+    expect(getRefreshToken()).toBeNull()
+    expect(router.state.location.pathname).toBe('/login')
+  })
+
+  /** 누른 사장님이 그대로 남아 있으면 안 된다. 서버가 못 받아도 화면에서는 로그아웃시킨다 */
+  it.each([
+    ['서버 오류', () => new Response(null, { status: 500 })],
+    ['연결 끊김', offline],
+  ])('%s 여도 브라우저 토큰을 지우고 로그인으로 간다', async (_, logout) => {
+    saveTokens('access-1', 'refresh-1')
+    serveWithLogout(logout)
+    renderAt('/mypage')
+
+    fireEvent.click(await screen.findByRole('button', { name: '로그아웃' }))
+
+    expect(await screen.findByText('로그인 화면')).toBeInTheDocument()
+    expect(getAccessToken()).toBeNull()
+    expect(getRefreshToken()).toBeNull()
+  })
+
+  it('Mock 으로 보고 있으면 서버를 부르지 않고 로그아웃한다', async () => {
+    const fetchMock = serveWithLogout(() => new Response(null))
+    renderAt('/mypage?mock=done')
+
+    fireEvent.click(await screen.findByRole('button', { name: '로그아웃' }))
+
+    expect(await screen.findByText('로그인 화면')).toBeInTheDocument()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  /** 같은 탭에 남아 있으면 다음에 로그인한 계정이 앞 사람의 진단 답을 이어받는다 */
+  it('진단 중이던 답도 지운다', async () => {
+    saveTokens('access-1', 'refresh-1')
+    useDiagnosisStore.getState().setAnswers({ business: 'PERSONAL_CAFE', fullTimeCount: 2 })
+    serveWithLogout(() => new Response(JSON.stringify({ message: 'ok' })))
+    renderAt('/mypage')
+
+    fireEvent.click(await screen.findByRole('button', { name: '로그아웃' }))
+
+    await screen.findByText('로그인 화면')
+    expect(useDiagnosisStore.getState().answers).toEqual(EMPTY_DIAGNOSIS)
+  })
+
+  it('로그아웃한 뒤 뒤로 가도 내 정보로 돌아오지 않는다', async () => {
+    saveTokens('access-1', 'refresh-1')
+    serveWithLogout(() => new Response(JSON.stringify({ message: 'ok' })))
+    const router = renderAt('/mypage', ['/case'])
+
+    fireEvent.click(await screen.findByRole('button', { name: '로그아웃' }))
+    await screen.findByText('로그인 화면')
+    await act(() => router.navigate(-1))
+
+    expect(router.state.location.pathname).not.toBe('/mypage')
+  })
+
+  it('서버 답을 기다리는 동안 버튼을 잠가 두 번 보내지 않는다', async () => {
+    saveTokens('access-1', 'refresh-1')
+    const fetchMock = serveWithLogout(() => new Promise<Response>(() => {}))
+    renderAt('/mypage')
+
+    const button = await screen.findByRole('button', { name: '로그아웃' })
+    fireEvent.click(button)
+    fireEvent.click(button)
+
+    expect(button).toBeDisabled()
+    expect(logoutCalls(fetchMock)).toHaveLength(1)
+  })
+
+  /** Case가 없어도 로그아웃은 할 수 있어야 한다 */
+  it('가게가 없어도 로그아웃할 수 있다', async () => {
+    saveTokens('access-1', 'refresh-1')
+    serveWithLogout(() => new Response(JSON.stringify({ message: 'ok' })), envelope(null))
+    renderAt('/mypage')
+
+    await screen.findByRole('button', { name: '상황 진단하기' })
+    expect(screen.getByRole('button', { name: '로그아웃' })).toBeEnabled()
   })
 })
