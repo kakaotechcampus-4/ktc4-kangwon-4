@@ -310,5 +310,10 @@ export async function postLogin(code: string, state: string | null): Promise<Log
  * 실패하면 오류를 그대로 올린다 — 그래도 로그아웃할지는 화면이 정한다.
  */
 export async function logOutFromServer(): Promise<void> {
-  await request('/logout', { method: 'POST' })
+  // 기다리는 동안 사장님은 로그아웃을 누른 화면에 남아 있다. 응답이 늦으면 기본 15초 대신
+  // 짧게 끊고 화면 쪽 로그아웃으로 넘어간다
+  await request('/logout', { method: 'POST', timeoutMs: LOGOUT_TIMEOUT_MS })
 }
+
+/** 로그아웃 요청을 기다리는 시간 */
+const LOGOUT_TIMEOUT_MS = 5_000

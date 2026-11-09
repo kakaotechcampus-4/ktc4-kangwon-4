@@ -59,8 +59,10 @@ const BUSINESS_LABEL: Record<string, string> = {
  * - 아는 코드면 이름
  * - 모르는 코드(영문 대문자 모양, `UNKNOWN` 포함)면 `null` — 코드를 그대로 내보내지 않고 미확인으로 둔다
  * - 코드가 아닌 글(서버가 "카페"처럼 사장님 말을 그대로 적은 경우)은 그대로
+ * - 빈 글이면 `null` — 확인된 값처럼 빈칸을 보여주지 않는다
  */
 export function businessLabelOf(raw: string): string | null {
+  if (raw.trim() === '') return null
   if (Object.hasOwn(BUSINESS_LABEL, raw)) return BUSINESS_LABEL[raw]
   return /^[A-Z_]+$/.test(raw) ? null : raw
 }

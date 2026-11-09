@@ -58,6 +58,7 @@ describe('toFacts', () => {
     ['CAFE', { value: '카페', status: 'CONFIRMED' }],
     ['RESTAURANT', { value: '다른 음식점', status: 'CONFIRMED' }],
     ['BAKERY', { status: 'UNKNOWN' }],
+    ['', { status: 'UNKNOWN' }],
   ])('업종 %s 를 화면 말로 바꾼다', (raw, expected) => {
     const fact = factFor({ ...SERVER_CASE, business_type: raw }, 'business_type')
     expect(fact).toMatchObject(expected)

@@ -8,7 +8,7 @@ import { HammerLoader } from '../components/ui/HammerLoader'
 import { TopBar } from '../components/ui/TopBar'
 import { useCase } from '../hooks/useCase'
 import { logOutFromServer } from '../lib/api'
-import { logOut, usesMockData } from '../lib/auth'
+import { isMockSession, logOut } from '../lib/auth'
 import { useDiagnosisStore } from '../stores/useDiagnosisStore'
 import type { Fact } from '../types/view'
 
@@ -36,14 +36,15 @@ export function MyInfoPage() {
    * 그대로 돌아오는 동작이다.
    *
    * **서버가 실패해도 화면에서는 로그아웃시킨다.** 누른 사장님이 그대로 남아 있으면 안 된다.
-   * 가짜 세션 · `?mock=` 은 서버가 모르는 토큰이라 부르지 않는다.
+   * 가짜 세션만 서버를 부르지 않는다 — 서버가 모르는 토큰이다. `?mock=` 으로 화면만 Mock 을 보고
+   * 있어도 로그인은 진짜일 수 있어서, 그때는 서버의 Refresh 토큰도 지워야 한다.
    *
    * 진단 답(`useDiagnosisStore`)도 지운다. 같은 탭에 남아 있으면 다음에 로그인한 계정이
    * 앞 사람의 대출 · 직원 답을 이어받는다. `replace` 로 가서 뒤로 가기로 이 화면에 돌아오지 않는다.
    */
   async function handleLogOut() {
     setLoggingOut(true)
-    if (!usesMockData(search)) {
+    if (!isMockSession()) {
       try {
         await logOutFromServer()
       } catch {

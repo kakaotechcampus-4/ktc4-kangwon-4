@@ -74,8 +74,7 @@ export function toValueLabel(field: string, raw: unknown): string | null {
   if (typeof raw !== 'string') return NEEDS_CHECK
 
   switch (field) {
-    // 서버는 `CAFE` 같은 코드를 적는다. 모르는 코드는 원문 그대로 내보내지 않고, 코드가 아닌
-    // 글(서버가 사장님 말을 그대로 적은 경우)은 그대로 보여준다
+    // 코드 · 자유 글을 가르는 규칙은 `businessLabelOf` 에 있다. 그게 못 읽은 값만 확인 필요다
     case 'business_type':
       return businessLabelOf(raw) ?? NEEDS_CHECK
 

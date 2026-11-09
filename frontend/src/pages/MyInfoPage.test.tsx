@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react'
 import { RouterProvider, createMemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { getAccessToken, getRefreshToken, saveTokens } from '../lib/auth'
+import { getAccessToken, getRefreshToken, logInWithMock, saveTokens } from '../lib/auth'
 import { EMPTY_DIAGNOSIS, useDiagnosisStore } from '../stores/useDiagnosisStore'
 import type { CaseResponse } from '../types/api'
 import { MyInfoPage } from './MyInfoPage'
@@ -173,14 +173,29 @@ describe('MyInfoPage — 로그아웃', () => {
     expect(getRefreshToken()).toBeNull()
   })
 
-  it('Mock 으로 보고 있으면 서버를 부르지 않고 로그아웃한다', async () => {
+  /** 가짜 세션의 토큰은 서버가 모른다 */
+  it('가짜 세션이면 서버를 부르지 않고 로그아웃한다', async () => {
+    logInWithMock()
     const fetchMock = serveWithLogout(() => new Response(null))
-    renderAt('/mypage?mock=done')
+    renderAt('/mypage')
 
     fireEvent.click(await screen.findByRole('button', { name: '로그아웃' }))
 
     expect(await screen.findByText('로그인 화면')).toBeInTheDocument()
     expect(fetchMock).not.toHaveBeenCalled()
+    expect(getAccessToken()).toBeNull()
+  })
+
+  /** 화면만 Mock 을 보고 있어도 로그인은 진짜다. 서버의 Refresh 토큰도 지워야 한다 */
+  it('진짜 로그인으로 Mock 화면을 보고 있으면 서버에도 알린다', async () => {
+    saveTokens('access-1', 'refresh-1')
+    const fetchMock = serveWithLogout(() => new Response(JSON.stringify({ message: 'ok' })))
+    renderAt('/mypage?mock=done')
+
+    fireEvent.click(await screen.findByRole('button', { name: '로그아웃' }))
+
+    expect(await screen.findByText('로그인 화면')).toBeInTheDocument()
+    expect(logoutCalls(fetchMock)).toHaveLength(1)
   })
 
   /** 같은 탭에 남아 있으면 다음에 로그인한 계정이 앞 사람의 진단 답을 이어받는다 */
