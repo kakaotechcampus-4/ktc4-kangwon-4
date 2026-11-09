@@ -27,7 +27,10 @@ describe('toValueLabel', () => {
     ['restoration_status', 'IN_PROGRESS', '진행 중'],
     ['restoration_scope', 'FULL', '전체'],
     ['demolition_required', 'REQUIRED', '필요함'],
+    ['business_type', 'CAFE', '카페'],
+    ['business_type', 'RESTAURANT', '다른 음식점'],
     ['business_type', '카페', '카페'],
+    ['business_type', 'toString', 'toString'],
     ['restoration_scope_detail', '간판과 바닥만', '간판과 바닥만'],
   ])('%s 의 %s 를 %s 로 바꾼다', (field, raw, label) => {
     expect(toValueLabel(field, raw)).toBe(label)
@@ -56,6 +59,7 @@ describe('toValueLabel', () => {
     ['restoration_scope', 'toString'],
     ['demolition_required', 3],
     ['unknown_field', '카페'],
+    ['business_type', 'BAKERY'],
   ])('%s 의 %s 는 확인 필요로 둔다', (field, raw) => {
     expect(toValueLabel(field, raw)).toBe('확인 필요')
   })

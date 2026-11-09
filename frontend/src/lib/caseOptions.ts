@@ -42,6 +42,23 @@ export const FRANCHISE_OPTIONS: Option<boolean>[] = [
 ]
 
 /**
+ * 서버가 업종 칸에 적는 코드를 화면 말로. 진단에서 고르는 업종 둘과 같다.
+ *
+ * 진단 첫 질문은 개인 카페·프랜차이즈 카페·다른 음식점 셋이지만, 서버에는 업종과
+ * 프랜차이즈 여부가 따로 저장된다(`adapters/case.ts` `BUSINESS_REQUEST`). 그래서 업종 칸
+ * 하나만 옮길 때는 "카페"다. "다른 음식점"은 진단 화면의 선택지와 같은 말이다(QA 3-07).
+ */
+const BUSINESS_LABEL: Record<string, string> = {
+  CAFE: '카페',
+  RESTAURANT: '다른 음식점',
+}
+
+/** 업종 코드를 화면 말로. 모르는 코드면 `null` */
+export function businessLabelOf(code: string): string | null {
+  return Object.hasOwn(BUSINESS_LABEL, code) ? BUSINESS_LABEL[code] : null
+}
+
+/**
  * 고른 값을 사실 목록에 표시할 문구로 바꾼다.
  *
  * 목록에 없는 값이 오면 `null`이다 — 서버가 우리가 모르는 값을 보냈다는 뜻이라,
