@@ -302,6 +302,9 @@ export async function postLogin(code: string, state: string | null): Promise<Log
   return { accessToken, refreshToken, nickname }
 }
 
+/** 로그아웃 요청을 기다리는 시간 */
+const LOGOUT_TIMEOUT_MS = 5_000
+
 /**
  * 서버에 로그아웃을 알린다(`POST /logout`). 서버는 이 회원의 Refresh 토큰을 지운다.
  *
@@ -314,6 +317,3 @@ export async function logOutFromServer(): Promise<void> {
   // 짧게 끊고 화면 쪽 로그아웃으로 넘어간다
   await request('/logout', { method: 'POST', timeoutMs: LOGOUT_TIMEOUT_MS })
 }
-
-/** 로그아웃 요청을 기다리는 시간 */
-const LOGOUT_TIMEOUT_MS = 5_000
