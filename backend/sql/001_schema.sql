@@ -107,6 +107,18 @@ CREATE TABLE `case_checklist_history` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `case_document_context` (
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `case_id` bigint NOT NULL,
+  `context` json NOT NULL,
+  `judged_context` json DEFAULT NULL,
+  PRIMARY KEY (`case_id`),
+  CONSTRAINT `case_document_context_ibfk_1` FOREIGN KEY (`case_id`) REFERENCES `case` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `case_document_history` (
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `id` bigint NOT NULL AUTO_INCREMENT,

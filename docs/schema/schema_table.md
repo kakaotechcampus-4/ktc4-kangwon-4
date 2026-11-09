@@ -16,7 +16,9 @@
         └──[6. 근거·충돌·판단기록]      Agent 판단의 근거, 값 충돌, 판단·리뷰 결과
 ```
 
-> 서류함(올린 서류 목록·점검 결과)은 DB가 아니라 서류 폴더(`AGENT_DOCUMENT_DIR/<Case UUID>/case_documents.json`) 파일에 저장합니다(#159). 그래서 ERD에 서류함 테이블은 없습니다.
+> 서류함(올린 서류 목록·점검 결과)은 `case_document_context` 표에 저장합니다(#242). 처음에는 서류 폴더의
+> JSON 파일에 뒀는데(#159), 파일은 목록 전체를 덮어쓰게 되어 서류를 분석하는 동안 다른 서류를 지우면
+> 그 삭제가 사라졌습니다(멘토님 #187). 서류 원본과 가린 PDF는 그대로 `AGENT_DOCUMENT_DIR/<Case UUID>/` 폴더에 있습니다.
 
 > 제약조건(NOT NULL·DEFAULT·UNIQUE)은 운영 DB를 만드는 `backend/sql/001_schema.sql` 기준으로 맞췄습니다.
 > DEFAULT가 없는 필드는 DB에 기본값이 없고, 저장할 때 코드가 값을 채웁니다.
