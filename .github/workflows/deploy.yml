@@ -1,0 +1,116 @@
+# 운영 EC2에 BE를 올린다. Actions 화면의 [Run workflow] 버튼으로만 돈다.
+#
+# 흐름: GitHub Actions → ktc-github-deploy 역할(부트캠프가 팀마다 만든 OIDC 역할, 액세스 키 없음)
+#       → Session Manager → EC2에서 scripts/deploy.sh 실행. 22번 포트는 열지 않는다.
+# 실제 절차는 scripts/deploy.sh에 있다. 서버에서 손으로 돌릴 때와 같은 절차를 쓰려는 것이다.
+#
+# develop 머지마다 자동으로 올리지 않는다. QA·녹화 중에 서버가 재시작되면 돌던 판단이 끊긴다(발표 뒤 검토).
+# DB 표가 바뀌는 배포는 deploy.sh가 멈춘다. 그때는 docs/deploy.md대로 손으로 올린다.
+name: Deploy BE
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "올릴 커밋 (비우면 develop 최신)"
+        required: false
+        default: ""
+      check_only:
+        description: "확인만 하고 서버는 건드리지 않기"
+        type: boolean
+        default: false
+  # 이 브랜치에서는 확인만 돌려 본다(머지 전 시험용)
+  push:
+    branches: [chore/deploy-oidc-check]
+
+permissions:
+  id-token: write   # OIDC 토큰 발급. 빠지면 AWS 로그인이 실패한다
+  contents: read
+
+# 배포가 겹치면 서버에서 compose가 동시에 돌아 꼬인다. 앞 배포가 끝날 때까지 기다린다
+concurrency:
+  group: deploy-ec2
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-northeast-2
+  EC2_INSTANCE_ID: i-0c5333a2eb9116601
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 올릴 커밋 정하기
+        id: target
+        env:
+          INPUT_COMMIT: ${{ inputs.commit }}
+          CHECK_ONLY: ${{ github.event_name == 'push' || inputs.check_only }}
+        run: |
+          # 입력값을 서버 명령에 그대로 넣으므로 커밋 해시 모양만 받는다
+          TARGET=${INPUT_COMMIT:-$GITHUB_SHA}
+          [ "$GITHUB_EVENT_NAME" != push ] || TARGET=origin/develop
+          if [ "$TARGET" != origin/develop ] && ! [[ "$TARGET" =~ ^[0-9a-f]{7,40}$ ]]; then
+            echo "커밋 해시(7~40자)만 넣어 주세요: $TARGET"; exit 1
+          fi
+          echo "target=$TARGET" >> "$GITHUB_OUTPUT"
+          echo "check=$([ "$CHECK_ONLY" = true ] && echo 1 || true)" >> "$GITHUB_OUTPUT"
+          echo "올릴 커밋: $TARGET / 확인만: $CHECK_ONLY"
+
+      - name: AWS 로그인 (ktc-github-deploy)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/ktc-github-deploy
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: 배포 명령 보내기
+        id: send
+        run: |
+          # 서버에 받아 둔 코드가 아니라 이 워크플로를 띄운 커밋의 deploy.sh를 쓴다
+          REMOTE="set -e
+          export HOME=/root
+          cd /home/ubuntu/app
+          git fetch --quiet origin
+          git show ${GITHUB_SHA}:scripts/deploy.sh > /tmp/reborn-deploy.sh
+          CHECK_ONLY=${{ steps.target.outputs.check }} bash /tmp/reborn-deploy.sh ${{ steps.target.outputs.target }}"
+          PARAMS=$(jq -n --arg s "$REMOTE" '{commands: [$s]}')
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "$EC2_INSTANCE_ID" \
+            --document-name AWS-RunShellScript \
+            --comment "deploy ${GITHUB_SHA:0:7}" \
+            --timeout-seconds 1200 \
+            --parameters "$PARAMS" \
+            --query Command.CommandId --output text)
+          echo "command_id=$COMMAND_ID" >> "$GITHUB_OUTPUT"
+
+      - name: 끝날 때까지 기다리기
+        id: wait
+        run: |
+          # 이미지 빌드가 몇 분 걸려 최대 20분 기다린다
+          STATUS=Pending
+          for _ in $(seq 1 120); do
+            STATUS=$(aws ssm get-command-invocation \
+              --command-id "${{ steps.send.outputs.command_id }}" \
+              --instance-id "$EC2_INSTANCE_ID" \
+              --query Status --output text 2>/dev/null || echo Pending)
+            case "$STATUS" in Success|Failed|Cancelled|TimedOut) break ;; esac
+            sleep 10
+          done
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+          echo "상태: $STATUS"
+
+      - name: 서버 출력
+        if: always() && steps.send.outputs.command_id
+        run: |
+          for part in StandardOutputContent StandardErrorContent; do
+            echo "----- $part -----"
+            aws ssm get-command-invocation \
+              --command-id "${{ steps.send.outputs.command_id }}" \
+              --instance-id "$EC2_INSTANCE_ID" \
+              --query "$part" --output text || true
+          done
+
+      - name: 실패면 빨간불
+        if: steps.wait.outputs.status != 'Success'
+        run: |
+          echo "배포 실패 (상태: ${{ steps.wait.outputs.status }}). 서버 출력을 보고 docs/deploy.md로 이어 갑니다"
+          exit 1
