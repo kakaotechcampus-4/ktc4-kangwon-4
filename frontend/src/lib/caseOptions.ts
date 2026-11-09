@@ -53,9 +53,18 @@ const BUSINESS_LABEL: Record<string, string> = {
   RESTAURANT: '다른 음식점',
 }
 
-/** 업종 코드를 화면 말로. 모르는 코드면 `null` */
-export function businessLabelOf(code: string): string | null {
-  return Object.hasOwn(BUSINESS_LABEL, code) ? BUSINESS_LABEL[code] : null
+/**
+ * 서버가 업종 칸에 적은 값을 화면 말로. 충돌 확인과 내 정보가 같이 쓴다.
+ *
+ * - 아는 코드면 이름
+ * - 모르는 코드(영문 대문자 모양, `UNKNOWN` 포함)면 `null` — 코드를 그대로 내보내지 않고 미확인으로 둔다
+ * - 코드가 아닌 글(서버가 "카페"처럼 사장님 말을 그대로 적은 경우)은 그대로
+ * - 빈 글이면 `null` — 확인된 값처럼 빈칸을 보여주지 않는다
+ */
+export function businessLabelOf(raw: string): string | null {
+  if (raw.trim() === '') return null
+  if (Object.hasOwn(BUSINESS_LABEL, raw)) return BUSINESS_LABEL[raw]
+  return /^[A-Z_]+$/.test(raw) ? null : raw
 }
 
 /**
