@@ -1,5 +1,5 @@
 import type { Step, StepStatus } from '../components/ui/ProcessSteps'
-import { factLabelOf, fieldLabelOf, FRANCHISE_OPTIONS, LEASE_OPTIONS } from '../lib/caseOptions'
+import { businessLabelOf, factLabelOf, fieldLabelOf, FRANCHISE_OPTIONS, LEASE_OPTIONS } from '../lib/caseOptions'
 import type {
   CaseConflictsDecisionRequest,
   CaseResultsEntryResponse,
@@ -74,7 +74,11 @@ export function toValueLabel(field: string, raw: unknown): string | null {
   if (typeof raw !== 'string') return NEEDS_CHECK
 
   switch (field) {
+    // 서버는 `CAFE` 같은 코드를 적는다. 모르는 코드는 원문 그대로 내보내지 않고, 코드가 아닌
+    // 글(서버가 사장님 말을 그대로 적은 경우)은 그대로 보여준다
     case 'business_type':
+      return businessLabelOf(raw) ?? (/^[A-Z_]+$/.test(raw) ? NEEDS_CHECK : raw)
+
     case 'restoration_scope_detail':
       return raw
 
