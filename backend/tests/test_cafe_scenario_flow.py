@@ -433,3 +433,73 @@ def test_final_cafe_completion_is_not_saved_when_review_fails(case_engine, monke
         assert session.get(Case, flow.case_id).case_status == "IN_PROGRESS"
         assert session.exec(select(DecisionRecord).where(DecisionRecord.case_history_id == history_id)).first() is None
     assert flow.progress()["SETTLE_EMPLOYEE_PAYMENTS"] == ("IN_PROGRESS", True, False)
+
+
+def test_insurance_completion_waits_for_restoration_report_then_continues_to_return(case_engine, monkeypatch):
+    class SettlementFirstModel(ScenarioModel):
+        prioritize_settlement = False
+
+        async def generate(self, response_model, messages, **kwargs):
+            if self.prioritize_settlement and kwargs["schema_name"] == "reborn_supervisor_draft":
+                contract = json.loads(messages[1]["content"].removeprefix("INPUT_JSON="))["contract"]
+                preferred = next((row for row in contract["blocker_candidates"]
+                                  if row["actions"][0]["action_code"] in {
+                                      "CONFIRM_EMPLOYEE_SETTLEMENT_REQUIREMENTS", "SETTLE_EMPLOYEE_PAYMENTS",
+                                  }), None)
+                if preferred is not None:
+                    self.contracts.append(contract)
+                    return response_model.model_validate({"decision_type": "ACTION",
+                        "blocker_candidate_id": preferred["candidate_id"],
+                        "action_code": preferred["actions"][0]["action_code"]})
+            return await super().generate(response_model, messages, **kwargs)
+
+    fake = SettlementFirstModel(report_progress=True)
+    monkeypatch.setattr(runtime.StructuredLLMClient, "from_env", classmethod(lambda cls, *a, **k: fake))
+    monkeypatch.setattr(runtime.LangfuseTraceSink, "from_env", classmethod(lambda cls, *a, **k: None))
+    flow = CafeFlow(case_engine)
+    flow.plan()
+    flow.submit(restoration_answer={"restoration_scope": "PARTIAL", "demolition_required": "REQUIRED"})
+    flow.submit(raw_input=LANDLORD)
+    flow.submit(raw_input=NOT_STARTED)
+    flow.submit(action_done=True)
+    fake.prioritize_settlement = True
+    for _ in range(25):
+        entry, action = flow.entry()
+        if entry.judgment_status == "NEEDS_MORE_INFO":
+            break
+        assert entry.result_input_kind == "ACTION_DONE", flow.turns
+        assert action not in {"PERFORM_RESTORATION", "CONFIRM_RESTORATION_REQUIREMENTS",
+                              "CONFIRM_PREMISES_RETURN_REQUIREMENTS", "RETURN_PREMISES"}, flow.turns
+        outcome = flow.submit(action_done=True)
+    else:
+        pytest.fail(f"원상복구 진행 보고 대기에 도달하지 못함: {flow.turns}")
+    assert outcome.outcome_type == "REVIEWED_PLAN"
+    decision = outcome.review_subject.supervisor_draft.decision
+    assert decision.decision_type == "NEEDS_MORE_INFO" and decision.next_action is None
+    question = " ".join(decision.questions_for_user)
+    assert all(word in question for word in ("아직", "시작", "진행", "알려")), question
+    assert "진행하세요" not in question
+    assert outcome.review_proof.verdict == "PASS"
+    progress = flow.progress()
+    assert all(progress[code][0] == "COMPLETED" for code in (
+        "FILE_FOOD_SERVICE_CLOSURE", "FILE_TAX_BUSINESS_CLOSURE", "SETTLE_EMPLOYEE_PAYMENTS",
+        "REPORT_EMPLOYEE_INSURANCE_LOSS", "REPORT_WORKPLACE_INSURANCE_CLOSURE",
+    ))
+    assert progress["PERFORM_RESTORATION"] == ("IN_PROGRESS", True, False)
+    assert progress["RETURN_PREMISES"] == ("NOT_STARTED", False, False)
+    with Session(case_engine) as session:
+        case = session.get(Case, flow.case_id)
+        assert (case.restoration_status, case.case_status) == ("NOT_STARTED", "IN_PROGRESS")
+        home = case_service.get_case(session, flow.member_id)
+        assert home.judgment_status == "NEEDS_MORE_INFO" and home.next_action is None
+        assert home.questions_for_user == decision.questions_for_user
+    flow.confirm_restored()
+    assert flow.entry()[1] == "CONFIRM_PREMISES_RETURN_REQUIREMENTS"
+    flow.submit(action_done=True)
+    assert flow.entry()[1] == "RETURN_PREMISES"
+    terminal = flow.submit(action_done=True)
+    assert terminal.review_subject.supervisor_draft.decision.decision_type == "PROCEDURES_COMPLETED"
+    assert flow.progress()["RETURN_PREMISES"][0] == "COMPLETED"
+    with Session(case_engine) as session:
+        case = session.get(Case, flow.case_id)
+        assert (case.restoration_status, case.case_status) == ("COMPLETED", "IN_PROGRESS")

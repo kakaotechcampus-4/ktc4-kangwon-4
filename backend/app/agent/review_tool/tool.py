@@ -1078,6 +1078,7 @@ def _deterministic_safety_review(
             mutations,
             procedure_bindings,
             known_procedure_steps=subject.known_procedure_steps,
+            include_prepared_restoration=not candidates,
         ),
         completed_procedure_decision_fields(
             subject.snapshot, subject.known_procedure_steps, subject.source_results, mutations, procedure_bindings,
