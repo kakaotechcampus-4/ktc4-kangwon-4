@@ -21,8 +21,6 @@ const facts: Fact[] = [
   { key: 'employee_count', label: '직원 수', value: '2명', status: 'CONFIRMED' },
   { key: 'lease_status', label: '점포 형태', value: '임차 (월세)', status: 'CONFIRMED' },
   { key: 'planned_closure_date', label: '폐업 예정일', status: 'UNKNOWN' },
-  { key: 'restoration_scope', label: '원상복구 범위', status: 'UNKNOWN' },
-  { key: 'demolition_required', label: '철거 필요 여부', status: 'UNKNOWN' },
 ]
 
 /**

@@ -75,10 +75,10 @@ describe('MyInfoPage', () => {
     renderAt('/mypage')
 
     expect(await screen.findByRole('heading', { level: 2, name: '내 가게' })).toBeInTheDocument()
-    expect(screen.getAllByRole('term')).toHaveLength(7)
+    expect(screen.getAllByRole('term')).toHaveLength(5)
     expect(valueOf('업종')).toHaveTextContent('카페')
     expect(valueOf('직원 수')).toHaveTextContent('3명')
-    expect(valueOf('철거 필요 여부')).toHaveTextContent('필요함')
+    expect(valueOf('점포 형태')).toHaveTextContent('임차 (월세)')
   })
 
   /** 빈칸으로 숨기면 사장님은 답한 것이 사라진 줄 안다(FE 규칙 6) */
@@ -88,7 +88,6 @@ describe('MyInfoPage', () => {
     renderAt('/mypage')
 
     await screen.findByRole('heading', { level: 2, name: '내 가게' })
-    expect(valueOf('원상복구 범위')).toHaveTextContent('확인 필요')
     expect(valueOf('폐업 예정일')).toHaveTextContent('확인 필요')
   })
 
@@ -119,7 +118,7 @@ describe('MyInfoPage', () => {
     renderAt('/mypage?mock=done')
 
     expect(await screen.findByRole('heading', { level: 2, name: '내 가게' })).toBeInTheDocument()
-    expect(screen.getAllByRole('term')).toHaveLength(7)
+    expect(screen.getAllByRole('term')).toHaveLength(5)
     expect(fetchMock).not.toHaveBeenCalled()
   })
 })

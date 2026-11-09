@@ -78,7 +78,7 @@ describe('toFacts', () => {
 
   /** 모르는 것은 모른다고 보여준다. 빈 값으로 숨기면 "확인할 게 없다"로 읽힌다 */
   it('UNKNOWN 은 값 없이 미확인으로 둔다', () => {
-    const fact = factFor(SERVER_CASE, 'demolition_required')
+    const fact = factFor({ ...SERVER_CASE, business_type: 'UNKNOWN' }, 'business_type')
 
     expect(fact.status).toBe('UNKNOWN')
     expect(fact.value).toBeUndefined()
@@ -90,23 +90,15 @@ describe('toFacts', () => {
     expect(fact.status).toBe('UNKNOWN')
   })
 
-  it('확인된 값은 그대로 문구가 된다', () => {
-    const fact = factFor({ ...SERVER_CASE, restoration_scope: 'FULL' }, 'restoration_scope')
-
-    expect(fact).toMatchObject({ value: '전체', status: 'CONFIRMED' })
-  })
-
   /**
    * 서버가 우리가 모르는 값을 보낼 수 있다 — 선택지가 넷으로 늘어나는 경우가 그렇다.
    * 그때 문구를 지어내면 사장님이 틀린 정보를 읽는다. 미확인으로 두는 편이 정직하다.
    */
   it.each([
     ['lease_status', 'SUBLEASE'],
-    ['restoration_scope', 'IN_PROGRESS'],
-    ['demolition_required', 'MAYBE'],
   ])('%s 에 모르는 값이 오면 지어내지 않고 미확인으로 둔다', (field, value) => {
     const unknownValue = { ...SERVER_CASE, [field]: value } as unknown as CaseResponse
-    const fact = factFor(unknownValue, field === 'lease_status' ? 'lease_status' : field)
+    const fact = factFor(unknownValue, field)
 
     expect(fact.status).toBe('UNKNOWN')
     expect(fact.value).toBeUndefined()
@@ -146,10 +138,13 @@ describe('toFacts', () => {
     expect(fact.value).toBeUndefined()
   })
 
-  /** 진행 단계는 사용자가 답할 수 있는 것이 아니라 할 일 목록에 섞이면 안 된다 */
-  it('원상복구 진행 상태는 목록에 넣지 않는다', () => {
-    expect(toFacts(SERVER_CASE).map((fact) => fact.key)).not.toContain('restoration_status')
-  })
+  /** 진단 뒤 할 일을 하며 정해지는 값이다. 초반에는 늘 미확인이라 할 일 목록처럼 읽힌다 */
+  it.each(['restoration_status', 'restoration_scope', 'demolition_required'])(
+    '진단에서 답하지 않는 %s 는 목록에 넣지 않는다',
+    (key) => {
+      expect(toFacts(SERVER_CASE).map((fact) => fact.key)).not.toContain(key)
+    },
+  )
 })
 
 /** 봉투에서 판단만 바꿔 끼운다. 가게 칸은 어느 상태에서나 같은 것이 와야 한다 */
@@ -259,7 +254,7 @@ describe('toCurrentCaseView', () => {
     const view = toCurrentCaseView(envelopeOf({ judgment_status: 'PENDING' }), SERVER_CASE)
 
     expect(view.judgment.status).toBe('PENDING')
-    expect(view.facts).toHaveLength(7)
+    expect(view.facts).toHaveLength(5)
   })
 
   it('판단이 끝났으면 막힌 것과 할 일을 담는다', () => {

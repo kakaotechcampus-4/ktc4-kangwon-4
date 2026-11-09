@@ -84,8 +84,9 @@ function toFact(key: string, label: string, value: string | null | undefined): F
 /**
  * "내 가게 상황"에 나열할 항목.
  *
- * 사용자가 답할 수 있는 것만 담는다. `restoration_status`처럼 진행 단계를 나타내는 값은
- * 목록에 넣지 않는다 — "아직 확인 안 된 것"이 사용자에게 할 일로 읽히기 때문이다.
+ * 사용자가 진단에서 답한 것만 담는다. 진단 뒤 할 일을 하며 정해지는 값 — 원상복구 진행 상태 ·
+ * 범위, 철거 필요 여부 — 은 넣지 않는다. 초반에는 늘 "확인 필요"라 사용자에게 할 일로 읽히고,
+ * 그 진행은 로드맵의 할 일이 보여준다.
  *
  * 문구는 `FIELD_LABEL`에서 가져온다. 서버는 여러 자리에서 같은 칸을 이름으로 지목하는데
  * (실패했을 때 다시 봐야 할 칸, 변경 내역, 충돌 항목), 문구를 여기 적어두면 그 자리마다
@@ -119,16 +120,6 @@ export function toFacts(serverCase: CaseResponse): Fact[] {
       // 날짜를 못 정하고 예상 달만 고른 가게도 미확인이 아니다. 고른 달을 보여준다(#237)
       toDateLabel(serverCase.planned_closure_date) ??
         (serverCase.planned_closure_month ? `${toDateLabel(serverCase.planned_closure_month)} 중` : null),
-    ),
-    toFact(
-      'restoration_scope',
-      FIELD_LABEL.restoration_scope,
-      RESTORATION_SCOPE_LABEL[serverCase.restoration_scope],
-    ),
-    toFact(
-      'demolition_required',
-      FIELD_LABEL.demolition_required,
-      DEMOLITION_LABEL[serverCase.demolition_required],
     ),
   ]
 }
