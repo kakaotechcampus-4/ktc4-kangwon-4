@@ -239,6 +239,8 @@ def check_documents(
     # 점검은 목록 전체를 보고 내린 결과다. 도는 사이 서류가 바뀌었으면 그 결과는 이미 옛것이라
     # 버린다 — "서류를 더하거나 빼거나 확인하면 지난 점검은 지워진다"는 기존 규칙과 같다.
     # 사장님은 바뀐 목록으로 다시 점검을 누르면 된다.
+    # 지금은 점검 내내 Case·서류함 잠금이 유지돼 목록이 바뀌지 않는다. 잠금 구간을 줄이더라도
+    # 오래된 점검을 저장하지 않도록 이 비교는 남긴다.
     fresh = load_context(session, case, for_update=True)
     if fresh.documents != context.documents:
         fresh.applicant_name, fresh.closure_date, fresh.document_check = applicant_name, closure_date, None
