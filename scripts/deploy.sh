@@ -29,7 +29,16 @@ SHA=$(git rev-parse --verify "${TARGET}^{commit}") || fail "커밋 ${TARGET}을 
 BEFORE=$(git rev-parse --short HEAD)
 git merge-base --is-ancestor "$SHA" origin/develop || fail "develop에 머지된 커밋만 올립니다"
 git merge-base --is-ancestor HEAD "$SHA" || fail "지금 커밋(${BEFORE})보다 앞선 커밋입니다. 되돌리기는 deploy.md 5단계로 합니다"
-[ "$(git rev-parse HEAD)" != "$SHA" ] || { echo "이미 ${BEFORE}이 올라가 있습니다. 할 일이 없습니다"; exit 0; }
+# 저장소만 보면 안 된다. 지난 배포가 merge 뒤 빌드에서 멈췄으면 저장소는 새 커밋, 서버는 옛 커밋이다(현종님 #321)
+if [ "$(git rev-parse HEAD)" = "$SHA" ]; then
+  curl -fsS -m 5 "$HEALTH" | grep -q "\"version\":\"$BEFORE\"" \
+    || fail "저장소는 ${BEFORE}인데 /health는 다릅니다. 지난 배포가 반영 중에 멈춘 것 같습니다. deploy.md 3단계부터 손으로 이어 가 주세요"
+  echo "이미 ${BEFORE}이 올라가 있습니다. 할 일이 없습니다"
+  exit 0
+fi
+# 손으로 고친 추적 파일(Caddyfile 등)이 있으면 merge가 거부된다. FastAPI를 멈추기 전에 여기서 막는다(현종님 #321)
+git diff --quiet HEAD || fail "서버에 손으로 고친 파일이 있습니다. 먼저 정리해 주세요:
+$(git diff --name-only HEAD)"
 # 표가 바뀌는 배포는 SQL을 넣고 켜야 해서 자동으로 하지 않는다(11/9 SQL005)
 changed=$(git diff --name-only HEAD "$SHA" -- backend/sql backend/app/be/models)
 [ -z "$changed" ] || fail "DB 표가 바뀌는 배포라 자동으로 하지 않습니다. docs/deploy.md대로 손으로 올려 주세요:

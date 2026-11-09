@@ -35,6 +35,8 @@ env:
 
 jobs:
   deploy:
+    # 운영에서 root로 도는 deploy.sh를 이 커밋에서 꺼낸다. develop 밖의 브랜치 스크립트가 돌지 않게 한다(현종님 #321)
+    if: github.ref == 'refs/heads/develop'
     runs-on: ubuntu-latest
     steps:
       - name: 올릴 커밋 정하기
@@ -108,5 +110,12 @@ jobs:
       - name: 실패면 빨간불
         if: steps.wait.outputs.status != 'Success'
         run: |
-          echo "배포 실패 (상태: ${{ steps.wait.outputs.status }}). 서버 출력을 보고 docs/deploy.md로 이어 갑니다"
+          # 20분은 기다리는 쪽의 한도일 뿐 서버 명령은 계속 돌 수 있다. 그때 손으로 배포하면 두 배포가 겹친다(현종님 #321)
+          case "${{ steps.wait.outputs.status }}" in
+            Pending|InProgress|Delayed)
+              echo "20분 안에 끝나지 않았지만 서버에서는 아직 배포가 돌고 있습니다. 손으로 배포하지 말고,"
+              echo "Systems Manager → 명령 실행 기록(명령 ID ${{ steps.send.outputs.command_id }})이나 /health로 끝났는지 먼저 확인하세요" ;;
+            *)
+              echo "배포 실패 (상태: ${{ steps.wait.outputs.status }}). 서버 출력을 보고 docs/deploy.md로 이어 갑니다" ;;
+          esac
           exit 1
