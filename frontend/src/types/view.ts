@@ -129,6 +129,11 @@ export type JudgmentView =
    */
   /** `lastTask` 는 실패하기 전 마지막 할 일 제목. 모르면 없다 */
   | { status: 'FAILED'; notice: FailureNotice; lastTask?: string | null }
+  /**
+   * 등록된 절차 안내를 모두 마쳤다. 다음 할 일이 없어 로드맵에서 남은 일을 보게 한다.
+   * 폐업 전체 완료(`CurrentCaseView.completed`)와 다른 것이다
+   */
+  | { status: 'PROCEDURES_COMPLETED' }
   /** 서버가 모르는 값을 보냈거나, 상태와 내용의 조합이 계약과 어긋난다 */
   | { status: 'UNRECOGNIZED' }
 

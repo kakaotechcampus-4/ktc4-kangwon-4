@@ -36,6 +36,8 @@ const EVENT_TEXT: Record<string, { actor: LogActor; text: string }> = {
   ROADMAP_TASKS_ADDED: { actor: 'RIBBON', text: '할 일을 새로 추가했어요' },
   // 서버는 정산 서류 점검을 통과했을 때만 남긴다(#174). 통과하면 제출 파일(ZIP)이 만들어진다
   DOCUMENTS_CHECKED: { actor: 'RIBBON', text: '서류를 점검하고 제출 파일을 만들었어요' },
+  // 등록된 절차 안내를 다 마쳤다(#315). 폐업 전체를 마친 것은 아니라 "모두 끝냈어요"라고 쓰지 않는다
+  PROCEDURES_COMPLETED: { actor: 'RIBBON', text: '등록된 절차를 모두 마쳤어요' },
 }
 
 /** 철거비 심사 결과(`detail`) → 덧붙이는 한 줄. 사장님이 알려 준 값이지 리본의 판단이 아니다 */
