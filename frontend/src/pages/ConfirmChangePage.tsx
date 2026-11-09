@@ -40,6 +40,12 @@ export function ConfirmChangePage() {
   const view = (state as ConfirmView | null) ?? (usesMock ? conflictConfirm : null)
   const [choices, setChoices] = useState<Choices>({})
   const [sending, setSending] = useState<SendState>({ kind: 'IDLE' })
+  /**
+   * 이 충돌 묶음에서 다시 해도 풀리지 않는다고 실패한 선택들. 마지막 것만 두면 A 실패 → B 실패 뒤에
+   * A로 돌아왔을 때 잠금이 풀려, 두 선택을 번갈아 같은 실패를 되풀이할 수 있다(#332 승준님).
+   * 새 충돌 묶음이 오면 비운다
+   */
+  const [failedChoices, setFailedChoices] = useState<Choices[]>([])
   /** 판단을 기다리는 중이면 그 기다림을 끊는 손잡이. 화면을 떠날 때 당긴다 */
   const waiting = useRef<AbortController | null>(null)
 
@@ -71,9 +77,9 @@ export function ConfirmChangePage() {
   const goToCase = { label: '지금 상황 보기', onClick: () => navigate({ pathname: '/case', search }) }
   const notice = sendNotice(sending, goToCase)
   // 접수된 뒤 결과를 못 받았거나 보낼 수 없는 요청이었으면, 다시 눌러도 같은 답이 온다.
-  // 다시 해도 풀리지 않는 실패는 같은 선택만 막는다 — 한 항목이라도 바꾸면 다시 보낼 수 있다
+  // 다시 해도 풀리지 않는 실패는 그때 보낸 선택만 막는다 — 실패한 적 없는 선택은 다시 보낼 수 있다
   const locked =
-    sending.kind === 'STUCK' || (sending.kind === 'FAILED' && sameChoices(choices, sending.sent))
+    sending.kind === 'STUCK' || failedChoices.some((failed) => sameChoices(choices, failed))
 
   /*
    * 이동은 모두 `replace` 다. 이미 보낸 결정 화면으로 뒤로 돌아가 같은 결정을 다시 제출하는
@@ -94,6 +100,8 @@ export function ConfirmChangePage() {
       // 새 충돌에 붙지 않는다
       case 'CONFIRM':
         setSending({ kind: 'IDLE' })
+        // 실패한 선택은 앞 충돌 묶음에 대한 것이다. 새 묶음에서는 처음부터 고른다
+        setFailedChoices([])
         return navigate({ pathname: '/confirm', search }, { state: outcome.view, replace: true })
 
       // 고른 것으로 마지막 절차까지 마쳤다(#315). 마쳤다는 안내는 홈이 한다
@@ -112,7 +120,8 @@ export function ConfirmChangePage() {
           case 'FAILED': {
             const { notice } = outcome.state
             if (notice.kind === 'RETRY_AVAILABLE') return setSending({ kind: 'RETRY' })
-            return setSending({ kind: 'FAILED', notice, sent })
+            setFailedChoices((current) => [...current, sent])
+            return setSending({ kind: 'FAILED', notice })
           }
 
           default:
@@ -263,9 +272,9 @@ type SendState =
   | { kind: 'RETRY' }
   /**
    * 판단이 실패했고 같은 선택으로는 풀리지 않는다고 서버가 분류했다. 충돌은 그대로 남아 있다.
-   * `sent` 는 그때 보낸 선택이다 — 이것과 같으면 다시 보내지 못하게 막는다
+   * 보낸 선택은 `failedChoices` 에 쌓여 다시 보내지 못하게 막힌다
    */
-  | { kind: 'FAILED'; notice: Exclude<FailureNotice, { kind: 'RETRY_AVAILABLE' }>; sent: Choices }
+  | { kind: 'FAILED'; notice: Exclude<FailureNotice, { kind: 'RETRY_AVAILABLE' }> }
   /** 보내다 끊겼다. 서버가 받았는지 모른다 */
   | { kind: 'SEND_FAILED' }
   /**

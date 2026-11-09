@@ -418,6 +418,59 @@ describe('ConfirmChangePage — 서버', () => {
     expect(router.state.location.pathname).toBe('/replan')
   })
 
+  /** 마지막 실패만 기억하면 두 선택을 번갈아 같은 실패를 되풀이한다(#332 승준님) */
+  it('두 선택이 차례로 실패하면 앞서 실패한 선택으로 돌아가도 잠겨 있다', async () => {
+    const fetchMock = serve({ decide: [ACCEPTED], judged: [failed('NONE')] })
+    renderWith(TWO_CONFLICTS, '')
+
+    await decideAndWait()
+    fireEvent.click(screen.getByRole('button', { name: /필요 없음/ }))
+    fireEvent.click(proceedButton())
+    await advance(INTERVAL_MS)
+
+    chooseIncoming('필요함')
+    expect(proceedButton()).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: /필요 없음/ }))
+    expect(proceedButton()).toBeDisabled()
+    expect(decisions(fetchMock)).toHaveLength(2)
+  })
+
+  /**
+   * 실패한 선택은 그 충돌 묶음에 대한 것이다. 새 묶음이 오면 비운다. 서버 번호가 같은 충돌이
+   * 다시 와도(열쇠가 같아도) 앞 묶음에서 실패한 선택에 묶이지 않는다
+   */
+  it('실패 뒤 새 충돌이 오면 실패한 선택의 잠금을 비운다', async () => {
+    const serverKeyed: ConfirmView = {
+      ...TWO_CONFLICTS,
+      conflicts: TWO_CONFLICTS.conflicts.map((item) => ({ ...item, key: `conflict-${item.referenceId}` })),
+    }
+    serve({
+      decide: [ACCEPTED],
+      judged: [
+        failed('NONE'),
+        json(
+          judgedBody({
+            result: 'CONFLICT',
+            raw_input: '다시 확인했는데 철거까지 해야 한대요.',
+            conflicts: [
+              { id: 1, field: 'demolition_required', stored_value: 'NOT_REQUIRED', proposed_value: 'REQUIRED' },
+              { id: 2, field: 'restoration_scope', stored_value: 'PARTIAL', proposed_value: 'FULL' },
+            ],
+          }),
+        ),
+      ],
+    })
+    renderWith(serverKeyed, '')
+
+    await decideAndWait()
+    fireEvent.click(screen.getByRole('button', { name: /필요 없음/ }))
+    fireEvent.click(proceedButton())
+    await advance(INTERVAL_MS)
+
+    chooseIncoming('필요함')
+    expect(proceedButton()).toBeEnabled()
+  })
+
   /** 바꿨다가 처음 보낸 선택으로 되돌리면, 서버가 풀리지 않는다고 한 그 선택이다 */
   it('바꿨다가 실패한 선택으로 되돌리면 다시 잠긴다', async () => {
     serve({ decide: [ACCEPTED], judged: [failed('NONE')] })
