@@ -18,9 +18,16 @@ from app.be.services import auth as auth_service
 
 
 def _kakao_answers(monkeypatch, handler):
-    """auth 서비스가 만드는 httpx.Client가 진짜 카카오 대신 handler에게 묻게 한다."""
+    """auth 서비스가 만드는 httpx.Client가 진짜 카카오 대신 handler에게 묻게 한다.
+
+    카카오가 가짜면 앱 키도 가짜로 쓴다. 진짜 설정을 읽으면 `.env`가 없는 곳에서 테스트가 깨진다.
+    """
     real_client = httpx.Client
     monkeypatch.setattr(auth_service.httpx, "Client", lambda: real_client(transport=httpx.MockTransport(handler)))
+    monkeypatch.setattr(auth_service, "get_settings", lambda: SimpleNamespace(
+        KAKAO_CLIENT_ID="synthetic-client", KAKAO_CLIENT_SECRET="synthetic-secret",
+        KAKAO_REDIRECT_URI="https://example.com/login/callback",
+    ))
 
 
 def _unreachable(request):
@@ -67,10 +74,6 @@ def test_user_info_failure_is_502(monkeypatch, handler):
 def test_login_api_returns_400_or_502(monkeypatch, handler, status):
     # 함수만 보면 라우터가 예외를 감쌀 때 놓친다. 사장님이 받는 POST /login 응답으로 확인한다
     _kakao_answers(monkeypatch, handler)
-    monkeypatch.setattr(auth_service, "get_settings", lambda: SimpleNamespace(
-        KAKAO_CLIENT_ID="synthetic-client", KAKAO_CLIENT_SECRET="synthetic-secret",
-        KAKAO_REDIRECT_URI="https://example.com/login/callback",
-    ))
     app = FastAPI()
     app.include_router(auth_router.router)
     # 카카오 단계에서 끝나 DB까지 가지 않는다
