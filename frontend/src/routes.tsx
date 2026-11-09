@@ -44,7 +44,7 @@ import { TaskPage } from './pages/TaskPage'
  *   /roadmap/:taskId  할 일          할 일마다 체크·첨부·고르기 등을 연다 (lib/taskFlows.ts)
  *   /docs/check       서류 점검      정산 서류를 점검한다
  *   /docs/done        정산 제출 파일  점검을 통과했을 때만
- *   /me               내 정보        탭 화면 머리말의 사람 버튼으로 들어온다. 저장된 가게 정보 · 로그아웃
+ *   /mypage           내 정보        탭 화면 머리말의 사람 버튼으로 들어온다. 저장된 가게 정보 · 로그아웃
  *
  * `/confirm`은 `/results`와 `/replan` 사이의 단계가 아니라 예외 분기다.
  * 정상 경로는 `/results`에서 `/replan`으로 바로 간다.
@@ -79,7 +79,7 @@ export const router = createBrowserRouter([
           { path: '/log', element: <LogPage /> },
         ],
       },
-      { path: '/me', element: <MyInfoPage /> },
+      { path: '/mypage', element: <MyInfoPage /> },
     ],
   },
   { path: '*', element: <Navigate to="/" replace /> },

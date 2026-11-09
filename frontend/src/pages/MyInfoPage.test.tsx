@@ -44,7 +44,7 @@ function serve(answers: Array<() => Response>) {
 function renderAt(path: string) {
   const router = createMemoryRouter(
     [
-      { path: '/me', element: <MyInfoPage /> },
+      { path: '/mypage', element: <MyInfoPage /> },
       { path: '/cases/new', element: <p>상황 진단 화면</p> },
     ],
     { initialEntries: [path] },
@@ -69,7 +69,7 @@ describe('MyInfoPage', () => {
   it('저장된 가게 정보를 항목마다 보여준다', async () => {
     saveTokens('access-1', 'refresh-1')
     serve([ok(envelope(SERVER_CASE))])
-    renderAt('/me')
+    renderAt('/mypage')
 
     expect(await screen.findByRole('heading', { level: 2, name: '내 가게' })).toBeInTheDocument()
     expect(screen.getAllByRole('term')).toHaveLength(7)
@@ -82,7 +82,7 @@ describe('MyInfoPage', () => {
   it('서버가 확정하지 않은 값은 빈칸이 아니라 확인 필요로 남긴다', async () => {
     saveTokens('access-1', 'refresh-1')
     serve([ok(envelope(SERVER_CASE))])
-    renderAt('/me')
+    renderAt('/mypage')
 
     await screen.findByRole('heading', { level: 2, name: '내 가게' })
     expect(valueOf('원상복구 범위')).toHaveTextContent('확인 필요')
@@ -93,7 +93,7 @@ describe('MyInfoPage', () => {
   it('가게가 없으면 이 화면에서 알리고 상황 진단으로 가는 길을 둔다', async () => {
     saveTokens('access-1', 'refresh-1')
     serve([ok(envelope(null))])
-    const router = renderAt('/me')
+    const router = renderAt('/mypage')
 
     fireEvent.click(await screen.findByRole('button', { name: '상황 진단하기' }))
 
@@ -103,7 +103,7 @@ describe('MyInfoPage', () => {
   it('불러오지 못하면 다시 불러올 수 있다', async () => {
     saveTokens('access-1', 'refresh-1')
     const fetchMock = serve([failing, ok(envelope(SERVER_CASE))])
-    renderAt('/me')
+    renderAt('/mypage')
 
     fireEvent.click(await screen.findByRole('button', { name: '다시 불러오기' }))
 
@@ -113,7 +113,7 @@ describe('MyInfoPage', () => {
 
   it('Mock 으로 열면 서버를 부르지 않고 Mock 가게 정보를 그린다', async () => {
     const fetchMock = serve([failing])
-    renderAt('/me?mock=done')
+    renderAt('/mypage?mock=done')
 
     expect(await screen.findByRole('heading', { level: 2, name: '내 가게' })).toBeInTheDocument()
     expect(screen.getAllByRole('term')).toHaveLength(7)

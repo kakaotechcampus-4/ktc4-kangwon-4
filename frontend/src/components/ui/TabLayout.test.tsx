@@ -23,7 +23,7 @@ function renderAt(path: string) {
           { path: '/log', element: <LogPage /> },
         ],
       },
-      { path: '/me', element: <MyInfoPage /> },
+      { path: '/mypage', element: <MyInfoPage /> },
     ],
     { initialEntries: [path] },
   )
