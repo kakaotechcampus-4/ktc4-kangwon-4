@@ -94,6 +94,10 @@ export function ConfirmChangePage() {
         setSending({ kind: 'IDLE' })
         return navigate({ pathname: '/confirm', search }, { state: outcome.view, replace: true })
 
+      // 고른 것으로 마지막 절차까지 마쳤다(#315). 마쳤다는 안내는 홈이 한다
+      case 'FINISHED':
+        return leave('/case')
+
       case 'STAY':
         switch (outcome.state.kind) {
           // 고른 값은 저장됐고 되물을 것이 남았다. 결과 입력이 질문 답하기로 연다

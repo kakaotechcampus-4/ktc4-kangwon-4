@@ -399,6 +399,15 @@ describe('ResultInputPage — 서버', () => {
   })
 
   describe('들어올 때', () => {
+    /** 등록된 절차를 다 마쳐 받을 결과가 없다(#315). "지금 상황을 읽지 못했어요" 대신 안내하는 홈으로 보낸다 */
+    it('등록된 절차를 다 마쳤으면 홈으로 보낸다', async () => {
+      serve({ entry: [json(entryBody({ judgment_status: 'PROCEDURES_COMPLETED', case_history_id: 40, next_action: null }))] })
+      const router = renderFlow()
+      await advance()
+
+      expect(router.state.location.pathname).toBe('/case')
+    })
+
     it('결과를 받을 수 있으면 할 일과 폼을 연다', async () => {
       serve({ entry: [READY] })
       renderFlow()
@@ -749,6 +758,27 @@ describe('ResultInputPage — 서버', () => {
   })
 
   describe('보낸 뒤', () => {
+    /**
+     * 마지막 완료 입력으로 등록된 절차를 다 마쳤다(#315). "판단 결과를 읽지 못했어요" 대신 홈으로 간다.
+     * 같은 입력을 다시 보내지 않는다 — 끝난 일을 다시 접수하면 판단이 또 돈다
+     */
+    it('등록된 절차를 다 마쳤으면 홈으로 가고 다시 보내지 않는다', async () => {
+      const fetchMock = serve({
+        entry: [READY],
+        submit: [ACCEPTED],
+        judged: [json(judgedBody({ result: 'PROCEDURES_COMPLETED', changes: [] }))],
+      })
+      const router = renderFlow()
+      await advance()
+
+      submit('점포 반환까지 끝냈어요')
+      await advance(INTERVAL_MS)
+
+      expect(router.state.location.pathname).toBe('/case')
+      await advance(INTERVAL_MS * 3)
+      expect(sentBodies(fetchMock)).toHaveLength(1)
+    })
+
     it('판단이 끝날 때까지 기다렸다가 재계획 화면으로 간다', async () => {
       serve({
         entry: [READY],
