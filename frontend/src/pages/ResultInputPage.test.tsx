@@ -126,6 +126,7 @@ function entryBody(overrides: Partial<CaseResultsEntryResponse>): CaseResultsEnt
   return {
     judgment_status: 'DONE',
     result_input_kind: 'TEXT',
+    action_done_kind: null,
     case_history_id: 12,
     raw_input: null,
     conflicts: null,
@@ -249,6 +250,158 @@ describe('ResultInputPage — 서버', () => {
     expect(screen.getByRole('textbox')).toHaveValue('간판만 떼면 된대요')
   })
 
+  /**
+   * 할 일 대부분은 "확인하세요"·"진행하세요" 같은 지시문이라 글로 답하기 어렵다. 운영에서 글로 보낸 보고가
+   * 저장되지 않아 같은 안내가 반복되거나 판단이 멈췄다(2026-11-07·08). [했어요]는 고정 값으로 보낸다
+   */
+  it.each([
+    ['PREPARATION', '준비했어요', '아직 안 했어요'],
+    ['SUBMISSION', '제출했어요', '아직 안 했어요'],
+    ['PROCESSING', '처리 끝났어요', '아직이에요'],
+    ['WORK', '끝냈어요', '아직이에요'],
+  ] as const)('%s 할 일은 [%s]를 누르면 글 없이 했다는 것만 보낸다', async (doneKind, done, notYet) => {
+    const fetchMock = serve({
+      entry: [json(entryBody({ result_input_kind: 'ACTION_DONE', action_done_kind: doneKind }))],
+      submit: [ACCEPTED], judged: [json(judgedBody({ result: 'PENDING' }))],
+    })
+    renderFlow()
+    await advance()
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '보내기' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: notYet })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: done }))
+    await advance()
+    expect(sentBodies(fetchMock)).toEqual([{ case_history_id: 12, action_done: true }])
+  })
+
+  /** 진행 상태 질문은 글로 답하기 어렵다. 고른 값을 그대로 보내 모델이 해석하지 않게 한다 */
+  it('원상복구 진행 상태 질문은 버튼으로 골라 보낸다', async () => {
+    const fetchMock = serve({
+      entry: [json(entryBody({
+        judgment_status: 'NEEDS_MORE_INFO', next_action: null, result_input_kind: 'RESTORATION_STATUS',
+        questions_for_user: ['원상복구 작업이 어디까지 진행됐는지 알려주세요.'],
+      }))],
+      submit: [ACCEPTED], judged: [json(judgedBody({ result: 'PENDING' }))],
+    })
+    renderFlow()
+    await advance()
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '보내기' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('radio', { name: '진행 중이에요' }))
+    fireEvent.click(screen.getByRole('button', { name: '보내기' }))
+    await advance()
+    expect(sentBodies(fetchMock)).toEqual([{ case_history_id: 12, restoration_status: 'IN_PROGRESS' }])
+  })
+
+  it('원상복구 진행 상태 질문도 [직접 쓸게요]로 글을 쓸 수 있다', async () => {
+    serve({
+      entry: [json(entryBody({
+        judgment_status: 'NEEDS_MORE_INFO', next_action: null, result_input_kind: 'RESTORATION_STATUS',
+        questions_for_user: ['원상복구 작업이 어디까지 진행됐는지 알려주세요.'],
+      }))],
+    })
+    renderFlow()
+    await advance()
+    fireEvent.click(screen.getByRole('button', { name: '직접 쓸게요' }))
+    expect(screen.getByLabelText('원상복구 작업이 어디까지 진행됐는지 알려주세요.')).toBeInTheDocument()
+    expect(screen.queryByRole('radio', { name: '진행 중이에요' })).not.toBeInTheDocument()
+  })
+
+  it.each(['done', 'text', 'status'])('보낸 뒤 진행 상태를 되물으면 최신 입력 방식으로 전환한다 (%s)', async (mode) => {
+    const question = '원상복구 작업이 어디까지 진행됐는지 알려주세요.'
+    const fetchMock = serve({
+      entry: [
+        json(entryBody(mode === 'status'
+          ? { judgment_status: 'NEEDS_MORE_INFO', next_action: null, result_input_kind: 'RESTORATION_STATUS', questions_for_user: [question] }
+          : { result_input_kind: 'ACTION_DONE', action_done_kind: 'PROCESSING' })),
+        json(entryBody({ judgment_status: 'NEEDS_MORE_INFO', case_history_id: 13, next_action: null,
+          result_input_kind: 'RESTORATION_STATUS', questions_for_user: [question] })),
+      ],
+      submit: [ACCEPTED, json({ case_history_id: 14 })],
+      judged: [json(judgedBody({ result: 'NEEDS_MORE_INFO', questions_for_user: [question] })),
+        json(judgedBody({ result: 'PENDING' }))],
+    })
+    renderFlow()
+    await advance()
+    if (mode === 'text') {
+      fireEvent.click(screen.getByRole('button', { name: '직접 쓸게요' }))
+      submit('신고 처리가 끝났어요')
+    } else if (mode === 'status') {
+      fireEvent.click(screen.getByRole('radio', { name: '진행 중이에요' }))
+      fireEvent.click(screen.getByRole('button', { name: '보내기' }))
+    } else fireEvent.click(screen.getByRole('button', { name: '처리 끝났어요' }))
+    await advance(INTERVAL_MS)
+
+    expect(sentBodies(fetchMock)).toHaveLength(1)
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+    for (const radio of screen.getAllByRole('radio')) expect(radio).not.toBeChecked()
+    expect(screen.getByRole('button', { name: '보내기' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '직접 쓸게요' }))
+    expect(screen.getByRole('textbox', { name: question })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: '골라서 답할게요' }))
+    fireEvent.click(screen.getByRole('radio', { name: '진행 중이에요' }))
+    fireEvent.click(screen.getByRole('button', { name: '보내기' }))
+    await advance(INTERVAL_MS * 3)
+    expect(sentBodies(fetchMock)).toHaveLength(2)
+    expect(sentBodies(fetchMock)[1]).toEqual({ case_history_id: 13, restoration_status: 'IN_PROGRESS' })
+  })
+
+  it('되물은 입력 방식을 못 읽으면 재접수 없이 다시 불러온다', async () => {
+    const fetchMock = serve({
+      entry: [READY, status(503), json(entryBody({ judgment_status: 'NEEDS_MORE_INFO', case_history_id: 13,
+        next_action: null, result_input_kind: 'RESTORATION_STATUS', questions_for_user: ['진행 상태를 알려주세요.'] }))],
+      submit: [ACCEPTED],
+      judged: [json(judgedBody({ result: 'NEEDS_MORE_INFO', questions_for_user: ['진행 상태를 알려주세요.'] }))],
+    })
+    renderFlow()
+    await advance()
+    submit('신고 처리가 끝났어요')
+    await advance(INTERVAL_MS)
+
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+    expect(sentBodies(fetchMock)).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: '다시 불러오기' }))
+    await advance()
+    expect(screen.getByRole('radio', { name: '진행 중이에요' })).toBeEnabled()
+    expect(sentBodies(fetchMock)).toHaveLength(1)
+  })
+
+  /** 바뀌는 것이 없으니 판단(AI)을 부르지 않는다. 할 일은 그대로 홈에 남는다 */
+  it('[아직 …]은 아무것도 보내지 않고 홈으로 돌아간다', async () => {
+    const fetchMock = serve({
+      entry: [json(entryBody({ result_input_kind: 'ACTION_DONE', action_done_kind: 'SUBMISSION' }))],
+    })
+    const router = renderFlow()
+    await advance()
+    fireEvent.click(screen.getByRole('button', { name: '아직 안 했어요' }))
+    await advance()
+    expect(sentBodies(fetchMock)).toEqual([])
+    expect(router.state.location.pathname).toBe('/case')
+  })
+
+  it('[했어요] 할 일도 직접 쓰면 적은 글을 보낸다', async () => {
+    const fetchMock = serve({
+      entry: [json(entryBody({ result_input_kind: 'ACTION_DONE', action_done_kind: 'PROCESSING' }))],
+      submit: [status(422)],
+    })
+    renderFlow()
+    await advance()
+    fireEvent.click(screen.getByRole('button', { name: '직접 쓸게요' }))
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '신고가 반려됐대요' } })
+    fireEvent.click(screen.getByRole('button', { name: '보내기' }))
+    await advance()
+    expect(sentBodies(fetchMock)).toEqual([{ case_history_id: 12, raw_input: '신고가 반려됐대요' }])
+  })
+
+  /** 어떤 버튼을 보여 줄지 정할 수 없으면 지어내지 않고 읽지 못했다고 알린다 */
+  it('[했어요] 할 일인데 종류가 없으면 읽지 못했다고 알린다', async () => {
+    serve({ entry: [json(entryBody({ result_input_kind: 'ACTION_DONE', action_done_kind: null }))] })
+    renderFlow()
+    await advance()
+    expect(screen.queryByRole('button', { name: '보내기' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+  })
+
   /** 다시 보낼 수 없는 실패에서 보기만 바뀌면, 안내와 폼이 서로 다른 말을 한다 */
   it('다시 보낼 수 없는 실패면 보기도 잠근다', async () => {
     serve({
@@ -305,6 +458,15 @@ describe('ResultInputPage — 서버', () => {
   })
 
   describe('들어올 때', () => {
+    /** 등록된 절차를 다 마쳐 받을 결과가 없다(#315). "지금 상황을 읽지 못했어요" 대신 안내하는 홈으로 보낸다 */
+    it('등록된 절차를 다 마쳤으면 홈으로 보낸다', async () => {
+      serve({ entry: [json(entryBody({ judgment_status: 'PROCEDURES_COMPLETED', case_history_id: 40, next_action: null }))] })
+      const router = renderFlow()
+      await advance()
+
+      expect(router.state.location.pathname).toBe('/case')
+    })
+
     it('결과를 받을 수 있으면 할 일과 폼을 연다', async () => {
       serve({ entry: [READY] })
       renderFlow()
@@ -524,7 +686,8 @@ describe('ResultInputPage — 서버', () => {
     /** 보내다 실패했다고 질문이 사라지면, 사장님은 무엇에 답하던 중이었는지 잃는다 */
     it('보낸 뒤 되물은 질문은 보내다 실패해도 답과 함께 남는다', async () => {
       serve({
-        entry: [READY],
+        entry: [READY, json(entryBody({ judgment_status: 'NEEDS_MORE_INFO', case_history_id: 13,
+          next_action: null, questions_for_user: ['매장 전체인가요?'] }))],
         submit: [ACCEPTED, status(500)],
         judged: [json(judgedBody({ result: 'NEEDS_MORE_INFO', questions_for_user: ['매장 전체인가요?'] }))],
       })
@@ -655,6 +818,27 @@ describe('ResultInputPage — 서버', () => {
   })
 
   describe('보낸 뒤', () => {
+    /**
+     * 마지막 완료 입력으로 등록된 절차를 다 마쳤다(#315). "판단 결과를 읽지 못했어요" 대신 홈으로 간다.
+     * 같은 입력을 다시 보내지 않는다 — 끝난 일을 다시 접수하면 판단이 또 돈다
+     */
+    it('등록된 절차를 다 마쳤으면 홈으로 가고 다시 보내지 않는다', async () => {
+      const fetchMock = serve({
+        entry: [READY],
+        submit: [ACCEPTED],
+        judged: [json(judgedBody({ result: 'PROCEDURES_COMPLETED', changes: [] }))],
+      })
+      const router = renderFlow()
+      await advance()
+
+      submit('점포 반환까지 끝냈어요')
+      await advance(INTERVAL_MS)
+
+      expect(router.state.location.pathname).toBe('/case')
+      await advance(INTERVAL_MS * 3)
+      expect(sentBodies(fetchMock)).toHaveLength(1)
+    })
+
     it('판단이 끝날 때까지 기다렸다가 재계획 화면으로 간다', async () => {
       serve({
         entry: [READY],
@@ -718,7 +902,8 @@ describe('ResultInputPage — 서버', () => {
      */
     it('되물은 뒤 다시 보내면 방금 받은 접수 번호로 보낸다', async () => {
       const fetchMock = serve({
-        entry: [READY],
+        entry: [READY, json(entryBody({ judgment_status: 'NEEDS_MORE_INFO', case_history_id: 13,
+          next_action: null, questions_for_user: ['매장 전체인가요?'] }))],
         submit: [ACCEPTED, json({ case_history_id: 14 })],
         judged: [json(judgedBody({ result: 'NEEDS_MORE_INFO', questions_for_user: ['매장 전체인가요?'] }))],
       })

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
@@ -14,12 +15,14 @@ from app.agent.action_catalog import (
     ACTION_DEFINITIONS,
     ProcedureBindings,
     build_action_candidates,
+    confirmed_restoration_progress,
     effective_procedure_progress,
     resolve_procedure_bindings,
 )
 from app.agent.blocker_candidates import (
     build_blocker_candidates,
     candidate_decision_violations,
+    completed_procedure_decision_fields,
     missing_info_fields,
     resolved_blocker_candidates,
 )
@@ -48,6 +51,7 @@ from app.agent.projection import (
 )
 from app.agent.prompts import review_messages
 from app.agent.schemas import (
+    completion_confirmed,
     CaseFieldKey,
     ClaimType,
     Component,
@@ -77,6 +81,8 @@ from app.agent.schemas import (
 )
 
 from .models import ReviewModelOutput, ReviewProviderOutput
+
+logger = logging.getLogger(__name__)
 
 
 class ReviewToolError(RuntimeError):
@@ -157,7 +163,7 @@ class ReviewTool:
 
     async def review_code_only(self, subject: ReviewSubject) -> ReviewResult:
         """모델 없이 무결성·코드 안전 검사만 한다. 어떤 판단에 쓸지는 graph가 정한다."""
-        context = _validate_integrity(subject)
+        context = _validate_integrity(subject, procedure_bindings=self._procedure_bindings)
         deterministic = _deterministic_safety_review(
             subject,
             context,
@@ -173,7 +179,7 @@ class ReviewTool:
         return _finalize_result(subject, no_model, deterministic)
 
     async def review(self, subject: ReviewSubject) -> ReviewResult:
-        context = _validate_integrity(subject)
+        context = _validate_integrity(subject, procedure_bindings=self._procedure_bindings)
         procedure_bindings = resolve_procedure_bindings(
             subject.known_procedure_steps, self._procedure_bindings
         )
@@ -202,6 +208,9 @@ class ReviewTool:
             "null이면, 같은 evidence_id의 원문이 snapshot.evidence_records에 있어 중복을 뺀 것입니다. "
             "원문은 evidence_ref·evidence_id로 snapshot.evidence_records에서 찾아 대조하고, "
             "null이라는 이유만으로 근거가 없다고 보지 마세요."
+            "\n사용자가 충돌 확인에서 restoration_status=COMPLETED를 채택한 경우, 코드가 같은 원상복구 절차의 "
+            "완료 변경을 만들 수 있습니다. 이 경우 Info 완료 관찰이 없다는 이유만으로 반려하지 말고, "
+            "채택된 충돌·절차 대상·근거가 일치하는지 검수하세요. 단독 모델의 완료 사실 제안은 이 확인을 대신하지 않습니다."
         )
         base_messages[0]["content"] += (
             "\n- Every issue.target_path and missing_evidence.claim_path must be an "
@@ -322,7 +331,7 @@ def _coerce_model_output(
         raise ReviewOutputViolation("review model output violates its schema") from exc
 
 
-def _validate_integrity(subject: ReviewSubject) -> _ReviewContext:
+def _validate_integrity(subject: ReviewSubject, *, procedure_bindings=None) -> _ReviewContext:
     try:
         calculated_digest = subject.calculate_digest()
     except (TypeError, ValueError, AttributeError) as exc:
@@ -398,7 +407,7 @@ def _validate_integrity(subject: ReviewSubject) -> _ReviewContext:
         )
 
     _validate_procedure_analysis_provenance(sources_by_call_id)
-    _validate_mutation_provenance(subject, sources_by_call_id)
+    _validate_mutation_provenance(subject, sources_by_call_id, procedure_bindings=procedure_bindings)
     for source in subject.source_results:
         if not isinstance(source.output, InfoAnalysisResult):
             continue
@@ -429,9 +438,17 @@ def _validate_integrity(subject: ReviewSubject) -> _ReviewContext:
 def _validate_mutation_provenance(
     subject: ReviewSubject,
     sources_by_call_id: dict[UUID, Any],
+    *, procedure_bindings=None,
 ) -> None:
     mutations = subject.supervisor_draft.mutations
     expected_changes = {}
+    try:
+        completed = confirmed_restoration_progress(
+            subject.snapshot, subject.trigger, subject.source_results, mutations.fact_changes,
+            subject.known_procedure_steps, procedure_bindings=procedure_bindings,
+        )
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise ReviewIntegrityError("restoration completion provenance is invalid") from exc
     if isinstance(subject.trigger, ConflictConfirmedTrigger):
         try:
             expected_changes = {
@@ -450,7 +467,8 @@ def _validate_mutation_provenance(
         retained = subject.trigger.retained_info_result
         others = [item for item in mutations.fact_changes if item not in confirmed]
         if retained is None:
-            if others or mutations.procedure_progress_changes:
+            if others or any(completed is None or item != completed.model_copy(update={"candidate_id": item.candidate_id})
+                             for item in mutations.procedure_progress_changes):
                 raise ReviewIntegrityError("conflict confirmation must contain exactly the accepted changes")
         else:
             sources = [item for item in subject.source_results if item.meta.component == Component.INFO_AGENT]
@@ -578,6 +596,9 @@ def _validate_mutation_provenance(
                 "procedure mutation before state differs from snapshot/finding"
             )
 
+        if completed is not None and candidate == completed.model_copy(update={"candidate_id": candidate.candidate_id}):
+            continue  # 사용자가 채택한 완료만 저장한다. 보류 중인 모델 관찰은 승인하지 않는다.
+
         matching_observations = [
             observation
             for observation in source.output.procedure_progress_observations
@@ -603,8 +624,7 @@ def _validate_mutation_provenance(
             candidate.before_status != ProcedureProgressStatus.COMPLETED
             and candidate.proposed_status == ProcedureProgressStatus.COMPLETED
         ):
-            confirmation = getattr(subject.trigger, "procedure_completion_confirmation", None)
-            if confirmation is None or not confirmation.matches(matching_observations[0]):
+            if not completion_confirmed(subject.trigger, matching_observations[0]):
                 raise ReviewIntegrityError("procedure completion requires explicit user confirmation")
 
     for candidate in mutations.support_match_updates:
@@ -853,6 +873,10 @@ def _validate_action_shape(
     sources_by_call_id: dict[UUID, Any],
 ) -> None:
     decision = subject.supervisor_draft.decision
+    if decision.decision_type == DecisionType.PROCEDURES_COMPLETED:
+        if decision.blocker is not None or decision.blockers or decision.next_action is not None or decision.questions_for_user:
+            raise ReviewIntegrityError("PROCEDURES_COMPLETED shape is invalid")
+        return
     if decision.blocker is None:
         raise ReviewIntegrityError("MVP decisions require exactly one blocker")
     if decision.decision_type == DecisionType.ACTION:
@@ -1056,6 +1080,10 @@ def _deterministic_safety_review(
             mutations,
             procedure_bindings,
             known_procedure_steps=subject.known_procedure_steps,
+            include_prepared_restoration=not candidates,
+        ),
+        completed_procedure_decision_fields(
+            subject.snapshot, subject.known_procedure_steps, subject.source_results, mutations, procedure_bindings,
         ),
     ):
         issues.append(
@@ -1428,12 +1456,34 @@ def _validate_model_output(
         raise ReviewOutputViolation("review output contains sensitive text") from exc
 
 
+_CODE_FIXED_BLOCKERS_PATH = "/supervisor_draft/decision/blockers"
+
+
+def _targets_code_fixed_blockers(target_path: str) -> bool:
+    """코드가 후보로 정하는 막힌 일 목록(과 그 안의 값)을 가리키는가. 우선 blocker 선택은 아니다."""
+    return target_path == _CODE_FIXED_BLOCKERS_PATH or target_path.startswith(_CODE_FIXED_BLOCKERS_PATH + "/")
+
+
 def _finalize_result(
     subject: ReviewSubject,
     model_output: ReviewModelOutput,
     deterministic: _SafetyFindings,
 ) -> ReviewResult:
-    issues = _deduplicate_models([*model_output.issues, *deterministic.issues])
+    # 막힌 일 목록은 코드가 후보로 정하고, 같은지는 위 결정적 검사(candidate_decision_violations)가
+    # 이미 확인한다. 모델의 목록 계약 지적만 제외하고, 같은 위치의 근거·안전 반려는 유지한다.
+    # (11/01~11/08 운영 기록: 모델 반려 뒤 재작업 성공 24건 중 1건). 판정에서 빼고 서버 로그에만 남긴다.
+    ignored = [issue for issue in model_output.issues
+               if issue.issue_code == "CONTRACT_VIOLATION" and issue.category == "CONTRACT"
+               and _targets_code_fixed_blockers(issue.target_path)]
+    if ignored:
+        logger.warning(
+            "review model issues on code-fixed blockers ignored for %s: %s",
+            subject.review_subject_id,
+            [(issue.issue_code, issue.target_path, issue.reason_summary) for issue in ignored],
+        )
+    issues = _deduplicate_models([
+        *(issue for issue in model_output.issues if issue not in ignored), *deterministic.issues,
+    ])
     missing = _deduplicate_models(
         [*model_output.missing_evidence, *deterministic.missing_evidence]
     )
@@ -1460,6 +1510,8 @@ def _finalize_result(
     resolution_reason = model_output.resolution_reason
     if force_revise and model_output.verdict == ReviewVerdict.PASS:
         resolution_reason = "결정적 안전 검증에서 수정이 필요한 항목을 확인했습니다."
+    elif not force_revise and model_output.verdict == ReviewVerdict.REVISE:
+        resolution_reason = "코드가 확인한 막힌 일 목록에 대한 모델 지적만 있어 통과로 판정했습니다."
 
     return ReviewResult(
         reviewed_subject_id=subject.review_subject_id,
@@ -1496,9 +1548,10 @@ def _visible_draft_strings(subject: ReviewSubject) -> list[tuple[str, str]]:
     base = "/supervisor_draft/decision"
     values: list[tuple[str, str]] = [
         (f"{base}/selection_summary", decision.selection_summary),
-        (f"{base}/blocker/description", decision.blocker.description),
         *((f"{base}/blockers/{index}/description", item.description) for index, item in enumerate(decision.blockers)),
     ]
+    if decision.blocker is not None:
+        values.append((f"{base}/blocker/description", decision.blocker.description))
     if decision.next_action is not None:
         action_base = f"{base}/next_action"
         values.extend(

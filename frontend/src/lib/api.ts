@@ -301,3 +301,19 @@ export async function postLogin(code: string, state: string | null): Promise<Log
 
   return { accessToken, refreshToken, nickname }
 }
+
+/** 로그아웃 요청을 기다리는 시간 */
+const LOGOUT_TIMEOUT_MS = 5_000
+
+/**
+ * 서버에 로그아웃을 알린다(`POST /logout`). 서버는 이 회원의 Refresh 토큰을 지운다.
+ *
+ * 브라우저의 토큰만 지우면 서버에는 Refresh 토큰이 남아, 어딘가 복사돼 있던 값으로 새 로그인을
+ * 계속 받을 수 있다. 그래서 화면은 이것을 부른 **뒤에** 브라우저 토큰도 지운다(`logOut`).
+ * 실패하면 오류를 그대로 올린다 — 그래도 로그아웃할지는 화면이 정한다.
+ */
+export async function logOutFromServer(): Promise<void> {
+  // 기다리는 동안 사장님은 로그아웃을 누른 화면에 남아 있다. 응답이 늦으면 기본 15초 대신
+  // 짧게 끊고 화면 쪽 로그아웃으로 넘어간다
+  await request('/logout', { method: 'POST', timeoutMs: LOGOUT_TIMEOUT_MS })
+}

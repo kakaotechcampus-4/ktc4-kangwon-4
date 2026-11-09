@@ -20,7 +20,15 @@ import {
 } from '../lib/resultSubmit'
 import { judgmentNeedsDetailCase, moreInfoCase } from '../mocks/currentCase'
 import { resultInput, simulateSubmit } from '../mocks/resultFlow'
-import type { DemolitionRequired, RestorationAnswer, RestorationScope, ResultInputKind } from '../types/api'
+import type {
+  ActionDone,
+  ActionDoneKind,
+  DemolitionRequired,
+  RestorationAnswer,
+  RestorationScope,
+  RestorationStatusAnswer,
+  ResultInputKind,
+} from '../types/api'
 import type { FailureNotice, NextAction, SubmitOutcome, SubmitState } from '../types/view'
 
 /**
@@ -45,6 +53,24 @@ const DEMOLITION_OPTIONS: { value: DemolitionRequired; label: string }[] = [
   { value: 'UNKNOWN', label: '철거는 아직 안 정해졌대요' },
 ]
 
+/** 원상복구 진행 상태 질문의 보기. 고른 값은 모델 해석 없이 저장된다 */
+const STATUS_OPTIONS: { value: RestorationStatusAnswer['restoration_status']; label: string }[] = [
+  { value: 'NOT_STARTED', label: '아직 시작 안 했어요' },
+  { value: 'IN_PROGRESS', label: '진행 중이에요' },
+  { value: 'COMPLETED', label: '다 끝냈어요' },
+]
+
+/**
+ * [했어요] 버튼 문구. 할 일 종류는 서버가 정하고(`action_done_kind`), 화면은 문구만 고른다.
+ * [아직 …]은 아무것도 보내지 않고 홈으로 돌아간다. 할 일은 그대로 남는다.
+ */
+const DONE_LABELS: Record<ActionDoneKind, { done: string; notYet: string }> = {
+  PREPARATION: { done: '준비했어요', notYet: '아직 안 했어요' },
+  SUBMISSION: { done: '제출했어요', notYet: '아직 안 했어요' },
+  PROCESSING: { done: '처리 끝났어요', notYet: '아직이에요' },
+  WORK: { done: '끝냈어요', notYet: '아직이에요' },
+}
+
 /**
  * 이 화면이 받는 것.
  *
@@ -55,8 +81,8 @@ const DEMOLITION_OPTIONS: { value: DemolitionRequired; label: string }[] = [
  * 둘 다 같은 길(`POST /cases/results`)로 보낸다. 다른 것은 화면에 띄울 물음과 보낼 글 모양뿐이다.
  */
 type Ask =
-  | { kind: 'RESULT'; nextAction: NextAction; inputKind: ResultInputKind }
-  | { kind: 'ANSWER'; questions: string[] }
+  | { kind: 'RESULT'; nextAction: NextAction; inputKind: ResultInputKind; doneKind: ActionDoneKind | null }
+  | { kind: 'ANSWER'; questions: string[]; inputKind: 'TEXT' | 'RESTORATION_STATUS' }
   | { kind: 'RESUBMIT'; notice: Extract<FailureNotice, { kind: 'NEEDS_DETAIL' }> }
   | { kind: 'NEW_INPUT' }
 
@@ -78,7 +104,7 @@ function mockEntry(mockKey: string): EntryQuery {
   const failed = judgmentNeedsDetailCase.judgment
   const ask: Ask =
     mockKey === 'more-info' && moreInfoCase.judgment.status === 'NEEDS_MORE_INFO'
-      ? { kind: 'ANSWER', questions: moreInfoCase.judgment.questions }
+      ? { kind: 'ANSWER', questions: moreInfoCase.judgment.questions, inputKind: 'TEXT' }
       : mockKey === 'judgment-failed-detail' && failed.status === 'FAILED' && failed.notice.kind === 'NEEDS_DETAIL'
         ? { kind: 'RESUBMIT', notice: failed.notice }
         : {
@@ -86,6 +112,7 @@ function mockEntry(mockKey: string): EntryQuery {
             nextAction: resultInput.nextAction,
             // `?mock=result-choice` 는 서버가 원상복구 답을 골라서 받겠다고 한 화면(#197). 보내면 기본 반영 결과로 간다
             inputKind: mockKey === 'result-choice' ? 'RESTORATION_ANSWER' : 'TEXT',
+            doneKind: null,
           }
   return { status: 'READY', ask, historyId: 0 }
 }
@@ -117,12 +144,13 @@ export function ResultInputPage() {
   const [text, setText] = useState('')
   const [restorationAnswer, setRestorationAnswer] = useState<Partial<RestorationAnswer>>({})
   const [directInput, setDirectInput] = useState(false)
+  const [restorationStatus, setRestorationStatus] = useState<RestorationStatusAnswer['restoration_status'] | null>(null)
   const scopeTitleId = useId()
   const demolitionTitleId = useId()
   /** 질문마다 적은 답. 질문 문장으로 찾는다 — 같은 질문을 다시 받으면 적었던 답이 그대로 남는다 */
   const [answers, setAnswers] = useState<Record<string, string>>({})
   /**
-   * 보낸 뒤 리본이 되물은 질문. 들어올 때의 물음보다 앞선다.
+   * Mock에서 보낸 뒤 리본이 되물은 질문. 실서버는 최신 진입 조회로 질문과 입력 종류를 받는다.
    *
    * 상태(`state`)와 따로 둔다. 답을 보내다 실패하면 상태는 "보내지 못함"으로 바뀌는데,
    * 그때도 질문은 화면에 남아 있어야 같은 답을 다시 보낼 수 있다.
@@ -165,14 +193,14 @@ export function ResultInputPage() {
           case 'READY':
             setFetched({
               status: 'READY',
-              ask: { kind: 'RESULT', nextAction: entry.nextAction, inputKind: entry.inputKind },
+              ask: { kind: 'RESULT', nextAction: entry.nextAction, inputKind: entry.inputKind, doneKind: entry.doneKind },
               historyId: entry.historyId,
             })
             return
           case 'ANSWER':
             setFetched({
               status: 'READY',
-              ask: { kind: 'ANSWER', questions: entry.questions },
+              ask: { kind: 'ANSWER', questions: entry.questions, inputKind: entry.inputKind },
               historyId: entry.historyId,
             })
             return
@@ -231,9 +259,18 @@ export function ResultInputPage() {
   const resubmitNotice = entry.status === 'READY' && entry.ask.kind === 'RESUBMIT' ? entry.ask.notice : null
   const latestDetail = state.kind === 'FAILED' && state.notice.kind === 'NEEDS_DETAIL' ? state.notice : null
   const askedFields = latestDetail ?? resubmitNotice
-  const canChoose = entry.status === 'READY' && entry.ask.kind === 'RESULT'
-    && entry.ask.inputKind === 'RESTORATION_ANSWER' && !correcting && questions === null && !askedFields
+  const choiceKind = entry.status === 'READY' && entry.ask.kind === 'RESULT'
+    && !correcting && questions === null && !askedFields ? entry.ask.inputKind
+    // 되물은 질문이 원상복구 진행 상태면 서버가 알려 준 입력 종류대로 버튼으로 받는다
+    : entry.status === 'READY' && entry.ask.kind === 'ANSWER' && askedAgain === null && !askedFields
+      ? entry.ask.inputKind
+      : 'TEXT'
+  const canChoose = choiceKind !== 'TEXT'
   const usingChoices = canChoose && !directInput
+  // 할 일 대부분은 지시문이라 글로 답하기 어렵다. [했어요]면 서버가 모델 해석 없이 그 할 일의 진행으로 저장한다
+  const doneKind = usingChoices && choiceKind === 'ACTION_DONE' && entry.status === 'READY' && entry.ask.kind === 'RESULT'
+    ? entry.ask.doneKind
+    : null
   const selectionInput: RestorationAnswer | null = restorationAnswer.restoration_scope && restorationAnswer.demolition_required
     ? { restoration_scope: restorationAnswer.restoration_scope, demolition_required: restorationAnswer.demolition_required }
     : null
@@ -258,8 +295,14 @@ export function ResultInputPage() {
     (state.kind === 'FAILED' && (state.notice.kind === 'SERVICE_SIDE' || state.notice.kind === 'NO_RECOVERY'))
   // 너무 긴 글은 자르지 않고 보내기를 막는다. 소리 없이 잘라 보내면 사장님이 적은 뒷부분이 사라진다.
   // 아래 [보내기]와 실패 안내의 [다시 보내기]가 같은 조건을 쓴다
+  const statusChoice = usingChoices && choiceKind === 'RESTORATION_STATUS'
+  const choiceInput: RestorationAnswer | ActionDone | RestorationStatusAnswer | null = doneKind
+    ? { action_done: true }
+    : statusChoice
+      ? (restorationStatus ? { restoration_status: restorationStatus } : null)
+      : selectionInput
   const tooLong = !usingChoices && draft.length > MAX_RESULT_LENGTH
-  const canRetry = usingChoices ? selectionInput !== null : draft.length > 0 && !tooLong
+  const canRetry = usingChoices ? choiceInput !== null : draft.length > 0 && !tooLong
   const goToCase = { label: '지금 상황 보기', onClick: () => navigate({ pathname: '/case', search }) }
   const notice = stayNotice(
     state,
@@ -274,7 +317,10 @@ export function ResultInputPage() {
    * 보내기와 기다리기의 실패를 따로 받는다. 보내다 실패하면 서버가 받았는지조차 모르고,
    * 기다리다 실패하면 접수는 된 것이라 사장님에게 할 말이 다르다.
    */
-  async function submitToServer(historyId: number, input: string | RestorationAnswer): Promise<SubmitOutcome | null> {
+  async function submitToServer(
+    historyId: number,
+    input: string | RestorationAnswer | ActionDone | RestorationStatusAnswer,
+  ): Promise<SubmitOutcome | null> {
     let acceptedId: number
     try {
       acceptedId = await submitResult(historyId, input)
@@ -333,7 +379,7 @@ export function ResultInputPage() {
 
     const outcome = usesMock
       ? await simulateSubmit(readMockKey(search), draft)
-      : await submitToServer(entry.historyId, usingChoices && selectionInput ? selectionInput : draft)
+      : await submitToServer(entry.historyId, usingChoices && choiceInput ? choiceInput : draft)
     if (!alive.current || outcome === null) return
 
     switch (outcome.kind) {
@@ -349,9 +395,24 @@ export function ResultInputPage() {
         navigate({ pathname: '/confirm', search }, { state: outcome.view, replace: true })
         return
       case 'STAY':
+        if (outcome.state.kind === 'NEEDS_MORE_INFO' && !usesMock) {
+          // 상태 응답에는 입력 종류가 없다. 새 판단의 질문·입력 방식을 함께 다시 읽는다(#325).
+          setFetched({ status: 'LOADING' })
+          setAskedAgain(null)
+          setDirectInput(false)
+          setRestorationAnswer({})
+          setRestorationStatus(null)
+          setState({ kind: 'IDLE' })
+          setAttempt((current) => current + 1)
+          return
+        }
         // 또 되물었다. 이제부터는 이 질문들의 답을 받는다
         if (outcome.state.kind === 'NEEDS_MORE_INFO') setAskedAgain(outcome.state.questions)
         setState(outcome.state)
+        return
+      case 'FINISHED':
+        // 등록된 절차를 다 마쳤다(#315). 홈이 안내한다. 뒤로 가도 이 화면이 다시 홈으로 보내니 바꿔 낀다
+        navigate({ pathname: '/case', search }, { replace: true })
         return
       default: {
         // 갈래가 늘면 여기서 컴파일이 막힌다. 없으면 조용히 빠져나가 PENDING에 갇힌다
@@ -494,7 +555,28 @@ export function ResultInputPage() {
             submitIfReady()
           }}
         >
-          {usingChoices ? (
+          {doneKind ? (
+            // [아직 안 했어요]는 바뀌는 것이 없어 보내지 않는다. 판단(AI)을 부르지 않고 할 일을 그대로 둔다
+            <div className="flex flex-col gap-3">
+              <Button disabled={formLocked} onClick={submitIfReady}>
+                {DONE_LABELS[doneKind].done}
+              </Button>
+              <Button variant="outline" disabled={formLocked} onClick={goToCase.onClick}>
+                {DONE_LABELS[doneKind].notYet}
+              </Button>
+            </div>
+          ) : statusChoice && questions ? (
+            <div className="flex flex-col gap-3">
+              <p id={scopeTitleId} className="text-17 font-bold">{questions.join(' ')}</p>
+              <PillChoices
+                options={STATUS_OPTIONS}
+                selected={restorationStatus}
+                onSelect={setRestorationStatus}
+                labelledBy={scopeTitleId}
+                disabled={formLocked}
+              />
+            </div>
+          ) : usingChoices ? (
             <>
               <div className="flex flex-col gap-3">
                 <p id={scopeTitleId} className="text-17 font-bold">원상복구 범위</p>
@@ -560,9 +642,11 @@ export function ResultInputPage() {
           */}
           {partlyAnswered && <InfoBox>답하지 않은 질문은 비워 두셔도 돼요. 필요하면 다시 여쭤볼게요.</InfoBox>}
           {!usingChoices && <LengthNotice length={draft.length} withQuestions={questions !== null} />}
-          <Button type="submit" disabled={!canSubmit}>
-            보내기
-          </Button>
+          {!doneKind && (
+            <Button type="submit" disabled={!canSubmit}>
+              보내기
+            </Button>
+          )}
         </form>
       </main>
     </ResultFrame>

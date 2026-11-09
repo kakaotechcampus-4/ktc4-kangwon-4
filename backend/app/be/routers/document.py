@@ -44,10 +44,10 @@ def _current_case(session: Session, member_id: int) -> Case:
     return case
 
 
-def _judge_if_changed(background_tasks: BackgroundTasks, session: Session, directory: Path, case: Case) -> None:
+def _judge_if_changed(background_tasks: BackgroundTasks, session: Session, case: Case) -> None:
     # 판단에 아직 안 넘긴 원상복구 조항이 있으면 결과 제출(/results)처럼 응답 뒤에 판단을 돌린다.
     # 화면은 서류 목록을 바로 받고, 다음 할 일은 홈(GET /cases)이 PENDING을 보고 다시 묻는다.
-    case_history_id = document_service.queue_document_judgment(session, directory, case)
+    case_history_id = document_service.queue_document_judgment(session, case)
     if case_history_id is not None:
         db.release_request_connection(session)
         background_tasks.add_task(judgment_service.run_judgment_in_background, case_history_id)
@@ -57,10 +57,9 @@ def _judge_if_changed(background_tasks: BackgroundTasks, session: Session, direc
 def list_documents(
     member_id: int = Depends(get_current_member_id),
     session: Session = Depends(get_db),
-    directory: Path = Depends(get_document_directory),
 ):
     case = _current_case(session, member_id)
-    return document_list_response(document_service.load_context(directory, case))
+    return document_list_response(document_service.load_context(session, case))
 
 
 @router.post("/cases/documents", response_model=DocumentListResponse)
@@ -71,17 +70,16 @@ async def upload_document(
     kind: DocumentKind | None = Form(default=None),
     member_id: int = Depends(get_current_member_id),
     session: Session = Depends(get_db),
-    directory: Path = Depends(get_document_directory),
     tool: DocumentTool = Depends(get_document_tool),
 ):
     # 값 꺼내기에 모델·OCR을 써서 수십 초 걸린다. 시연에서는 한 장씩 올리므로 끝날 때까지 기다려 결과를 돌려준다.
     case = _current_case(session, member_id)
     content = await file.read(document_service.MAX_UPLOAD_BYTES + 1)
     context = await document_service.upload_document(
-        session, tool, directory, case, file.filename or "document", content, kind,
+        session, tool, case, file.filename or "document", content, kind,
     )
     # 확인이 필요 없는 서류는 올리는 순간 값이 판단 글에 들어가므로 여기서도 본다
-    _judge_if_changed(background_tasks, session, directory, case)
+    _judge_if_changed(background_tasks, session, case)
     return document_list_response(context)
 
 
@@ -92,14 +90,13 @@ def confirm_document(
     background_tasks: BackgroundTasks,
     member_id: int = Depends(get_current_member_id),
     session: Session = Depends(get_db),
-    directory: Path = Depends(get_document_directory),
     tool: DocumentTool = Depends(get_document_tool),
 ):
     case = _current_case(session, member_id)
     context = document_service.confirm_document(
-        tool, directory, case, document_id, confirm_request.kind, confirm_request.confirmed_fields,
+        session, tool, case, document_id, confirm_request.kind, confirm_request.confirmed_fields,
     )
-    _judge_if_changed(background_tasks, session, directory, case)
+    _judge_if_changed(background_tasks, session, case)
     return document_list_response(context)
 
 
@@ -108,11 +105,10 @@ def remove_document(
     document_id: UUID,
     member_id: int = Depends(get_current_member_id),
     session: Session = Depends(get_db),
-    directory: Path = Depends(get_document_directory),
     tool: DocumentTool = Depends(get_document_tool),
 ):
     case = _current_case(session, member_id)
-    return document_list_response(document_service.remove_document(tool, directory, case, document_id))
+    return document_list_response(document_service.remove_document(session, tool, case, document_id))
 
 
 @router.post("/cases/documents/check", response_model=DocumentListResponse)
@@ -120,13 +116,12 @@ def check_documents(
     check_request: DocumentCheckRequest,
     member_id: int = Depends(get_current_member_id),
     session: Session = Depends(get_db),
-    directory: Path = Depends(get_document_directory),
     tool: DocumentTool = Depends(get_document_tool),
 ):
     # 점검은 규칙만 돌고 모델을 부르지 않는다(checks.check_settlement)
     case = _current_case(session, member_id)
     context = document_service.check_documents(
-        session, tool, directory, case, check_request.applicant_name, check_request.closure_date,
+        session, tool, case, check_request.applicant_name, check_request.closure_date,
         store_name=check_request.store_name,
     )
     return document_list_response(context)
@@ -136,11 +131,10 @@ def check_documents(
 def download_settlement(
     member_id: int = Depends(get_current_member_id),
     session: Session = Depends(get_db),
-    directory: Path = Depends(get_document_directory),
     tool: DocumentTool = Depends(get_document_tool),
 ):
     case = _current_case(session, member_id)
-    content = document_service.settlement_zip(tool, directory, case)
+    content = document_service.settlement_zip(session, tool, case)
     return Response(
         content=content,
         media_type="application/zip",

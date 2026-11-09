@@ -5,6 +5,8 @@
 - GET /cases/results/status — 제출 뒤 처리 상태 조회
 """
 
+import asyncio
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -17,7 +19,7 @@ from app.be.crud import procedure_step as procedure_step_crud
 from app.be.models.case import Case
 from app.be.models.case_history import CaseHistory
 from app.be.schemas.case import CaseResultsSubmitRequest
-from app.be.services import decision_record
+from app.be.services import decision_record, judgment
 from app.be.services.case import (
     get_case_results_entry,
     get_case_results_submit_status,
@@ -139,6 +141,187 @@ def test_restoration_answer_is_persisted_with_its_literal_text(case_engine, case
         assert (saved.source, saved.judgment_status) == ("USER_INPUT", "PENDING")
 
 
+def _set_next_action(case_engine, history_id, action_code, candidate_id="procedure:5"):
+    """지금 할 일과, 그 할 일을 고른 막힌 일 후보("procedure:{절차 번호}")를 저장해 둔다."""
+    from app.be.models.blocker import Blocker
+
+    with Session(case_engine) as session:
+        history = session.get(CaseHistory, history_id)
+        history.next_action_code = action_code
+        session.get(Blocker, history.priority_blocker_id).candidate_id = candidate_id
+        session.commit()
+
+
+def _legacy_preparation(case_engine, case_world, status="FAILED"):
+    member_id, case_id, prior_id = case_world.sign_up()
+    code = "CONFIRM_EMPLOYEE_SETTLEMENT_REQUIREMENTS"
+    with Session(case_engine) as session:
+        step = next(row for row in procedure_step_crud.get_all_procedure_steps(session)
+                    if row.step_code == "SETTLE_EMPLOYEE_PAYMENTS")
+        step_id = step.id
+    _set_next_action(case_engine, prior_id, code, f"procedure:{step_id}")
+    history_id = case_world.add_history(case_id, "USER_INPUT", status)
+    with Session(case_engine) as session:
+        history = session.get(CaseHistory, history_id)
+        history.action_done = {"action_code": code}  # #298의 저장값: SQL004도 JSON은 그대로 둔다
+        history.raw_input = "준비사항 확인을 마쳤어요."
+        session.commit()
+    return member_id, history_id, prior_id, step_id
+
+
+@pytest.mark.parametrize("mode", ["resubmit", "retry", "pending"])
+def test_legacy_preparation_reaches_ai_with_its_saved_procedure(case_engine, case_world, mode):
+    member_id, history_id, _, step_id = _legacy_preparation(
+        case_engine, case_world, "PENDING" if mode == "pending" else "FAILED",
+    )
+    with Session(case_engine) as session:
+        original = session.get(CaseHistory, history_id)
+        stored_input = original.action_done.copy()
+        if mode == "resubmit":
+            accepted = submit_case_results(session, member_id, CaseResultsSubmitRequest(
+                case_history_id=history_id, action_done=True,
+            ))
+            target_id = accepted.case_history_id
+        elif mode == "retry":
+            target_id = retry_case_judgment(session, member_id).case_history_id
+        else:
+            target_id = history_id
+        graph_input, _ = judgment._read_judgment_input(session, target_id)
+        assert graph_input.trigger.action_done.model_dump() == {
+            "action_code": stored_input["action_code"], "procedure_step_id": step_id,
+        }
+        assert graph_input.trigger.action_done.kind == "PREPARATION"
+        assert all(step.status == "NOT_STARTED" for step in graph_input.case_snapshot.procedure_progress)
+        assert session.get(CaseHistory, history_id).action_done == stored_input
+
+
+@pytest.mark.parametrize("changes", [
+    {"action_done": 42},
+    {"action_done": [{"action_code": "CONFIRM_EMPLOYEE_SETTLEMENT_REQUIREMENTS"}]},
+    {"raw_input": "기관 처리가 끝났어요."},
+    {"action_done": {"action_code": "CONFIRM_EMPLOYEE_SETTLEMENT_REQUIREMENTS", "extra": True}},
+    {"action_done": {"action_code": "CONFIRM_EMPLOYEE_SETTLEMENT_REQUIREMENTS", "procedure_step_id": 0}},
+    {"previous_action": "CONFIRM_TAX_CLOSURE_REQUIREMENTS"},
+    {"candidate_id": None},
+    {"candidate_id": "support:1"},
+    {"action_done": {"action_code": "SETTLE_EMPLOYEE_PAYMENTS"},
+     "previous_action": "SETTLE_EMPLOYEE_PAYMENTS"},
+])
+def test_legacy_preparation_does_not_invent_a_procedure(case_engine, case_world, changes):
+    member_id, history_id, prior_id, step_id = _legacy_preparation(case_engine, case_world)
+    _set_next_action(case_engine, prior_id, changes.get("previous_action", "CONFIRM_EMPLOYEE_SETTLEMENT_REQUIREMENTS"),
+                     changes.get("candidate_id", f"procedure:{step_id}"))
+    with Session(case_engine) as session:
+        original = session.get(CaseHistory, history_id)
+        for key in ("raw_input", "action_done"):
+            if key in changes:
+                setattr(original, key, changes[key])
+        session.commit()
+        request = CaseResultsSubmitRequest(case_history_id=history_id, action_done=True)
+        assert error_of(lambda: submit_case_results(session, member_id, request))[0] == 422
+        assert session.get(CaseHistory, history_id).judgment_status == "FAILED"
+
+
+def test_unrecoverable_legacy_preparation_stops_retrying_before_ai(case_engine, case_world, monkeypatch):
+    _, history_id, prior_id, _ = _legacy_preparation(case_engine, case_world, "PENDING")
+    _set_next_action(case_engine, prior_id, "CONFIRM_TAX_CLOSURE_REQUIREMENTS")
+    ask_agent = AsyncMock()
+    monkeypatch.setattr(judgment, "get_engine", lambda: case_engine)
+    monkeypatch.setattr(judgment, "_ask_agent", ask_agent)
+    monkeypatch.setattr(judgment, "judge_owed_documents", AsyncMock())
+    asyncio.run(judgment.run_judgment_in_background(history_id))
+    ask_agent.assert_not_awaited()
+    with Session(case_engine) as session:
+        history = session.get(CaseHistory, history_id)
+        assert (history.judgment_status, history.recovery_action_code, history.retryable) == (
+            "FAILED", "CONTACT_SUPPORT", False,
+        )
+        assert history.action_done == {"action_code": "CONFIRM_EMPLOYEE_SETTLEMENT_REQUIREMENTS"}
+
+
+@pytest.mark.parametrize("action_code,candidate_id,kind,done_kind", [
+    ("CONFIRM_FOOD_SERVICE_CLOSURE_REQUIREMENTS", "procedure:5", "ACTION_DONE", "PREPARATION"),
+    ("FILE_FOOD_SERVICE_CLOSURE", "procedure:5", "ACTION_DONE", "SUBMISSION"),
+    ("CONFIRM_PROCEDURE_COMPLETION", "procedure:5", "ACTION_DONE", "PROCESSING"),
+    ("RETURN_PREMISES", "procedure:3", "ACTION_DONE", "WORK"),
+    ("CONFIRM_RESTORATION_SCOPE", "procedure:1", "RESTORATION_ANSWER", None),
+    # 지원사업 확인(MVP 밖)이나 절차를 모르는 막힌 일은 글로 받는다
+    ("CONFIRM_SUPPORT_PROGRAM_REQUIREMENTS", "support:1", "TEXT", None),
+    ("FILE_FOOD_SERVICE_CLOSURE", "missing:had_employees", "TEXT", None),
+    ("FILE_FOOD_SERVICE_CLOSURE", None, "TEXT", None),
+])
+def test_results_entry_tells_which_input_the_current_action_takes(
+    case_engine, case_world, action_code, candidate_id, kind, done_kind,
+):
+    member_id, _, history_id = case_world.sign_up()
+    _set_next_action(case_engine, history_id, action_code, candidate_id)
+    response = entry(case_engine, member_id)
+    assert (response.result_input_kind, response.action_done_kind) == (kind, done_kind)
+
+
+@pytest.mark.parametrize("action_code,text", [
+    ("CONFIRM_FOOD_SERVICE_CLOSURE_REQUIREMENTS", "준비사항 확인을 마쳤어요."),
+    ("FILE_FOOD_SERVICE_CLOSURE", "신고서를 제출했어요."),
+    ("CONFIRM_PROCEDURE_COMPLETION", "기관 처리가 끝났어요."),
+    ("SETTLE_EMPLOYEE_PAYMENTS", "이 일을 끝냈어요."),
+])
+def test_action_done_is_persisted_with_the_action_and_procedure_it_answers(case_engine, case_world, action_code, text):
+    member_id, _, history_id = case_world.sign_up()
+    _set_next_action(case_engine, history_id, action_code, "procedure:5")
+    with Session(case_engine) as session:
+        accepted = submit_case_results(session, member_id, CaseResultsSubmitRequest(
+            case_history_id=history_id, action_done=True,
+        ))
+    with Session(case_engine) as session:
+        saved = session.get(CaseHistory, accepted.case_history_id)
+        # 어느 할 일·절차에 답했는지는 화면이 아니라 서버가 지금 할 일에서 정한다
+        assert saved.action_done == {"action_code": action_code, "procedure_step_id": 5}
+        assert saved.raw_input == text
+        assert (saved.source, saved.judgment_status, saved.restoration_answer) == ("USER_INPUT", "PENDING", None)
+
+
+@pytest.mark.parametrize("action_code,candidate_id", [
+    ("CONFIRM_RESTORATION_SCOPE", "procedure:1"), ("CONFIRM_SUPPORT_PROGRAM_REQUIREMENTS", "support:1"),
+    (None, "procedure:5"), ("FILE_FOOD_SERVICE_CLOSURE", "missing:had_employees"),
+])
+def test_action_done_for_an_action_without_buttons_is_422(case_engine, case_world, action_code, candidate_id):
+    member_id, _, history_id = case_world.sign_up()
+    _set_next_action(case_engine, history_id, action_code, candidate_id)
+    with Session(case_engine) as session:
+        request = CaseResultsSubmitRequest(case_history_id=history_id, action_done=True)
+        assert error_of(lambda: submit_case_results(session, member_id, request)) == (
+            422, "현재 할 일에는 [했어요] 답변을 보낼 수 없습니다.")
+
+
+@pytest.mark.parametrize("changes", [
+    {}, {"action_done": None}, {"raw_input": "다른 입력"},
+    {"recovery_action_code": "RESUBMIT_INPUT"}, {"retryable": False},
+])
+def test_retrying_an_action_done_keeps_the_same_action_and_procedure(case_engine, case_world, changes):
+    member_id, _, history_id = case_world.sign_up()
+    _set_next_action(case_engine, history_id, "FILE_TAX_BUSINESS_CLOSURE", "procedure:4")
+    with Session(case_engine) as session:
+        accepted = submit_case_results(session, member_id, CaseResultsSubmitRequest(
+            case_history_id=history_id, action_done=True,
+        ))
+    with Session(case_engine) as session:
+        failed = session.get(CaseHistory, accepted.case_history_id)
+        failed.judgment_status, failed.recovery_action_code, failed.retryable = "FAILED", "RETRY", True
+        for field, value in changes.items():
+            setattr(failed, field, value)
+        session.commit()
+    with Session(case_engine) as session:
+        request = CaseResultsSubmitRequest(case_history_id=accepted.case_history_id, action_done=True)
+        if changes:
+            assert error_of(lambda: submit_case_results(session, member_id, request))[0] == 422
+            return
+        retried = submit_case_results(session, member_id, request)
+    with Session(case_engine) as session:
+        saved = session.get(CaseHistory, retried.case_history_id)
+        assert saved.action_done == {"action_code": "FILE_TAX_BUSINESS_CLOSURE", "procedure_step_id": 4}
+        assert saved.raw_input == "신고서를 제출했어요."
+
+
 @pytest.mark.parametrize("changes", [
     {}, {"restoration_answer": None},
     {"restoration_answer": {"restoration_scope": "FULL", "demolition_required": "NOT_REQUIRED"}},
@@ -200,6 +383,11 @@ def test_restoration_answer_requires_the_current_supported_action(case_engine, c
     {"restoration_answer": {"restoration_scope": "PARTIAL", "demolition_required": "MAYBE"}},
     {"restoration_answer": {"restoration_scope": "PARTIAL", "demolition_required": "REQUIRED", "detail": "글"}},
     {"raw_input": "추가 글", "restoration_answer": {"restoration_scope": "FULL", "demolition_required": "REQUIRED"}},
+    # [아직 안 했어요]는 보내지 않는다. 버튼 답에 글이나 다른 선택을 섞을 수 없다
+    {"action_done": False},
+    {"action_done": True, "raw_input": "넵 다 확인 완료했어요"},
+    {"action_done": True,
+     "restoration_answer": {"restoration_scope": "FULL", "demolition_required": "REQUIRED"}},
 ])
 def test_restoration_answer_rejects_incomplete_or_mixed_requests(payload):
     with pytest.raises(ValidationError):
@@ -370,3 +558,37 @@ def test_status_stops_on_a_conflict_without_any_open_conflict(case_engine, case_
     conflicted = case_world.add_history(case_id, "USER_INPUT", "CONFLICT")
 
     assert error_of(lambda: status(case_engine, member_id, conflicted))[0] == 500
+
+
+def _ask(case_world, candidate_id: str | None) -> tuple[int, int]:
+    """막힌 일 후보가 candidate_id인 질문(NEEDS_MORE_INFO)에서 멈춘 Case."""
+
+    member_id, case_id, _ = case_world.sign_up()
+    history_id = case_world.add_history(case_id, "USER_INPUT", "NEEDS_MORE_INFO")
+    with Session(case_world.engine) as session:
+        history = session.get(CaseHistory, history_id)
+        history.priority_blocker.candidate_id = candidate_id
+        session.commit()
+    return member_id, history_id
+
+
+def test_restoration_status_question_takes_buttons_and_stores_the_choice(case_world):
+    member_id, history_id = _ask(case_world, "missing:restoration_status")
+    with Session(case_world.engine) as session:
+        assert get_case_results_entry(session, member_id).result_input_kind == "RESTORATION_STATUS"
+        accepted = submit_case_results(session, member_id, CaseResultsSubmitRequest(
+            case_history_id=history_id, restoration_status="IN_PROGRESS"))
+    with Session(case_world.engine) as session:
+        stored = session.get(CaseHistory, accepted.case_history_id)
+        assert stored.restoration_status_answer == {"restoration_status": "IN_PROGRESS"}
+        assert stored.raw_input == "원상복구와 철거 작업을 진행하고 있어요."
+
+
+def test_other_questions_keep_text_and_refuse_status_buttons(case_world):
+    member_id, history_id = _ask(case_world, "missing:restoration_scope")
+    with Session(case_world.engine) as session:
+        assert get_case_results_entry(session, member_id).result_input_kind == "TEXT"
+        with pytest.raises(HTTPException) as error:
+            submit_case_results(session, member_id, CaseResultsSubmitRequest(
+                case_history_id=history_id, restoration_status="NOT_STARTED"))
+    assert error.value.status_code == 422

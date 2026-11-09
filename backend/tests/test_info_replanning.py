@@ -922,17 +922,26 @@ def test_free_text_restoration_completion_preserves_committed_facts(committed_st
 
 
 RESTORATION_RESULT = "원상복구 범위는 없고 원상복구 작업은 필요하지 않습니다."
+F03_RESULT = "원상복구 범위는 없고 철거도 필요하지 않습니다."
 
 
 @pytest.mark.parametrize("unsupported_completion", [False, True])
-def test_result_sentence_produces_only_the_three_stated_fact_changes(unsupported_completion):
+@pytest.mark.parametrize("report,reported_facts", [
+    (F03_RESULT, {"restoration_scope": F03_RESULT, "demolition_required": F03_RESULT}),
+    (RESTORATION_RESULT + " 철거도 필요하지 않습니다.",
+     {"restoration_scope": RESTORATION_RESULT, "restoration_status": RESTORATION_RESULT,
+      "demolition_required": "철거도 필요하지 않습니다."}),
+])
+def test_result_sentence_preserves_only_reported_fact_changes(
+    unsupported_completion, report, reported_facts,
+):
     request = request_for_replanning()
     snapshot = request.case_snapshot.model_dump(mode="json")
     for item in snapshot["facts"]:
         if item["field_path"] in {"restoration_scope", "restoration_status", "demolition_required"}:
             item.update(status="UNKNOWN", value=None, evidence_refs=[], updated_at=None)
     snapshot["procedure_progress"] = []
-    text = "임대인에게 확인했습니다. " + RESTORATION_RESULT + " 철거도 필요하지 않습니다."
+    text = "임대인에게 확인했습니다. " + report
     request = InfoAnalysisInput.model_validate(request.model_dump() | {
         "case_snapshot": snapshot,
         "input": request.input.model_dump() | {"redacted_text": text},
@@ -942,11 +951,7 @@ def test_result_sentence_produces_only_the_three_stated_fact_changes(unsupported
         {"operation": "SET", "field_path": field, "value_type": "ENUM", "value": "NOT_REQUIRED",
          "source_text": quote, "confidence_bps": 9500, "requires_confirmation": False,
          "reason_summary": "합성 임대인 확인 결과"}
-        for field, quote in (
-            ("restoration_scope", RESTORATION_RESULT),
-            ("restoration_status", RESTORATION_RESULT),
-            ("demolition_required", "철거도 필요하지 않습니다."),
-        )
+        for field, quote in reported_facts.items()
     ]
     rejected = deepcopy(response)
     rejected["procedure_observations"] = [{
@@ -961,9 +966,7 @@ def test_result_sentence_produces_only_the_three_stated_fact_changes(unsupported
         feedback = " ".join(item["content"] for item in client.messages[1])
         assert "progress must quote the user's own execution report" in feedback
     assert {(fact.field_path, fact.value) for fact in result.fact_candidates} == {
-        ("restoration_scope", "NOT_REQUIRED"),
-        ("restoration_status", "NOT_REQUIRED"),
-        ("demolition_required", "NOT_REQUIRED"),
+        (field, "NOT_REQUIRED") for field in reported_facts
     }
     assert result.conflicts == []
     assert result.procedure_progress_observations == []

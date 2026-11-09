@@ -1,5 +1,5 @@
 import type { Step, StepStatus } from '../components/ui/ProcessSteps'
-import { factLabelOf, fieldLabelOf, FRANCHISE_OPTIONS, LEASE_OPTIONS } from '../lib/caseOptions'
+import { businessLabelOf, factLabelOf, fieldLabelOf, FRANCHISE_OPTIONS, LEASE_OPTIONS } from '../lib/caseOptions'
 import type {
   CaseConflictsDecisionRequest,
   CaseResultsEntryResponse,
@@ -74,7 +74,10 @@ export function toValueLabel(field: string, raw: unknown): string | null {
   if (typeof raw !== 'string') return NEEDS_CHECK
 
   switch (field) {
+    // 코드 · 자유 글을 가르는 규칙은 `businessLabelOf` 에 있다. 그게 못 읽은 값만 확인 필요다
     case 'business_type':
+      return businessLabelOf(raw) ?? NEEDS_CHECK
+
     case 'restoration_scope_detail':
       return raw
 
@@ -213,10 +216,19 @@ export function toResultsEntry(body: CaseResultsEntryResponse | null): ResultsEn
       // 번호가 없으면 결과를 보낼 수 없고, 할 일이 없으면 무엇에 대한 결과인지 보여줄 수 없다
       const nextAction = toNextAction(body.next_action)
       if (!Number.isInteger(body.case_history_id) || nextAction === null) return { kind: 'UNRECOGNIZED' }
-      if (body.result_input_kind !== 'TEXT' && body.result_input_kind !== 'RESTORATION_ANSWER') {
+      if (!['TEXT', 'RESTORATION_ANSWER', 'ACTION_DONE'].includes(body.result_input_kind)) {
         return { kind: 'UNRECOGNIZED' }
       }
-      return { kind: 'READY', nextAction, historyId: body.case_history_id as number, inputKind: body.result_input_kind }
+      // [했어요] 버튼인데 종류가 없거나 모르는 값이면 어떤 버튼을 보여 줄지 정할 수 없다
+      const doneKind = body.result_input_kind === 'ACTION_DONE' ? body.action_done_kind : null
+      if (body.result_input_kind === 'ACTION_DONE'
+        && !['PREPARATION', 'SUBMISSION', 'PROCESSING', 'WORK'].includes(doneKind as string)) {
+        return { kind: 'UNRECOGNIZED' }
+      }
+      return {
+        kind: 'READY', nextAction, historyId: body.case_history_id as number,
+        inputKind: body.result_input_kind, doneKind,
+      }
     }
 
     case 'CONFLICT': {
@@ -228,7 +240,13 @@ export function toResultsEntry(body: CaseResultsEntryResponse | null): ResultsEn
       // 번호가 없으면 답을 보낼 수 없고, 질문이 없으면 무엇에 답하는지 보여줄 수 없다
       const questions = toQuestionsForUser(body.questions_for_user)
       if (!Number.isInteger(body.case_history_id) || questions === null) return { kind: 'UNRECOGNIZED' }
-      return { kind: 'ANSWER', questions, historyId: body.case_history_id as number }
+      // 원상복구 진행 상태 질문이면 버튼으로 받는다. 모르는 값은 다른 입력으로 바꾸지 않는다
+      if (body.result_input_kind !== 'TEXT' && body.result_input_kind !== 'RESTORATION_STATUS') {
+        return { kind: 'UNRECOGNIZED' }
+      }
+      return {
+        kind: 'ANSWER', questions, historyId: body.case_history_id as number, inputKind: body.result_input_kind,
+      }
     }
 
     /*
@@ -243,7 +261,9 @@ export function toResultsEntry(body: CaseResultsEntryResponse | null): ResultsEn
       return { kind: 'RESUBMIT', notice, historyId: body.case_history_id as number }
     }
 
+    // 판단 중이거나, 등록된 절차를 다 마쳐 받을 결과가 없다(#315). 둘 다 홈이 안내한다
     case 'PENDING':
+    case 'PROCEDURES_COMPLETED':
       return { kind: 'ELSEWHERE' }
 
     default:
@@ -294,6 +314,10 @@ export function toSubmitOutcome(body: CaseResultsSubmitResponse | null): SubmitO
 
     case 'FAILED':
       return { kind: 'STAY', state: { kind: 'FAILED', notice: toFailureNotice(body) } }
+
+    // 다음 할 일이 없는 것이 정상이다. 반영 결과(⑤)는 다음 할 일을 꼭 그리는 화면이라 보내지 않는다
+    case 'PROCEDURES_COMPLETED':
+      return { kind: 'FINISHED' }
 
     default:
       return UNRECOGNIZED

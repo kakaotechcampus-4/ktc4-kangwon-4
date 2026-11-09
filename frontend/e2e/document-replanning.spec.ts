@@ -91,6 +91,8 @@ test('판단 중 확인한 업로드를 보존하고 앞 판단 뒤 서류를 �
   await upload(page, files.LEASE)
   await documentJudgmentsDone(caseId, directory, 1)
   await page.goto('/results')
+  // 지금 할 일이 준비 확인이면 [준비했어요] 버튼이 먼저 뜬다. 이 시나리오는 자유글 진행 보고를 쓴다
+  await page.getByRole('button', { name: '직접 쓸게요', exact: true }).click()
   await page.getByRole('textbox').fill('원상복구 작업을 시작했습니다. 서류 대기 검증입니다.')
   const sent = page.waitForResponse(r => r.url() === `${BE_URL}/cases/results` && r.request().method() === 'POST')
   await page.getByRole('button', { name: '보내기', exact: true }).click()
@@ -124,7 +126,8 @@ test('충돌 대기 중 확인한 서류는 저장하고 사용자 선택이 끝
   await documentJudgmentsDone(caseId, directory, 1)
   databaseState(caseId, directory, true) // 이전에 전부로 확인한 합성 기록만 준비한다.
   await page.goto('/results')
-  // 이전 행동이 자유글이므로 실제 TEXT 계약으로 충돌을 만든다.
+  // 자유글로 충돌을 만든다. 준비 확인 할 일이면 버튼이 먼저 떠서 직접 쓰기로 바꾼다
+  await page.getByRole('button', { name: '직접 쓸게요', exact: true }).click()
   await page.getByRole('textbox').fill('원상복구는 일부이고 카운터만 철거해야 합니다.')
   await page.getByRole('button', { name: '보내기', exact: true }).click()
   await expect(page).toHaveURL(/\/confirm$/)
@@ -157,17 +160,16 @@ test('충돌 대기 중 확인한 서류는 저장하고 사용자 선택이 끝
   await expect(page.getByRole('button', { name: '임대차계약서 확인하기', exact: true })).toHaveCount(0)
 })
 
-// 새 DB 세션과 실제 서류 JSON을 함께 읽는다. 범위 준비 외에는 저장 경로를 대체하지 않는다.
+// 새 DB 세션으로 판단 이력과 서류함(case_document_context)을 함께 읽는다. 범위 준비 외에는 저장 경로를 대체하지 않는다.
 function databaseState(caseId: number, directory: string, prepareConflict = false) {
   return JSON.parse(execFileSync(process.env.E2E_PYTHON ?? 'python', ['-c', `
 import json, os, sys
-from pathlib import Path
 from sqlmodel import Session, create_engine, select
 from app.be.models.case import Case
 from app.be.models.case_history import CaseHistory
+from app.be.models.case_document_context import CaseDocumentContext
 from app.be.models.case_document_history import CaseDocumentHistory
 from app.be.models.evidence import ConflictReference
-from app.be.services.document import document_case_id
 with Session(create_engine(os.environ['E2E_DATABASE_URL'])) as session:
     case = session.get(Case, int(sys.argv[1]))
     if sys.argv[3] == 'true':
@@ -177,13 +179,14 @@ with Session(create_engine(os.environ['E2E_DATABASE_URL'])) as session:
     else:
         histories = session.exec(select(CaseHistory).where(CaseHistory.case_id == case.id).order_by(CaseHistory.id)).all()
         rows = [dict(id=h.id, source=h.source, status=h.judgment_status, input=h.raw_input) for h in histories]
-        folder = Path(sys.argv[2]) / str(document_case_id(case))
-        def ids(filename):
-            return [d['document_id'] for d in json.loads((folder / filename).read_text())['documents']] if (folder / filename).is_file() else []
+        row = session.get(CaseDocumentContext, case.id)
+        def ids(column):
+            saved = getattr(row, column) if row is not None else None
+            return [d['document_id'] for d in saved['documents']] if saved else []
         uploads = session.exec(select(CaseDocumentHistory).where(CaseDocumentHistory.case_id == case.id, CaseDocumentHistory.action == 'UPLOADED')).all()
         conflicts = session.exec(select(ConflictReference.status).where(ConflictReference.case_id == case.id)).all()
         print(json.dumps(dict(scope=case.restoration_scope, status=case.restoration_status,
             histories=rows, documents=[h for h in rows if h['source'] == 'DOCUMENT_SUBMITTED'],
-            uploads=len(uploads), stored=ids('case_documents.json'), baseline=ids('judged_documents.json'), conflicts=list(conflicts))))
+            uploads=len(uploads), stored=ids('context'), baseline=ids('judged_context'), conflicts=list(conflicts))))
 `, String(caseId), directory, String(prepareConflict)], { cwd: '../backend', env: { ...process.env, PYTHONPATH: '.' }, encoding: 'utf-8' }))
 }

@@ -93,8 +93,11 @@ describe('CaseCreatePage', () => {
     })
   })
 
-  /** [가입한 적 없어요]와 다르다. 없음으로 보내면 보험 신고 할 일이 빠지고, 모름이면 확인 필요로 남는다 */
-  it('보험을 잘 모르겠다고 하면 네 칸을 비워 보낸다', async () => {
+  /**
+   * 보험·예전 직원 질문에는 "잘 모르겠어요"가 없다. 모름이 남으면 그 할 일의 [준비했어요] 버튼이
+   * 대상 여부를 정하지 못해 판단이 실패한다. 사장님은 가게 이름으로 낸 보험과 고용 이력을 안다고 본다
+   */
+  it('보험과 예전 직원 질문에는 모른다는 선택지가 없다', async () => {
     saveTokens('access-1', 'refresh-1')
     const fetchMock = mockServer(200)
     renderPage()
@@ -102,36 +105,23 @@ describe('CaseCreatePage', () => {
     await press('radio', /개인 카페/)
     await press('button', '다음')
     await press('button', '해당하는 게 없어요')
+    await screen.findByRole('radio', { name: '아니요, 없어요' })
+    expect(screen.queryByRole('radio', { name: '잘 모르겠어요' })).not.toBeInTheDocument()
     await press('radio', '아니요, 없어요')
     await press('button', '다음')
-    await press('button', '잘 모르겠어요')
-    await press('radio', '아직 안 정했어요')
-    fireEvent.click(sendButton())
-
-    expect(postBody(fetchMock)).toMatchObject({
-      pension_enrolled: null,
-      health_insurance_enrolled: null,
-      employment_insurance_enrolled: null,
-      industrial_accident_insurance_enrolled: null,
-    })
-  })
-
-  /** [아니요, 없어요]와 다르다. 없음으로 보내면 직원 정산·보험 신고가 빠지고, 모름이면 확인 필요로 남는다 */
-  it('예전 직원을 잘 모르겠다고 하면 비워 보낸다', async () => {
-    saveTokens('access-1', 'refresh-1')
-    const fetchMock = mockServer(200)
-    renderPage()
-
-    await press('radio', /개인 카페/)
-    await press('button', '다음')
-    await press('button', '해당하는 게 없어요')
-    await press('radio', '잘 모르겠어요')
-    await press('button', '다음')
+    await screen.findByRole('button', { name: '가입한 적 없어요' })
+    expect(screen.queryByRole('button', { name: '잘 모르겠어요' })).not.toBeInTheDocument()
     await press('button', '가입한 적 없어요')
     await press('radio', '아직 안 정했어요')
     fireEvent.click(sendButton())
 
-    expect(postBody(fetchMock)).toMatchObject({ employee_count: 0, had_employees: null })
+    expect(postBody(fetchMock)).toMatchObject({
+      had_employees: false,
+      pension_enrolled: false,
+      health_insurance_enrolled: false,
+      employment_insurance_enrolled: false,
+      industrial_accident_insurance_enrolled: false,
+    })
   })
 
   /** 서버가 월세 여부를 꼭 받아야 한다. 건너뛰면 점포 형태를 정할 수 없어 보내지 못한다 */

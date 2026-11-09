@@ -1,11 +1,11 @@
 import {
-  IconBellLine,
   IconBoxFlapLine,
   IconCheckmarkCircleFill,
   IconCheckmarkLine,
   IconDocumentLine,
   IconExclamationmarkCircleFill,
   IconILowercaseSerifCircleFill,
+  IconPersonLine,
   IconPictureLine,
   IconReceiptLine,
   IconSparkle2Fill,
@@ -55,7 +55,7 @@ function RoadmapPicture() {
     <PhoneFrame>
       <div className="flex items-center">
         <span className="flex-1 text-15 font-bold">우리 가게</span>
-        <IconBellLine size={18} />
+        <IconPersonLine size={18} />
       </div>
       <div className="flex flex-col gap-2 rounded-xl bg-bg-layer-default px-3 py-2.5">
         <span className="text-12 font-bold">5단계 중 2단계 · 원상복구·철거</span>

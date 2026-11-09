@@ -1,4 +1,5 @@
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
@@ -68,9 +69,11 @@ def health(engine: Engine = Depends(get_health_engine)):
     # 배포 컨테이너가 이 주소로 살아 있는지 본다(docker-compose.prod.yml). DB가 끊겨도 ok라고 하면
     # 모든 요청이 실패하는데 서버는 건강하다고 남는다. DB 오류 내용은 밖에 내보내지 않는다.
     # 기다리는 한도와 앱 풀을 안 쓰는 이유는 create_health_engine에 있다.
+    # version은 이 서버를 빌드한 커밋이다(Dockerfile의 GIT_SHA). 서버에 들어가지 않고 운영 버전을 본다
+    version = os.environ.get("APP_VERSION", "unknown")
     try:
         with engine.connect() as connection:
             connection.execute(text("SELECT 1"))
     except SQLAlchemyError:
-        return JSONResponse(status_code=503, content={"status": "unavailable"})
-    return {"status": "ok"}
+        return JSONResponse(status_code=503, content={"status": "unavailable", "version": version})
+    return {"status": "ok", "version": version}

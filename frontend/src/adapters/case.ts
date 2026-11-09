@@ -1,4 +1,5 @@
 import {
+  businessLabelOf,
   factLabelOf,
   FIELD_LABEL,
   fieldLabelOf,
@@ -83,8 +84,9 @@ function toFact(key: string, label: string, value: string | null | undefined): F
 /**
  * "내 가게 상황"에 나열할 항목.
  *
- * 사용자가 답할 수 있는 것만 담는다. `restoration_status`처럼 진행 단계를 나타내는 값은
- * 목록에 넣지 않는다 — "아직 확인 안 된 것"이 사용자에게 할 일로 읽히기 때문이다.
+ * 사용자가 진단에서 답한 것만 담는다. 진단 뒤 할 일을 하며 정해지는 값 — 원상복구 진행 상태 ·
+ * 범위, 철거 필요 여부 — 은 넣지 않는다. 초반에는 늘 "확인 필요"라 사용자에게 할 일로 읽히고,
+ * 그 진행은 로드맵의 할 일이 보여준다.
  *
  * 문구는 `FIELD_LABEL`에서 가져온다. 서버는 여러 자리에서 같은 칸을 이름으로 지목하는데
  * (실패했을 때 다시 봐야 할 칸, 변경 내역, 충돌 항목), 문구를 여기 적어두면 그 자리마다
@@ -96,7 +98,7 @@ function toFact(key: string, label: string, value: string | null | undefined): F
  */
 export function toFacts(serverCase: CaseResponse): Fact[] {
   return [
-    toFact('business_type', FIELD_LABEL.business_type, serverCase.business_type),
+    toFact('business_type', FIELD_LABEL.business_type, businessLabelOf(serverCase.business_type)),
     toFact(
       'franchise',
       FIELD_LABEL.franchise_status,
@@ -115,21 +117,28 @@ export function toFacts(serverCase: CaseResponse): Fact[] {
     toFact(
       'planned_closure_date',
       FIELD_LABEL.planned_closure_date,
-      // 날짜를 못 정하고 예상 달만 고른 가게도 미확인이 아니다. 고른 달을 보여준다(#237)
-      toDateLabel(serverCase.planned_closure_date) ??
-        (serverCase.planned_closure_month ? `${toDateLabel(serverCase.planned_closure_month)} 중` : null),
-    ),
-    toFact(
-      'restoration_scope',
-      FIELD_LABEL.restoration_scope,
-      RESTORATION_SCOPE_LABEL[serverCase.restoration_scope],
-    ),
-    toFact(
-      'demolition_required',
-      FIELD_LABEL.demolition_required,
-      DEMOLITION_LABEL[serverCase.demolition_required],
+      closureLabelOf(serverCase),
     ),
   ]
+}
+
+/**
+ * 폐업 예정일 칸에 쓸 말. 읽을 수 없으면 `null`(미확인).
+ *
+ * - 날짜가 있으면 그 날짜
+ * - 날짜 없이 예상 달만 있으면 그 달(#237) — "이번 달 안에"·"다음 달"을 고른 가게다
+ * - 둘 다 `null` 이면 "아직 정하지 않음". 진단의 폐업 시기 질문은 답해야 넘어가고, 날짜는 진단에서
+ *   받지 않아(`toCaseCreateRequest`) 둘 다 비는 것은 "아직 안 정했어요"를 고른 경우뿐이다.
+ *   "확인 필요"로 두면 답한 사장님이 뭘 빠뜨린 줄 안다
+ * - 칸 자체가 안 오면(`undefined`) 응답이 어긋난 것이라 미확인으로 둔다
+ */
+function closureLabelOf(serverCase: CaseResponse): string | null {
+  const { planned_closure_date: date, planned_closure_month: month } = serverCase
+  const dateLabel = toDateLabel(date)
+  if (dateLabel) return dateLabel
+  if (month) return `${toDateLabel(month)} 중`
+  if (date === null && month === null) return '아직 정하지 않음'
+  return null
 }
 
 /**
@@ -268,7 +277,11 @@ function toJudgmentView(envelope: CasesEnvelope): JudgmentView {
       return { status: 'PENDING' }
 
     case 'FAILED':
-      return { status: 'FAILED', notice: toFailureNotice(envelope) }
+      return {
+        status: 'FAILED',
+        notice: toFailureNotice(envelope),
+        lastTask: isReadableText(envelope.last_next_action_title) ? envelope.last_next_action_title : null,
+      }
 
     // 검증할 것이 없다. 어긋난 항목은 응답에 안 실려 온다(#66).
     //
@@ -276,6 +289,10 @@ function toJudgmentView(envelope: CasesEnvelope): JudgmentView {
     // 그리면 사장님이 이미 어긋난 전제 위에서 움직이게 된다. `PENDING`·`FAILED` 와 같은 규칙이다
     case 'CONFLICT':
       return { status: 'CONFLICT' }
+
+    // 다음 할 일·질문이 비어 오는 것이 정상이다(#315). `DONE` 처럼 비었다고 읽지 못한 것으로 두지 않는다
+    case 'PROCEDURES_COMPLETED':
+      return { status: 'PROCEDURES_COMPLETED' }
 
     case 'DONE': {
       // 막힌 것과 할 일 중 하나라도 받을 수 없으면 그릴 것이 없다. 칸을 빠뜨린 응답·
@@ -429,8 +446,7 @@ export function toCaseCreateRequest(answers: DiagnosisAnswers, now: Date): CaseC
 
   const { insurances } = answers
   if (insurances === null) return null
-  const enrolled = (insurance: DiagnosisInsurance) =>
-    insurances === 'UNKNOWN' ? null : insurances.includes(insurance)
+  const enrolled = (insurance: DiagnosisInsurance) => insurances.includes(insurance)
 
   return {
     store_name: null,
@@ -443,7 +459,7 @@ export function toCaseCreateRequest(answers: DiagnosisAnswers, now: Date): CaseC
     restoration_clause: restorationClause,
     planned_closure_date: null,
     planned_closure_month: closureMonthOf(answers.closure, now),
-    had_employees: staffed || answers.hadEmployees === 'UNKNOWN' ? null : answers.hadEmployees,
+    had_employees: staffed ? null : answers.hadEmployees,
     pension_enrolled: enrolled('PENSION'),
     health_insurance_enrolled: enrolled('HEALTH'),
     employment_insurance_enrolled: enrolled('EMPLOYMENT'),

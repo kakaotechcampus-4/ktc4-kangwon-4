@@ -7,14 +7,18 @@ Case 직접 접근 없이 검증된 `SupervisorAgentInput` 사용.
 
 `SupervisorAgentInput` → `SupervisorDraft` (`decision` + `mutations` + `grounded_claims`)
 
-## decision_type (2가지뿐)
+## decision_type
 
 | 값 | 조건 | 모양 |
 |---|---|---|
 | `ACTION` | 근거 있는 행동 가능 | `blocker` 1개, `next_action` 1개, `questions_for_user=[]` |
-| `NEEDS_MORE_INFO` | 실제 미확인 정보를 묻는 후보를 우선 선택 | `blocker` 1개, `next_action=None`, `questions_for_user` 1개 이상, `requires_human=True` |
+| `NEEDS_MORE_INFO` | 실제 미확인 정보나 안내로 실행을 지시할 수 없는 원상복구의 새 진행 보고를 기다림 | `blocker` 1개, `next_action=None`, `questions_for_user` 1개 이상, `requires_human=True` |
+| `PROCEDURES_COMPLETED` | 적용되는 등록 절차의 완료 근거와 자료·대응표를 확인한 안내 종료 | `blocker=None`, `blockers=[]`, `next_action=None`, `questions_for_user=[]`, `requires_human=False` |
 
-두 갈래 모두 전체 `blockers`와 그중 선택한 우선 `blocker`를 반환한다.
+`ACTION`과 `NEEDS_MORE_INFO`는 전체 `blockers`와 그중 선택한 우선 `blocker`를 반환한다.
+행동·질문 후보가 없다는 이유만으로 종료하지 않는다.
+[`completed_procedure_decision_fields`](../../backend/app/agent/blocker_candidates.py)의 조건을
+Supervisor와 Review가 각각 검사하며, 미완료·적용 여부 미확인·자료 설정 오류는 정상 종료로 숨기지 않는다.
 
 `CASE_COMPLETE`는 없다 — schema_table.md의 `DECISION_RECORD.decision_type`에도 없고,
 "전체 폐업 완료 자동 판정"은 [Agent MVP 제외 범위](./README.md)다.
@@ -26,7 +30,7 @@ Agent 출력은 판단 근거를 연결하는 `evidence_refs`도 함께 반환�
 `title`·`blocker_code`는 없다 — 물리 컬럼에 없어서 뺐다.
 기존 Blocker 중 현재 조건에서 해소된 항목은 코드가 `resolved_blocker_candidate_ids`로 반환하고 BE가 저장한다.
 
-현재 MVP의 정상 판단에는 우선 Blocker가 정확히 1개 있고 전체 Blocker는 여러 개일 수 있다. 원상복구 미확인과
+`ACTION`과 `NEEDS_MORE_INFO`에는 우선 Blocker가 정확히 1개 있고 전체 Blocker는 여러 개일 수 있다. 원상복구 미확인과
 공식 절차의 진행 상태·준비사항 확인을 근거 있는 후보로 반환한다. 확인된 사실을 다시
 미확인으로 바꾸거나, 후보에 없는 차단 조건을 만들지 않는다. 전체 Case 완료 판정은
 범위에서 제외하며 모든 판단·행동의 근거와 필수 Review를 유지한다.

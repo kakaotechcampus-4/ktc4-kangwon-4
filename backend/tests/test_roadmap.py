@@ -101,6 +101,42 @@ def test_no_clause_does_not_establish_no_restoration_or_demolition():
     assert view["support_application"].status == "NEEDS_CONFIRMATION"
 
 
+@pytest.mark.parametrize("scope,demolition", [
+    ("FULL", "REQUIRED"), ("FULL", "NOT_REQUIRED"),
+    ("PARTIAL", "REQUIRED"), ("PARTIAL", "NOT_REQUIRED"),
+    ("NOT_REQUIRED", "NOT_REQUIRED"),
+])
+def test_confirmed_scope_facts_complete_only_the_scope_confirmation_row(scope, demolition):
+    value = request(restoration_scope=scope, demolition_required=demolition)
+    before = value.model_dump_json()
+    view = tasks(value)
+    assert view["restoration"].status == "COMPLETED"
+    assert view["restoration"].kind == "PROCEDURE"
+    assert view["restoration"].procedure_steps == [next(
+        step.procedure_step for step in value.known_procedure_steps
+        if step.procedure_step.step_code == "CONFIRM_RESTORATION_SCOPE"
+    )]
+    # PARTIAL 세부 설명은 별도 질문이다. 확인한 범위가 실제 작업·반환 완료를 뜻하지 않는다.
+    assert not any(f.field_path == "restoration_scope_detail" for f in value.case_snapshot.facts)
+    assert view["restoration_work"].status == (
+        "NOT_APPLICABLE" if scope == demolition == "NOT_REQUIRED" else "NOT_STARTED"
+    )
+    assert view["return_premises"].status == "NOT_STARTED"
+    assert value.case_snapshot.procedure_progress == []
+    assert value.reviewed_plan is None
+    assert value.model_dump_json() == before
+
+
+@pytest.mark.parametrize("scope,demolition", [
+    (None, "REQUIRED"), ("FULL", None), (None, None),
+])
+def test_scope_confirmation_is_not_completed_with_missing_or_unknown_facts(scope, demolition):
+    value = request(restoration_scope=scope, demolition_required=demolition)
+    assert tasks(value)["restoration"].status == "NOT_STARTED"
+    value.case_snapshot.facts = [fact for fact in value.case_snapshot.facts if fact.status == "CONFIRMED"]
+    assert tasks(value)["restoration"].status == "NOT_STARTED"
+
+
 @pytest.mark.parametrize("month,day,status", [
     ("2026-12", None, "IN_PROGRESS"),
     (None, "2026-12-20", "COMPLETED"),
@@ -189,6 +225,7 @@ def test_missing_registry_does_not_mark_official_procedures_inapplicable():
     value = request()
     value.known_procedure_steps = []
     assert tasks(value)["closure_submission"].status == "NEEDS_CONFIRMATION"
+    assert tasks(value)["restoration"].status == "NEEDS_CONFIRMATION"
 
 
 @pytest.mark.parametrize("facts", [
@@ -318,6 +355,33 @@ def test_caller_procedure_bindings_use_db_references_without_name_guessing():
     view = build_roadmap(value, procedure_bindings=bindings)
     task = next(t for s in view.stages for t in s.tasks if t.task_id == "closure_submission")
     assert task.status == "NOT_STARTED" and len(task.procedure_steps) == 2
+
+
+@pytest.mark.parametrize("stored_status", ["NOT_STARTED", "IN_PROGRESS"])
+def test_scope_fact_completion_preserves_bound_references_and_stored_progress(stored_status):
+    value = request(restoration_scope="FULL", demolition_required="REQUIRED")
+    bindings = {}
+    for i, step in enumerate(value.known_procedure_steps, 1):
+        logical = step.procedure_step.step_code
+        step.procedure_step.step_code = f"DB_{i}"
+        bindings[logical] = step.procedure_step
+    scope_ref = bindings["CONFIRM_RESTORATION_SCOPE"]
+    progress(value, scope_ref.step_code, stored_status)
+    before = value.model_dump_json()
+    view = build_roadmap(value, procedure_bindings=bindings)
+    task = next(t for stage in view.stages for t in stage.tasks if t.task_id == "restoration")
+    assert task.status == "COMPLETED"
+    assert task.kind == "PROCEDURE" and task.procedure_steps == [scope_ref]
+    assert value.case_snapshot.procedure_progress[0].status == stored_status
+    assert value.model_dump_json() == before
+
+
+def test_scope_facts_do_not_override_deprecated_procedure_applicability():
+    value = request(restoration_scope="FULL", demolition_required="REQUIRED")
+    scope = next(step for step in value.known_procedure_steps
+                 if step.procedure_step.step_code == "CONFIRM_RESTORATION_SCOPE")
+    scope.deprecated_at = NOW
+    assert tasks(value)["restoration"].status == "NOT_APPLICABLE"
 
 
 def test_existing_reviewed_plan_is_required_and_bound_to_same_snapshot():

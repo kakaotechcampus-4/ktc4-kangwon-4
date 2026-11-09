@@ -29,7 +29,27 @@ export interface RestorationAnswer {
   demolition_required: DemolitionRequired
 }
 
-export type ResultInputKind = 'TEXT' | 'RESTORATION_ANSWER'
+/** 지금 할 일에 [했어요]를 눌렀다. [아직 안 했어요]는 보내지 않으므로 true만 있다 */
+export interface ActionDone {
+  action_done: true
+}
+
+/** 원상복구 진행 상태 질문에 버튼으로 고른 답. 모르는 값(UNKNOWN)·해당 없음은 버튼에 없다 */
+export interface RestorationStatusAnswer {
+  restoration_status: Extract<RestorationStatus, 'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETED'>
+}
+
+/**
+ * 결과를 어떻게 받을지 서버가 정한다. 할 일 대부분은 [했어요 / 아직 안 했어요]로 받는다.
+ * `RESTORATION_STATUS` 는 되물은 질문(원상복구 진행 상태)에만 온다
+ */
+export type ResultInputKind = 'TEXT' | 'RESTORATION_ANSWER' | 'ACTION_DONE' | 'RESTORATION_STATUS'
+
+/**
+ * [했어요] 버튼의 할 일 종류. 버튼 문구만 고르고, 무엇을 저장할지는 서버가 정한다.
+ * 준비 확인 · 신고 제출 · 기관 처리 결과 확인 · 사장님이 직접 하는 일(철거·점포 반환·직원 정산)
+ */
+export type ActionDoneKind = 'PREPARATION' | 'SUBMISSION' | 'PROCESSING' | 'WORK'
 
 /** 임대차계약서에 원상복구 조항이 있는지. 가입 때 사장님이 답한다 */
 export type RestorationClause = 'EXISTS' | 'NOT_EXISTS' | 'UNKNOWN'
@@ -141,7 +161,18 @@ export interface CaseCreateResponse
  * 다섯이 다가 아닐 수 있다. 모르는 값이 오면 어댑터가 가려내고 화면은 "판단 내용을
  * 불러오지 못했어요" 로 간다 — 다른 상태로 바꿔 보여주지 않는다 (`CLAUDE.md` 규칙 9).
  */
-export type JudgmentStatus = 'PENDING' | 'DONE' | 'NEEDS_MORE_INFO' | 'CONFLICT' | 'FAILED'
+export type JudgmentStatus =
+  | 'PENDING'
+  | 'DONE'
+  | 'NEEDS_MORE_INFO'
+  | 'CONFLICT'
+  | 'FAILED'
+  /**
+   * 등록된 절차 안내를 모두 마쳤다(#314·#315). 다음 할 일과 질문이 없어 `blocker`·`next_action`·
+   * `questions_for_user` 가 `null` 이다. **폐업 전체 완료가 아니다** — `case_status` 는 `IN_PROGRESS` 그대로고,
+   * 남은 체크 할 일은 로드맵에 있다
+   */
+  | 'PROCEDURES_COMPLETED'
 
 /**
  * 판단이 실패했을 때 서버가 분류한 **다음에 해볼 만한 것**.
@@ -200,6 +231,8 @@ export interface CasesEnvelope {
   questions_for_user: string[] | null
   /** 판단이 실패했을 때만 채워진다. 실패가 아니면 `null` 이다 */
   recovery_action_code: RecoveryActionCode | null
+  /** 판단이 실패했을 때만 채워진다. 실패하기 전 마지막으로 보여 준 할 일 제목. 예전 서버는 보내지 않는다 */
+  last_next_action_title?: string | null
   /**
    * 판단을 멈추게 한 Case 의 칸 이름들. 실패가 아니면 `null` 이다.
    *
@@ -256,6 +289,8 @@ export interface ConflictItemResponse {
 export interface CaseResultsEntryResponse {
   judgment_status: JudgmentStatus
   result_input_kind: ResultInputKind
+  /** `ACTION_DONE`일 때만 있다 */
+  action_done_kind: ActionDoneKind | null
   case_history_id: number | null
   raw_input: string | null
   conflicts: ConflictItemResponse[] | null
@@ -267,8 +302,10 @@ export interface CaseResultsEntryResponse {
 
 /** `POST /cases/results` 로 보내는 것 */
 export type CaseResultsSubmitRequest = { case_history_id: number } & (
-  | { raw_input: string; restoration_answer?: never }
-  | { restoration_answer: RestorationAnswer; raw_input?: never }
+  | { raw_input: string; restoration_answer?: never; action_done?: never; restoration_status?: never }
+  | { restoration_answer: RestorationAnswer; raw_input?: never; action_done?: never; restoration_status?: never }
+  | (ActionDone & { raw_input?: never; restoration_answer?: never; restoration_status?: never })
+  | (RestorationStatusAnswer & { raw_input?: never; restoration_answer?: never; action_done?: never })
 )
 
 /**
@@ -326,6 +363,8 @@ export type ResultsSubmitResult =
   | 'NEEDS_MORE_INFO'
   | 'CONFLICT'
   | 'FAILED'
+  /** 등록된 절차 안내를 모두 마쳤다. `JudgmentStatus` 의 같은 값과 뜻이 같다 */
+  | 'PROCEDURES_COMPLETED'
 
 /**
  * `GET /cases/results/status?case_history_id=` 응답.
@@ -372,7 +411,7 @@ export type CaseLogActor = 'OWNER' | 'RIBBON'
  *   사장님  CASE_CREATED · RESULT_SUBMITTED · CONFLICT_DECIDED · DOCUMENT_SUBMITTED(#173)
  *           CHECKLIST_COMPLETED · CHECKLIST_UNCHECKED · SUPPORT_RESULT_REPORTED · DOCUMENT_UPLOADED(#174)
  *   리본    NEXT_ACTION_DECIDED · MORE_INFO_REQUESTED · CONFLICT_FOUND · JUDGMENT_FAILED
- *           DOCUMENTS_CHECKED(#174) · ROADMAP_TASKS_ADDED(#184)
+ *           DOCUMENTS_CHECKED(#174) · ROADMAP_TASKS_ADDED(#184) · PROCEDURES_COMPLETED(#315)
  */
 export type CaseLogEvent =
   | 'CASE_CREATED'
@@ -389,6 +428,7 @@ export type CaseLogEvent =
   | 'DOCUMENT_UPLOADED'
   | 'DOCUMENTS_CHECKED'
   | 'DOCUMENT_SUBMITTED'
+  | 'PROCEDURES_COMPLETED'
 
 /** 기록 한 줄 */
 export interface CaseLogItem {

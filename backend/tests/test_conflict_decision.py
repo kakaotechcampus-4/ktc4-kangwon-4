@@ -7,6 +7,7 @@
 """
 
 import asyncio
+import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -315,6 +316,200 @@ def reviewed_plan_setting_employee_count():
         )
 
     return asyncio.run(build())
+
+
+def reviewed_scope_change(case_id, *, before="PARTIAL", after="FULL", accepted=True, detail="카운터", include_detail=True):
+    """실제 충돌 overlay와 검수를 거친 합성 판단. 모델 호출은 없다."""
+    from app.agent.enrichment import build_conflict_overlays
+    from app.agent.review_tool import ReviewTool
+    from app.agent.schemas import (
+        CaseFact, ConflictCandidate, ConflictConfirmedTrigger, ReviewProof,
+        ReviewSubject, ReviewedPlanOutcome, canonical_digest,
+    )
+    from app.agent.supervisor.agent import SupervisorAgent
+    from test_action_codes import NOW, REF, StubModel, evidence, source as invocation, supervisor_request
+
+    async def build():
+        request = supervisor_request()
+        data = json.loads(request.model_dump_json().replace(f'"{REF}"', f'"{REF}:{case_id}"'))
+        for original, source in zip(request.source_results, data["source_results"]):
+            if source["meta"]["component"] == "INFO_AGENT":
+                source["output"]["based_on_procedure_lookup_digest"] = data["source_results"][0]["output_digest"]
+            source["output_digest"] = canonical_digest(type(original.output).model_validate(source["output"]))
+        request = type(request).model_validate(data)
+        request.case_snapshot.case_id = case_id
+        for source in request.source_results:
+            source.meta.case_id = case_id
+        reported = evidence(evidence_id=f"scope-report:{case_id}", source_type="USER_INPUT",
+                            source_ref=f"synthetic-scope-input:{case_id}", excerpt="원상복구는 전부입니다.")
+        request.case_snapshot.evidence_records.append(reported)
+        info = request.source_results[1].output.model_copy(deep=True)
+        info.evidence_records.append(reported)
+        request.source_results[1] = invocation(info)
+        request.source_results[1].meta.case_id = case_id
+        facts = [("restoration_scope", "ENUM", before)]
+        if include_detail:
+            facts.append(("restoration_scope_detail", "STRING", detail))
+        for field, kind, value in facts:
+            request.case_snapshot.facts.append(CaseFact(
+                field_path=field, value_type=kind, value=value, status="CONFIRMED" if value is not None else "UNKNOWN",
+                evidence_refs=[f"{REF}:{case_id}"] if value is not None else [], updated_at=NOW if value is not None else None,
+            ))
+        conflict = ConflictCandidate.create(
+            conflict_ref=f"scope:{case_id}", candidate_id=uuid4(), snapshot_id=request.case_snapshot.snapshot_id,
+            field_path="restoration_scope", committed_status="CONFIRMED", committed_value=before,
+            proposed_operation="SET", proposed_status="CONFIRMED", proposed_value=after,
+            source_evidence_refs=[reported.evidence_id], source_call_id=request.source_results[1].meta.call_id,
+        )
+        request.trigger = ConflictConfirmedTrigger(
+            trigger_type="CONFLICT_CONFIRMED", input_event_id=f"scope-choice:{case_id}",
+            client_event_id=None, conflicts=[conflict], conflict_snapshot=request.case_snapshot.model_copy(deep=True),
+            selections=[{"conflict_ref": conflict.conflict_ref, "accepted": accepted}], confirmed_at=NOW,
+        )
+        request.fact_overlays = build_conflict_overlays(request.case_snapshot, request.trigger)
+        draft = await SupervisorAgent(StubModel(), max_local_attempts=1).draft(request)
+        subject = ReviewSubject.create(
+            schema_version="agent-io/2.0", review_subject_id=uuid4(), review_attempt=1,
+            run_id=request.source_results[0].meta.run_id, case_id=case_id, trigger=request.trigger,
+            snapshot=request.case_snapshot, known_procedure_steps=request.known_procedure_steps,
+            source_results=request.source_results, supervisor_draft=draft,
+        )
+        result = await ReviewTool(StubModel(), max_output_attempts=1).review(subject)
+        meta = request.source_results[0].meta.model_copy(update={"component": "REVIEW_TOOL", "call_id": uuid4()})
+        return ReviewedPlanOutcome(outcome_type="REVIEWED_PLAN", review_subject=subject,
+            review_proof=ReviewProof.from_passed_review(subject=subject, result=result, review_meta=meta, reviewed_at=NOW))
+    return asyncio.run(build())
+
+
+def scope_case(engine, before="PARTIAL", detail="카운터"):
+    from app.be.models.case import Case
+    from app.be.models.case_field_history import CaseFieldHistory
+    from app.be.models.case_history import CaseHistory
+    from app.be.models.evidence import ConflictReference
+
+    with Session(engine) as session:
+        case_id = new_case_id(session)
+        case = session.get(Case, case_id)
+        case.restoration_scope, case.restoration_scope_detail = before, detail
+        origin = CaseHistory(case_id=case_id, source="USER_INPUT", raw_input="원상복구는 전부입니다.", judgment_status="CONFLICT")
+        session.add(origin)
+        session.flush()
+        creation = case_history_crud.get_case_created_history(session, case_id)
+        seed = CaseFieldHistory(case_id=case_id, case_history_id=origin.id, canonical_field="restoration_scope_detail",
+            before_value=None, after_value=detail, source="INFO_ANALYSIS",
+            source_evidence_refs=[f"case_{case_id}_history_{creation.id}"])
+        conflict = ConflictReference(conflict_ref=f"scope:{case_id}", case_id=case_id, case_history_id=origin.id,
+            canonical_field="restoration_scope", committed_value=before, proposed_value="FULL", candidate_payload={})
+        history = CaseHistory(case_id=case_id, source="CONFLICT_DECISION", judgment_status="PENDING")
+        session.add_all([seed, conflict, history])
+        session.commit()
+        return case_id, history.id, conflict.id, seed.id
+
+
+@pytest.mark.parametrize("accepted,detail", [(True, "카운터"), (False, "카운터"), (True, None)],
+                         ids=["new-full", "keep-partial", "already-empty-detail"])
+def test_full_scope_choice_clears_only_current_detail_and_keeps_old_history(mysql_engine, accepted, detail):
+    from app.be.models.case import Case
+    from app.be.models.case_field_history import CaseFieldHistory
+    from app.be.models.case_history import CaseHistory
+    from app.be.models.evidence import ConflictReference
+
+    case_id, history_id, conflict_id, seed_id = scope_case(mysql_engine, detail=detail)
+    outcome = reviewed_scope_change(case_id, accepted=accepted, detail=detail)
+    with Session(mysql_engine) as session:
+        decision_record_service.save_reviewed_plan(session, session.get(CaseHistory, history_id), outcome,
+            resolved_conflicts={conflict_id: "PROPOSED" if accepted else "STORED"})
+    with Session(mysql_engine) as session:
+        case = session.get(Case, case_id)
+        assert (case.restoration_scope, case.restoration_scope_detail) == (("FULL", None) if accepted else ("PARTIAL", detail))
+        assert session.get(CaseFieldHistory, seed_id).after_value == detail
+        if accepted:
+            fact = next(f for f in case_snapshot_service.build_case_snapshot(session, case_id).facts
+                        if f.field_path == "restoration_scope_detail")
+            assert (fact.status, fact.value, fact.evidence_refs) == ("UNKNOWN", None, [])
+        rows = session.exec(select(CaseFieldHistory).where(CaseFieldHistory.case_history_id == history_id,
+            CaseFieldHistory.canonical_field == "restoration_scope_detail")).all()
+        assert len(rows) == int(accepted and detail is not None)
+        if rows:
+            scope = outcome.review_subject.supervisor_draft.mutations.fact_changes[0]
+            assert (rows[0].before_value, rows[0].after_value, rows[0].source) == ("카운터", None, scope.source_type.value)
+            assert rows[0].source_evidence_refs == scope.source_evidence_refs
+            assert rows[0].reason
+        assert session.get(ConflictReference, conflict_id).status == ("CONFIRMED" if accepted else "REJECTED")
+
+
+@pytest.mark.parametrize("failure", ["stale-detail", "missing-detail", "resolve-rollback"])
+def test_full_scope_detail_clear_is_stale_checked_and_atomic(mysql_engine, failure):
+    from app.be.models.case import Case
+    from app.be.models.case_field_history import CaseFieldHistory
+    from app.be.models.case_history import CaseHistory
+    from app.be.models.evidence import ConflictReference
+
+    case_id, history_id, conflict_id, _ = scope_case(mysql_engine)
+    outcome = reviewed_scope_change(case_id, include_detail=failure != "missing-detail")
+    if failure == "stale-detail":
+        with Session(mysql_engine) as session:
+            session.get(Case, case_id).restoration_scope_detail = "나중에 확인한 바닥"
+            session.commit()
+    error = ValueError if failure == "resolve-rollback" else decision_record_service.StaleJudgmentError
+    with Session(mysql_engine) as session, pytest.raises(error):
+        decision_record_service.save_reviewed_plan(session, session.get(CaseHistory, history_id), outcome,
+            resolved_conflicts={-1 if failure == "resolve-rollback" else conflict_id: "PROPOSED"})
+    with Session(mysql_engine) as session:
+        case = session.get(Case, case_id)
+        assert case.restoration_scope == "PARTIAL"
+        assert case.restoration_scope_detail == ("나중에 확인한 바닥" if failure == "stale-detail" else "카운터")
+        assert session.get(CaseHistory, history_id).judgment_status == "PENDING"
+        assert session.get(ConflictReference, conflict_id).status == "PENDING"
+        assert not session.exec(select(CaseFieldHistory).where(CaseFieldHistory.case_history_id == history_id)).all()
+
+
+@pytest.mark.parametrize("operation", ["SET", "CLEAR"])
+@pytest.mark.parametrize("detail_first", [True, False])
+def test_full_scope_clear_wins_over_same_batch_detail_without_duplicate_history(mysql_engine, operation, detail_first):
+    from app.agent.schemas import FactChangeCandidate
+    from app.be.models.case import Case
+    from app.be.models.case_field_history import CaseFieldHistory
+    from app.be.models.case_history import CaseHistory
+
+    case_id, history_id, _, _ = scope_case(mysql_engine)
+    scope = reviewed_scope_change(case_id).review_subject.supervisor_draft.mutations.fact_changes[0]
+    detail = FactChangeCandidate.model_validate(scope.model_dump() | {
+        "candidate_id": uuid4(), "field_path": "restoration_scope_detail", "value_type": "STRING",
+        "before_value": "카운터", "operation": operation,
+        "proposed_status": "CONFIRMED" if operation == "SET" else "UNKNOWN",
+        "proposed_value": "새 세부 설명" if operation == "SET" else None,
+        "source_evidence_refs": ["separate-detail-report"],
+    })
+    with Session(mysql_engine) as session:
+        decision_record_service._apply_fact_changes(session, session.get(CaseHistory, history_id),
+            [detail, scope] if detail_first else [scope, detail])
+        session.commit()
+    with Session(mysql_engine) as session:
+        assert session.get(Case, case_id).restoration_scope_detail is None
+        rows = session.exec(select(CaseFieldHistory).where(CaseFieldHistory.case_history_id == history_id,
+            CaseFieldHistory.canonical_field == "restoration_scope_detail")).all()
+        assert len(rows) == 1
+        assert (rows[0].before_value, rows[0].after_value) == ("카운터", None)
+        assert rows[0].source_evidence_refs == scope.source_evidence_refs
+
+
+@pytest.mark.parametrize("before,after", [("FULL", "FULL"), ("PARTIAL", "NOT_REQUIRED"), ("PARTIAL", "PARTIAL")])
+def test_detail_clear_policy_only_applies_when_scope_changes_to_full(mysql_engine, before, after):
+    from app.be.models.case import Case
+    from app.be.models.case_field_history import CaseFieldHistory
+    from app.be.models.case_history import CaseHistory
+
+    case_id, history_id, _, _ = scope_case(mysql_engine, before)
+    outcome = reviewed_scope_change(case_id, before=before, after=after)
+    with Session(mysql_engine) as session:
+        decision_record_service._apply_fact_changes(session, session.get(CaseHistory, history_id),
+            outcome.review_subject.supervisor_draft.mutations.fact_changes)
+        session.commit()
+    with Session(mysql_engine) as session:
+        assert session.get(Case, case_id).restoration_scope_detail == "카운터"
+        assert not session.exec(select(CaseFieldHistory).where(CaseFieldHistory.case_history_id == history_id,
+            CaseFieldHistory.canonical_field == "restoration_scope_detail")).all()
 
 
 def test_the_choice_and_the_saved_value_live_or_die_together(mysql_engine):

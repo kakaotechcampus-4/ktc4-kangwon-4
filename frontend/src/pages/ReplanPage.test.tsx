@@ -246,7 +246,7 @@ describe('ReplanPage — 서버', () => {
   })
 
   /** 반영된 결과만 이 화면의 것이다. 판단 중을 반영 결과처럼 그리면 빈 칸이 뜬다 */
-  it.each(['PENDING', 'NEEDS_MORE_INFO', 'FAILED'] as const)(
+  it.each(['PENDING', 'NEEDS_MORE_INFO', 'FAILED', 'PROCEDURES_COMPLETED'] as const)(
     '반영된 결과가 아니면(%s) 지금 상황으로 보낸다',
     async (result) => {
       serve(json(judged({ result, questions_for_user: ['직원이 몇 명인가요?'] })))

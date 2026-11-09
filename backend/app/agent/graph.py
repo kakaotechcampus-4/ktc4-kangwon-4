@@ -7,6 +7,7 @@ owns authorization, transaction and storage guardrails.
 
 from __future__ import annotations
 
+import logging
 import time
 from collections.abc import Callable, Sequence
 from contextvars import ContextVar
@@ -64,8 +65,11 @@ from app.agent.tracing import (
     TraceEvent,
     TraceSink,
     UsageAccumulator,
+    current_trace_id,
     traced_component,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class InfoRunner(Protocol):
@@ -152,6 +156,9 @@ class AgentGraph:
         # An owned deep copy prevents caller-side mutation while the graph is in flight.
         owned_request = request.model_copy(deep=True)
         failure_request = request.model_copy(deep=True)
+        # The RUN span is already active. Store its actual ID, not an unrelated caller label.
+        if trace_id := current_trace_id():
+            owned_request.trace_id = failure_request.trace_id = trace_id
         snapshot_digest = canonical_digest(owned_request.case_snapshot)
         run_id = self._uuid()
         initial: AgentGraphState = {
@@ -191,6 +198,7 @@ class AgentGraph:
             _REVIEW_TRACE_COUNTERS.reset(counter_scope)
         self._emit_run_summary(
             run_id=run_id,
+            case_id=owned_request.case_snapshot.case_id,
             started=run_started,
             outcome=outcome,
             review_counters=review_counters,
@@ -201,6 +209,7 @@ class AgentGraph:
         self,
         *,
         run_id: UUID,
+        case_id: int,
         started: float,
         outcome: AgentGraphOutput,
         review_counters: _ReviewTraceCounters,
@@ -226,6 +235,7 @@ class AgentGraph:
             review_count=review_counters.review_count,
             review_revise_count=review_counters.review_revise_count,
             rework_count=len(review_counters.started_rework_rounds),
+            case_id=case_id,
             error_code=(
                 outcome.failure_code if outcome.outcome_type == "SAFE_FAILURE" else None
             ),
@@ -348,6 +358,8 @@ class AgentGraph:
         component_input = InfoAnalysisInput(
             input=trigger_input,
             restoration_answer=getattr(request.trigger, "restoration_answer", None),
+            action_done=getattr(request.trigger, "action_done", None),
+            restoration_status_answer=getattr(request.trigger, "restoration_status_answer", None),
             case_snapshot=request.case_snapshot,
             fact_overlays=analysis_overlays,
             conflict_confirmation=(request.trigger if isinstance(request.trigger, ConflictConfirmedTrigger) else None),
@@ -383,7 +395,12 @@ class AgentGraph:
             # 정리본으로 채웠거나 선택형 답변이면 Info 모델을 부르지 않는다(info_agent.analyze 참고)
             # 보관된 사실은 이전 판단에서 Info 모델이 글에서 꺼냈고 아직 Review를 거치지 않았다. Review 모델을 유지한다
             used_model = (
-                (output is None and component_input.restoration_answer is None)
+                (
+                    output is None
+                    and component_input.restoration_answer is None
+                    and component_input.action_done is None
+                    and component_input.restoration_status_answer is None
+                )
                 or retained is not None
             )
             if output is None:
@@ -434,8 +451,12 @@ class AgentGraph:
             item for item in output.procedure_progress_observations
             if item.procedure_step.procedure_step_id not in completed
         ]
+        answer = getattr(request.trigger, "action_done", None)
         for observation in output.procedure_progress_observations:
-            if observation.observed_status == ProcedureProgressStatus.COMPLETED:
+            # 완료 보고는 다시 묻는다. 같은 절차에 누른 완료 버튼은 그 자체가 사장님의 확인이다
+            if observation.observed_status == ProcedureProgressStatus.COMPLETED and not (
+                answer is not None and answer.completes(observation)
+            ):
                 observation.requires_confirmation = True
         confirmation = getattr(request.trigger, "procedure_completion_confirmation", None)
         if confirmation is None:
@@ -708,9 +729,13 @@ class AgentGraph:
             if "meta" in locals():
                 self._emit(meta, started, "ERROR", exc)
             return self._failure(exc, Component.REVIEW_TOOL)
+        draft_action = subject.supervisor_draft.decision.next_action
         if Component.SUPPORT_AGENT in result.recommended_rework_targets:
             exc = ValueError("Support analysis is outside the closure MVP")
-            self._emit(meta, started, "ERROR", exc)
+            self._emit(
+                meta, started, "ERROR", exc, review_result=result,
+                draft_action_code=draft_action.action_code if draft_action else None,
+            )
             return {
                 **self._failure(exc, Component.REVIEW_TOOL),
                 "recovery_action_code": "CONTACT_SUPPORT",
@@ -721,6 +746,8 @@ class AgentGraph:
             "SUCCESS",
             review_verdict="PASS" if result.verdict == ReviewVerdict.PASS else "REVISE",
             review_mode="CODE_ONLY" if code_only else "MODEL",
+            review_result=result,
+            draft_action_code=draft_action.action_code if draft_action else None,
         )
         update: dict[str, Any] = {
             "phase": "REVIEWING",
@@ -737,6 +764,12 @@ class AgentGraph:
                 # Keep the last Review's findings instead of dropping them.
                 # Without this the caller learns only that the run failed, not
                 # what would unblock it, and the reason for the verdict is gone.
+                # 거절 이유 문장은 사장님 글이 섞일 수 있어 외부 추적(Langfuse)에는 보내지 않고 이 서버 로그에만 남긴다
+                logger.warning(
+                    "review stopped run %s (case %s): %s",
+                    state["run_id"], state["request"].case_snapshot.case_id,
+                    [(issue.issue_code, issue.target_path, issue.reason_summary) for issue in result.issues],
+                )
                 update.update(
                     {
                         "phase": "SAFE_FAILED",
@@ -1154,6 +1187,8 @@ class AgentGraph:
         *,
         review_verdict: Literal["PASS", "REVISE"] | None = None,
         review_mode: Literal["MODEL", "CODE_ONLY"] | None = None,
+        review_result: ReviewResult | None = None,
+        draft_action_code: str | None = None,
     ) -> None:
         counters = _REVIEW_TRACE_COUNTERS.get()
         if counters is not None and review_verdict is not None:
@@ -1172,6 +1207,16 @@ class AgentGraph:
             attempt=meta.attempt,
             review_verdict=review_verdict,
             review_mode=review_mode,
+            case_id=meta.case_id,
+            review_issue_count=len(review_result.issues) if review_result is not None else None,
+            review_issues=tuple(
+                issue.model_dump(mode="json", include={"issue_code", "target_path", "severity", "target_component"})
+                for issue in review_result.issues[:20]
+            ) if review_result is not None else None,
+            draft_action_code=draft_action_code,
+            recommended_rework_targets=tuple(
+                target.value for target in review_result.recommended_rework_targets
+            ) if review_result is not None else None,
             model=model,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,

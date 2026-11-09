@@ -6,6 +6,7 @@ import json
 from uuid import UUID
 
 import pytest
+from app.agent.action_catalog import resolve_procedure_bindings
 from app.agent.blocker_candidates import build_blocker_candidates, missing_info_fields
 from app.agent.llm import LLMRequestError, LLMResponseError
 from app.agent.review_tool import ReviewTool
@@ -134,9 +135,10 @@ def candidates(request, changes=None):
     )
 
 
-def completion_without_finding():
+def completion_without_finding(step=None, *, report=None):
     request = request_with_state(restoration_scope="FULL", demolition_required="REQUIRED")
-    text = "임대인에게 원상복구 범위 확인을 마쳤습니다."
+    step = step or request.known_procedure_steps[0].procedure_step
+    text = report or "사업자 폐업신고의 기관 처리 완료를 확인했습니다."
     request.trigger.input.redacted_text = text
     fingerprint = hashlib.sha256(text.encode()).hexdigest()
     record = evidence(evidence_id=f"input:{request.trigger.input.input_event_id}:0:{len(text)}:{fingerprint[:12]}",
@@ -144,14 +146,14 @@ def completion_without_finding():
                       excerpt=text, locator=f"text:0-{len(text)}", content_hash=fingerprint)
     request.case_snapshot.evidence_records.append(record)
     info = request.source_results[1].output.model_copy(deep=True)
-    info.procedure_findings = [item for item in info.procedure_findings if item.procedure_step != RESTORATION]
+    info.procedure_findings = [item for item in info.procedure_findings if item.procedure_step != step]
     info.evidence_records.append(record)
     info.procedure_progress_observations.append(ProcedureProgressObservation(
-        observation_id=UUID(int=990), procedure_step=RESTORATION, observed_status="COMPLETED",
+        observation_id=UUID(int=990), procedure_step=step, observed_status="COMPLETED",
         source_span={"input_event_id": request.trigger.input.input_event_id, "text": text,
                      "start_offset": 0, "end_offset": len(text)},
         source_evidence_refs=[record.evidence_id], requires_confirmation=True,
-        reason_summary="사용자의 범위 확인 완료 보고",
+        reason_summary="사용자의 절차 완료 보고",
     ))
     request.source_results[1] = source(info)
     return request
@@ -161,7 +163,8 @@ def test_completion_without_a_finding_keeps_its_own_lookup_source_through_review
     request = completion_without_finding()
     original = request.model_dump_json()
     draft = asyncio.run(SupervisorAgent(ChoiceModel(), max_local_attempts=1).draft(request))
-    [completion] = [item for item in draft.decision.blockers if item.candidate_id == "procedure:4"]
+    assert draft.decision.decision_type == "NEEDS_MORE_INFO"
+    [completion] = [item for item in draft.decision.blockers if item.candidate_id == "procedure:1"]
     user_refs = request.source_results[1].output.procedure_progress_observations[0].source_evidence_refs
     assert completion.evidence_refs == [*user_refs, REF]
     assert draft.mutations.procedure_progress_changes == []
@@ -177,7 +180,7 @@ def test_completion_never_borrows_an_unrelated_official_lookup(unrelated):
     if unrelated == "missing":
         request.source_results.remove(lookup)
     elif unrelated == "other_step":
-        lookup.output.documents[0].step_codes.remove(RESTORATION.step_code)
+        lookup.output.documents[0].step_codes.remove(info.output.procedure_progress_observations[0].procedure_step.step_code)
         request.source_results[0] = source(lookup.output, "PROCEDURE_TOOL", 5)
         info.output.based_on_procedure_lookup_digest = canonical_digest(lookup.output)
     elif unrelated == "other_call":
@@ -196,6 +199,68 @@ def test_completion_never_borrows_an_unrelated_official_lookup(unrelated):
     if unrelated == "other_step":
         with pytest.raises(SupervisorGuardrailError):
             asyncio.run(SupervisorAgent(ChoiceModel(), max_local_attempts=1).draft(request))
+
+
+@pytest.mark.parametrize("custom_binding", [False, True])
+def test_scope_answer_does_not_require_a_second_procedure_completion_choice(custom_binding):
+    request = completion_without_finding(
+        RESTORATION, report="임대인에게 확인했습니다. 원상복구 범위는 없고 철거도 필요하지 않습니다.",
+    )
+    for fact in request.case_snapshot.facts:
+        if fact.field_path in {"restoration_scope", "demolition_required"}:
+            fact.value = "NOT_REQUIRED"
+    bindings = None
+    if custom_binding:
+        bindings = dict(resolve_procedure_bindings(request.known_procedure_steps))
+        mapped = ProcedureStepRef(procedure_step_id=RESTORATION.procedure_step_id, step_code="SYNTHETIC_SCOPE_CHECK")
+        bindings["CONFIRM_RESTORATION_SCOPE"] = mapped
+        for known in request.known_procedure_steps:
+            if known.procedure_step == RESTORATION:
+                known.procedure_step = mapped
+        lookup, info = (item.output for item in request.source_results)
+        for document in lookup.documents:
+            document.step_codes = [mapped.step_code if code == RESTORATION.step_code else code
+                                   for code in document.step_codes]
+        info.procedure_progress_observations[0].procedure_step = mapped
+        info.based_on_procedure_lookup_digest = canonical_digest(lookup)
+        request.source_results = [source(lookup, "PROCEDURE_TOOL", 5), source(info)]
+    before = request.model_dump_json()
+
+    assert missing_info_fields(
+        request.case_snapshot, request.source_results, mutations(), bindings,
+        known_procedure_steps=request.known_procedure_steps,
+    ) is None
+    draft = asyncio.run(SupervisorAgent(
+        ChoiceModel(), procedure_bindings=bindings, max_local_attempts=1,
+    ).draft(request))
+
+    assert draft.decision.decision_type == "ACTION"
+    assert draft.decision.next_action.action_code == "CONFIRM_TAX_CLOSURE_REQUIREMENTS"
+    assert all(item.candidate_id != "procedure:4" for item in draft.decision.blockers)
+    assert draft.mutations.procedure_progress_changes == []
+    assert request.model_dump_json() == before
+    assert asyncio.run(ReviewTool(ChoiceModel(), procedure_bindings=bindings).review(subject(request, draft))).verdict == "PASS"
+
+
+def test_scope_completion_observation_keeps_unanswered_fact_question():
+    request = completion_without_finding(RESTORATION, report="임대인에게 범위를 확인했습니다.")
+    request.case_snapshot.facts = [
+        CaseFact(field_path="demolition_required", value_type="ENUM", value=None, status="UNKNOWN",
+                 evidence_refs=[], updated_at=None)
+        if fact.field_path == "demolition_required" else fact
+        for fact in request.case_snapshot.facts
+    ]
+    missing_questions(request, "demolition_required")
+    before = request.model_dump_json()
+
+    fields = missing_info_fields(
+        request.case_snapshot, request.source_results, mutations(),
+        known_procedure_steps=request.known_procedure_steps,
+    )
+
+    assert fields["blocker"]["candidate_id"] == "missing:demolition_required"
+    assert fields["questions_for_user"] == ["철거가 필요한지 확인한 내용이 있으면 알려주세요."]
+    assert request.model_dump_json() == before
 
 
 @pytest.mark.parametrize(
@@ -356,6 +421,63 @@ class ChoiceModel(StubModel):
             "blocker_candidate_id": "invented" if self.invalid else row["candidate_id"],
             "action_code": row["actions"][0]["action_code"],
         })
+
+
+@pytest.mark.parametrize("actions,questions,prefer_question", [
+    (False, True, False), (True, False, False), (True, True, False),
+    (True, True, True), (False, False, False),
+], ids=["questions-only", "actions-only", "mixed-action", "mixed-question", "no-candidates"])
+def test_supervisor_request_limits_decision_type_to_available_candidates(actions, questions, prefer_question):
+    import httpx
+
+    from app.agent.llm import LLMConfig, StructuredLLMClient
+
+    request = supervisor_request()
+    if not actions:
+        step = request.known_procedure_steps[0].procedure_step
+        request.case_snapshot.procedure_progress.append(ProcedureProgress(
+            procedure_step=step, status="COMPLETED", requirements_confirmed=True,
+            submitted=True, evidence_refs=[REF], updated_at=NOW))
+        request.source_results[1].output.procedure_findings[0].current_status = "COMPLETED"
+        request.source_results[1] = source(request.source_results[1].output)
+    if questions:
+        request.case_snapshot.facts = [fact for fact in request.case_snapshot.facts if fact.field_path != "employee_count"]
+        missing_questions(request, "employee_count")
+    sent = []
+
+    def respond(http_request):
+        payload = json.loads(http_request.content)
+        schema = payload["response_format"]["json_schema"]["schema"]
+        decision = schema["properties"]["decision_type"]
+        if "$ref" in decision:
+            decision = schema["$defs"][decision["$ref"].rsplit("/", 1)[1]]
+        sent.append(decision["enum"])
+        contract = json.loads(payload["messages"][1]["content"].removeprefix("INPUT_JSON="))["contract"]
+        rows, missing = contract["blocker_candidates"], contract["information_blockers"]
+        assert bool(rows) is actions and bool(missing) is questions
+        # 제한이 없으면 ACTION을 고르는 대역. 질문만 있을 때의 잘못된 선택을 실제 검증으로 잡는다.
+        if "ACTION" in decision["enum"] and not prefer_question:
+            reply = {"decision_type": "ACTION", "blocker_candidate_id": rows[0]["candidate_id"] if rows else None,
+                     "action_code": rows[0]["actions"][0]["action_code"] if rows else "CONFIRM_TAX_CLOSURE_REQUIREMENTS"}
+        else:
+            reply = {"decision_type": "NEEDS_MORE_INFO", "blocker_candidate_id": missing[0]["candidate_id"], "action_code": None}
+        return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps(reply)}}]})
+
+    async def run():
+        config = LLMConfig(base_url="https://example.org/synthetic", api_token="synthetic", model="synthetic", max_retries=0)
+        async with StructuredLLMClient(config, transport=httpx.MockTransport(respond)) as client:
+            if not actions and not questions:
+                with pytest.raises(SupervisorGuardrailError):
+                    await SupervisorAgent(client, clock=lambda: NOW).draft(request)
+                assert sent == []
+                return
+            draft = await SupervisorAgent(client, clock=lambda: NOW).draft(request)
+        expected_types = (["ACTION"] if actions else []) + (["NEEDS_MORE_INFO"] if questions else [])
+        assert sent == [expected_types]
+        assert draft.decision.decision_type == ("NEEDS_MORE_INFO" if prefer_question or not actions else "ACTION")
+        assert (draft.decision.next_action is None) is (prefer_question or not actions)
+
+    asyncio.run(run())
 
 
 def test_selection_only_output_preserves_verified_text_target_and_evidence():
@@ -627,7 +749,8 @@ def test_registered_filing_keeps_execution_and_confirmation_distinct():
         .required_actions[0]
         .text
     )
-    assert "접수" in filing["questions_to_ask"][0]
+    # 실행 행동은 준비가 아니라 제출을 묻는다. 접수·처리 여부는 제출 뒤 처리 결과 확인이 묻는다
+    assert filing["questions_to_ask"] == ["사업자 폐업신고를 제출하셨나요?"]
 
 
 

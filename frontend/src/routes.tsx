@@ -12,7 +12,7 @@ import { DocsPage } from './pages/DocsPage'
 import { EntryPage } from './pages/EntryPage'
 import { LogPage } from './pages/LogPage'
 import { LoginPage } from './pages/LoginPage'
-import { NotificationsPage } from './pages/NotificationsPage'
+import { MyInfoPage } from './pages/MyInfoPage'
 import { ReplanPage } from './pages/ReplanPage'
 import { RoadmapPage } from './pages/RoadmapPage'
 import { TaskFlowPage } from './pages/TaskFlowPage'
@@ -37,7 +37,6 @@ import { TaskPage } from './pages/TaskPage'
  *
  *   /docs          서류함      올린 서류 · 올리기 시트 · 확인 · 빼기 (서류 API #159)
  *   /log           작업 기록   사장님·리본이 한 일 (GET /cases/logs)
- *   /notifications 알림        탭 화면의 종 버튼으로 들어온다. 아직 빈 상태
  *
  * 탭 밖에서 밀려 들어오는 화면이다. 뒤로 버튼으로 돌아간다.
  *
@@ -45,6 +44,7 @@ import { TaskPage } from './pages/TaskPage'
  *   /roadmap/:taskId  할 일          할 일마다 체크·첨부·고르기 등을 연다 (lib/taskFlows.ts)
  *   /docs/check       서류 점검      정산 서류를 점검한다
  *   /docs/done        정산 제출 파일  점검을 통과했을 때만
+ *   /mypage           내 정보        탭 화면 머리말의 사람 버튼으로 들어온다. 저장된 가게 정보 · 로그아웃
  *
  * `/confirm`은 `/results`와 `/replan` 사이의 단계가 아니라 예외 분기다.
  * 정상 경로는 `/results`에서 `/replan`으로 바로 간다.
@@ -79,7 +79,7 @@ export const router = createBrowserRouter([
           { path: '/log', element: <LogPage /> },
         ],
       },
-      { path: '/notifications', element: <NotificationsPage /> },
+      { path: '/mypage', element: <MyInfoPage /> },
     ],
   },
   { path: '*', element: <Navigate to="/" replace /> },

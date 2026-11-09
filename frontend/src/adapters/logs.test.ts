@@ -149,6 +149,16 @@ describe('toLogEntries', () => {
   })
 })
 
+/** 등록된 절차를 다 마친 기록(#315). 리본이 한 일로 적고, 사장님이 했다고 오면 거짓이라 뺀다 */
+describe('toLogEntries — 등록된 절차 종료', () => {
+  it('리본이 등록된 절차를 모두 마쳤다고 적는다', () => {
+    expect(toLogEntries(logsOf(log('RIBBON', 'PROCEDURES_COMPLETED')))?.map((entry) => entry.text)).toEqual([
+      '등록된 절차를 모두 마쳤어요',
+    ])
+    expect(toLogEntries(logsOf(log('OWNER', 'PROCEDURES_COMPLETED')))).toEqual([])
+  })
+})
+
 /** 체크 기록은 번호만 온다. 이름은 로드맵이 준 것을 붙인다(FE가 따로 들고 있으면 로드맵과 어긋난다) */
 describe('withTaskTitles', () => {
   const roadmap: RoadmapView = {

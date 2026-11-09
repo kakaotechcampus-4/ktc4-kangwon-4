@@ -152,6 +152,8 @@ const OUTCOMES: Record<string, SubmitOutcome> = {
   },
   'failed-service': { kind: 'STAY', state: { kind: 'FAILED', notice: { kind: 'SERVICE_SIDE' } } },
   'failed-none': { kind: 'STAY', state: { kind: 'FAILED', notice: { kind: 'NO_RECOVERY' } } },
+  // 마지막 절차까지 마쳐 홈으로 간다(#315). 홈 안내는 `/case?mock=procedures-completed` 로 본다
+  finished: { kind: 'FINISHED' },
   'failed-unknown': { kind: 'STAY', state: { kind: 'FAILED', notice: { kind: 'UNKNOWN_CAUSE' } } },
   'send-failed': { kind: 'STAY', state: { kind: 'SEND_FAILED' } },
   'send-rejected': { kind: 'STAY', state: { kind: 'SEND_REJECTED' } },

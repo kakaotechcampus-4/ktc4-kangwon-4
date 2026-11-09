@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -8,6 +9,8 @@ from sqlmodel import Session
 
 from app.be.crud import member as member_crud
 from app.common.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 def login(session: Session, code: str) -> tuple[str, str, str]:
@@ -64,33 +67,55 @@ def reissue(session: Session, member_id: int, refresh_token: str) -> tuple[str, 
 
 def _fetch_kakao_token(code: str) -> str:
     settings = get_settings()
-    with httpx.Client() as client:
-        response = client.post(
-            "https://kauth.kakao.com/oauth/token",
-            data={
-                "grant_type": "authorization_code",
-                "client_id": settings.KAKAO_CLIENT_ID,
-                "client_secret": settings.KAKAO_CLIENT_SECRET,
-                "redirect_uri": settings.KAKAO_REDIRECT_URI,
-                "code": code,
-            },
-        )
-        response.raise_for_status()
-        return response.json()["access_token"]
+    try:
+        with httpx.Client() as client:
+            response = client.post(
+                "https://kauth.kakao.com/oauth/token",
+                data={
+                    "grant_type": "authorization_code",
+                    "client_id": settings.KAKAO_CLIENT_ID,
+                    "client_secret": settings.KAKAO_CLIENT_SECRET,
+                    "redirect_uri": settings.KAKAO_REDIRECT_URI,
+                    "code": code,
+                },
+            )
+            response.raise_for_status()
+            return response.json()["access_token"]
+    except httpx.HTTPStatusError as error:
+        # 4xx는 잘못되거나 이미 쓴 code다(#257). 사장님이 다시 로그인하면 풀린다.
+        # 401만은 앱 키·시크릿이 틀린 우리 설정 문제라(카카오 KOE010·KOE101) 다시 눌러도 안 풀린다
+        if error.response.is_client_error and error.response.status_code != 401:
+            logger.warning("카카오 토큰 요청 거절: %s", error.response.status_code)
+            raise HTTPException(status_code=400, detail="로그인 요청이 올바르지 않습니다. 다시 로그인해 주세요.") from None
+        raise _kakao_unavailable("토큰", error) from None
+    except (httpx.HTTPError, KeyError, TypeError, ValueError) as error:
+        raise _kakao_unavailable("토큰", error) from None
 
 
 def _fetch_kakao_user_info(kakao_access_token: str) -> tuple[str, str]:
-    with httpx.Client() as client:
-        response = client.get(
-            "https://kapi.kakao.com/v2/user/me",
-            headers={"Authorization": f"Bearer {kakao_access_token}"},
-        )
-        response.raise_for_status()
-        user_info = response.json()
+    # 방금 카카오가 준 토큰으로 묻는 것이라, 여기서 거절돼도 사장님 요청 문제가 아니다. 모두 502로 본다
+    try:
+        with httpx.Client() as client:
+            response = client.get(
+                "https://kapi.kakao.com/v2/user/me",
+                headers={"Authorization": f"Bearer {kakao_access_token}"},
+            )
+            response.raise_for_status()
+            user_info = response.json()
 
-    oauth_id = str(user_info["id"])
-    nickname = user_info["kakao_account"]["profile"]["nickname"]
+        oauth_id = str(user_info["id"])
+        nickname = user_info["kakao_account"]["profile"]["nickname"]
+    except (httpx.HTTPError, KeyError, TypeError, ValueError) as error:
+        raise _kakao_unavailable("사용자 정보", error) from None
     return oauth_id, nickname
+
+
+def _kakao_unavailable(step: str, error: Exception) -> HTTPException:
+    # 응답 본문은 남기지 않는다. 상태 코드나 오류 종류만 있으면 카카오 장애인지 우리 설정 문제인지 구분할 수 있다.
+    # 사장님이 풀 수 없는 실패라 우리가 알아채도록 error로 남긴다
+    status = error.response.status_code if isinstance(error, httpx.HTTPStatusError) else type(error).__name__
+    logger.error("카카오 %s 요청 실패: %s", step, status)
+    return HTTPException(status_code=502, detail="카카오 로그인 서버에 문제가 있습니다. 잠시 뒤 다시 시도해 주세요.")
 
 
 def _create_access_token(member_id: int) -> str:

@@ -210,26 +210,17 @@ function questionOf(
           options: [
             { value: 'YES', label: '네, 있어요' },
             { value: 'NO', label: '아니요, 없어요' },
-            // 모르는 사장님이 [아니요]를 누르면 직원 정산·보험 신고 할 일이 "해당 없음"으로 빠진다(#237)
-            { value: 'UNKNOWN', label: '잘 모르겠어요' },
           ],
-          selected:
-            answers.hadEmployees === null
-              ? null
-              : answers.hadEmployees === 'UNKNOWN'
-                ? 'UNKNOWN'
-                : answers.hadEmployees
-                  ? 'YES'
-                  : 'NO',
-          onSelect: (value) =>
-            setAnswers({ hadEmployees: value === 'UNKNOWN' ? 'UNKNOWN' : value === 'YES' }),
+          // "잘 모르겠어요"는 두지 않는다. 사장님은 직원 고용 이력을 안다고 보고, 모름이 남으면
+          // 직원 할 일의 [준비했어요] 버튼이 대상 여부를 정하지 못해 판단이 실패한다
+          selected: answers.hadEmployees === null ? null : answers.hadEmployees ? 'YES' : 'NO',
+          onSelect: (value) => setAnswers({ hadEmployees: value === 'YES' }),
         },
         action: plainNext,
       }
 
     case 'insurance': {
-      // "잘 모르겠어요"를 골랐다가 돌아오면 아무것도 안 고른 모양에서 다시 고른다
-      const insurances = Array.isArray(answers.insurances) ? answers.insurances : []
+      const insurances = answers.insurances ?? []
       return {
         // "가게 이름으로"를 강조한다. 혼자 하는 사장님도 개인으로는 국민연금·건강보험에 들어 있어,
         // 그냥 "가입했던 보험"이라고 물으면 사업장 보험이 아닌 것을 고르게 된다
@@ -247,9 +238,9 @@ function questionOf(
           onToggle: (value) =>
             setAnswers({ insurances: toggle(insurances, value as (typeof insurances)[number]) }),
         },
+        // "잘 모르겠어요"는 두지 않는다. 가게 이름으로 낸 보험은 사장님이 안다고 보고, 모름이 남으면
+        // 보험 할 일의 [준비했어요] 버튼이 대상 여부를 정하지 못해 판단이 실패한다
         action: multiAction(insurances.length, '가입한 적 없어요', () => next({ insurances })),
-        // 모르는 사장님이 [가입한 적 없어요]를 누르면 보험 신고 할 일이 "해당 없음"으로 빠진다(#156 다물님)
-        secondary: { label: '잘 모르겠어요', onClick: () => next({ insurances: 'UNKNOWN' }) },
       }
     }
 

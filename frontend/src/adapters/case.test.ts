@@ -53,6 +53,18 @@ describe('toFacts', () => {
     expect(factFor(SERVER_CASE, 'employee_count')).toMatchObject({ value: '2명' })
   })
 
+  /** 서버는 업종을 `CAFE` 같은 코드로 적는다. 모르는 코드는 원문 대신 미확인으로 둔다 */
+  it.each([
+    ['CAFE', { value: '카페', status: 'CONFIRMED' }],
+    ['RESTAURANT', { value: '다른 음식점', status: 'CONFIRMED' }],
+    ['BAKERY', { status: 'UNKNOWN' }],
+    ['', { status: 'UNKNOWN' }],
+  ])('업종 %s 를 화면 말로 바꾼다', (raw, expected) => {
+    const fact = factFor({ ...SERVER_CASE, business_type: raw }, 'business_type')
+    expect(fact).toMatchObject(expected)
+    if (expected.status === 'UNKNOWN') expect(fact.value).toBeUndefined()
+  })
+
   /**
    * `false`를 빈 값으로 다루면 비프랜차이즈 사장님의 항목이 통째로 미확인이 된다.
    * 타깃이 비프랜차이즈 카페라 대부분이 여기 걸린다.
@@ -66,7 +78,7 @@ describe('toFacts', () => {
 
   /** 모르는 것은 모른다고 보여준다. 빈 값으로 숨기면 "확인할 게 없다"로 읽힌다 */
   it('UNKNOWN 은 값 없이 미확인으로 둔다', () => {
-    const fact = factFor(SERVER_CASE, 'demolition_required')
+    const fact = factFor({ ...SERVER_CASE, business_type: 'UNKNOWN' }, 'business_type')
 
     expect(fact.status).toBe('UNKNOWN')
     expect(fact.value).toBeUndefined()
@@ -78,23 +90,15 @@ describe('toFacts', () => {
     expect(fact.status).toBe('UNKNOWN')
   })
 
-  it('확인된 값은 그대로 문구가 된다', () => {
-    const fact = factFor({ ...SERVER_CASE, restoration_scope: 'FULL' }, 'restoration_scope')
-
-    expect(fact).toMatchObject({ value: '전체', status: 'CONFIRMED' })
-  })
-
   /**
    * 서버가 우리가 모르는 값을 보낼 수 있다 — 선택지가 넷으로 늘어나는 경우가 그렇다.
    * 그때 문구를 지어내면 사장님이 틀린 정보를 읽는다. 미확인으로 두는 편이 정직하다.
    */
   it.each([
     ['lease_status', 'SUBLEASE'],
-    ['restoration_scope', 'IN_PROGRESS'],
-    ['demolition_required', 'MAYBE'],
   ])('%s 에 모르는 값이 오면 지어내지 않고 미확인으로 둔다', (field, value) => {
     const unknownValue = { ...SERVER_CASE, [field]: value } as unknown as CaseResponse
-    const fact = factFor(unknownValue, field === 'lease_status' ? 'lease_status' : field)
+    const fact = factFor(unknownValue, field)
 
     expect(fact.status).toBe('UNKNOWN')
     expect(fact.value).toBeUndefined()
@@ -121,12 +125,22 @@ describe('toFacts', () => {
     expect(fact.value).toBe('2026.11 중')
   })
 
-  it.each([
-    ['비어 있으면', null],
-    ['칸 자체가 안 오면', undefined],
-  ])('폐업 예정일이 %s 미확인으로 둔다', (_name, value) => {
+  /**
+   * 진단에서 "아직 안 정했어요"를 고르면 날짜도 달도 비어 온다. 답을 한 것이라 "확인 필요"로 두면
+   * 사장님이 뭘 빠뜨린 줄 안다
+   */
+  it('날짜도 예상 달도 비어 있으면 아직 정하지 않았다고 보여준다', () => {
     const fact = factFor(
-      { ...SERVER_CASE, planned_closure_date: value as string | null },
+      { ...SERVER_CASE, planned_closure_date: null, planned_closure_month: null },
+      'planned_closure_date',
+    )
+
+    expect(fact).toMatchObject({ value: '아직 정하지 않음', status: 'CONFIRMED' })
+  })
+
+  it('폐업 예정일 칸 자체가 안 오면 미확인으로 둔다', () => {
+    const fact = factFor(
+      { ...SERVER_CASE, planned_closure_date: undefined as unknown as string | null },
       'planned_closure_date',
     )
 
@@ -134,10 +148,13 @@ describe('toFacts', () => {
     expect(fact.value).toBeUndefined()
   })
 
-  /** 진행 단계는 사용자가 답할 수 있는 것이 아니라 할 일 목록에 섞이면 안 된다 */
-  it('원상복구 진행 상태는 목록에 넣지 않는다', () => {
-    expect(toFacts(SERVER_CASE).map((fact) => fact.key)).not.toContain('restoration_status')
-  })
+  /** 진단 뒤 할 일을 하며 정해지는 값이다. 초반에는 늘 미확인이라 할 일 목록처럼 읽힌다 */
+  it.each(['restoration_status', 'restoration_scope', 'demolition_required'])(
+    '진단에서 답하지 않는 %s 는 목록에 넣지 않는다',
+    (key) => {
+      expect(toFacts(SERVER_CASE).map((fact) => fact.key)).not.toContain(key)
+    },
+  )
 })
 
 /** 봉투에서 판단만 바꿔 끼운다. 가게 칸은 어느 상태에서나 같은 것이 와야 한다 */
@@ -247,7 +264,7 @@ describe('toCurrentCaseView', () => {
     const view = toCurrentCaseView(envelopeOf({ judgment_status: 'PENDING' }), SERVER_CASE)
 
     expect(view.judgment.status).toBe('PENDING')
-    expect(view.facts).toHaveLength(7)
+    expect(view.facts).toHaveLength(5)
   })
 
   it('판단이 끝났으면 막힌 것과 할 일을 담는다', () => {
@@ -347,6 +364,18 @@ describe('toCurrentCaseView', () => {
     const view = toCurrentCaseView(envelopeOf({ judgment_status: 'CONFLICT' }), SERVER_CASE)
 
     expect(view.judgment).toEqual({ status: 'CONFLICT' })
+  })
+
+  /** 다음 할 일이 비어 오는 것이 정상인 상태다(#315). `DONE` 처럼 비었다고 읽지 못한 것으로 두면 홈이 "멈췄어요"가 된다 */
+  it('등록된 절차를 다 마쳤으면 할 일이 비어 있어도 마친 것으로 둔다', () => {
+    const view = toCurrentCaseView(
+      envelopeOf({ judgment_status: 'PROCEDURES_COMPLETED', blocker: null, next_action: null, questions_for_user: null }),
+      SERVER_CASE,
+    )
+
+    expect(view.judgment).toEqual({ status: 'PROCEDURES_COMPLETED' })
+    // 폐업 전체 완료와 다르다. 완료는 `case_status` 가 정한다
+    expect(view.completed).toBe(false)
   })
 
   /**
@@ -684,14 +713,6 @@ describe('toCaseCreateRequest', () => {
     expect(request(diagnosis({ hadEmployees: null }))).toBeNull()
   })
 
-  /** "아니요"(false)로 보내면 직원 정산·보험 신고가 "해당 없음"으로 빠진다. 모름은 비워 보내 확인 필요로 남긴다 */
-  it('예전 직원을 잘 모르겠다고 하면 비워 보내고, 답한 것으로 본다', () => {
-    const sent = request(diagnosis({ hadEmployees: 'UNKNOWN' }))
-    expect(sent).not.toBeNull()
-    expect(sent?.had_employees).toBeNull()
-    expect(sent?.employee_count).toBe(0)
-  })
-
   /** 하나라도 비면 서버가 넷을 다 "모름"으로 본다. "가입한 적 없어요"가 "해당 없음"이 되려면 넷 다 false여야 한다 */
   it('보험 네 칸을 늘 같이 채워 보낸다', () => {
     expect(request(diagnosis({ insurances: ['PENSION', 'EMPLOYMENT'] }))).toMatchObject({
@@ -707,16 +728,6 @@ describe('toCaseCreateRequest', () => {
       industrial_accident_insurance_enrolled: false,
     })
     expect(request(diagnosis({ insurances: null }))).toBeNull()
-  })
-
-  /** 모르는 것을 "가입한 적 없음"으로 보내면 보험 신고 할 일이 해당 없음으로 빠진다(#156 다물님) */
-  it('보험을 모르면 네 칸을 모두 비워 보낸다', () => {
-    expect(request(diagnosis({ insurances: 'UNKNOWN' }))).toMatchObject({
-      pension_enrolled: null,
-      health_insurance_enrolled: null,
-      employment_insurance_enrolled: null,
-      industrial_accident_insurance_enrolled: null,
-    })
   })
 
   /**

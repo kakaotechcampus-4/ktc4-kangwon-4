@@ -211,7 +211,6 @@ def test_a_passed_document_check_shows_up_as_done(mysql_engine, tmp_path, monkey
     from app.be.crud.case import get_case_by_member_id
     from app.be.services import document as document_service
 
-    monkeypatch.setattr(document_service, "document_directory", lambda: tmp_path)
     member_id = new_case(mysql_engine)
     with Session(mysql_engine) as session:
         # 이 항목은 정산 단계라 철거가 필요하고 지원 승인까지 나와야 해당된다. 그 전에는
@@ -230,6 +229,7 @@ def test_a_passed_document_check_shows_up_as_done(mysql_engine, tmp_path, monkey
         context.document_check = DocumentCheck(
             status="COMPLETE", steps=[], issues=[], document_digest=document_digest(context),
         )
-        document_service.save_context(tmp_path, context)
+        document_service.save_context(session, case, context)
+        session.commit()
 
     assert task_status(roadmap_of(mysql_engine, member_id), "document_check") == "COMPLETED"
