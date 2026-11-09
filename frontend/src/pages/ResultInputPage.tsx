@@ -150,7 +150,7 @@ export function ResultInputPage() {
   /** 질문마다 적은 답. 질문 문장으로 찾는다 — 같은 질문을 다시 받으면 적었던 답이 그대로 남는다 */
   const [answers, setAnswers] = useState<Record<string, string>>({})
   /**
-   * 보낸 뒤 리본이 되물은 질문. 들어올 때의 물음보다 앞선다.
+   * Mock에서 보낸 뒤 리본이 되물은 질문. 실서버는 최신 진입 조회로 질문과 입력 종류를 받는다.
    *
    * 상태(`state`)와 따로 둔다. 답을 보내다 실패하면 상태는 "보내지 못함"으로 바뀌는데,
    * 그때도 질문은 화면에 남아 있어야 같은 답을 다시 보낼 수 있다.
@@ -261,7 +261,7 @@ export function ResultInputPage() {
   const askedFields = latestDetail ?? resubmitNotice
   const choiceKind = entry.status === 'READY' && entry.ask.kind === 'RESULT'
     && !correcting && questions === null && !askedFields ? entry.ask.inputKind
-    // 되물은 질문이 원상복구 진행 상태면 버튼으로 받는다. 보낸 뒤 다시 물은 질문은 종류를 몰라 글로 받는다
+    // 되물은 질문이 원상복구 진행 상태면 서버가 알려 준 입력 종류대로 버튼으로 받는다
     : entry.status === 'READY' && entry.ask.kind === 'ANSWER' && askedAgain === null && !askedFields
       ? entry.ask.inputKind
       : 'TEXT'
@@ -395,6 +395,17 @@ export function ResultInputPage() {
         navigate({ pathname: '/confirm', search }, { state: outcome.view, replace: true })
         return
       case 'STAY':
+        if (outcome.state.kind === 'NEEDS_MORE_INFO' && !usesMock) {
+          // 상태 응답에는 입력 종류가 없다. 새 판단의 질문·입력 방식을 함께 다시 읽는다(#325).
+          setFetched({ status: 'LOADING' })
+          setAskedAgain(null)
+          setDirectInput(false)
+          setRestorationAnswer({})
+          setRestorationStatus(null)
+          setState({ kind: 'IDLE' })
+          setAttempt((current) => current + 1)
+          return
+        }
         // 또 되물었다. 이제부터는 이 질문들의 답을 받는다
         if (outcome.state.kind === 'NEEDS_MORE_INFO') setAskedAgain(outcome.state.questions)
         setState(outcome.state)
