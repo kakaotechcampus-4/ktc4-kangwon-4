@@ -475,6 +475,7 @@ def missing_info_fields(
     *,
     selected_candidate_id: str | None = None,
     known_procedure_steps: Sequence[KnownProcedureStep] = (),
+    include_prepared_restoration: bool = False,
 ) -> dict[str, Any] | None:
     """Ask about one unresolved decision blocker in the existing question order."""
     completion_questions = _completion_questions(
@@ -574,11 +575,18 @@ def missing_info_fields(
         {"candidate_id": f"missing:{path}", "description": f"{_FIELD_LABELS[path]} 확인이 필요합니다.", "evidence_refs": refs}
         for path in ordered
     ]
+    waiting = None
+    if not blockers and include_prepared_restoration:
+        waiting = _prepared_restoration_wait(snapshot, sources, mutations, procedure_bindings or {}, known_procedure_steps)
+        if waiting is not None:
+            blocker, _ = waiting
+            blockers.append(blocker)
     selected = next((item for item in blockers if selected_candidate_id is None or item["candidate_id"] == selected_candidate_id), None)
     if selected is None:
         return None
     question = (
-        _COMPLETION_QUESTION if selected["candidate_id"].startswith("procedure:")
+        waiting[1] if waiting is not None and selected == waiting[0]
+        else _COMPLETION_QUESTION if selected["candidate_id"].startswith("procedure:")
         else _QUESTIONS[selected["candidate_id"].removeprefix("missing:")]
     )
     return {
@@ -591,6 +599,40 @@ def missing_info_fields(
         "next_action": None,
         "questions_for_user": [question],
     }
+
+
+def _prepared_restoration_wait(snapshot, sources, mutations, bindings, steps):
+    """Ask for a later work report, without repeating preparation or authorizing demolition."""
+    target = bindings.get("PERFORM_RESTORATION")
+    progress = next((item for item in effective_procedure_progress(
+        snapshot, mutations, known_steps=steps, procedure_bindings=bindings,
+    ) if item.procedure_step == target), None)
+    status = _values(snapshot, mutations).get("restoration_status")
+    step = next((item for item in steps if item.procedure_step == target), None)
+    if (progress is None or not progress.requirements_confirmed or progress.status == "COMPLETED"
+            or status not in {"NOT_STARTED", "IN_PROGRESS"} or step is None
+            or procedure_applicability(step, snapshot, mutations.fact_changes) is not True
+            or procedure_constraints(step, snapshot, mutations.fact_changes, mutations.procedure_progress_changes,
+                                     known_steps=steps, procedure_bindings=bindings)):
+        return None
+    evidence = {item.evidence_id: item for item in snapshot.evidence_records}
+    evidence.update((item.evidence_id, item) for source in sources for item in source.output.evidence_records)
+    finding = next((finding for source in sources if isinstance(source.output, InfoAnalysisResult)
+                    for finding in source.output.procedure_findings if finding.procedure_step == target), None)
+    if finding is None or not demolition_preparation_only(
+        "PERFORM_RESTORATION", expand_evidence([evidence[ref] for ref in finding.evidence_refs], evidence),
+    ):
+        return None
+    label = "아직 시작 전" if status == "NOT_STARTED" else "진행 중"
+    refs = list(dict.fromkeys([*finding.evidence_refs, *progress.evidence_refs,
+                              *(ref for fact in snapshot.facts if fact.field_path == "restoration_status"
+                                for ref in fact.evidence_refs),
+                              *(ref for change in mutations.fact_changes if change.field_path == "restoration_status"
+                                for ref in change.source_evidence_refs)]))
+    return ({"candidate_id": f"procedure:{target.procedure_step_id}",
+             "description": "철거 전 증빙 준비는 확인했지만, 실제 원상복구·철거 작업은 아직 완료되지 않았습니다.",
+             "evidence_refs": refs},
+            f"마지막으로 알려주신 원상복구 상태는 ‘{label}’입니다. 이후 실제 작업의 진행·완료에 변화가 있다면 알려주세요.")
 
 
 def candidate_decision_violations(
@@ -623,7 +665,8 @@ def candidate_decision_violations(
         )
         if selected is not None:
             question = (
-                _COMPLETION_QUESTION if selected["candidate_id"].startswith("procedure:")
+                fallback["questions_for_user"][0] if selected == fallback["blocker"]
+                else _COMPLETION_QUESTION if selected["candidate_id"].startswith("procedure:")
                 else _QUESTIONS[selected["candidate_id"].removeprefix("missing:")]
             )
             expected = {

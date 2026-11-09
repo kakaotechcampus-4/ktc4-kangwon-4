@@ -270,6 +270,7 @@ class SupervisorAgent:
         information_fields = missing_info_fields(
             request.case_snapshot, source_results, mutations, bindings,
             known_procedure_steps=request.known_procedure_steps,
+            include_prepared_restoration=not action_candidates,
         )
         information_blockers = information_fields["blockers"] if information_fields else []
         decision_types = (["ACTION"] if action_candidates else []) + (
@@ -435,6 +436,7 @@ class SupervisorAgent:
             request.case_snapshot, request.source_results, mutations, self._bindings(request),
             selected_candidate_id=output.blocker_candidate_id if output.decision_type == DecisionType.NEEDS_MORE_INFO else None,
             known_procedure_steps=request.known_procedure_steps,
+            include_prepared_restoration=not candidates,
         )
         if output.decision_type == DecisionType.NEEDS_MORE_INFO:
             if output.action_code is not None or information is None or output.blocker_candidate_id is None and len(information["blockers"]) > 1:
@@ -687,20 +689,17 @@ class SupervisorAgent:
             request.known_procedure_steps, request.case_snapshot, mutations, decision,
             procedure_bindings=self._bindings(request),
         )
+        candidates = build_blocker_candidates(
+            request.case_snapshot, request.known_procedure_steps, sources, mutations, evidence, self._bindings(request),
+        )
         violations.extend(
             candidate_decision_violations(
                 decision,
-                build_blocker_candidates(
-                    request.case_snapshot,
-                    request.known_procedure_steps,
-                    sources,
-                    mutations,
-                    evidence,
-                    self._bindings(request),
-                ),
+                candidates,
                 missing_info_fields(
                     request.case_snapshot, sources, mutations, self._bindings(request),
                     known_procedure_steps=request.known_procedure_steps,
+                    include_prepared_restoration=not candidates,
                 ),
                 completed_procedure_decision_fields(
                     request.case_snapshot, request.known_procedure_steps, sources, mutations, self._bindings(request),
