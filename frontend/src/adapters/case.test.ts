@@ -53,6 +53,17 @@ describe('toFacts', () => {
     expect(factFor(SERVER_CASE, 'employee_count')).toMatchObject({ value: '2명' })
   })
 
+  /** 서버는 업종을 `CAFE` 같은 코드로 적는다. 모르는 코드는 원문 대신 미확인으로 둔다 */
+  it.each([
+    ['CAFE', { value: '카페', status: 'CONFIRMED' }],
+    ['RESTAURANT', { value: '다른 음식점', status: 'CONFIRMED' }],
+    ['BAKERY', { status: 'UNKNOWN' }],
+  ])('업종 %s 를 화면 말로 바꾼다', (raw, expected) => {
+    const fact = factFor({ ...SERVER_CASE, business_type: raw }, 'business_type')
+    expect(fact).toMatchObject(expected)
+    if (expected.status === 'UNKNOWN') expect(fact.value).toBeUndefined()
+  })
+
   /**
    * `false`를 빈 값으로 다루면 비프랜차이즈 사장님의 항목이 통째로 미확인이 된다.
    * 타깃이 비프랜차이즈 카페라 대부분이 여기 걸린다.

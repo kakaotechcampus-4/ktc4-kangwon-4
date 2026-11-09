@@ -1,4 +1,5 @@
 import {
+  businessLabelOf,
   factLabelOf,
   FIELD_LABEL,
   fieldLabelOf,
@@ -96,7 +97,7 @@ function toFact(key: string, label: string, value: string | null | undefined): F
  */
 export function toFacts(serverCase: CaseResponse): Fact[] {
   return [
-    toFact('business_type', FIELD_LABEL.business_type, serverCase.business_type),
+    toFact('business_type', FIELD_LABEL.business_type, businessLabelOf(serverCase.business_type)),
     toFact(
       'franchise',
       FIELD_LABEL.franchise_status,
