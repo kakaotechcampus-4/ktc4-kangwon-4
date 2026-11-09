@@ -117,11 +117,28 @@ export function toFacts(serverCase: CaseResponse): Fact[] {
     toFact(
       'planned_closure_date',
       FIELD_LABEL.planned_closure_date,
-      // 날짜를 못 정하고 예상 달만 고른 가게도 미확인이 아니다. 고른 달을 보여준다(#237)
-      toDateLabel(serverCase.planned_closure_date) ??
-        (serverCase.planned_closure_month ? `${toDateLabel(serverCase.planned_closure_month)} 중` : null),
+      closureLabelOf(serverCase),
     ),
   ]
+}
+
+/**
+ * 폐업 예정일 칸에 쓸 말. 읽을 수 없으면 `null`(미확인).
+ *
+ * - 날짜가 있으면 그 날짜
+ * - 날짜 없이 예상 달만 있으면 그 달(#237) — "이번 달 안에"·"다음 달"을 고른 가게다
+ * - 둘 다 `null` 이면 "아직 정하지 않음". 진단의 폐업 시기 질문은 답해야 넘어가고, 날짜는 진단에서
+ *   받지 않아(`toCaseCreateRequest`) 둘 다 비는 것은 "아직 안 정했어요"를 고른 경우뿐이다.
+ *   "확인 필요"로 두면 답한 사장님이 뭘 빠뜨린 줄 안다
+ * - 칸 자체가 안 오면(`undefined`) 응답이 어긋난 것이라 미확인으로 둔다
+ */
+function closureLabelOf(serverCase: CaseResponse): string | null {
+  const { planned_closure_date: date, planned_closure_month: month } = serverCase
+  const dateLabel = toDateLabel(date)
+  if (dateLabel) return dateLabel
+  if (month) return `${toDateLabel(month)} 중`
+  if (date === null && month === null) return '아직 정하지 않음'
+  return null
 }
 
 /**

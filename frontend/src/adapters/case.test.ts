@@ -125,12 +125,22 @@ describe('toFacts', () => {
     expect(fact.value).toBe('2026.11 중')
   })
 
-  it.each([
-    ['비어 있으면', null],
-    ['칸 자체가 안 오면', undefined],
-  ])('폐업 예정일이 %s 미확인으로 둔다', (_name, value) => {
+  /**
+   * 진단에서 "아직 안 정했어요"를 고르면 날짜도 달도 비어 온다. 답을 한 것이라 "확인 필요"로 두면
+   * 사장님이 뭘 빠뜨린 줄 안다
+   */
+  it('날짜도 예상 달도 비어 있으면 아직 정하지 않았다고 보여준다', () => {
     const fact = factFor(
-      { ...SERVER_CASE, planned_closure_date: value as string | null },
+      { ...SERVER_CASE, planned_closure_date: null, planned_closure_month: null },
+      'planned_closure_date',
+    )
+
+    expect(fact).toMatchObject({ value: '아직 정하지 않음', status: 'CONFIRMED' })
+  })
+
+  it('폐업 예정일 칸 자체가 안 오면 미확인으로 둔다', () => {
+    const fact = factFor(
+      { ...SERVER_CASE, planned_closure_date: undefined as unknown as string | null },
       'planned_closure_date',
     )
 

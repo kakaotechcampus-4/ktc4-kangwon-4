@@ -40,6 +40,8 @@ export function TabLayout() {
         )}
         <Link
           to="/mypage"
+          // 탭 밖 화면이라 로드맵처럼 오른쪽에서 밀려 들어온다. 뒤로 나갈 때와 짝이 맞는다
+          viewTransition
           aria-label="내 정보"
           className="grid size-12 place-items-center rounded-lg text-fg-neutral active:bg-bg-transparent-pressed"
         >

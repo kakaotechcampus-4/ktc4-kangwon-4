@@ -79,6 +79,8 @@ describe('MyInfoPage', () => {
     expect(valueOf('업종')).toHaveTextContent('카페')
     expect(valueOf('직원 수')).toHaveTextContent('3명')
     expect(valueOf('점포 형태')).toHaveTextContent('임차 (월세)')
+    // 진단에서 "아직 안 정했어요"를 고르면 날짜도 달도 비어 온다
+    expect(valueOf('폐업 예정일')).toHaveTextContent('아직 정하지 않음')
   })
 
   /** 요약은 목록의 확인된 값을 옮겨 적을 뿐이다. 모르는 값을 지어 채우지 않는다 */
@@ -97,11 +99,11 @@ describe('MyInfoPage', () => {
   /** 빈칸으로 숨기면 사장님은 답한 것이 사라진 줄 안다(FE 규칙 6) */
   it('서버가 확정하지 않은 값은 빈칸이 아니라 확인 필요로 남긴다', async () => {
     saveTokens('access-1', 'refresh-1')
-    serve([ok(envelope(SERVER_CASE))])
+    serve([ok(envelope({ ...SERVER_CASE, employee_count: null }))])
     renderAt('/mypage')
 
     await screen.findByRole('heading', { level: 2, name: '내 가게' })
-    expect(valueOf('폐업 예정일')).toHaveTextContent('확인 필요')
+    expect(valueOf('직원 수')).toHaveTextContent('확인 필요')
   })
 
   /** 로그아웃은 Case가 없어도 할 수 있어야 해서 진단으로 바로 보내지 않는다 */
