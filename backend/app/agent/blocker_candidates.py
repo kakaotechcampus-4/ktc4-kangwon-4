@@ -126,6 +126,7 @@ def candidate_decision_fields(
 
 
 def _completion_questions(snapshot, sources, mutations, bindings, known_steps):
+    bindings = resolve_procedure_bindings(known_steps, bindings)
     completed = {
         (item.procedure_step.procedure_step_id, item.procedure_step.step_code)
         for item in effective_procedure_progress(snapshot, mutations, known_steps=known_steps, procedure_bindings=bindings)
@@ -147,6 +148,9 @@ def _completion_questions(snapshot, sources, mutations, bindings, known_steps):
         ), None)
         for observation in source.output.procedure_progress_observations:
             step = observation.procedure_step
+            # 범위 확인은 범위·철거 필요 여부의 사실 답변으로 해소한다. 신고·정산 등의 완료 승인과 구분한다.
+            if step == bindings.get("CONFIRM_RESTORATION_SCOPE"):
+                continue
             if observation.observed_status != "COMPLETED" or (step.procedure_step_id, step.step_code) in completed:
                 continue
             label = next((PROCEDURE_LABELS[code] for code, ref in bindings.items() if ref == step), "해당 절차")
@@ -479,7 +483,7 @@ def missing_info_fields(
 ) -> dict[str, Any] | None:
     """Ask about one unresolved decision blocker in the existing question order."""
     completion_questions = _completion_questions(
-        snapshot, sources, mutations, procedure_bindings or {}, known_procedure_steps,
+        snapshot, sources, mutations, procedure_bindings, known_procedure_steps,
     )
     values = _values(snapshot, mutations)
     restoration_detail_unnecessary = (
