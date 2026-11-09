@@ -1,7 +1,8 @@
 # Agent 범위
 
-Agent는 폐업 Case의 확인된 사실과 근거로 **Blocker 1개·Next Action 1개** 판단.
-현재 MVP의 정상 판단에는 근거 있는 Blocker가 항상 1개 있다.
+Agent는 폐업 Case의 확인된 사실과 근거로 **다음 행동·확인 질문·등록 절차 안내 종료**를 판단한다.
+`ACTION`과 `NEEDS_MORE_INFO`는 근거 있는 Blocker 1개를 유지한다. `PROCEDURES_COMPLETED`는
+적용되는 등록 절차의 완료 근거를 확인한 정상 종료이며 Blocker·다음 행동·질문이 없다.
 사용자가 현실에서 실행한 결과를 입력하면 같은 Case를 다시 판단한다.
 모든 정상 판단은 독립 Review를 거치며 Case 저장은 BE가 담당한다. Info가 모델을 쓰지 않은
 첫 회차는 코드 검사만 하고, 그 밖에는 모델 검토도 한다([검수 조건](./review-tool.md#두-겹-검사)).
@@ -141,6 +142,7 @@ DB 전체 복사본이나 별도로 저장한 snapshot 행을 뜻하지 않는�
 | `submitted_at` / `captured_at` / `confirmed_at` | 입력 이력 시각 / snapshot 조립 시각 / 사용자 충돌 확인 시각. 서로 대신 채우는 값이 아니다. |
 
 Langfuse 미설정·장애로 실제 ID를 얻지 못하면 연결값은 비어 있을 수 있다. `DecisionRecord`는 검수 PASS 판단만 저장하며, 실패·충돌 대기 이력에는 새 `trace_id` 필드를 추가하지 않는다.
+[#187 멘토 후속](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/187#pullrequestreview-5812635175)의 추적 ID 연결은 [#294](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/294), 서류 동시 갱신의 DB 행 잠금은 #296·#300에 반영됐다. 동시 요청·재시작 복구의 실제 운영 검증은 [#242](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/issues/242)로 구분한다.
 
 Trigger와 그 안의 `RedactedInput`에는 같은 의미의 `submitted_at`이 있으며,
 `build_planning_input`은 저장된 입력 시각을 두 곳에 함께 넣는다.
@@ -249,10 +251,13 @@ BE는 현재 할 일과 절차 번호를 정해 `ActionDoneAnswer(action_code, p
 
 글로 쓴 기관 처리 완료 보고는 확인이 필요한 후보로 보류하며, 그 보고만으로 완료를 확정하지 않는다.
 내부 `ProcedureCompletionConfirmation`을 전달하는 별도 FE·BE 확인 계약은 여전히 없다.
-이 내부 DTO를 직접 조립하는 테스트와 버튼 경로의 검증은 구분하며, 실제 운영 확인은 별도로 남는다.
+이 내부 DTO를 직접 조립하는 테스트와 버튼 경로의 검증은 구분한다. 버튼 경로의 실제 운영 확인은
+[11/9 개인 카페 시나리오](./monitoring-results.md#운영-개인-카페-시나리오-2026-11-09)에 기록했다.
 
 로드맵 체크리스트 완료와 부가세 신고 체크에 따른 Case 종료는 별도 저장 동작이다.
 이를 공식 절차의 `CaseProcedureStep` 완료나 기관 처리 완료로 대신 사용하지 않는다.
+`PROCEDURES_COMPLETED`도 Case 전체 완료가 아니다. BE는 마지막 완료 변경을 검수 후 저장하고
+홈·결과·기록에 안내 종료를 제공하며, Case는 `IN_PROGRESS`를 유지한다.
 
 ### 충돌 확인
 
