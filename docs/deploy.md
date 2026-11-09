@@ -160,16 +160,18 @@ $C exec -T mysql mysql --defaults-extra-file=/run/secrets/mysql_health_cnf \
 
 위 1~5단계는 이미 돌고 있는 서버를 갱신하는 순서입니다. 새 서버는 설정 파일 두 개가 git에 없어서 먼저 만들어야 MySQL이 뜹니다(현종님·승준님 #225). 기존 서버에서 이 파일들을 덮어쓰지 않습니다.
 
-1. `.env.prod`: `.env.prod.example`을 복사해 실제 값을 채웁니다. AI 연결 값은 루트 `.env.example`을 보고 같은 파일에 넣습니다. 값은 문서·PR에 적지 않습니다
+1. `.env.prod`: `.env.prod.example`을 복사해 실제 값을 채웁니다. **AI 연결 값도 이 예시 안에 다 있습니다**(#268) — 루트 `.env.example`에는 비교 실험용 모델(`LUNA_*`·`HAIKU_*`·`GEMINI_*`)이 섞여 있어 그쪽을 보면 운영에 안 쓰는 값을 넣게 됩니다. 값은 문서·PR에 적지 않습니다
 2. `mysql_health.cnf`: `docker-compose.prod.yml` 머리말대로 만들고 `chmod 600`. 비밀번호는 `.env.prod`의 `MYSQL_ROOT_PASSWORD`와 같아야 합니다
 3. MySQL만 먼저 켜서 준비될 때까지 기다린 뒤 표를 만들고, 그다음 FastAPI를 켭니다. `001`은 이미 표가 있으면 "already exists"로 멈추고 아무것도 지우지 않습니다
+
+> FastAPI가 뜨면 **절차 기준 표**와 **공식 자료 본문**을 넣습니다(`main.py` lifespan, #263). 둘 다 전체가 함께 쓰는 한 벌이라 가입 요청 안에서 넣지 않습니다 — 빈 DB에 동시 가입이 오면 같은 것을 둘 다 넣다 unique에 걸립니다. 공식 자료 적재는 실패해도 서버가 뜨고 로그만 남으므로, 처음 띄운 뒤 `$C logs fastapi`에 `공식 자료 본문 적재 실패`가 없는지 봅니다.
 
 ```bash
 cp .env.prod.example .env.prod        # 그다음 값을 채운다
 chmod 600 mysql_health.cnf            # 머리말대로 만든 뒤
 $C up -d --wait mysql && \
   $MYSQL closure_agent < backend/sql/001_schema.sql && \
-  GIT_SHA=$(git rev-parse --short HEAD) $C up -d --build fastapi   # 절차 기준 표는 서버가 켜질 때 채운다
+  GIT_SHA=$(git rev-parse --short HEAD) $C up -d --build fastapi   # 절차 기준 표와 공식 자료 본문은 서버가 켜질 때 채운다
 ```
 
 ### 검수 자료 버전을 올렸을 때
