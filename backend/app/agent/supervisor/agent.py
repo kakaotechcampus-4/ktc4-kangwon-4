@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Annotated, Any, Literal, Protocol
 from uuid import UUID, uuid4
 
-from pydantic import Field, StrictBool, StrictStr, model_validator
+from pydantic import Field, StrictBool, StrictStr, field_validator, model_validator
 
 from app.agent.action_catalog import (
     ProcedureBindings,
@@ -20,6 +20,7 @@ from app.agent.blocker_candidates import (
     build_blocker_candidates,
     candidate_decision_fields,
     candidate_decision_violations,
+    completed_procedure_decision_fields,
     missing_info_fields,
     resolved_blocker_candidates,
 )
@@ -66,6 +67,7 @@ from app.agent.schemas import (
     ProcedureLookupResult,
     ProcedureProgressChangeCandidate,
     ProcedureProgressStatus,
+    ProceduresCompletedDecisionDraft,
     ReviewSourceResult,
     SupervisorAgentInput,
     SupervisorDraft,
@@ -138,6 +140,13 @@ class SupervisorModelOutput(AgentSchema):
     blocker_candidate_id: StrictStr | None = None
     action_code: ActionCode | None
 
+    @field_validator("decision_type")
+    @classmethod
+    def require_model_selection(cls, value: DecisionType) -> DecisionType:
+        if value == DecisionType.PROCEDURES_COMPLETED:
+            raise ValueError("procedure completion is determined by code, not model selection")
+        return value
+
 
 class SupervisorSemanticDraft(AgentSchema):
     decision_type: DecisionType
@@ -146,7 +155,7 @@ class SupervisorSemanticDraft(AgentSchema):
     evidence_refs: Annotated[
         list[Annotated[StrictStr, Field(min_length=1)]], Field(min_length=1)
     ]
-    blocker: Blocker
+    blocker: Blocker | None
     blockers: list[Blocker]
     next_action: NextActionSemantic | None
     questions_for_user: list[Annotated[StrictStr, Field(min_length=1)]]
@@ -155,7 +164,7 @@ class SupervisorSemanticDraft(AgentSchema):
     @model_validator(mode="after")
     def validate_variant(self) -> SupervisorSemanticDraft:
         if self.decision_type == DecisionType.ACTION:
-            if self.next_action is None:
+            if self.next_action is None or self.blocker is None:
                 raise ValueError("ACTION requires one next action")
             if self.questions_for_user:
                 raise ValueError("ACTION questions_for_user must be empty")
@@ -164,6 +173,8 @@ class SupervisorSemanticDraft(AgentSchema):
                 raise ValueError("NEEDS_MORE_INFO requires blocker and no action")
             if not self.requires_human or not self.questions_for_user:
                 raise ValueError("NEEDS_MORE_INFO requires a human question")
+        elif self.blocker is not None or self.blockers or self.next_action is not None or self.questions_for_user or self.requires_human:
+            raise ValueError("PROCEDURES_COMPLETED cannot contain a blocker, action or question")
         return self
 
 
@@ -265,7 +276,15 @@ class SupervisorAgent:
             ["NEEDS_MORE_INFO"] if information_blockers else []
         )
         if not decision_types:
-            raise SupervisorGuardrailError("Supervisor has no available action or information question")
+            completed = completed_procedure_decision_fields(
+                request.case_snapshot, request.known_procedure_steps, source_results, mutations, bindings,
+            )
+            if completed is None:
+                raise SupervisorGuardrailError("Supervisor has no available action or information question")
+            return self._materialize(
+                request, list(source_results), SupervisorSemanticDraft(**completed, grounded_claims=[]),
+                draft_version=draft_version, mutations=mutations,
+            )
         prompt_input = {
             "trigger": to_model_projection(request.trigger),
             "case_snapshot": to_model_projection(request.case_snapshot),
@@ -482,7 +501,7 @@ class SupervisorAgent:
         blocker = {
             "description": decision.blocker.description,
             "evidence_refs": list(decision.blocker.evidence_refs),
-        }
+        } if decision.blocker is not None else None
         return {
             "decision": {
                 "decision_type": decision.decision_type.value,
@@ -650,13 +669,18 @@ class SupervisorAgent:
                 questions_for_user=[],
                 **common,
             )
-        else:
+        elif semantic.decision_type == DecisionType.NEEDS_MORE_INFO:
             decision = NeedsMoreInfoDecisionDraft(
                 decision_type=DecisionType.NEEDS_MORE_INFO,
                 blocker=semantic.blocker,
                 next_action=None,
                 questions_for_user=semantic.questions_for_user,
                 **common,
+            )
+        else:
+            decision = ProceduresCompletedDecisionDraft(
+                decision_type=DecisionType.PROCEDURES_COMPLETED,
+                blocker=None, next_action=None, questions_for_user=[], **common,
             )
 
         violations = procedure_plan_constraints(
@@ -677,6 +701,9 @@ class SupervisorAgent:
                 missing_info_fields(
                     request.case_snapshot, sources, mutations, self._bindings(request),
                     known_procedure_steps=request.known_procedure_steps,
+                ),
+                completed_procedure_decision_fields(
+                    request.case_snapshot, request.known_procedure_steps, sources, mutations, self._bindings(request),
                 ),
             )
         )
@@ -947,9 +974,10 @@ class SupervisorAgent:
         base = "/supervisor_draft/decision"
         values = [
             (f"{base}/selection_summary", decision.selection_summary),
-            (f"{base}/blocker/description", decision.blocker.description),
             *((f"{base}/blockers/{index}/description", item.description) for index, item in enumerate(decision.blockers)),
         ]
+        if decision.blocker is not None:
+            values.append((f"{base}/blocker/description", decision.blocker.description))
         if decision.next_action is not None:
             action_base = f"{base}/next_action"
             values.extend(

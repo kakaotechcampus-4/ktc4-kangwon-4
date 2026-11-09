@@ -90,7 +90,7 @@ def save_reviewed_plan(
     blocker = _save_blockers(session, history, outcome)
 
     # blocker와 case_history가 서로를 참조해서, blocker를 먼저 만들고 그 id를 채운다.
-    # NEEDS_MORE_INFO는 다음 행동 자체가 없어서 next_action 관련 컬럼을 전부 NULL로 둔다
+    # NEEDS_MORE_INFO·절차 안내 종료는 다음 행동이 없어 관련 컬럼을 전부 NULL로 둔다
     # ("다음 행동이 없음"과 "행동은 있는데 질문이 0개"를 구분하기 위해 빈 배열을 쓰지 않는다).
     next_action = decision.next_action
     history.next_action = next_action.title if next_action else None
@@ -98,9 +98,11 @@ def save_reviewed_plan(
     history.next_action_reason = next_action.reason if next_action else None
     history.next_action_questions_to_ask = list(next_action.questions_to_ask) if next_action else None
     history.next_action_evidence_refs = list(next_action.evidence_refs) if next_action else None
-    history.priority_blocker_id = blocker.id
+    history.priority_blocker_id = blocker.id if blocker is not None else None
     # 화면이 읽는 값들은 case_history 한 행에 모아둔다(GET /cases가 이 행만 조회한다).
     history.questions_for_user = list(decision.questions_for_user) or None
+    # 절차 안내 종료도 판단 실행은 DONE이다. 기존 DecisionRecord의 decision_type으로
+    # 조회 응답을 구분하므로 DB ENUM과 Case 전체 폐업 완료 상태는 바꾸지 않는다.
     history.judgment_status = (
         "NEEDS_MORE_INFO" if decision.decision_type.value == "NEEDS_MORE_INFO" else "DONE"
     )
@@ -170,7 +172,7 @@ def _roadmap_task_ids(session: Session, case_id: int) -> list[str] | None:
     ]
 
 
-def _save_blockers(session: Session, history: CaseHistory, outcome: ReviewedPlanOutcome) -> Blocker:
+def _save_blockers(session: Session, history: CaseHistory, outcome: ReviewedPlanOutcome) -> Blocker | None:
     draft = outcome.review_subject.supervisor_draft
     resolved = set(draft.resolved_blocker_candidate_ids)
     if resolved:
@@ -191,7 +193,7 @@ def _save_blockers(session: Session, history: CaseHistory, outcome: ReviewedPlan
         ))
         if candidate == draft.decision.blocker:
             priority = row
-    if priority is None:
+    if priority is None and draft.decision.decision_type.value != "PROCEDURES_COMPLETED":
         raise ValueError("reviewed blockers must contain the priority blocker")
     return priority
 

@@ -5,21 +5,32 @@ import json
 from uuid import uuid4
 
 import pytest
-from sqlmodel import Session
+from case_world import case_engine  # noqa: F401 — 격리 MySQL 픽스처
+from fastapi import HTTPException
+from sqlmodel import Session, select
 
 from app.agent import runtime
+from app.agent.action_catalog import resolve_procedure_bindings
+from app.agent.blocker_candidates import completed_procedure_decision_fields
 from app.agent.review_tool import ReviewIntegrityError, ReviewTool
-from app.agent.schemas import ReviewSubject
+from app.agent.schemas import (
+    InfoAnalysisResult,
+    ProcedureDependency,
+    ProcedureLookupResult,
+    ReviewSubject,
+)
 from app.be.crud import conflict_reference, member
 from app.be.models.case import Case
 from app.be.models.case_history import CaseHistory
-from app.be.schemas.case import CaseConflictsDecisionRequest, CaseCreateRequest, CaseResultsSubmitRequest
+from app.be.models.evidence import DecisionRecord
+from app.be.schemas.case import (
+    CaseConflictsDecisionRequest,
+    CaseCreateRequest,
+    CaseResultsSubmitRequest,
+)
 from app.be.services import case as case_service
 from app.be.services import conflict_decision, judgment
 from app.be.services import roadmap as roadmap_service
-
-from case_world import case_engine  # noqa: F401 — 격리 MySQL 픽스처
-
 
 LANDLORD = "카운터랑 싱크대는 빼고, 간판도 떼야 한대요. 바닥 타일은 그대로 둬도 된대요."
 NOT_STARTED = "원상복구와 철거 작업은 아직 시작하지 않았습니다."
@@ -291,3 +302,134 @@ def test_new_model_completion_fact_does_not_bypass_pending_owner_confirmation(ca
     allowed = {action["action_code"] for row in fake.contracts[-1]["blocker_candidates"] for action in row["actions"]}
     assert "CONFIRM_PREMISES_RETURN_REQUIREMENTS" not in allowed
     assert flow.work_status() == "IN_PROGRESS"
+
+
+def ready_for_final_cafe_action(case_engine, monkeypatch):
+    fake = ScenarioModel(report_progress=True)
+    monkeypatch.setattr(runtime.StructuredLLMClient, "from_env", classmethod(lambda cls, *a, **k: fake))
+    monkeypatch.setattr(runtime.LangfuseTraceSink, "from_env", classmethod(lambda cls, *a, **k: None))
+    flow = CafeFlow(case_engine)
+    flow.plan()
+    flow.submit(restoration_answer={"restoration_scope": "PARTIAL", "demolition_required": "REQUIRED"})
+    flow.submit(raw_input=LANDLORD)
+    flow.submit(raw_input=NOT_STARTED)
+    flow.submit(action_done=True)
+    flow.confirm_restored()
+    for _ in range(20):
+        entry, action = flow.entry()
+        assert entry.result_input_kind == "ACTION_DONE", flow.turns
+        if action == "SETTLE_EMPLOYEE_PAYMENTS":
+            return flow
+        flow.submit(action_done=True)
+    pytest.fail(f"마지막 직원 정산에 도달하지 못함: {flow.turns}")
+
+
+def assert_completion_requires_supported_complete_sources(subject):
+    for missing in ("unfinished", "business", "registry", "official_source", "info", "prerequisite"):
+        changed = subject.model_copy(deep=True)
+        sources = changed.source_results
+        if missing == "unfinished":
+            next(item for item in changed.snapshot.procedure_progress
+                 if item.procedure_step.step_code == "FILE_FOOD_SERVICE_CLOSURE").status = "IN_PROGRESS"
+        elif missing == "business":
+            next(fact for fact in changed.snapshot.facts if fact.field_path == "business_type").value = "RESTAURANT"
+        elif missing == "registry":
+            changed.known_procedure_steps.pop()
+        elif missing == "official_source":
+            sources = [item for item in sources if not isinstance(item.output, ProcedureLookupResult)]
+        elif missing == "info":
+            next(item.output for item in sources if isinstance(item.output, InfoAnalysisResult)).completion_status = "PARTIAL"
+        else:
+            changed.known_procedure_steps[0].dependencies.append(
+                ProcedureDependency(prerequisite_procedure_step_id=999999, dependency_type="SEQUENTIAL"))
+        assert completed_procedure_decision_fields(
+            changed.snapshot, changed.known_procedure_steps, sources,
+            changed.supervisor_draft.mutations, resolve_procedure_bindings(changed.known_procedure_steps),
+        ) is None, missing
+
+
+def test_final_cafe_completion_is_reviewed_saved_and_returns_to_the_roadmap(case_engine, monkeypatch):
+    flow = ready_for_final_cafe_action(case_engine, monkeypatch)
+    outcome = flow.submit(action_done=True)
+    assert outcome.outcome_type == "REVIEWED_PLAN"
+    outcome.assert_integrity()
+    decision = outcome.review_subject.supervisor_draft.decision
+    assert decision.decision_type == "PROCEDURES_COMPLETED"
+    assert (decision.blocker, decision.blockers, decision.next_action, decision.questions_for_user) == (
+        None, [], None, [],
+    )
+    assert outcome.review_proof.verdict == "PASS"
+    assert flow.progress()["SETTLE_EMPLOYEE_PAYMENTS"] == ("COMPLETED", True, False)
+    assert_completion_requires_supported_complete_sources(outcome.review_subject)
+    # 후보가 사라졌다는 말만으로 종료를 통과시키지 않는다. 이전 절차가 남으면 독립 검수가 거부한다.
+    subject = outcome.review_subject.model_copy(deep=True)
+    unfinished = next(item for item in subject.snapshot.procedure_progress
+                      if item.procedure_step.step_code == "FILE_TAX_BUSINESS_CLOSURE")
+    unfinished.status = "IN_PROGRESS"
+    subject = ReviewSubject.create(**{key: getattr(subject, key) for key in type(subject).model_fields
+                                      if key != "subject_digest"})
+    review = asyncio.run(ReviewTool(ScenarioModel()).review_code_only(subject))
+    assert review.verdict == "REVISE"
+
+    class PassingReview:
+        async def generate(self, response_model, *args, **kwargs):
+            return response_model.model_validate({"verdict": "PASS", "issues": [], "missing_evidence": [],
+                "recommended_rework_targets": [], "resolution_reason": "합성 모델 통과"})
+
+    assert asyncio.run(ReviewTool(PassingReview()).review(subject)).verdict == "REVISE"
+    with Session(case_engine) as session:
+        case = session.get(Case, flow.case_id)
+        history = session.get(CaseHistory, flow.history_id)
+        record = session.exec(select(DecisionRecord).where(DecisionRecord.case_history_id == history.id)).one()
+        assert (case.case_status, case.completed_at) == ("IN_PROGRESS", None)
+        assert (history.judgment_status, record.decision_type, record.verdict) == (
+            "DONE", "PROCEDURES_COMPLETED", "PASS",
+        )
+        assert (history.next_action, history.priority_blocker_id) == (None, None)
+        home = case_service.get_case(session, flow.member_id)
+        entry = case_service.get_case_results_entry(session, flow.member_id)
+        status = case_service.get_case_results_submit_status(session, flow.member_id, history.id)
+        assert (home.judgment_status, entry.judgment_status, status.result) == ("PROCEDURES_COMPLETED",) * 3
+        assert (home.blocker, home.next_action, entry.next_action, status.blocker, status.next_action) == (None,) * 5
+        roadmap = roadmap_service.get_case_roadmap(session, flow.member_id)
+        tasks = {task.task_id: task for stage in roadmap.stages for task in stage.tasks}
+        assert tasks["employee_payments"].status == "COMPLETED"
+        assert tasks["vat_submission"].status == "NOT_STARTED"
+        assert roadmap.current_stage is not None
+        # 절차 안내 종료와 폐업 정리 완료는 다르다. 기존 부가세 체크만 Case를 완료시킨다.
+        case_service.update_case_checklist(session, flow.member_id, "vat_submission", True)
+    with Session(case_engine) as session:
+        assert session.get(Case, flow.case_id).case_status == "COMPLETED"
+        assert case_service.get_case(session, flow.member_id).case.case_status == "COMPLETED"
+        assert roadmap_service.get_case_roadmap(session, flow.member_id).current_stage is None
+        with pytest.raises(HTTPException) as error:
+            case_service.submit_case_results(session, flow.member_id,
+                CaseResultsSubmitRequest(case_history_id=flow.history_id, raw_input="추가 상황"))
+        assert error.value.status_code == 409
+
+
+def test_final_cafe_completion_is_not_saved_when_review_fails(case_engine, monkeypatch):
+    flow = ready_for_final_cafe_action(case_engine, monkeypatch)
+    reviewed_types = []
+
+    async def reject_final_review(self, subject):
+        reviewed_types.append(subject.supervisor_draft.decision.decision_type)
+        raise ReviewIntegrityError("합성 마지막 완료 검수 거부")
+
+    monkeypatch.setattr(ReviewTool, "review", reject_final_review)
+    monkeypatch.setattr(ReviewTool, "review_code_only", reject_final_review)
+    with Session(case_engine) as session:
+        accepted = case_service.submit_case_results(session, flow.member_id,
+            CaseResultsSubmitRequest(case_history_id=flow.history_id, action_done=True))
+        history_id = accepted.case_history_id
+        request, registry = judgment._read_judgment_input(session, history_id)
+    outcome = asyncio.run(judgment._ask_agent(request, registry))
+    assert outcome.outcome_type == "SAFE_FAILURE"
+    assert reviewed_types == ["PROCEDURES_COMPLETED"]
+    with Session(case_engine) as session:
+        judgment._save_judgment_outcome(session, history_id, outcome)
+    with Session(case_engine) as session:
+        assert session.get(CaseHistory, history_id).judgment_status == "FAILED"
+        assert session.get(Case, flow.case_id).case_status == "IN_PROGRESS"
+        assert session.exec(select(DecisionRecord).where(DecisionRecord.case_history_id == history_id)).first() is None
+    assert flow.progress()["SETTLE_EMPLOYEE_PAYMENTS"] == ("IN_PROGRESS", True, False)

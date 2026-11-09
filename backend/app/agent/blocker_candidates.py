@@ -17,6 +17,7 @@ from app.agent.action_catalog import (
 )
 from app.agent.claim_safety import demolition_preparation_only, expand_evidence
 from app.agent.procedure_tool.rules import (
+    business_type_code,
     employment_history,
     employment_history_conflicts,
     procedure_applicability,
@@ -596,8 +597,15 @@ def candidate_decision_violations(
     decision: DecisionDraft,
     candidates: Sequence[dict[str, Any]],
     fallback: dict[str, Any] | None,
+    completed: dict[str, Any] | None = None,
 ) -> list[tuple[str, str]]:
     """Shared by Supervisor and independent Review, including a forced-model PASS."""
+    if decision.decision_type == "PROCEDURES_COMPLETED":
+        if candidates or fallback is not None or completed is None:
+            return [("/decision", "registered procedures are not verified complete")]
+        actual = decision.model_dump(mode="json")
+        return [(f"/decision/{key}", "completion differs from verified procedure state")
+                for key, value in completed.items() if actual.get(key) != value]
     if decision.blocker is None:
         return [("/decision/blocker", "an unfinished candidate decision requires a primary blocker")]
     expected = fallback
@@ -668,6 +676,60 @@ def candidate_decision_violations(
             )
         )
     return violations
+
+
+def completed_procedure_decision_fields(
+    snapshot: CaseSnapshot, steps: Sequence[KnownProcedureStep], sources: Sequence[ReviewSourceResult],
+    mutations: MutationSet, bindings: ProcedureBindings,
+) -> dict[str, Any] | None:
+    """No candidates alone is not completion: require a supported registry and saved/proposed proof."""
+    values = _values(snapshot, mutations)
+    active = [step for step in steps if step.deprecated_at is None]
+    if (business_type_code(values.get("business_type")) != "CAFE"
+            or values.get("franchise_status") is not False or not active
+            or set(bindings) != set(PROCEDURE_LABELS)
+            or any(isinstance(source.output, InfoAnalysisResult)
+                   and source.output.completion_status != "COMPLETE" for source in sources)
+            or any(step.procedure_step not in bindings.values() for step in active)
+            or not any(isinstance(source.output, ProcedureLookupResult)
+                       and source.output.completion_status == "COMPLETE" and source.output.documents
+                       for source in sources)):
+        return None
+    progress = {(item.procedure_step.procedure_step_id, item.procedure_step.step_code): item
+                for item in effective_procedure_progress(
+                    snapshot, mutations, known_steps=steps, procedure_bindings=bindings,
+                )}
+    refs = []
+    applicable = 0
+    step_ids = {step.procedure_step.procedure_step_id for step in active}
+    for step in active:
+        applies = procedure_applicability(step, snapshot, mutations.fact_changes)
+        if applies is None:
+            return None
+        if not applies:
+            continue
+        if (any(item.prerequisite_procedure_step_id not in step_ids for item in step.dependencies)
+                or procedure_constraints(step, snapshot, mutations.fact_changes,
+                                         mutations.procedure_progress_changes,
+                                         known_steps=steps, procedure_bindings=bindings)):
+            return None
+        applicable += 1
+        if step.procedure_step == bindings.get("CONFIRM_RESTORATION_SCOPE"):
+            if not all(field in values for field in ("restoration_scope", "demolition_required")):
+                return None
+            refs.extend(ref for fact in snapshot.facts for ref in fact.evidence_refs)
+            refs.extend(ref for change in mutations.fact_changes for ref in change.source_evidence_refs)
+            continue
+        current = progress.get((step.procedure_step.procedure_step_id, step.procedure_step.step_code))
+        if current is None or current.status != "COMPLETED" or not current.evidence_refs:
+            return None
+        refs.extend(current.evidence_refs)
+    if not applicable or not refs:
+        return None
+    return {"decision_type": "PROCEDURES_COMPLETED",
+            "selection_summary": "등록된 절차를 모두 마쳤어요. 로드맵에서 남은 할 일을 확인해 주세요.",
+            "requires_human": False, "evidence_refs": list(dict.fromkeys(refs)),
+            "blocker": None, "blockers": [], "next_action": None, "questions_for_user": []}
 
 
 def resolved_blocker_candidates(snapshot, known_steps, mutations, bindings, *, sources=()) -> list[str]:

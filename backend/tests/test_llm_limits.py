@@ -499,6 +499,13 @@ def test_supervisor_selection_enums_reach_the_api_and_preserve_nulls():
     assert result.model_dump(mode="json") == selection
 
 
+def test_supervisor_model_cannot_select_procedure_completion():
+    with pytest.raises(ValueError, match="determined by code"):
+        SupervisorModelOutput.model_validate({
+            "decision_type": "PROCEDURES_COMPLETED", "blocker_candidate_id": None, "action_code": None,
+        })
+
+
 def test_enum_restrictions_preserve_shared_definitions_and_evidence_items():
     schema = sanitize_json_schema(SupervisorModelOutput.model_json_schema())
     schema["properties"]["other_decision_type"] = {"$ref": "#/$defs/DecisionType"}

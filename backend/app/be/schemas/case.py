@@ -13,9 +13,12 @@ RestorationStatus = Literal["UNKNOWN", "NOT_STARTED", "IN_PROGRESS", "COMPLETED"
 RestorationScope = Literal["UNKNOWN", "PARTIAL", "FULL", "NOT_REQUIRED"]
 DemolitionRequired = Literal["UNKNOWN", "REQUIRED", "NOT_REQUIRED"]
 RestorationClause = Literal["EXISTS", "NOT_EXISTS", "UNKNOWN"]
-JudgmentStatus = Literal["PENDING", "DONE", "NEEDS_MORE_INFO", "CONFLICT", "FAILED"]
+# 등록된 절차 안내 종료이며 Case 전체 폐업 완료와는 다르다.
+JudgmentStatus = Literal["PENDING", "DONE", "NEEDS_MORE_INFO", "CONFLICT", "FAILED", "PROCEDURES_COMPLETED"]
 RecoveryActionCode = Literal["RETRY", "RESUBMIT_INPUT", "CONTACT_SUPPORT", "NONE"]
-ResultsSubmitResult = Literal["PENDING", "UPDATED", "NO_CHANGE", "NEEDS_MORE_INFO", "CONFLICT", "FAILED"]
+ResultsSubmitResult = Literal[
+    "PENDING", "UPDATED", "NO_CHANGE", "NEEDS_MORE_INFO", "CONFLICT", "FAILED", "PROCEDURES_COMPLETED",
+]
 ConflictSide = Literal["PROPOSED", "STORED"]
 ClosureReason = Literal["BUSINESS_SLUMP", "PERSONAL", "OTHER"]
 DepositReturnResult = Literal["FULL", "PARTIAL", "NONE"]
@@ -37,6 +40,7 @@ CaseLogEvent = Literal[
     "MORE_INFO_REQUESTED",
     "CONFLICT_FOUND",
     "JUDGMENT_FAILED",
+    "PROCEDURES_COMPLETED",
     "DOCUMENTS_CHECKED",
     "ROADMAP_TASKS_ADDED",
 ]

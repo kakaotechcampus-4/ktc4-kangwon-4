@@ -237,7 +237,8 @@ def get_case(session: Session, member_id: int) -> CaseGetResponse:
             latest_history.priority_blocker.description if latest_history.priority_blocker else None
         ),
         next_action=next_action,
-        judgment_status=latest_history.judgment_status,
+        judgment_status=("PROCEDURES_COMPLETED" if _procedures_completed(latest_history)
+                         else latest_history.judgment_status),
         case_history_id=latest_history.id if latest_history.judgment_status != "CONFLICT" else None,
         questions_for_user=latest_history.questions_for_user,
         # 실패했을 때만 채워진다. 화면은 이 값으로 "다시 시도" / "다시 말씀해 주세요" /
@@ -278,6 +279,11 @@ def get_case_results_entry(session: Session, member_id: int) -> CaseResultsEntry
 
     _assert_judgment_is_showable(latest_history)
 
+    if _procedures_completed(latest_history):
+        return CaseResultsEntryResponse(
+            judgment_status="PROCEDURES_COMPLETED", case_history_id=latest_history.id,
+        )
+
     if latest_history.judgment_status == "DONE":
         done = _current_action_done(latest_history)
         return CaseResultsEntryResponse(
@@ -316,17 +322,36 @@ def get_case_results_entry(session: Session, member_id: int) -> CaseResultsEntry
     )
 
 
+def _procedures_completed(history: CaseHistory) -> bool:
+    # DB의 DONE은 판단 실행 완료다. 다음 행동 없는 정상 종료는 같은 입력의 검수 기록으로
+    # 구분한다. 빈 행동만 보고 종료로 읽으면 예전의 손상된 DONE까지 정상으로 숨기게 된다.
+    return history.judgment_status == "DONE" and any(
+        record.case_id == history.case_id and record.case_history_id == history.id
+        and record.decision_type == "PROCEDURES_COMPLETED" and record.verdict == "PASS"
+        for record in history.case.decision_records
+    )
+
+
 def _assert_judgment_is_showable(history: CaseHistory) -> None:
     """상태별로 화면이 읽을 값이 다 있는지 본다. 없으면 빈칸을 내보내지 말고 여기서 막는다.
 
     AI 계약상 next_action이 있으면 reason도 반드시 있고(NextAction.reason은 빈 문자열도
-    거부한다), 검수를 통과한 판단은 항상 blocker를 남긴다. 그래서 평소에는 걸리지 않는다.
+    거부한다). 절차 안내 종료를 제외하면 검수를 통과한 판단은 blocker를 남긴다.
     걸린다면 AI가 아니라 우리 저장 코드가 깨진 것이고, 그때 조용히 빈 화면을 보여주는 것보다
     멈추고 알아차리는 쪽이 낫다.
 
     같은 검사를 /cases와 /cases/results가 함께 쓴다. 흩어 두면 화면이 늘 때마다 한쪽만
     고치게 된다.
     """
+
+    if _procedures_completed(history):
+        if any(value is not None for value in (
+            history.next_action, history.next_action_code, history.next_action_reason,
+            history.next_action_questions_to_ask, history.next_action_evidence_refs,
+            history.priority_blocker_id, history.questions_for_user,
+        )):
+            raise HTTPException(status_code=500, detail="절차 안내 종료인데 다음 행동이나 질문이 남아 있습니다.")
+        return
 
     if history.judgment_status == "DONE":
         if history.next_action is None or history.next_action_reason is None:
@@ -626,6 +651,12 @@ def get_case_results_submit_status(
 
     _assert_judgment_is_showable(latest_history)
 
+    if _procedures_completed(latest_history):
+        return CaseResultsSubmitResponse(
+            result="PROCEDURES_COMPLETED", changes=_field_changes(session, latest_history.id),
+            new_tasks=_new_tasks(session, case.id, latest_history),
+        )
+
     # 충돌은 Case 전체가 아니라 이 이력(latest_history)에 달린 것만 본다.
     # 예: 충돌 결정(CONFLICT_DECISION)이 처리 중이면 이전 이력의 충돌이 아직 미결로 남아 있어서,
     # Case 전체로 찾으면 처리 중(PENDING)인 이 이력을 CONFLICT로 잘못 응답한다.
@@ -826,6 +857,7 @@ _LOG_RIBBON_EVENTS = {
     "NEEDS_MORE_INFO": "MORE_INFO_REQUESTED",
     "CONFLICT": "CONFLICT_FOUND",
     "FAILED": "JUDGMENT_FAILED",
+    "PROCEDURES_COMPLETED": "PROCEDURES_COMPLETED",
 }
 
 
@@ -850,9 +882,10 @@ def get_case_logs(session: Session, member_id: int) -> CaseLogResponse:
         # 올린 사실은 CaseDocumentHistory가 남긴다. 서류 재판단은 리본 결과만 기록한다.
         if owner_event is not None:
             logs.append(_log("OWNER", owner_event, history.created_at))
-        if history.judged_at is not None and history.judgment_status in _LOG_RIBBON_EVENTS:
+        judgment_status = "PROCEDURES_COMPLETED" if _procedures_completed(history) else history.judgment_status
+        if history.judged_at is not None and judgment_status in _LOG_RIBBON_EVENTS:
             logs.append(_log(
-                "RIBBON", _LOG_RIBBON_EVENTS[history.judgment_status], history.judged_at,
+                "RIBBON", _LOG_RIBBON_EVENTS[judgment_status], history.judged_at,
                 detail=history.next_action if history.judgment_status == "DONE" else None,
             ))
         # 시안 "답변대로 할 일 3개를 추가했어요". 새로 생긴 게 있을 때만 남긴다.
