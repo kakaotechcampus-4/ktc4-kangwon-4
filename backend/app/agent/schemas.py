@@ -1745,6 +1745,7 @@ class NextAction(AgentSchema):
 class DecisionType(StrEnum):
     ACTION = "ACTION"
     NEEDS_MORE_INFO = "NEEDS_MORE_INFO"
+    PROCEDURES_COMPLETED = "PROCEDURES_COMPLETED"
 
 
 class ActionDecisionDraft(_BlockerDecision):
@@ -1782,8 +1783,25 @@ class NeedsMoreInfoDecisionDraft(_BlockerDecision):
     questions_for_user: Annotated[list[NonEmptyStr], Field(min_length=1)]
 
 
+class ProceduresCompletedDecisionDraft(AgentSchema):
+    """Registered applicable procedures are done; the Case may still have checklist tasks."""
+
+    decision_type: Literal[DecisionType.PROCEDURES_COMPLETED]
+    draft_id: RuntimeUUID
+    draft_version: PositiveStrictInt
+    selection_summary: NonEmptyStr
+    requires_human: Literal[False]
+    evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
+    based_on_call_ids: Annotated[list[RuntimeUUID], Field(min_length=1)]
+    created_at: RuntimeDateTime
+    blocker: None
+    blockers: Annotated[list[Blocker], Field(max_length=0)]
+    next_action: None
+    questions_for_user: Annotated[list[NonEmptyStr], Field(max_length=0)]
+
+
 DecisionDraft: TypeAlias = Annotated[
-    ActionDecisionDraft | NeedsMoreInfoDecisionDraft,
+    ActionDecisionDraft | NeedsMoreInfoDecisionDraft | ProceduresCompletedDecisionDraft,
     Field(discriminator="decision_type"),
 ]
 
@@ -1890,7 +1908,7 @@ class SupervisorDraft(AgentSchema):
 
     resolved_blocker_candidate_ids: list[NonEmptyStr] = Field(default_factory=list)
     decision: DecisionDraft = Field(
-        description="All verified Blockers, one priority Blocker, and one Next Action or information question."
+        description="Verified action, information question, or completion of all registered applicable procedures."
     )
     mutations: MutationSet = Field(
         description="Uncommitted Case changes that require a matching Review PASS."
@@ -1918,7 +1936,7 @@ class SupervisorDraft(AgentSchema):
         return self
 
     @property
-    def blocker(self) -> Blocker:
+    def blocker(self) -> Blocker | None:
         return self.decision.blocker
 
     @property
@@ -2785,6 +2803,7 @@ __all__ = [
     "DecisionAuthority",
     "DecisionDraft",
     "DecisionType",
+    "ProceduresCompletedDecisionDraft",
     "Digest",
     "DiscoverSupportInput",
     "DocumentSubmittedTrigger",

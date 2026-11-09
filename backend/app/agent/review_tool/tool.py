@@ -22,6 +22,7 @@ from app.agent.action_catalog import (
 from app.agent.blocker_candidates import (
     build_blocker_candidates,
     candidate_decision_violations,
+    completed_procedure_decision_fields,
     missing_info_fields,
     resolved_blocker_candidates,
 )
@@ -870,6 +871,10 @@ def _validate_action_shape(
     sources_by_call_id: dict[UUID, Any],
 ) -> None:
     decision = subject.supervisor_draft.decision
+    if decision.decision_type == DecisionType.PROCEDURES_COMPLETED:
+        if decision.blocker is not None or decision.blockers or decision.next_action is not None or decision.questions_for_user:
+            raise ReviewIntegrityError("PROCEDURES_COMPLETED shape is invalid")
+        return
     if decision.blocker is None:
         raise ReviewIntegrityError("MVP decisions require exactly one blocker")
     if decision.decision_type == DecisionType.ACTION:
@@ -1073,6 +1078,9 @@ def _deterministic_safety_review(
             mutations,
             procedure_bindings,
             known_procedure_steps=subject.known_procedure_steps,
+        ),
+        completed_procedure_decision_fields(
+            subject.snapshot, subject.known_procedure_steps, subject.source_results, mutations, procedure_bindings,
         ),
     ):
         issues.append(
@@ -1537,9 +1545,10 @@ def _visible_draft_strings(subject: ReviewSubject) -> list[tuple[str, str]]:
     base = "/supervisor_draft/decision"
     values: list[tuple[str, str]] = [
         (f"{base}/selection_summary", decision.selection_summary),
-        (f"{base}/blocker/description", decision.blocker.description),
         *((f"{base}/blockers/{index}/description", item.description) for index, item in enumerate(decision.blockers)),
     ]
+    if decision.blocker is not None:
+        values.append((f"{base}/blocker/description", decision.blocker.description))
     if decision.next_action is not None:
         action_base = f"{base}/next_action"
         values.extend(
