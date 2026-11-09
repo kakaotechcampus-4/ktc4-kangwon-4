@@ -9,7 +9,7 @@
 import asyncio
 import json
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlmodel import Session
@@ -32,6 +32,13 @@ from testcontainers.community.mysql import MySqlContainer
 from app.be.crud.member import create_member
 from app.be.schemas.case import CaseCreateRequest
 from app.be.services.case import create_case
+from app.agent.schemas import RetainedInfoResult, SafeFailureOutcome, canonical_digest
+from app.be.models.case import Case
+from app.be.models.case_history import CaseHistory
+from app.be.models.evidence import ConflictReference
+from app.be.routers import case as case_router
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 HISTORY_ID = 9
 SNAPSHOT_ID = "11111111-1111-1111-1111-111111111111"
@@ -404,6 +411,155 @@ def scope_case(engine, before="PARTIAL", detail="카운터"):
         session.add_all([seed, conflict, history])
         session.commit()
         return case_id, history.id, conflict.id, seed.id
+
+
+def stale_failure_case(engine):
+    from test_action_codes import supervisor_request
+
+    case_id, history_id, conflict_id, _ = scope_case(engine)
+    request = supervisor_request()
+    subject = reviewed_scope_change(case_id).review_subject
+    source = next(row for row in subject.source_results if row.meta.component == "INFO_AGENT")
+    info = source.output.model_copy(update={key: [] for key in (
+        "fact_candidates", "conflicts", "procedure_findings", "missing_fields", "question_candidates", "uncertainties")})
+    retained = RetainedInfoResult(meta=source.meta, output=info, output_digest=canonical_digest(info),
+        input=request.trigger.input)
+    trigger = subject.trigger.model_copy(update={
+        "input_event_id": str(history_id), "retained_info_result": retained,
+    })
+    with Session(engine) as session:
+        row = session.get(ConflictReference, conflict_id)
+        row.candidate_payload = trigger.conflicts[0].model_dump(mode="json")
+        row.conflict_digest = trigger.conflicts[0].conflict_digest
+        origin = session.get(CaseHistory, row.case_history_id)
+        origin.conflict_snapshot = trigger.conflict_snapshot.model_dump(mode="json")
+        origin.retained_info_result = retained.model_dump(mode="json")
+        session.commit()
+    outcome = SafeFailureOutcome(outcome_type="SAFE_FAILURE", run_id=uuid4(), case_id=case_id,
+        trigger=trigger, snapshot_id=trigger.conflict_snapshot.snapshot_id,
+        failure_code="STALE_CONFLICT_CONFIRMATION", message_code="STALE_CONFLICT_CONFIRMATION",
+        recovery_action_code="RESUBMIT_INPUT", requested_field_paths=[], retryable=False,
+        failed_component=None, trace_id=None)
+    return case_id, history_id, conflict_id, outcome
+
+
+@pytest.mark.parametrize("side", ["PROPOSED", "STORED"])
+def test_stale_failure_keeps_original_data_and_opens_new_text(mysql_engine, monkeypatch, side):
+    case_id, history_id, conflict_id, outcome = stale_failure_case(mysql_engine)
+    with Session(mysql_engine) as session:
+        case = session.get(Case, case_id)
+        member_id, original_case = case.member_id, case.model_dump()
+        original_progress = [row.model_dump() for row in case.case_procedure_steps]
+        conflict = session.get(ConflictReference, conflict_id)
+        origin_id = conflict.case_history_id
+        original_origin = session.get(CaseHistory, origin_id).model_dump()
+        original_payload = conflict.candidate_payload
+        conflict_decision._save_decision_outcome(session, history_id, outcome, {conflict_id: side})
+    app = FastAPI()
+    app.include_router(case_router.router)
+    def database():
+        with Session(mysql_engine) as session:
+            yield session
+    app.dependency_overrides[case_router.get_db] = database
+    app.dependency_overrides[case_router.get_current_member_id] = lambda: member_id
+    monkeypatch.setattr(case_router.judgment_service, "run_judgment_in_background", AsyncMock())
+    with TestClient(app) as client:
+        assert client.get("/cases").json()["judgment_status"] == "FAILED"
+        entry = client.get("/cases/results").json()
+        assert (entry["judgment_status"], entry["recovery_action_code"], entry["case_history_id"]) == (
+            "FAILED", "RESUBMIT_INPUT", history_id)
+        status = client.get("/cases/results/status", params={"case_history_id": history_id}).json()
+        assert status["result"] == "FAILED" and status["retryable"] is False
+        assert any(row["event"] == "JUDGMENT_FAILED" for row in client.get("/cases/logs").json()["logs"])
+        response = client.post("/cases/results", json={"case_history_id": history_id, "raw_input": "현재 상황을 다시 알려드려요."})
+        assert response.status_code == 200
+    with Session(mysql_engine) as session:
+        saved = session.get(ConflictReference, conflict_id)
+        assert (saved.status, saved.resolved_by_case_history_id) == ("REJECTED", history_id)
+        assert saved.decided_at is not None and saved.candidate_payload == original_payload
+        assert session.get(CaseHistory, origin_id).model_dump() == original_origin
+        case = session.get(Case, case_id)
+        assert case.model_dump() == original_case
+        assert [row.model_dump() for row in case.case_procedure_steps] == original_progress
+        failed = session.get(CaseHistory, history_id)
+        assert (failed.judgment_status, failed.failure_code, failed.recovery_action_code) == (
+            "FAILED", "STALE_CONFLICT_CONFIRMATION", "RESUBMIT_INPUT")
+        assert session.get(CaseHistory, response.json()["case_history_id"]).judgment_status == "PENDING"
+
+
+@pytest.mark.parametrize("bad", ["case", "event", "ids", "batch", "resolved", "done", "newer", "snapshot", "payload", "retained", "legacy"])
+def test_stale_failure_target_and_cleanup_guards_are_independent(mysql_engine, bad):
+    case_id, history_id, conflict_id, outcome = stale_failure_case(mysql_engine)
+    choices = {conflict_id: "PROPOSED"}
+    with Session(mysql_engine) as session:
+        history, row = session.get(CaseHistory, history_id), session.get(ConflictReference, conflict_id)
+        origin = session.get(CaseHistory, row.case_history_id)
+        if bad == "case": outcome = outcome.model_copy(update={"case_id": case_id + 9999})
+        elif bad == "event": outcome.trigger.input_event_id = "another-decision"
+        elif bad == "ids": choices = {conflict_id + 9999: "PROPOSED"}
+        elif bad == "resolved": row.status = "REJECTED"
+        elif bad == "done": history.judgment_status = "DONE"
+        elif bad == "snapshot": origin.conflict_snapshot = origin.conflict_snapshot | {"snapshot_id": str(uuid4())}
+        elif bad == "payload": row.candidate_payload = row.candidate_payload | {"proposed_value": "NOT_REQUIRED"}
+        elif bad == "retained": origin.retained_info_result = None
+        elif bad == "legacy": origin.conflict_snapshot = {key: value for key, value in origin.conflict_snapshot.items()
+                                                         if key != "active_blocker_candidate_ids"}
+        elif bad == "batch":
+            other = ConflictReference(case_id=case_id, case_history_id=case_history_crud.get_case_created_history(session, case_id).id,
+                conflict_ref=str(uuid4()), canonical_field="employee_count", proposed_value="3")
+            session.add(other)
+            session.flush()
+            choices[other.id] = "PROPOSED"
+        session.commit()
+        session.refresh(history)
+        session.refresh(origin)
+        original_history = history.model_dump()
+        original_origin = origin.model_dump()
+        original_rows = [row.model_dump() for row in session.exec(select(ConflictReference).where(ConflictReference.case_id == case_id)).all()]
+        if bad == "newer":  # 먼저 읽은 세션의 MySQL 스냅샷보다 최신인 이력도 저장 직전에 확인해야 한다.
+            with Session(mysql_engine) as other:
+                other.add(CaseHistory(case_id=case_id, source="USER_INPUT", judgment_status="PENDING"))
+                other.commit()
+        conflict_decision._save_decision_outcome(session, history_id, outcome, choices)
+        session.commit()
+    with Session(mysql_engine) as session:
+        saved = session.get(CaseHistory, history_id)
+        if bad in {"case", "event", "done", "newer"}:
+            assert saved.model_dump() == original_history
+        else:
+            assert (saved.judgment_status, saved.failure_code, saved.recovery_action_code) == (
+                "FAILED", "STALE_CONFLICT_CONFIRMATION", "RESUBMIT_INPUT")
+        assert session.get(CaseHistory, original_origin["id"]).model_dump() == original_origin
+        assert [row.model_dump() for row in session.exec(select(ConflictReference).where(ConflictReference.case_id == case_id)).all()] == original_rows
+
+
+@pytest.mark.parametrize("code,recovery", [
+    ("COMPONENT_UNAVAILABLE", "RESUBMIT_INPUT"), ("STALE_CONFLICT_CONFIRMATION", "RETRY"),
+    ("STALE_CONFLICT_CONFIRMATION", "CONTACT_SUPPORT"), ("STALE_CONFLICT_CONFIRMATION", "NONE"),
+])
+def test_other_failures_keep_the_conflict_pending(mysql_engine, code, recovery):
+    _, history_id, conflict_id, outcome = stale_failure_case(mysql_engine)
+    outcome = SafeFailureOutcome.model_validate(outcome.model_dump(mode="python") | {"failure_code": code, "recovery_action_code": recovery,
+        "retryable": recovery == "RETRY", "requested_field_paths": ["employee_count"] if code == "COMPONENT_UNAVAILABLE" else []})
+    with Session(mysql_engine) as session:
+        conflict_decision._save_decision_outcome(session, history_id, outcome, {conflict_id: "PROPOSED"})
+    with Session(mysql_engine) as session:
+        assert session.get(CaseHistory, history_id).recovery_action_code == recovery
+        assert session.get(ConflictReference, conflict_id).status == "PENDING"
+
+
+def test_stale_cleanup_and_failure_record_roll_back_together(mysql_engine, monkeypatch):
+    _, history_id, conflict_id, outcome = stale_failure_case(mysql_engine)
+    resolve = decision_record_service._resolve_conflicts
+    def interrupted(*args):
+        resolve(*args)
+        raise RuntimeError("stop after staging conflict cleanup")
+    monkeypatch.setattr(decision_record_service, "_resolve_conflicts", interrupted)
+    with Session(mysql_engine) as session, pytest.raises(RuntimeError):
+        conflict_decision._save_decision_outcome(session, history_id, outcome, {conflict_id: "PROPOSED"})
+    with Session(mysql_engine) as session:
+        assert session.get(CaseHistory, history_id).judgment_status == "PENDING"
+        assert session.get(ConflictReference, conflict_id).status == "PENDING"
 
 
 @pytest.mark.parametrize("accepted,detail", [(True, "카운터"), (False, "카운터"), (True, None)],
