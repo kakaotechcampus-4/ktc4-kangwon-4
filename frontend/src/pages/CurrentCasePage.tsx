@@ -2,6 +2,7 @@ import {
   IconCheckmarkCircleFill,
   IconExclamationmarkCircleFill,
   IconExclamationmarkCircleLine,
+  IconFlagLine,
   IconPersonLine,
   IconSparkle2Fill,
 } from '@karrotmarket/react-monochrome-icon'
@@ -238,7 +239,7 @@ const NEUTRAL_ICON = <IconExclamationmarkCircleLine size={40} />
 /**
  * 판단 상태에 맞는 머리 문구와 할 일 카드.
  *
- * 여섯 갈래를 전부 적는다. `switch`가 아니라 `if`로 흘려두면 새 상태가 늘었을 때
+ * 일곱 갈래를 전부 적는다. `switch`가 아니라 `if`로 흘려두면 새 상태가 늘었을 때
  * 아무 화면도 안 나오고 조용히 빈 자리가 생긴다.
  *
  * 색은 사장님이 할 일이 있는지로 나눈다. 할 일이면 주황, 사장님이 답하거나 골라야 하면 빨강,
@@ -375,6 +376,24 @@ function judgmentCard(judgment: JudgmentView, waitedTooLong: boolean): JudgmentC
     }
 
     /*
+      등록된 절차 안내를 다 마쳤다(#315). 다음 할 일이 없어 로드맵에서 남은 일을 보게 한다.
+      폐업 전체 완료가 아니라 완료 화면(`CompletedCard`)을 쓰지 않는다 — 그건 `case_status` 가 정한다.
+      [결과 알려주기]를 두지 않는다. 끝난 일을 다시 보내게 하지 않으려는 것이다
+    */
+    case 'PROCEDURES_COMPLETED':
+      return {
+        headline: '등록된 절차를 모두 마쳤어요',
+        props: {
+          tone: 'brand',
+          icon: <IconFlagLine size={40} />,
+          badge: '절차 안내 끝',
+          title: '등록된 절차를 모두 마쳤어요',
+          description: '로드맵에서 남은 할 일을 확인해 주세요.',
+        },
+        main: (stale) => <RoadmapButton locked={stale} />,
+      }
+
+    /*
       서버가 우리가 모르는 상태를 보냈거나 내용이 비어서 온 경우다. "정보가 부족합니다"로
       바꿔 보여주지 않는다 — 서버가 틀린 것을 사장님이 덜 적어낸 탓으로 읽게 된다.
     */
@@ -418,6 +437,27 @@ function TaskButton({ hasQuestions, locked }: { hasQuestions: boolean; locked: b
         <p className="text-center text-14 text-fg-neutral-muted">
           최신 상태를 확인한 뒤에 볼 수 있어요
         </p>
+      )}
+    </>
+  )
+}
+
+/**
+ * 등록된 절차를 다 마친 뒤 남은 할 일을 보러 로드맵으로 가는 버튼(#315).
+ *
+ * 최신 상태를 확인하지 못했으면 잠근다. `AnswerButton` 과 같은 규칙이다 — 낡은 화면을 믿고 움직이지 않게 한다.
+ */
+function RoadmapButton({ locked }: { locked: boolean }) {
+  const navigate = useNavigate()
+  const { search } = useLocation()
+
+  return (
+    <>
+      <Button size="lg" disabled={locked} onClick={() => navigate({ pathname: '/roadmap', search }, { viewTransition: true })}>
+        로드맵 보기
+      </Button>
+      {locked && (
+        <p className="text-center text-14 text-fg-neutral-muted">최신 상태를 확인한 뒤에 볼 수 있어요</p>
       )}
     </>
   )

@@ -127,6 +127,12 @@ export const judgmentConflictCase: CurrentCaseView = {
   judgment: { status: 'CONFLICT' },
 }
 
+/** 등록된 절차 안내를 모두 마친 상태(#315). 폐업 전체 완료가 아니라 남은 할 일은 로드맵에 있다 */
+export const proceduresCompletedCase: CurrentCaseView = {
+  ...store,
+  judgment: { status: 'PROCEDURES_COMPLETED' },
+}
+
 /**
  * 서버가 우리가 모르는 상태를 보냈거나, 상태와 내용의 조합이 계약과 어긋난 경우.
  *

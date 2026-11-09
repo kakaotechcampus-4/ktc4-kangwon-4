@@ -161,7 +161,18 @@ export interface CaseCreateResponse
  * 다섯이 다가 아닐 수 있다. 모르는 값이 오면 어댑터가 가려내고 화면은 "판단 내용을
  * 불러오지 못했어요" 로 간다 — 다른 상태로 바꿔 보여주지 않는다 (`CLAUDE.md` 규칙 9).
  */
-export type JudgmentStatus = 'PENDING' | 'DONE' | 'NEEDS_MORE_INFO' | 'CONFLICT' | 'FAILED'
+export type JudgmentStatus =
+  | 'PENDING'
+  | 'DONE'
+  | 'NEEDS_MORE_INFO'
+  | 'CONFLICT'
+  | 'FAILED'
+  /**
+   * 등록된 절차 안내를 모두 마쳤다(#314·#315). 다음 할 일과 질문이 없어 `blocker`·`next_action`·
+   * `questions_for_user` 가 `null` 이다. **폐업 전체 완료가 아니다** — `case_status` 는 `IN_PROGRESS` 그대로고,
+   * 남은 체크 할 일은 로드맵에 있다
+   */
+  | 'PROCEDURES_COMPLETED'
 
 /**
  * 판단이 실패했을 때 서버가 분류한 **다음에 해볼 만한 것**.
@@ -352,6 +363,8 @@ export type ResultsSubmitResult =
   | 'NEEDS_MORE_INFO'
   | 'CONFLICT'
   | 'FAILED'
+  /** 등록된 절차 안내를 모두 마쳤다. `JudgmentStatus` 의 같은 값과 뜻이 같다 */
+  | 'PROCEDURES_COMPLETED'
 
 /**
  * `GET /cases/results/status?case_history_id=` 응답.
@@ -398,7 +411,7 @@ export type CaseLogActor = 'OWNER' | 'RIBBON'
  *   사장님  CASE_CREATED · RESULT_SUBMITTED · CONFLICT_DECIDED · DOCUMENT_SUBMITTED(#173)
  *           CHECKLIST_COMPLETED · CHECKLIST_UNCHECKED · SUPPORT_RESULT_REPORTED · DOCUMENT_UPLOADED(#174)
  *   리본    NEXT_ACTION_DECIDED · MORE_INFO_REQUESTED · CONFLICT_FOUND · JUDGMENT_FAILED
- *           DOCUMENTS_CHECKED(#174) · ROADMAP_TASKS_ADDED(#184)
+ *           DOCUMENTS_CHECKED(#174) · ROADMAP_TASKS_ADDED(#184) · PROCEDURES_COMPLETED(#315)
  */
 export type CaseLogEvent =
   | 'CASE_CREATED'
@@ -415,6 +428,7 @@ export type CaseLogEvent =
   | 'DOCUMENT_UPLOADED'
   | 'DOCUMENTS_CHECKED'
   | 'DOCUMENT_SUBMITTED'
+  | 'PROCEDURES_COMPLETED'
 
 /** 기록 한 줄 */
 export interface CaseLogItem {

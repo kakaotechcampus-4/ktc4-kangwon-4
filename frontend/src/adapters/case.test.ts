@@ -349,6 +349,18 @@ describe('toCurrentCaseView', () => {
     expect(view.judgment).toEqual({ status: 'CONFLICT' })
   })
 
+  /** 다음 할 일이 비어 오는 것이 정상인 상태다(#315). `DONE` 처럼 비었다고 읽지 못한 것으로 두면 홈이 "멈췄어요"가 된다 */
+  it('등록된 절차를 다 마쳤으면 할 일이 비어 있어도 마친 것으로 둔다', () => {
+    const view = toCurrentCaseView(
+      envelopeOf({ judgment_status: 'PROCEDURES_COMPLETED', blocker: null, next_action: null, questions_for_user: null }),
+      SERVER_CASE,
+    )
+
+    expect(view.judgment).toEqual({ status: 'PROCEDURES_COMPLETED' })
+    // 폐업 전체 완료와 다르다. 완료는 `case_status` 가 정한다
+    expect(view.completed).toBe(false)
+  })
+
   /**
    * 그 할 일은 **어긋나기 전의 판단**이다. 지금 할 일로 그리면 사장님이 이미 틀어진
    * 전제 위에서 움직이고, 그 결과를 또 보고한다. `PENDING`·`FAILED` 에서 이전 판단을

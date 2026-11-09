@@ -15,6 +15,7 @@ import {
   judgmentServiceSideCase,
   moreInfoCase,
   pendingCase,
+  proceduresCompletedCase,
   unrecognizedCase,
 } from '../mocks/currentCase'
 import type { CasesEnvelope } from '../types/api'
@@ -102,6 +103,7 @@ const MOCKS: Record<string, CurrentCaseView> = {
   // `conflict` 는 못 쓴다. `/results?mock=conflict` 가 결과 제출 쪽 충돌 흐름을 쓰고 있어서,
   // 같은 키를 여기 붙이면 `/case` 에서 할 일 카드가 안 떠 그 흐름이 첫 걸음에서 끊긴다
   'judgment-conflict': judgmentConflictCase,
+  'procedures-completed': proceduresCompletedCase,
   unrecognized: unrecognizedCase,
   // 폐업 정리를 모두 마친 홈(시안 `closed`)
   completed: completedCase,

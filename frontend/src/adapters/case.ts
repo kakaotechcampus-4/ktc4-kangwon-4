@@ -281,6 +281,10 @@ function toJudgmentView(envelope: CasesEnvelope): JudgmentView {
     case 'CONFLICT':
       return { status: 'CONFLICT' }
 
+    // 다음 할 일·질문이 비어 오는 것이 정상이다(#315). `DONE` 처럼 비었다고 읽지 못한 것으로 두지 않는다
+    case 'PROCEDURES_COMPLETED':
+      return { status: 'PROCEDURES_COMPLETED' }
+
     case 'DONE': {
       // 막힌 것과 할 일 중 하나라도 받을 수 없으면 그릴 것이 없다. 칸을 빠뜨린 응답·
       // 빈 문자열·모양이 다른 응답이 모두 여기 걸린다 — 통과시키면 제목 없는 할 일 카드가
