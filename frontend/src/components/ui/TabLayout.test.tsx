@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { DocsPage } from '../../pages/DocsPage'
 import { LogPage } from '../../pages/LogPage'
-import { NotificationsPage } from '../../pages/NotificationsPage'
+import { MyInfoPage } from '../../pages/MyInfoPage'
 import { TabLayout } from './TabLayout'
 
 /**
@@ -23,7 +23,7 @@ function renderAt(path: string) {
           { path: '/log', element: <LogPage /> },
         ],
       },
-      { path: '/notifications', element: <NotificationsPage /> },
+      { path: '/me', element: <MyInfoPage /> },
     ],
     { initialEntries: [path] },
   )
@@ -57,11 +57,11 @@ describe('TabLayout', () => {
     expect(await screen.findByRole('heading', { level: 1, name: '작업 기록' })).toBeInTheDocument()
   })
 
-  it('종 버튼을 누르면 알림 화면으로 가고, 뒤로 누르면 돌아온다', async () => {
+  it('사람 버튼을 누르면 내 정보로 가고, 뒤로 누르면 돌아온다', async () => {
     renderAt('/docs')
 
-    await userEvent.click(screen.getByRole('link', { name: '알림' }))
-    expect(await screen.findByRole('heading', { level: 1, name: '알림' })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('link', { name: '내 정보' }))
+    expect(await screen.findByRole('heading', { level: 1, name: '내 정보' })).toBeInTheDocument()
     expect(screen.queryByRole('navigation', { name: '주요 화면' })).not.toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('button', { name: '뒤로' }))

@@ -1,4 +1,4 @@
-import { IconBellLine } from '@karrotmarket/react-monochrome-icon'
+import { IconPersonLine } from '@karrotmarket/react-monochrome-icon'
 import { Link, Outlet, useLocation } from 'react-router'
 
 import hammerUrl from '../../assets/brand/reborn-hammer.svg'
@@ -39,11 +39,11 @@ export function TabLayout() {
           <h1 className="flex-1 text-20 font-bold">{TAB_TITLE[pathname]}</h1>
         )}
         <Link
-          to="/notifications"
-          aria-label="알림"
+          to="/me"
+          aria-label="내 정보"
           className="grid size-12 place-items-center rounded-lg text-fg-neutral active:bg-bg-transparent-pressed"
         >
-          <IconBellLine size={24} aria-hidden="true" />
+          <IconPersonLine size={24} aria-hidden="true" />
         </Link>
       </header>
 
