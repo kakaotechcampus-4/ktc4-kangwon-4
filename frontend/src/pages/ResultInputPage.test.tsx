@@ -274,6 +274,39 @@ describe('ResultInputPage — 서버', () => {
     expect(sentBodies(fetchMock)).toEqual([{ case_history_id: 12, action_done: true }])
   })
 
+  /** 진행 상태 질문은 글로 답하기 어렵다. 고른 값을 그대로 보내 모델이 해석하지 않게 한다 */
+  it('원상복구 진행 상태 질문은 버튼으로 골라 보낸다', async () => {
+    const fetchMock = serve({
+      entry: [json(entryBody({
+        judgment_status: 'NEEDS_MORE_INFO', next_action: null, result_input_kind: 'RESTORATION_STATUS',
+        questions_for_user: ['원상복구 작업이 어디까지 진행됐는지 알려주세요.'],
+      }))],
+      submit: [ACCEPTED], judged: [json(judgedBody({ result: 'PENDING' }))],
+    })
+    renderFlow()
+    await advance()
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '보내기' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('radio', { name: '진행 중이에요' }))
+    fireEvent.click(screen.getByRole('button', { name: '보내기' }))
+    await advance()
+    expect(sentBodies(fetchMock)).toEqual([{ case_history_id: 12, restoration_status: 'IN_PROGRESS' }])
+  })
+
+  it('원상복구 진행 상태 질문도 [직접 쓸게요]로 글을 쓸 수 있다', async () => {
+    serve({
+      entry: [json(entryBody({
+        judgment_status: 'NEEDS_MORE_INFO', next_action: null, result_input_kind: 'RESTORATION_STATUS',
+        questions_for_user: ['원상복구 작업이 어디까지 진행됐는지 알려주세요.'],
+      }))],
+    })
+    renderFlow()
+    await advance()
+    fireEvent.click(screen.getByRole('button', { name: '직접 쓸게요' }))
+    expect(screen.getByLabelText('원상복구 작업이 어디까지 진행됐는지 알려주세요.')).toBeInTheDocument()
+    expect(screen.queryByRole('radio', { name: '진행 중이에요' })).not.toBeInTheDocument()
+  })
+
   /** 바뀌는 것이 없으니 판단(AI)을 부르지 않는다. 할 일은 그대로 홈에 남는다 */
   it('[아직 …]은 아무것도 보내지 않고 홈으로 돌아간다', async () => {
     const fetchMock = serve({

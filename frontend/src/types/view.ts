@@ -127,7 +127,8 @@ export type JudgmentView =
    * 나왔는데, 그중 "정보가 더 있어야 한다"까지 "저희가 다시 해보겠습니다"로 읽혀
    * 사장님이 기다리면 되는 줄 알게 된다.
    */
-  | { status: 'FAILED'; notice: FailureNotice }
+  /** `lastTask` 는 실패하기 전 마지막 할 일 제목. 모르면 없다 */
+  | { status: 'FAILED'; notice: FailureNotice; lastTask?: string | null }
   /** 서버가 모르는 값을 보냈거나, 상태와 내용의 조합이 계약과 어긋난다 */
   | { status: 'UNRECOGNIZED' }
 
@@ -194,7 +195,7 @@ export type ResultsEntry =
    *
    * 답도 결과와 같은 길(`POST /cases/results`)로 보내므로 `historyId` 가 필요하다.
    */
-  | { kind: 'ANSWER'; questions: string[]; historyId: number }
+  | { kind: 'ANSWER'; questions: string[]; historyId: number; inputKind: 'TEXT' | 'RESTORATION_STATUS' }
   /**
    * 판단이 실패했는데, 사장님이 더 알려주시면 풀린다(`NEEDS_DETAIL`). 무엇이 더 필요한지
    * 보여주고 글을 다시 받는다.

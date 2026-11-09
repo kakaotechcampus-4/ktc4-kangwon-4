@@ -558,3 +558,37 @@ def test_status_stops_on_a_conflict_without_any_open_conflict(case_engine, case_
     conflicted = case_world.add_history(case_id, "USER_INPUT", "CONFLICT")
 
     assert error_of(lambda: status(case_engine, member_id, conflicted))[0] == 500
+
+
+def _ask(case_world, candidate_id: str | None) -> tuple[int, int]:
+    """막힌 일 후보가 candidate_id인 질문(NEEDS_MORE_INFO)에서 멈춘 Case."""
+
+    member_id, case_id, _ = case_world.sign_up()
+    history_id = case_world.add_history(case_id, "USER_INPUT", "NEEDS_MORE_INFO")
+    with Session(case_world.engine) as session:
+        history = session.get(CaseHistory, history_id)
+        history.priority_blocker.candidate_id = candidate_id
+        session.commit()
+    return member_id, history_id
+
+
+def test_restoration_status_question_takes_buttons_and_stores_the_choice(case_world):
+    member_id, history_id = _ask(case_world, "missing:restoration_status")
+    with Session(case_world.engine) as session:
+        assert get_case_results_entry(session, member_id).result_input_kind == "RESTORATION_STATUS"
+        accepted = submit_case_results(session, member_id, CaseResultsSubmitRequest(
+            case_history_id=history_id, restoration_status="IN_PROGRESS"))
+    with Session(case_world.engine) as session:
+        stored = session.get(CaseHistory, accepted.case_history_id)
+        assert stored.restoration_status_answer == {"restoration_status": "IN_PROGRESS"}
+        assert stored.raw_input == "원상복구와 철거 작업을 진행하고 있어요."
+
+
+def test_other_questions_keep_text_and_refuse_status_buttons(case_world):
+    member_id, history_id = _ask(case_world, "missing:restoration_scope")
+    with Session(case_world.engine) as session:
+        assert get_case_results_entry(session, member_id).result_input_kind == "TEXT"
+        with pytest.raises(HTTPException) as error:
+            submit_case_results(session, member_id, CaseResultsSubmitRequest(
+                case_history_id=history_id, restoration_status="NOT_STARTED"))
+    assert error.value.status_code == 422

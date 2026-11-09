@@ -268,7 +268,11 @@ function toJudgmentView(envelope: CasesEnvelope): JudgmentView {
       return { status: 'PENDING' }
 
     case 'FAILED':
-      return { status: 'FAILED', notice: toFailureNotice(envelope) }
+      return {
+        status: 'FAILED',
+        notice: toFailureNotice(envelope),
+        lastTask: isReadableText(envelope.last_next_action_title) ? envelope.last_next_action_title : null,
+      }
 
     // 검증할 것이 없다. 어긋난 항목은 응답에 안 실려 온다(#66).
     //

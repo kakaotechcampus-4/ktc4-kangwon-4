@@ -237,7 +237,13 @@ export function toResultsEntry(body: CaseResultsEntryResponse | null): ResultsEn
       // 번호가 없으면 답을 보낼 수 없고, 질문이 없으면 무엇에 답하는지 보여줄 수 없다
       const questions = toQuestionsForUser(body.questions_for_user)
       if (!Number.isInteger(body.case_history_id) || questions === null) return { kind: 'UNRECOGNIZED' }
-      return { kind: 'ANSWER', questions, historyId: body.case_history_id as number }
+      // 원상복구 진행 상태 질문이면 버튼으로 받는다. 모르는 값은 다른 입력으로 바꾸지 않는다
+      if (body.result_input_kind !== 'TEXT' && body.result_input_kind !== 'RESTORATION_STATUS') {
+        return { kind: 'UNRECOGNIZED' }
+      }
+      return {
+        kind: 'ANSWER', questions, historyId: body.case_history_id as number, inputKind: body.result_input_kind,
+      }
     }
 
     /*

@@ -7,6 +7,7 @@
 
 
 import logging
+import os
 import re
 from collections.abc import Mapping
 from datetime import datetime
@@ -47,6 +48,12 @@ from app.be.services import roadmap as roadmap_service
 from app.be.services.case_snapshot import UNKNOWN_SENTINEL_FIELDS
 
 logger = logging.getLogger(__name__)
+
+
+def current_app_version() -> str | None:
+    """이 서버를 빌드한 커밋(main.py의 /health와 같은 값). 모르면 None이라 버전 비교를 하지 않는다."""
+    version = os.environ.get("APP_VERSION")
+    return version if version and version != "unknown" else None
 
 
 def save_reviewed_plan(
@@ -107,6 +114,7 @@ def save_reviewed_plan(
         "NEEDS_MORE_INFO" if decision.decision_type.value == "NEEDS_MORE_INFO" else "DONE"
     )
     history.judged_at = kst_now()
+    history.judged_version = current_app_version()
 
     # 검수를 통과한 변경 제안을 실제 테이블에 반영한다. AI는 이것들을 "제안"으로만 돌려주기
     # 때문에, 저장하지 않으면 다음 판단의 스냅샷이 그대로여서 같은 판단이 반복된다.
@@ -264,6 +272,7 @@ def save_conflict(
 
     history.judgment_status = "CONFLICT"
     history.judged_at = kst_now()
+    history.judged_version = current_app_version()
     session.commit()
 
 
@@ -302,6 +311,7 @@ def save_safe_failure(session: Session, history: CaseHistory, outcome: SafeFailu
 
     history.judgment_status = "FAILED"
     history.judged_at = kst_now()
+    history.judged_version = current_app_version()
     # 왜 실패했는지. 이게 없으면 쌓인 실패가 전부 "다시 시도해보세요"로만 남아서,
     # 형식이 틀린 건지 호출 예산을 다 쓴 건지 구분할 수 없다.
     history.failure_code = outcome.failure_code
@@ -329,6 +339,7 @@ def mark_judgment_failed(session: Session, case_history_id: int, error: Exceptio
         return
     history.judgment_status = "FAILED"
     history.judged_at = kst_now()
+    history.judged_version = current_app_version()
     # AI가 결과를 내기 전에 끊겨서 실패 종류를 받지 못했다. 없는 값을 지어내지 않는다.
     history.failure_code = None
     # 저장된 데이터나 설정이 원인이면 다시 판단해도 같은 자리에서 또 터진다. 그 Case는

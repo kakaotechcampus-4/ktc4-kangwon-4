@@ -533,3 +533,53 @@ def test_prepared_restoration_without_reported_status_asks_status_instead_of_fai
     decision = answered.review_subject.supervisor_draft.decision
     assert decision.decision_type == "NEEDS_MORE_INFO" and decision.next_action is None
     assert "아직 시작 전" in " ".join(decision.questions_for_user)
+
+
+def test_restoration_status_question_is_answered_with_buttons_without_info_model(case_engine, monkeypatch):
+    # 진행 상태 질문은 글 대신 [아직 시작 안 했어요 / 진행 중이에요 / 다 끝냈어요]로 받는다
+    fake = ScenarioModel(report_progress=True)
+    monkeypatch.setattr(runtime.StructuredLLMClient, "from_env", classmethod(lambda cls, *a, **k: fake))
+    monkeypatch.setattr(runtime.LangfuseTraceSink, "from_env", classmethod(lambda cls, *a, **k: None))
+    flow = CafeFlow(case_engine)
+    flow.plan()
+    flow.submit(raw_input=LANDLORD)
+    for _ in range(25):
+        entry, _ = flow.entry()
+        if entry.judgment_status == "NEEDS_MORE_INFO":
+            break
+        flow.submit(action_done=True)
+    else:
+        pytest.fail(f"진행 상태 질문에 도달하지 못함: {flow.turns}")
+    assert entry.result_input_kind == "RESTORATION_STATUS"
+    called, generate = [], fake.generate
+
+    async def counted(response_model, messages, **kwargs):
+        called.append(kwargs["schema_name"])
+        return await generate(response_model, messages, **kwargs)
+
+    monkeypatch.setattr(fake, "generate", counted)
+    waiting = flow.submit(restoration_status="NOT_STARTED")
+    assert not any("info" in name for name in called), called
+    decision = waiting.review_subject.supervisor_draft.decision
+    assert "아직 시작 전" in " ".join(decision.questions_for_user)
+    with Session(case_engine) as session:
+        assert session.get(Case, flow.case_id).restoration_status == "NOT_STARTED"
+        history = session.get(CaseHistory, flow.history_id)
+        assert history.restoration_status_answer == {"restoration_status": "NOT_STARTED"}
+        assert history.raw_input == "원상복구와 철거 작업은 아직 시작하지 않았어요."
+    # 철거 준비 뒤 기다리는 질문도 같은 버튼으로 받는다
+    assert flow.entry()[0].result_input_kind == "RESTORATION_STATUS"
+    # 저장된 "시작 전"과 다르므로 글로 알려줬을 때처럼 사장님 확인(충돌)을 거친다
+    assert flow.submit(restoration_status="COMPLETED").outcome_type == "CONFLICT"
+    with Session(case_engine) as session:
+        pending = conflict_reference.get_pending_conflicts_by_case_id(session, flow.case_id)
+        assert {row.canonical_field for row in pending} == {"restoration_status"}
+        choices = {row.id: "PROPOSED" for row in pending}
+        accepted = case_service.submit_case_conflicts_decision(session, flow.member_id,
+            CaseConflictsDecisionRequest(decisions=[{"conflict_reference_id": key, "side": value}
+                                                   for key, value in choices.items()]))
+        flow.history_id = accepted.case_history_id
+    flow.plan(choices=choices)
+    with Session(case_engine) as session:
+        assert session.get(Case, flow.case_id).restoration_status == "COMPLETED"
+    assert flow.entry()[1] == "CONFIRM_PREMISES_RETURN_REQUIREMENTS"

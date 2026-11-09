@@ -26,6 +26,7 @@ import type {
   DemolitionRequired,
   RestorationAnswer,
   RestorationScope,
+  RestorationStatusAnswer,
   ResultInputKind,
 } from '../types/api'
 import type { FailureNotice, NextAction, SubmitOutcome, SubmitState } from '../types/view'
@@ -52,6 +53,13 @@ const DEMOLITION_OPTIONS: { value: DemolitionRequired; label: string }[] = [
   { value: 'UNKNOWN', label: '철거는 아직 안 정해졌대요' },
 ]
 
+/** 원상복구 진행 상태 질문의 보기. 고른 값은 모델 해석 없이 저장된다 */
+const STATUS_OPTIONS: { value: RestorationStatusAnswer['restoration_status']; label: string }[] = [
+  { value: 'NOT_STARTED', label: '아직 시작 안 했어요' },
+  { value: 'IN_PROGRESS', label: '진행 중이에요' },
+  { value: 'COMPLETED', label: '다 끝냈어요' },
+]
+
 /**
  * [했어요] 버튼 문구. 할 일 종류는 서버가 정하고(`action_done_kind`), 화면은 문구만 고른다.
  * [아직 …]은 아무것도 보내지 않고 홈으로 돌아간다. 할 일은 그대로 남는다.
@@ -74,7 +82,7 @@ const DONE_LABELS: Record<ActionDoneKind, { done: string; notYet: string }> = {
  */
 type Ask =
   | { kind: 'RESULT'; nextAction: NextAction; inputKind: ResultInputKind; doneKind: ActionDoneKind | null }
-  | { kind: 'ANSWER'; questions: string[] }
+  | { kind: 'ANSWER'; questions: string[]; inputKind: 'TEXT' | 'RESTORATION_STATUS' }
   | { kind: 'RESUBMIT'; notice: Extract<FailureNotice, { kind: 'NEEDS_DETAIL' }> }
   | { kind: 'NEW_INPUT' }
 
@@ -96,7 +104,7 @@ function mockEntry(mockKey: string): EntryQuery {
   const failed = judgmentNeedsDetailCase.judgment
   const ask: Ask =
     mockKey === 'more-info' && moreInfoCase.judgment.status === 'NEEDS_MORE_INFO'
-      ? { kind: 'ANSWER', questions: moreInfoCase.judgment.questions }
+      ? { kind: 'ANSWER', questions: moreInfoCase.judgment.questions, inputKind: 'TEXT' }
       : mockKey === 'judgment-failed-detail' && failed.status === 'FAILED' && failed.notice.kind === 'NEEDS_DETAIL'
         ? { kind: 'RESUBMIT', notice: failed.notice }
         : {
@@ -136,6 +144,7 @@ export function ResultInputPage() {
   const [text, setText] = useState('')
   const [restorationAnswer, setRestorationAnswer] = useState<Partial<RestorationAnswer>>({})
   const [directInput, setDirectInput] = useState(false)
+  const [restorationStatus, setRestorationStatus] = useState<RestorationStatusAnswer['restoration_status'] | null>(null)
   const scopeTitleId = useId()
   const demolitionTitleId = useId()
   /** 질문마다 적은 답. 질문 문장으로 찾는다 — 같은 질문을 다시 받으면 적었던 답이 그대로 남는다 */
@@ -191,7 +200,7 @@ export function ResultInputPage() {
           case 'ANSWER':
             setFetched({
               status: 'READY',
-              ask: { kind: 'ANSWER', questions: entry.questions },
+              ask: { kind: 'ANSWER', questions: entry.questions, inputKind: entry.inputKind },
               historyId: entry.historyId,
             })
             return
@@ -251,7 +260,11 @@ export function ResultInputPage() {
   const latestDetail = state.kind === 'FAILED' && state.notice.kind === 'NEEDS_DETAIL' ? state.notice : null
   const askedFields = latestDetail ?? resubmitNotice
   const choiceKind = entry.status === 'READY' && entry.ask.kind === 'RESULT'
-    && !correcting && questions === null && !askedFields ? entry.ask.inputKind : 'TEXT'
+    && !correcting && questions === null && !askedFields ? entry.ask.inputKind
+    // 되물은 질문이 원상복구 진행 상태면 버튼으로 받는다. 보낸 뒤 다시 물은 질문은 종류를 몰라 글로 받는다
+    : entry.status === 'READY' && entry.ask.kind === 'ANSWER' && askedAgain === null && !askedFields
+      ? entry.ask.inputKind
+      : 'TEXT'
   const canChoose = choiceKind !== 'TEXT'
   const usingChoices = canChoose && !directInput
   // 할 일 대부분은 지시문이라 글로 답하기 어렵다. [했어요]면 서버가 모델 해석 없이 그 할 일의 진행으로 저장한다
@@ -282,9 +295,12 @@ export function ResultInputPage() {
     (state.kind === 'FAILED' && (state.notice.kind === 'SERVICE_SIDE' || state.notice.kind === 'NO_RECOVERY'))
   // 너무 긴 글은 자르지 않고 보내기를 막는다. 소리 없이 잘라 보내면 사장님이 적은 뒷부분이 사라진다.
   // 아래 [보내기]와 실패 안내의 [다시 보내기]가 같은 조건을 쓴다
-  const choiceInput: RestorationAnswer | ActionDone | null = doneKind
+  const statusChoice = usingChoices && choiceKind === 'RESTORATION_STATUS'
+  const choiceInput: RestorationAnswer | ActionDone | RestorationStatusAnswer | null = doneKind
     ? { action_done: true }
-    : selectionInput
+    : statusChoice
+      ? (restorationStatus ? { restoration_status: restorationStatus } : null)
+      : selectionInput
   const tooLong = !usingChoices && draft.length > MAX_RESULT_LENGTH
   const canRetry = usingChoices ? choiceInput !== null : draft.length > 0 && !tooLong
   const goToCase = { label: '지금 상황 보기', onClick: () => navigate({ pathname: '/case', search }) }
@@ -303,7 +319,7 @@ export function ResultInputPage() {
    */
   async function submitToServer(
     historyId: number,
-    input: string | RestorationAnswer | ActionDone,
+    input: string | RestorationAnswer | ActionDone | RestorationStatusAnswer,
   ): Promise<SubmitOutcome | null> {
     let acceptedId: number
     try {
@@ -533,6 +549,17 @@ export function ResultInputPage() {
               <Button variant="outline" disabled={formLocked} onClick={goToCase.onClick}>
                 {DONE_LABELS[doneKind].notYet}
               </Button>
+            </div>
+          ) : statusChoice && questions ? (
+            <div className="flex flex-col gap-3">
+              <p id={scopeTitleId} className="text-17 font-bold">{questions.join(' ')}</p>
+              <PillChoices
+                options={STATUS_OPTIONS}
+                selected={restorationStatus}
+                onSelect={setRestorationStatus}
+                labelledBy={scopeTitleId}
+                disabled={formLocked}
+              />
             </div>
           ) : usingChoices ? (
             <>

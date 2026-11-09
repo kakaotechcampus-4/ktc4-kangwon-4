@@ -359,6 +359,7 @@ class AgentGraph:
             input=trigger_input,
             restoration_answer=getattr(request.trigger, "restoration_answer", None),
             action_done=getattr(request.trigger, "action_done", None),
+            restoration_status_answer=getattr(request.trigger, "restoration_status_answer", None),
             case_snapshot=request.case_snapshot,
             fact_overlays=analysis_overlays,
             conflict_confirmation=(request.trigger if isinstance(request.trigger, ConflictConfirmedTrigger) else None),
@@ -398,6 +399,7 @@ class AgentGraph:
                     output is None
                     and component_input.restoration_answer is None
                     and component_input.action_done is None
+                    and component_input.restoration_status_answer is None
                 )
                 or retained is not None
             )
