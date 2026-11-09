@@ -2,6 +2,19 @@
 
 실서버에 develop을 올릴 때 이 순서대로 칩니다. 명령은 모두 EC2의 `/home/ubuntu/app`(저장소, `docker-compose.prod.yml`이 있는 곳)에서 칩니다.
 
+## 0. 버튼으로 올리기 (DB 표가 바뀌지 않는 배포)
+
+아래 1~4단계를 그대로 묶은 `scripts/deploy.sh`를 GitHub Actions가 대신 돌립니다.
+
+1. GitHub → Actions → **Deploy BE** → **Run workflow** (브랜치는 develop 그대로)
+2. **올릴 커밋**에 정한 커밋을 넣습니다. 비우면 그 순간의 develop 최신입니다. 처음이면 **확인만**을 체크해 한 번 돌려 봅니다
+3. 끝나면 로그의 "서버 출력"에서 `배포 끝: <이전> → <새 커밋>, 백업 <TS>`를 확인합니다. 이전 커밋과 TS는 되돌릴 때(5단계) 씁니다
+
+- 부트캠프가 팀마다 만든 `ktc-github-deploy` 역할로 로그인해 Session Manager로 명령을 보냅니다. 액세스 키를 만들지 않고 22번 포트도 열지 않습니다
+- **멈추는 경우**: develop에 없는 커밋, 지금보다 앞선 커밋(되돌리기는 5단계), `backend/sql`·`backend/app/be/models`가 바뀐 배포. 표가 바뀌는 배포는 SQL을 넣고 켜야 해서 아래 순서대로 손으로 합니다
+- 백업 뒤 반영이나 확인에서 실패하면 멈췄던 FastAPI를 다시 켜고 빨간불로 끝납니다. 서버 출력의 마지막 줄부터 봅니다
+- develop에 머지할 때마다 자동으로 올리지는 않습니다. QA·녹화 중에 재시작되면 돌던 판단이 실패(`RETRY`)로 바뀝니다
+
 - 서버 구성: Caddy(80·443, `Caddyfile`) → FastAPI(`127.0.0.1:8000`) → MySQL `8.0.46`(`127.0.0.1:3306`). 서류 파일은 `document_data` 볼륨(`/data/documents`)에 있습니다
 - 운영은 `ENVIRONMENT=prod`라 **서버를 켜도 표를 만들거나 지우지 않습니다**(`backend/app/main.py`). 표를 만들고 고치는 건 `backend/sql/`의 SQL로 합니다
 - 명령을 짧게 쓰려고 아래 두 변수를 먼저 만들어 둡니다. `C`는 compose, `MYSQL`은 DB 컨테이너 안의 mysql 클라이언트입니다

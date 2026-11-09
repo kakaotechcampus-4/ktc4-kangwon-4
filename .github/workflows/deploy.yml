@@ -19,9 +19,6 @@ on:
         description: "확인만 하고 서버는 건드리지 않기"
         type: boolean
         default: false
-  # 이 브랜치에서는 확인만 돌려 본다(머지 전 시험용)
-  push:
-    branches: [chore/deploy-oidc-check]
 
 permissions:
   id-token: write   # OIDC 토큰 발급. 빠지면 AWS 로그인이 실패한다
@@ -44,12 +41,11 @@ jobs:
         id: target
         env:
           INPUT_COMMIT: ${{ inputs.commit }}
-          CHECK_ONLY: ${{ github.event_name == 'push' || inputs.check_only }}
+          CHECK_ONLY: ${{ inputs.check_only }}
         run: |
           # 입력값을 서버 명령에 그대로 넣으므로 커밋 해시 모양만 받는다
           TARGET=${INPUT_COMMIT:-$GITHUB_SHA}
-          [ "$GITHUB_EVENT_NAME" != push ] || TARGET=origin/develop
-          if [ "$TARGET" != origin/develop ] && ! [[ "$TARGET" =~ ^[0-9a-f]{7,40}$ ]]; then
+          if ! [[ "$TARGET" =~ ^[0-9a-f]{7,40}$ ]]; then
             echo "커밋 해시(7~40자)만 넣어 주세요: $TARGET"; exit 1
           fi
           echo "target=$TARGET" >> "$GITHUB_OUTPUT"
