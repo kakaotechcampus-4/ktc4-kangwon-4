@@ -379,14 +379,55 @@ describe('ConfirmChangePage — 서버', () => {
     expect(decisions(fetchMock)).toHaveLength(1)
   })
 
-  /** 같은 선택으로 다시 보내도 풀리지 않는 실패다. 홈 실패 카드가 이유를 안내한다 */
-  it('그 밖의 실패면 홈으로 간다', async () => {
-    serve({ decide: [ACCEPTED], judged: [failed('CONTACT_SUPPORT')] })
+  /**
+   * 같은 선택으로 다시 보내도 풀리지 않는 실패다. 충돌이 그대로 남아 홈에 가면 충돌 카드만 다시
+   * 뜨고 실패 이유는 사라진다(#313). 여기 머물러 알리고, 같은 선택은 다시 보내지 못하게 한다
+   */
+  it.each(['CONTACT_SUPPORT', 'NONE', 'RESUBMIT_INPUT', null] as const)(
+    '다시 해도 풀리지 않는 실패(%s)면 머물러 알리고, 같은 선택은 다시 보낼 수 없다',
+    async (code) => {
+      const fetchMock = serve({ decide: [ACCEPTED], judged: [failed(code)] })
+      const router = renderWith(TWO_CONFLICTS, '')
+
+      await decideAndWait()
+
+      expect(router.state.location.pathname).toBe('/confirm')
+      expect(screen.getByRole('button', { name: /필요함/ })).toHaveAttribute('aria-pressed', 'true')
+      expect(proceedButton()).toBeDisabled()
+      expect(screen.getByRole('button', { name: '지금 상황 보기' })).toBeInTheDocument()
+
+      await advance(INTERVAL_MS * 3)
+      expect(decisions(fetchMock)).toHaveLength(1)
+    },
+  )
+
+  /** 충돌이 남아 있는 동안은 결정을 다시 받는다. 고른 것을 바꾸면 그 선택으로 다시 보낼 수 있다 */
+  it('풀리지 않는 실패 뒤에 고른 것을 바꾸면 바꾼 선택으로 다시 보낼 수 있다', async () => {
+    const fetchMock = serve({ decide: [ACCEPTED], judged: [failed('NONE'), UPDATED] })
     const router = renderWith(TWO_CONFLICTS, '')
 
     await decideAndWait()
+    fireEvent.click(screen.getByRole('button', { name: /필요 없음/ }))
 
-    expect(router.state.location.pathname).toBe('/case')
+    expect(proceedButton()).toBeEnabled()
+    fireEvent.click(proceedButton())
+    await advance(INTERVAL_MS)
+
+    const [first, second] = decisions(fetchMock)
+    expect(second).not.toEqual(first)
+    expect(router.state.location.pathname).toBe('/replan')
+  })
+
+  /** 바꿨다가 처음 보낸 선택으로 되돌리면, 서버가 풀리지 않는다고 한 그 선택이다 */
+  it('바꿨다가 실패한 선택으로 되돌리면 다시 잠긴다', async () => {
+    serve({ decide: [ACCEPTED], judged: [failed('NONE')] })
+    renderWith(TWO_CONFLICTS, '')
+
+    await decideAndWait()
+    fireEvent.click(screen.getByRole('button', { name: /필요 없음/ }))
+    chooseIncoming('필요함')
+
+    expect(proceedButton()).toBeDisabled()
   })
 
   /** 이미 해결됐거나 직전 결정이 판단 중이다. 결과 입력이 지금 상태를 다시 물어 맞는 화면으로 보낸다 */
