@@ -267,6 +267,13 @@ describe('toResultsEntry', () => {
     })
   })
 
+  /** 등록된 절차를 다 마쳐 받을 결과가 없다(#315). 할 일이 비어 와도 읽지 못한 것이 아니라 홈이 안내할 상태다 */
+  it('등록된 절차를 다 마쳤으면 홈으로 보낸다', () => {
+    expect(toResultsEntry(entry({ judgment_status: 'PROCEDURES_COMPLETED', case_history_id: 40 }))).toEqual({
+      kind: 'ELSEWHERE',
+    })
+  })
+
   it('더 알려주셔야 풀리는 실패면 무엇이 필요한지와 판단 번호를 담는다', () => {
     expect(
       toResultsEntry(
@@ -356,6 +363,13 @@ const CONFLICTS = [
 const UNRECOGNIZED = { kind: 'STAY', state: { kind: 'UNRECOGNIZED' } }
 
 describe('toSubmitOutcome', () => {
+  /** 다음 할 일이 없는 것이 정상이다(#315). 반영 결과는 다음 할 일을 꼭 그려서 그쪽으로 보내지 않는다 */
+  it('등록된 절차를 다 마쳤으면 할 일이 비어 있어도 마친 것으로 둔다', () => {
+    expect(
+      toSubmitOutcome(judged({ result: 'PROCEDURES_COMPLETED', changes: [], blocker: null, next_action: null })),
+    ).toEqual({ kind: 'FINISHED' })
+  })
+
   it('반영됐으면 바뀐 내용과 새 할 일을 싣고 재계획으로 보낸다', () => {
     expect(toSubmitOutcome(judged(REPLANNED))).toEqual({
       kind: 'REPLAN',
