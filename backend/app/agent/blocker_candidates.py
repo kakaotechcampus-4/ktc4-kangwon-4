@@ -609,8 +609,9 @@ def _prepared_restoration_wait(snapshot, sources, mutations, bindings, steps):
     ) if item.procedure_step == target), None)
     status = _values(snapshot, mutations).get("restoration_status")
     step = next((item for item in steps if item.procedure_step == target), None)
+    # 진행 상태를 한 번도 듣지 못했으면(None) 아래에서 기존 진행 상태 질문으로 먼저 묻는다
     if (progress is None or not progress.requirements_confirmed or progress.status == "COMPLETED"
-            or status not in {"NOT_STARTED", "IN_PROGRESS"} or step is None
+            or status not in {"NOT_STARTED", "IN_PROGRESS", None} or step is None
             or procedure_applicability(step, snapshot, mutations.fact_changes) is not True
             or procedure_constraints(step, snapshot, mutations.fact_changes, mutations.procedure_progress_changes,
                                      known_steps=steps, procedure_bindings=bindings)):
@@ -623,6 +624,12 @@ def _prepared_restoration_wait(snapshot, sources, mutations, bindings, steps):
         "PERFORM_RESTORATION", expand_evidence([evidence[ref] for ref in finding.evidence_refs], evidence),
     ):
         return None
+    if status is None:
+        # "마지막으로 알려주신 상태"가 없으니 대기 문구 대신 기존 질문을 쓴다. 답하면 위 대기 흐름으로 이어진다
+        return ({"candidate_id": "missing:restoration_status",
+                 "description": f"{_FIELD_LABELS['restoration_status']} 확인이 필요합니다.",
+                 "evidence_refs": list(dict.fromkeys([*finding.evidence_refs, *progress.evidence_refs]))},
+                _QUESTIONS["restoration_status"])
     label = "아직 시작 전" if status == "NOT_STARTED" else "진행 중"
     refs = list(dict.fromkeys([*finding.evidence_refs, *progress.evidence_refs,
                               *(ref for fact in snapshot.facts if fact.field_path == "restoration_status"

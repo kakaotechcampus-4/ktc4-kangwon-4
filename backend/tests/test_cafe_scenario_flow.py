@@ -503,3 +503,33 @@ def test_insurance_completion_waits_for_restoration_report_then_continues_to_ret
     with Session(case_engine) as session:
         case = session.get(Case, flow.case_id)
         assert (case.restoration_status, case.case_status) == ("COMPLETED", "IN_PROGRESS")
+
+
+def test_prepared_restoration_without_reported_status_asks_status_instead_of_failing(case_engine, monkeypatch):
+    # 운영 11/09: 진행 상태를 말한 적 없이 철거 준비만 확인하고 다른 절차를 다 끝내면
+    # 할 일·질문·완료가 모두 없어 Supervisor가 멈췄다(STRUCTURED_OUTPUT_FAILED)
+    fake = ScenarioModel(report_progress=True)
+    monkeypatch.setattr(runtime.StructuredLLMClient, "from_env", classmethod(lambda cls, *a, **k: fake))
+    monkeypatch.setattr(runtime.LangfuseTraceSink, "from_env", classmethod(lambda cls, *a, **k: None))
+    flow = CafeFlow(case_engine)
+    flow.plan()
+    flow.submit(raw_input=LANDLORD)
+    for _ in range(25):
+        entry, action = flow.entry()
+        if entry.judgment_status == "NEEDS_MORE_INFO":
+            break
+        assert entry.result_input_kind == "ACTION_DONE", flow.turns
+        assert action not in {"PERFORM_RESTORATION", "RETURN_PREMISES"}, flow.turns
+        outcome = flow.submit(action_done=True)
+    else:
+        pytest.fail(f"진행 상태 질문에 도달하지 못함: {flow.turns}")
+    assert outcome.review_proof.verdict == "PASS"
+    assert outcome.review_subject.supervisor_draft.decision.questions_for_user == [
+        "원상복구 작업이 어디까지 진행됐는지 알려주세요."
+    ]
+    with Session(case_engine) as session:
+        assert session.get(Case, flow.case_id).restoration_status == "UNKNOWN"
+    answered = flow.submit(raw_input=NOT_STARTED)
+    decision = answered.review_subject.supervisor_draft.decision
+    assert decision.decision_type == "NEEDS_MORE_INFO" and decision.next_action is None
+    assert "아직 시작 전" in " ".join(decision.questions_for_user)
