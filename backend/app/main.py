@@ -20,12 +20,15 @@ from app.be.services import official_document
 from app.be.services import procedure_registry
 from app.be.services import reviewed_procedure
 from app.common.config import get_settings
+from app.common.error_alert import install_error_alert
 
 logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 가장 먼저 단다. 아래 시작 작업(공식 자료 적재 등)이 실패해도 알림이 가게 한다
+    install_error_alert(get_settings().DISCORD_ERROR_WEBHOOK_URL, get_settings().ENVIRONMENT)
     if get_settings().ENVIRONMENT == "dev":
         reset_all_tables()
     # 절차 마스터 표는 Case가 생기기 전부터 있어야 한다. 가입 요청 안에서 적재하면

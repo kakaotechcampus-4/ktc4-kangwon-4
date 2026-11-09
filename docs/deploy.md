@@ -186,3 +186,12 @@ $C exec -T fastapi python -m scripts.import_reviewed_procedures --case-id <확�
 ```
 
 같은 버전을 재실행해도 근거를 중복 추가하지 않고, 과거 판단의 근거는 덮어쓰지 않습니다. 실패하면 다음 대상을 진행하지 말고 해당 Case의 결과를 확인합니다. 실제 이미지·격리 DB 검증과 운영 반영 범위는 #239에서 추적합니다.
+
+### 서버 오류를 Discord로 받기
+
+ERROR 로그(처리되지 않은 500, 판단 실패, 카카오 502 등)가 나면 Discord 채널로 한 줄씩 알립니다(`backend/app/common/error_alert.py`).
+
+- 보내는 것: 로그 위치, 코드에 적은 한 줄(Case·판단 번호 정도), 오류 종류 이름, 서버 버전, 시각. **예외 메시지와 스택은 보내지 않습니다**(사장님 글·서류 값이 섞일 수 있음). 같은 오류는 1분에 한 번만 보냅니다
+- 켜기: 채널 설정 → 연동 → 웹후크에서 만든 주소를 `.env.prod`의 `DISCORD_ERROR_WEBHOOK_URL`에 넣고 `$C up -d fastapi`. 주소는 비밀값이라 문서·PR·채팅에 붙이지 않습니다. 비우면 알리지 않습니다
+- `.env.prod`를 바꾸면 mysql 컨테이너도 다시 만들어집니다(3단계 참고, 데이터는 볼륨에 남음)
+- 오류 내용은 알림을 보고 서버에서 `$C logs --since 10m fastapi`로 확인합니다
