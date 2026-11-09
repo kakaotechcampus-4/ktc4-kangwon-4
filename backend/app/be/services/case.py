@@ -20,7 +20,7 @@ from app.be.models.case_checklist import CaseChecklist, CaseChecklistHistory
 from app.be.models.case_history import CaseHistory
 from app.be.models.evidence import ConflictReference, Evidence
 from app.be.models.mixins import KST, kst_now
-from app.be.models.procedure_step import CaseProcedureStep
+from app.be.models.procedure_step import CaseProcedureStep, ProcedureStep
 from app.be.schemas.case import (
     CaseClosureReportRequest,
     CaseClosureReportResponse,
@@ -48,7 +48,8 @@ from app.agent.roadmap import TASKS as ROADMAP_TASKS, record_checklist
 from app.be.services import procedure_registry
 from app.be.services import reviewed_procedure as reviewed_procedure_service
 from app.be.services import roadmap as roadmap_service
-from app.common.agent_dto import ActionDoneAnswer, ActionDoneCode
+from app.be.services.decision_record import current_app_version
+from app.common.agent_dto import ActionDoneAnswer, ActionDoneCode, RestorationStatusAnswer
 
 # [했어요 / 아직 안 했어요]로 답하는 할 일(AI 쪽 ActionDoneCode와 같은 목록)
 _ACTION_DONE_CODES = frozenset(get_args(ActionDoneCode))
@@ -243,10 +244,14 @@ def get_case(session: Session, member_id: int) -> CaseGetResponse:
         questions_for_user=latest_history.questions_for_user,
         # 실패했을 때만 채워진다. 화면은 이 값으로 "다시 시도" / "다시 말씀해 주세요" /
         # "문의" 중 무엇을 보여줄지 정한다.
-        recovery_action_code=latest_history.recovery_action_code,
+        recovery_action_code=_shown_recovery(latest_history)[0],
         requested_field_paths=latest_history.requested_field_paths,
-        retryable=latest_history.retryable,
+        retryable=_shown_recovery(latest_history)[1],
         changes=changes,
+        last_next_action_title=(
+            _last_next_action_title(session, latest_history)
+            if latest_history.judgment_status == "FAILED" else None
+        ),
     )
 
 
@@ -309,6 +314,7 @@ def get_case_results_entry(session: Session, member_id: int) -> CaseResultsEntry
     if latest_history.judgment_status == "NEEDS_MORE_INFO":
         return CaseResultsEntryResponse(
             judgment_status="NEEDS_MORE_INFO",
+            result_input_kind="RESTORATION_STATUS" if _asks_restoration_status(session, latest_history) else "TEXT",
             case_history_id=latest_history.id,
             questions_for_user=latest_history.questions_for_user,
         )
@@ -439,6 +445,24 @@ def submit_case_results(
 
     confirmation = _submitted_action_done(session, latest_history) if submit_request.action_done else None
 
+    status_answer = (
+        RestorationStatusAnswer(restoration_status=submit_request.restoration_status)
+        if submit_request.restoration_status is not None else None
+    )
+    if status_answer is not None:
+        asked = latest_history.judgment_status == "NEEDS_MORE_INFO" and _asks_restoration_status(session, latest_history)
+        # 실패 이력에는 질문이 없다. 이미 접수한 버튼 답을 그대로 다시 보낼 때만 허용한다.
+        retrying_same_status = (
+            latest_history.source == "USER_INPUT"
+            and latest_history.judgment_status == "FAILED"
+            and latest_history.recovery_action_code == "RETRY"
+            and latest_history.retryable is True
+            and latest_history.restoration_status_answer == status_answer.model_dump(mode="json")
+            and latest_history.raw_input == status_answer.to_input_text()
+        )
+        if not (asked or retrying_same_status):
+            raise HTTPException(status_code=422, detail="지금 질문에는 원상복구 진행 상태 버튼 답을 보낼 수 없습니다.")
+
     history = case_history_crud.create_case_history(
         session,
         CaseHistory(
@@ -446,16 +470,63 @@ def submit_case_results(
             raw_input=(
                 answer.to_input_text() if answer is not None
                 else confirmation.to_input_text() if confirmation is not None
+                else status_answer.to_input_text() if status_answer is not None
                 else submit_request.raw_input
             ),
             restoration_answer=answer.model_dump(mode="json") if answer is not None else None,
             action_done=confirmation.model_dump(mode="json") if confirmation is not None else None,
+            restoration_status_answer=status_answer.model_dump(mode="json") if status_answer is not None else None,
             source="USER_INPUT",
             judgment_status="PENDING",
         ),
     )
     session.commit()
     return CaseResultsSubmitAcceptedResponse(case_history_id=history.id)
+
+
+def _asks_restoration_status(session: Session, history: CaseHistory) -> bool:
+    """지금 질문이 원상복구 진행 상태를 묻는지. 그러면 글 대신 버튼으로 받는다.
+
+    AI가 저장한 막힌 일 후보로 정한다. 진행 상태를 처음 묻는 질문("missing:restoration_status")과
+    철거 준비 뒤 진행을 기다리는 질문(원상복구 작업 절차의 "procedure:{절차 번호}")이다.
+    """
+    candidate = history.priority_blocker.candidate_id if history.priority_blocker is not None else None
+    if candidate == "missing:restoration_status":
+        return True
+    prefix, _, step_id = (candidate or "").partition(":")
+    if prefix != "procedure" or not step_id.isdigit():
+        return False
+    step = session.get(ProcedureStep, int(step_id))
+    return step is not None and step.step_code == "PERFORM_RESTORATION"
+
+
+def _shown_recovery(history: CaseHistory) -> tuple[str | None, bool | None]:
+    """화면에 보여줄 실패 복구 안내. 저장값 그대로이되, 고칠 수 없다고 끝난 실패(NONE)도
+    판단한 서버와 지금 서버의 커밋이 다르면 [다시 판단하기]를 보여 준다(RETRY).
+    같은 코드로 다시 돌리면 같은 이유로 또 실패하지만, 고친 코드가 올라왔으면 풀릴 수 있어서다.
+    두 커밋 중 하나라도 모르면 바꾸지 않는다.
+    """
+    current = current_app_version()
+    if (
+        history.judgment_status == "FAILED"
+        and history.recovery_action_code == "NONE"
+        and history.source in ("CASE_CREATED", "USER_INPUT", "DOCUMENT_SUBMITTED")
+        and history.judged_version is not None
+        and current is not None
+        and history.judged_version != current
+    ):
+        return "RETRY", True
+    return history.recovery_action_code, history.retryable
+
+
+def _last_next_action_title(session: Session, history: CaseHistory) -> str | None:
+    """실패하기 전 마지막으로 보여 준 할 일 제목. 판단을 다시 하지 않고 저장된 기록만 읽는다."""
+    prior = max(
+        (row for row in case_history_crud.get_case_histories_by_case_id(session, history.case_id)
+         if row.id < history.id and row.judgment_status == "DONE" and row.next_action is not None),
+        key=lambda row: row.id, default=None,
+    )
+    return prior.next_action if prior is not None else None
 
 
 def _current_action_done(history: CaseHistory) -> ActionDoneAnswer | None:
@@ -553,12 +624,13 @@ def retry_case_judgment(session: Session, member_id: int) -> CaseRetryResponse:
         history is None
         or history.source not in ("CASE_CREATED", "USER_INPUT", "DOCUMENT_SUBMITTED")
         or history.judgment_status != "FAILED"
-        or history.recovery_action_code != "RETRY"
+        or _shown_recovery(history)[0] != "RETRY"
     ):
         raise HTTPException(status_code=409, detail="다시 판단할 수 있는 판단이 없습니다.")
 
     history.judgment_status = "PENDING"
     history.judged_at = None
+    history.judged_version = None
     history.failure_code = None
     history.recovery_action_code = None
     history.retryable = None

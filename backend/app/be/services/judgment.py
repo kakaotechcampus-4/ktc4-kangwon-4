@@ -147,6 +147,7 @@ def _read_judgment_input(
         client_event_id=None,
         restoration_answer=history.restoration_answer,
         action_done=case_service.read_action_done(session, history),
+        restoration_status_answer=history.restoration_status_answer,
     )
     return graph_input, agent_runtime_service.build_known_procedure_steps(session)
 

@@ -204,3 +204,70 @@ def test_retrying_schedules_the_judgment_of_that_history(monkeypatch):
     assert [(task.func, task.args) for task in background_tasks.tasks] == [
         (judgment.run_judgment_in_background, (42,))
     ]
+
+
+def _fail_without_recovery(engine, history_id: int, judged_version: str | None) -> None:
+    """고칠 수 없다고 끝난 실패(NONE). 그 판단을 돌린 서버의 커밋을 남긴다."""
+
+    with Session(engine) as session:
+        history = get_case_history_by_id(session, history_id)
+        history.failure_code = "STRUCTURED_OUTPUT_FAILED"
+        history.recovery_action_code = "NONE"
+        history.retryable = False
+        history.judged_version = judged_version
+        session.commit()
+
+
+def test_a_no_recovery_failure_is_retried_after_a_new_server_is_deployed(case_world, monkeypatch):
+    # 11/09 운영: 코드 검사에 걸린 실패(NONE)는 고친 코드를 올려도 같은 입력으로 다시 판단할 길이 없었다
+    member_id, case_id, _ = case_world.sign_up()
+    history_id = case_world.add_history(case_id, "USER_INPUT", "FAILED")
+    _fail_without_recovery(case_world.engine, history_id, judged_version="a6ed43a")
+    monkeypatch.setenv("APP_VERSION", "6f8b619")
+
+    with Session(case_world.engine) as session:
+        home = case_service.get_case(session, member_id)
+        assert (home.recovery_action_code, home.retryable) == ("RETRY", True)
+        # 저장된 실패 기록은 그대로다. 화면에 보여줄 안내만 바뀐다
+        assert get_case_history_by_id(session, history_id).recovery_action_code == "NONE"
+
+    assert _retry(case_world.engine, member_id).case_history_id == history_id
+    with Session(case_world.engine) as session:
+        history = get_case_history_by_id(session, history_id)
+        assert (history.judgment_status, history.judged_version) == ("PENDING", None)
+
+
+@pytest.mark.parametrize(("judged_version", "app_version"), [
+    ("6f8b619", "6f8b619"),  # 같은 코드로 다시 돌리면 같은 이유로 또 실패한다
+    (None, "6f8b619"),       # 판단한 서버를 모른다(이 칸이 생기기 전 실패)
+    ("a6ed43a", None),       # 지금 서버를 모른다(GIT_SHA를 빠뜨린 배포)
+])
+def test_a_no_recovery_failure_stays_without_retry_unless_both_versions_differ(
+    case_world, monkeypatch, judged_version, app_version,
+):
+    member_id, case_id, _ = case_world.sign_up()
+    history_id = case_world.add_history(case_id, "USER_INPUT", "FAILED")
+    _fail_without_recovery(case_world.engine, history_id, judged_version)
+    if app_version is None:
+        monkeypatch.delenv("APP_VERSION", raising=False)
+    else:
+        monkeypatch.setenv("APP_VERSION", app_version)
+
+    with Session(case_world.engine) as session:
+        home = case_service.get_case(session, member_id)
+        assert (home.recovery_action_code, home.retryable) == ("NONE", False)
+    with pytest.raises(HTTPException) as error:
+        _retry(case_world.engine, member_id)
+    assert error.value.status_code == 409
+
+
+def test_a_failed_judgment_shows_the_last_task_it_was_about(case_world):
+    # 실패 화면의 [새 상황 알려주기]가 무엇에 대해 알려줄지 보이게 마지막 할 일 제목을 준다
+    member_id, case_id, signup_id = case_world.sign_up()
+    with Session(case_world.engine) as session:
+        last_task = get_case_history_by_id(session, signup_id).next_action
+    assert last_task is not None
+    case_world.add_history(case_id, "USER_INPUT", "FAILED")
+
+    with Session(case_world.engine) as session:
+        assert case_service.get_case(session, member_id).last_next_action_title == last_task

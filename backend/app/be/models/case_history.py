@@ -21,6 +21,8 @@ class CaseHistory(CreatedAtMixin, table=True):
     # [했어요] 버튼 답. 어느 할 일·절차에 답했는지 남긴다({"action_code": ..., "procedure_step_id": ...}).
     # 판단 결과가 next_action_code를 새 행동으로 덮어쓰기 때문에 따로 둔다. 버튼으로 답하지 않은 이력은 NULL
     action_done: dict | None = Field(default=None, sa_column=Column(JSON, nullable=True))
+    # 원상복구 진행 상태 버튼 답({"restoration_status": ...}). 버튼으로 답하지 않은 이력은 NULL
+    restoration_status_answer: dict | None = Field(default=None, sa_column=Column(JSON, nullable=True))
     conflict_snapshot: dict | None = Field(
         default=None,
         sa_column=Column(JSON, nullable=True),
@@ -122,6 +124,14 @@ class CaseHistory(CreatedAtMixin, table=True):
         default=None,
         sa_column=Column(DateTime, nullable=True),
         description="판단이 끝난 시각. 판단 중(PENDING)이면 NULL",
+    )
+    judged_version: str | None = Field(
+        default=None,
+        sa_column=Column(String(40), nullable=True),
+        description=(
+            "판단한 서버의 커밋(/health의 version). 고칠 수 없다고 끝난 실패도 서버가 바뀌면 다시 판단할 수 있게 "
+            "비교한다. 판단 중이거나 서버 버전을 모르면 NULL"
+        ),
     )
     priority_blocker_id: int | None = Field(
         default=None, sa_column=Column(BigInteger, ForeignKey("blocker.id", use_alter=True, name="fk_case_history_priority_blocker"), nullable=True)
