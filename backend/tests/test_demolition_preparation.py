@@ -21,7 +21,7 @@ from app.agent.schemas import (
     ProcedureStepRef,
     ReviewSubject,
 )
-from app.agent.supervisor.agent import SupervisorAgent, SupervisorGuardrailError
+from app.agent.supervisor.agent import SupervisorAgent
 
 EXCERPT = "점포철거비 정산 증빙: 공사내역서, 전자세금계산서, 이체확인증, 점포철거 전·후 사진."
 DOCUMENTS = ["공사내역서", "전자세금계산서", "이체확인증", "점포철거 전·후 사진"]
@@ -189,6 +189,11 @@ def test_confirmed_preparation_with_no_other_grounded_action_does_not_restore_ol
                                     request.source_results, MutationSet(fact_changes=[],
                                     procedure_progress_changes=[], support_match_updates=[]), evidence)
     assert rows == []
-    # With no grounded action or missing-information question, fail closed.
-    with pytest.raises(SupervisorGuardrailError):
-        asyncio.run(SupervisorAgent(ChoiceModel(), clock=lambda: NOW, max_local_attempts=1).draft(request))
+    before = deepcopy(request.case_snapshot)
+    draft = asyncio.run(SupervisorAgent(ChoiceModel(), clock=lambda: NOW, max_local_attempts=1).draft(request))
+    assert draft.decision.decision_type == "NEEDS_MORE_INFO"
+    assert draft.decision.next_action is None
+    assert "아직 시작 전" in draft.decision.questions_for_user[0]
+    assert "변화" in draft.decision.questions_for_user[0]
+    assert draft.mutations.procedure_progress_changes == []
+    assert request.case_snapshot == before
