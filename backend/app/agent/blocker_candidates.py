@@ -17,6 +17,7 @@ from app.agent.action_catalog import (
 )
 from app.agent.claim_safety import demolition_preparation_only, expand_evidence
 from app.agent.procedure_tool.rules import (
+    business_type_code,
     employment_history,
     employment_history_conflicts,
     procedure_applicability,
@@ -124,10 +125,10 @@ def candidate_decision_fields(
     return _decision_fields(candidate, action)
 
 
-def _completion_questions(snapshot, sources, mutations, bindings):
+def _completion_questions(snapshot, sources, mutations, bindings, known_steps):
     completed = {
         (item.procedure_step.procedure_step_id, item.procedure_step.step_code)
-        for item in effective_procedure_progress(snapshot, mutations)
+        for item in effective_procedure_progress(snapshot, mutations, known_steps=known_steps, procedure_bindings=bindings)
         if item.status == "COMPLETED"
     }
     questions = {}
@@ -183,7 +184,7 @@ def build_blocker_candidates(
     resolved_bindings = resolve_procedure_bindings(steps, procedure_bindings)
     pending_completions = {
         item["candidate_id"]
-        for item in _completion_questions(snapshot, sources, mutations, resolved_bindings)
+        for item in _completion_questions(snapshot, sources, mutations, resolved_bindings, steps)
     }
     values = _values(snapshot, mutations)
     history_question = missing_info_fields(
@@ -335,7 +336,8 @@ def build_blocker_candidates(
                 if applicability_unknown
                 else [f"{label}에 필요한 서류와 제출 방법을 확인해 주시겠습니까?"]
                 if confirmation
-                else ["제출한 신고서와 첨부서류가 접수되었는지 확인해 주시겠습니까?"]
+                # "진행하세요" 할 일에 접수 확인을 물으면 어긋난다. 접수·처리는 제출 뒤 처리 결과 확인이 묻는다
+                else [f"{label}를 제출하셨나요?"]
             )
             if logical_code in {
                 "PERFORM_RESTORATION", "RETURN_PREMISES", "SETTLE_EMPLOYEE_PAYMENTS",
@@ -473,10 +475,11 @@ def missing_info_fields(
     *,
     selected_candidate_id: str | None = None,
     known_procedure_steps: Sequence[KnownProcedureStep] = (),
+    include_prepared_restoration: bool = False,
 ) -> dict[str, Any] | None:
     """Ask about one unresolved decision blocker in the existing question order."""
     completion_questions = _completion_questions(
-        snapshot, sources, mutations, procedure_bindings or {}
+        snapshot, sources, mutations, procedure_bindings or {}, known_procedure_steps,
     )
     values = _values(snapshot, mutations)
     restoration_detail_unnecessary = (
@@ -572,11 +575,18 @@ def missing_info_fields(
         {"candidate_id": f"missing:{path}", "description": f"{_FIELD_LABELS[path]} 확인이 필요합니다.", "evidence_refs": refs}
         for path in ordered
     ]
+    waiting = None
+    if not blockers and include_prepared_restoration:
+        waiting = _prepared_restoration_wait(snapshot, sources, mutations, procedure_bindings or {}, known_procedure_steps)
+        if waiting is not None:
+            blocker, _ = waiting
+            blockers.append(blocker)
     selected = next((item for item in blockers if selected_candidate_id is None or item["candidate_id"] == selected_candidate_id), None)
     if selected is None:
         return None
     question = (
-        _COMPLETION_QUESTION if selected["candidate_id"].startswith("procedure:")
+        waiting[1] if waiting is not None and selected == waiting[0]
+        else _COMPLETION_QUESTION if selected["candidate_id"].startswith("procedure:")
         else _QUESTIONS[selected["candidate_id"].removeprefix("missing:")]
     )
     return {
@@ -591,12 +601,53 @@ def missing_info_fields(
     }
 
 
+def _prepared_restoration_wait(snapshot, sources, mutations, bindings, steps):
+    """Ask for a later work report, without repeating preparation or authorizing demolition."""
+    target = bindings.get("PERFORM_RESTORATION")
+    progress = next((item for item in effective_procedure_progress(
+        snapshot, mutations, known_steps=steps, procedure_bindings=bindings,
+    ) if item.procedure_step == target), None)
+    status = _values(snapshot, mutations).get("restoration_status")
+    step = next((item for item in steps if item.procedure_step == target), None)
+    if (progress is None or not progress.requirements_confirmed or progress.status == "COMPLETED"
+            or status not in {"NOT_STARTED", "IN_PROGRESS"} or step is None
+            or procedure_applicability(step, snapshot, mutations.fact_changes) is not True
+            or procedure_constraints(step, snapshot, mutations.fact_changes, mutations.procedure_progress_changes,
+                                     known_steps=steps, procedure_bindings=bindings)):
+        return None
+    evidence = {item.evidence_id: item for item in snapshot.evidence_records}
+    evidence.update((item.evidence_id, item) for source in sources for item in source.output.evidence_records)
+    finding = next((finding for source in sources if isinstance(source.output, InfoAnalysisResult)
+                    for finding in source.output.procedure_findings if finding.procedure_step == target), None)
+    if finding is None or not demolition_preparation_only(
+        "PERFORM_RESTORATION", expand_evidence([evidence[ref] for ref in finding.evidence_refs], evidence),
+    ):
+        return None
+    label = "아직 시작 전" if status == "NOT_STARTED" else "진행 중"
+    refs = list(dict.fromkeys([*finding.evidence_refs, *progress.evidence_refs,
+                              *(ref for fact in snapshot.facts if fact.field_path == "restoration_status"
+                                for ref in fact.evidence_refs),
+                              *(ref for change in mutations.fact_changes if change.field_path == "restoration_status"
+                                for ref in change.source_evidence_refs)]))
+    return ({"candidate_id": f"procedure:{target.procedure_step_id}",
+             "description": "철거 전 증빙 준비는 확인했지만, 실제 원상복구·철거 작업은 아직 완료되지 않았습니다.",
+             "evidence_refs": refs},
+            f"마지막으로 알려주신 원상복구 상태는 ‘{label}’입니다. 이후 실제 작업의 진행·완료에 변화가 있다면 알려주세요.")
+
+
 def candidate_decision_violations(
     decision: DecisionDraft,
     candidates: Sequence[dict[str, Any]],
     fallback: dict[str, Any] | None,
+    completed: dict[str, Any] | None = None,
 ) -> list[tuple[str, str]]:
     """Shared by Supervisor and independent Review, including a forced-model PASS."""
+    if decision.decision_type == "PROCEDURES_COMPLETED":
+        if candidates or fallback is not None or completed is None:
+            return [("/decision", "registered procedures are not verified complete")]
+        actual = decision.model_dump(mode="json")
+        return [(f"/decision/{key}", "completion differs from verified procedure state")
+                for key, value in completed.items() if actual.get(key) != value]
     if decision.blocker is None:
         return [("/decision/blocker", "an unfinished candidate decision requires a primary blocker")]
     expected = fallback
@@ -614,7 +665,8 @@ def candidate_decision_violations(
         )
         if selected is not None:
             question = (
-                _COMPLETION_QUESTION if selected["candidate_id"].startswith("procedure:")
+                fallback["questions_for_user"][0] if selected == fallback["blocker"]
+                else _COMPLETION_QUESTION if selected["candidate_id"].startswith("procedure:")
                 else _QUESTIONS[selected["candidate_id"].removeprefix("missing:")]
             )
             expected = {
@@ -667,6 +719,60 @@ def candidate_decision_violations(
             )
         )
     return violations
+
+
+def completed_procedure_decision_fields(
+    snapshot: CaseSnapshot, steps: Sequence[KnownProcedureStep], sources: Sequence[ReviewSourceResult],
+    mutations: MutationSet, bindings: ProcedureBindings,
+) -> dict[str, Any] | None:
+    """No candidates alone is not completion: require a supported registry and saved/proposed proof."""
+    values = _values(snapshot, mutations)
+    active = [step for step in steps if step.deprecated_at is None]
+    if (business_type_code(values.get("business_type")) != "CAFE"
+            or values.get("franchise_status") is not False or not active
+            or set(bindings) != set(PROCEDURE_LABELS)
+            or any(isinstance(source.output, InfoAnalysisResult)
+                   and source.output.completion_status != "COMPLETE" for source in sources)
+            or any(step.procedure_step not in bindings.values() for step in active)
+            or not any(isinstance(source.output, ProcedureLookupResult)
+                       and source.output.completion_status == "COMPLETE" and source.output.documents
+                       for source in sources)):
+        return None
+    progress = {(item.procedure_step.procedure_step_id, item.procedure_step.step_code): item
+                for item in effective_procedure_progress(
+                    snapshot, mutations, known_steps=steps, procedure_bindings=bindings,
+                )}
+    refs = []
+    applicable = 0
+    step_ids = {step.procedure_step.procedure_step_id for step in active}
+    for step in active:
+        applies = procedure_applicability(step, snapshot, mutations.fact_changes)
+        if applies is None:
+            return None
+        if not applies:
+            continue
+        if (any(item.prerequisite_procedure_step_id not in step_ids for item in step.dependencies)
+                or procedure_constraints(step, snapshot, mutations.fact_changes,
+                                         mutations.procedure_progress_changes,
+                                         known_steps=steps, procedure_bindings=bindings)):
+            return None
+        applicable += 1
+        if step.procedure_step == bindings.get("CONFIRM_RESTORATION_SCOPE"):
+            if not all(field in values for field in ("restoration_scope", "demolition_required")):
+                return None
+            refs.extend(ref for fact in snapshot.facts for ref in fact.evidence_refs)
+            refs.extend(ref for change in mutations.fact_changes for ref in change.source_evidence_refs)
+            continue
+        current = progress.get((step.procedure_step.procedure_step_id, step.procedure_step.step_code))
+        if current is None or current.status != "COMPLETED" or not current.evidence_refs:
+            return None
+        refs.extend(current.evidence_refs)
+    if not applicable or not refs:
+        return None
+    return {"decision_type": "PROCEDURES_COMPLETED",
+            "selection_summary": "등록된 절차를 모두 마쳤어요. 로드맵에서 남은 할 일을 확인해 주세요.",
+            "requires_human": False, "evidence_refs": list(dict.fromkeys(refs)),
+            "blocker": None, "blockers": [], "next_action": None, "questions_for_user": []}
 
 
 def resolved_blocker_candidates(snapshot, known_steps, mutations, bindings, *, sources=()) -> list[str]:

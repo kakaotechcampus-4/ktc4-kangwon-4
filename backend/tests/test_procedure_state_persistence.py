@@ -111,7 +111,7 @@ def test_flag_only_changes_and_completion_survive_reload(mysql_engine, before, a
             procedure_progress_changes=[change],
             support_match_updates=[],
         )
-        decision_record_service._assert_changes_are_current(session, history, mutations)
+        decision_record_service._assert_changes_are_current(session, history, mutations, snapshot=snapshot)
         decision_record_service._apply_procedure_progress_changes(
             session, history, [change]
         )
@@ -177,7 +177,7 @@ def test_newer_progress_or_flags_reject_the_old_judgment(mysql_engine, field, va
         session.rollback()  # save_reviewed_plan이 저장 전 대조 직전에 하는 것과 같다.
         with pytest.raises(decision_record_service.StaleJudgmentError):
             decision_record_service._assert_changes_are_current(
-                session, history, mutations
+                session, history, mutations, snapshot=snapshot
             )
     with Session(mysql_engine) as session:
         step = procedure_step_crud.get_case_procedure_step(session, case_id, step_id)

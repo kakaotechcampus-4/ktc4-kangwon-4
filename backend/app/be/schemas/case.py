@@ -4,7 +4,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, model_validator
 
 from app.agent.roadmap import CHECKLIST_IDS
-from app.common.agent_dto import RestorationAnswer
+from app.common.agent_dto import ActionDoneKind, RestorationAnswer
 
 BusinessType = Literal["CAFE", "RESTAURANT"]
 LeaseStatus = Literal["LEASED_PAID", "LEASED_FREE", "OWNED"]
@@ -13,9 +13,12 @@ RestorationStatus = Literal["UNKNOWN", "NOT_STARTED", "IN_PROGRESS", "COMPLETED"
 RestorationScope = Literal["UNKNOWN", "PARTIAL", "FULL", "NOT_REQUIRED"]
 DemolitionRequired = Literal["UNKNOWN", "REQUIRED", "NOT_REQUIRED"]
 RestorationClause = Literal["EXISTS", "NOT_EXISTS", "UNKNOWN"]
-JudgmentStatus = Literal["PENDING", "DONE", "NEEDS_MORE_INFO", "CONFLICT", "FAILED"]
+# 등록된 절차 안내 종료이며 Case 전체 폐업 완료와는 다르다.
+JudgmentStatus = Literal["PENDING", "DONE", "NEEDS_MORE_INFO", "CONFLICT", "FAILED", "PROCEDURES_COMPLETED"]
 RecoveryActionCode = Literal["RETRY", "RESUBMIT_INPUT", "CONTACT_SUPPORT", "NONE"]
-ResultsSubmitResult = Literal["PENDING", "UPDATED", "NO_CHANGE", "NEEDS_MORE_INFO", "CONFLICT", "FAILED"]
+ResultsSubmitResult = Literal[
+    "PENDING", "UPDATED", "NO_CHANGE", "NEEDS_MORE_INFO", "CONFLICT", "FAILED", "PROCEDURES_COMPLETED",
+]
 ConflictSide = Literal["PROPOSED", "STORED"]
 ClosureReason = Literal["BUSINESS_SLUMP", "PERSONAL", "OTHER"]
 DepositReturnResult = Literal["FULL", "PARTIAL", "NONE"]
@@ -37,6 +40,7 @@ CaseLogEvent = Literal[
     "MORE_INFO_REQUESTED",
     "CONFLICT_FOUND",
     "JUDGMENT_FAILED",
+    "PROCEDURES_COMPLETED",
     "DOCUMENTS_CHECKED",
     "ROADMAP_TASKS_ADDED",
 ]
@@ -163,7 +167,9 @@ class ConflictItemResponse(BaseModel):
 
 class CaseResultsEntryResponse(BaseModel):
     judgment_status: JudgmentStatus
-    result_input_kind: Literal["TEXT", "RESTORATION_ANSWER"] = "TEXT"
+    result_input_kind: Literal["TEXT", "RESTORATION_ANSWER", "ACTION_DONE"] = "TEXT"
+    # ACTION_DONE일 때 버튼 문구를 고르는 할 일 종류(준비 확인·신고 제출·처리 결과 확인·직접 하는 일)
+    action_done_kind: ActionDoneKind | None = None
     case_history_id: int | None = None
     raw_input: str | None = None
     conflicts: list[ConflictItemResponse] | None = None
@@ -179,12 +185,15 @@ class CaseResultsSubmitRequest(BaseModel):
 
     raw_input: str | None = Field(default=None, min_length=1, max_length=2000)
     restoration_answer: RestorationAnswer | None = None
+    # 지금 할 일에 [했어요]를 눌렀다. [아직 안 했어요]는 화면이 보내지 않으므로 true만 받는다
+    action_done: Literal[True] | None = None
     case_history_id: int
 
     @model_validator(mode="after")
     def validate_input(self) -> "CaseResultsSubmitRequest":
-        if (self.raw_input is None) == (self.restoration_answer is None):
-            raise ValueError("raw_input과 restoration_answer는 하나만 보낸다")
+        sent = [self.raw_input, self.restoration_answer, self.action_done]
+        if sum(value is not None for value in sent) != 1:
+            raise ValueError("raw_input, restoration_answer, action_done 중 하나만 보낸다")
         if self.raw_input is not None and not self.raw_input.strip():
             raise ValueError("raw_input은 빈 글일 수 없다")
         return self

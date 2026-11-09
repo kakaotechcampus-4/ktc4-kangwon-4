@@ -4,6 +4,7 @@ from app.be.models.case_history import CaseHistory
 from app.be.models.case_field_history import CaseFieldHistory
 from app.be.models.case_checklist import CaseChecklist, CaseChecklistHistory
 from app.be.models.case_document_history import CaseDocumentHistory
+from app.be.models.case_document_context import CaseDocumentContext
 from app.be.models.blocker import Blocker
 from app.be.models.procedure_step import (
     ProcedureStep,

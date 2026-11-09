@@ -30,12 +30,13 @@ HISTORY_ID = 42
 SUBMITTED_AT = datetime(2026, 10, 20, 9, 0, 0)
 
 
-def history(source: str, restoration_answer=None) -> SimpleNamespace:
+def history(source: str, restoration_answer=None, action_done=None) -> SimpleNamespace:
     return SimpleNamespace(
         id=HISTORY_ID,
         case_id=CASE_ID,
         raw_input="원상복구 끝냈어요",
         restoration_answer=restoration_answer,
+        action_done=action_done,
         source=source,
         created_at=SUBMITTED_AT,
     )
@@ -48,7 +49,8 @@ def trigger_of(monkeypatch):
     captured: dict[str, str] = {}
 
     def fake_build_planning_input(*, trigger_type, **_kwargs):
-        captured.update(trigger_type=trigger_type, restoration_answer=_kwargs.get("restoration_answer"))
+        captured.update(trigger_type=trigger_type, restoration_answer=_kwargs.get("restoration_answer"),
+                        action_done=_kwargs.get("action_done"))
         return SimpleNamespace(trigger=trigger_type)
 
     async def fake_run_case_planning(*_args, **_kwargs):
@@ -63,9 +65,9 @@ def trigger_of(monkeypatch):
     monkeypatch.setattr(reviewed_procedure_service, "load_reviewed_procedures", lambda: None)
     monkeypatch.setattr(decision_record_service, "save_safe_failure", lambda *_a, **_k: None)
 
-    def run(source: str, answer=None) -> dict:
+    def run(source: str, answer=None, confirmation=None) -> dict:
         monkeypatch.setattr(
-            case_history_crud, "get_case_history_by_id", lambda *_a: history(source, answer)
+            case_history_crud, "get_case_history_by_id", lambda *_a: history(source, answer, confirmation)
         )
         asyncio.run(judgment.run_judgment(MagicMock(spec=Session), HISTORY_ID))
         return captured
@@ -84,7 +86,17 @@ def test_submitted_result_is_judged_as_a_result_report(trigger_of):
 
 def test_restoration_answer_survives_the_background_judgment_boundary(trigger_of):
     answer = {"restoration_scope": "PARTIAL", "demolition_required": "NOT_REQUIRED"}
-    assert trigger_of("USER_INPUT", answer) == {"trigger_type": "RESULT_SUBMITTED", "restoration_answer": answer}
+    assert trigger_of("USER_INPUT", answer) == {
+        "trigger_type": "RESULT_SUBMITTED", "restoration_answer": answer, "action_done": None,
+    }
+
+
+def test_action_done_survives_the_background_judgment_boundary(trigger_of):
+    # [준비했어요] 답이 여기서 빠지면 AI가 고정 문장을 글로 해석하려다 모델을 부른다
+    confirmation = {"action_code": "FILE_FOOD_SERVICE_CLOSURE", "procedure_step_id": 5}
+    assert trigger_of("USER_INPUT", confirmation=confirmation) == {
+        "trigger_type": "RESULT_SUBMITTED", "restoration_answer": None, "action_done": confirmation,
+    }
 
 
 def test_a_source_nobody_creates_stops_instead_of_guessing(trigger_of):
@@ -152,7 +164,7 @@ def test_a_finished_judgment_goes_on_to_documents_that_waited(monkeypatch):
     monkeypatch.setattr(judgment, "Session", MagicMock())
     monkeypatch.setattr(judgment, "get_engine", MagicMock())
     monkeypatch.setattr(document_service, "queue_owed_document_judgment",
-                        lambda _session, _directory, case_history_id: owed.pop(case_history_id, None))
+                        lambda _session, case_history_id: owed.pop(case_history_id, None))
 
     asyncio.run(judgment.run_judgment_in_background(HISTORY_ID))
     assert ran == [HISTORY_ID, HISTORY_ID + 1]

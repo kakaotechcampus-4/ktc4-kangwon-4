@@ -16,6 +16,8 @@ def fetch_observations(api, *, start, end, trace_id=None, maximum=5000):
     while len(rows) < maximum:
         page = api.get_many(
             fields="core,basic,model,usage,metadata", from_start_time=start,
+            # Otherwise Langfuse returns issue lists over 200 chars as truncated strings.
+            expand_metadata="review_issues",
             to_start_time=end, trace_id=trace_id, limit=min(1000, maximum - len(rows)),
             cursor=cursor,
         ).model_dump(mode="json")

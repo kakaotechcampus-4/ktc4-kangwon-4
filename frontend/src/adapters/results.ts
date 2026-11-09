@@ -213,10 +213,19 @@ export function toResultsEntry(body: CaseResultsEntryResponse | null): ResultsEn
       // 번호가 없으면 결과를 보낼 수 없고, 할 일이 없으면 무엇에 대한 결과인지 보여줄 수 없다
       const nextAction = toNextAction(body.next_action)
       if (!Number.isInteger(body.case_history_id) || nextAction === null) return { kind: 'UNRECOGNIZED' }
-      if (body.result_input_kind !== 'TEXT' && body.result_input_kind !== 'RESTORATION_ANSWER') {
+      if (!['TEXT', 'RESTORATION_ANSWER', 'ACTION_DONE'].includes(body.result_input_kind)) {
         return { kind: 'UNRECOGNIZED' }
       }
-      return { kind: 'READY', nextAction, historyId: body.case_history_id as number, inputKind: body.result_input_kind }
+      // [했어요] 버튼인데 종류가 없거나 모르는 값이면 어떤 버튼을 보여 줄지 정할 수 없다
+      const doneKind = body.result_input_kind === 'ACTION_DONE' ? body.action_done_kind : null
+      if (body.result_input_kind === 'ACTION_DONE'
+        && !['PREPARATION', 'SUBMISSION', 'PROCESSING', 'WORK'].includes(doneKind as string)) {
+        return { kind: 'UNRECOGNIZED' }
+      }
+      return {
+        kind: 'READY', nextAction, historyId: body.case_history_id as number,
+        inputKind: body.result_input_kind, doneKind,
+      }
     }
 
     case 'CONFLICT': {
@@ -232,13 +241,14 @@ export function toResultsEntry(body: CaseResultsEntryResponse | null): ResultsEn
     }
 
     /*
-      사장님이 더 알려주셔야 풀리는 실패만 여기서 받는다. 같은 길(`POST /cases/results`)로 다시
-      보내면 서버가 다시 판단한다. 그 밖의 실패는 더 적어도 풀리지 않아(#57) `/case` 가 안내한다
+      NONE은 같은 제출 재시도 대신 새 상황 글을 받는다. 과거 질문·선택은 새 입력에 넘기지 않는다.
+      RESUBMIT_INPUT은 요청한 내용을 받고, 나머지 실패는 `/case` 가 안내한다.
     */
     case 'FAILED': {
       const notice = toFailureNotice(body)
-      if (notice.kind !== 'NEEDS_DETAIL') return { kind: 'ELSEWHERE' }
+      if (notice.kind !== 'NEEDS_DETAIL' && notice.kind !== 'NO_RECOVERY') return { kind: 'ELSEWHERE' }
       if (!Number.isInteger(body.case_history_id)) return { kind: 'UNRECOGNIZED' }
+      if (notice.kind === 'NO_RECOVERY') return { kind: 'NEW_INPUT', historyId: body.case_history_id as number }
       return { kind: 'RESUBMIT', notice, historyId: body.case_history_id as number }
     }
 

@@ -3,9 +3,10 @@
 모든 정상 판단을 독립 검수하는 필수 관문. 검색하지 않고 초안을 직접 고치지 않는다 —
 반송 사유만 내고, 해당 구성요소가 다시 판단한다.
 
-공용 모델 설정(`OPENAI_MODEL=gpt-5.6-sol`, `OPENAI_REASONING_EFFORT=xhigh`)으로 호출.
-Supervisor를 포함한 모든 LLM 호출도 같은 모델·추론 강도로 통일.
-Review 독립성은 다른 모델 사용이 아니라 별도 프롬프트·별도 호출로 확보.
+모델 검토는 공용 설정을 사용한다. [운영 예시](../../.env.prod.example)는 Review에
+Sol `xhigh`, Info에 Sol `high`, Supervisor에 별도 Luna 6 `high`를 지정한다.
+실제 선택은 [`runtime.py`](../../backend/app/agent/runtime.py)와 환경설정을 따른다.
+모델 검토의 독립성은 별도 프롬프트·별도 호출로 확보한다.
 Supervisor의 응답이나 대화 이력을 재사용하지 않고 `ReviewSubject`만 입력으로 사용.
 
 ## 입력 → 출력
@@ -17,11 +18,11 @@ Supervisor의 응답이나 대화 이력을 재사용하지 않고 `ReviewSubjec
 
 1. **결정적 검사(코드, 우회 불가)** — `_validate_integrity` 뒤 `_deterministic_safety_review`를 수행한다
    - `_validate_integrity`: subject 자체의 구조적 일관성
-   - `_validate_mutation_provenance`: 모든 변경 후보가 실제 하위 결과에서 나왔는지(근거·digest 추적)
+   - `_validate_mutation_provenance`: 변경 후보의 출처·근거·digest를 검사한다. 절차 완료는 `completion_confirmed`로 별도 확인 또는 같은 절차의 고정 완료 버튼을 검사한다. 충돌 확인에서 채택한 원상복구 완료는 `confirmed_restoration_progress`가 원래 충돌·현재 절차·근거의 일치를 확인한 변경만 인정한다
    - `_validate_procedure_analysis_provenance`: 절차 finding의 출처 추적
    - `_validate_action_shape`: ACTION/NEEDS_MORE_INFO 모양 규칙(Blocker/NextAction 존재 여부 등)
    - `procedure_plan_constraints`([procedure-tool.md](./procedure-tool.md))도 여기서 다시 검사
-2. **모델 검토** — 무결성 검사를 통과하면 LLM도 검토하며, 최종 결과에는 결정적 검사 사유를 함께 반영한다. 첫 시도 포함 최대 2회(`max_output_attempts`)
+2. **모델 검토** — Info가 모델을 사용하지 않은 첫 회차(`revision_count=0`)는 `review_code_only`로 코드 검사만 한다. 첫 판단·원상복구 선택형 답변·`action_done` 버튼·충돌 확인 뒤 판단이 이 조건에 해당할 수 있다. 그 밖에는 LLM도 검토하며, 최종 결과에는 결정적 검사 사유를 함께 반영한다. 모델 응답 검증은 기본 첫 시도 포함 최대 2회(`max_output_attempts`)
 
 ## PASS 조건
 

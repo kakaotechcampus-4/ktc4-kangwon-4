@@ -47,6 +47,7 @@ from app.agent.document_tool.safety import ContentSafetyGuard  # noqa: E402
 from app.agent.document_tool.safety import SafetyDecision  # noqa: E402
 from app.agent.document_tool.tool import DocumentTool  # noqa: E402
 from app.agent.llm import LLMRequestError  # noqa: E402
+from app.agent.schemas import ActionDoneAnswer  # noqa: E402
 from app.be.crud.member import create_member  # noqa: E402
 from app.be.db import get_engine, reset_all_tables  # noqa: E402
 from app.be.services import auth as auth_service  # noqa: E402
@@ -119,6 +120,10 @@ def document_safety_files(directory):
 # 이 문장이 결과로 오면 처음 한 번은 모델 서버가 끊긴 것처럼 실패하고(다시 시도 가능), 그다음부터는 정상이다.
 # 홈의 [다시 판단하기](POST /cases/retry)가 같은 글로 다시 판단해 이어지는지 본다(#196·#231).
 OUTAGE_TEXT = "다시 확인해 보니 원상복구는 일부이고 카운터만 철거해야 합니다."
+PREPARATION_SCOPE_TEXT = "원상복구 범위는 전부이고 철거가 필요합니다. 작업은 아직 시작하지 않았습니다."
+PREPARATION_TEXT = "철거 전 사진을 찍고, 업체와 증빙 준비사항을 확인했습니다."
+# [준비했어요] 버튼이 남기는 고정 문장. 모델 해석 없이 코드가 준비 확인으로 저장한다
+PREPARATION_BUTTON_TEXT = ActionDoneAnswer(action_code="CONFIRM_RESTORATION_REQUIREMENTS", procedure_step_id=1).to_input_text()
 
 
 class FirstCandidateModel:
@@ -132,6 +137,24 @@ class FirstCandidateModel:
 
     async def generate(self, response_model, messages, **kwargs):
         name = kwargs.get("schema_name")
+        prompt = json.dumps(messages, ensure_ascii=False)
+        if name == "reborn_info_analysis" and any(text in prompt for text in (PREPARATION_SCOPE_TEXT, PREPARATION_TEXT)):
+            preparing = PREPARATION_TEXT in prompt
+            text = PREPARATION_TEXT if preparing else PREPARATION_SCOPE_TEXT
+            return response_model.model_validate({
+                "completion_status": "COMPLETE", "missing_fields": [], "uncertainties": [],
+                "facts": [] if preparing else [
+                    {"operation": "SET", "field_path": field, "value_type": "ENUM", "value": value,
+                     "source_text": text, "confidence_bps": 10000, "requires_confirmation": False,
+                     "reason_summary": "합성 원상복구 범위 보고"}
+                    for field, value in [("restoration_scope", "FULL"), ("demolition_required", "REQUIRED"),
+                                         ("restoration_status", "NOT_STARTED")]],
+                "procedure_observations": [{
+                    "step_code": "PERFORM_RESTORATION", "observed_status": "IN_PROGRESS", "source_text": text,
+                    "requirements_confirmed": True, "submitted": False, "requires_confirmation": False,
+                    "reason_summary": "철거 전 준비사항 확인 보고이며 공사 실행·완료 보고가 아님",
+                }] if preparing else [],
+            })
         if name == "reborn_info_analysis" and OUTAGE_TEXT in json.dumps(messages, ensure_ascii=False):
             if not FirstCandidateModel.outage_seen:
                 FirstCandidateModel.outage_seen = True
@@ -183,6 +206,11 @@ class FirstCandidateModel:
             raise AssertionError(f"지원하지 않는 E2E 모델 호출: {name}")
         contract = json.loads(messages[1]["content"].removeprefix("INPUT_JSON="))["contract"]
         first = contract["blocker_candidates"][0]
+        if any(text in prompt for text in (PREPARATION_SCOPE_TEXT, PREPARATION_TEXT, PREPARATION_BUTTON_TEXT)):
+            # 이 시나리오는 준비 확인 후보가 남아 있으면 고른다. 후보 제거가 깨지면
+            # 다른 후보를 우연히 골라 통과하지 않고, 실제 반복 행동이 드러난다.
+            first = next((row for row in contract["blocker_candidates"]
+                          if any(a["action_code"] == "CONFIRM_RESTORATION_REQUIREMENTS" for a in row["actions"])), first)
         return response_model.model_validate({
             "decision_type": "ACTION",
             "blocker_candidate_id": first["candidate_id"],
@@ -216,6 +244,8 @@ def main() -> None:
         tokens = {**_signed_in_member(), "restoration_members": [_signed_in_member() for _ in range(6)],
                   "conflict_members": [_signed_in_member() for _ in range(2)],
                   "retry_member": _signed_in_member(), "session_members": [_signed_in_member() for _ in range(3)],
+                  "preparation_member": _signed_in_member(),
+                  "preparation_button_member": _signed_in_member(),
                   "replan_members": [_signed_in_member() for _ in range(3)],
                   "replan_files": replan_files(directory),
                   "document_member": _signed_in_member(), "document_other_member": _signed_in_member(),

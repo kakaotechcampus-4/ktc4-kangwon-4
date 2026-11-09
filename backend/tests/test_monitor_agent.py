@@ -1,3 +1,4 @@
+import json
 from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -91,9 +92,43 @@ def test_pagination_fetches_no_io_and_marks_partial_reports(maximum, truncated, 
     assert api.get_many.call_count == requests
     for call in api.get_many.call_args_list:
         assert "io" not in call.kwargs["fields"].split(",")
+        assert call.kwargs["expand_metadata"] == "review_issues"
         assert call.kwargs["from_start_time"] == "start"
         assert call.kwargs["to_start_time"] == "end"
         assert call.kwargs["trace_id"] == "trace"
+
+
+def test_review_diagnostics_expand_all_three_issues_without_requesting_private_fields():
+    issues = [{
+        "issue_code": "CONTRACT_VIOLATION", "severity": "BLOCKING",
+        "target_component": "SUPERVISOR", "target_path": path,
+    } for path in (
+        "/supervisor_draft/decision/blockers",
+        "/supervisor_draft/decision/next_action/questions_to_ask/0",
+        "/supervisor_draft/decision/next_action/reason",
+    )]
+
+    def get_many(**options):
+        # Langfuse's observations API truncates unexpanded metadata at 200 chars.
+        value = issues if options.get("expand_metadata") == "review_issues" else json.dumps(issues)[:200]
+        return SimpleNamespace(model_dump=lambda **_: {
+            "data": [{"id": "review", "metadata": {"review_issue_count": 3, "review_issues": value}}],
+            "meta": {"cursor": None},
+        })
+
+    api = SimpleNamespace(get_many=Mock(side_effect=get_many))
+    default = api.get_many().model_dump()["data"][0]["metadata"]["review_issues"]
+    assert isinstance(default, str) and len(default) == 200
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(default)
+
+    rows, truncated = fetch_observations(api, start="start", end="end")
+    assert not truncated
+    assert rows[0]["metadata"]["review_issue_count"] == 3
+    assert rows[0]["metadata"]["review_issues"] == issues
+    options = api.get_many.call_args.kwargs
+    assert options["expand_metadata"] == "review_issues"
+    assert set(options["fields"].split(",")) == {"core", "basic", "model", "usage", "metadata"}
 
 
 def test_repeated_cursor_stops_instead_of_fetching_forever():

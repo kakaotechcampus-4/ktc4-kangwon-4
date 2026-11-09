@@ -61,6 +61,8 @@ def _fill_every_case_table(engine, case_id: int, history_id: int, support_item_i
             history_id=history_id)
         run("INSERT INTO case_checklist (case_id, task_id) VALUES (:case_id, 'vat_submission')")
         run("INSERT INTO case_checklist_history (case_id, task_id, completed) VALUES (:case_id, 'vat_submission', 1)")
+        run("INSERT INTO case_document_context (case_id, context, created_at, updated_at)"
+            " VALUES (:case_id, '{}', NOW(), NOW())")
         run("INSERT INTO case_document_history (case_id, action) VALUES (:case_id, 'UPLOADED')")
         run("INSERT INTO case_procedure_step_history (case_procedure_step_id, case_history_id, previous_status, new_status)"
             " SELECT MIN(id), :history_id, 'NOT_STARTED', 'IN_PROGRESS' FROM case_procedure_step WHERE case_id = :case_id",

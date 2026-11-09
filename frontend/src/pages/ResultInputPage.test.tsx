@@ -126,6 +126,7 @@ function entryBody(overrides: Partial<CaseResultsEntryResponse>): CaseResultsEnt
   return {
     judgment_status: 'DONE',
     result_input_kind: 'TEXT',
+    action_done_kind: null,
     case_history_id: 12,
     raw_input: null,
     conflicts: null,
@@ -165,6 +166,26 @@ const INTERVAL_MS = 3_000
 describe('ResultInputPage — 서버', () => {
   beforeEach(() => {
     vi.useFakeTimers()
+  })
+
+  it('NONE 실패 뒤에는 이전 선택과 질문 없이 빈 자유글로 새 상황만 보낸다', async () => {
+    const fetchMock = serve({ entry: [json(entryBody({
+      judgment_status: 'FAILED', recovery_action_code: 'NONE', case_history_id: 25,
+      result_input_kind: 'RESTORATION_ANSWER', raw_input: '예전 글',
+      questions_for_user: ['예전 질문'], requested_field_paths: ['restoration_scope'],
+    }))], submit: [ACCEPTED], judged: [json(judgedBody({ result: 'PENDING' }))] })
+    renderFlow('/results?fix=1')
+    await advance()
+
+    expect(screen.getByRole('textbox', { name: '지금 상황을 알려주세요' })).toHaveValue('')
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument()
+    expect(screen.queryByText('예전 질문')).not.toBeInTheDocument()
+    expect(screen.queryByText('임대인에게 원상복구 범위 묻기')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '보내기' })).toBeDisabled()
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '  철거 전 사진과 준비사항을 확인했어요  ' } })
+    fireEvent.click(screen.getByRole('button', { name: '보내기' }))
+    await advance()
+    expect(sentBodies(fetchMock)).toEqual([{ case_history_id: 25, raw_input: '철거 전 사진과 준비사항을 확인했어요' }])
   })
 
   it('선택을 기본으로 채우지 않고 두 항목을 고른 뒤에만 선택값을 전송한다', async () => {
@@ -227,6 +248,66 @@ describe('ResultInputPage — 서버', () => {
     await advance()
     expect(sentBodies(fetchMock)).toEqual([{ case_history_id: 12, raw_input: '간판만 떼면 된대요' }])
     expect(screen.getByRole('textbox')).toHaveValue('간판만 떼면 된대요')
+  })
+
+  /**
+   * 할 일 대부분은 "확인하세요"·"진행하세요" 같은 지시문이라 글로 답하기 어렵다. 운영에서 글로 보낸 보고가
+   * 저장되지 않아 같은 안내가 반복되거나 판단이 멈췄다(2026-11-07·08). [했어요]는 고정 값으로 보낸다
+   */
+  it.each([
+    ['PREPARATION', '준비했어요', '아직 안 했어요'],
+    ['SUBMISSION', '제출했어요', '아직 안 했어요'],
+    ['PROCESSING', '처리 끝났어요', '아직이에요'],
+    ['WORK', '끝냈어요', '아직이에요'],
+  ] as const)('%s 할 일은 [%s]를 누르면 글 없이 했다는 것만 보낸다', async (doneKind, done, notYet) => {
+    const fetchMock = serve({
+      entry: [json(entryBody({ result_input_kind: 'ACTION_DONE', action_done_kind: doneKind }))],
+      submit: [ACCEPTED], judged: [json(judgedBody({ result: 'PENDING' }))],
+    })
+    renderFlow()
+    await advance()
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '보내기' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: notYet })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: done }))
+    await advance()
+    expect(sentBodies(fetchMock)).toEqual([{ case_history_id: 12, action_done: true }])
+  })
+
+  /** 바뀌는 것이 없으니 판단(AI)을 부르지 않는다. 할 일은 그대로 홈에 남는다 */
+  it('[아직 …]은 아무것도 보내지 않고 홈으로 돌아간다', async () => {
+    const fetchMock = serve({
+      entry: [json(entryBody({ result_input_kind: 'ACTION_DONE', action_done_kind: 'SUBMISSION' }))],
+    })
+    const router = renderFlow()
+    await advance()
+    fireEvent.click(screen.getByRole('button', { name: '아직 안 했어요' }))
+    await advance()
+    expect(sentBodies(fetchMock)).toEqual([])
+    expect(router.state.location.pathname).toBe('/case')
+  })
+
+  it('[했어요] 할 일도 직접 쓰면 적은 글을 보낸다', async () => {
+    const fetchMock = serve({
+      entry: [json(entryBody({ result_input_kind: 'ACTION_DONE', action_done_kind: 'PROCESSING' }))],
+      submit: [status(422)],
+    })
+    renderFlow()
+    await advance()
+    fireEvent.click(screen.getByRole('button', { name: '직접 쓸게요' }))
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '신고가 반려됐대요' } })
+    fireEvent.click(screen.getByRole('button', { name: '보내기' }))
+    await advance()
+    expect(sentBodies(fetchMock)).toEqual([{ case_history_id: 12, raw_input: '신고가 반려됐대요' }])
+  })
+
+  /** 어떤 버튼을 보여 줄지 정할 수 없으면 지어내지 않고 읽지 못했다고 알린다 */
+  it('[했어요] 할 일인데 종류가 없으면 읽지 못했다고 알린다', async () => {
+    serve({ entry: [json(entryBody({ result_input_kind: 'ACTION_DONE', action_done_kind: null }))] })
+    renderFlow()
+    await advance()
+    expect(screen.queryByRole('button', { name: '보내기' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
   })
 
   /** 다시 보낼 수 없는 실패에서 보기만 바뀌면, 안내와 폼이 서로 다른 말을 한다 */

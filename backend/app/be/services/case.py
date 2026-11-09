@@ -1,8 +1,10 @@
 import hashlib
 import json
 import logging
+from typing import get_args
 
 from fastapi import HTTPException
+from pydantic import ValidationError
 from sqlmodel import Session
 
 from app.be.crud import case as case_crud
@@ -46,6 +48,10 @@ from app.agent.roadmap import TASKS as ROADMAP_TASKS, record_checklist
 from app.be.services import procedure_registry
 from app.be.services import reviewed_procedure as reviewed_procedure_service
 from app.be.services import roadmap as roadmap_service
+from app.common.agent_dto import ActionDoneAnswer, ActionDoneCode
+
+# [했어요 / 아직 안 했어요]로 답하는 할 일(AI 쪽 ActionDoneCode와 같은 목록)
+_ACTION_DONE_CODES = frozenset(get_args(ActionDoneCode))
 
 logger = logging.getLogger(__name__)
 
@@ -231,7 +237,8 @@ def get_case(session: Session, member_id: int) -> CaseGetResponse:
             latest_history.priority_blocker.description if latest_history.priority_blocker else None
         ),
         next_action=next_action,
-        judgment_status=latest_history.judgment_status,
+        judgment_status=("PROCEDURES_COMPLETED" if _procedures_completed(latest_history)
+                         else latest_history.judgment_status),
         case_history_id=latest_history.id if latest_history.judgment_status != "CONFLICT" else None,
         questions_for_user=latest_history.questions_for_user,
         # 실패했을 때만 채워진다. 화면은 이 값으로 "다시 시도" / "다시 말씀해 주세요" /
@@ -272,12 +279,21 @@ def get_case_results_entry(session: Session, member_id: int) -> CaseResultsEntry
 
     _assert_judgment_is_showable(latest_history)
 
+    if _procedures_completed(latest_history):
+        return CaseResultsEntryResponse(
+            judgment_status="PROCEDURES_COMPLETED", case_history_id=latest_history.id,
+        )
+
     if latest_history.judgment_status == "DONE":
+        done = _current_action_done(latest_history)
         return CaseResultsEntryResponse(
             judgment_status="DONE",
             result_input_kind=(
-                "RESTORATION_ANSWER" if latest_history.next_action_code == "CONFIRM_RESTORATION_SCOPE" else "TEXT"
+                "RESTORATION_ANSWER" if latest_history.next_action_code == "CONFIRM_RESTORATION_SCOPE"
+                else "ACTION_DONE" if done is not None
+                else "TEXT"
             ),
+            action_done_kind=done.kind if done is not None else None,
             case_history_id=latest_history.id,
             next_action=(
                 NextActionResponse(
@@ -306,17 +322,36 @@ def get_case_results_entry(session: Session, member_id: int) -> CaseResultsEntry
     )
 
 
+def _procedures_completed(history: CaseHistory) -> bool:
+    # DB의 DONE은 판단 실행 완료다. 다음 행동 없는 정상 종료는 같은 입력의 검수 기록으로
+    # 구분한다. 빈 행동만 보고 종료로 읽으면 예전의 손상된 DONE까지 정상으로 숨기게 된다.
+    return history.judgment_status == "DONE" and any(
+        record.case_id == history.case_id and record.case_history_id == history.id
+        and record.decision_type == "PROCEDURES_COMPLETED" and record.verdict == "PASS"
+        for record in history.case.decision_records
+    )
+
+
 def _assert_judgment_is_showable(history: CaseHistory) -> None:
     """상태별로 화면이 읽을 값이 다 있는지 본다. 없으면 빈칸을 내보내지 말고 여기서 막는다.
 
     AI 계약상 next_action이 있으면 reason도 반드시 있고(NextAction.reason은 빈 문자열도
-    거부한다), 검수를 통과한 판단은 항상 blocker를 남긴다. 그래서 평소에는 걸리지 않는다.
+    거부한다). 절차 안내 종료를 제외하면 검수를 통과한 판단은 blocker를 남긴다.
     걸린다면 AI가 아니라 우리 저장 코드가 깨진 것이고, 그때 조용히 빈 화면을 보여주는 것보다
     멈추고 알아차리는 쪽이 낫다.
 
     같은 검사를 /cases와 /cases/results가 함께 쓴다. 흩어 두면 화면이 늘 때마다 한쪽만
     고치게 된다.
     """
+
+    if _procedures_completed(history):
+        if any(value is not None for value in (
+            history.next_action, history.next_action_code, history.next_action_reason,
+            history.next_action_questions_to_ask, history.next_action_evidence_refs,
+            history.priority_blocker_id, history.questions_for_user,
+        )):
+            raise HTTPException(status_code=500, detail="절차 안내 종료인데 다음 행동이나 질문이 남아 있습니다.")
+        return
 
     if history.judgment_status == "DONE":
         if history.next_action is None or history.next_action_reason is None:
@@ -402,18 +437,91 @@ def submit_case_results(
         if not (current_action or retrying_same_answer):
             raise HTTPException(status_code=422, detail="현재 할 일에는 선택형 원상복구 답변을 보낼 수 없습니다.")
 
+    confirmation = _submitted_action_done(session, latest_history) if submit_request.action_done else None
+
     history = case_history_crud.create_case_history(
         session,
         CaseHistory(
             case_id=case.id,
-            raw_input=answer.to_input_text() if answer is not None else submit_request.raw_input,
+            raw_input=(
+                answer.to_input_text() if answer is not None
+                else confirmation.to_input_text() if confirmation is not None
+                else submit_request.raw_input
+            ),
             restoration_answer=answer.model_dump(mode="json") if answer is not None else None,
+            action_done=confirmation.model_dump(mode="json") if confirmation is not None else None,
             source="USER_INPUT",
             judgment_status="PENDING",
         ),
     )
     session.commit()
     return CaseResultsSubmitAcceptedResponse(case_history_id=history.id)
+
+
+def _current_action_done(history: CaseHistory) -> ActionDoneAnswer | None:
+    """지금 할 일을 [했어요] 버튼으로 받을 수 있으면 그 답의 할 일·절차. 아니면 None(글로 받는다).
+
+    어느 절차인지는 할 일과 함께 저장한 막힌 일 후보("procedure:{절차 번호}")에서 정한다.
+    처리 결과 확인처럼 할 일 코드만으로는 어느 신고인지 모르는 경우가 있어서다.
+    """
+    if history.next_action_code not in _ACTION_DONE_CODES or history.next_action is None:
+        return None
+    candidate = history.priority_blocker.candidate_id if history.priority_blocker is not None else None
+    prefix, _, step_id = (candidate or "").partition(":")
+    if prefix != "procedure" or not step_id.isdigit():
+        return None
+    return ActionDoneAnswer(action_code=history.next_action_code, procedure_step_id=int(step_id))
+
+
+class InvalidActionDoneError(ValueError):
+    """저장된 버튼의 절차 근거가 없으면 같은 입력을 반복해도 복원되지 않는다."""
+
+    retryable = False
+
+
+def read_action_done(session: Session, history: CaseHistory) -> dict | None:
+    """#298 준비 버튼은 당시 저장한 판단의 절차를 확인해 #304 입력으로 읽는다."""
+    payload = history.action_done
+    if payload is None:
+        return None
+    if not isinstance(payload, dict):
+        raise InvalidActionDoneError("저장된 버튼 답변의 형식이 올바르지 않습니다.")
+    try:
+        if (history.source == "USER_INPUT" and set(payload) == {"action_code"}
+                and history.raw_input == "준비사항 확인을 마쳤어요."):
+            prior = max((row for row in case_history_crud.get_case_histories_by_case_id(session, history.case_id)
+                         if row.id < history.id and row.judgment_status == "DONE" and row.source != "SYSTEM_BATCH"),
+                        key=lambda row: row.id, default=None)
+            if prior is not None and prior.next_action_code == payload["action_code"]:
+                answer = _current_action_done(prior)
+                if answer is not None and answer.kind == "PREPARATION":
+                    return answer.model_dump(mode="json")
+        return ActionDoneAnswer.model_validate(payload).model_dump(mode="json")
+    except ValidationError:
+        raise InvalidActionDoneError("저장된 버튼 답변의 절차를 확인할 수 없습니다.") from None
+
+
+def _submitted_action_done(session: Session, latest_history: CaseHistory) -> ActionDoneAnswer:
+    """[했어요]가 어느 할 일에 대한 답인지 서버가 정한다. 화면이 보낸 할 일 이름은 믿지 않는다."""
+    if latest_history.judgment_status == "DONE":
+        done = _current_action_done(latest_history)
+        if done is not None:
+            return done
+    # 실패 이력에는 다음 행동이 없다. 이미 접수한 버튼 답을 그대로 다시 보낼 때만 허용한다.
+    if (
+        latest_history.source == "USER_INPUT"
+        and latest_history.judgment_status == "FAILED"
+        and latest_history.recovery_action_code == "RETRY"
+        and latest_history.retryable is True
+        and latest_history.action_done is not None
+    ):
+        try:
+            retried = ActionDoneAnswer.model_validate(read_action_done(session, latest_history))
+        except InvalidActionDoneError:
+            raise HTTPException(status_code=422, detail="저장된 버튼 답변의 절차를 확인할 수 없습니다.") from None
+        if latest_history.raw_input == retried.to_input_text():
+            return retried
+    raise HTTPException(status_code=422, detail="현재 할 일에는 [했어요] 답변을 보낼 수 없습니다.")
 
 
 def retry_case_judgment(session: Session, member_id: int) -> CaseRetryResponse:
@@ -543,6 +651,12 @@ def get_case_results_submit_status(
 
     _assert_judgment_is_showable(latest_history)
 
+    if _procedures_completed(latest_history):
+        return CaseResultsSubmitResponse(
+            result="PROCEDURES_COMPLETED", changes=_field_changes(session, latest_history.id),
+            new_tasks=_new_tasks(session, case.id, latest_history),
+        )
+
     # 충돌은 Case 전체가 아니라 이 이력(latest_history)에 달린 것만 본다.
     # 예: 충돌 결정(CONFLICT_DECISION)이 처리 중이면 이전 이력의 충돌이 아직 미결로 남아 있어서,
     # Case 전체로 찾으면 처리 중(PENDING)인 이 이력을 CONFLICT로 잘못 응답한다.
@@ -587,8 +701,11 @@ def get_case_results_submit_status(
         )
 
     changes = _field_changes(session, latest_history.id)
+    # 절차 변경 후보는 상태 또는 준비·제출 여부가 앞으로 바뀐 경우만 저장된다.
+    # 가게 필드가 같아도 이 제출의 절차 변경이 있으면 반영 결과다.
+    progress_changed = bool(latest_history.procedure_step_histories)
     return CaseResultsSubmitResponse(
-        result="UPDATED" if changes else "NO_CHANGE",
+        result="UPDATED" if changes or progress_changed else "NO_CHANGE",
         changes=changes,
         blocker=latest_history.priority_blocker.description,
         next_action=NextActionResponse(
@@ -740,6 +857,7 @@ _LOG_RIBBON_EVENTS = {
     "NEEDS_MORE_INFO": "MORE_INFO_REQUESTED",
     "CONFLICT": "CONFLICT_FOUND",
     "FAILED": "JUDGMENT_FAILED",
+    "PROCEDURES_COMPLETED": "PROCEDURES_COMPLETED",
 }
 
 
@@ -764,9 +882,10 @@ def get_case_logs(session: Session, member_id: int) -> CaseLogResponse:
         # 올린 사실은 CaseDocumentHistory가 남긴다. 서류 재판단은 리본 결과만 기록한다.
         if owner_event is not None:
             logs.append(_log("OWNER", owner_event, history.created_at))
-        if history.judged_at is not None and history.judgment_status in _LOG_RIBBON_EVENTS:
+        judgment_status = "PROCEDURES_COMPLETED" if _procedures_completed(history) else history.judgment_status
+        if history.judged_at is not None and judgment_status in _LOG_RIBBON_EVENTS:
             logs.append(_log(
-                "RIBBON", _LOG_RIBBON_EVENTS[history.judgment_status], history.judged_at,
+                "RIBBON", _LOG_RIBBON_EVENTS[judgment_status], history.judged_at,
                 detail=history.next_action if history.judgment_status == "DONE" else None,
             ))
         # 시안 "답변대로 할 일 3개를 추가했어요". 새로 생긴 게 있을 때만 남긴다.

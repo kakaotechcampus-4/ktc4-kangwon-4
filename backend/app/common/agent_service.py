@@ -25,6 +25,7 @@ from app.common.agent_dto import (
     DocumentSubmittedTrigger,
     ProcedureCompletionConfirmation,
     RedactedInput,
+    ActionDoneAnswer,
     ResultSubmittedTrigger,
     RestorationAnswer,
 )
@@ -53,6 +54,7 @@ def build_planning_input(
     trace_id: str | None = None,
     procedure_completion_confirmation: ProcedureCompletionConfirmation | None = None,
     restoration_answer: RestorationAnswer | None = None,
+    action_done: ActionDoneAnswer | None = None,
 ) -> AgentGraphInput:
     """Use the persisted input event's ID/time, not invented run-time values.
 
@@ -70,6 +72,10 @@ def build_planning_input(
         if trigger_type != "RESULT_SUBMITTED":
             raise ValueError("restoration answer requires RESULT_SUBMITTED")
         confirmation_fields["restoration_answer"] = restoration_answer
+    if action_done is not None:
+        if trigger_type != "RESULT_SUBMITTED":
+            raise ValueError("action done answer requires RESULT_SUBMITTED")
+        confirmation_fields["action_done"] = action_done
     if procedure_completion_confirmation is not None:
         if trigger_type != "RESULT_SUBMITTED":
             raise ValueError("completion confirmation requires RESULT_SUBMITTED")

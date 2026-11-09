@@ -946,6 +946,90 @@ class RestorationAnswer(AgentSchema):
         return scope[self.restoration_scope] + "\n" + demolition[self.demolition_required]
 
 
+# [했어요] 버튼으로 답하는 할 일과 그 버튼이 남기는 것. 지원사업 확인(MVP 밖)과
+# 원상복구 범위(자체 선택지)는 뺀다. 종류마다 버튼 문구와 저장할 진행 상태가 다르다.
+_ACTION_DONE_KINDS = {
+    "CONFIRM_TAX_CLOSURE_REQUIREMENTS": "PREPARATION",
+    "CONFIRM_FOOD_SERVICE_CLOSURE_REQUIREMENTS": "PREPARATION",
+    "CONFIRM_WORKPLACE_INSURANCE_CLOSURE_REQUIREMENTS": "PREPARATION",
+    "CONFIRM_RESTORATION_REQUIREMENTS": "PREPARATION",
+    "CONFIRM_PREMISES_RETURN_REQUIREMENTS": "PREPARATION",
+    "CONFIRM_EMPLOYEE_SETTLEMENT_REQUIREMENTS": "PREPARATION",
+    "CONFIRM_EMPLOYEE_INSURANCE_LOSS_REQUIREMENTS": "PREPARATION",
+    "FILE_TAX_BUSINESS_CLOSURE": "SUBMISSION",
+    "FILE_FOOD_SERVICE_CLOSURE": "SUBMISSION",
+    "REPORT_WORKPLACE_INSURANCE_CLOSURE": "SUBMISSION",
+    "REPORT_EMPLOYEE_INSURANCE_LOSS": "SUBMISSION",
+    "CONFIRM_PROCEDURE_COMPLETION": "PROCESSING",
+    "PERFORM_RESTORATION": "WORK",
+    "RETURN_PREMISES": "WORK",
+    "SETTLE_EMPLOYEE_PAYMENTS": "WORK",
+}
+ActionDoneCode: TypeAlias = Literal[
+    "CONFIRM_TAX_CLOSURE_REQUIREMENTS",
+    "CONFIRM_FOOD_SERVICE_CLOSURE_REQUIREMENTS",
+    "CONFIRM_WORKPLACE_INSURANCE_CLOSURE_REQUIREMENTS",
+    "CONFIRM_RESTORATION_REQUIREMENTS",
+    "CONFIRM_PREMISES_RETURN_REQUIREMENTS",
+    "CONFIRM_EMPLOYEE_SETTLEMENT_REQUIREMENTS",
+    "CONFIRM_EMPLOYEE_INSURANCE_LOSS_REQUIREMENTS",
+    "FILE_TAX_BUSINESS_CLOSURE",
+    "FILE_FOOD_SERVICE_CLOSURE",
+    "REPORT_WORKPLACE_INSURANCE_CLOSURE",
+    "REPORT_EMPLOYEE_INSURANCE_LOSS",
+    "CONFIRM_PROCEDURE_COMPLETION",
+    "PERFORM_RESTORATION",
+    "RETURN_PREMISES",
+    "SETTLE_EMPLOYEE_PAYMENTS",
+]
+ActionDoneKind: TypeAlias = Literal["PREPARATION", "SUBMISSION", "PROCESSING", "WORK"]
+_ACTION_DONE_TEXT = {
+    "PREPARATION": "준비사항 확인을 마쳤어요.",
+    "SUBMISSION": "신고서를 제출했어요.",
+    "PROCESSING": "기관 처리가 끝났어요.",
+    "WORK": "이 일을 끝냈어요.",
+}
+
+
+class ActionDoneAnswer(AgentSchema):
+    """사장님이 지금 할 일에 [했어요] 버튼을 누른 답. 어느 할 일·절차인지는 서버가 정한다.
+
+    준비 확인은 준비만, 신고 제출은 제출만 남긴다. 처리 결과 확인과 직접 하는 일은 완료다.
+    버튼을 누른 것 자체가 사장님의 명시적 확인이라 완료를 다시 묻지 않는다(completes 참고).
+    """
+
+    action_code: ActionDoneCode
+    procedure_step_id: PositiveStrictInt
+
+    @property
+    def kind(self) -> ActionDoneKind:
+        return _ACTION_DONE_KINDS[self.action_code]
+
+    def to_input_text(self) -> str:
+        return _ACTION_DONE_TEXT[self.kind]
+
+    def completes(self, observation: ProcedureProgressObservation) -> bool:
+        """이 완료 보고가 바로 이 버튼에서 왔는가. 글로 쓴 완료 보고는 지금처럼 다시 확인한다."""
+        return (
+            self.kind in {"PROCESSING", "WORK"}
+            and observation.observed_status == ProcedureProgressStatus.COMPLETED
+            and observation.procedure_step.procedure_step_id == self.procedure_step_id
+            and observation.source_span.text == self.to_input_text()
+        )
+
+
+def completion_confirmed(trigger: Any, observation: ProcedureProgressObservation) -> bool:
+    """완료 보고를 저장해도 되는가: [완료로 기록] 확인이나 같은 절차의 완료 버튼이 있을 때만.
+
+    Info·graph·Supervisor·Review가 같은 판정을 쓴다. 한 곳만 바뀌면 서로 다른 답을 낸다.
+    """
+    confirmation = getattr(trigger, "procedure_completion_confirmation", None)
+    if confirmation is not None and confirmation.matches(observation):
+        return True
+    answer = getattr(trigger, "action_done", None)
+    return answer is not None and answer.completes(observation)
+
+
 class InfoAnalysisInput(AgentSchema):
     """Complete request schema accepted by ``InfoAnalysisAgent.analyze``."""
 
@@ -957,6 +1041,9 @@ class InfoAnalysisInput(AgentSchema):
     )
     # 없던 칸을 null로 직렬화하면 과거 검수·충돌 기록의 지문이 달라진다.
     restoration_answer: RestorationAnswer | None = Field(default=None, exclude_if=lambda value: value is None)
+    action_done: ActionDoneAnswer | None = Field(
+        default=None, exclude_if=lambda value: value is None,
+    )
     case_snapshot: CaseSnapshot = Field(
         description="Immutable Case read view used as the analysis baseline."
     )
@@ -996,6 +1083,13 @@ class InfoAnalysisInput(AgentSchema):
             or self.input.redacted_text != self.restoration_answer.to_input_text()
         ):
             raise ValueError("restoration answer requires its exact USER_INPUT text")
+        if self.action_done is not None and (
+            self.input is None or self.conflict_confirmation is not None
+            or self.restoration_answer is not None
+            or self.input.source_type != InputSourceType.USER_INPUT
+            or self.input.redacted_text != self.action_done.to_input_text()
+        ):
+            raise ValueError("action done answer requires its exact USER_INPUT text only")
         if self.conflict_confirmation is not None:
             if self.input is not None:
                 raise ValueError("confirmation must not replay the rejected user text")
@@ -1651,6 +1745,7 @@ class NextAction(AgentSchema):
 class DecisionType(StrEnum):
     ACTION = "ACTION"
     NEEDS_MORE_INFO = "NEEDS_MORE_INFO"
+    PROCEDURES_COMPLETED = "PROCEDURES_COMPLETED"
 
 
 class ActionDecisionDraft(_BlockerDecision):
@@ -1688,8 +1783,25 @@ class NeedsMoreInfoDecisionDraft(_BlockerDecision):
     questions_for_user: Annotated[list[NonEmptyStr], Field(min_length=1)]
 
 
+class ProceduresCompletedDecisionDraft(AgentSchema):
+    """Registered applicable procedures are done; the Case may still have checklist tasks."""
+
+    decision_type: Literal[DecisionType.PROCEDURES_COMPLETED]
+    draft_id: RuntimeUUID
+    draft_version: PositiveStrictInt
+    selection_summary: NonEmptyStr
+    requires_human: Literal[False]
+    evidence_refs: Annotated[list[NonEmptyStr], Field(min_length=1)]
+    based_on_call_ids: Annotated[list[RuntimeUUID], Field(min_length=1)]
+    created_at: RuntimeDateTime
+    blocker: None
+    blockers: Annotated[list[Blocker], Field(max_length=0)]
+    next_action: None
+    questions_for_user: Annotated[list[NonEmptyStr], Field(max_length=0)]
+
+
 DecisionDraft: TypeAlias = Annotated[
-    ActionDecisionDraft | NeedsMoreInfoDecisionDraft,
+    ActionDecisionDraft | NeedsMoreInfoDecisionDraft | ProceduresCompletedDecisionDraft,
     Field(discriminator="decision_type"),
 ]
 
@@ -1796,7 +1908,7 @@ class SupervisorDraft(AgentSchema):
 
     resolved_blocker_candidate_ids: list[NonEmptyStr] = Field(default_factory=list)
     decision: DecisionDraft = Field(
-        description="All verified Blockers, one priority Blocker, and one Next Action or information question."
+        description="Verified action, information question, or completion of all registered applicable procedures."
     )
     mutations: MutationSet = Field(
         description="Uncommitted Case changes that require a matching Review PASS."
@@ -1824,7 +1936,7 @@ class SupervisorDraft(AgentSchema):
         return self
 
     @property
-    def blocker(self) -> Blocker:
+    def blocker(self) -> Blocker | None:
         return self.decision.blocker
 
     @property
@@ -1854,6 +1966,9 @@ class CaseCreatedTrigger(AgentSchema):
 class ResultSubmittedTrigger(AgentSchema):
     trigger_type: Literal["RESULT_SUBMITTED"]
     restoration_answer: RestorationAnswer | None = Field(default=None, exclude_if=lambda value: value is None)
+    action_done: ActionDoneAnswer | None = Field(
+        default=None, exclude_if=lambda value: value is None,
+    )
     procedure_completion_confirmation: ProcedureCompletionConfirmation | None = None
     input_event_id: NonEmptyStr
     client_event_id: NonEmptyStr | None = Field(
@@ -1875,6 +1990,13 @@ class ResultSubmittedTrigger(AgentSchema):
             or self.procedure_completion_confirmation is not None
         ):
             raise ValueError("restoration answer requires its exact USER_INPUT text only")
+        if self.action_done is not None and (
+            self.input.source_type != InputSourceType.USER_INPUT
+            or self.input.redacted_text != self.action_done.to_input_text()
+            or self.restoration_answer is not None
+            or self.procedure_completion_confirmation is not None
+        ):
+            raise ValueError("action done answer requires its exact USER_INPUT text only")
         if (
             self.procedure_completion_confirmation is not None
             and self.procedure_completion_confirmation.input.input_event_id == self.input_event_id
@@ -2681,6 +2803,7 @@ __all__ = [
     "DecisionAuthority",
     "DecisionDraft",
     "DecisionType",
+    "ProceduresCompletedDecisionDraft",
     "Digest",
     "DiscoverSupportInput",
     "DocumentSubmittedTrigger",
@@ -2734,6 +2857,10 @@ __all__ = [
     "RedactionType",
     "RequiredDocument",
     "ResultSubmittedTrigger",
+    "ActionDoneAnswer",
+    "ActionDoneCode",
+    "ActionDoneKind",
+    "completion_confirmed",
     "RestorationAnswer",
     "RetainedInfoResult",
     "ReviewIssue",

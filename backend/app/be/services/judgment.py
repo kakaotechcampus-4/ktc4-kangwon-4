@@ -17,6 +17,7 @@ from app.be.db import get_engine
 from app.be.models.case_history import CaseHistory
 from app.be.models.evidence import DecisionRecord
 from app.be.services import agent_runtime as agent_runtime_service
+from app.be.services import case as case_service
 from app.be.services import case_snapshot as case_snapshot_service
 from app.be.services import decision_record as decision_record_service
 from app.be.services import document as document_service
@@ -66,9 +67,7 @@ async def judge_owed_documents(case_history_id: int) -> None:
 
     try:
         with Session(get_engine()) as session:
-            next_history_id = document_service.queue_owed_document_judgment(
-                session, document_service.document_directory(), case_history_id
-            )
+            next_history_id = document_service.queue_owed_document_judgment(session, case_history_id)
     except Exception:
         logger.exception("case_history %s 뒤 서류 재판단 확인 실패", case_history_id)
         return
@@ -147,6 +146,7 @@ def _read_judgment_input(
         # TODO: 프론트가 자기 쪽 이벤트 식별자를 보내주기로 하면 그 값을 넣는다. 아직 미협의.
         client_event_id=None,
         restoration_answer=history.restoration_answer,
+        action_done=case_service.read_action_done(session, history),
     )
     return graph_input, agent_runtime_service.build_known_procedure_steps(session)
 

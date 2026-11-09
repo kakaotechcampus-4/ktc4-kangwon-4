@@ -16,7 +16,9 @@
         └──[6. 근거·충돌·판단기록]      Agent 판단의 근거, 값 충돌, 판단·리뷰 결과
 ```
 
-> 서류함(올린 서류 목록·점검 결과)은 DB가 아니라 서류 폴더(`AGENT_DOCUMENT_DIR/<Case UUID>/case_documents.json`) 파일에 저장합니다(#159). 그래서 ERD에 서류함 테이블은 없습니다.
+> 서류함(올린 서류 목록·점검 결과)은 `case_document_context` 표에 저장합니다(#242). 처음에는 서류 폴더의
+> JSON 파일에 뒀는데(#159), 파일은 목록 전체를 덮어쓰게 되어 서류를 분석하는 동안 다른 서류를 지우면
+> 그 삭제가 사라졌습니다(멘토님 #187). 서류 원본과 가린 PDF는 그대로 `AGENT_DOCUMENT_DIR/<Case UUID>/` 폴더에 있습니다.
 
 > 제약조건(NOT NULL·DEFAULT·UNIQUE)은 운영 DB를 만드는 `backend/sql/001_schema.sql` 기준으로 맞췄습니다.
 > DEFAULT가 없는 필드는 DB에 기본값이 없고, 저장할 때 코드가 값을 채웁니다.
@@ -163,6 +165,7 @@ CASE에 대한 발화·이벤트 원본 이력.
 | case_id | BIGINT | FK | NOT NULL | 1 | |
 | raw_input | TEXT | | NULLABLE | `"임대인이랑 얘기 끝났어요, 다음 달까지 나가기로 했어요"` | 입력 원문. `USER_INPUT`·`CASE_CREATED`는 사장님이 쓴 문장이 항상 들어가고, `SYSTEM_BATCH`는 배치가 에이전트에 전달한 지시문이 들어갈 수 있다. `DOCUMENT_SUBMITTED`는 서류에서 꺼낸 값을 한 줄씩 적은 글(이름·날짜는 넣지 않음)이 들어간다. 문장 없이 고른 값만 있는 `CONFLICT_DECISION`만 NULL |
 | restoration_answer | JSON | | NULLABLE | `{"restoration_scope": "PARTIAL", "demolition_required": "REQUIRED"}` | 원상복구 범위를 묻는 다음 행동(`CONFIRM_RESTORATION_SCOPE`)에 선택형으로 답한 값. 한 번 제출할 때 글(`raw_input`)과 둘 중 하나만 들어온다 |
+| action_done | JSON | | NULLABLE | `{"action_code": "FILE_FOOD_SERVICE_CLOSURE", "procedure_step_id": 5}` | 지금 할 일에 [했어요] 버튼으로 답했을 때, 어느 할 일·절차에 대한 답인지 서버가 남긴 값. 준비 확인은 준비만, 신고 제출은 제출만, 처리 결과 확인·직접 하는 일은 완료로 반영된다. `next_action_code`는 판단이 끝나면 새 할 일로 덮이므로 따로 둔다. 한 번 제출할 때 글·`restoration_answer`와 셋 중 하나만 들어온다 |
 | conflict_snapshot | JSON | | NULLABLE | `{"snapshot_id": "…", "facts": […]}` | 충돌이 났을 때의 Case 상태 전체. 사장님이 고른 뒤 Agent에 **그대로** 돌려줘야 한다 — Agent가 받은 것이 자기가 준 것과 같은지 대조하고 다르면 거절한다. 다시 만들어 넘기면 안 된다. 충돌을 낸 판단에만 값이 있다 |
 | retained_info_result | JSON | | NULLABLE | `{"meta": {…}, "output": {…}, "input": {…}}` | 같은 글에서 충돌이 **아니었던** 사실·진행 보고. 확인 뒤 재판단에 그대로 돌려줘야 반영된다 — Agent는 원문을 다시 읽지 않으므로 빠뜨리면 사장님이 함께 말한 내용이 사라진다. 충돌을 낸 판단에만 값이 있다 |
 | source | ENUM | | NOT NULL | `USER_INPUT` | `USER_INPUT` / `SYSTEM_BATCH` / `CASE_CREATED` / `CONFLICT_DECISION` / `DOCUMENT_SUBMITTED` — `CASE_CREATED`는 Case 생성 직후 첫 Blocker/Next Action 판단, `CONFLICT_DECISION`은 충돌 확인(`POST /cases/results/decision`)에서 고른 결정에 대한 판단, `DOCUMENT_SUBMITTED`는 서류를 올리거나 확인해 원상복구 조항이 새로 생기거나 바뀌었을 때의 판단 |
