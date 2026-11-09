@@ -358,9 +358,11 @@ function judgmentCard(judgment: JudgmentView, waitedTooLong: boolean): JudgmentC
           main: (stale) => <AnswerButton locked={stale} label="다시 알려주기" />,
         }
       }
+      // 무엇에 대한 판단이 멈췄는지 알아야 [새 상황 알려주기]에 무엇을 적을지 안다. 저장된 제목을 보여 줄 뿐이다
+      const lastTask = judgment.lastTask ? ` 마지막 할 일은 ‘${judgment.lastTask}’였어요.` : ''
       return {
         headline: '할 일 정리가 멈췄어요',
-        props: { tone: 'neutral', icon: NEUTRAL_ICON, badge: '판단 멈춤', title, description },
+        props: { tone: 'neutral', icon: NEUTRAL_ICON, badge: '판단 멈춤', title, description: description + lastTask },
         main:
           judgment.notice.kind === 'RETRY_AVAILABLE'
             ? (stale, refresh, refreshing, onSendingChange) => (

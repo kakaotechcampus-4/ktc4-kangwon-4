@@ -34,8 +34,16 @@ export interface ActionDone {
   action_done: true
 }
 
-/** 결과를 어떻게 받을지 서버가 정한다. 할 일 대부분은 [했어요 / 아직 안 했어요]로 받는다 */
-export type ResultInputKind = 'TEXT' | 'RESTORATION_ANSWER' | 'ACTION_DONE'
+/** 원상복구 진행 상태 질문에 버튼으로 고른 답. 모르는 값(UNKNOWN)·해당 없음은 버튼에 없다 */
+export interface RestorationStatusAnswer {
+  restoration_status: Extract<RestorationStatus, 'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETED'>
+}
+
+/**
+ * 결과를 어떻게 받을지 서버가 정한다. 할 일 대부분은 [했어요 / 아직 안 했어요]로 받는다.
+ * `RESTORATION_STATUS` 는 되물은 질문(원상복구 진행 상태)에만 온다
+ */
+export type ResultInputKind = 'TEXT' | 'RESTORATION_ANSWER' | 'ACTION_DONE' | 'RESTORATION_STATUS'
 
 /**
  * [했어요] 버튼의 할 일 종류. 버튼 문구만 고르고, 무엇을 저장할지는 서버가 정한다.
@@ -212,6 +220,8 @@ export interface CasesEnvelope {
   questions_for_user: string[] | null
   /** 판단이 실패했을 때만 채워진다. 실패가 아니면 `null` 이다 */
   recovery_action_code: RecoveryActionCode | null
+  /** 판단이 실패했을 때만 채워진다. 실패하기 전 마지막으로 보여 준 할 일 제목. 예전 서버는 보내지 않는다 */
+  last_next_action_title?: string | null
   /**
    * 판단을 멈추게 한 Case 의 칸 이름들. 실패가 아니면 `null` 이다.
    *
@@ -281,9 +291,10 @@ export interface CaseResultsEntryResponse {
 
 /** `POST /cases/results` 로 보내는 것 */
 export type CaseResultsSubmitRequest = { case_history_id: number } & (
-  | { raw_input: string; restoration_answer?: never; action_done?: never }
-  | { restoration_answer: RestorationAnswer; raw_input?: never; action_done?: never }
-  | (ActionDone & { raw_input?: never; restoration_answer?: never })
+  | { raw_input: string; restoration_answer?: never; action_done?: never; restoration_status?: never }
+  | { restoration_answer: RestorationAnswer; raw_input?: never; action_done?: never; restoration_status?: never }
+  | (ActionDone & { raw_input?: never; restoration_answer?: never; restoration_status?: never })
+  | (RestorationStatusAnswer & { raw_input?: never; restoration_answer?: never; action_done?: never })
 )
 
 /**

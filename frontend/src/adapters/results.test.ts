@@ -237,7 +237,28 @@ describe('toResultsEntry', () => {
       toResultsEntry(
         entry({ judgment_status: 'NEEDS_MORE_INFO', case_history_id: 12, questions_for_user: ['직원이 몇 명인가요?'] }),
       ),
-    ).toEqual({ kind: 'ANSWER', questions: ['직원이 몇 명인가요?'], historyId: 12 })
+    ).toEqual({ kind: 'ANSWER', questions: ['직원이 몇 명인가요?'], historyId: 12, inputKind: 'TEXT' })
+  })
+
+  it('원상복구 진행 상태 질문이면 버튼으로 받는다고 담는다', () => {
+    expect(
+      toResultsEntry(entry({
+        judgment_status: 'NEEDS_MORE_INFO', case_history_id: 12, result_input_kind: 'RESTORATION_STATUS',
+        questions_for_user: ['원상복구 작업이 어디까지 진행됐는지 알려주세요.'],
+      })),
+    ).toEqual({
+      kind: 'ANSWER', questions: ['원상복구 작업이 어디까지 진행됐는지 알려주세요.'], historyId: 12,
+      inputKind: 'RESTORATION_STATUS',
+    })
+  })
+
+  it('되물은 질문에 [했어요] 같은 다른 입력 방식이 오면 알 수 없는 응답으로 둔다', () => {
+    expect(
+      toResultsEntry(entry({
+        judgment_status: 'NEEDS_MORE_INFO', case_history_id: 12, result_input_kind: 'ACTION_DONE',
+        questions_for_user: ['직원이 몇 명인가요?'],
+      })),
+    ).toEqual({ kind: 'UNRECOGNIZED' })
   })
 
   it.each(['PENDING', 'FAILED'] as const)('%s 면 다른 화면으로 보낸다', (status) => {

@@ -420,6 +420,19 @@ describe('CurrentCasePage', () => {
     expect(await screen.findByText('결과 입력 화면')).toBeInTheDocument()
   })
 
+  /** [새 상황 알려주기]에 무엇을 적을지 알 수 있게, 멈춘 판단이 어느 할 일 뒤였는지 보여 준다 */
+  it('판단이 멈추면 마지막 할 일 제목을 함께 보여 준다', async () => {
+    saveTokens('access-1', 'refresh-1')
+    mockCase(envelope({
+      judgment_status: 'FAILED', recovery_action_code: 'NONE',
+      last_next_action_title: '사업장 보험 탈퇴 신고의 처리 완료 여부를 확인하세요.',
+    }))
+    renderAt('/case')
+
+    expect(await screen.findByText(/마지막 할 일은 ‘사업장 보험 탈퇴 신고의 처리 완료 여부를 확인하세요\.’였어요/))
+      .toBeInTheDocument()
+  })
+
   describe('다시 판단하기', () => {
     const RETRYABLE = envelope({ judgment_status: 'FAILED', recovery_action_code: 'RETRY' })
     const PENDING = envelope({ judgment_status: 'PENDING' })
