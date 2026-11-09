@@ -399,6 +399,10 @@ export function ResultInputPage() {
         if (outcome.state.kind === 'NEEDS_MORE_INFO') setAskedAgain(outcome.state.questions)
         setState(outcome.state)
         return
+      case 'FINISHED':
+        // 등록된 절차를 다 마쳤다(#315). 홈이 안내한다. 뒤로 가도 이 화면이 다시 홈으로 보내니 바꿔 낀다
+        navigate({ pathname: '/case', search }, { replace: true })
+        return
       default: {
         // 갈래가 늘면 여기서 컴파일이 막힌다. 없으면 조용히 빠져나가 PENDING에 갇힌다
         const unhandled: never = outcome

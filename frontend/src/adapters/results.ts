@@ -258,7 +258,9 @@ export function toResultsEntry(body: CaseResultsEntryResponse | null): ResultsEn
       return { kind: 'RESUBMIT', notice, historyId: body.case_history_id as number }
     }
 
+    // 판단 중이거나, 등록된 절차를 다 마쳐 받을 결과가 없다(#315). 둘 다 홈이 안내한다
     case 'PENDING':
+    case 'PROCEDURES_COMPLETED':
       return { kind: 'ELSEWHERE' }
 
     default:
@@ -309,6 +311,10 @@ export function toSubmitOutcome(body: CaseResultsSubmitResponse | null): SubmitO
 
     case 'FAILED':
       return { kind: 'STAY', state: { kind: 'FAILED', notice: toFailureNotice(body) } }
+
+    // 다음 할 일이 없는 것이 정상이다. 반영 결과(⑤)는 다음 할 일을 꼭 그리는 화면이라 보내지 않는다
+    case 'PROCEDURES_COMPLETED':
+      return { kind: 'FINISHED' }
 
     default:
       return UNRECOGNIZED

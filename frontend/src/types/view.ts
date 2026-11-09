@@ -353,6 +353,11 @@ export type SubmitOutcome =
   | { kind: 'CONFIRM'; view: ConfirmView }
   /** 화면에 머문다 */
   | { kind: 'STAY'; state: SubmitState }
+  /**
+   * 등록된 절차 안내를 모두 마쳤다(`PROCEDURES_COMPLETED`, #315). 홈으로 이동한다 — 마쳤다는 안내는 홈 한
+   * 곳에서 한다. 화면마다 따로 안내하면 문구가 어긋나고, 새로고침하면 어차피 홈 안내를 보게 된다
+   */
+  | { kind: 'FINISHED' }
 
 /** 점포 형태. 서버 `lease_status`와 같은 값이다. AI 쪽도 같은 값을 쓴다 */
 export type LeaseStatus =

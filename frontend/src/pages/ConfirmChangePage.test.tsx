@@ -367,6 +367,18 @@ describe('ConfirmChangePage — 서버', () => {
     expect(router.state.location.pathname).toBe('/replan')
   })
 
+  /** 고른 것으로 마지막 절차까지 마쳤다(#315). 마쳤다는 안내는 홈이 하고, 같은 선택을 다시 보내지 않는다 */
+  it('등록된 절차를 다 마쳤으면 홈으로 가고 다시 보내지 않는다', async () => {
+    const fetchMock = serve({ decide: [ACCEPTED], judged: [json(judgedBody({ result: 'PROCEDURES_COMPLETED', changes: [] }))] })
+    const router = renderWith(TWO_CONFLICTS, '')
+
+    await decideAndWait()
+
+    expect(router.state.location.pathname).toBe('/case')
+    await advance(INTERVAL_MS * 3)
+    expect(decisions(fetchMock)).toHaveLength(1)
+  })
+
   /** 같은 선택으로 다시 보내도 풀리지 않는 실패다. 홈 실패 카드가 이유를 안내한다 */
   it('그 밖의 실패면 홈으로 간다', async () => {
     serve({ decide: [ACCEPTED], judged: [failed('CONTACT_SUPPORT')] })
