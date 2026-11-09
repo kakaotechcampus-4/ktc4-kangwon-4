@@ -11,7 +11,7 @@ from app.agent.claim_safety import (
     demolition_preparation_only,
     expand_evidence,
 )
-from app.agent.enrichment import build_conflict_overlays
+from app.agent.enrichment import build_conflict_overlays, build_fact_overlays
 from app.agent.schemas import (
     CaseSnapshot,
     ConflictConfirmedTrigger,
@@ -25,6 +25,7 @@ from app.agent.schemas import (
     ProcedureProgressChangeCandidate,
     ProcedureRelevance,
     ProcedureStepRef,
+    ResultSubmittedTrigger,
     ReviewSourceResult,
     SupportAnalysisResult,
     SupportMatchStatus,
@@ -240,9 +241,17 @@ def confirmed_restoration_progress(
     procedure_bindings: ProcedureBindings | None = None, uuid_factory=uuid4,
 ) -> ProcedureProgressChangeCandidate | None:
     """사용자가 채택한 원상복구 완료를 검수·저장할 절차 변경으로 만든다."""
-    if not isinstance(trigger, ConflictConfirmedTrigger):
+    if isinstance(trigger, ConflictConfirmedTrigger):
+        overlays = build_conflict_overlays(snapshot, trigger)
+    elif (isinstance(trigger, ResultSubmittedTrigger)
+          and trigger.restoration_status_answer is not None
+          and trigger.restoration_status_answer.restoration_status == "COMPLETED"):
+        # 이전 상태를 모르면 충돌 없이 들어오는 완료 버튼도 같은 검수 경로로 보낸다.
+        overlays = [change for source in sources if isinstance(source.output, InfoAnalysisResult)
+                    for change in build_fact_overlays(snapshot, source.output, source.meta.call_id)]
+    else:
         return None
-    accepted = next((item for item in build_conflict_overlays(snapshot, trigger)
+    accepted = next((item for item in overlays
                      if item.field_path == "restoration_status" and item.proposed_status == "CONFIRMED"
                      and item.proposed_value == "COMPLETED"), None)
     if accepted is None or not any(canonical_digest(item, exclude={"candidate_id"})
