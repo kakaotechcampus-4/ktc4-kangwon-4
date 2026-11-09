@@ -55,10 +55,17 @@ export function MyInfoPage() {
     navigate('/login', { replace: true })
   }
 
+  // 주 버튼이 아니라 글자 버튼이다. 이 화면에서 자주 누를 것이 아니고, 넓은 버튼으로 두면
+  // 가게 정보보다 먼저 눈에 띈다. 누르는 영역은 높이 44px 로 둔다
   const logOutButton = (
-    <Button variant="outline" onClick={handleLogOut} disabled={loggingOut}>
+    <button
+      type="button"
+      onClick={handleLogOut}
+      disabled={loggingOut}
+      className="-mx-1 min-h-11 cursor-pointer rounded-md px-1 text-15 text-fg-neutral-muted underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-stroke-brand-solid active:bg-bg-transparent-pressed disabled:cursor-not-allowed disabled:text-fg-disabled"
+    >
       로그아웃
-    </Button>
+    </button>
   )
 
   if (query.status === 'LOADING') {
@@ -84,7 +91,7 @@ export function MyInfoPage() {
             </Button>
           }
         />
-        <div className="px-4 pb-8">{logOutButton}</div>
+        <div className="flex justify-end px-4 pb-8">{logOutButton}</div>
       </MyInfoFrame>
     )
   }
@@ -98,7 +105,7 @@ export function MyInfoPage() {
           description="상황 진단을 마치면 여기서 가게 정보를 볼 수 있어요."
           action={<Button onClick={() => navigate({ pathname: '/cases/new', search })}>상황 진단하기</Button>}
         />
-        <div className="px-4 pb-8">{logOutButton}</div>
+        <div className="flex justify-end px-4 pb-8">{logOutButton}</div>
       </MyInfoFrame>
     )
   }
@@ -119,7 +126,7 @@ export function MyInfoPage() {
             ))}
           </dl>
         </section>
-        <div className="mt-5">{logOutButton}</div>
+        <div className="mt-4 flex justify-end">{logOutButton}</div>
       </main>
     </MyInfoFrame>
   )
