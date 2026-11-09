@@ -442,17 +442,19 @@ def _validate_mutation_provenance(
 ) -> None:
     mutations = subject.supervisor_draft.mutations
     expected_changes = {}
-    completed = None
+    try:
+        completed = confirmed_restoration_progress(
+            subject.snapshot, subject.trigger, subject.source_results, mutations.fact_changes,
+            subject.known_procedure_steps, procedure_bindings=procedure_bindings,
+        )
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise ReviewIntegrityError("restoration completion provenance is invalid") from exc
     if isinstance(subject.trigger, ConflictConfirmedTrigger):
         try:
             expected_changes = {
                 item.confirmed_conflict_ref: item
                 for item in build_conflict_overlays(subject.snapshot, subject.trigger)
             }
-            completed = confirmed_restoration_progress(
-                subject.snapshot, subject.trigger, subject.source_results, mutations.fact_changes,
-                subject.known_procedure_steps, procedure_bindings=procedure_bindings,
-            )
         except (AttributeError, TypeError, ValueError) as exc:
             raise ReviewIntegrityError("confirmed-conflict provenance is invalid") from exc
         confirmed = [item for item in mutations.fact_changes
