@@ -17,22 +17,34 @@ cd "$APP"
 
 fail() { echo "실패: $*"; exit 1; }
 
+# 같은 서버에서 배포가 겹치지 않게 한다. Actions가 20분 뒤 끝나도 이 스크립트는 계속 돌고 있을 수
+# 있고, 그때 큐에 있던 다음 배포가 시작되면 둘이 같은 저장소·백업·Compose를 건드린다(승준님 #321)
+exec 9>/var/lock/reborn-deploy.lock
+flock -n 9 || fail "이 서버에서 다른 배포가 돌고 있습니다. 끝난 뒤에 다시 해 주세요"
+
 # 백업부터 반영까지는 FastAPI가 멈춰 있다. 중간에 실패하면 원래 컨테이너라도 다시 켜서 서비스를 살린다
 stopped=""
 on_exit() { if [ $? -ne 0 ] && [ -n "$stopped" ]; then echo "멈췄던 FastAPI를 다시 켭니다"; $C start fastapi || true; fi; }
 trap on_exit EXIT
 
 echo "== 1/4 확인 =="
-grep -q '^ENVIRONMENT=prod' .env.prod || fail ".env.prod가 prod가 아닙니다. dev로 켜면 표가 전부 지워집니다"
+# env 파일은 같은 이름이 여러 줄이면 마지막 값이 적용된다. 줄이 있는지만 보면 뒤에 dev가 또 있어도
+# 통과한다 — 그 상태로 올리면 main.py가 reset_all_tables()로 표를 전부 지운다(승준님 #321)
+env_lines=$(grep -cE '^ENVIRONMENT=' .env.prod || true)
+[ "$env_lines" = "1" ] || fail ".env.prod의 ENVIRONMENT가 ${env_lines}줄입니다. 정확히 한 줄만 두세요"
+grep -qE '^ENVIRONMENT=prod[[:space:]]*$' .env.prod || fail ".env.prod가 prod가 아닙니다. dev로 켜면 표가 전부 지워집니다"
 git fetch --quiet origin
 SHA=$(git rev-parse --verify "${TARGET}^{commit}") || fail "커밋 ${TARGET}을 찾지 못했습니다"
 BEFORE=$(git rev-parse --short HEAD)
 git merge-base --is-ancestor "$SHA" origin/develop || fail "develop에 머지된 커밋만 올립니다"
 git merge-base --is-ancestor HEAD "$SHA" || fail "지금 커밋(${BEFORE})보다 앞선 커밋입니다. 되돌리기는 deploy.md 5단계로 합니다"
-# 저장소만 보면 안 된다. 지난 배포가 merge 뒤 빌드에서 멈췄으면 저장소는 새 커밋, 서버는 옛 커밋이다(현종님 #321)
+# 저장소만 보면 안 된다. 지난 배포가 merge 뒤 빌드에서 멈췄으면 저장소는 새 커밋, 서버는 옛 커밋이다(현종님 #321).
+# 올릴 커밋이 무엇이든 먼저 본다 — 같은 커밋일 때만 보면, 더 새 커밋을 지정했을 때 그냥 지나간다(승준님 #321)
+RUNNING=$(curl -fsS -m 5 "$HEALTH" | sed -n 's/.*"version":"\([^"]*\)".*/\1/p') \
+  || fail "/health를 읽지 못했습니다. 서버가 떠 있는지 먼저 확인해 주세요"
+[ "$RUNNING" = "$BEFORE" ] \
+  || fail "저장소는 ${BEFORE}인데 서버는 ${RUNNING}입니다. 지난 배포가 반영 중에 멈춘 것 같습니다. deploy.md 3단계부터 손으로 이어 가 주세요"
 if [ "$(git rev-parse HEAD)" = "$SHA" ]; then
-  curl -fsS -m 5 "$HEALTH" | grep -q "\"version\":\"$BEFORE\"" \
-    || fail "저장소는 ${BEFORE}인데 /health는 다릅니다. 지난 배포가 반영 중에 멈춘 것 같습니다. deploy.md 3단계부터 손으로 이어 가 주세요"
   echo "이미 ${BEFORE}이 올라가 있습니다. 할 일이 없습니다"
   exit 0
 fi
@@ -48,7 +60,8 @@ echo "지금 ${BEFORE} → 올릴 $(git rev-parse --short "$SHA")"
 
 echo "== 2/4 백업 (FastAPI 멈춤) =="
 mkdir -p "$BACKUP"
-TS=$(date +%Y%m%d-%H%M)
+# 분 단위면 같은 분에 두 번 돌릴 때 앞 백업을 덮어쓴다. 되돌릴 때 쓰는 파일이다(승준님 #321)
+TS=$(date +%Y%m%d-%H%M%S)
 $C logs --no-color fastapi > "$BACKUP/fastapi-$TS.log"
 stopped=1
 $C stop fastapi
