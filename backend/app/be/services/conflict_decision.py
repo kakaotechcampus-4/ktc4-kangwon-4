@@ -11,7 +11,7 @@
 
 import logging
 
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.agent.enrichment import confirmation_state
 from app.agent.schemas import (
@@ -20,8 +20,11 @@ from app.agent.schemas import (
     ConflictSelection,
     KnownProcedureStep,
     RetainedInfoResult,
+    SafeFailureOutcome,
 )
-from app.be.models.evidence import DecisionRecord
+from app.be.models.case import Case
+from app.be.models.case_history import CaseHistory
+from app.be.models.evidence import ConflictReference, DecisionRecord
 from app.common.agent_dto import AgentGraphInput, AgentGraphOutput
 from app.be.crud import case_history as case_history_crud
 from app.be.crud import conflict_reference as conflict_reference_crud
@@ -165,7 +168,7 @@ def _save_decision_outcome(
     #
     #   DONE / NEEDS_MORE_INFO  고른 값 저장 + 충돌 닫기
     #   또 다른 충돌            새 충돌 저장 + 방금 고른 것은 닫기
-    #   실패                    아무것도 안 함 — 충돌이 남아야 다시 결정할 수 있다
+    #   실패                    충돌 유지. 단, 재입력이 필요한 묶음은 미채택으로 정리한다.
     #
     # 되물을 것이 또 생겨도(NEEDS_MORE_INFO) 고른 값은 저장한다. 안 그러면 사장님이 답을
     # 했는데 Case가 그대로라 같은 질문을 또 받는다.
@@ -188,12 +191,59 @@ def _save_decision_outcome(
         return None
 
     if outcome.outcome_type == "SAFE_FAILURE":
+        if (outcome.recovery_action_code == "RESUBMIT_INPUT"
+                and history.source == "CONFLICT_DECISION"):
+            if not _prepare_resubmit_failure(session, history, outcome, choices):
+                return None
         decision_record_service.save_safe_failure(session, history, outcome)
         return None
 
     return decision_record_service.save_reviewed_plan(
         session, history, outcome, resolved_conflicts=choices
     )
+
+
+def _prepare_resubmit_failure(
+    session: Session, history: CaseHistory, outcome: SafeFailureOutcome, choices: dict[int, str]
+) -> bool:
+    """현재 결정이면 실패를 저장한다. 원본 묶음도 일치할 때만 미채택 처리를 함께 준비한다."""
+    trigger = outcome.trigger
+    if outcome.case_id != history.case_id or trigger.input_event_id != str(history.id):
+        return False
+    case = session.get(Case, history.case_id, with_for_update=True, populate_existing=True)
+    if case is None:
+        return False
+    session.refresh(history, with_for_update=True)
+    latest = session.exec(select(CaseHistory.id).where(CaseHistory.case_id == case.id,
+        CaseHistory.source.in_(("CASE_CREATED", "USER_INPUT", "CONFLICT_DECISION", "DOCUMENT_SUBMITTED")))
+        .order_by(CaseHistory.created_at.desc(), CaseHistory.id.desc()).limit(1).with_for_update()).first()
+    if (history.source != "CONFLICT_DECISION" or history.case_id != case.id
+            or history.judgment_status != "PENDING" or latest != history.id):
+        return False
+    if case.case_status != "IN_PROGRESS" or trigger.trigger_type != "CONFLICT_CONFIRMED":
+        return True
+    # 원본 형식 등이 달라도 현재 판단은 실패로 끝낸다. 충돌 정리만 엄격히 제한한다.
+    if trigger.conflict_snapshot is None:
+        return True
+    pending = session.exec(select(ConflictReference).where(ConflictReference.case_id == case.id,
+        ConflictReference.status == "PENDING").with_for_update().execution_options(populate_existing=True)).all()
+    if (not pending or {row.id for row in pending} != set(choices)
+            or any(side not in {"PROPOSED", "STORED"} for side in choices.values())
+            or len({row.case_history_id for row in pending}) != 1):
+        return True
+    origin = session.get(CaseHistory, pending[0].case_history_id, with_for_update=True, populate_existing=True)
+    retained = trigger.retained_info_result.model_dump(mode="json") if trigger.retained_info_result else None
+    if (origin is None or origin.case_id != case.id or origin.id >= history.id
+            or origin.judgment_status != "CONFLICT" or trigger.conflict_snapshot.case_id != case.id
+            or trigger.conflict_snapshot.snapshot_id != outcome.snapshot_id
+            or origin.conflict_snapshot != trigger.conflict_snapshot.model_dump(mode="json")
+            or origin.retained_info_result != retained
+            or {row.conflict_ref: row.candidate_payload for row in pending}
+            != {row.conflict_ref: row.model_dump(mode="json") for row in trigger.conflicts}):
+        return True
+    # PROPOSED 선택도 반영하지 않는다. 새 글로 다시 확인하므로 기존 값 유지로 정리한다.
+    decision_record_service._resolve_conflicts(session, history, {row.id: "STORED" for row in pending})
+    return True
 
 
 def _restore_batch(
