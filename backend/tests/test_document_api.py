@@ -467,3 +467,76 @@ def test_document_skipped_while_blocked_is_judged_once_the_block_ends(judged, mo
     assert queued == history.id and history.source == "DOCUMENT_SUBMITTED"
     assert "원상복구 조항: 임차인은 계약 종료 시 원상복구한다" in history.raw_input
     assert document_service.queue_owed_document_judgment(judged.session, history.id) is None
+
+
+def test_confirmed_document_can_be_confirmed_again_and_clears_the_check(api):
+    """오타를 확인 뒤에 고칠 수 있어야 한다. 서버는 확인이 끝난 서류도 다시 받는다(#341).
+
+    사장님이 값을 잘못 확인하면 점검이 그 값으로 걸린다. 그때 같은 서류를 다시 확인해
+    고칠 수 없으면 Case가 거기서 막힌다 — 같은 파일을 다시 올려도 캐시가 확인한 값을
+    그대로 돌려줘서 오타가 따라온다. 화면이 그 길을 열 수 있게 계약을 여기 고정한다.
+    """
+    client, _, _, _ = api
+    for kind, fields in SETTLEMENT.items():
+        assert upload(client, kind, fields).status_code == 200
+    assert upload(client, DocumentKind.TRANSFER, TRANSFER).status_code == 200
+
+    # 종류를 확신하지 못한 서류부터 확인해 둔다. 여기까지는 기존 흐름이다
+    for document in client.post("/cases/documents/check", json=OWNER).json()["documents"]:
+        if document["needs_confirmation"]:
+            values = {field["name"]: field["value"] for field in document["fields"]}
+            assert client.post(f"/cases/documents/{document['document_id']}/confirm",
+                               json={"kind": document["kind"], "confirmed_fields": values}).status_code == 200
+
+    transfer = next(d for d in client.get("/cases/documents").json()["documents"] if d["kind"] == "TRANSFER")
+    correct = {field["name"]: field["value"] for field in transfer["fields"]}
+    confirm_url = f"/cases/documents/{transfer['document_id']}/confirm"
+
+    # 1. 보낸 사람을 한 글자 틀리게 확인한다. 점검이 신청인과 다르다고 잡는다
+    typo = client.post(confirm_url, json={"kind": "TRANSFER", "confirmed_fields": {**correct, "sender": "김리폰"}})
+    assert typo.status_code == 200
+    assert not typo.json()["documents"][0]["needs_confirmation"] or True
+    issues = client.post("/cases/documents/check", json=OWNER).json()["check"]
+    assert issues["status"] == "ISSUES"
+    assert "APPLICANT_MISMATCH" in {issue["code"] for issue in issues["issues"]}
+
+    # 2. 확인이 끝난(needs_confirmation=false) 서류인데도 다시 받는다 — 막는 코드가 없다
+    listed = next(d for d in client.get("/cases/documents").json()["documents"] if d["kind"] == "TRANSFER")
+    assert listed["needs_confirmation"] is False
+    fixed = client.post(confirm_url, json={"kind": "TRANSFER", "confirmed_fields": correct})
+    assert fixed.status_code == 200
+
+    # 3. 값이 바뀌었으므로 지난 점검은 지워진다. 틀린 값으로 낸 결과가 남아 있으면 안 된다
+    assert fixed.json()["check"] is None
+
+    # 4. 다시 점검하면 통과한다. 같은 파일을 다시 올리지 않고 고쳤다
+    assert client.post("/cases/documents/check", json=OWNER).json()["check"]["status"] == "COMPLETE"
+
+
+def test_confirming_the_same_values_again_keeps_the_check(api):
+    """값을 안 바꾸고 다시 확인하면 점검을 지우지 않는다(#341).
+
+    화면이 확인 시트를 열었다 그대로 닫는 경우다. 요청을 안 보내는 것이 가장 깔끔하지만,
+    보내더라도 멀쩡한 점검 결과가 사라지지는 않아야 한다.
+    """
+    client, _, _, _ = api
+    for kind, fields in SETTLEMENT.items():
+        assert upload(client, kind, fields).status_code == 200
+    assert upload(client, DocumentKind.TRANSFER, TRANSFER).status_code == 200
+    for document in client.post("/cases/documents/check", json=OWNER).json()["documents"]:
+        if document["needs_confirmation"]:
+            values = {field["name"]: field["value"] for field in document["fields"]}
+            client.post(f"/cases/documents/{document['document_id']}/confirm",
+                        json={"kind": document["kind"], "confirmed_fields": values})
+
+    # 이체확인증까지 한 번 확인해 둔다. "확인된 서류를 다시 여는" 경우를 만들려면 먼저 확인돼 있어야 한다
+    transfer = next(d for d in client.get("/cases/documents").json()["documents"] if d["kind"] == "TRANSFER")
+    same = {field["name"]: field["value"] for field in transfer["fields"]}
+    confirm_url = f"/cases/documents/{transfer['document_id']}/confirm"
+    assert client.post(confirm_url, json={"kind": "TRANSFER", "confirmed_fields": same}).status_code == 200
+    assert client.post("/cases/documents/check", json=OWNER).json()["check"]["status"] == "COMPLETE"
+
+    # 같은 값을 다시 보낸다. 바뀐 것이 없으므로 점검 결과가 그대로 남는다
+    again = client.post(confirm_url, json={"kind": "TRANSFER", "confirmed_fields": same})
+    assert again.status_code == 200
+    assert again.json()["check"]["status"] == "COMPLETE"
