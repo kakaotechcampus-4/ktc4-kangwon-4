@@ -1,44 +1,183 @@
 {
-  "checked_at": "2026-11-07",
-  "source_revision": "366617abdc0b85dc779c27f5260269d60746c365",
-  "scope": "운영철학·안심 이용 정적 안내와 진입 링크. Backend 기능 변경 없음.",
+  "checked_at": "2026-11-10",
+  "source_revision": "c01bf12b4ddc5abed13b3c01af9040b1160baf1f",
+  "implementation_basis": "develop 52807ae plus local public guide changes",
+  "scope": "안심가이드 홈의 사용자 제공 MP4 교체, 설명·미리보기 화면을 나란히 둔 큰 안내 3개, 기존 홈 섹션 제거. 상세 안내 7개는 유지.",
   "results": {
-    "safety_pages": 7,
-    "questions": 9,
-    "public_pages_link_checked": 36,
+    "checked_at": "2026-11-10",
+    "video": {
+      "duration": 12,
+      "width": 1920,
+      "height": 1080,
+      "muted": true,
+      "loop": true,
+      "play_pause_keyboard": "passed",
+      "reduced_motion_manual_play": "passed",
+      "offscreen_pause": "passed",
+      "range_request": "206 passed"
+    },
+    "features": 3,
+    "removed_home_sections": "passed",
+    "feature_detail_links": [
+      "/safety/guide/#buttons",
+      "/safety/guide/#finish",
+      "/safety/guide/#my-info"
+    ],
     "viewports": [
       1440,
-      768,
+      1000,
+      800,
+      701,
+      700,
       390,
       320
     ],
-    "render_checks": 28,
-    "local_assets_checked": 22,
-    "search": "passed",
-    "keyboard": "passed",
-    "question_filters": "passed",
-    "mobile_menu": "passed",
-    "login_page_tests": "5 passed",
-    "lint": "passed",
-    "typescript_and_build": "passed",
-    "documentation_contract_check": "passed",
-    "browser_console_errors": 0,
-    "production_build_preview": {
-      "pages": 7,
+    "home_render_checks": 7,
+    "safety_page_smoke_checks": 7,
+    "search_filters_mobile_menu": "passed",
+    "console_errors": [],
+    "service_api_requests": []
+  },
+  "video_asset": {
+    "filename": "brand-intro.mp4",
+    "duration_seconds": 12,
+    "width": 1920,
+    "height": 1080,
+    "size_bytes": 423860,
+    "sha256": "d9137e376ce82c43f6e42dde4374451ce24600e7c214e2fbb0781f53ef2a2de3",
+    "origin": "user-provided reborn_typography_12s_1080p.mp4, copied without transcoding",
+    "poster_frame_seconds": 10.5
+  },
+  "notes": [
+    "문서 소스·계약·링크 검사와 프로덕션 타입·빌드 통과. 기존 애플리케이션 번들 크기 경고 유지.",
+    "가져온 MP4와 저장한 MP4의 SHA-256이 일치합니다. 영상은 재인코딩하지 않았습니다.",
+    "세 안내의 미리보기 화면은 2026-11-09 합성 데이터 캡처로 촬영 기준을 표시합니다.",
+    "실제 모델 호출·카카오 운영 로그인·운영 배포·사용자 사용성 실험은 실행하지 않았습니다. 이전 검사 결과는 previous_validation에 보존합니다."
+  ],
+  "previous_validation": {
+    "checked_at": "2026-11-09",
+    "source_revision": "c01bf12b4ddc5abed13b3c01af9040b1160baf1f",
+    "implementation_basis": "develop 52807ae",
+    "scope": "운영철학·버튼 답변·절차 안내 종료·내 정보·복구·DB 서류함의 공개 안내 최신화. 서비스 구현 변경 없음.",
+    "results": {
+      "safety_pages": 7,
+      "questions": 12,
       "viewports": [
         1440,
         390,
         320
       ],
-      "render_checks": 21,
-      "all_36_public_page_links_and_anchors": "passed"
+      "safety_render_checks": 21,
+      "all_public_pages": 38,
+      "all_public_render_checks": 114,
+      "all_public_fragment_links": 442,
+      "all_public_local_resources": 26,
+      "search": "passed",
+      "question_filters_and_accordion": "passed",
+      "mobile_menu_and_keyboard": "passed",
+      "documentation_contract_check": "passed",
+      "typescript_and_production_build": "passed",
+      "browser_console_errors": 0,
+      "service_api_requests": 0
+    },
+    "notes": [
+      "현재 제공 기능·저장·삭제·복구 범위를 코드에서 대조했습니다.",
+      "이번 정적 문서 검증에서 FE/BE 전체 테스트·실제 모델·카카오 운영 로그인·운영 배포·대상 사용자 실험은 실행하지 않았습니다.",
+      "이전 테스트 수·운영 검증·실측을 이번 결과로 재사용하지 않았습니다."
+    ],
+    "previous_validation": {
+      "checked_at": "2026-11-07",
+      "source_revision": "366617abdc0b85dc779c27f5260269d60746c365",
+      "scope": "운영철학·안심 이용 정적 안내와 진입 링크. Backend 기능 변경 없음.",
+      "results": {
+        "safety_pages": 7,
+        "questions": 9,
+        "public_pages_link_checked": 36,
+        "viewports": [
+          1440,
+          768,
+          390,
+          320
+        ],
+        "render_checks": 28,
+        "local_assets_checked": 22,
+        "search": "passed",
+        "keyboard": "passed",
+        "question_filters": "passed",
+        "mobile_menu": "passed",
+        "login_page_tests": "5 passed",
+        "lint": "passed",
+        "typescript_and_build": "passed",
+        "documentation_contract_check": "passed",
+        "browser_console_errors": 0,
+        "production_build_preview": {
+          "pages": 7,
+          "viewports": [
+            1440,
+            390,
+            320
+          ],
+          "render_checks": 21,
+          "all_36_public_page_links_and_anchors": "passed"
+        }
+      },
+      "notes": [
+        "카카오톡의 정책·운영 통계를 리본의 기능이나 성과로 제시하지 않음.",
+        "서류함 삭제와 저장 파일 영구 삭제의 차이를 코드에서 확인해 안내.",
+        "개발 문서의 이전 전체 FE 660개·BE 1112개 결과를 이번 신규 실행으로 계산하지 않음. 이번 영향 범위는 LoginPage 5개와 정적 문서·브라우저 검증.",
+        "Orca 스크롤 캡처가 빈 이미지로 저장돼 해당 화면 배치는 Headless Chrome으로 추가 렌더링해 확인. 실제 서비스 오류나 JavaScript 오류는 관찰되지 않음.",
+        "실제 모델 호출·운영 계정 초기화·실제 카카오 로그인은 실행하지 않음."
+      ]
+    },
+    "hero_motion_update": {
+      "checked_at": "2026-11-09",
+      "implementation": "SVG/CSS animation in public safety hero; no service API changes",
+      "verification": {
+        "viewport_widths": [
+          1440,
+          1000,
+          768,
+          701,
+          700,
+          390,
+          320
+        ],
+        "viewport_checks": 7,
+        "animation_progress": "passed",
+        "pause_and_keyboard_resume": "passed",
+        "reduced_motion_and_restore": "passed",
+        "svg_validity": "passed",
+        "control_minimum_height": 44,
+        "non_home_page": "passed",
+        "console_errors": [],
+        "external_requests": []
+      },
+      "limits": "실제 모델 호출·외부 영상 생성 없음. 상단 그림은 실제 이용자의 진행 상태가 아닌 장식입니다."
     }
   },
-  "notes": [
-    "카카오톡의 정책·운영 통계를 리본의 기능이나 성과로 제시하지 않음.",
-    "서류함 삭제와 저장 파일 영구 삭제의 차이를 코드에서 확인해 안내.",
-    "개발 문서의 이전 전체 FE 660개·BE 1112개 결과를 이번 신규 실행으로 계산하지 않음. 이번 영향 범위는 LoginPage 5개와 정적 문서·브라우저 검증.",
-    "Orca 스크롤 캡처가 빈 이미지로 저장돼 해당 화면 배치는 Headless Chrome으로 추가 렌더링해 확인. 실제 서비스 오류나 JavaScript 오류는 관찰되지 않음.",
-    "실제 모델 호출·운영 계정 초기화·실제 카카오 로그인은 실행하지 않음."
-  ]
+  "presentation_review_20261110": {
+    "checked_at": "2026-11-10",
+    "source_revision": "9d6a7fe8c6b85294473cac78de2575237bc01aa4",
+    "implementation_basis": "develop 6cb52843e911bf29bd85a5b3b6ca1690a0572b10 plus existing local public guide work",
+    "scope": "발표 15·16쪽 코드 대조, 최신 develop 병합, 충돌 실패 뒤 새 상황 입력·배포 보호 문서 갱신",
+    "results": {
+      "backend_export_check": "통과: API 24개·작업 26개·소스 186개",
+      "docs_check_build": "통과: 개발 문서 31개·안심가이드 7개·질문 12개",
+      "frontend_build": "통과: 기존 500kB 번들 경고",
+      "ConfirmChangePage.test.tsx": "30개 통과"
+    },
+    "not_run": [
+      "BE 전체 테스트",
+      "FE 전체 테스트",
+      "실제 LLM",
+      "운영 DB",
+      "Discord 전송",
+      "카카오 운영 로그인",
+      "운영 배포",
+      "새 브라우저 시각 검증"
+    ],
+    "pr331": "확인 시점 open·미머지, 적용 예정으로만 표기",
+    "report": "outputs/발표그림_15-16쪽_코드대조_20261110.md",
+    "note": "상위의 기존 검증 결과와 캡처는 해당 이전 기준이며 이번 실행 결과로 재표시하지 않는다."
+  }
 }

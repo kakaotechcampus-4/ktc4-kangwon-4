@@ -1,43 +1,219 @@
 {
-  "checked_at": "2026-11-07",
-  "source_revision": "366617abdc0b85dc779c27f5260269d60746c365",
+  "checked_at": "2026-11-10",
+  "source_revision": "c01bf12b4ddc5abed13b3c01af9040b1160baf1f",
+  "implementation_basis": "develop 52807ae plus local public guide changes",
   "source_hashes": "generated/contracts.json",
   "results": [
     {
-      "name": "Frontend 자동 테스트",
-      "result": "기준 전체 660개 통과 · 안심가이드 진입 링크 변경 후 LoginPage 5개 재확인"
+      "name": "Backend 문서 계약 내보내기·대조",
+      "result": "API 24개·작업 26개·소스 해시 186개 통과 · 앱 시작·DB 초기화·모델 호출 없음"
     },
     {
-      "name": "Backend·Agent 자동 테스트",
-      "result": "1,112개 통과 · PERF 7개 건너뜀 · 경고 7개"
+      "name": "문서 검사·생성",
+      "result": "개발 문서 31개·안심가이드 7개·질문 12개 통과 · 내부 링크·앵커·영상·미리보기 원본 검사"
     },
     {
-      "name": "Frontend 린트·타입·빌드",
-      "result": "안심가이드 포함 린트·타입·빌드 통과 · 기존 번들 크기 경고 있음"
+      "name": "Frontend 타입·프로덕션 빌드",
+      "result": "통과 · 기존 애플리케이션 번들 크기 경고 유지"
     },
     {
-      "name": "문서 계약·소스·링크 검사",
-      "result": "개발 문서 29개 + 안심가이드 7개 · API 24개 · 작업 26개 · 소스 180개 통과"
+      "name": "안심가이드 홈과 상세 안내",
+      "result": "홈 320~1440px 7개 폭·큰 안내 3개·자세히 보기 3개·상세 페이지 7개·검색/필터/모바일 메뉴 통과"
     },
     {
-      "name": "문서 브라우저 확인",
-      "result": "개발·빌드 preview에서 29개 페이지 · 1440/390/320px · 링크/이미지/검색/키보드/복사/최근 문서/모바일 메뉴 통과"
+      "name": "소개 영상 동작",
+      "result": "12초·1920×1080 · 무음 반복·멈춤/키보드 재생·동작 줄이기/수동 재생·화면 밖 정지·Range 206 통과"
+    },
+    {
+      "name": "브라우저 오류·원본 보존",
+      "result": "JS 오류 0건·서비스 API 요청 0건 · 제공 영상과 저장 파일 SHA-256 일치"
     }
   ],
-  "note": "2026-11-07 develop 366617a와 문서 구현 작업본을 검증했습니다. Backend 테스트는 별도의 MySQL 컨테이너를 사용하며 실제 운영 계정 초기화·실제 모델 호출·카카오 운영 로그인·사용자 테스트는 실행하지 않았습니다. FE 테스트의 jsdom 문서 이동 안내와 기존 번들·직렬화 경고는 검증 로그에 기록했습니다. 브라우저 검증 중 리본 API 요청과 JavaScript 오류는 0건입니다. 운영철학·안심 이용 안내 추가 뒤의 별도 검증은 docs/safety/validation.json에 기록했습니다. Backend 동작은 변경하지 않았고 이전 전체 테스트 수를 신규 실행 결과로 재계산하지 않았습니다.",
-  "documentation_updates": [
-    {
-      "checked_at": "2026-11-07",
-      "base_revision": "8376cec",
-      "implementation_basis": "develop 279dad5",
-      "scope": "40~50대 핵심 대상·문제정의·UI/UX 구현 근거와 사용자 확인 과제. 서비스 기능·API 변경 없음.",
-      "results": [
-        "docs:check: 개발 문서29개·안심가이드7개·API24개·작업26개·소스180개 통과",
-        "docs:build 통과",
-        "Frontend 타입·프로덕션 빌드 통과. 기존 번들 크기 경고 유지",
-        "생성된 소개·UX·운영철학·문서 홈의 문구와 소개/UX 화면 이미지 연결 확인"
+  "note": "2026-11-10 안심가이드 홈 변경과 관련 개발 문서를 검증했습니다. 이번에는 정적 문서·계약·타입·빌드·변경된 홈과 상세 안내를 확인했습니다. FE/BE 전체 기능 테스트·실제 모델·카카오 운영 로그인·대상 사용자 실험·운영 배포는 실행하지 않았습니다. 11월 7일/9일 검증·PDF·캡처는 해당 기준으로 previous_validation과 원본에 보존합니다.",
+  "safety_home_verification": {
+    "checked_at": "2026-11-10",
+    "video": {
+      "duration": 12,
+      "width": 1920,
+      "height": 1080,
+      "muted": true,
+      "loop": true,
+      "play_pause_keyboard": "passed",
+      "reduced_motion_manual_play": "passed",
+      "offscreen_pause": "passed",
+      "range_request": "206 passed"
+    },
+    "features": 3,
+    "removed_home_sections": "passed",
+    "feature_detail_links": [
+      "/safety/guide/#buttons",
+      "/safety/guide/#finish",
+      "/safety/guide/#my-info"
+    ],
+    "viewports": [
+      1440,
+      1000,
+      800,
+      701,
+      700,
+      390,
+      320
+    ],
+    "home_render_checks": 7,
+    "safety_page_smoke_checks": 7,
+    "search_filters_mobile_menu": "passed",
+    "console_errors": [],
+    "service_api_requests": []
+  },
+  "previous_validation": {
+    "checked_at": "2026-11-09",
+    "source_revision": "c01bf12b4ddc5abed13b3c01af9040b1160baf1f",
+    "implementation_basis": "develop 52807ae merged into local documentation branch",
+    "source_hashes": "generated/contracts.json",
+    "results": [
+      {
+        "name": "Backend 문서 계약 내보내기·대조",
+        "result": "OpenAPI 24개·작업 26개·소스 해시 186개 통과 · 앱 시작·DB 초기화·모델 호출 없음"
+      },
+      {
+        "name": "개발 문서·안심가이드 검사와 생성",
+        "result": "31개 개발 문서·7개 안심가이드·질문 12개 · 소스·내부 링크·앵커·캡처 검사 통과"
+      },
+      {
+        "name": "Frontend 타입·프로덕션 빌드",
+        "result": "통과 · 기존 애플리케이션 번들 500kB 초과 경고 유지"
+      },
+      {
+        "name": "프로덕션 preview 브라우저 확인",
+        "result": "38개 페이지 × 1440/390/320px = 114회 · 내부 앵커 442개·로컬 리소스 26개 통과"
+      },
+      {
+        "name": "문서 상호작용",
+        "result": "검색·키보드·복사·최근 문서 삭제·질문 필터·펼쳐 읽기·모바일 메뉴 통과 · JS 오류 0건·서비스 API 요청 0건"
+      },
+      {
+        "name": "최신 화면 캡처",
+        "result": "내 정보·준비 확인·진행 상태·절차 안내 종료 4장 · 합성 API 응답 · 2026-11-09 미리보기 데이터 표시"
+      },
+      {
+        "name": "안심가이드 상단 모션",
+        "result": "320~1440px 7개 폭·움직임·멈춤/키보드 재생·동작 줄이기 전환·다른 안내 페이지 통과 · JS 오류·외부 요청 0건"
+      }
+    ],
+    "note": "2026-11-09 문서 갱신 작업본과 develop 52807ae를 대조했습니다. 이번 실행은 정적 문서·타입·빌드·브라우저 검사이며 FE/BE 전체 기능 테스트, 실제 모델 호출, 카카오 운영 로그인, 실제 고객 사용성 실험과 운영 배포는 실행하지 않았습니다. 11월 7일 PDF·캡처와 과거 테스트·성능 수치는 해당 기준으로 보존합니다. 이전 검증 기록은 previous_validation에 보존했습니다.",
+    "browser_validation": {
+      "checked_at": "2026-11-09",
+      "developers_pages": 31,
+      "safety_pages": 7,
+      "questions": 12,
+      "viewports": [
+        1440,
+        390,
+        320
       ],
-      "limitations": "자동 기능 테스트·실제 모델 호출·대상 사용자 사용성 실험은 이번 문구 갱신에서 실행하지 않음. 과거 검증 수치·PDF·캡처 기준 유지."
+      "render_checks": 114,
+      "local_assets": 26,
+      "fragment_links": 442,
+      "search": "passed",
+      "clipboard": "passed",
+      "recent_documents": "passed",
+      "question_filter_and_accordion": "passed",
+      "mobile_menu_and_keyboard": "passed",
+      "console_errors": [],
+      "service_api_requests": []
+    },
+    "previous_validation": {
+      "checked_at": "2026-11-07",
+      "source_revision": "366617abdc0b85dc779c27f5260269d60746c365",
+      "source_hashes": "generated/contracts.json",
+      "results": [
+        {
+          "name": "Frontend 자동 테스트",
+          "result": "기준 전체 660개 통과 · 안심가이드 진입 링크 변경 후 LoginPage 5개 재확인"
+        },
+        {
+          "name": "Backend·Agent 자동 테스트",
+          "result": "1,112개 통과 · PERF 7개 건너뜀 · 경고 7개"
+        },
+        {
+          "name": "Frontend 린트·타입·빌드",
+          "result": "안심가이드 포함 린트·타입·빌드 통과 · 기존 번들 크기 경고 있음"
+        },
+        {
+          "name": "문서 계약·소스·링크 검사",
+          "result": "개발 문서 29개 + 안심가이드 7개 · API 24개 · 작업 26개 · 소스 180개 통과"
+        },
+        {
+          "name": "문서 브라우저 확인",
+          "result": "개발·빌드 preview에서 29개 페이지 · 1440/390/320px · 링크/이미지/검색/키보드/복사/최근 문서/모바일 메뉴 통과"
+        }
+      ],
+      "note": "2026-11-07 develop 366617a와 문서 구현 작업본을 검증했습니다. Backend 테스트는 별도의 MySQL 컨테이너를 사용하며 실제 운영 계정 초기화·실제 모델 호출·카카오 운영 로그인·사용자 테스트는 실행하지 않았습니다. FE 테스트의 jsdom 문서 이동 안내와 기존 번들·직렬화 경고는 검증 로그에 기록했습니다. 브라우저 검증 중 리본 API 요청과 JavaScript 오류는 0건입니다. 운영철학·안심 이용 안내 추가 뒤의 별도 검증은 docs/safety/validation.json에 기록했습니다. Backend 동작은 변경하지 않았고 이전 전체 테스트 수를 신규 실행 결과로 재계산하지 않았습니다.",
+      "documentation_updates": [
+        {
+          "checked_at": "2026-11-07",
+          "base_revision": "8376cec",
+          "implementation_basis": "develop 279dad5",
+          "scope": "40~50대 핵심 대상·문제정의·UI/UX 구현 근거와 사용자 확인 과제. 서비스 기능·API 변경 없음.",
+          "results": [
+            "docs:check: 개발 문서29개·안심가이드7개·API24개·작업26개·소스180개 통과",
+            "docs:build 통과",
+            "Frontend 타입·프로덕션 빌드 통과. 기존 번들 크기 경고 유지",
+            "생성된 소개·UX·운영철학·문서 홈의 문구와 소개/UX 화면 이미지 연결 확인"
+          ],
+          "limitations": "자동 기능 테스트·실제 모델 호출·대상 사용자 사용성 실험은 이번 문구 갱신에서 실행하지 않음. 과거 검증 수치·PDF·캡처 기준 유지."
+        }
+      ]
+    },
+    "hero_motion_update": {
+      "checked_at": "2026-11-09",
+      "implementation": "SVG/CSS animation in public safety hero; no service API changes",
+      "verification": {
+        "viewport_widths": [
+          1440,
+          1000,
+          768,
+          701,
+          700,
+          390,
+          320
+        ],
+        "viewport_checks": 7,
+        "animation_progress": "passed",
+        "pause_and_keyboard_resume": "passed",
+        "reduced_motion_and_restore": "passed",
+        "svg_validity": "passed",
+        "control_minimum_height": 44,
+        "non_home_page": "passed",
+        "console_errors": [],
+        "external_requests": []
+      },
+      "limits": "실제 모델 호출·외부 영상 생성 없음. 상단 그림은 실제 이용자의 진행 상태가 아닌 장식입니다."
     }
-  ]
+  },
+  "presentation_review_20261110": {
+    "checked_at": "2026-11-10",
+    "source_revision": "9d6a7fe8c6b85294473cac78de2575237bc01aa4",
+    "implementation_basis": "develop 6cb52843e911bf29bd85a5b3b6ca1690a0572b10 plus existing local public guide work",
+    "scope": "발표 15·16쪽 코드 대조, 최신 develop 병합, 충돌 실패 뒤 새 상황 입력·배포 보호 문서 갱신",
+    "results": {
+      "backend_export_check": "통과: API 24개·작업 26개·소스 186개",
+      "docs_check_build": "통과: 개발 문서 31개·안심가이드 7개·질문 12개",
+      "frontend_build": "통과: 기존 500kB 번들 경고",
+      "ConfirmChangePage.test.tsx": "30개 통과"
+    },
+    "not_run": [
+      "BE 전체 테스트",
+      "FE 전체 테스트",
+      "실제 LLM",
+      "운영 DB",
+      "Discord 전송",
+      "카카오 운영 로그인",
+      "운영 배포",
+      "새 브라우저 시각 검증"
+    ],
+    "pr331": "확인 시점 open·미머지, 적용 예정으로만 표기",
+    "report": "outputs/발표그림_15-16쪽_코드대조_20261110.md",
+    "note": "상위의 기존 검증 결과와 캡처는 해당 이전 기준이며 이번 실행 결과로 재표시하지 않는다."
+  }
 }

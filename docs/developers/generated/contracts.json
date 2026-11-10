@@ -1,5 +1,5 @@
 {
-  "checked_at": "2026-11-07T17:36:08+09:00",
+  "checked_at": "2026-11-10T17:24:02+09:00",
   "maintain_through": "2026-11-11",
   "openapi": {
     "components": {
@@ -918,7 +918,8 @@
                     "DONE",
                     "NEEDS_MORE_INFO",
                     "CONFLICT",
-                    "FAILED"
+                    "FAILED",
+                    "PROCEDURES_COMPLETED"
                   ],
                   "type": "string"
                 },
@@ -927,6 +928,17 @@
                 }
               ],
               "title": "Judgment Status"
+            },
+            "last_next_action_title": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Last Next Action Title"
             },
             "next_action": {
               "anyOf": [
@@ -1045,6 +1057,7 @@
                 "MORE_INFO_REQUESTED",
                 "CONFLICT_FOUND",
                 "JUDGMENT_FAILED",
+                "PROCEDURES_COMPLETED",
                 "DOCUMENTS_CHECKED",
                 "ROADMAP_TASKS_ADDED"
               ],
@@ -1114,6 +1127,23 @@
         },
         "CaseResultsEntryResponse": {
           "properties": {
+            "action_done_kind": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "PREPARATION",
+                    "SUBMISSION",
+                    "PROCESSING",
+                    "WORK"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Action Done Kind"
+            },
             "case_history_id": {
               "anyOf": [
                 {
@@ -1145,7 +1175,8 @@
                 "DONE",
                 "NEEDS_MORE_INFO",
                 "CONFLICT",
-                "FAILED"
+                "FAILED",
+                "PROCEDURES_COMPLETED"
               ],
               "title": "Judgment Status",
               "type": "string"
@@ -1220,7 +1251,9 @@
               "default": "TEXT",
               "enum": [
                 "TEXT",
-                "RESTORATION_ANSWER"
+                "RESTORATION_ANSWER",
+                "ACTION_DONE",
+                "RESTORATION_STATUS"
               ],
               "title": "Result Input Kind",
               "type": "string"
@@ -1259,6 +1292,18 @@
         "CaseResultsSubmitRequest": {
           "additionalProperties": false,
           "properties": {
+            "action_done": {
+              "anyOf": [
+                {
+                  "const": true,
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Action Done"
+            },
             "case_history_id": {
               "title": "Case History Id",
               "type": "integer"
@@ -1285,6 +1330,22 @@
                   "type": "null"
                 }
               ]
+            },
+            "restoration_status": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "NOT_STARTED",
+                    "IN_PROGRESS",
+                    "COMPLETED"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Restoration Status"
             }
           },
           "required": [
@@ -1421,7 +1482,8 @@
                 "NO_CHANGE",
                 "NEEDS_MORE_INFO",
                 "CONFLICT",
-                "FAILED"
+                "FAILED",
+                "PROCEDURES_COMPLETED"
               ],
               "title": "Result",
               "type": "string"
@@ -3989,8 +4051,8 @@
   "source_hashes": {
     "backend/app/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/agent/__init__.py": "c4d06792da4ff09e07e8c980458f98f6607a42d9443044e02cbce790cca52b37",
-    "backend/app/agent/action_catalog.py": "f4e07850f199c64ca0405395a3b455dc2fa3c489625bd80a7f0f59eb545f00de",
-    "backend/app/agent/blocker_candidates.py": "364c49f14c8f1a01f4b19316d5b379e4619469c9095794fbb52965e0f15a69d2",
+    "backend/app/agent/action_catalog.py": "d3f67b04f1a19253dc9c8f7ae902e7b49eb1604242d1f326c94f9a0f831f67bc",
+    "backend/app/agent/blocker_candidates.py": "201a91f158d78c72106f4bc69731512a6fcac9ee90c767186fcda547d719236e",
     "backend/app/agent/claim_safety.py": "16a0c03e0af2f3cb8103fd7b2249688e0a222d1df78952f8e1c0454d26005f72",
     "backend/app/agent/document_tool/__init__.py": "e224c6b50e1c00b1029d7d6f0e7467b4b88c036106bc7a4bd2ede6fc5e78f113",
     "backend/app/agent/document_tool/checks.py": "abc3fd6040023ab5a79824e0b5c8366bb8e9969110465a7d8fcc5be217f6e107",
@@ -4000,10 +4062,10 @@
     "backend/app/agent/document_tool/safety.py": "a802e5d84eb3ed9c0d5c803d3cc870f7556901ecb8e037dfa862f225e33ad70a",
     "backend/app/agent/document_tool/tool.py": "a346653285d45a22f922bbf0d01d787c77d617f5f2692d0e3d53440b474fa909",
     "backend/app/agent/enrichment.py": "89f7800969a9ca2b368717ee9846e0f081e10fcaf988dc5ab3dcee45cf7c7873",
-    "backend/app/agent/graph.py": "622672d2e568e7ebd008aa94542eda538583591818d82be07ec82fc885974fcb",
+    "backend/app/agent/graph.py": "c907f2508b984278e76729abc45ebf30012a3e05814d49a0286be193c753acc2",
     "backend/app/agent/guardrails.py": "5acc6e311cfee5f0c65c795a73934e749b58b902c2bf18de24fe1c7fe7a6c95f",
     "backend/app/agent/info_agent/__init__.py": "e5d7bc62d476dcc142fdd76fcc067afb4ac3ccc6534d8ff6a1fdc9681c8d2faf",
-    "backend/app/agent/info_agent/agent.py": "66cabb24417dfdbe2da0d43bca4854f5bd948c360e920a11bf7cbdcbbc77c501",
+    "backend/app/agent/info_agent/agent.py": "fb242b0b87dc1eb807dfdd1816249d8e746cb273807ccf4009784148938417ec",
     "backend/app/agent/info_agent/procedure_digests.py": "64510ec04d8ce20d25340b6272414223d1f0abf1ac7ba2ffe1ffdb2905a8ec78",
     "backend/app/agent/llm.py": "0212a5f8271453d9e4ddd51fe41606e6a662dd86f8f99db58ac3b7ff8dd9629d",
     "backend/app/agent/procedure_tool/__init__.py": "6e46154e007ea876946316efeb7854a59aa9482531f24504411ebf514d4d598b",
@@ -4012,22 +4074,22 @@
     "backend/app/agent/procedure_tool/store.py": "16a0002383d989aa4a8ab1dc94ebc16c4ce35afda66d22bc18a7769ed42b6d1a",
     "backend/app/agent/procedure_tool/stored_tool.py": "b59ed2b343d6276d2031e530e8dd589c5d80a401b1e6580f512d31e475f8487a",
     "backend/app/agent/projection.py": "e03c003d371a5d2db351cb5378a977534e90ef080147e7492d7dc288372da7f2",
-    "backend/app/agent/prompts.py": "a6cd0176f124facb7cab8d8a3731552b5fb2c3e5f02a294681cb3a6453234c85",
+    "backend/app/agent/prompts.py": "aeaeca509e2552083beee40c8ba7f3f4b3b1ebe3e3896164d33b284b3d8f8885",
     "backend/app/agent/review_tool/__init__.py": "31053c8258b934a58e76031de18972e45c5f2c2d7aba5f3d2a8a62e7743786b8",
     "backend/app/agent/review_tool/models.py": "72222f50255b8d0d98e9e4675ee9e33736342905b491c322e6d931e9822bd15c",
-    "backend/app/agent/review_tool/tool.py": "427457e95b4491e73657e8c0b23c992edc3b9d6b8bfc1b0a36a6c1249bee00c6",
-    "backend/app/agent/roadmap.py": "ada9176063de12d6a1633a4a13129440741a42377e84442073f2d3ab4747e291",
+    "backend/app/agent/review_tool/tool.py": "a9d2a25b1c980de38dfd75b4c77e4f8f74991216fc5b98d5732d7682e8d324b6",
+    "backend/app/agent/roadmap.py": "9425124cd01bea68b81bd3dc799047abad490e64e966bb30b119130085aa4965",
     "backend/app/agent/run_scope.py": "cb267f2ded59ec540a11ea0d69a05ac204bdd406763d65bad9f6f77e0fe6f747",
     "backend/app/agent/runtime.py": "35659c4009ee240eec5a7d1c54b3d559283d5b6401e008069ceb23b93c9f87fe",
-    "backend/app/agent/schemas.py": "440b6cbf9c1f0efdeaad87915ff25d06c8ac81b245742015dd0fbd5ea2e6390e",
+    "backend/app/agent/schemas.py": "a54f9930d284da339942a9c19ebe582ef26f5662567e5f32397d18928f2dab7f",
     "backend/app/agent/state.py": "c61ad1666b040918f6e2dcb9d5828f84af35d617be92e81b51683f9a4eb26b44",
     "backend/app/agent/supervisor/__init__.py": "f3f52fda1ecbb167732e362de7179e196f72caa0106504cb46a2379f8c6ad129",
-    "backend/app/agent/supervisor/agent.py": "1f63de5c594942426d41fea1b890c1fe7a3f31fe5a7c1c3bf8dea19455e6d629",
+    "backend/app/agent/supervisor/agent.py": "da3dc0725f9419b3f0a3a9a3fcc55216b88f49f91e2462406cf5078644989da2",
     "backend/app/agent/support_agent/__init__.py": "7317447fb9b4c7f89f459991d95405a2a473396c574fe85ba5d05a332fb9da6a",
     "backend/app/agent/support_agent/agent.py": "8d562741d504e35516b227f56d3fd32873f006d161d11ca8ebc3d6e36106ced9",
     "backend/app/agent/support_agent/models.py": "5a59d8d74b52bc3090bef2570c2d748e652963fc2122645ea724f70add869f57",
     "backend/app/agent/support_agent/wiki/__init__.py": "dce5fac5b29e7a14048640c6dc91092a4e8ae29d73251b929353ede540151c48",
-    "backend/app/agent/tracing.py": "54838cb5978098523555f5b4b15d9bdfafec0d2d3308eb432b718c5e1e020c45",
+    "backend/app/agent/tracing.py": "aa2b3bd72062df28284fb3d74ac9288a94c10fae096a3a03831f1b957849ce1c",
     "backend/app/be/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/be/crud/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/be/crud/blocker.py": "0ab5a141a976b1b85e690eaf2da355907da841490604193451a6ecd55337e366",
@@ -4039,19 +4101,20 @@
     "backend/app/be/crud/conflict_reference.py": "b0feb49acd64fe34d1cb6290dba3f16ad88a3fe6f0bb57e2f50bb218de0a203d",
     "backend/app/be/crud/evidence.py": "4af469caffca3b12d224ec2f1d5e098b119b24f476c18222d7e0501fcda5ae7a",
     "backend/app/be/crud/member.py": "8beea1f73e7603161bc71e50a4abdf3793d469ac7eca8ad80597b67a20aadcd1",
-    "backend/app/be/crud/procedure_step.py": "7ce5cdb4f4256d29dedffe0dc905388ddb7da80d403c7ce4d5b3779dc0c1a15e",
+    "backend/app/be/crud/procedure_step.py": "50b119dd18df494665bba1cfcb503bf28fb3a8046e148f9ceff55d6cc5307905",
     "backend/app/be/crud/support_item.py": "106b4402e1b250731e63e97131326eab4a50a584d8b1f960d1c3e91ba73beb35",
     "backend/app/be/db.py": "50f7fbc6dc60180c4ef9133d0d54a14728e4283d53f33d8c30ceb95779c2b4f0",
     "backend/app/be/dependencies/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/be/dependencies/auth.py": "1e375f898d5c5bf5343295960e08e6eab384880202aa109621215e9d077ceec3",
-    "backend/app/be/models/__init__.py": "e7cd734f6d97f86e0227bdc4744c9140ce570f230de102e12e656ed009976715",
+    "backend/app/be/models/__init__.py": "90ede8b1f84c24bb14b9db5050c96c2a3817eca00e5c94ec9779e874c113327d",
     "backend/app/be/models/blocker.py": "a99b1f72fcebb3102fca573987dcc3054959bc346d893d9ff68a6332742da4d6",
     "backend/app/be/models/case.py": "26a50c50f83c8c36185c57987854499290412bd7bb078ba07b04072745329d08",
     "backend/app/be/models/case_checklist.py": "e4228616399c60dd50028a94d508bf696277ddd249974207c939b8fe02f84a34",
+    "backend/app/be/models/case_document_context.py": "ef14870ab5b19001d4ccda8dcbc20be411b750a4c82c86418ff4654867405215",
     "backend/app/be/models/case_document_history.py": "620c2a382e07f482ebafcda58524431453a66946f26dead89ba4a950bad51554",
     "backend/app/be/models/case_field_history.py": "0927f3ffa061afb6df630cc49357c08bd6be1550e8c75a9d89472bd96253cb49",
-    "backend/app/be/models/case_history.py": "fbafd7212b6ab9a708a6fc71c43de965db595495cbcdd4b36133c3088fb8945d",
-    "backend/app/be/models/evidence.py": "4412d0427f6301d4b75d9d6af5384c902172f7ee6f091af5724de32884bdceba",
+    "backend/app/be/models/case_history.py": "0154e4ef20850d3e922bf13cf7631b4cf7eed8feebee7040e4bc0c64d5e22b60",
+    "backend/app/be/models/evidence.py": "7ee0f7a3a861b72751d8b590fbf51a18d7fd36092e823afe5c0ebf440ea22f49",
     "backend/app/be/models/member.py": "c58d7c241d2e1e7f51f8baf4496aed8e4d54c8108eede1c62a4a8820544f716b",
     "backend/app/be/models/mixins.py": "188866e43ffeeea055c255ecf236ffa87dbd94868e73690d2e655f274e894e3f",
     "backend/app/be/models/procedure_step.py": "d3afa28485df5e46f45fdb24275d43e589f297132e0ff7372d1afbf161ffe50b",
@@ -4059,45 +4122,49 @@
     "backend/app/be/routers/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/be/routers/auth.py": "d5bfbc4646bc6ef5b610956ba58024f4ae10ff999f3eb841984a4128d4d19268",
     "backend/app/be/routers/case.py": "2e2f1a58b11c7d748ff0f40e2e432de7eaae4f9ddbf47b3b333659251d36bba5",
-    "backend/app/be/routers/document.py": "012eaa8c5e5f7e01782b627500b5567274514970a96c92d9d4eeff8ca6521119",
+    "backend/app/be/routers/document.py": "09638ab14192b313158ccf515caaca76db6c5e2e7d80da0134718ac45fb297f3",
     "backend/app/be/schemas/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/be/schemas/auth.py": "f1b34a14a386b8301b9335bdaa160caa5894e6b473a4d79f06761b6713a6c58b",
-    "backend/app/be/schemas/case.py": "5d5506aa4e9f76bd3984712ce98cb4314a583f01393f4ad0d15664ac2531131b",
+    "backend/app/be/schemas/case.py": "1cf5846f903eb8e64397d0248a5de5917544936c6e8f333e4e67c2807e6cde24",
     "backend/app/be/schemas/document.py": "e4f93b60953c03341d459a70f1ca7c0a9b470561dd5d02b31deec670100828c0",
     "backend/app/be/services/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/be/services/agent_runtime.py": "95707c6ee56c9b37c4a1223e36fbb585de43a05136f47b28424f3fae2f636f42",
-    "backend/app/be/services/auth.py": "90d3d2c2b40736618c9c02faf3fbcfddc5c30457a5b2b1fc7bde4555a62a5bdd",
-    "backend/app/be/services/case.py": "04b45362ba5402395ac22c2d1272ffc7809a41a7a2dda5feb97aaf45a5bb2289",
+    "backend/app/be/services/auth.py": "e5e982a4acb257b92338a1eafb959b65eb03bba2ed87e3e55ea50686e05dad27",
+    "backend/app/be/services/case.py": "1c31cb8002ba351dbcd81c0bc9587f33529d82171b8ca05a41c306670831a923",
     "backend/app/be/services/case_snapshot.py": "c6909ab4f7a5be43005883b9908fd7e02a1aac7bc6ddec44d4a20b2e41a98e61",
-    "backend/app/be/services/conflict_decision.py": "927036baa7c6b2d0c1629f59cc8f8cd45052d0d17c09d52d72998835a0532c52",
-    "backend/app/be/services/decision_record.py": "f9ad7d49e9b33b178ef4abc71ee39d16fd548265b2e2ba913d63a2f04f469207",
-    "backend/app/be/services/document.py": "773f9c86d9080b279398f347e3f45cd91a54bba2a873aa2dc521354f785ba256",
-    "backend/app/be/services/judgment.py": "c75531e563ddfc689a800148d06f6b975ebf02b8efb56d1562e5486db247240f",
+    "backend/app/be/services/conflict_decision.py": "752da07498559d88d7ba7000a60e63e02f8598b2743a1417c29d1b56823250e2",
+    "backend/app/be/services/decision_record.py": "e27f77236c7a3ccae3bd66e7bfb91ee36b7f78fee91ecea66c88deb949d1b8c8",
+    "backend/app/be/services/document.py": "3d7f01f057e765ee03c0dc3a832aa0c615da251ccff7c272d41ee3caf8aae349",
+    "backend/app/be/services/judgment.py": "20f916485a73dcb83688ec88a9eccfd180aaefd15745c91b7d598e3138c8fcdc",
     "backend/app/be/services/official_document.py": "6c2d076a8fb092c6d12fd781f879c14c41a1814b439c154a8ef96fc4a4e61f62",
     "backend/app/be/services/procedure_registry.py": "fddacc4d6361ecdd3636e29a80cb47394e448381f9fc8337f22a53b4457ef77d",
     "backend/app/be/services/redaction.py": "8c295b8e4d82a39747fd71a0cb7094daebf5a69e4e7b7489e586460097991b2d",
     "backend/app/be/services/reviewed_procedure.py": "2ae9d18fbff86b764d7e6edaa98a33e363c37e9e82ee9899d29ae4b73c23bb06",
-    "backend/app/be/services/roadmap.py": "ed95606372076d1b8b1560e1b096e9606cff6f1714ae6bf51901e3a12a10e4f1",
-    "backend/app/be/services/unmasking.py": "3c4f91977cd3f5b417351f5719f5cc43439f27ab4bd8b9cf0fec0a275c8e3c6c",
+    "backend/app/be/services/roadmap.py": "a162d8d57628f09a0150cd6ea1f406190eeed0dc980af1f9ae522fa0a8e42c5f",
+    "backend/app/be/services/unmasking.py": "69f2b22d395efab7ab02f6cce9625a34feaaea8404ddf7b4476c1b01cfab0255",
     "backend/app/common/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/common/agent_data.py": "a3f5435c208dbe2962945becf9f8339d16e04bd73a503e4b7ab7179ef948f092",
-    "backend/app/common/agent_dto.py": "c8c162fc83bb67b081a2992cddce936db1fbd7e629b4a9e16e2a46b2cdd66bd7",
-    "backend/app/common/agent_service.py": "30c79377771107c265755707043ec6ffdcb491b122789a9fa6f8587410e14d8a",
+    "backend/app/common/agent_dto.py": "d94f8b2dc3ddedcfa086cb5a4b5fb8b362d7319ff1b7bb908517527f2bbe8aa4",
+    "backend/app/common/agent_service.py": "d6eb1fa9d02ea69dadfcc764ea6d11fa130ef48dd75548e8d564e95f4c42c8c1",
     "backend/app/common/config.py": "a89eeabcdd478a7991dd186a54f1c7421219299c02a9795096bda58e93cecf0e",
     "backend/app/common/procedure-digests.ko-KR.json": "8df285b76f00488bf9c07333e1025151e0b5abbf9468a667a7173b535d1fc952",
     "backend/app/common/reviewed-procedures.ko-KR.json": "2da204f302d2fd177000f00fa1957d881664b623f790d162c1e7fbd08bf04c7a",
-    "backend/app/main.py": "d261691c51e22c4753d4091e1a652d6a81edf586bd96dbacc3e2a70f1ef60a02",
-    "backend/requirements.txt": "326f57043c631a91af2799351bc378a98f0cb699b1d3694e27470084dd43cece",
-    "backend/sql/001_schema.sql": "8c97936387160126d16cb98096df79da85ff18c29eccda143f7ad538ae30476d",
+    "backend/app/main.py": "31d454cfd1751539c652bac8e16c7d79f02eaed8ef9283b33c4a69f8caee3d9c",
+    "backend/requirements.txt": "594ea57ac7c0fec8e5f4b20291489a61d202e33986c35cc19a3b07b1796874dc",
+    "backend/sql/001_schema.sql": "516d880a9fa7897f3b0fae49312c93ddb271e8eb08183c7155bf30a1d7e61837",
     "backend/sql/002_case_history_source_document_submitted.sql": "4183aab2f72d6296472054d20791c41fdbaf792b82aa4bcf834ad5888835a5e8",
-    "backend/sql/reset_member_case.sql": "e260b78219adbc425118100ff3778a9599affafefc15cd22060d44f66706a28f",
-    "docker-compose.prod.yml": "7425078f6a6298b192790eb6247aad4d9e1e6c636a572b3bfc204e639424e151",
+    "backend/sql/003_case_history_requirements_confirmation.sql": "f35070448bb34143f19ab2f349a4780a11d1ec3a4a5a773fc6f8c5428d4e240c",
+    "backend/sql/004_case_history_action_done.sql": "5b5b1379d8b011f67cf64f5031076e3839d47a9ac041bd6160a4ae0311b823c3",
+    "backend/sql/005_case_document_context.sql": "32209fcd4c7b40f0f83d1f9b9dd78750ef609654b55d12df5d60ff9734291426",
+    "backend/sql/006_case_history_restoration_status_answer.sql": "cbcccee7bbbba3c957a82c7182f6c4bbc47f923b8dd5c06d4a0a5d700152587d",
+    "backend/sql/reset_member_case.sql": "e30c76bab51ffd6af3624d97c2b5b7a4e2afc97ece99c7a9057f2a3c24b88b41",
+    "docker-compose.prod.yml": "08e6988727dac83cc791f19f361c019f4ace3ef8c79c66588458c76bab96fa81",
     "frontend/package.json": "567b3e7edfedd798a4d8ffcbb35b470a48cc54a193934e571c905dec66d1598d",
     "frontend/src/App.tsx": "8223684420789b9755c6994b972226c7450d7af21a98806d53e0b9e57c37930b",
-    "frontend/src/adapters/case.ts": "268b7d6f13a3d3981772c1e744431581d29f6ecae9fcf9c7c3bcafbd3fea5b7b",
+    "frontend/src/adapters/case.ts": "6e675f0d715ed9bf6a4e19b3f13da4044fac30745c6959f27a0cad4279ed4237",
     "frontend/src/adapters/documents.ts": "3803039d54d500b3086522576458df8c588045f89a1353a6d6decc58ce28b88f",
-    "frontend/src/adapters/logs.ts": "7e34dc9ee258aa98a451e5e2790fa6f937d60b6a61756072e3cad0cfa2d31b90",
-    "frontend/src/adapters/results.ts": "60e9121803901da051cabf789278b9215ba13daabdd78a160e276d8f96063d30",
+    "frontend/src/adapters/logs.ts": "0be6904af70d15a229272cb43582bb69b3a797022cc117ac25374099ed598f65",
+    "frontend/src/adapters/results.ts": "78c07e7f59bf28565917dea1213d35cbf262863348ad75ff0a2730ca24f98ad9",
     "frontend/src/adapters/roadmap.ts": "c26d2c4a53018f5d4c46be9d2a86d727849ae5e3000d870380feeaef9070871b",
     "frontend/src/components/RequireAuth.tsx": "86c1fcf2ca8a5bb4dae8c12c57b75b9247cea827fb52d6ca1a91ad17946948ef",
     "frontend/src/components/ui/AiNotice.tsx": "d5e9011dd6cca2d52f0258f71abf88be8bc9bf1dcd7d2a4631390d20f3d936d6",
@@ -4109,65 +4176,65 @@
     "frontend/src/components/ui/HomeBanner.tsx": "f49686027322443ac443a28791d70fe60a8f71384388296400804d64ccc53fe1",
     "frontend/src/components/ui/HomeStageCard.tsx": "2e741cdfa4c3162236aba09ec1c8743295fb2fa59d0ae1644e9df7777e967397",
     "frontend/src/components/ui/InfoBox.tsx": "d2d4d509397c1116c457ba6e32c5fcba0b2d85a12d7806e3a419c8312311ee4a",
-    "frontend/src/components/ui/IntroCarousel.tsx": "899aa41e85691f196819fe1d7d11d74859c2ca07f8ba4a2f73b2c4bf62efa17c",
+    "frontend/src/components/ui/IntroCarousel.tsx": "127241ef6bac805cbd3897d65a50f599ec0cf259d629c272f834830cabea8c1f",
     "frontend/src/components/ui/ProcessSteps.tsx": "15b6920f4c833e25fc89c6e40f896b4f757fbe210bb7a917eecc343727da216a",
     "frontend/src/components/ui/ProcessingScreen.tsx": "f9418df9ecdfa19c22ce017afbd5a806764f467bf40e1a43e242690d722a89e4",
     "frontend/src/components/ui/QuestionScreen.tsx": "fff17190b8d083da6a89542d7a81f034bb16470b73382749592aaa50f2b168a0",
     "frontend/src/components/ui/TabBar.tsx": "37f01d66461dc517a01ccfea7adc8728dea67b4d81a566f4b5afd076d9a36e46",
-    "frontend/src/components/ui/TabLayout.tsx": "fefac9580f3797e00725757d3496129d3dcfe306b45f3684043eb74350b3b92f",
+    "frontend/src/components/ui/TabLayout.tsx": "52ec755ffd996f0fe0266a54ffb930052c4f64787c141d3dba099c80bbc75fed",
     "frontend/src/components/ui/TaskCard.tsx": "c2db3eb7f79702dd8e54e1fea3c406f0a046ac3c92fb9df465ff986cd4b04eba",
     "frontend/src/components/ui/TopBar.tsx": "4021e5ca0e46c3bcccba4b9b1c7e7b92dd6c5a736a82f7233fedd222f3c68e3d",
-    "frontend/src/hooks/useCase.ts": "c811d2b47887a79e5699848f07039c29b8ae16cda566690d04a73ed3d4e804d0",
+    "frontend/src/hooks/useCase.ts": "641aa8d0aafcb17f1c8911193f46e04249f0a3139f3f7c16cc38563170a508b5",
     "frontend/src/hooks/useDocuments.ts": "c4b315d2fa2a24bad50f9f2ee8163da4e923102de8ac69bba9d234f5e588850b",
     "frontend/src/hooks/useLogs.ts": "7dfaea31f2e5b571c0da79f9870580bbaa5295b5faa87f4002c954e3ce092908",
     "frontend/src/hooks/useRoadmap.ts": "eed95e8fb4472d9890d95784f66e46813ee21eb0f04c6e3f3d9179127472de54",
     "frontend/src/index.css": "33c2f14da276be3b5f58c0b013c3a48691a1e903745c6f7c4dc8abbf0c99e3a4",
-    "frontend/src/lib/api.ts": "d79f876feaaeeb9c1fb0cd7c4233d612f371639fda91c5265ff07502ffa50f71",
+    "frontend/src/lib/api.ts": "33d35062434058d03535ab6617b82444b10242cb0f1dd6164dab20e9d12ef25f",
     "frontend/src/lib/auth.ts": "a6157e8d03eee60313904f6d790ffb7e81243e9c8719d0a9aa2e97e31aa211c5",
-    "frontend/src/lib/caseOptions.ts": "87ddf56599271b5a5054d7f3f7ba4cbb3d8ded7fd50b78dbfc86e4065579a38a",
+    "frontend/src/lib/caseOptions.ts": "0f6a4bb78f54f858a7b2db02deaa798afa0eea08d7a03bb385c7346b2fa467db",
     "frontend/src/lib/diagnosisSteps.ts": "d4e7778c8dbb9fa42ec5fb8238cf91682c4dcdeca02516d891453b3b6e986732",
     "frontend/src/lib/documentsApi.ts": "1593d2f22997d7908d28f075d7670136ed691c4afe0bda1ee871064c3588fc88",
     "frontend/src/lib/judgmentRetry.ts": "b1742f997f6c396c2d3262c565281069c41a9456ed25157db8fa1a1607905eb4",
     "frontend/src/lib/mockSwitch.ts": "b0fa2679b4ef409860c78c2f006bb1d82c722de077372e9ddb19bb6e9eabfd4b",
     "frontend/src/lib/motionFeatures.ts": "a6d0f0baf55e3d6e6b5923d9022adbba7b57be0762aaa0d2bdd2c6c2c0e68be0",
     "frontend/src/lib/postcode.ts": "46f4d3df50d605bdbe948065b22d4fec218da1e03a137765d86af17c59738a82",
-    "frontend/src/lib/resultSubmit.ts": "0c439794686f41e5b70b53a1233347fd14291610f34582d795d0218ffc453b06",
+    "frontend/src/lib/resultSubmit.ts": "a40e79817633546929f8d3a49f16b09628e6fd2abcc6dd0f89c29a8e19ca52e6",
     "frontend/src/lib/roadmapActions.ts": "dae918aa9afc0aa23e8d6fcc05951a2b56edc9ccb4fa4f31317c69332db33041",
     "frontend/src/lib/sessionStore.ts": "d1293894ad6923ca3646fbced9c9ae80168ed13dd1ecffb24e354d10c2173232",
     "frontend/src/lib/taskFlows.ts": "9feaae4ab80dcd481dec52f6ef08f646f5ed31a82e586a00426f4261fa07a988",
     "frontend/src/lib/viewTransition.ts": "e5dcf28495e50e084509a02bf71646064e795a381be44be60232f652131064cf",
     "frontend/src/main.tsx": "e75aafc9c5e2322e707b7f8936fff570c97bcdf176816dc2d1624116e650f342",
-    "frontend/src/mocks/currentCase.ts": "0a7ac6481fb8e8ac361e75de5ba26755626f7bb86b63422631f3539d2915942f",
+    "frontend/src/mocks/currentCase.ts": "5542058b5077fdd6bc152f0f68863ab4a9e15af3a4068186e4752caf750d22de",
     "frontend/src/mocks/documents.ts": "15ea8c738ad34aea55cc6e45d927311c9e7ffc4fd1e136f99ba5768865923a5d",
     "frontend/src/mocks/logs.ts": "29efae98c1c866f9f3ab0c2c1e6a231db5d9e521e6958c7148e5ecab6ea0e769",
-    "frontend/src/mocks/resultFlow.ts": "75252ca4be1f58810f90e00a273069af03395eab58da34b34f4b4b6e1a498936",
+    "frontend/src/mocks/resultFlow.ts": "007951bc460bd47604c4df47fdb2d5a71be6ddcc919cf7c437c5d40c3023bac4",
     "frontend/src/mocks/roadmap.ts": "2024c881ba98b253c3c238bf0220ef2a848c1b458411209e4d02c8eb21b0b183",
-    "frontend/src/pages/CaseCreatePage.tsx": "fe4de4a26d962416bc9ee8fe291a01342aac952ce7c485e17976f4fe359ab0ea",
-    "frontend/src/pages/ConfirmChangePage.tsx": "bb408e9fff1fd63fd866355b8cbbf8a89e189fd58836274581d910d265044410",
-    "frontend/src/pages/CurrentCasePage.tsx": "5f7c1f0d0cd3aadbb71504edcfd1c0f27a0c58516975f30f31989fba3f29000c",
+    "frontend/src/pages/CaseCreatePage.tsx": "fa3dc0bea102e487701e08ffb2767fbb8dde1dd37cd8ba295f1d28c794793f92",
+    "frontend/src/pages/ConfirmChangePage.tsx": "a8beb57bf99cd04a7271002f7d4780a2f5b91c3536ece3bc508a061f30103336",
+    "frontend/src/pages/CurrentCasePage.tsx": "0beabe75cf21d83ba43f35327c845ffb4dc1909d64083d156675e2e57508e5d0",
     "frontend/src/pages/DocsCheckPage.tsx": "eb99319399d2349478905a47630c35c2ba0ab493600a74dd90bd17756ec72c67",
     "frontend/src/pages/DocsDonePage.tsx": "fc39239d2f62a99a925c5d1a66f911cfd261630fe685a92fa43b110207e135da",
-    "frontend/src/pages/DocsPage.tsx": "1505add672259fd004fd7198d92d38271178319b26036cd10786ac1e6e75cdb8",
+    "frontend/src/pages/DocsPage.tsx": "69bc151d1e43246c206cbfa098b2542da29917b50730bcdda783ff3ea2dd3453",
     "frontend/src/pages/EntryPage.tsx": "6bbd3c417d20198dab26f7e405abccd4a5581af1e7ba228c8cd9c6cd3cf1c289",
     "frontend/src/pages/LogPage.tsx": "266b495a07945a995236f3ce98f85ee6811709336070ac5be6ce1678c313d016",
     "frontend/src/pages/LoginCallbackPage.tsx": "d94de9a6774431a3736f84bf361a6e2adcf37296bfd3257b07f702ec0dcbf321",
     "frontend/src/pages/LoginPage.tsx": "5808071868c90dbfbd4f94ecc81ea2a052dd23a1df29399ee2c54877d8e4652f",
-    "frontend/src/pages/NotificationsPage.tsx": "fa1a1619c9fd0bba0305f612f51fbff10aa2597127b7b017f58a581281b7109b",
-    "frontend/src/pages/ReplanPage.tsx": "8de673695c9da58b6b7c0fee75b224dfbbafcd28e8a4d05d686370daf9d356c2",
-    "frontend/src/pages/ResultInputPage.tsx": "469599394094fd9caa0d81cbe5e6bf47bca59e5cd8f45ac459008fbcf4f64911",
+    "frontend/src/pages/MyInfoPage.tsx": "3f6ec4341410fae7b39ced58b6159dd2606a6b0b90804a658a6026f8387532bc",
+    "frontend/src/pages/ReplanPage.tsx": "80c66174bd021124ef1c4ea5455002405a330053158a9e5916a8e997f67e7d91",
+    "frontend/src/pages/ResultInputPage.tsx": "ba366002fddf331cee7f327e528000c5c7756d111c656d3490d3b403217f5df6",
     "frontend/src/pages/RoadmapPage.tsx": "f535f27d88865d7b85ae8382e29fbe2f9c612ebdad4d7cb1162ab34b7d338dbe",
     "frontend/src/pages/TaskFlowPage.tsx": "70b8acbf946278d7366f112070c591da683652d9a94aa49a21f7f0fb315dee07",
     "frontend/src/pages/TaskPage.tsx": "ec132e505fc939145c207525684079595a3f32a4c6f41fa43d4a93ceacc4b0f4",
     "frontend/src/pages/docsTestServer.ts": "cfc21ddaa0c75deebfd04f08adb713081432024aa37cb1831815f7d88ba9cdbc",
-    "frontend/src/routes.tsx": "ba7f9bce99c05a0e64c8daa43235e08a1479dd4a4788f93e6135c621b1dcdd9e",
+    "frontend/src/routes.tsx": "2aac7a608430292debc79c2bebe0b1e416e2285933fdb72c995bae98c3f0849c",
     "frontend/src/setupTests.ts": "e21d12550201c791de27aa00c4f57a56d0cb6258420b0c4bf048a80533003f9a",
     "frontend/src/stores/useDiagnosisStore.ts": "ffbae0509f5fab05f66fc4bc3a15db6cdd7611c76283fe2d1a7182833e511284",
     "frontend/src/styles/tokens.css": "ac9fc68080e3efe75b7f5ddb35f5b9c64f5408374fc612c2d93aebfd91d8bee5",
-    "frontend/src/types/api.ts": "276ba95bbcd5255045fb70241b1fc1a236d95c28110daf2ad6d4f43a39aa1d62",
-    "frontend/src/types/view.ts": "4e551a6783da4d0a48a51c0c15afe039cdd9fe9f3db407689f01c57fc7cf7a3b",
+    "frontend/src/types/api.ts": "6d5f044a3aa2c35807b5f1135a0dce8bebf8739af34924d124381bfc3c26a73c",
+    "frontend/src/types/view.ts": "70b700eab6a27d253799f2036384385384fd42c35c4d6e7b22113a2074e1d756",
     "frontend/src/vite-env.d.ts": "918a0674786e414c2501b27954c72740e7565b0fcd52a214484c69e68ac2b8b4",
     "frontend/vercel.json": "1549d197267d93234cfe0fdf05eaa2dc680f192acc2cac0dcb3f80fe22867808",
     "frontend/vite.config.ts": "5aea7e89b922a21bd905069764da8c8eef193436ba616f36ea17db87a4779f70"
   },
-  "source_revision": "9f99476d71345321d7120df8343c63544fcc4d13"
+  "source_revision": "9d6a7fe8c6b85294473cac78de2575237bc01aa4"
 }

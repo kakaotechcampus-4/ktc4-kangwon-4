@@ -89,5 +89,45 @@
     "captured_at": "2026-11-07",
     "source_revision": "366617a",
     "mode": "local preview fixtures"
+  },
+  "2026-11-09-my-info": {
+    "title": "내 정보와 로그아웃",
+    "file": "images/2026-11-09-my-info.png",
+    "captured_at": "2026-11-09",
+    "source_revision": "c01bf12b4ddc5abed13b3c01af9040b1160baf1f",
+    "implementation_basis": "develop 52807ae",
+    "mode": "local preview synthetic API fixtures; no Backend/model requests",
+    "width": 390,
+    "height": 844
+  },
+  "2026-11-09-action-done": {
+    "title": "준비 확인 버튼",
+    "file": "images/2026-11-09-action-done.png",
+    "captured_at": "2026-11-09",
+    "source_revision": "c01bf12b4ddc5abed13b3c01af9040b1160baf1f",
+    "implementation_basis": "develop 52807ae",
+    "mode": "local preview synthetic API fixtures; no Backend/model requests",
+    "width": 390,
+    "height": 844
+  },
+  "2026-11-09-restoration-status": {
+    "title": "원상복구 진행 상태 버튼",
+    "file": "images/2026-11-09-restoration-status.png",
+    "captured_at": "2026-11-09",
+    "source_revision": "c01bf12b4ddc5abed13b3c01af9040b1160baf1f",
+    "implementation_basis": "develop 52807ae",
+    "mode": "local preview synthetic API fixtures; no Backend/model requests",
+    "width": 390,
+    "height": 844
+  },
+  "2026-11-09-procedures-completed": {
+    "title": "등록된 절차 안내 종료",
+    "file": "images/2026-11-09-procedures-completed.png",
+    "captured_at": "2026-11-09",
+    "source_revision": "c01bf12b4ddc5abed13b3c01af9040b1160baf1f",
+    "implementation_basis": "develop 52807ae",
+    "mode": "local preview synthetic API fixtures; no Backend/model requests",
+    "width": 390,
+    "height": 844
   }
 }

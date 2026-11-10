@@ -1,6 +1,6 @@
 # RE:BORN 기술 스택과 현재 사용 상태
 
-기준일은 2026년 11월 9일이며, `develop`의 `52807ae` 구현을 확인했습니다. 패키지 설치 여부와 실제 실행 경로를 구분합니다. 화면별 설명과 테스트 시나리오는 [서비스 전체 설명서](final-guide/설명서.md)를 참고합니다.
+기준일은 2026년 11월 10일이며, `develop`의 `6cb5284` 구현을 확인했습니다. 패키지 설치 여부와 실제 실행 경로를 구분합니다. 화면별 설명과 테스트 시나리오는 [서비스 전체 설명서](final-guide/설명서.md)를 참고합니다.
 
 ## 현재 동작하는 전체 흐름
 
@@ -78,7 +78,7 @@ Info·Supervisor·Review는 환경 설정에 따라 별도 client를 사용할 �
 
 PyMuPDF 1.28.2와 로컬 한국어·영어 OCR로 PDF·사진을 읽습니다. 스캔 판독에는 가린 이미지의 모델 판독 경로도 있습니다. 문서 분류·추출·안전 검사를 거쳐 불확실한 값을 사용자에게 확인받습니다. 누락·금액·이름·날짜 대조는 코드 규칙으로 실행합니다.
 
-서류는 PDF·PNG·JPG/JPEG, 20,000,000바이트 이하, 암호 없는 30쪽 이하를 받습니다. 서류 목록·추출값·점검 context는 MySQL의 `case_document_context`에, 원본·가림 PDF 등 파일 산출물은 Case별 파일 디렉터리에 저장합니다. 제출용 PDF는 현재 API에서 주민번호 뒷자리 가림 정책을 사용하며 모델용 가림과 구분합니다. 점검 통과와 현재 digest·정책·산출물을 대조한 뒤 ZIP을 제공합니다.
+서류는 PDF·PNG·JPG/JPEG, 20,000,000바이트 이하, 암호 없는 30쪽 이하를 받습니다. 서류 목록·추출값·점검 context는 MySQL의 `case_document_context`에, 처리 PDF·분석 캐시 등 파일 산출물은 Case별 파일 디렉터리에 저장합니다. 제출용 PDF는 현재 API에서 주민번호 뒷자리 가림 정책을 사용하며 모델용 가림과 구분합니다. 점검 통과와 현재 digest·정책·산출물을 대조한 뒤 ZIP을 제공합니다.
 
 안전 검사 차단은 422의 detail.code로 AGENT_SAFETY_REFUSE·AGENT_SAFETY_CRISIS_SUPPORT를 전달하며 FE는 일반 재시도와 구분합니다.
 
@@ -90,7 +90,7 @@ LangChain·langchain-openai·OpenAI SDK·Chroma 관련 패키지는 requirements
 
 ## 실행과 배포
 
-로컬 `docker-compose.yml`은 MySQL만 실행합니다. FE는 Vite, BE와 Agent는 로컬 Python 프로세스로 실행합니다. 운영 `docker-compose.prod.yml`은 MySQL과 FastAPI 컨테이너, DB·서류 볼륨을 구성합니다. Caddy와 Vercel 프록시 설정이 저장소에 있습니다. 설정의 존재는 현재 운영 배포 성공의 증거와 구분합니다.
+로컬 `docker-compose.yml`은 MySQL만 실행합니다. FE는 Vite, BE와 Agent는 로컬 Python 프로세스로 실행합니다. 운영 `docker-compose.prod.yml`은 MySQL과 FastAPI 컨테이너, DB·서류 볼륨을 구성합니다. Caddy와 Vercel 프록시 설정이 저장소에 있습니다. FE·BE·Agent·E2E 검사는 배포와 구분하며, BE·Agent는 같은 FastAPI 컨테이너로 수동 Actions 배포합니다. 배포 스크립트는 Compose 실효 ENVIRONMENT=prod 확인, 서버 잠금, 실행별 백업 폴더와 실행 커밋 대조를 사용합니다. Discord 오류 알림 #331은 확인 시점 미머지로 현재 구성에 포함하지 않습니다. 설정의 존재는 현재 운영 배포 성공의 증거와 구분합니다.
 
 `BackgroundTasks`는 영구 작업 큐가 아닙니다. 재시작 시 남은 PENDING을 실패로 풀어 복구합니다. `/health`는 앱 풀과 별도인 연결로 `SELECT 1`을 확인합니다. 성공은 200·`status: ok`, DB 오류는 503·`status: unavailable`이며 연결·읽기·쓰기 제한은 각각 2초입니다. `ENVIRONMENT=dev` 시작 시에는 테이블 초기화 코드가 있으므로 운영 DB에 연결해 실행하면 안 됩니다.
 

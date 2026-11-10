@@ -1,5 +1,40 @@
 (() => {
   'use strict'
+  const film = document.querySelector('.hero-film')
+  if (film) {
+    const video = film.querySelector('video')
+    const control = film.querySelector('.film-toggle')
+    const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)')
+    let wantsPlayback = !reducedMotion.matches
+    let visible = true
+    video.muted = true
+    function updateControl() {
+      const playing = !video.paused && !video.ended
+      film.dataset.motion = playing ? 'running' : 'paused'
+      control.setAttribute('aria-pressed', String(playing))
+      control.setAttribute('aria-label', playing ? '소개 영상 일시정지' : '소개 영상 재생')
+      control.querySelector('.film-control-label').textContent = playing ? '영상 멈춤' : '영상 재생'
+      control.querySelector('.film-control-icon').textContent = playing ? 'Ⅱ' : '▶'
+    }
+    async function syncPlayback() {
+      if (!wantsPlayback || document.hidden || !visible) {
+        video.pause()
+      } else {
+        try { await video.play() } catch { /* 자동 재생이 막혀도 재생 버튼을 남긴다. */ }
+      }
+      updateControl()
+    }
+    control.addEventListener('click', () => { wantsPlayback = video.paused; void syncPlayback() })
+    video.addEventListener('play', updateControl)
+    video.addEventListener('pause', updateControl)
+    video.addEventListener('error', () => { wantsPlayback = false; control.hidden = true })
+    reducedMotion.addEventListener('change', () => { wantsPlayback = !reducedMotion.matches; void syncPlayback() })
+    document.addEventListener('visibilitychange', () => { void syncPlayback() })
+    if ('IntersectionObserver' in window) {
+      new IntersectionObserver(entries => { visible = entries[0].isIntersecting; void syncPlayback() }, { threshold: 0.05 }).observe(film)
+    }
+    void syncPlayback()
+  }
   const nav = document.querySelector('.site-nav')
   const toggle = document.querySelector('.menu-toggle')
   function menu(open) {
