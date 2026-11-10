@@ -80,6 +80,19 @@ export function LoginPage() {
             가짜로 로그인 (미리보기용)
           </Button>
         )}
+
+        {/*
+          안심가이드와 개발 문서는 React 앱 밖의 정적 문서(`public/`)다. 라우터 `Link`로 옮기면
+          앱 안에서 그 주소를 찾다가 모르는 경로라 홈으로 가 버려서, 브라우저가 문서를 받아 오게 `<a>`를 쓴다
+        */}
+        <div className="flex items-center justify-center gap-4 text-12 text-fg-neutral-muted">
+          <a href="/safety/" className="py-1 underline underline-offset-4">
+            운영철학과 안심 이용
+          </a>
+          <a href="/developers/" className="py-1 underline underline-offset-4">
+            서비스 안내와 개발 문서
+          </a>
+        </div>
       </div>
     </div>
   )
