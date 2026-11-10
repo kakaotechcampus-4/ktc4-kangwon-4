@@ -227,6 +227,8 @@ export interface CasesEnvelope {
   blocker: string | null
   next_action: NextActionResponse | null
   judgment_status: JudgmentStatus | null
+  /** 지금 판단의 번호. 판단 기록이 없으면 `null` 이다 */
+  case_history_id: number | null
   /** 서비스가 사장님에게 되묻는 질문. `next_action` 의 "물어볼 말"과 다른 것이다 */
   questions_for_user: string[] | null
   /** 판단이 실패했을 때만 채워진다. 실패가 아니면 `null` 이다 */

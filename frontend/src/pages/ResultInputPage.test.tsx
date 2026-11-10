@@ -2,7 +2,13 @@ import { act, fireEvent, render, screen } from '@testing-library/react'
 import { RouterProvider, createMemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { CaseResultsEntryResponse, CaseResultsSubmitRequest, CaseResultsSubmitResponse } from '../types/api'
+import type {
+  CaseResultsEntryResponse,
+  CaseResultsSubmitRequest,
+  CaseResultsSubmitResponse,
+  CasesEnvelope,
+  CaseStatus,
+} from '../types/api'
 import { ResultInputPage } from './ResultInputPage'
 
 /**
@@ -93,13 +99,18 @@ const status =
     new Response(null, { status: code })
 
 /**
- * 세 군데 주소에 각각 순서대로 답한다. 목록이 끝나면 마지막 답을 계속 준다.
+ * 네 군데 주소에 각각 순서대로 답한다. 목록이 끝나면 마지막 답을 계속 준다.
  *
  * 부른 순서가 아니라 주소로 답을 고른다. 화면이 어떤 순서로 부르는지까지 테스트가
  * 정해 두면, 순서를 바꾸는 정당한 수정에도 관계없는 테스트가 깨진다.
  */
-function serve({ entry = [], submit = [], judged = [] }: Partial<Record<'entry' | 'submit' | 'judged', Answer[]>>) {
-  const calls = { entry: 0, submit: 0, judged: 0 }
+function serve({
+  entry = [],
+  submit = [],
+  judged = [],
+  cases = [],
+}: Partial<Record<'entry' | 'submit' | 'judged' | 'cases', Answer[]>>) {
+  const calls = { entry: 0, submit: 0, judged: 0, cases: 0 }
   const pick = (kind: keyof typeof calls, answers: Answer[]) => {
     const answer = answers[Math.min(calls[kind], answers.length - 1)]
     calls[kind] += 1
@@ -109,6 +120,8 @@ function serve({ entry = [], submit = [], judged = [] }: Partial<Record<'entry' 
   const fetchMock = vi.fn(async (url: string, init: RequestInit) => {
     if (url.includes('/cases/results/status')) return pick('judged', judged)
     if (init.method === 'POST') return pick('submit', submit)
+    // `/cases/results` 도 `/cases` 를 품고 있어서 끝부분으로 가른다
+    if (url.endsWith('/cases')) return pick('cases', cases)
     return pick('entry', entry)
   })
   vi.stubGlobal('fetch', fetchMock)
@@ -458,13 +471,81 @@ describe('ResultInputPage — 서버', () => {
   })
 
   describe('들어올 때', () => {
-    /** 등록된 절차를 다 마쳐 받을 결과가 없다(#315). "지금 상황을 읽지 못했어요" 대신 안내하는 홈으로 보낸다 */
-    it('등록된 절차를 다 마쳤으면 홈으로 보낸다', async () => {
-      serve({ entry: [json(entryBody({ judgment_status: 'PROCEDURES_COMPLETED', case_history_id: 40, next_action: null }))] })
-      const router = renderFlow()
-      await advance()
+    describe('등록된 절차 안내를 마친 뒤(#315)', () => {
+      const FINISHED_ENTRY = json(entryBody({ judgment_status: 'PROCEDURES_COMPLETED', case_history_id: 40, next_action: null }))
 
-      expect(router.state.location.pathname).toBe('/case')
+      /** `GET /cases` 답. 판단 칸만 바꿔 끼운다 */
+      function casesBody(caseStatus: CaseStatus, overrides: Partial<CasesEnvelope> = {}) {
+        return json({
+          case: { case_status: caseStatus },
+          blocker: null,
+          next_action: null,
+          judgment_status: 'PROCEDURES_COMPLETED',
+          case_history_id: 40,
+          questions_for_user: null,
+          recovery_action_code: null,
+          requested_field_paths: null,
+          ...overrides,
+        })
+      }
+
+      /**
+       * 로드맵에 남은 날짜 할 일이 결과 알려주기로 안내한다(#340). 여기서 홈으로 돌려보내면
+       * 사장님은 날짜를 알려 줄 곳이 없다
+       */
+      it('Case가 아직 진행 중이면 빈 글을 열고, 보낸 글은 그 판단 번호로 접수한다', async () => {
+        const fetchMock = serve({
+          entry: [FINISHED_ENTRY],
+          cases: [casesBody('IN_PROGRESS')],
+          submit: [ACCEPTED],
+          judged: [json(judgedBody({ result: 'PROCEDURES_COMPLETED', changes: [] }))],
+        })
+        const router = renderFlow()
+        await advance()
+
+        const textbox = screen.getByRole('textbox', { name: '지금 상황을 알려주세요' })
+        expect(textbox).toHaveValue('')
+        fireEvent.change(textbox, { target: { value: '12월 20일에 폐업해요' } })
+        fireEvent.click(screen.getByRole('button', { name: '보내기' }))
+        await advance(INTERVAL_MS)
+
+        expect(sentBodies(fetchMock)).toEqual([{ case_history_id: 40, raw_input: '12월 20일에 폐업해요' }])
+        expect(router.state.location.pathname).toBe('/case')
+      })
+
+      /** 열면 보낸 뒤에야 거절된다. 폐업을 다 마쳤다는 안내는 홈이 한다 */
+      it('Case 전체를 마쳤으면 입력창 없이 홈으로 보낸다', async () => {
+        const fetchMock = serve({ entry: [FINISHED_ENTRY], cases: [casesBody('COMPLETED')] })
+        const router = renderFlow()
+        await advance()
+
+        expect(router.state.location.pathname).toBe('/case')
+        expect(sentBodies(fetchMock)).toHaveLength(0)
+      })
+
+      /** 두 번 묻는 사이에 새 판단이 생겼다. 그 판단이 보여 줄 화면은 홈이 고른다 */
+      it('그사이 다른 판단이 생겼으면 홈으로 보낸다', async () => {
+        const fetchMock = serve({
+          entry: [FINISHED_ENTRY],
+          cases: [casesBody('IN_PROGRESS', { judgment_status: 'PENDING', case_history_id: 41 })],
+        })
+        const router = renderFlow()
+        await advance()
+
+        expect(router.state.location.pathname).toBe('/case')
+        expect(sentBodies(fetchMock)).toHaveLength(0)
+      })
+
+      /** 진행 중인지 모르면 열지도 홈으로 보내지도 않는다. 다시 불러올 수 있게 둔다 */
+      it('Case를 확인하지 못하면 불러오지 못한 화면에 머문다', async () => {
+        const fetchMock = serve({ entry: [FINISHED_ENTRY], cases: [status(500)] })
+        const router = renderFlow()
+        await advance()
+
+        expect(router.state.location.pathname).toBe('/results')
+        expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+        expect(sentBodies(fetchMock)).toHaveLength(0)
+      })
     })
 
     it('결과를 받을 수 있으면 할 일과 폼을 연다', async () => {

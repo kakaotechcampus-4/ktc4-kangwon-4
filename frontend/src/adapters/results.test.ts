@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest'
 
-import type { CaseResultsEntryResponse, CaseResultsSubmitResponse } from '../types/api'
+import type {
+  CaseResponse,
+  CaseResultsEntryResponse,
+  CaseResultsSubmitResponse,
+  CasesEnvelope,
+  CaseStatus,
+} from '../types/api'
 import {
+  opensInputAfterProcedures,
   toAnswerInput,
   toChanges,
   toConflicts,
@@ -271,10 +278,21 @@ describe('toResultsEntry', () => {
     })
   })
 
-  /** 등록된 절차를 다 마쳐 받을 결과가 없다(#315). 할 일이 비어 와도 읽지 못한 것이 아니라 홈이 안내할 상태다 */
-  it('등록된 절차를 다 마쳤으면 홈으로 보낸다', () => {
+  /**
+   * 등록된 절차 안내를 마쳤다(#315). 할 일이 비어 와도 읽지 못한 것이 아니다. 로드맵에 남은 일을
+   * 알리러 왔을 수 있어 홈으로 바로 보내지 않고, 화면이 Case 상태를 확인할 판단 번호를 담는다(#340)
+   */
+  it('등록된 절차를 다 마쳤으면 그 판단 번호를 담는다', () => {
     expect(toResultsEntry(entry({ judgment_status: 'PROCEDURES_COMPLETED', case_history_id: 40 }))).toEqual({
-      kind: 'ELSEWHERE',
+      kind: 'PROCEDURES_COMPLETED',
+      historyId: 40,
+    })
+  })
+
+  /** 번호가 없으면 남은 일을 받아도 어느 판단에 대한 글인지 보낼 수 없다 */
+  it('등록된 절차를 다 마쳤는데 판단 번호가 없으면 읽지 못한 것으로 둔다', () => {
+    expect(toResultsEntry(entry({ judgment_status: 'PROCEDURES_COMPLETED', case_history_id: null }))).toEqual({
+      kind: 'UNRECOGNIZED',
     })
   })
 
@@ -544,5 +562,47 @@ describe('toResultSteps', () => {
       expect(decision[1].label).toBe('고르신 내용을 반영하고 있어요')
       expect([decision[0].label, decision[2].label]).toEqual([result[0].label, result[2].label])
     }
+  })
+})
+
+/**
+ * 절차 안내를 마친 뒤 결과 알려주기로 들어왔을 때 빈 글을 열지(#340).
+ * 열지 않는 경우는 모두 홈으로 간다 — 홈이 그 상태를 안내한다.
+ */
+describe('opensInputAfterProcedures', () => {
+  const HISTORY_ID = 40
+
+  function casesOf(overrides: Partial<CasesEnvelope> = {}, caseStatus: CaseStatus = 'IN_PROGRESS'): CasesEnvelope {
+    return {
+      case: { case_status: caseStatus } as CaseResponse,
+      blocker: null,
+      next_action: null,
+      judgment_status: 'PROCEDURES_COMPLETED',
+      case_history_id: HISTORY_ID,
+      questions_for_user: null,
+      recovery_action_code: null,
+      requested_field_paths: null,
+      ...overrides,
+    }
+  }
+
+  it('Case가 진행 중이고 같은 판단을 가리키면 연다', () => {
+    expect(opensInputAfterProcedures(casesOf(), HISTORY_ID)).toBe(true)
+  })
+
+  /** 폐업을 다 마친 Case는 서버가 글을 받지 않는다. 열면 보낸 뒤에야 거절된다 */
+  it('Case 전체를 마쳤으면 열지 않는다', () => {
+    expect(opensInputAfterProcedures(casesOf({}, 'COMPLETED'), HISTORY_ID)).toBe(false)
+  })
+
+  it.each([
+    ['Case가 없다', casesOf({ case: null })],
+    ['응답이 비었다', null],
+    ['그사이 판단 중이 됐다', casesOf({ judgment_status: 'PENDING' })],
+    ['그사이 충돌이 생겼다', casesOf({ judgment_status: 'CONFLICT' })],
+    ['그사이 새 판단이 생겼다', casesOf({ case_history_id: HISTORY_ID + 1 })],
+    ['판단 번호가 없다', casesOf({ case_history_id: null })],
+  ])('%s 면 열지 않는다', (_, envelope) => {
+    expect(opensInputAfterProcedures(envelope, HISTORY_ID)).toBe(false)
   })
 })
