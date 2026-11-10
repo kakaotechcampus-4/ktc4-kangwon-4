@@ -209,6 +209,11 @@ export type ResultsEntry =
   /** 같은 판단의 재시도 대신, 새로 확인한 상황을 자유글로 받는다 */
   | { kind: 'NEW_INPUT'; historyId: number }
   /**
+   * 등록된 절차 안내를 마쳤다(#315). Case가 아직 진행 중이면 남은 날짜 같은 일을 자유글로 받는다(#340).
+   * 진행 중인지는 이 응답에 없어서, 화면이 `GET /cases` 로 한 번 더 확인한 뒤 정한다.
+   */
+  | { kind: 'PROCEDURES_COMPLETED'; historyId: number }
+  /**
    * 지금은 결과를 받을 때가 아니다 — 판단 중이거나, 더 적어도 풀리지 않는 실패다.
    *
    * 둘 다 `/case` 가 이미 안내하는 상태라 그쪽으로 보낸다. 여기서 같은 안내를 한 번 더

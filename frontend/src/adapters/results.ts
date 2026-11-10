@@ -4,6 +4,7 @@ import type {
   CaseConflictsDecisionRequest,
   CaseResultsEntryResponse,
   CaseResultsSubmitResponse,
+  CasesEnvelope,
   LeaseStatus,
   RestorationStatus,
 } from '../types/api'
@@ -261,14 +262,38 @@ export function toResultsEntry(body: CaseResultsEntryResponse | null): ResultsEn
       return { kind: 'RESUBMIT', notice, historyId: body.case_history_id as number }
     }
 
-    // 판단 중이거나, 등록된 절차를 다 마쳐 받을 결과가 없다(#315). 둘 다 홈이 안내한다
+    // 판단 중이다. 홈이 안내한다
     case 'PENDING':
-    case 'PROCEDURES_COMPLETED':
       return { kind: 'ELSEWHERE' }
+
+    // 등록된 절차 안내를 마쳤다(#315). 남은 일을 받을지는 화면이 Case 상태를 보고 정한다(#340)
+    case 'PROCEDURES_COMPLETED':
+      if (!Number.isInteger(body.case_history_id)) return { kind: 'UNRECOGNIZED' }
+      return { kind: 'PROCEDURES_COMPLETED', historyId: body.case_history_id as number }
 
     default:
       return { kind: 'UNRECOGNIZED' }
   }
+}
+
+/**
+ * 등록된 절차 안내를 마친 뒤(#315) 결과 알려주기로 들어왔을 때, 남은 일을 자유글로 받아도 되는지(#340).
+ *
+ * 로드맵에는 아직 끝나지 않은 일(예: 폐업 날짜 정하기)이 남아 그 화면이 결과 알려주기로 안내한다.
+ * 서버도 이 상태의 글을 받는다. 다만 `GET /cases/results` 에는 Case 전체 상태가 없어서 `GET /cases` 로
+ * 한 번 더 확인한다. 확인 없이 열면 폐업을 다 마친 Case에도 입력창이 뜨고, 보낸 뒤에야 409로 거절된다.
+ *
+ * 두 응답이 **같은 판단**을 가리킬 때만 연다. 두 번 묻는 사이에 새 판단이 생겼으면 그 판단이 보여 줄
+ * 화면이 따로 있다. 판단을 새로 하는 것이 아니라 서버 값으로 어느 화면을 열지 고르는 것이다(FE 규칙 1).
+ */
+export function opensInputAfterProcedures(envelope: CasesEnvelope | null, historyId: number): boolean {
+  if (envelope === null || typeof envelope !== 'object') return false
+  return (
+    envelope.case?.case_status === 'IN_PROGRESS'
+    && envelope.judgment_status === 'PROCEDURES_COMPLETED'
+    && Number.isInteger(envelope.case_history_id)
+    && envelope.case_history_id === historyId
+  )
 }
 
 const UNRECOGNIZED: SubmitOutcome = { kind: 'STAY', state: { kind: 'UNRECOGNIZED' } }
