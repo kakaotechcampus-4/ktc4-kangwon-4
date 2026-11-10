@@ -9,6 +9,7 @@ Sentry 같은 서비스는 기본으로 요청 본문과 지역 변수까지 보
 
 import logging
 import os
+import re
 import sys
 import threading
 import time
@@ -33,8 +34,12 @@ class DiscordErrorHandler(logging.Handler):
 
     def format_alert(self, record: logging.LogRecord) -> str:
         error = record.exc_info[0].__name__ if record.exc_info and record.exc_info[0] else None
-        # uvicorn의 500 문구는 줄바꿈으로 끝나서, 자르지 않으면 오류 이름이 다음 줄로 밀린다
-        line = record.getMessage().strip()[:_MAX_LINE]
+        # 첫 줄만 보낸다. 우리 오류 문구는 모두 한 줄이고, uvicorn의 500 문구는 줄바꿈으로 끝난다
+        lines = record.getMessage().strip().splitlines() or [""]
+        line = lines[0][:_MAX_LINE]
+        if line.startswith("Traceback"):
+            # uvicorn은 시작 실패를 스택 전체를 글자로 남긴다. 스택 대신 마지막 줄의 오류 종류 이름만 쓴다
+            line, error = "서버 시작 중 오류", _error_name_in(lines)
         where = _where(record)
         version = os.environ.get("APP_VERSION", "unknown")
         when = datetime.fromtimestamp(record.created, _KST).strftime("%Y-%m-%d %H:%M:%S KST")
@@ -55,8 +60,9 @@ class DiscordErrorHandler(logging.Handler):
                     return
                 self._last_sent[key] = now
             content = self.format_alert(record)
-            # 요청·판단을 기다리게 하지 않는다. 보내다 실패해도 서비스에는 아무 영향이 없어야 한다
-            threading.Thread(target=self._send, args=(content,), daemon=True).start()
+            # 요청·판단을 기다리게 하지 않는다. 보내다 실패해도 서비스에는 아무 영향이 없어야 한다.
+            # daemon으로 두면 시작 실패처럼 곧바로 꺼질 때 보내기 전에 끊긴다. 꺼질 때 길어야 3초(_send 제한) 더 기다린다
+            threading.Thread(target=self._send, args=(content,), daemon=False).start()
         except Exception:
             self.handleError(record)
 
@@ -65,6 +71,18 @@ class DiscordErrorHandler(logging.Handler):
             httpx.post(self._webhook_url, json={"content": content}, timeout=3)
         except httpx.HTTPError:
             pass
+
+
+def _error_name_in(stack_lines: list[str]) -> str | None:
+    """스택 끝의 `sqlalchemy.exc.OperationalError: ...` 줄에서 오류 종류 이름만 꺼낸다. 메시지는 버린다.
+
+    SQLAlchemy처럼 맨 끝에 안내 줄을 더 붙이는 경우가 있어, 끝에서부터 이름 모양인 첫 줄을 찾는다.
+    """
+    for stack_line in reversed(stack_lines):
+        name = stack_line.split(":", 1)[0]
+        if re.fullmatch(r"[A-Za-z_][\w.]*", name):
+            return name.rsplit(".", 1)[-1]
+    return None
 
 
 def _where(record: logging.LogRecord) -> str | None:

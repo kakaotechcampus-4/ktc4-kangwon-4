@@ -141,3 +141,28 @@ def test_a_broken_alert_does_not_break_the_caller(sent):
         logger.propagate = True
 
     assert sent == []
+
+
+def test_startup_failure_sends_only_the_error_name_not_the_stack():
+    handler = DiscordErrorHandler("https://discord.invalid/webhook", "prod")
+    # uvicorn은 시작 실패를 traceback.format_exc() 글자 그대로 남긴다(exc_info 없음)
+    try:
+        raise ConnectionError("사장님이 쓴 글")
+    except ConnectionError:
+        import traceback
+        # SQLAlchemy는 스택 끝에 안내 줄을 한 줄 더 붙인다
+        stack = traceback.format_exc() + "(Background on this error at: https://sqlalche.me/e/20/e3q8)\n"
+    record = logging.LogRecord("uvicorn.error", logging.ERROR, __file__, 1, stack, None, None)
+
+    content = handler.format_alert(record)
+
+    assert "서버 시작 중 오류 (ConnectionError)" in content
+    assert "Traceback" not in content and "File " not in content and "사장님이 쓴 글" not in content
+
+
+def test_only_the_first_line_of_a_message_is_sent():
+    handler = DiscordErrorHandler("https://discord.invalid/webhook", "prod")
+
+    content = handler.format_alert(_error_record("case_history %s 판단 실패\n%s", 85, "사장님이 쓴 글"))
+
+    assert "case_history 85 판단 실패" in content and "사장님이 쓴 글" not in content
