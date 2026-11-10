@@ -49,7 +49,11 @@ git merge-base --is-ancestor HEAD "$SHA" || fail "지금 커밋(${BEFORE})보다
 # 올릴 커밋이 무엇이든 먼저 본다 — 같은 커밋일 때만 보면, 더 새 커밋을 지정했을 때 그냥 지나간다(승준님 #321)
 RUNNING=$(curl -fsS -m 5 "$HEALTH" | sed -n 's/.*"version":"\([^"]*\)".*/\1/p') \
   || fail "/health를 읽지 못했습니다. 서버가 떠 있는지 먼저 확인해 주세요"
-[ "$RUNNING" = "$BEFORE" ] \
+# 글자로 비교하지 않는다. git의 짧은 번호는 저장소가 커지면 7자 → 8자로 알아서 늘어나는데
+# (지금 객체 14,537개, 8자 전환은 16,384개 부근), 그 순간 서버는 7자로 빌드돼 있고 저장소는
+# 8자를 내놓아 같은 커밋인데도 "지난 배포가 멈췄다"로 모든 배포가 막힌다(다물님 #337).
+# 길이와 무관하게 커밋 자체로 본다. 빌드에 GIT_SHA를 안 넘겨 unknown이면 풀리지 않아 막힌다 — 그게 맞다.
+[ "$(git rev-parse -q --verify "${RUNNING}^{commit}" || true)" = "$(git rev-parse HEAD)" ] \
   || fail "저장소는 ${BEFORE}인데 서버는 ${RUNNING}입니다. 지난 배포가 반영 중에 멈춘 것 같습니다. deploy.md 3단계부터 손으로 이어 가 주세요"
 if [ "$(git rev-parse HEAD)" = "$SHA" ]; then
   echo "이미 ${BEFORE}이 올라가 있습니다. 할 일이 없습니다"
@@ -72,7 +76,6 @@ mkdir -p "$BACKUP"
 # mktemp -d로 실행마다 새 폴더를 원자적으로 만든다. 이미 있으면 만들지 않으므로 덮어쓸 수 없다.
 RUN_DIR=$(mktemp -d "$BACKUP/$(date +%Y%m%d-%H%M%S)-XXXXXX") \
   || fail "백업 폴더를 만들지 못했습니다: $BACKUP"
-TS=$(basename "$RUN_DIR")
 $C logs --no-color fastapi > "$RUN_DIR/fastapi.log"
 stopped=1
 $C stop fastapi
@@ -81,7 +84,7 @@ $C exec -T mysql mysqldump --defaults-extra-file=/run/secrets/mysql_health_cnf \
 $C run --rm --no-deps -T fastapi tar czf - -C /data/documents . > "$RUN_DIR/documents.tgz"
 tail -n 1 "$RUN_DIR/db.sql" | grep -q '^-- Dump completed' || fail "DB 백업이 끝까지 받아지지 않았습니다"
 tar tzf "$RUN_DIR/documents.tgz" > /dev/null || fail "서류 백업 파일이 깨졌습니다"
-echo "백업 $BACKUP/$TS (되돌릴 때 씁니다)"
+echo "백업 $RUN_DIR (되돌릴 때 씁니다)"
 
 echo "== 3/4 반영 =="
 git merge --ff-only "$SHA"
@@ -92,11 +95,11 @@ stopped=""
 echo "== 4/4 /health 확인 =="
 for _ in $(seq 1 30); do
   if curl -fsS -m 5 "$HEALTH" | grep -q "\"version\":\"$VERSION\""; then
-    echo "배포 끝: ${BEFORE} → ${VERSION}, 백업 $TS"
+    echo "배포 끝: ${BEFORE} → ${VERSION}, 백업 $RUN_DIR"
     exit 0
   fi
   sleep 3
 done
 $C ps
 $C logs --tail 50 fastapi
-fail "90초 안에 /health가 ${VERSION}을 보여 주지 않았습니다. 되돌리기는 deploy.md 5단계(되돌릴 커밋 ${BEFORE}, 백업 $TS)"
+fail "90초 안에 /health가 ${VERSION}을 보여 주지 않았습니다. 되돌리기는 deploy.md 5단계(되돌릴 커밋 ${BEFORE}, 백업 $RUN_DIR)"
