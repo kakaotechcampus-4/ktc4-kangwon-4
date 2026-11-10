@@ -100,4 +100,16 @@
     if (event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom) dialog.close()
   })
   document.querySelector('.to-top').addEventListener('click', () => window.scrollTo({ top: 0, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' }))
+  // 같은 페이지 안의 #링크(목차, 본문 바로가기)를 누를 때만 부드럽게 옮긴다. html 전체에
+  // scroll-behavior:smooth 를 두면 #이 붙은 주소로 들어오거나 새로고침할 때도 맨 위에서 미끄러져 내려간다
+  document.addEventListener('click', event => {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+    const link = event.target.closest('a[href^="#"]')
+    const target = link && document.getElementById(decodeURIComponent(link.hash.slice(1)))
+    if (!target) return
+    event.preventDefault()
+    target.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' })
+    if (location.hash !== link.hash) history.pushState(null, '', link.hash)
+    if (target.hasAttribute('tabindex')) target.focus({ preventScroll: true })
+  })
 })()
