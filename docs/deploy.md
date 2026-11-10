@@ -8,7 +8,7 @@
 
 1. GitHub → Actions → **Deploy BE** → **Run workflow** (브랜치는 develop 그대로)
 2. **올릴 커밋**에 정한 커밋을 넣습니다. 비우면 그 순간의 develop 최신입니다. 처음이면 **확인만**을 체크해 한 번 돌려 봅니다
-3. 끝나면 로그의 "서버 출력"에서 `배포 끝: <이전> → <새 커밋>, 백업 <TS>`를 확인합니다. 이전 커밋과 TS는 되돌릴 때(5단계) 씁니다
+3. 끝나면 로그의 "서버 출력"에서 `배포 끝: <이전> → <새 커밋>, 백업 <폴더 경로>`를 확인합니다. 이전 커밋과 백업 폴더 경로는 되돌릴 때(5단계) 씁니다
 
 - 부트캠프가 팀마다 만든 `ktc-github-deploy` 역할로 로그인해 Session Manager로 명령을 보냅니다. 액세스 키를 만들지 않고 22번 포트도 열지 않습니다. 역할이 있는 계정 번호는 저장소 변수 `AWS_ACCOUNT_ID`(Settings → Secrets and variables → Actions → Variables, 우리 팀 계정 `ktc4-kangwon-team04`)에서 읽습니다. 비어 있으면 로그인에서 실패합니다
 - **멈추는 경우**: develop에 없는 커밋, 지금보다 앞선 커밋(되돌리기는 5단계), `backend/sql`·`backend/app/be/models`가 바뀐 배포, 서버에 손으로 고친 파일이 있을 때, 저장소와 `/health`의 커밋이 다를 때(지난 배포가 반영 중에 멈춤). 표가 바뀌는 배포는 SQL을 넣고 켜야 해서 아래 순서대로 손으로 합니다
@@ -140,15 +140,24 @@ GIT_SHA=$(git rev-parse --short HEAD) $C up -d --build
 - 두 백업 파일이 온전한지 **둘 다 먼저** 보고, 하나라도 아니면 아무것도 지우지 않고 멈춥니다
 - FastAPI는 DB·서류 복원이 모두 성공한 뒤에만 켭니다. 복원 도중 요청이 들어와 쓰지 않게 하려는 것입니다(승준님 #225)
 
+**백업이 어디 있는지부터 정합니다.** 손으로 받았으면 파일 이름에 시각이 붙어 있고, 버튼/스크립트(`scripts/deploy.sh`)로 받았으면 **실행마다 만든 폴더 안**에 있습니다. 스크립트는 끝낼 때 그 폴더 경로를 그대로 찍어 줍니다.
+
 ```bash
-TS=<2단계에서 적은 값>
+# 손으로 받은 백업
+BK=/home/ubuntu/backup && DB=$BK/db-<2단계에서 적은 값>.sql && DOCS=$BK/documents-<같은 값>.tgz
+
+# 스크립트가 받은 백업 (배포 로그의 "백업 …" 줄에 적힌 폴더)
+BK=/home/ubuntu/backup/<폴더이름> && DB=$BK/db.sql && DOCS=$BK/documents.tgz
+```
+
+```bash
 $C stop fastapi
 git checkout <1단계에서 적은 커밋>
-tail -n 1 /home/ubuntu/backup/db-$TS.sql | grep -q '^-- Dump completed' && \
-  tar tzf /home/ubuntu/backup/documents-$TS.tgz > /dev/null && \
-  $MYSQL closure_agent < /home/ubuntu/backup/db-$TS.sql && \
+tail -n 1 "$DB" | grep -q '^-- Dump completed' && \
+  tar tzf "$DOCS" > /dev/null && \
+  $MYSQL closure_agent < "$DB" && \
   $C run --rm --no-deps -T fastapi sh -c 'find /data/documents -mindepth 1 -delete && tar xzf - -C /data/documents' \
-    < /home/ubuntu/backup/documents-$TS.tgz && \
+    < "$DOCS" && \
   GIT_SHA=$(git rev-parse --short HEAD) $C up -d --build
 ```
 
