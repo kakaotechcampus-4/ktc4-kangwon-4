@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
+    # 서버 ERROR 로그를 보낼 Discord 웹훅. 비워 두면 알리지 않는다(app/common/error_alert.py)
+    DISCORD_ERROR_WEBHOOK_URL: str | None = None
+
 
 @lru_cache
 def get_settings() -> Settings:
