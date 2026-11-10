@@ -1,6 +1,6 @@
 # RE:BORN 기술 스택과 현재 사용 상태
 
-> 기준일: 2026-09-23
+> 기준일: 2026-11-10
 >
 > 이 문서의 책임: 패키지 선언 버전과 현재 코드의 실제 사용 여부
 
@@ -12,7 +12,7 @@
 - LLM은 LangChain이나 OpenAI SDK가 아니라 `httpx`로 OpenAI-compatible endpoint를 호출한다. `SUPERVISOR_*`·`INFO_*` 환경변수를 설정하면 Supervisor와 정보분석이 각각 별도 client를 사용하고, 미설정 시 공용 endpoint 설정을 사용한다. 지원금 Agent와 독립 Review는 항상 공용 설정을 사용한다. 환경변수는 [`.env.example`](../.env.example)을 따른다.
 - LangChain·OpenAI SDK·Chroma는 `backend/requirements.txt`에 고정돼 있지만 Agent 코드에 import가 없다. Langfuse는 credential이 설정된 경우에만 metadata 전송에 사용한다.
 - 루트 `docker-compose.yml`은 **MySQL 8.0 DB만** 실행한다. Backend와 Agent container는 없다.
-- 현재 작업 트리에는 SQLModel 테이블, DB 세션, FastAPI 진입점과 카카오 인증 라우터가 있다. Agent를 호출하는 라우터와 Case 저장·재조회 연동, migration은 아직 없다.
+- FastAPI에는 카카오 인증·Case·서류 라우터가 있다. Case·서류 라우터가 Agent 판단을 맡기고 결과를 DB에 저장·재조회한다. migration 도구는 쓰지 않고, 운영 표는 `backend/sql/`의 SQL로 넣는다([배포 문서](./deploy.md)).
 - Support Agent는 생성 시 주입된 검수 catalog를 사용한다.
 - 기업마당 adapter·공식 문서 crawler·RAG는 Agent에 없다. 지원·절차 자료는 사람이 검수해 주입한다.
 
@@ -66,14 +66,14 @@
 - **React / React DOM `^19.2.8`:** entrypoint와 component에서 사용
 - **React Router `^7.18.3`:** route 구성과 화면 이동에 사용
 - **TypeScript `~6.0.2`:** TS/TSX source와 build에 사용
-- **Vite `^8.2.2`:** script와 설정이 존재
+- **Vite `^8.3.4`:** script와 설정이 존재
 - **Tailwind CSS `^4.3.3`:** CSS import와 Vite plugin 설정에 사용
-- **Vercel:** `frontend/vercel.json` 설정이 존재하며 실제 배포 상태는 별도 확인 대상
+- **Vercel:** 화면을 배포한다. `frontend/vercel.json`이 `/api` 요청을 BE로 넘긴다
 
 ### 로컬 실행 환경
 
 - **Python `3.12`:** `backend/.python-version`과 Dockerfile 기준
-- **MySQL `8.0`:** 루트 Compose가 DB service만 실행
+- **MySQL `8.0.46`:** 루트 Compose가 DB service만 실행. 운영 Compose와 테스트 DB도 같은 버전
 
 Agent standalone은 MySQL을 사용하지 않는다. manifest와 lockfile은 설치 요청 상태를 보여주며 실제 빌드·배포 성공은 별도 검증이 필요하다.
 
@@ -88,14 +88,14 @@ Agent standalone은 MySQL을 사용하지 않는다. manifest와 lockfile은 설
 
 ### Application·DB 관련 패키지
 
-- **FastAPI `0.141.1`:** `backend/app/main.py`가 인증 라우터와 health 경로를 연결
-- **Uvicorn `0.52.4`:** FastAPI 실행 서버로 선언
+- **FastAPI `0.141.1`:** `backend/app/main.py`가 인증·Case·서류 라우터와 health 경로를 연결
+- **Uvicorn `0.52.4`:** FastAPI 실행 서버. 운영은 프로세스 1개로 띄운다(`backend/Dockerfile`)
 - **SQLModel `0.0.42`:** `backend/app/be/models/`의 테이블과 `app/be/db.py`의 DB 세션에 사용. SQLAlchemy를 내부적으로 사용
 - **PyMySQL `1.2.0`:** MySQL 연결에 사용
-- **Alembic `1.19.2`:** migration 미구현
+- **Alembic `1.19.2`:** 설치만 돼 있고 쓰지 않는다. 운영 표는 `backend/sql/`의 SQL로 넣는다
 - **PyJWT `2.13.0`:** `backend/app/be/services/auth.py`에서 서비스 JWT 발급에 사용
-
-DB 연결 코드의 존재가 Agent 변경 후보의 저장·재조회 완료를 뜻하지는 않는다.
+- **python-multipart `0.0.20`:** 서류 업로드(`backend/app/be/routers/document.py`)의 파일 받기에 사용
+- **PyMuPDF `1.28.2`:** 서류 처리(`backend/app/agent/document_tool/`)에서 PDF를 읽는 데 사용
 
 ### 후속 AI 기능용 패키지
 
@@ -104,8 +104,8 @@ DB 연결 코드의 존재가 Agent 변경 후보의 저장·재조회 완료를
 
 ### 개발 도구
 
-- **pytest `9.1.1`:** 현재 Agent 테스트에 사용
-- **testcontainers[mysql] `4.15.0`:** 버전만 선언. DB 통합 테스트는 아직 없음
+- **pytest `9.1.1`:** BE·Agent 테스트에 사용
+- **testcontainers[mysql] `4.15.0`:** DB를 쓰는 BE 테스트가 테스트마다 격리된 MySQL 컨테이너를 띄우는 데 사용
 
 
 ### Agent와 공식 데이터
