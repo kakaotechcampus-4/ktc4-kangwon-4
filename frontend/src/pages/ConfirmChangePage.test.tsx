@@ -403,7 +403,8 @@ describe('ConfirmChangePage — 서버', () => {
 
   /** 충돌이 남아 있는 동안은 결정을 다시 받는다. 고른 것을 바꾸면 그 선택으로 다시 보낼 수 있다 */
   it('풀리지 않는 실패 뒤에 고른 것을 바꾸면 바꾼 선택으로 다시 보낼 수 있다', async () => {
-    const fetchMock = serve({ decide: [ACCEPTED], judged: [failed('NONE'), UPDATED] })
+    // 서비스 쪽 실패는 서버가 충돌을 남긴다. NONE 은 충돌을 정리한다(#338)
+    const fetchMock = serve({ decide: [ACCEPTED], judged: [failed('CONTACT_SUPPORT'), UPDATED] })
     const router = renderWith(TWO_CONFLICTS, '')
 
     await decideAndWait()
