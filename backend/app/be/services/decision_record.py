@@ -7,6 +7,7 @@
 
 
 import logging
+import os
 import re
 from collections.abc import Mapping
 from datetime import datetime
@@ -16,6 +17,7 @@ from sqlmodel import Session
 from app.agent.roadmap import build_roadmap
 from app.agent.schemas import (
     CaseFieldKey,
+    CaseSnapshot,
     ConflictOutcome,
     EvidenceRecord,
     FactChangeCandidate,
@@ -35,6 +37,7 @@ from app.be.crud import evidence as evidence_crud
 from app.be.crud import procedure_step as procedure_step_crud
 from app.be.crud import support_item as support_item_crud
 from app.be.models.blocker import Blocker
+from app.be.models.case import Case
 from app.be.models.case_field_history import CaseFieldHistory
 from app.be.models.case_history import CaseHistory
 from app.be.models.evidence import ConflictReference, DecisionRecord, Evidence, EvidenceLineage
@@ -45,6 +48,12 @@ from app.be.services import roadmap as roadmap_service
 from app.be.services.case_snapshot import UNKNOWN_SENTINEL_FIELDS
 
 logger = logging.getLogger(__name__)
+
+
+def current_app_version() -> str | None:
+    """이 서버를 빌드한 커밋(main.py의 /health와 같은 값). 모르면 None이라 버전 비교를 하지 않는다."""
+    version = os.environ.get("APP_VERSION")
+    return version if version and version != "unknown" else None
 
 
 def save_reviewed_plan(
@@ -77,7 +86,10 @@ def save_reviewed_plan(
     # 여기까지 읽기만 했으므로 되돌릴 것이 없고, 대조와 쓰기는 그다음 트랜잭션에 함께 들어간다.
     session.rollback()
     # 쓰기 전에 본다. 하나라도 어긋나면 아무것도 반영하지 않는다.
-    _assert_changes_are_current(session, history, outcome.review_subject.supervisor_draft.mutations)
+    _assert_changes_are_current(
+        session, history, outcome.review_subject.supervisor_draft.mutations,
+        snapshot=outcome.review_subject.snapshot,
+    )
 
     decision = outcome.review_subject.supervisor_draft.decision
     proof = outcome.review_proof
@@ -85,7 +97,7 @@ def save_reviewed_plan(
     blocker = _save_blockers(session, history, outcome)
 
     # blocker와 case_history가 서로를 참조해서, blocker를 먼저 만들고 그 id를 채운다.
-    # NEEDS_MORE_INFO는 다음 행동 자체가 없어서 next_action 관련 컬럼을 전부 NULL로 둔다
+    # NEEDS_MORE_INFO·절차 안내 종료는 다음 행동이 없어 관련 컬럼을 전부 NULL로 둔다
     # ("다음 행동이 없음"과 "행동은 있는데 질문이 0개"를 구분하기 위해 빈 배열을 쓰지 않는다).
     next_action = decision.next_action
     history.next_action = next_action.title if next_action else None
@@ -93,13 +105,16 @@ def save_reviewed_plan(
     history.next_action_reason = next_action.reason if next_action else None
     history.next_action_questions_to_ask = list(next_action.questions_to_ask) if next_action else None
     history.next_action_evidence_refs = list(next_action.evidence_refs) if next_action else None
-    history.priority_blocker_id = blocker.id
+    history.priority_blocker_id = blocker.id if blocker is not None else None
     # 화면이 읽는 값들은 case_history 한 행에 모아둔다(GET /cases가 이 행만 조회한다).
     history.questions_for_user = list(decision.questions_for_user) or None
+    # 절차 안내 종료도 판단 실행은 DONE이다. 기존 DecisionRecord의 decision_type으로
+    # 조회 응답을 구분하므로 DB ENUM과 Case 전체 폐업 완료 상태는 바꾸지 않는다.
     history.judgment_status = (
         "NEEDS_MORE_INFO" if decision.decision_type.value == "NEEDS_MORE_INFO" else "DONE"
     )
     history.judged_at = kst_now()
+    history.judged_version = current_app_version()
 
     # 검수를 통과한 변경 제안을 실제 테이블에 반영한다. AI는 이것들을 "제안"으로만 돌려주기
     # 때문에, 저장하지 않으면 다음 판단의 스냅샷이 그대로여서 같은 판단이 반복된다.
@@ -165,7 +180,7 @@ def _roadmap_task_ids(session: Session, case_id: int) -> list[str] | None:
     ]
 
 
-def _save_blockers(session: Session, history: CaseHistory, outcome: ReviewedPlanOutcome) -> Blocker:
+def _save_blockers(session: Session, history: CaseHistory, outcome: ReviewedPlanOutcome) -> Blocker | None:
     draft = outcome.review_subject.supervisor_draft
     resolved = set(draft.resolved_blocker_candidate_ids)
     if resolved:
@@ -186,7 +201,7 @@ def _save_blockers(session: Session, history: CaseHistory, outcome: ReviewedPlan
         ))
         if candidate == draft.decision.blocker:
             priority = row
-    if priority is None:
+    if priority is None and draft.decision.decision_type.value != "PROCEDURES_COMPLETED":
         raise ValueError("reviewed blockers must contain the priority blocker")
     return priority
 
@@ -257,6 +272,7 @@ def save_conflict(
 
     history.judgment_status = "CONFLICT"
     history.judged_at = kst_now()
+    history.judged_version = current_app_version()
     session.commit()
 
 
@@ -269,6 +285,9 @@ def _resolve_conflicts(
     쪽이든 더는 되묻지 않는다. 결정 접수 시점이 아니라 판단이 성공해서 값을 저장할 때
     닫는다 — 접수 때 닫으면 판단이 실패했을 때 값은 그대로인데 충돌만 사라져서, 사장님이
     다시 결정할 길이 없어진다(현석님 #108).
+
+    예외로, 추가 입력이 필요한 실패 뒤 새 글을 받아야 할 때는 conflict_decision이 원래 묶음을
+    확인하고 모두 STORED로 넘긴다. 값을 적용하지 않고 실패 이력과 함께 REJECTED로 남긴다.
 
     닫은 이력(`history`)에는 글이 없어서 이 관계로 충돌을 일으킨 제출의 출처를 추적한다.
     과거 고정 표식을 번호와 호환할 때 사용하며 화면을 원문으로 복원하지 않는다.
@@ -295,6 +314,7 @@ def save_safe_failure(session: Session, history: CaseHistory, outcome: SafeFailu
 
     history.judgment_status = "FAILED"
     history.judged_at = kst_now()
+    history.judged_version = current_app_version()
     # 왜 실패했는지. 이게 없으면 쌓인 실패가 전부 "다시 시도해보세요"로만 남아서,
     # 형식이 틀린 건지 호출 예산을 다 쓴 건지 구분할 수 없다.
     history.failure_code = outcome.failure_code
@@ -302,6 +322,13 @@ def save_safe_failure(session: Session, history: CaseHistory, outcome: SafeFailu
     history.retryable = outcome.retryable
     history.requested_field_paths = [field.value for field in outcome.requested_field_paths]
     session.commit()
+    # 사장님이 다시 하거나 더 알려 주면 풀리는 실패는 서버 로그에만 남긴다. 그 밖(CONTACT_SUPPORT 등)은
+    # 사장님이 빠져나올 수 없어 우리가 먼저 알아야 하므로 ERROR로 남겨 Discord 알림이 가게 한다(#334).
+    # 번호와 코드만 남기고 사장님 글은 넣지 않는다.
+    # 알림은 문구 틀이 같으면 1분에 한 번만 간다. 코드는 틀에 넣어 다른 실패가 앞 실패에 묻히지 않게 하고,
+    # 판단 번호만 %s로 두어 같은 실패는 한 번만 오게 한다(승준님 #331)
+    level = logging.WARNING if outcome.recovery_action_code in ("RETRY", "RESUBMIT_INPUT") else logging.ERROR
+    logger.log(level, f"case_history %s 판단 실패: {outcome.failure_code} / {outcome.recovery_action_code}", history.id)
 
 
 def mark_judgment_failed(session: Session, case_history_id: int, error: Exception | None = None) -> None:
@@ -322,6 +349,7 @@ def mark_judgment_failed(session: Session, case_history_id: int, error: Exceptio
         return
     history.judgment_status = "FAILED"
     history.judged_at = kst_now()
+    history.judged_version = current_app_version()
     # AI가 결과를 내기 전에 끊겨서 실패 종류를 받지 못했다. 없는 값을 지어내지 않는다.
     history.failure_code = None
     # 저장된 데이터나 설정이 원인이면 다시 판단해도 같은 자리에서 또 터진다. 그 Case는
@@ -338,7 +366,9 @@ class StaleJudgmentError(RuntimeError):
     """판단이 도는 사이 Case가 바뀌어, 그 판단을 반영하면 최신 값을 덮어쓰게 되는 상태."""
 
 
-def _assert_changes_are_current(session: Session, history: CaseHistory, mutations: MutationSet) -> None:
+def _assert_changes_are_current(
+    session: Session, history: CaseHistory, mutations: MutationSet, *, snapshot: CaseSnapshot,
+) -> None:
     """AI가 보고 판단한 "바뀌기 전 값"이 지금도 그대로인지 확인한다.
 
     판단은 실측 36~120초 걸린다. 그 사이 다른 입력이 반영되면 AI가 들고 있는 값은 이미
@@ -353,6 +383,14 @@ def _assert_changes_are_current(session: Session, history: CaseHistory, mutation
     case = case_crud.get_case_by_id(session, history.case_id)
     if case is None:
         raise ValueError(f"case {history.case_id} not found")
+
+    if _full_restoration_change(case, mutations.fact_changes) is not None:
+        # 범위 확정에 따라 함께 비울 세부값도 잠근 최신 행과 판단 당시 값이 같아야 한다.
+        session.refresh(case, with_for_update=True)
+        detail = next((fact for fact in snapshot.facts
+                       if fact.field_path == CaseFieldKey.RESTORATION_SCOPE_DETAIL), None)
+        if detail is None or case.restoration_scope_detail != detail.value:
+            raise StaleJudgmentError("전체 범위 확정 전 세부 설명이 판단 당시와 다릅니다")
 
     for change in mutations.fact_changes:
         stored = _comparable_case_value(case, change.field_path)
@@ -409,7 +447,11 @@ def _apply_fact_changes(
     if case is None:
         raise ValueError(f"case {history.case_id} not found")
 
+    full_change = _full_restoration_change(case, fact_changes)
+    old_detail = case.restoration_scope_detail if full_change is not None else None
     for change in fact_changes:
+        if full_change is not None and change.field_path == CaseFieldKey.RESTORATION_SCOPE_DETAIL:
+            continue  # 같은 묶음의 SET/CLEAR 순서와 관계없이 전체 전환의 정리를 한 번만 남긴다.
         # AI가 대화 중에 바꾸겠다고 보낼 수 있는 필드는 14개(AgentFieldKey)지만, 저장하는
         # 것은 9개(CaseFieldKey)뿐이다. 나머지 5개(직원 고용 이력·4대보험 가입 이력)는
         # 가입 폼으로만 채우기로 했다 — 사장님이 직접 답한 값을 AI가 대화 중에 추정한
@@ -449,6 +491,23 @@ def _apply_fact_changes(
                 reason=change.reason_summary,
             ),
         )
+
+    if full_change is not None and old_detail is not None:
+        case.restoration_scope_detail = None
+        case_field_history_crud.create_case_field_history(session, CaseFieldHistory(
+            case_id=case.id, case_history_id=history.id,
+            canonical_field=CaseFieldKey.RESTORATION_SCOPE_DETAIL.value,
+            before_value=old_detail, after_value=None,
+            source=full_change.source_type.value, source_evidence_refs=list(full_change.source_evidence_refs),
+            reason="전체 범위 확정 시 세부 설명을 비우기로 한 사용자 정책을 적용했습니다.",
+        ))
+
+
+def _full_restoration_change(case: Case, changes: list[FactChangeCandidate]) -> FactChangeCandidate | None:
+    return next((change for change in changes
+                 if change.field_path == CaseFieldKey.RESTORATION_SCOPE
+                 and change.operation == FactOperation.SET and change.proposed_value == "FULL"
+                 and case.restoration_scope != "FULL"), None)
 
 
 def _column_value(change: FactChangeCandidate) -> object | None:

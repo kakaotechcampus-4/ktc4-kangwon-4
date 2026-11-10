@@ -6,6 +6,7 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
+from types import SimpleNamespace
 
 import jwt
 import pytest
@@ -16,7 +17,6 @@ from app.be.crud import member as member_crud
 from app.be.db import MYSQL_IMAGE
 from app.be.models.member import Member
 from app.be.services import auth as auth_service
-from app.common.config import get_settings
 
 
 @pytest.fixture
@@ -34,6 +34,12 @@ def empty_engine():
 def test_two_first_logins_at_once_both_succeed_with_one_member(empty_engine, monkeypatch):
     monkeypatch.setattr(auth_service, "_fetch_kakao_token", lambda code: "kakao-token")
     monkeypatch.setattr(auth_service, "_fetch_kakao_user_info", lambda token: ("kakao-257", "동시 로그인"))
+    # 로그인은 JWT를 만든다. 진짜 설정을 읽으면 `.env`가 없는 곳에서 테스트가 깨진다
+    settings = SimpleNamespace(
+        JWT_SECRET_KEY="synthetic-jwt-secret-for-tests-0123456789",
+        JWT_ACCESS_TOKEN_EXPIRE_MINUTES=30, JWT_REFRESH_TOKEN_EXPIRE_DAYS=14,
+    )
+    monkeypatch.setattr(auth_service, "get_settings", lambda: settings)
 
     # 둘 다 "회원 없음"을 본 다음에야 INSERT로 넘어가게 맞춘다.
     # 처음 두 번의 조회만 기다린다. 고친 뒤 실패한 쪽이 다시 조회할 때는 기다리지 않는다.
@@ -59,6 +65,5 @@ def test_two_first_logins_at_once_both_succeed_with_one_member(empty_engine, mon
     with Session(empty_engine) as session:
         members = session.exec(select(Member)).all()
     assert len(members) == 1
-    secret = get_settings().JWT_SECRET_KEY
-    subjects = {jwt.decode(access, secret, algorithms=["HS256"])["sub"] for access, _, _ in results}
+    subjects = {jwt.decode(access, settings.JWT_SECRET_KEY, algorithms=["HS256"])["sub"] for access, _, _ in results}
     assert subjects == {str(members[0].id)}

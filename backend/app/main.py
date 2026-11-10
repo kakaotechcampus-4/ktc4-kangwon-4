@@ -1,4 +1,5 @@
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
@@ -19,12 +20,15 @@ from app.be.services import official_document
 from app.be.services import procedure_registry
 from app.be.services import reviewed_procedure
 from app.common.config import get_settings
+from app.common.error_alert import install_error_alert
 
 logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 가장 먼저 단다. 아래 시작 작업(공식 자료 적재 등)이 실패해도 알림이 가게 한다
+    install_error_alert(get_settings().DISCORD_ERROR_WEBHOOK_URL, get_settings().ENVIRONMENT)
     if get_settings().ENVIRONMENT == "dev":
         reset_all_tables()
     # 절차 마스터 표는 Case가 생기기 전부터 있어야 한다. 가입 요청 안에서 적재하면
@@ -68,9 +72,11 @@ def health(engine: Engine = Depends(get_health_engine)):
     # 배포 컨테이너가 이 주소로 살아 있는지 본다(docker-compose.prod.yml). DB가 끊겨도 ok라고 하면
     # 모든 요청이 실패하는데 서버는 건강하다고 남는다. DB 오류 내용은 밖에 내보내지 않는다.
     # 기다리는 한도와 앱 풀을 안 쓰는 이유는 create_health_engine에 있다.
+    # version은 이 서버를 빌드한 커밋이다(Dockerfile의 GIT_SHA). 서버에 들어가지 않고 운영 버전을 본다
+    version = os.environ.get("APP_VERSION", "unknown")
     try:
         with engine.connect() as connection:
             connection.execute(text("SELECT 1"))
     except SQLAlchemyError:
-        return JSONResponse(status_code=503, content={"status": "unavailable"})
-    return {"status": "ok"}
+        return JSONResponse(status_code=503, content={"status": "unavailable", "version": version})
+    return {"status": "ok", "version": version}

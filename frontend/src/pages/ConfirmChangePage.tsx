@@ -12,7 +12,7 @@ import { usesMockData } from '../lib/auth'
 import { submitDecision, waitForResult } from '../lib/resultSubmit'
 import { conflictConfirm, simulateConfirm } from '../mocks/resultFlow'
 import type { CaseConflictsDecisionRequest } from '../types/api'
-import type { ConfirmView, ConflictItem, ConflictSide, SubmitOutcome } from '../types/view'
+import type { ConfirmView, ConflictItem, ConflictSide, FailureNotice, SubmitOutcome } from '../types/view'
 
 /**
  * ④ 충돌 확인.
@@ -38,8 +38,14 @@ export function ConfirmChangePage() {
   // 주소로 직접 열었을 때는 넘겨받은 충돌이 없다. Mock 으로 볼 때만 준비된 것으로 그린다 —
   // 없는 충돌을 지어내 보여주면 사장님이 기록에 없는 것을 고르게 된다
   const view = (state as ConfirmView | null) ?? (usesMock ? conflictConfirm : null)
-  const [choices, setChoices] = useState<Record<string, ConflictSide>>({})
+  const [choices, setChoices] = useState<Choices>({})
   const [sending, setSending] = useState<SendState>({ kind: 'IDLE' })
+  /**
+   * 이 충돌 묶음에서 다시 해도 풀리지 않는다고 실패한 선택들. 마지막 것만 두면 A 실패 → B 실패 뒤에
+   * A로 돌아왔을 때 잠금이 풀려, 두 선택을 번갈아 같은 실패를 되풀이할 수 있다(#332 승준님).
+   * 새 충돌 묶음이 오면 비운다
+   */
+  const [failedChoices, setFailedChoices] = useState<Choices[]>([])
   /** 판단을 기다리는 중이면 그 기다림을 끊는 손잡이. 화면을 떠날 때 당긴다 */
   const waiting = useRef<AbortController | null>(null)
 
@@ -70,8 +76,10 @@ export function ConfirmChangePage() {
   const decision = toDecisionRequest(conflicts, choices)
   const goToCase = { label: '지금 상황 보기', onClick: () => navigate({ pathname: '/case', search }) }
   const notice = sendNotice(sending, goToCase)
-  // 접수된 뒤 결과를 못 받았거나 보낼 수 없는 요청이었으면, 다시 눌러도 같은 답이 온다
-  const locked = sending.kind === 'STUCK'
+  // 접수된 뒤 결과를 못 받았거나 보낼 수 없는 요청이었으면, 다시 눌러도 같은 답이 온다.
+  // 다시 해도 풀리지 않는 실패는 그때 보낸 선택만 막는다 — 실패한 적 없는 선택은 다시 보낼 수 있다
+  const locked =
+    sending.kind === 'STUCK' || failedChoices.some((failed) => sameChoices(choices, failed))
 
   /*
    * 이동은 모두 `replace` 다. 이미 보낸 결정 화면으로 뒤로 돌아가 같은 결정을 다시 제출하는
@@ -80,7 +88,7 @@ export function ConfirmChangePage() {
   const leave = (to: string) => navigate(to, { replace: true })
 
   /** 판단이 끝난 결과에 따라 옮긴다. 머무는 경우만 이 화면의 상태를 바꾼다 */
-  function settle(outcome: SubmitOutcome, acceptedId: number) {
+  function settle(outcome: SubmitOutcome, acceptedId: number, sent: Choices) {
     switch (outcome.kind) {
       // 반영 결과는 판단 번호로 다시 묻는다. 결과를 들고 가면 새로고침 때 지난 판단이 지금 것처럼 뜬다
       case 'REPLAN':
@@ -92,7 +100,13 @@ export function ConfirmChangePage() {
       // 새 충돌에 붙지 않는다
       case 'CONFIRM':
         setSending({ kind: 'IDLE' })
+        // 실패한 선택은 앞 충돌 묶음에 대한 것이다. 새 묶음에서는 처음부터 고른다
+        setFailedChoices([])
         return navigate({ pathname: '/confirm', search }, { state: outcome.view, replace: true })
+
+      // 고른 것으로 마지막 절차까지 마쳤다(#315). 마쳤다는 안내는 홈이 한다
+      case 'FINISHED':
+        return leave('/case')
 
       case 'STAY':
         switch (outcome.state.kind) {
@@ -100,11 +114,14 @@ export function ConfirmChangePage() {
           case 'NEEDS_MORE_INFO':
             return leave('/results')
 
-          // 실패하면 서버가 아무것도 바꾸지 않아 충돌이 그대로 남는다. 다시 해볼 수 있는 실패만
-          // 여기 머물며 같은 선택으로 다시 보내게 한다. 나머지는 다시 보내도 풀리지 않아 홈이 안내한다
-          case 'FAILED':
-            if (outcome.state.notice.kind === 'RETRY_AVAILABLE') return setSending({ kind: 'RETRY' })
-            return leave('/case')
+          // 홈으로 바로 가면 실패 이유가 사라진다(#313). 어느 실패든 여기 머물며 이유를 알린다.
+          // 다시 해볼 수 있는 실패만 같은 선택으로 다시 보내게 한다
+          case 'FAILED': {
+            const { notice } = outcome.state
+            if (notice.kind === 'RETRY_AVAILABLE') return setSending({ kind: 'RETRY' })
+            setFailedChoices((current) => [...current, sent])
+            return setSending({ kind: 'FAILED', notice })
+          }
 
           default:
             return setSending({ kind: 'STUCK', reason: 'UNRECOGNIZED' })
@@ -124,7 +141,7 @@ export function ConfirmChangePage() {
    * 보내기와 기다리기의 실패를 따로 받는다. 보내다 실패하면 서버가 받았는지조차 모르고,
    * 기다리다 실패하면 접수는 된 것이라 사장님에게 할 말이 다르다(결과 입력과 같은 규칙).
    */
-  async function sendToServer(body: CaseConflictsDecisionRequest) {
+  async function sendToServer(body: CaseConflictsDecisionRequest, sent: Choices) {
     setSending({ kind: 'PENDING', accepted: false })
 
     let acceptedId: number
@@ -150,7 +167,7 @@ export function ConfirmChangePage() {
       const waited = await waitForResult(acceptedId, { signal: controller.signal })
       switch (waited.kind) {
         case 'SETTLED':
-          return settle(toSubmitOutcome(waited.body), acceptedId)
+          return settle(toSubmitOutcome(waited.body), acceptedId, sent)
         // 그사이 다른 판단이 생겼다(다른 탭 등)
         case 'STALE':
           return leave('/results')
@@ -171,7 +188,7 @@ export function ConfirmChangePage() {
     // 버튼이 다 고르기 전에는 잠겨 있지만, 반쪽 요청이 나가지 않게 여기서도 거른다
     if (decision === null) return
 
-    if (!usesMock) return sendToServer(decision)
+    if (!usesMock) return sendToServer(decision, choices)
 
     // Mock 은 접수 단계가 없어 둘째 줄부터다
     setSending({ kind: 'PENDING', accepted: true })
@@ -235,6 +252,15 @@ export function ConfirmChangePage() {
   )
 }
 
+/** 충돌마다 고른 쪽. 열쇠는 충돌 항목의 `key` 다 */
+type Choices = Record<string, ConflictSide>
+
+/** 두 선택이 모든 항목에서 같은지 */
+function sameChoices(a: Choices, b: Choices): boolean {
+  const keys = Object.keys(a)
+  return keys.length === Object.keys(b).length && keys.every((key) => a[key] === b[key])
+}
+
 /** 고른 것을 보내는 상태 */
 type SendState =
   /** 아직 보내지 않았다 */
@@ -243,6 +269,11 @@ type SendState =
   | { kind: 'PENDING'; accepted: boolean }
   /** 판단이 실패했고 다시 해볼 수 있다. 충돌은 그대로 남아 있다 */
   | { kind: 'RETRY' }
+  /**
+   * 판단이 실패했고 같은 선택으로는 풀리지 않는다고 서버가 분류했다. 충돌은 그대로 남아 있다.
+   * 보낸 선택은 `failedChoices` 에 쌓여 다시 보내지 못하게 막힌다
+   */
+  | { kind: 'FAILED'; notice: Exclude<FailureNotice, { kind: 'RETRY_AVAILABLE' }> }
   /** 보내다 끊겼다. 서버가 받았는지 모른다 */
   | { kind: 'SEND_FAILED' }
   /**
@@ -275,6 +306,9 @@ function sendNotice(
         description: '기록은 그대로예요. 같은 선택으로 다시 보내실 수 있어요.',
       }
 
+    case 'FAILED':
+      return { ...failedNotice(sending.notice), tone: 'critical', action: goToCase }
+
     case 'SEND_FAILED':
       return {
         tone: 'critical',
@@ -305,6 +339,45 @@ function sendNotice(
             description: '고르신 내용은 접수됐어요. 지금 상황 화면에서 다시 확인해 주세요.',
             action: goToCase,
           }
+      }
+  }
+}
+
+/**
+ * 다시 해도 풀리지 않는 실패의 이유. 결과 입력의 `failureNotice` 와 같은 나눔이다.
+ *
+ * "기록은 그대로예요" 를 앞에 둔다 — 실패해도 고른 값은 저장되지 않는다.
+ *
+ * `NO_RECOVERY` 는 다른 쪽을 고르라고 하지 않는다. 서버가 이 충돌을 정리하고 홈에서 새 상황을
+ * 받는다(#338). 홈 카드의 "새 상황 알려주기" 와 같은 말로 안내한다.
+ */
+function failedNotice(notice: Exclude<FailureNotice, { kind: 'RETRY_AVAILABLE' }>): {
+  title: string
+  description: string
+} {
+  switch (notice.kind) {
+    case 'NO_RECOVERY':
+      return {
+        title: '고르신 내용으로는 다음 할 일을 정하지 못했어요.',
+        description: '기록은 그대로예요. 지금 상황 화면에서 새로 확인한 상황을 알려주실 수 있어요.',
+      }
+    case 'SERVICE_SIDE':
+      return {
+        title: '서비스에서 확인이 필요한 문제가 생겼어요.',
+        description: '기록은 그대로예요. 이 건은 저희 쪽에서 봐야 하는 문제예요.',
+      }
+    case 'NEEDS_DETAIL':
+      return {
+        title: '추가 확인이 필요해요.',
+        description:
+          notice.fields.length === 0
+            ? '기록은 그대로예요. 어떤 내용이 더 필요한지는 아직 확인되지 않았어요.'
+            : `기록은 그대로예요. 더 알아야 하는 것: ${notice.fields.join(', ')}${notice.partial ? ' 등' : ''}.`,
+      }
+    case 'UNKNOWN_CAUSE':
+      return {
+        title: '고르신 내용을 반영하지 못했어요.',
+        description: '기록은 그대로예요. 자세한 이유는 확인되지 않았어요.',
       }
   }
 }

@@ -81,7 +81,8 @@ langfuse_data/
 
 # ── 개인 로컬 파일 (팀 공용 아님) ──────────────────────
 /handoff.md
-/AGENTS.md
+# 사용자의 11월 11일까지 문서 갱신 요청을 팀 작업에도 유지한다.
+!/AGENTS.md
 /docs/agent/handoof.md
 
 # ── Agent 로컬 도구·수집 데이터 ────────────────────────
@@ -114,6 +115,8 @@ langfuse_data/
 # ── Frontend 전용 규칙 (하위 디렉터리 포함) ─────────────
 # Logs
 /frontend/**/logs
+# 개발 문서의 "작업 기록" 페이지 폴더라 로그가 아니다
+!/frontend/public/developers/ko/logs/
 /frontend/**/*.log
 /frontend/**/npm-debug.log*
 /frontend/**/yarn-debug.log*
@@ -124,6 +127,10 @@ langfuse_data/
 /frontend/**/node_modules
 /frontend/**/dist
 /frontend/**/dist-ssr
+/frontend/public/developers/
+/frontend/public/safety/
+/docs/developers/_qa/
+/docs/safety/_qa/
 /frontend/**/*.local
 
 # Editor directories and files

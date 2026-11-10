@@ -256,7 +256,7 @@ def test_conflict_input_overlays_and_storage_preserve_numbered_or_legacy_values(
             return
         changes = build_conflict_overlays(graph_input.case_snapshot, graph_input.trigger)
         decision_record._assert_changes_are_current(session, decision, SimpleNamespace(
-            fact_changes=changes, procedure_progress_changes=[]))
+            fact_changes=changes, procedure_progress_changes=[]), snapshot=graph_input.case_snapshot)
         decision_record._apply_fact_changes(session, decision, changes)
         decision_record._resolve_conflicts(session, decision, {row_id: "PROPOSED" if accepted else "STORED"})
         session.commit()

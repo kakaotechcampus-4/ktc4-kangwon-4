@@ -7,8 +7,9 @@
 """
 
 import asyncio
+import json
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlmodel import Session
@@ -31,6 +32,13 @@ from testcontainers.community.mysql import MySqlContainer
 from app.be.crud.member import create_member
 from app.be.schemas.case import CaseCreateRequest
 from app.be.services.case import create_case
+from app.agent.schemas import RetainedInfoResult, SafeFailureOutcome, canonical_digest
+from app.be.models.case import Case
+from app.be.models.case_history import CaseHistory
+from app.be.models.evidence import ConflictReference
+from app.be.routers import case as case_router
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 HISTORY_ID = 9
 SNAPSHOT_ID = "11111111-1111-1111-1111-111111111111"
@@ -54,7 +62,7 @@ def flow(monkeypatch):
 
         async def fake_run_case_planning(request, **_kwargs):
             captured["request"] = request
-            return SimpleNamespace(outcome_type=outcome_type)
+            return SimpleNamespace(outcome_type=outcome_type, recovery_action_code="RETRY")
 
         monkeypatch.setattr(
             case_history_crud, "get_case_history_by_id",
@@ -315,6 +323,404 @@ def reviewed_plan_setting_employee_count():
         )
 
     return asyncio.run(build())
+
+
+def reviewed_scope_change(case_id, *, before="PARTIAL", after="FULL", accepted=True, detail="카운터", include_detail=True):
+    """실제 충돌 overlay와 검수를 거친 합성 판단. 모델 호출은 없다."""
+    from app.agent.enrichment import build_conflict_overlays
+    from app.agent.review_tool import ReviewTool
+    from app.agent.schemas import (
+        CaseFact, ConflictCandidate, ConflictConfirmedTrigger, ReviewProof,
+        ReviewSubject, ReviewedPlanOutcome, canonical_digest,
+    )
+    from app.agent.supervisor.agent import SupervisorAgent
+    from test_action_codes import NOW, REF, StubModel, evidence, source as invocation, supervisor_request
+
+    async def build():
+        request = supervisor_request()
+        data = json.loads(request.model_dump_json().replace(f'"{REF}"', f'"{REF}:{case_id}"'))
+        for original, source in zip(request.source_results, data["source_results"]):
+            if source["meta"]["component"] == "INFO_AGENT":
+                source["output"]["based_on_procedure_lookup_digest"] = data["source_results"][0]["output_digest"]
+            source["output_digest"] = canonical_digest(type(original.output).model_validate(source["output"]))
+        request = type(request).model_validate(data)
+        request.case_snapshot.case_id = case_id
+        for source in request.source_results:
+            source.meta.case_id = case_id
+        reported = evidence(evidence_id=f"scope-report:{case_id}", source_type="USER_INPUT",
+                            source_ref=f"synthetic-scope-input:{case_id}", excerpt="원상복구는 전부입니다.")
+        request.case_snapshot.evidence_records.append(reported)
+        info = request.source_results[1].output.model_copy(deep=True)
+        info.evidence_records.append(reported)
+        request.source_results[1] = invocation(info)
+        request.source_results[1].meta.case_id = case_id
+        facts = [("restoration_scope", "ENUM", before)]
+        if include_detail:
+            facts.append(("restoration_scope_detail", "STRING", detail))
+        for field, kind, value in facts:
+            request.case_snapshot.facts.append(CaseFact(
+                field_path=field, value_type=kind, value=value, status="CONFIRMED" if value is not None else "UNKNOWN",
+                evidence_refs=[f"{REF}:{case_id}"] if value is not None else [], updated_at=NOW if value is not None else None,
+            ))
+        conflict = ConflictCandidate.create(
+            conflict_ref=f"scope:{case_id}", candidate_id=uuid4(), snapshot_id=request.case_snapshot.snapshot_id,
+            field_path="restoration_scope", committed_status="CONFIRMED", committed_value=before,
+            proposed_operation="SET", proposed_status="CONFIRMED", proposed_value=after,
+            source_evidence_refs=[reported.evidence_id], source_call_id=request.source_results[1].meta.call_id,
+        )
+        request.trigger = ConflictConfirmedTrigger(
+            trigger_type="CONFLICT_CONFIRMED", input_event_id=f"scope-choice:{case_id}",
+            client_event_id=None, conflicts=[conflict], conflict_snapshot=request.case_snapshot.model_copy(deep=True),
+            selections=[{"conflict_ref": conflict.conflict_ref, "accepted": accepted}], confirmed_at=NOW,
+        )
+        request.fact_overlays = build_conflict_overlays(request.case_snapshot, request.trigger)
+        draft = await SupervisorAgent(StubModel(), max_local_attempts=1).draft(request)
+        subject = ReviewSubject.create(
+            schema_version="agent-io/2.0", review_subject_id=uuid4(), review_attempt=1,
+            run_id=request.source_results[0].meta.run_id, case_id=case_id, trigger=request.trigger,
+            snapshot=request.case_snapshot, known_procedure_steps=request.known_procedure_steps,
+            source_results=request.source_results, supervisor_draft=draft,
+        )
+        result = await ReviewTool(StubModel(), max_output_attempts=1).review(subject)
+        meta = request.source_results[0].meta.model_copy(update={"component": "REVIEW_TOOL", "call_id": uuid4()})
+        return ReviewedPlanOutcome(outcome_type="REVIEWED_PLAN", review_subject=subject,
+            review_proof=ReviewProof.from_passed_review(subject=subject, result=result, review_meta=meta, reviewed_at=NOW))
+    return asyncio.run(build())
+
+
+def scope_case(engine, before="PARTIAL", detail="카운터"):
+    from app.be.models.case import Case
+    from app.be.models.case_field_history import CaseFieldHistory
+    from app.be.models.case_history import CaseHistory
+    from app.be.models.evidence import ConflictReference
+
+    with Session(engine) as session:
+        case_id = new_case_id(session)
+        case = session.get(Case, case_id)
+        case.restoration_scope, case.restoration_scope_detail = before, detail
+        origin = CaseHistory(case_id=case_id, source="USER_INPUT", raw_input="원상복구는 전부입니다.", judgment_status="CONFLICT")
+        session.add(origin)
+        session.flush()
+        creation = case_history_crud.get_case_created_history(session, case_id)
+        seed = CaseFieldHistory(case_id=case_id, case_history_id=origin.id, canonical_field="restoration_scope_detail",
+            before_value=None, after_value=detail, source="INFO_ANALYSIS",
+            source_evidence_refs=[f"case_{case_id}_history_{creation.id}"])
+        conflict = ConflictReference(conflict_ref=f"scope:{case_id}", case_id=case_id, case_history_id=origin.id,
+            canonical_field="restoration_scope", committed_value=before, proposed_value="FULL", candidate_payload={})
+        history = CaseHistory(case_id=case_id, source="CONFLICT_DECISION", judgment_status="PENDING")
+        session.add_all([seed, conflict, history])
+        session.commit()
+        return case_id, history.id, conflict.id, seed.id
+
+
+def stale_failure_case(engine):
+    from test_action_codes import supervisor_request
+
+    case_id, history_id, conflict_id, _ = scope_case(engine)
+    request = supervisor_request()
+    subject = reviewed_scope_change(case_id).review_subject
+    source = next(row for row in subject.source_results if row.meta.component == "INFO_AGENT")
+    info = source.output.model_copy(update={key: [] for key in (
+        "fact_candidates", "conflicts", "procedure_findings", "missing_fields", "question_candidates", "uncertainties")})
+    retained = RetainedInfoResult(meta=source.meta, output=info, output_digest=canonical_digest(info),
+        input=request.trigger.input)
+    trigger = subject.trigger.model_copy(update={
+        "input_event_id": str(history_id), "retained_info_result": retained,
+    })
+    with Session(engine) as session:
+        row = session.get(ConflictReference, conflict_id)
+        row.candidate_payload = trigger.conflicts[0].model_dump(mode="json")
+        row.conflict_digest = trigger.conflicts[0].conflict_digest
+        origin = session.get(CaseHistory, row.case_history_id)
+        origin.conflict_snapshot = trigger.conflict_snapshot.model_dump(mode="json")
+        origin.retained_info_result = retained.model_dump(mode="json")
+        session.commit()
+    outcome = SafeFailureOutcome(outcome_type="SAFE_FAILURE", run_id=uuid4(), case_id=case_id,
+        trigger=trigger, snapshot_id=trigger.conflict_snapshot.snapshot_id,
+        failure_code="STALE_CONFLICT_CONFIRMATION", message_code="STALE_CONFLICT_CONFIRMATION",
+        recovery_action_code="RESUBMIT_INPUT", requested_field_paths=[], retryable=False,
+        failed_component=None, trace_id=None)
+    return case_id, history_id, conflict_id, outcome
+
+
+@pytest.mark.parametrize("side", ["PROPOSED", "STORED"])
+@pytest.mark.parametrize("code,recovery,fields", [
+    ("STALE_CONFLICT_CONFIRMATION", "RESUBMIT_INPUT", []),
+    ("COMPONENT_UNAVAILABLE", "RESUBMIT_INPUT", ["employee_count"]),
+    ("STRUCTURED_OUTPUT_FAILED", "NONE", []),
+    ("LOOP_LIMIT_REACHED", "NONE", []),
+])
+def test_new_input_failure_keeps_original_data_and_opens_new_text(mysql_engine, monkeypatch, side, code, recovery, fields):
+    case_id, history_id, conflict_id, outcome = stale_failure_case(mysql_engine)
+    outcome = SafeFailureOutcome.model_validate(outcome.model_dump(mode="python") | {
+        "failure_code": code, "message_code": code, "recovery_action_code": recovery,
+        "requested_field_paths": fields,
+    })
+    with Session(mysql_engine) as session:
+        case = session.get(Case, case_id)
+        member_id, original_case = case.member_id, case.model_dump()
+        original_progress = [row.model_dump() for row in case.case_procedure_steps]
+        conflict = session.get(ConflictReference, conflict_id)
+        origin_id = conflict.case_history_id
+        original_origin = session.get(CaseHistory, origin_id).model_dump()
+        original_payload = conflict.candidate_payload
+        conflict_decision._save_decision_outcome(session, history_id, outcome, {conflict_id: side})
+    app = FastAPI()
+    app.include_router(case_router.router)
+    def database():
+        with Session(mysql_engine) as session:
+            yield session
+    app.dependency_overrides[case_router.get_db] = database
+    app.dependency_overrides[case_router.get_current_member_id] = lambda: member_id
+    monkeypatch.setattr(case_router.judgment_service, "run_judgment_in_background", AsyncMock())
+    with TestClient(app) as client:
+        assert client.get("/cases").json()["judgment_status"] == "FAILED"
+        entry = client.get("/cases/results").json()
+        assert (entry["judgment_status"], entry["recovery_action_code"], entry["case_history_id"]) == (
+            "FAILED", recovery, history_id)
+        assert entry["requested_field_paths"] == fields
+        status = client.get("/cases/results/status", params={"case_history_id": history_id}).json()
+        assert status["result"] == "FAILED" and status["retryable"] is False
+        assert any(row["event"] == "JUDGMENT_FAILED" for row in client.get("/cases/logs").json()["logs"])
+        response = client.post("/cases/results", json={"case_history_id": history_id, "raw_input": "현재 상황을 다시 알려드려요."})
+        assert response.status_code == 200
+    with Session(mysql_engine) as session:
+        saved = session.get(ConflictReference, conflict_id)
+        assert (saved.status, saved.resolved_by_case_history_id) == ("REJECTED", history_id)
+        assert saved.decided_at is not None and saved.candidate_payload == original_payload
+        assert session.get(CaseHistory, origin_id).model_dump() == original_origin
+        case = session.get(Case, case_id)
+        assert case.model_dump() == original_case
+        assert [row.model_dump() for row in case.case_procedure_steps] == original_progress
+        failed = session.get(CaseHistory, history_id)
+        assert (failed.judgment_status, failed.failure_code, failed.recovery_action_code) == (
+            "FAILED", code, recovery)
+        assert failed.requested_field_paths == fields
+        assert session.get(CaseHistory, response.json()["case_history_id"]).judgment_status == "PENDING"
+
+
+@pytest.mark.parametrize("recovery", ["RESUBMIT_INPUT", "NONE"])
+@pytest.mark.parametrize("bad", ["case", "event", "ids", "batch", "resolved", "done", "newer", "snapshot", "payload", "retained", "legacy"])
+def test_stale_failure_target_and_cleanup_guards_are_independent(mysql_engine, bad, recovery):
+    case_id, history_id, conflict_id, outcome = stale_failure_case(mysql_engine)
+    outcome = outcome.model_copy(update={"recovery_action_code": recovery})
+    choices = {conflict_id: "PROPOSED"}
+    with Session(mysql_engine) as session:
+        history, row = session.get(CaseHistory, history_id), session.get(ConflictReference, conflict_id)
+        origin = session.get(CaseHistory, row.case_history_id)
+        if bad == "case": outcome = outcome.model_copy(update={"case_id": case_id + 9999})
+        elif bad == "event": outcome.trigger.input_event_id = "another-decision"
+        elif bad == "ids": choices = {conflict_id + 9999: "PROPOSED"}
+        elif bad == "resolved": row.status = "REJECTED"
+        elif bad == "done": history.judgment_status = "DONE"
+        elif bad == "snapshot": origin.conflict_snapshot = origin.conflict_snapshot | {"snapshot_id": str(uuid4())}
+        elif bad == "payload": row.candidate_payload = row.candidate_payload | {"proposed_value": "NOT_REQUIRED"}
+        elif bad == "retained": origin.retained_info_result = None
+        elif bad == "legacy": origin.conflict_snapshot = {key: value for key, value in origin.conflict_snapshot.items()
+                                                         if key != "active_blocker_candidate_ids"}
+        elif bad == "batch":
+            other = ConflictReference(case_id=case_id, case_history_id=case_history_crud.get_case_created_history(session, case_id).id,
+                conflict_ref=str(uuid4()), canonical_field="employee_count", proposed_value="3")
+            session.add(other)
+            session.flush()
+            choices[other.id] = "PROPOSED"
+        session.commit()
+        session.refresh(history)
+        session.refresh(origin)
+        original_history = history.model_dump()
+        original_origin = origin.model_dump()
+        original_rows = [row.model_dump() for row in session.exec(select(ConflictReference).where(ConflictReference.case_id == case_id)).all()]
+        if bad == "newer":  # 먼저 읽은 세션의 MySQL 스냅샷보다 최신인 이력도 저장 직전에 확인해야 한다.
+            with Session(mysql_engine) as other:
+                other.add(CaseHistory(case_id=case_id, source="USER_INPUT", judgment_status="PENDING"))
+                other.commit()
+        conflict_decision._save_decision_outcome(session, history_id, outcome, choices)
+        session.commit()
+    with Session(mysql_engine) as session:
+        saved = session.get(CaseHistory, history_id)
+        if bad in {"case", "event", "done", "newer"}:
+            assert saved.model_dump() == original_history
+        else:
+            assert (saved.judgment_status, saved.failure_code, saved.recovery_action_code) == (
+                "FAILED", "STALE_CONFLICT_CONFIRMATION", recovery)
+        assert session.get(CaseHistory, original_origin["id"]).model_dump() == original_origin
+        assert [row.model_dump() for row in session.exec(select(ConflictReference).where(ConflictReference.case_id == case_id)).all()] == original_rows
+
+
+@pytest.mark.parametrize("code,recovery", [
+    ("STALE_CONFLICT_CONFIRMATION", "RETRY"),
+    ("STALE_CONFLICT_CONFIRMATION", "CONTACT_SUPPORT"),
+])
+def test_other_failures_keep_the_conflict_pending(mysql_engine, code, recovery):
+    _, history_id, conflict_id, outcome = stale_failure_case(mysql_engine)
+    outcome = SafeFailureOutcome.model_validate(outcome.model_dump(mode="python") | {"failure_code": code, "recovery_action_code": recovery,
+        "retryable": recovery == "RETRY", "requested_field_paths": ["employee_count"] if code == "COMPONENT_UNAVAILABLE" else []})
+    with Session(mysql_engine) as session:
+        conflict_decision._save_decision_outcome(session, history_id, outcome, {conflict_id: "PROPOSED"})
+    with Session(mysql_engine) as session:
+        assert session.get(CaseHistory, history_id).recovery_action_code == recovery
+        assert session.get(ConflictReference, conflict_id).status == "PENDING"
+
+
+@pytest.mark.parametrize("cleanup_blocked_by", ["case_status", "trigger_type"])
+@pytest.mark.parametrize("history_state", ["PENDING", "DONE", "newer"])
+def test_cleanup_conditions_do_not_hide_current_failure_or_overwrite_late_results(
+    mysql_engine, cleanup_blocked_by, history_state,
+):
+    from app.agent.schemas import CaseCreatedTrigger
+
+    case_id, history_id, conflict_id, outcome = stale_failure_case(mysql_engine)
+    if cleanup_blocked_by == "trigger_type":
+        trigger = outcome.trigger
+        outcome = outcome.model_copy(update={"trigger": CaseCreatedTrigger(
+            trigger_type="CASE_CREATED", input_event_id=str(history_id), client_event_id=None,
+            input=trigger.retained_info_result.input.model_copy(update={"input_event_id": str(history_id)}),
+            submitted_at=trigger.confirmed_at,
+        )})
+    with Session(mysql_engine) as session:
+        history, case = session.get(CaseHistory, history_id), session.get(Case, case_id)
+        if cleanup_blocked_by == "case_status": case.case_status = "COMPLETED"
+        if history_state == "DONE": history.judgment_status = "DONE"
+        session.commit()
+        session.refresh(history)
+        before = history.model_dump()
+        original_conflict = session.get(ConflictReference, conflict_id).model_dump()
+        if history_state == "newer":
+            with Session(mysql_engine) as other:
+                other.add(CaseHistory(case_id=case_id, source="USER_INPUT", judgment_status="PENDING"))
+                other.commit()
+        conflict_decision._save_decision_outcome(session, history_id, outcome, {conflict_id: "PROPOSED"})
+        session.commit()
+    with Session(mysql_engine) as session:
+        saved = session.get(CaseHistory, history_id)
+        if history_state == "PENDING":
+            assert (saved.judgment_status, saved.failure_code, saved.recovery_action_code) == (
+                "FAILED", "STALE_CONFLICT_CONFIRMATION", "RESUBMIT_INPUT")
+        else:
+            assert saved.model_dump() == before
+        assert session.get(ConflictReference, conflict_id).model_dump() == original_conflict
+
+
+@pytest.mark.parametrize("recovery", ["RESUBMIT_INPUT", "NONE"])
+def test_stale_cleanup_and_failure_record_roll_back_together(mysql_engine, monkeypatch, recovery):
+    _, history_id, conflict_id, outcome = stale_failure_case(mysql_engine)
+    outcome = outcome.model_copy(update={"recovery_action_code": recovery})
+    resolve = decision_record_service._resolve_conflicts
+    def interrupted(*args):
+        resolve(*args)
+        raise RuntimeError("stop after staging conflict cleanup")
+    monkeypatch.setattr(decision_record_service, "_resolve_conflicts", interrupted)
+    with Session(mysql_engine) as session, pytest.raises(RuntimeError):
+        conflict_decision._save_decision_outcome(session, history_id, outcome, {conflict_id: "PROPOSED"})
+    with Session(mysql_engine) as session:
+        assert session.get(CaseHistory, history_id).judgment_status == "PENDING"
+        assert session.get(ConflictReference, conflict_id).status == "PENDING"
+
+
+@pytest.mark.parametrize("accepted,detail", [(True, "카운터"), (False, "카운터"), (True, None)],
+                         ids=["new-full", "keep-partial", "already-empty-detail"])
+def test_full_scope_choice_clears_only_current_detail_and_keeps_old_history(mysql_engine, accepted, detail):
+    from app.be.models.case import Case
+    from app.be.models.case_field_history import CaseFieldHistory
+    from app.be.models.case_history import CaseHistory
+    from app.be.models.evidence import ConflictReference
+
+    case_id, history_id, conflict_id, seed_id = scope_case(mysql_engine, detail=detail)
+    outcome = reviewed_scope_change(case_id, accepted=accepted, detail=detail)
+    with Session(mysql_engine) as session:
+        decision_record_service.save_reviewed_plan(session, session.get(CaseHistory, history_id), outcome,
+            resolved_conflicts={conflict_id: "PROPOSED" if accepted else "STORED"})
+    with Session(mysql_engine) as session:
+        case = session.get(Case, case_id)
+        assert (case.restoration_scope, case.restoration_scope_detail) == (("FULL", None) if accepted else ("PARTIAL", detail))
+        assert session.get(CaseFieldHistory, seed_id).after_value == detail
+        if accepted:
+            fact = next(f for f in case_snapshot_service.build_case_snapshot(session, case_id).facts
+                        if f.field_path == "restoration_scope_detail")
+            assert (fact.status, fact.value, fact.evidence_refs) == ("UNKNOWN", None, [])
+        rows = session.exec(select(CaseFieldHistory).where(CaseFieldHistory.case_history_id == history_id,
+            CaseFieldHistory.canonical_field == "restoration_scope_detail")).all()
+        assert len(rows) == int(accepted and detail is not None)
+        if rows:
+            scope = outcome.review_subject.supervisor_draft.mutations.fact_changes[0]
+            assert (rows[0].before_value, rows[0].after_value, rows[0].source) == ("카운터", None, scope.source_type.value)
+            assert rows[0].source_evidence_refs == scope.source_evidence_refs
+            assert rows[0].reason
+        assert session.get(ConflictReference, conflict_id).status == ("CONFIRMED" if accepted else "REJECTED")
+
+
+@pytest.mark.parametrize("failure", ["stale-detail", "missing-detail", "resolve-rollback"])
+def test_full_scope_detail_clear_is_stale_checked_and_atomic(mysql_engine, failure):
+    from app.be.models.case import Case
+    from app.be.models.case_field_history import CaseFieldHistory
+    from app.be.models.case_history import CaseHistory
+    from app.be.models.evidence import ConflictReference
+
+    case_id, history_id, conflict_id, _ = scope_case(mysql_engine)
+    outcome = reviewed_scope_change(case_id, include_detail=failure != "missing-detail")
+    if failure == "stale-detail":
+        with Session(mysql_engine) as session:
+            session.get(Case, case_id).restoration_scope_detail = "나중에 확인한 바닥"
+            session.commit()
+    error = ValueError if failure == "resolve-rollback" else decision_record_service.StaleJudgmentError
+    with Session(mysql_engine) as session, pytest.raises(error):
+        decision_record_service.save_reviewed_plan(session, session.get(CaseHistory, history_id), outcome,
+            resolved_conflicts={-1 if failure == "resolve-rollback" else conflict_id: "PROPOSED"})
+    with Session(mysql_engine) as session:
+        case = session.get(Case, case_id)
+        assert case.restoration_scope == "PARTIAL"
+        assert case.restoration_scope_detail == ("나중에 확인한 바닥" if failure == "stale-detail" else "카운터")
+        assert session.get(CaseHistory, history_id).judgment_status == "PENDING"
+        assert session.get(ConflictReference, conflict_id).status == "PENDING"
+        assert not session.exec(select(CaseFieldHistory).where(CaseFieldHistory.case_history_id == history_id)).all()
+
+
+@pytest.mark.parametrize("operation", ["SET", "CLEAR"])
+@pytest.mark.parametrize("detail_first", [True, False])
+def test_full_scope_clear_wins_over_same_batch_detail_without_duplicate_history(mysql_engine, operation, detail_first):
+    from app.agent.schemas import FactChangeCandidate
+    from app.be.models.case import Case
+    from app.be.models.case_field_history import CaseFieldHistory
+    from app.be.models.case_history import CaseHistory
+
+    case_id, history_id, _, _ = scope_case(mysql_engine)
+    scope = reviewed_scope_change(case_id).review_subject.supervisor_draft.mutations.fact_changes[0]
+    detail = FactChangeCandidate.model_validate(scope.model_dump() | {
+        "candidate_id": uuid4(), "field_path": "restoration_scope_detail", "value_type": "STRING",
+        "before_value": "카운터", "operation": operation,
+        "proposed_status": "CONFIRMED" if operation == "SET" else "UNKNOWN",
+        "proposed_value": "새 세부 설명" if operation == "SET" else None,
+        "source_evidence_refs": ["separate-detail-report"],
+    })
+    with Session(mysql_engine) as session:
+        decision_record_service._apply_fact_changes(session, session.get(CaseHistory, history_id),
+            [detail, scope] if detail_first else [scope, detail])
+        session.commit()
+    with Session(mysql_engine) as session:
+        assert session.get(Case, case_id).restoration_scope_detail is None
+        rows = session.exec(select(CaseFieldHistory).where(CaseFieldHistory.case_history_id == history_id,
+            CaseFieldHistory.canonical_field == "restoration_scope_detail")).all()
+        assert len(rows) == 1
+        assert (rows[0].before_value, rows[0].after_value) == ("카운터", None)
+        assert rows[0].source_evidence_refs == scope.source_evidence_refs
+
+
+@pytest.mark.parametrize("before,after", [("FULL", "FULL"), ("PARTIAL", "NOT_REQUIRED"), ("PARTIAL", "PARTIAL")])
+def test_detail_clear_policy_only_applies_when_scope_changes_to_full(mysql_engine, before, after):
+    from app.be.models.case import Case
+    from app.be.models.case_field_history import CaseFieldHistory
+    from app.be.models.case_history import CaseHistory
+
+    case_id, history_id, _, _ = scope_case(mysql_engine, before)
+    outcome = reviewed_scope_change(case_id, before=before, after=after)
+    with Session(mysql_engine) as session:
+        decision_record_service._apply_fact_changes(session, session.get(CaseHistory, history_id),
+            outcome.review_subject.supervisor_draft.mutations.fact_changes)
+        session.commit()
+    with Session(mysql_engine) as session:
+        assert session.get(Case, case_id).restoration_scope_detail == "카운터"
+        assert not session.exec(select(CaseFieldHistory).where(CaseFieldHistory.case_history_id == history_id,
+            CaseFieldHistory.canonical_field == "restoration_scope_detail")).all()
 
 
 def test_the_choice_and_the_saved_value_live_or_die_together(mysql_engine):

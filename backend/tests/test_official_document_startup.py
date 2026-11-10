@@ -44,7 +44,7 @@ def empty_engine():
 def test_startup_commits_sources_before_eight_concurrent_signups(empty_engine, monkeypatch):
     store = reviewed_procedure.load_reviewed_procedures()
     monkeypatch.setattr(main, "get_engine", lambda: empty_engine)
-    monkeypatch.setattr(main, "get_settings", lambda: SimpleNamespace(ENVIRONMENT="prod"))
+    monkeypatch.setattr(main, "get_settings", lambda: SimpleNamespace(ENVIRONMENT="prod", DISCORD_ERROR_WEBHOOK_URL=None))
     monkeypatch.setattr(judgment_service, "get_engine", lambda: empty_engine)
     monkeypatch.setattr(case_service, "kst_now", lambda: datetime(2026, 11, 7, tzinfo=KST))
 

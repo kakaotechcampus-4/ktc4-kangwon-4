@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest'
 
-import type { CaseResultsEntryResponse, CaseResultsSubmitResponse } from '../types/api'
+import type {
+  CaseResponse,
+  CaseResultsEntryResponse,
+  CaseResultsSubmitResponse,
+  CasesEnvelope,
+  CaseStatus,
+} from '../types/api'
 import {
+  opensInputAfterProcedures,
   toAnswerInput,
   toChanges,
   toConflicts,
@@ -27,7 +34,10 @@ describe('toValueLabel', () => {
     ['restoration_status', 'IN_PROGRESS', '진행 중'],
     ['restoration_scope', 'FULL', '전체'],
     ['demolition_required', 'REQUIRED', '필요함'],
+    ['business_type', 'CAFE', '카페'],
+    ['business_type', 'RESTAURANT', '다른 음식점'],
     ['business_type', '카페', '카페'],
+    ['business_type', 'toString', 'toString'],
     ['restoration_scope_detail', '간판과 바닥만', '간판과 바닥만'],
   ])('%s 의 %s 를 %s 로 바꾼다', (field, raw, label) => {
     expect(toValueLabel(field, raw)).toBe(label)
@@ -56,6 +66,7 @@ describe('toValueLabel', () => {
     ['restoration_scope', 'toString'],
     ['demolition_required', 3],
     ['unknown_field', '카페'],
+    ['business_type', 'BAKERY'],
   ])('%s 의 %s 는 확인 필요로 둔다', (field, raw) => {
     expect(toValueLabel(field, raw)).toBe('확인 필요')
   })
@@ -170,6 +181,7 @@ function entry(overrides: Partial<CaseResultsEntryResponse>): CaseResultsEntryRe
   return {
     judgment_status: 'DONE',
     result_input_kind: 'TEXT',
+    action_done_kind: null,
     case_history_id: null,
     raw_input: null,
     conflicts: null,
@@ -200,7 +212,18 @@ describe('toResultsEntry', () => {
       nextAction: { title: '임대인에게 원상복구 범위 묻기', reason: '', questions: [] },
       historyId: 12,
       inputKind: 'TEXT',
+      doneKind: null,
     })
+  })
+
+  /** 버튼 문구는 서버가 준 할 일 종류로 고른다. 종류가 없거나 모르는 값이면 지어내지 않는다 */
+  it('[했어요] 할 일이면 버튼 종류를 담고, 종류를 모르면 읽지 못했다고 본다', () => {
+    const body = { case_history_id: 12, next_action: NEXT_ACTION, result_input_kind: 'ACTION_DONE' as const }
+    expect(toResultsEntry(entry({ ...body, action_done_kind: 'SUBMISSION' }))).toMatchObject({
+      kind: 'READY', inputKind: 'ACTION_DONE', doneKind: 'SUBMISSION',
+    })
+    expect(toResultsEntry(entry({ ...body, action_done_kind: null }))).toEqual({ kind: 'UNRECOGNIZED' })
+    expect(toResultsEntry(entry({ ...body, action_done_kind: 'MAYBE' as never }))).toEqual({ kind: 'UNRECOGNIZED' })
   })
 
   it('충돌이 있으면 사장님이 한 말과 충돌 목록을 담는다', () => {
@@ -225,12 +248,51 @@ describe('toResultsEntry', () => {
       toResultsEntry(
         entry({ judgment_status: 'NEEDS_MORE_INFO', case_history_id: 12, questions_for_user: ['직원이 몇 명인가요?'] }),
       ),
-    ).toEqual({ kind: 'ANSWER', questions: ['직원이 몇 명인가요?'], historyId: 12 })
+    ).toEqual({ kind: 'ANSWER', questions: ['직원이 몇 명인가요?'], historyId: 12, inputKind: 'TEXT' })
+  })
+
+  it('원상복구 진행 상태 질문이면 버튼으로 받는다고 담는다', () => {
+    expect(
+      toResultsEntry(entry({
+        judgment_status: 'NEEDS_MORE_INFO', case_history_id: 12, result_input_kind: 'RESTORATION_STATUS',
+        questions_for_user: ['원상복구 작업이 어디까지 진행됐는지 알려주세요.'],
+      })),
+    ).toEqual({
+      kind: 'ANSWER', questions: ['원상복구 작업이 어디까지 진행됐는지 알려주세요.'], historyId: 12,
+      inputKind: 'RESTORATION_STATUS',
+    })
+  })
+
+  it('되물은 질문에 [했어요] 같은 다른 입력 방식이 오면 알 수 없는 응답으로 둔다', () => {
+    expect(
+      toResultsEntry(entry({
+        judgment_status: 'NEEDS_MORE_INFO', case_history_id: 12, result_input_kind: 'ACTION_DONE',
+        questions_for_user: ['직원이 몇 명인가요?'],
+      })),
+    ).toEqual({ kind: 'UNRECOGNIZED' })
   })
 
   it.each(['PENDING', 'FAILED'] as const)('%s 면 다른 화면으로 보낸다', (status) => {
     expect(toResultsEntry(entry({ judgment_status: status, case_history_id: 12 }))).toEqual({
       kind: 'ELSEWHERE',
+    })
+  })
+
+  /**
+   * 등록된 절차 안내를 마쳤다(#315). 할 일이 비어 와도 읽지 못한 것이 아니다. 로드맵에 남은 일을
+   * 알리러 왔을 수 있어 홈으로 바로 보내지 않고, 화면이 Case 상태를 확인할 판단 번호를 담는다(#340)
+   */
+  it('등록된 절차를 다 마쳤으면 그 판단 번호를 담는다', () => {
+    expect(toResultsEntry(entry({ judgment_status: 'PROCEDURES_COMPLETED', case_history_id: 40 }))).toEqual({
+      kind: 'PROCEDURES_COMPLETED',
+      historyId: 40,
+    })
+  })
+
+  /** 번호가 없으면 남은 일을 받아도 어느 판단에 대한 글인지 보낼 수 없다 */
+  it('등록된 절차를 다 마쳤는데 판단 번호가 없으면 읽지 못한 것으로 둔다', () => {
+    expect(toResultsEntry(entry({ judgment_status: 'PROCEDURES_COMPLETED', case_history_id: null }))).toEqual({
+      kind: 'UNRECOGNIZED',
     })
   })
 
@@ -323,6 +385,13 @@ const CONFLICTS = [
 const UNRECOGNIZED = { kind: 'STAY', state: { kind: 'UNRECOGNIZED' } }
 
 describe('toSubmitOutcome', () => {
+  /** 다음 할 일이 없는 것이 정상이다(#315). 반영 결과는 다음 할 일을 꼭 그려서 그쪽으로 보내지 않는다 */
+  it('등록된 절차를 다 마쳤으면 할 일이 비어 있어도 마친 것으로 둔다', () => {
+    expect(
+      toSubmitOutcome(judged({ result: 'PROCEDURES_COMPLETED', changes: [], blocker: null, next_action: null })),
+    ).toEqual({ kind: 'FINISHED' })
+  })
+
   it('반영됐으면 바뀐 내용과 새 할 일을 싣고 재계획으로 보낸다', () => {
     expect(toSubmitOutcome(judged(REPLANNED))).toEqual({
       kind: 'REPLAN',
@@ -493,5 +562,47 @@ describe('toResultSteps', () => {
       expect(decision[1].label).toBe('고르신 내용을 반영하고 있어요')
       expect([decision[0].label, decision[2].label]).toEqual([result[0].label, result[2].label])
     }
+  })
+})
+
+/**
+ * 절차 안내를 마친 뒤 결과 알려주기로 들어왔을 때 빈 글을 열지(#340).
+ * 열지 않는 경우는 모두 홈으로 간다 — 홈이 그 상태를 안내한다.
+ */
+describe('opensInputAfterProcedures', () => {
+  const HISTORY_ID = 40
+
+  function casesOf(overrides: Partial<CasesEnvelope> = {}, caseStatus: CaseStatus = 'IN_PROGRESS'): CasesEnvelope {
+    return {
+      case: { case_status: caseStatus } as CaseResponse,
+      blocker: null,
+      next_action: null,
+      judgment_status: 'PROCEDURES_COMPLETED',
+      case_history_id: HISTORY_ID,
+      questions_for_user: null,
+      recovery_action_code: null,
+      requested_field_paths: null,
+      ...overrides,
+    }
+  }
+
+  it('Case가 진행 중이고 같은 판단을 가리키면 연다', () => {
+    expect(opensInputAfterProcedures(casesOf(), HISTORY_ID)).toBe(true)
+  })
+
+  /** 폐업을 다 마친 Case는 서버가 글을 받지 않는다. 열면 보낸 뒤에야 거절된다 */
+  it('Case 전체를 마쳤으면 열지 않는다', () => {
+    expect(opensInputAfterProcedures(casesOf({}, 'COMPLETED'), HISTORY_ID)).toBe(false)
+  })
+
+  it.each([
+    ['Case가 없다', casesOf({ case: null })],
+    ['응답이 비었다', null],
+    ['그사이 판단 중이 됐다', casesOf({ judgment_status: 'PENDING' })],
+    ['그사이 충돌이 생겼다', casesOf({ judgment_status: 'CONFLICT' })],
+    ['그사이 새 판단이 생겼다', casesOf({ case_history_id: HISTORY_ID + 1 })],
+    ['판단 번호가 없다', casesOf({ case_history_id: null })],
+  ])('%s 면 열지 않는다', (_, envelope) => {
+    expect(opensInputAfterProcedures(envelope, HISTORY_ID)).toBe(false)
   })
 })

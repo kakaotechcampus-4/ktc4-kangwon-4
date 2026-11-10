@@ -6,7 +6,7 @@
  */
 
 // 폐업 사유·보증금 결과는 서버 값을 그대로 고르는 보기라, 같은 값을 여기 한 벌 더 적지 않는다
-import type { ClosureReason, DepositReturnResult, ResultInputKind } from './api'
+import type { ActionDoneKind, ClosureReason, DepositReturnResult, ResultInputKind } from './api'
 
 /** fact 하나의 확인 상태 */
 export type FactStatus =
@@ -127,7 +127,13 @@ export type JudgmentView =
    * 나왔는데, 그중 "정보가 더 있어야 한다"까지 "저희가 다시 해보겠습니다"로 읽혀
    * 사장님이 기다리면 되는 줄 알게 된다.
    */
-  | { status: 'FAILED'; notice: FailureNotice }
+  /** `lastTask` 는 실패하기 전 마지막 할 일 제목. 모르면 없다 */
+  | { status: 'FAILED'; notice: FailureNotice; lastTask?: string | null }
+  /**
+   * 등록된 절차 안내를 모두 마쳤다. 다음 할 일이 없어 로드맵에서 남은 일을 보게 한다.
+   * 폐업 전체 완료(`CurrentCaseView.completed`)와 다른 것이다
+   */
+  | { status: 'PROCEDURES_COMPLETED' }
   /** 서버가 모르는 값을 보냈거나, 상태와 내용의 조합이 계약과 어긋난다 */
   | { status: 'UNRECOGNIZED' }
 
@@ -186,7 +192,7 @@ export interface ResultInputView {
  */
 export type ResultsEntry =
   /** 결과를 받을 수 있다. `historyId` 는 이 결과가 어느 판단에 대한 것인지 가리킨다 */
-  | { kind: 'READY'; nextAction: NextAction; historyId: number; inputKind: ResultInputKind }
+  | { kind: 'READY'; nextAction: NextAction; historyId: number; inputKind: ResultInputKind; doneKind: ActionDoneKind | null }
   /** 확인을 기다리는 충돌이 있다. 그것부터 풀어야 해서 ④로 보낸다 */
   | { kind: 'CONFIRM'; view: ConfirmView }
   /**
@@ -194,7 +200,7 @@ export type ResultsEntry =
    *
    * 답도 결과와 같은 길(`POST /cases/results`)로 보내므로 `historyId` 가 필요하다.
    */
-  | { kind: 'ANSWER'; questions: string[]; historyId: number }
+  | { kind: 'ANSWER'; questions: string[]; historyId: number; inputKind: 'TEXT' | 'RESTORATION_STATUS' }
   /**
    * 판단이 실패했는데, 사장님이 더 알려주시면 풀린다(`NEEDS_DETAIL`). 무엇이 더 필요한지
    * 보여주고 글을 다시 받는다.
@@ -202,6 +208,11 @@ export type ResultsEntry =
   | { kind: 'RESUBMIT'; notice: Extract<FailureNotice, { kind: 'NEEDS_DETAIL' }>; historyId: number }
   /** 같은 판단의 재시도 대신, 새로 확인한 상황을 자유글로 받는다 */
   | { kind: 'NEW_INPUT'; historyId: number }
+  /**
+   * 등록된 절차 안내를 마쳤다(#315). Case가 아직 진행 중이면 남은 날짜 같은 일을 자유글로 받는다(#340).
+   * 진행 중인지는 이 응답에 없어서, 화면이 `GET /cases` 로 한 번 더 확인한 뒤 정한다.
+   */
+  | { kind: 'PROCEDURES_COMPLETED'; historyId: number }
   /**
    * 지금은 결과를 받을 때가 아니다 — 판단 중이거나, 더 적어도 풀리지 않는 실패다.
    *
@@ -347,6 +358,11 @@ export type SubmitOutcome =
   | { kind: 'CONFIRM'; view: ConfirmView }
   /** 화면에 머문다 */
   | { kind: 'STAY'; state: SubmitState }
+  /**
+   * 등록된 절차 안내를 모두 마쳤다(`PROCEDURES_COMPLETED`, #315). 홈으로 이동한다 — 마쳤다는 안내는 홈 한
+   * 곳에서 한다. 화면마다 따로 안내하면 문구가 어긋나고, 새로고침하면 어차피 홈 안내를 보게 된다
+   */
+  | { kind: 'FINISHED' }
 
 /** 점포 형태. 서버 `lease_status`와 같은 값이다. AI 쪽도 같은 값을 쓴다 */
 export type LeaseStatus =
@@ -397,16 +413,10 @@ export interface DiagnosisAnswers {
   /** 직원이 있을 때만 묻는다. 정직원 + 아르바이트가 보낼 직원 수가 된다 */
   fullTimeCount: number
   partTimeCount: number
-  /**
-   * 지금 직원이 없을 때만 묻는다. `UNKNOWN`은 "잘 모르겠어요"다.
-   * "아니요"와 나누는 것은 서버에서 뜻이 달라서다 — 없음은 직원 정산·보험 신고를 빼고, 모름은 확인 필요로 남긴다
-   */
-  hadEmployees: boolean | 'UNKNOWN' | null
-  /**
-   * 고른 보험. 빈 목록은 "가입한 적 없어요", `UNKNOWN`은 "잘 모르겠어요"다.
-   * 둘을 나누는 것은 서버에서 뜻이 달라서다 — 없음은 보험 할 일을 빼고, 모름은 확인 필요로 남긴다
-   */
-  insurances: DiagnosisInsurance[] | 'UNKNOWN' | null
+  /** 지금 직원이 없을 때만 묻는다. 없음이면 직원 정산·보험 신고를 뺀다 */
+  hadEmployees: boolean | null
+  /** 고른 보험. 빈 목록은 "가입한 적 없어요"이고 보험 할 일을 뺀다 */
+  insurances: DiagnosisInsurance[] | null
   closure: DiagnosisClosure | null
 }
 

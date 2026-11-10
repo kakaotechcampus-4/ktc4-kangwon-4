@@ -4,7 +4,10 @@ import type {
   CaseResultsSubmitAcceptedResponse,
   CaseResultsSubmitRequest,
   CaseResultsSubmitResponse,
+  CasesEnvelope,
+  ActionDone,
   RestorationAnswer,
+  RestorationStatusAnswer,
 } from '../types/api'
 import { ApiError, request, UnauthorizedError } from './api'
 
@@ -49,16 +52,32 @@ export async function fetchResultsEntry(): Promise<CaseResultsEntryResponse | nu
 }
 
 /**
+ * 지금 Case와 판단. 절차 안내를 마친 뒤 남은 일을 받아도 되는지 볼 때 한 번 부른다(#340).
+ * 계속 지켜볼 것이 아니라 `useCase` 대신 한 번만 묻는다.
+ */
+export async function fetchCaseEnvelope(): Promise<CasesEnvelope | null> {
+  const response = await request('/cases')
+  return (await response.json()) as CasesEnvelope | null
+}
+
+/**
  * 결과를 보내고 접수 번호를 받는다.
  *
  * 409 는 지금 받을 수 없다는 뜻이다 — 확인을 기다리는 충돌이 있거나, 직전 제출이 아직
  * 판단 중이거나, 그사이 더 새로운 판단이 생겼다. 셋 다 화면이 아는 상황이 낡은 것이라
  * 구분하지 않고 `ApiError` 그대로 올린다.
  */
-export async function submitResult(historyId: number, input: string | RestorationAnswer): Promise<number> {
+export async function submitResult(
+  historyId: number,
+  input: string | RestorationAnswer | ActionDone | RestorationStatusAnswer,
+): Promise<number> {
   const body: CaseResultsSubmitRequest = typeof input === 'string'
     ? { raw_input: input, case_history_id: historyId }
-    : { restoration_answer: input, case_history_id: historyId }
+    : 'action_done' in input
+      ? { action_done: true, case_history_id: historyId }
+      : 'restoration_status' in input
+        ? { restoration_status: input.restoration_status, case_history_id: historyId }
+      : { restoration_answer: input, case_history_id: historyId }
   return readAcceptedId(await request('/cases/results', { method: 'POST', body }))
 }
 

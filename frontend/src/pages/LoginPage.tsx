@@ -3,6 +3,7 @@ import { Navigate, useLocation, useNavigate } from 'react-router'
 import kakaoSymbolUrl from '../assets/brand/kakao-symbol.svg'
 import { IntroCarousel } from '../components/ui/IntroCarousel'
 import { Button } from '../components/ui/Button'
+import { DocLinks } from '../components/ui/DocLinks'
 import { loginFormUrl } from '../lib/api'
 import { createOAuthState, isLoggedIn, logInWithMock } from '../lib/auth'
 import { MOCK_SWITCH_ENABLED } from '../lib/mockSwitch'
@@ -80,6 +81,8 @@ export function LoginPage() {
             가짜로 로그인 (미리보기용)
           </Button>
         )}
+
+        <DocLinks />
       </div>
     </div>
   )

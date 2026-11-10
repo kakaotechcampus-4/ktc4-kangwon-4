@@ -34,6 +34,33 @@ describe('QuestionScreen', () => {
     expect(onSelect).toHaveBeenCalledWith('B')
   })
 
+  /** 보이기만 하는 보기다. 눌러서 골라지면 고를 수 없다는 표시와 실제 동작이 어긋난다 */
+  it('고를 수 없는 보기는 눌러도 알리지 않고, 배지 글자를 함께 읽힌다', () => {
+    const onSelect = vi.fn()
+    render(
+      <QuestionScreen
+        position={{ current: 1, total: 5 }}
+        title={TITLE}
+        sub=""
+        input={{
+          type: 'list',
+          options: [OPTIONS[0], { ...OPTIONS[1], disabled: true, badge: '준비 중' }],
+          selected: null,
+          onSelect,
+        }}
+        action={ACTION}
+      />,
+    )
+
+    const blocked = screen.getByRole('radio', { name: /다른 음식점.*준비 중/ })
+    expect(blocked).toBeDisabled()
+    fireEvent.click(blocked)
+    expect(onSelect).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('radio', { name: /개인 카페/ }))
+    expect(onSelect).toHaveBeenCalledWith('A')
+  })
+
   it('여럿 고르는 보기는 고른 것마다 눌림으로 표시하고, 누른 보기를 알린다', () => {
     const onToggle = vi.fn()
     render(

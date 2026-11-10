@@ -146,6 +146,8 @@ class ConflictReference(CreatedAtMixin, table=True):
     status: str = Field(
         default="PENDING",
         sa_column=Column(
+            # REJECTED는 연결 이력이 FAILED면 시스템 미채택, 검수 통과(DONE/NEEDS_MORE_INFO,
+            # 절차 안내 종료도 DONE)면 사용자가 기존 값 유지를 고른 것이다.
             Enum("PENDING", "CONFIRMED", "REJECTED", name="conflict_reference_status_enum"), nullable=False
         ),
         description="PENDING=아직 결정 안 됨, CONFIRMED=새 값 채택, REJECTED=기존 값 유지",

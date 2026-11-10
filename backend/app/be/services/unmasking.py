@@ -19,10 +19,10 @@ from app.be.services.redaction import (
 
 
 class HiddenTextRestorer:
-    """한 Case 안에서, 값을 만든 입력을 찾아 가림 문구를 되돌려 주는 호출기.
+    """한 Case 안에서 과거 고정 표식의 원문 출처를 찾는 내부 호출기.
 
-    입력 원문과 "어느 입력이 어느 값을 만들었는지"를 한 번에 읽어 둔다. 값마다 다시 읽으면
-    화면 하나 그리는 데 질의가 값 개수만큼 늘어난다.
+    build_case_placeholders가 과거 표식과 새 번호를 호환할 때 사용한다. 입력 원문과
+    "어느 입력이 어느 값을 만들었는지"를 한 번에 읽으며 화면 응답을 복원하지 않는다.
     """
 
     def __init__(self, session: Session, case_id: int) -> None:
@@ -54,7 +54,7 @@ class HiddenTextRestorer:
             )
         # 확인을 기다리는 충돌이 있는 동안은 새 제출이 막히므로(submit_case_results의 409) 한
         # 결정이 닫는 충돌은 모두 같은 제출에서 나온다. 그래도 둘 이상이면 되돌리지 않는다 —
-        # 틀린 주소를 보여주는 것은 [주소]를 보여주는 것보다 나쁘다(restore_hidden_text 설명).
+        # 서로 다른 원문을 같은 표식의 출처로 연결하지 않는다(restore_hidden_text 설명).
         self._submission_by_decision = {
             decision: next(iter(submissions))
             for decision, submissions in origins.items()
@@ -89,11 +89,7 @@ class HiddenTextRestorer:
 
 
 class _NothingToRestore:
-    """가림 문구가 없는 화면에서 쓰는, 아무것도 하지 않는 되돌리개.
-
-    "되돌릴 게 있으면 이렇게, 없으면 저렇게"를 호출부에 두면 응답을 만드는 코드가 두 벌이
-    된다. 나중에 응답에 칸이 하나 늘 때 한 쪽을 빠뜨리면, 되돌릴 때만 값이 비는 버그가 난다.
-    """
+    """가림 문구가 없을 때 같은 인터페이스로 값을 그대로 반환한다."""
 
     def restore(self, value: str | None, case_history_id: int | None) -> str | None:
         return value
@@ -108,9 +104,10 @@ class _NothingToRestore:
 def build_restorer(
     session: Session, case_id: int, values: Iterable[str | None]
 ) -> HiddenTextRestorer | _NothingToRestore:
-    """화면에 낼 값들을 먼저 보고, 되돌릴 게 있을 때만 입력 원문을 읽어 온다.
+    """값에 가림 문구가 있을 때만 입력 원문을 읽는 호환 함수를 만든다.
 
-    가림 문구는 항상 대괄호로 시작한다. 대부분의 화면은 여기서 끝나 질의가 늘지 않는다.
+    현재 서비스의 표식 번호 재구성은 build_case_placeholders를 사용한다. 화면 응답은
+    이 함수를 사용하지 않으며, 가림 문구가 없으면 추가 질의 없이 값을 그대로 반환한다.
     """
 
     if any(value is not None and "[" in value for value in values):
@@ -128,7 +125,7 @@ def restore_hidden_text(value: str, raw_input: str) -> str:
     값에 담으면 앞엣것이 들어가고, 둘 다 담되 **순서를 바꿔** 쓰면 서로 뒤바뀐다. AI가 값에
     쓰는 말은 원문 순서를 지킬 의무가 없어서, 개수를 맞춰 보는 것으로도 막히지 않는다.
 
-    틀린 주소를 보여주는 것은 [주소]를 보여주는 것보다 나쁘다.
+    현재는 과거 표식의 내부 출처 확인에 쓰며, 화면이나 DB 값을 원문으로 바꾸지 않는다.
     """
 
     originals: dict[str, list[str]] = {}

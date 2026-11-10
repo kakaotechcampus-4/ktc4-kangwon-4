@@ -7,6 +7,7 @@ owns authorization, transaction and storage guardrails.
 
 from __future__ import annotations
 
+import logging
 import time
 from collections.abc import Callable, Sequence
 from contextvars import ContextVar
@@ -67,6 +68,8 @@ from app.agent.tracing import (
     current_trace_id,
     traced_component,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class InfoRunner(Protocol):
@@ -355,6 +358,8 @@ class AgentGraph:
         component_input = InfoAnalysisInput(
             input=trigger_input,
             restoration_answer=getattr(request.trigger, "restoration_answer", None),
+            action_done=getattr(request.trigger, "action_done", None),
+            restoration_status_answer=getattr(request.trigger, "restoration_status_answer", None),
             case_snapshot=request.case_snapshot,
             fact_overlays=analysis_overlays,
             conflict_confirmation=(request.trigger if isinstance(request.trigger, ConflictConfirmedTrigger) else None),
@@ -390,7 +395,12 @@ class AgentGraph:
             # 정리본으로 채웠거나 선택형 답변이면 Info 모델을 부르지 않는다(info_agent.analyze 참고)
             # 보관된 사실은 이전 판단에서 Info 모델이 글에서 꺼냈고 아직 Review를 거치지 않았다. Review 모델을 유지한다
             used_model = (
-                (output is None and component_input.restoration_answer is None)
+                (
+                    output is None
+                    and component_input.restoration_answer is None
+                    and component_input.action_done is None
+                    and component_input.restoration_status_answer is None
+                )
                 or retained is not None
             )
             if output is None:
@@ -441,8 +451,12 @@ class AgentGraph:
             item for item in output.procedure_progress_observations
             if item.procedure_step.procedure_step_id not in completed
         ]
+        answer = getattr(request.trigger, "action_done", None)
         for observation in output.procedure_progress_observations:
-            if observation.observed_status == ProcedureProgressStatus.COMPLETED:
+            # 완료 보고는 다시 묻는다. 같은 절차에 누른 완료 버튼은 그 자체가 사장님의 확인이다
+            if observation.observed_status == ProcedureProgressStatus.COMPLETED and not (
+                answer is not None and answer.completes(observation)
+            ):
                 observation.requires_confirmation = True
         confirmation = getattr(request.trigger, "procedure_completion_confirmation", None)
         if confirmation is None:
@@ -750,6 +764,12 @@ class AgentGraph:
                 # Keep the last Review's findings instead of dropping them.
                 # Without this the caller learns only that the run failed, not
                 # what would unblock it, and the reason for the verdict is gone.
+                # 거절 이유 문장은 사장님 글이 섞일 수 있어 외부 추적(Langfuse)에는 보내지 않고 이 서버 로그에만 남긴다
+                logger.warning(
+                    "review stopped run %s (case %s): %s",
+                    state["run_id"], state["request"].case_snapshot.case_id,
+                    [(issue.issue_code, issue.target_path, issue.reason_summary) for issue in result.issues],
+                )
                 update.update(
                     {
                         "phase": "SAFE_FAILED",

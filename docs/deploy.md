@@ -2,6 +2,20 @@
 
 실서버에 develop을 올릴 때 이 순서대로 칩니다. 명령은 모두 EC2의 `/home/ubuntu/app`(저장소, `docker-compose.prod.yml`이 있는 곳)에서 칩니다.
 
+## 0. 버튼으로 올리기 (DB 표가 바뀌지 않는 배포)
+
+아래 1~4단계를 그대로 묶은 `scripts/deploy.sh`를 GitHub Actions가 대신 돌립니다.
+
+1. GitHub → Actions → **Deploy BE** → **Run workflow** (브랜치는 develop 그대로)
+2. **올릴 커밋**에 정한 커밋을 넣습니다. 비우면 그 순간의 develop 최신입니다. 처음이면 **확인만**을 체크해 한 번 돌려 봅니다
+3. 끝나면 로그의 "서버 출력"에서 `배포 끝: <이전> → <새 커밋>, 백업 <폴더 경로>`를 확인합니다. 이전 커밋과 백업 폴더 경로는 되돌릴 때(5단계) 씁니다
+
+- 부트캠프가 팀마다 만든 `ktc-github-deploy` 역할로 로그인해 Session Manager로 명령을 보냅니다. 액세스 키를 만들지 않고 22번 포트도 열지 않습니다. 역할이 있는 계정 번호는 저장소 변수 `AWS_ACCOUNT_ID`(Settings → Secrets and variables → Actions → Variables, 우리 팀 계정 `ktc4-kangwon-team04`)에서 읽습니다. 비어 있으면 로그인에서 실패합니다
+- **멈추는 경우**: develop에 없는 커밋, 지금보다 앞선 커밋(되돌리기는 5단계), `backend/sql`·`backend/app/be/models`가 바뀐 배포, 서버에 손으로 고친 파일이 있을 때, 저장소와 `/health`의 커밋이 다를 때(지난 배포가 반영 중에 멈춤). 표가 바뀌는 배포는 SQL을 넣고 켜야 해서 아래 순서대로 손으로 합니다
+- 20분 안에 끝나지 않으면 빨간불이지만 서버에서는 아직 돌고 있을 수 있습니다. 그때는 손으로 배포하지 말고 `/health`로 끝났는지부터 봅니다
+- 백업 뒤 반영이나 확인에서 실패하면 멈췄던 FastAPI를 다시 켜고 빨간불로 끝납니다. 서버 출력의 마지막 줄부터 봅니다
+- develop에 머지할 때마다 자동으로 올리지는 않습니다. QA·녹화 중에 재시작되면 돌던 판단이 실패(`RETRY`)로 바뀝니다
+
 - 서버 구성: Caddy(80·443, `Caddyfile`) → FastAPI(`127.0.0.1:8000`) → MySQL `8.0.46`(`127.0.0.1:3306`). 서류 파일은 `document_data` 볼륨(`/data/documents`)에 있습니다
 - 운영은 `ENVIRONMENT=prod`라 **서버를 켜도 표를 만들거나 지우지 않습니다**(`backend/app/main.py`). 표를 만들고 고치는 건 `backend/sql/`의 SQL로 합니다
 - 명령을 짧게 쓰려고 아래 두 변수를 먼저 만들어 둡니다. `C`는 compose, `MYSQL`은 DB 컨테이너 안의 mysql 클라이언트입니다
@@ -19,11 +33,18 @@ git log -1 --oneline                 # 지금 올라가 있는 커밋. 되돌릴
 grep '^ENVIRONMENT' .env.prod        # prod여야 한다. dev면 서버를 켤 때마다 표가 전부 지워진다
 ```
 
-**표가 바뀌는 배포인지 본다.** 지금 커밋과 올릴 develop 사이에 모델이 바뀌었으면 SQL이 필요합니다.
+**올릴 커밋을 정해 `SHA`에 넣습니다.** develop 최신이 아니라 팀이 정한 커밋입니다. 그사이 develop에 머지된 것까지 딸려 올라가지 않게, 이후 단계는 모두 이 값을 씁니다.
 
 ```bash
 git fetch origin
-git diff --stat HEAD origin/develop -- backend/app/be/models backend/sql
+SHA=<올릴 커밋>                      # 예: bcf99d0. 버전을 고정했으면 그 커밋
+git log -1 --oneline $SHA            # 올릴 커밋이 맞는지
+```
+
+**표가 바뀌는 배포인지 본다.** 지금 커밋과 올릴 커밋 사이에 모델이 바뀌었으면 SQL이 필요합니다.
+
+```bash
+git diff --stat HEAD $SHA -- backend/app/be/models backend/sql
 ```
 
 - 모델에서 칸·ENUM 값이 바뀌었는데(`001_schema.sql`도 같이 바뀜) 새 `00N_*.sql`이 없으면, **운영 DB를 고칠 SQL이 빠진 것**입니다. 배포를 멈추고 PR을 확인합니다. CI는 이걸 잡지 못합니다(`001` 머리말)
@@ -36,6 +57,7 @@ DB와 서류 폴더를 **같은 시점으로** 받습니다. DB만 되돌리면 
 
 ```bash
 mkdir -p /home/ubuntu/backup && TS=$(date +%Y%m%d-%H%M) && echo $TS    # TS는 되돌릴 때 쓰니 적어 둔다
+$C logs --no-color fastapi > /home/ubuntu/backup/fastapi-$TS.log         # 3단계에서 컨테이너를 새로 만들면 지금까지 로그가 사라진다
 $C stop fastapi
 $C exec -T mysql mysqldump --defaults-extra-file=/run/secrets/mysql_health_cnf \
   --single-transaction --default-character-set=utf8mb4 closure_agent > /home/ubuntu/backup/db-$TS.sql
@@ -58,28 +80,32 @@ tar tzf /home/ubuntu/backup/documents-$TS.tgz | head
 
 ```bash
 # 표가 바뀌지 않는 배포(1단계에서 새 00N_*.sql 없음)
-git pull && $C up -d --build
+git merge --ff-only $SHA && GIT_SHA=$(git rev-parse --short HEAD) $C up -d --build
 
 # 새 00N_*.sql이 있으면 번호 순서대로 이어서, 전부 성공했을 때만 켠다
-git pull && \
+git merge --ff-only $SHA && \
   $MYSQL closure_agent < backend/sql/00N_xxx.sql && \
-  $C up -d --build
+  GIT_SHA=$(git rev-parse --short HEAD) $C up -d --build
 ```
 
 중간에 멈추면 FastAPI는 멈춘 채로 남습니다. 원인을 고치고 다시 하거나, 5단계로 되돌립니다.
 
+- `GIT_SHA=…`는 지금 커밋을 이미지에 넣어 `/health`가 보여 주게 합니다(4단계에서 확인). 빠뜨려도 서버는 뜨지만 버전이 `unknown`으로 나옵니다
+- `git pull`이 아니라 `git merge --ff-only $SHA`인 이유: `pull`은 그 순간의 develop 최신을 받아서, 정하지 않은 커밋까지 올라갈 수 있습니다. `--ff-only`는 서버 저장소에 다른 커밋이 끼어 있으면 합치지 않고 멈춥니다
 - `.env.prod`만 바꿨을 때도 `restart`가 아니라 `$C up -d fastapi`입니다. `restart`는 바뀐 환경 변수를 읽지 않습니다
+- mysql도 `.env.prod`를 읽어서(`env_file`), 이 파일을 바꾸고 `up -d`를 하면 **mysql 컨테이너도 새로 만들어집니다.** DB 데이터는 `mysql_data` 볼륨에 있어 그대로 남고, 다시 healthy가 될 때까지 몇 초 걸립니다
 - 서버가 켜질 때 지난번에 꺼지며 남은 판단(`PENDING`)을 실패(`RETRY`)로 풀어 줍니다(#194). 사장님은 홈의 [다시 판단하기]로 이어 갈 수 있습니다
 
 ## 4. 확인
 
 ```bash
 $C ps                                                # fastapi·mysql 둘 다 healthy
-curl -s https://reborn-ktc.duckdns.org/health        # {"status":"ok"}
+curl -s https://reborn-ktc.duckdns.org/health        # {"status":"ok","version":"<올린 커밋>"}
 $C logs --tail 50 fastapi                            # 시작 오류가 없는지
 ```
 
-- `/health`는 DB에 `SELECT 1`까지 보냅니다(#219). DB가 안 되면 503 `{"status":"unavailable"}`이고 fastapi가 `unhealthy`로 보입니다. 그때는 `$C logs mysql`부터 봅니다
+- `/health`는 DB에 `SELECT 1`까지 보냅니다(#219). DB가 안 되면 503 `{"status":"unavailable","version":…}`이고 fastapi가 `unhealthy`로 보입니다. 그때는 `$C logs mysql`부터 봅니다
+- `version`이 `git log -1 --oneline`의 커밋과 같아야 새 코드가 떠 있는 것입니다. `unknown`이면 `GIT_SHA=`를 빠뜨린 것이라 3단계의 마지막 명령만 다시 칩니다. 이 주소는 누구나 볼 수 있어, 팀원도 서버에 들어가지 않고 운영 버전을 확인할 수 있습니다
 - 화면에서 로그인 → 홈까지 한 번 들어가 봅니다
 
 **AI 설정 확인(모델 호출 없음).** `.env.prod.example`의 Sol·Luna 6 endpoint/키를 실제 `.env.prod`에 채웁니다. Info는 Sol high, Supervisor는 Luna 6 high, 독립 Review·서류 판독은 Sol xhigh입니다. `/health`는 AI 설정이나 모델 연결을 검사하지 않으므로 별도로 확인합니다. 아래는 설정만 읽으며 endpoint·키를 출력하지 않습니다.
@@ -104,8 +130,8 @@ PY
 
 ```bash
 git checkout <1단계에서 적은 커밋>
-$C up -d --build
-# 고친 뒤 다시 올릴 때는 git checkout develop && git pull
+GIT_SHA=$(git rev-parse --short HEAD) $C up -d --build
+# 고친 뒤 다시 올릴 때는 git checkout develop && git merge --ff-only <새로 올릴 커밋>
 ```
 
 **DB·서류까지 되돌리기** — DB·서류가 백업 시점으로 **통째로** 바뀝니다. 백업 뒤에 사장님이 넣은 내용은 사라집니다.
@@ -114,16 +140,25 @@ $C up -d --build
 - 두 백업 파일이 온전한지 **둘 다 먼저** 보고, 하나라도 아니면 아무것도 지우지 않고 멈춥니다
 - FastAPI는 DB·서류 복원이 모두 성공한 뒤에만 켭니다. 복원 도중 요청이 들어와 쓰지 않게 하려는 것입니다(승준님 #225)
 
+**백업이 어디 있는지부터 정합니다.** 손으로 받았으면 파일 이름에 시각이 붙어 있고, 버튼/스크립트(`scripts/deploy.sh`)로 받았으면 **실행마다 만든 폴더 안**에 있습니다. 스크립트는 끝낼 때 그 폴더 경로를 그대로 찍어 줍니다.
+
 ```bash
-TS=<2단계에서 적은 값>
+# 손으로 받은 백업
+BK=/home/ubuntu/backup && DB=$BK/db-<2단계에서 적은 값>.sql && DOCS=$BK/documents-<같은 값>.tgz
+
+# 스크립트가 받은 백업 (배포 로그의 "백업 …" 줄에 적힌 폴더)
+BK=/home/ubuntu/backup/<폴더이름> && DB=$BK/db.sql && DOCS=$BK/documents.tgz
+```
+
+```bash
 $C stop fastapi
 git checkout <1단계에서 적은 커밋>
-tail -n 1 /home/ubuntu/backup/db-$TS.sql | grep -q '^-- Dump completed' && \
-  tar tzf /home/ubuntu/backup/documents-$TS.tgz > /dev/null && \
-  $MYSQL closure_agent < /home/ubuntu/backup/db-$TS.sql && \
+tail -n 1 "$DB" | grep -q '^-- Dump completed' && \
+  tar tzf "$DOCS" > /dev/null && \
+  $MYSQL closure_agent < "$DB" && \
   $C run --rm --no-deps -T fastapi sh -c 'find /data/documents -mindepth 1 -delete && tar xzf - -C /data/documents' \
-    < /home/ubuntu/backup/documents-$TS.tgz && \
-  $C up -d --build
+    < "$DOCS" && \
+  GIT_SHA=$(git rev-parse --short HEAD) $C up -d --build
 ```
 
 - 잘린 DB 백업을 넣으면 앞쪽 표만 지우고 다시 만든 채 멈춰 일부 표가 빕니다. 그래서 마지막 줄을 먼저 봅니다
@@ -148,16 +183,18 @@ $C exec -T mysql mysql --defaults-extra-file=/run/secrets/mysql_health_cnf \
 
 위 1~5단계는 이미 돌고 있는 서버를 갱신하는 순서입니다. 새 서버는 설정 파일 두 개가 git에 없어서 먼저 만들어야 MySQL이 뜹니다(현종님·승준님 #225). 기존 서버에서 이 파일들을 덮어쓰지 않습니다.
 
-1. `.env.prod`: `.env.prod.example`을 복사해 실제 값을 채웁니다. AI 연결 값은 루트 `.env.example`을 보고 같은 파일에 넣습니다. 값은 문서·PR에 적지 않습니다
+1. `.env.prod`: `.env.prod.example`을 복사해 실제 값을 채웁니다. **AI 연결 값도 이 예시 안에 다 있습니다**(#268) — 루트 `.env.example`에는 비교 실험용 모델(`LUNA_*`·`HAIKU_*`·`GEMINI_*`)이 섞여 있어 그쪽을 보면 운영에 안 쓰는 값을 넣게 됩니다. 값은 문서·PR에 적지 않습니다
 2. `mysql_health.cnf`: `docker-compose.prod.yml` 머리말대로 만들고 `chmod 600`. 비밀번호는 `.env.prod`의 `MYSQL_ROOT_PASSWORD`와 같아야 합니다
 3. MySQL만 먼저 켜서 준비될 때까지 기다린 뒤 표를 만들고, 그다음 FastAPI를 켭니다. `001`은 이미 표가 있으면 "already exists"로 멈추고 아무것도 지우지 않습니다
+
+> FastAPI가 뜨면 **절차 기준 표**와 **공식 자료 본문**을 넣습니다(`main.py` lifespan, #263). 둘 다 전체가 함께 쓰는 한 벌이라 가입 요청 안에서 넣지 않습니다 — 빈 DB에 동시 가입이 오면 같은 것을 둘 다 넣다 unique에 걸립니다. 공식 자료 적재는 실패해도 서버가 뜨고 로그만 남으므로, 처음 띄운 뒤 `$C logs fastapi`에 `공식 자료 본문 적재 실패`가 없는지 봅니다.
 
 ```bash
 cp .env.prod.example .env.prod        # 그다음 값을 채운다
 chmod 600 mysql_health.cnf            # 머리말대로 만든 뒤
 $C up -d --wait mysql && \
   $MYSQL closure_agent < backend/sql/001_schema.sql && \
-  $C up -d --build fastapi            # 절차 기준 표는 서버가 켜질 때 채운다
+  GIT_SHA=$(git rev-parse --short HEAD) $C up -d --build fastapi   # 절차 기준 표와 공식 자료 본문은 서버가 켜질 때 채운다
 ```
 
 ### 검수 자료 버전을 올렸을 때
@@ -172,3 +209,12 @@ $C exec -T fastapi python -m scripts.import_reviewed_procedures --case-id <확�
 ```
 
 같은 버전을 재실행해도 근거를 중복 추가하지 않고, 과거 판단의 근거는 덮어쓰지 않습니다. 실패하면 다음 대상을 진행하지 말고 해당 Case의 결과를 확인합니다. 실제 이미지·격리 DB 검증과 운영 반영 범위는 #239에서 추적합니다.
+
+### 서버 오류를 Discord로 받기
+
+ERROR 로그(처리되지 않은 500, 판단 실패, 카카오 502 등)가 나면 Discord 채널로 한 줄씩 알립니다(`backend/app/common/error_alert.py`).
+
+- 보내는 것: 로그 위치, 코드에 적은 한 줄(Case·판단 번호 정도), 오류 종류 이름, 서버 버전, 시각. **예외 메시지와 스택은 보내지 않습니다**(사장님 글·서류 값이 섞일 수 있음). 같은 오류는 1분에 한 번만 보냅니다
+- 켜기: 채널 설정 → 연동 → 웹후크에서 만든 주소를 `.env.prod`의 `DISCORD_ERROR_WEBHOOK_URL`에 넣고 `$C up -d fastapi`. 주소는 비밀값이라 문서·PR·채팅에 붙이지 않습니다. 비우면 알리지 않습니다
+- `.env.prod`를 바꾸면 mysql 컨테이너도 다시 만들어집니다(3단계 참고, 데이터는 볼륨에 남음)
+- 오류 내용은 알림을 보고 서버에서 `$C logs --since 10m fastapi`로 확인합니다

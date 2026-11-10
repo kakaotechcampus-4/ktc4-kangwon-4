@@ -7,11 +7,12 @@ from datetime import datetime, timezone
 from typing import Annotated, Any, Literal, Protocol
 from uuid import UUID, uuid4
 
-from pydantic import Field, StrictBool, StrictStr, model_validator
+from pydantic import Field, StrictBool, StrictStr, field_validator, model_validator
 
 from app.agent.action_catalog import (
     ProcedureBindings,
     build_action_candidates,
+    confirmed_restoration_progress,
     effective_procedure_progress,
     resolve_procedure_bindings,
 )
@@ -19,6 +20,7 @@ from app.agent.blocker_candidates import (
     build_blocker_candidates,
     candidate_decision_fields,
     candidate_decision_violations,
+    completed_procedure_decision_fields,
     missing_info_fields,
     resolved_blocker_candidates,
 )
@@ -44,6 +46,7 @@ from app.agent.projection import (
 )
 from app.agent.prompts import supervisor_messages
 from app.agent.schemas import (
+    completion_confirmed,
     ActionCode,
     ActionDecisionDraft,
     AgentSchema,
@@ -64,6 +67,7 @@ from app.agent.schemas import (
     ProcedureLookupResult,
     ProcedureProgressChangeCandidate,
     ProcedureProgressStatus,
+    ProceduresCompletedDecisionDraft,
     ReviewSourceResult,
     SupervisorAgentInput,
     SupervisorDraft,
@@ -136,6 +140,13 @@ class SupervisorModelOutput(AgentSchema):
     blocker_candidate_id: StrictStr | None = None
     action_code: ActionCode | None
 
+    @field_validator("decision_type")
+    @classmethod
+    def require_model_selection(cls, value: DecisionType) -> DecisionType:
+        if value == DecisionType.PROCEDURES_COMPLETED:
+            raise ValueError("procedure completion is determined by code, not model selection")
+        return value
+
 
 class SupervisorSemanticDraft(AgentSchema):
     decision_type: DecisionType
@@ -144,7 +155,7 @@ class SupervisorSemanticDraft(AgentSchema):
     evidence_refs: Annotated[
         list[Annotated[StrictStr, Field(min_length=1)]], Field(min_length=1)
     ]
-    blocker: Blocker
+    blocker: Blocker | None
     blockers: list[Blocker]
     next_action: NextActionSemantic | None
     questions_for_user: list[Annotated[StrictStr, Field(min_length=1)]]
@@ -153,7 +164,7 @@ class SupervisorSemanticDraft(AgentSchema):
     @model_validator(mode="after")
     def validate_variant(self) -> SupervisorSemanticDraft:
         if self.decision_type == DecisionType.ACTION:
-            if self.next_action is None:
+            if self.next_action is None or self.blocker is None:
                 raise ValueError("ACTION requires one next action")
             if self.questions_for_user:
                 raise ValueError("ACTION questions_for_user must be empty")
@@ -162,6 +173,8 @@ class SupervisorSemanticDraft(AgentSchema):
                 raise ValueError("NEEDS_MORE_INFO requires blocker and no action")
             if not self.requires_human or not self.questions_for_user:
                 raise ValueError("NEEDS_MORE_INFO requires a human question")
+        elif self.blocker is not None or self.blockers or self.next_action is not None or self.questions_for_user or self.requires_human:
+            raise ValueError("PROCEDURES_COMPLETED cannot contain a blocker, action or question")
         return self
 
 
@@ -257,13 +270,22 @@ class SupervisorAgent:
         information_fields = missing_info_fields(
             request.case_snapshot, source_results, mutations, bindings,
             known_procedure_steps=request.known_procedure_steps,
+            include_prepared_restoration=not action_candidates,
         )
         information_blockers = information_fields["blockers"] if information_fields else []
         decision_types = (["ACTION"] if action_candidates else []) + (
             ["NEEDS_MORE_INFO"] if information_blockers else []
         )
         if not decision_types:
-            raise SupervisorGuardrailError("Supervisor has no available action or information question")
+            completed = completed_procedure_decision_fields(
+                request.case_snapshot, request.known_procedure_steps, source_results, mutations, bindings,
+            )
+            if completed is None:
+                raise SupervisorGuardrailError("Supervisor has no available action or information question")
+            return self._materialize(
+                request, list(source_results), SupervisorSemanticDraft(**completed, grounded_claims=[]),
+                draft_version=draft_version, mutations=mutations,
+            )
         prompt_input = {
             "trigger": to_model_projection(request.trigger),
             "case_snapshot": to_model_projection(request.case_snapshot),
@@ -414,6 +436,7 @@ class SupervisorAgent:
             request.case_snapshot, request.source_results, mutations, self._bindings(request),
             selected_candidate_id=output.blocker_candidate_id if output.decision_type == DecisionType.NEEDS_MORE_INFO else None,
             known_procedure_steps=request.known_procedure_steps,
+            include_prepared_restoration=not candidates,
         )
         if output.decision_type == DecisionType.NEEDS_MORE_INFO:
             if output.action_code is not None or information is None or output.blocker_candidate_id is None and len(information["blockers"]) > 1:
@@ -480,7 +503,7 @@ class SupervisorAgent:
         blocker = {
             "description": decision.blocker.description,
             "evidence_refs": list(decision.blocker.evidence_refs),
-        }
+        } if decision.blocker is not None else None
         return {
             "decision": {
                 "decision_type": decision.decision_type.value,
@@ -648,7 +671,7 @@ class SupervisorAgent:
                 questions_for_user=[],
                 **common,
             )
-        else:
+        elif semantic.decision_type == DecisionType.NEEDS_MORE_INFO:
             decision = NeedsMoreInfoDecisionDraft(
                 decision_type=DecisionType.NEEDS_MORE_INFO,
                 blocker=semantic.blocker,
@@ -656,25 +679,30 @@ class SupervisorAgent:
                 questions_for_user=semantic.questions_for_user,
                 **common,
             )
+        else:
+            decision = ProceduresCompletedDecisionDraft(
+                decision_type=DecisionType.PROCEDURES_COMPLETED,
+                blocker=None, next_action=None, questions_for_user=[], **common,
+            )
 
         violations = procedure_plan_constraints(
             request.known_procedure_steps, request.case_snapshot, mutations, decision,
             procedure_bindings=self._bindings(request),
         )
+        candidates = build_blocker_candidates(
+            request.case_snapshot, request.known_procedure_steps, sources, mutations, evidence, self._bindings(request),
+        )
         violations.extend(
             candidate_decision_violations(
                 decision,
-                build_blocker_candidates(
-                    request.case_snapshot,
-                    request.known_procedure_steps,
-                    sources,
-                    mutations,
-                    evidence,
-                    self._bindings(request),
-                ),
+                candidates,
                 missing_info_fields(
                     request.case_snapshot, sources, mutations, self._bindings(request),
                     known_procedure_steps=request.known_procedure_steps,
+                    include_prepared_restoration=not candidates,
+                ),
+                completed_procedure_decision_fields(
+                    request.case_snapshot, request.known_procedure_steps, sources, mutations, self._bindings(request),
                 ),
             )
         )
@@ -784,11 +812,15 @@ class SupervisorAgent:
                     )
                     if observation.observed_status == ProcedureProgressStatus.COMPLETED:
                         confirmation = getattr(request.trigger, "procedure_completion_confirmation", None)
-                        if before_status != ProcedureProgressStatus.COMPLETED and (
-                            confirmation is None or not confirmation.matches(observation)
+                        if before_status != ProcedureProgressStatus.COMPLETED and not completion_confirmed(
+                            request.trigger, observation,
                         ):
                             continue
-                        if before_status != ProcedureProgressStatus.COMPLETED:
+                        if (
+                            before_status != ProcedureProgressStatus.COMPLETED
+                            and confirmation is not None
+                            and confirmation.matches(observation)
+                        ):
                             confirmation.assert_current(snapshot)
                     if finding.current_status != before_status:
                         raise SupervisorGuardrailError(
@@ -828,6 +860,14 @@ class SupervisorAgent:
                             procedure_analysis_call_id=source.meta.call_id,
                         )
                     )
+
+        completed = confirmed_restoration_progress(
+            snapshot, request.trigger, sources, fact_changes, request.known_procedure_steps,
+            procedure_bindings=self._bindings(request), uuid_factory=self._uuid,
+        )
+        if completed is not None:
+            progress_changes = [item for item in progress_changes if item.procedure_step != completed.procedure_step]
+            progress_changes.append(completed)
 
         return MutationSet(
             fact_changes=fact_changes,
@@ -933,9 +973,10 @@ class SupervisorAgent:
         base = "/supervisor_draft/decision"
         values = [
             (f"{base}/selection_summary", decision.selection_summary),
-            (f"{base}/blocker/description", decision.blocker.description),
             *((f"{base}/blockers/{index}/description", item.description) for index, item in enumerate(decision.blockers)),
         ]
+        if decision.blocker is not None:
+            values.append((f"{base}/blocker/description", decision.blocker.description))
         if decision.next_action is not None:
             action_base = f"{base}/next_action"
             values.extend(

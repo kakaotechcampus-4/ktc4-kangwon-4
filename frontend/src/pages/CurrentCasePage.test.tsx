@@ -25,6 +25,7 @@ function envelope(judgment: Partial<CasesEnvelope>) {
     blocker: null,
     next_action: null,
     judgment_status: null,
+    case_history_id: null,
     questions_for_user: null,
     recovery_action_code: null,
     requested_field_paths: null,
@@ -94,6 +95,7 @@ function renderAt(path: string) {
       { path: '/results', element: <p>결과 입력 화면</p> },
       { path: '/login', element: <p>로그인 화면</p> },
       { path: '/confirm', element: <p>충돌 확인 화면</p> },
+      { path: '/roadmap', element: <p>로드맵 화면</p> },
     ],
     { initialEntries: [path] },
   )
@@ -420,6 +422,19 @@ describe('CurrentCasePage', () => {
     expect(await screen.findByText('결과 입력 화면')).toBeInTheDocument()
   })
 
+  /** [새 상황 알려주기]에 무엇을 적을지 알 수 있게, 멈춘 판단이 어느 할 일 뒤였는지 보여 준다 */
+  it('판단이 멈추면 마지막 할 일 제목을 함께 보여 준다', async () => {
+    saveTokens('access-1', 'refresh-1')
+    mockCase(envelope({
+      judgment_status: 'FAILED', recovery_action_code: 'NONE',
+      last_next_action_title: '사업장 보험 탈퇴 신고의 처리 완료 여부를 확인하세요.',
+    }))
+    renderAt('/case')
+
+    expect(await screen.findByText(/마지막 할 일은 ‘사업장 보험 탈퇴 신고의 처리 완료 여부를 확인하세요\.’였어요/))
+      .toBeInTheDocument()
+  })
+
   describe('다시 판단하기', () => {
     const RETRYABLE = envelope({ judgment_status: 'FAILED', recovery_action_code: 'RETRY' })
     const PENDING = envelope({ judgment_status: 'PENDING' })
@@ -680,6 +695,68 @@ describe('CurrentCasePage', () => {
    * 폐업 정리를 마친 가게(#167). 완료돼도 마지막 판단 기록이 남아 있어서, 판단부터 보면 이미 마친
    * 가게에 할 일과 [결과 알려주기]가 다시 뜨고 누르면 409 다.
    */
+  /** 등록된 절차 안내를 다 마쳤다(#315). 오류가 아니고, 폐업 전체 완료도 아니다 */
+  describe('등록된 절차를 다 마쳤을 때', () => {
+    const FINISHED = envelope({ judgment_status: 'PROCEDURES_COMPLETED' })
+
+    it('오류 대신 마쳤다고 알리고 로드맵 보기로 로드맵에 보낸다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      mockCase(FINISHED)
+      renderAt('/case')
+
+      expect(await screen.findByRole('heading', { level: 2, name: '등록된 절차를 모두 마쳤어요' })).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: '로드맵 보기' }))
+
+      expect(await screen.findByText('로드맵 화면')).toBeInTheDocument()
+    })
+
+    /** 끝난 일을 다시 보내게 하지 않는다. 결과 입력으로 가는 버튼이 없어야 한다 */
+    it('결과를 알려주러 가는 버튼을 두지 않는다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      mockCase(FINISHED)
+      renderAt('/case')
+
+      await screen.findByRole('button', { name: '로드맵 보기' })
+      expect(screen.queryByRole('button', { name: /결과 알려주기|답하러 가기|물어볼 내용 보기|새 상황 알려주기/ })).not.toBeInTheDocument()
+      expect(screen.queryByRole('heading', { level: 2, name: '판단 내용을 불러오지 못했어요' })).not.toBeInTheDocument()
+    })
+
+    /** 판단 중이 아니다. 판단 중처럼 계속 다시 물으면 서버에 쓸데없는 요청이 쌓인다 */
+    it('다시 묻기를 이어 가지 않는다', async () => {
+      vi.useFakeTimers()
+      try {
+        saveTokens('access-1', 'refresh-1')
+        mockCase(FINISHED)
+        renderAt('/case')
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(0)
+        })
+        const caseCalls = () =>
+          vi.mocked(fetch).mock.calls.filter(([url]) => !isLogs(String(url)) && !isRoadmap(String(url))).length
+        const before = caseCalls()
+
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(30_000)
+        })
+
+        expect(screen.getByRole('heading', { level: 2, name: '등록된 절차를 모두 마쳤어요' })).toBeInTheDocument()
+        expect(caseCalls()).toBe(before)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    /** 전체 완료는 `case_status` 가 정한다. 절차를 마쳐도 가게가 완료면 완료 화면이 먼저다 */
+    it('폐업 전체를 마친 가게면 완료 화면을 보여준다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      mockCase({ ...FINISHED, case: { ...SERVER_CASE, case_status: 'COMPLETED', completed_at: '2026-11-09T10:00:00' } })
+      renderAt('/case')
+
+      expect(await screen.findByRole('heading', { level: 1, name: '폐업 정리를 모두 마쳤어요' })).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: '로드맵 보기' })).not.toBeInTheDocument()
+    })
+  })
+
   describe('폐업을 마쳤을 때', () => {
     const COMPLETED_CASE = { ...SERVER_CASE, case_status: 'COMPLETED', completed_at: '2026-11-04T10:00:00' } as CaseResponse
 

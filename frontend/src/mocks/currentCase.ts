@@ -20,9 +20,7 @@ const facts: Fact[] = [
   { key: 'franchise', label: '프랜차이즈', value: '비프랜차이즈', status: 'CONFIRMED' },
   { key: 'employee_count', label: '직원 수', value: '2명', status: 'CONFIRMED' },
   { key: 'lease_status', label: '점포 형태', value: '임차 (월세)', status: 'CONFIRMED' },
-  { key: 'planned_closure_date', label: '폐업 예정일', status: 'UNKNOWN' },
-  { key: 'restoration_scope', label: '원상복구 범위', status: 'UNKNOWN' },
-  { key: 'demolition_required', label: '철거 필요 여부', status: 'UNKNOWN' },
+  { key: 'planned_closure_date', label: '폐업 예정일', value: '아직 정하지 않음', status: 'CONFIRMED' },
 ]
 
 /**
@@ -125,6 +123,12 @@ export const judgmentNoRecoveryCase: CurrentCaseView = {
 export const judgmentConflictCase: CurrentCaseView = {
   ...store,
   judgment: { status: 'CONFLICT' },
+}
+
+/** 등록된 절차 안내를 모두 마친 상태(#315). 폐업 전체 완료가 아니라 남은 할 일은 로드맵에 있다 */
+export const proceduresCompletedCase: CurrentCaseView = {
+  ...store,
+  judgment: { status: 'PROCEDURES_COMPLETED' },
 }
 
 /**

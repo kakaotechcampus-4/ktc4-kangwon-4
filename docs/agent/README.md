@@ -1,9 +1,11 @@
 # Agent 범위
 
-Agent는 폐업 Case의 확인된 사실과 근거로 **Blocker 1개·Next Action 1개** 판단.
-현재 MVP의 정상 판단에는 근거 있는 Blocker가 항상 1개 있다.
+Agent는 폐업 Case의 확인된 사실과 근거로 **다음 행동·확인 질문·등록 절차 안내 종료**를 판단한다.
+`ACTION`과 `NEEDS_MORE_INFO`는 근거 있는 Blocker 1개를 유지한다. `PROCEDURES_COMPLETED`는
+적용되는 등록 절차의 완료 근거를 확인한 정상 종료이며 Blocker·다음 행동·질문이 없다.
 사용자가 현실에서 실행한 결과를 입력하면 같은 Case를 다시 판단한다.
-모든 정상 판단은 독립 Review를 거치며 Case 저장은 BE가 담당한다.
+모든 정상 판단은 독립 Review를 거치며 Case 저장은 BE가 담당한다. Info가 모델을 쓰지 않은
+첫 회차는 코드 검사만 하고, 그 밖에는 모델 검토도 한다([검수 조건](./review-tool.md#두-겹-검사)).
 
 원상복구 범위·철거 필요 여부의 미확인은 Case의 후속 진척을 막는 조건이며, 이를 해소할
 임대인 확인 행동은 실행 가능하다. 확인 행동을 할 수 있다는 이유만으로 이 Blocker를 제거하지 않는다.
@@ -11,7 +13,7 @@ Agent는 폐업 Case의 확인된 사실과 근거로 **Blocker 1개·Next Actio
 확인된 사실과 후보에 없는 차단 조건을 만들어내지 않는다.
 
 지원사업은 MVP 실행에서 제외한다. 지원 Agent를 호출하지 않고 지원 행동·추가 질문·변경 후보를 생성하지 않는다.
-기존 지원사업 코드·자료·입력 DTO는 유지한다. 폐업 절차의 선택 순서는 [Supervisor 우선순위](./supervisor.md#업무-순서-코드와-review에서-적용)를 따른다.
+기존 지원사업 코드·자료·입력 DTO는 유지한다. 폐업 절차의 선택 순서는 [Supervisor 우선순위](./supervisor.md#후보-정렬과-실행-조건)를 따른다.
 
 필드·타입·enum·NULL·기본값·관계·상태 전이는 실제 DTO·BE 모델·검증 코드가 기준이다.
 [schema_table.md](../schema/schema_table.md)는 설계 배경으로 참고하며 코드와 다르면 실제 코드를 확인한다.
@@ -53,7 +55,8 @@ Agent는 SQL·ORM으로 DB를 직접 읽거나 쓰지 않는다 — 저장·재�
 이때 단계·다음 행동은 비어 있다. 호출자는 지원 여부를 먼저 확인해 안내 화면을 선택한다.
 미지원 로드맵의 체크 기록은 거절한다. 필수 사실 누락·검수 변조 등 잘못된 입력 검증은 유지한다.
 서류 점검 결과가 없는 조회·체크는 PyMuPDF 없이 실행된다. 현재 서류의 점검 결과를 대조하는 경우에는
-`document_tool/requirements.txt`의 의존성이 필요하다. 실제 문서 추출·점검·ZIP과 OCR 배포 준비는 #128 범위다.
+`document_tool/requirements.txt`의 의존성이 필요하다. 문서 추출·점검·ZIP은 [문서 Tool](../../backend/app/agent/document_tool/tool.py),
+OCR·서류 볼륨의 배포 준비는 [배포 절차](../deploy.md)를 따른다.
 완료 Case도 조회할 수 있으며, 기존 Agent의 진행 중 Case만 판단하는 입력 검증은 유지한다.
 
 ```python
@@ -81,13 +84,16 @@ BE는 온보딩의 `had_employees`와 보험 4개(`pension_enrolled`, `health_in
 네 값을 함께 받고, 하나라도 true면 해당, 모두 false여야 해당 없음, 나머지는 미확인이다. 직원 수로 보험을 추정하지 않는다.
 직원 0명일 때 과거 고용 여부를 별도로 확인한다. 직원이 있으면 판단 중 고용 이력을 추론한다.
 AI 대화에서 받은 이 다섯 값은 해당 판단에만 사용하며 `fact_changes`로 반환하지 않는다.
-온보딩 저장으로 반복 질문이 줄어드는 것과 대화 답변을 저장하는 것은 구분한다. BE 저장·snapshot 연결은 담당 파트 작업이다.
+온보딩 저장으로 반복 질문이 줄어드는 것과 대화 답변을 저장하는 것은 구분한다. 현재 온보딩 저장과
+snapshot 연결은 [`case.py`](../../backend/app/be/services/case.py)·[`case_snapshot.py`](../../backend/app/be/services/case_snapshot.py)에 구현돼 있다.
 `support_approved`는 사장님이 확인한 기관 결과다. 미확인일 때 정산은 확인 필요, 거절이면 해당 없음이다.
-`documents`에는 #128의 `DocumentContext`를 전달한다. 점검 digest가 현재 서류와 일치할 때만 완료 표시한다.
+`documents`에는 [문서 Tool 모델](../../backend/app/agent/document_tool/models.py)의 `DocumentContext`를 전달한다. 점검 digest가 현재 서류와 일치할 때만 완료 표시한다.
 문서 Context의 UUID와 Case의 정수 ID는 다른 식별자이므로 BE가 소유권·연결을 확인한 뒤 전달한다.
 `next_action`·사용자 질문은 같은 Case/snapshot/절차 목록의 `ReviewedPlanOutcome`에서만 복사한다.
 `procedure_bindings`가 필요한 registry는 runtime에 사용한 동일 mapping을 전달한다.
-저장·API·화면 연결은 FE/BE 담당 작업이다. 기존 `run_case_planning`이 이 함수를 자동 호출하지는 않는다.
+현재 [`BE 로드맵 서비스`](../../backend/app/be/services/roadmap.py)가 Case·체크·서류 Context를 모아
+이 함수를 호출하고 API로 반환한다. 지금 할 일은 `GET /cases`가 따로 제공하므로 로드맵 입력의
+`reviewed_plan`은 비워 둔다. `run_case_planning`이 로드맵을 자동 호출하는 방식은 아니다.
 
 ## 실행 경계
 
@@ -136,6 +142,7 @@ DB 전체 복사본이나 별도로 저장한 snapshot 행을 뜻하지 않는�
 | `submitted_at` / `captured_at` / `confirmed_at` | 입력 이력 시각 / snapshot 조립 시각 / 사용자 충돌 확인 시각. 서로 대신 채우는 값이 아니다. |
 
 Langfuse 미설정·장애로 실제 ID를 얻지 못하면 연결값은 비어 있을 수 있다. `DecisionRecord`는 검수 PASS 판단만 저장하며, 실패·충돌 대기 이력에는 새 `trace_id` 필드를 추가하지 않는다.
+[#187 멘토 후속](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/187#pullrequestreview-5812635175)의 추적 ID 연결은 [#294](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/294), 서류 동시 갱신의 DB 행 잠금은 #296·#300에 반영됐다. 동시 요청·재시작 복구의 실제 운영 검증은 [#242](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/issues/242)로 구분한다.
 
 Trigger와 그 안의 `RedactedInput`에는 같은 의미의 `submitted_at`이 있으며,
 `build_planning_input`은 저장된 입력 시각을 두 곳에 함께 넣는다.
@@ -155,6 +162,8 @@ BE 모델에 없는 검수·조건·근거 필드를 만들어 채우지는 않�
 DB snapshot 조회 → Agent 전달**로 이어진다. 본문 적재는
 [`ensure_official_documents()`](../../backend/app/be/services/official_document.py),
 Case별 연결은 [`import_reviewed_procedures()`](../../backend/app/be/services/reviewed_procedure.py)가 맡는다.
+[`main.py`](../../backend/app/main.py)는 서버 시작 때 공식 자료 본문을 먼저 적재한다. 실패하면 로그를
+남기고 서버를 띄우며, 가입 때 다시 시도한다. 기존 Case의 근거 연결 갱신은 별도 재적재가 필요하다.
 [`case_snapshot.py`](../../backend/app/be/services/case_snapshot.py)는 `official_document_id`로 본문을 읽어
 `EvidenceRecord.excerpt`를 채운다. Agent는 이 DTO를 읽으며 DB를 직접 조회하지 않는다.
 
@@ -184,7 +193,8 @@ DB 근거가 없으면 JSON 본문으로 대신하지 않고 빈 결과를 반�
 
 공식 안내문을 수집·발췌한 뒤 개발자가 내용을 검수·승인한 자료를 사용한다.
 BE는 승인 JSON을 읽어 공용 본문을 준비하고 Case 생성 시 해당 자료의 Case별 Evidence를 적재한다.
-이후 DB에서 조립한 Case snapshot과 승인 목록을 Agent에 전달한다.
+서버 시작 때 본문을 먼저 적재하고, 가입 때 해당 Case에 근거를 연결한다. 시작 때 본문 적재가
+실패하면 가입 때 다시 시도한다. DB에서 조립한 Case snapshot과 승인 목록을 Agent에 전달한다.
 
 승인 자료는
 [`reviewed-procedures.ko-KR.json`](../../backend/app/common/reviewed-procedures.ko-KR.json)에 있다.
@@ -228,17 +238,26 @@ DB의 `evidence_id`를 그대로 반환한다. Agent는 전달받은 자료를 �
 
 ### 현재 화면에서의 절차 제출·완료 보고
 
-현재 `POST /cases/results`는 글(`raw_input`) 또는 원상복구 선택(`restoration_answer`)과
-`case_history_id`를 받는다. 공식 절차 화면도 결과를 글로 보내며, 별도 완료 확인 선택값은 보내지 않는다.
+현재 `POST /cases/results`는 글(`raw_input`)·원상복구 선택(`restoration_answer`)·했어요 버튼
+(`action_done: true`) 중 하나와 `case_history_id`를 받는다(#304). 결과 입력 조회의
+`result_input_kind=ACTION_DONE`과 `action_done_kind`에 따라 화면이 버튼 문구를 고른다.
+BE는 현재 할 일과 절차 번호를 정해 `ActionDoneAnswer(action_code, procedure_step_id)`로 AI에 전달한다.
 
-신고서를 제출했다는 유효한 보고는 `IN_PROGRESS`·`submitted=true`로 남긴다.
-기관 처리 완료 보고는 확인이 필요한 후보로 보류하며, 그 보고만으로 `COMPLETED` 변경을 만들지 않는다.
-내부 `ProcedureCompletionConfirmation`은 존재하지만 현재 FE·BE에는 이를 전달하는 별도 확인 계약이 없다.
-따라서 현재 화면에서 글을 다시 보내는 것만으로 공식 절차 완료를 확정할 수 없다.
-이 내부 DTO를 직접 조립하는 테스트는 Agent의 확인 제약 검사이며 화면·API 연결 완료의 증거가 아니다.
+준비 버튼(`PREPARATION`)은 준비 확인만, 제출 버튼(`SUBMISSION`)은
+`IN_PROGRESS`·`submitted=true`까지 남긴다. 처리 결과 확인(`PROCESSING`)·직접 하는 일(`WORK`)의
+완료 버튼은 그 자체를 명시적 확인으로 받아 `COMPLETED` 변경을 만들 수 있다.
+`ActionDoneAnswer.completes`·`completion_confirmed`가 같은 절차의 고정 완료 문장인지 검사하며,
+이 경로도 Supervisor·Review의 코드 검사를 거친다.
+
+글로 쓴 기관 처리 완료 보고는 확인이 필요한 후보로 보류하며, 그 보고만으로 완료를 확정하지 않는다.
+내부 `ProcedureCompletionConfirmation`을 전달하는 별도 FE·BE 확인 계약은 여전히 없다.
+이 내부 DTO를 직접 조립하는 테스트와 버튼 경로의 검증은 구분한다. 버튼 경로의 실제 운영 확인은
+[11/9 개인 카페 시나리오](./monitoring-results.md#운영-개인-카페-시나리오-2026-11-09)에 기록했다.
 
 로드맵 체크리스트 완료와 부가세 신고 체크에 따른 Case 종료는 별도 저장 동작이다.
 이를 공식 절차의 `CaseProcedureStep` 완료나 기관 처리 완료로 대신 사용하지 않는다.
+`PROCEDURES_COMPLETED`도 Case 전체 완료가 아니다. BE는 마지막 완료 변경을 검수 후 저장하고
+홈·결과·기록에 안내 종료를 제공하며, Case는 `IN_PROGRESS`를 유지한다.
 
 ### 충돌 확인
 
@@ -250,8 +269,10 @@ Agent는 확정값과 다른 새 입력을 `CONFLICT`로 반환하고, 확인 �
 
 `conflict_ref`는 후보를 찾는 참조, `conflict_digest`는 내용 변경을 확인하는 해시이며
 서로 대체하지 않는다. 호출자는 소유권·만료·중복 사용을 검증한 뒤 서버에서 복원한 원래 후보를
-`build_conflict_input()`에 전달해야 한다. 후보 보관·복원과 사용자 확인 연결, 실패 상태 구분의 진행 상황은
-[#57](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/issues/57)에서 관리한다.
+`build_conflict_input()`에 전달해야 한다. 후보 보관·확인 뒤 재판단과 실패 상태 저장은
+[`conflict_decision.py`](../../backend/app/be/services/conflict_decision.py)·[`decision_record.py`](../../backend/app/be/services/decision_record.py)에 구현돼 있다.
+기존 #57은 종료됐으며, 배포 환경의 확인은 [#240](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/issues/240),
+판단 당시 입력 보존의 후속은 [#241](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/issues/241)에서 다룬다.
 
 ### DB 칸에 맞추기
 
@@ -485,12 +506,14 @@ CLI는 현재 BE 방식인 `--case-id`·선택적 `--source`를 사용한다. �
 남은 한계: 반박이 **다음 문장**에 있으면 못 잡는다. 문장을 가져오는 범위가 마침표 하나
 안쪽이라 구조상 보이지 않는다. 이번 변경으로 좁아지거나 넓어지지 않은 기존 한계다.
 
-**모델에게서 쓸 답을 못 받았을 때** — 통신 장애든 응답 형식 불일치든 1순위 후보로
+**모델에게서 쓸 답을 못 받았을 때(당시 구현, 이후 폐기)** — 통신 장애든 응답 형식 불일치든 1순위 후보로
 ACTION 초안을 만든다. 이전에는 `generate()` 호출이 재시도 `try` 바깥이라 선언한 3회가
 이 오류들에 전혀 동작하지 않았고, 후보가 있어도 판단 전체가 실패했다. 모델이 답은
 했는데 틀린 경우는 그대로 실패로 남긴다. 자세한 내용은 [supervisor.md](./supervisor.md).
 
-Info·Review도 같은 구조이지만 고치지 않았다. 두 곳은 코드가 답을 대신 알 수 없고,
+현재는 통신·형식 오류를 Graph에 전달해 `SAFE_FAILURE`로 끝낸다. 1순위 후보로 대신 답하지 않는다.
+
+당시 Info·Review도 같은 구조였지만 고치지 않았다. 두 곳은 코드가 답을 대신 알 수 없고,
 `llm.py`가 이미 내부 재시도를 끝낸 뒤 오류를 던지므로 여기서 다시 부르면 이미
 재시도한 호출을 반복하게 된다. 위 2026-09-29 기록의 "503 한 번에 120초"가 그 경우다.
 

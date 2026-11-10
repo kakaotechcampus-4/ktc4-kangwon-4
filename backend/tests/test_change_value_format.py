@@ -15,6 +15,7 @@ from app.agent.schemas import CaseFieldKey, FactOperation, FactValueType
 from app.be.crud import case as case_crud
 from app.be.crud import case_field_history as case_field_history_crud
 from app.be.crud import evidence as evidence_crud
+from app.be.models.case import Case
 from app.be.services import decision_record
 
 
@@ -31,7 +32,8 @@ def saved_change(monkeypatch):
     """바뀐 값 하나를 저장하고, 이력에 적힌 글자를 돌려주는 호출기."""
 
     def save(field: CaseFieldKey, value_type: FactValueType, proposed, stored=None):
-        case = SimpleNamespace(id=1, **{field.value: stored})
+        case = Case(id=1, member_id=1, business_type="CAFE", lease_status="LEASED_PAID")
+        setattr(case, field.value, stored)
         rows: list = []
         monkeypatch.setattr(case_crud, "get_case_by_id", lambda *_: case)
         monkeypatch.setattr(

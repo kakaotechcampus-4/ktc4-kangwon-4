@@ -260,6 +260,11 @@ def build_roadmap(request: RoadmapInput, *, procedure_bindings: ProcedureBinding
         if applicable is True:
             if codes:
                 status, refs = _procedure_status(codes, steps, bindings, snapshot, mutations, progress)
+                # 범위 확인은 두 사실로 끝난다. 실제 작업·반환 완료는 별도 절차다.
+                if (key == "restoration" and status in {"NOT_STARTED", "IN_PROGRESS"}
+                        and all(facts.get(field) is not None
+                                for field in ("restoration_scope", "demolition_required"))):
+                    status = "COMPLETED"
             elif key in {"intake", "closure_date", "support_approval"}:
                 if key == "intake":
                     value = True

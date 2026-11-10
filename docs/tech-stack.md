@@ -1,6 +1,6 @@
 # RE:BORN 기술 스택과 현재 사용 상태
 
-> 기준일: 2026-09-23
+> 기준일: 2026-11-10
 >
 > 이 문서의 책임: 패키지 선언 버전과 현재 코드의 실제 사용 여부
 
@@ -9,10 +9,10 @@
 ## 1. 먼저 보는 결론
 
 - 현재 Agent 실행은 **Pydantic, LangGraph, httpx**를 사용한다.
-- LLM은 LangChain이나 OpenAI SDK가 아니라 `httpx`로 OpenAI-compatible endpoint를 호출한다. `SUPERVISOR_*`·`INFO_*` 환경변수를 설정하면 Supervisor와 정보분석이 각각 별도 client를 사용하고, 미설정 시 공용 endpoint 설정을 사용한다. 지원금 Agent와 독립 Review는 항상 공용 설정을 사용한다. 환경변수는 [`.env.example`](../.env.example)을 따른다.
+- LLM은 LangChain이나 OpenAI SDK가 아니라 `httpx`로 OpenAI-compatible endpoint를 호출한다. `AGENT_SUPERVISOR_MODEL_PREFIX`·`AGENT_INFO_MODEL_PREFIX`가 Supervisor와 정보분석의 설정 묶음을 고른다. 기본값인 `SUPERVISOR_`·`INFO_`는 비어 있는 값을 공용 설정에서 읽는다. 대체 묶음은 `LUNA_`·`LUNA6_`·`HAIKU_`·`GEMINI_` 중에서만 고를 수 있고, 해당 URL·토큰·모델을 모두 채워야 한다. 그 밖의 값은 설정 오류다. 현재 [`.env.example`](../.env.example)·[운영 예시](../.env.prod.example)는 Supervisor에 `LUNA6_`, 정보분석에 `INFO_`를 지정한다. 지원금 Agent와 독립 Review는 공용 설정을 사용한다.
 - LangChain·OpenAI SDK·Chroma는 `backend/requirements.txt`에 고정돼 있지만 Agent 코드에 import가 없다. Langfuse는 credential이 설정된 경우에만 metadata 전송에 사용한다.
 - 루트 `docker-compose.yml`은 **MySQL 8.0 DB만** 실행한다. Backend와 Agent container는 없다.
-- 현재 작업 트리에는 SQLModel 테이블, DB 세션, FastAPI 진입점과 카카오 인증 라우터가 있다. Agent를 호출하는 라우터와 Case 저장·재조회 연동, migration은 아직 없다.
+- FastAPI에는 카카오 인증·Case·서류 라우터가 있다. Case·서류 라우터가 Agent 판단을 맡기고 결과를 DB에 저장·재조회한다. migration 도구는 쓰지 않고, 운영 표는 `backend/sql/`의 SQL로 넣는다([배포 문서](./deploy.md)).
 - Support Agent는 생성 시 주입된 검수 catalog를 사용한다.
 - 기업마당 adapter·공식 문서 crawler·RAG는 Agent에 없다. 지원·절차 자료는 사람이 검수해 주입한다.
 
@@ -66,14 +66,14 @@
 - **React / React DOM `^19.2.8`:** entrypoint와 component에서 사용
 - **React Router `^7.18.3`:** route 구성과 화면 이동에 사용
 - **TypeScript `~6.0.2`:** TS/TSX source와 build에 사용
-- **Vite `^8.2.2`:** script와 설정이 존재
+- **Vite `^8.3.4`:** script와 설정이 존재
 - **Tailwind CSS `^4.3.3`:** CSS import와 Vite plugin 설정에 사용
-- **Vercel:** `frontend/vercel.json` 설정이 존재하며 실제 배포 상태는 별도 확인 대상
+- **Vercel:** 화면을 배포한다. `frontend/vercel.json`이 `/api` 요청을 BE로 넘긴다
 
 ### 로컬 실행 환경
 
 - **Python `3.12`:** `backend/.python-version`과 Dockerfile 기준
-- **MySQL `8.0`:** 루트 Compose가 DB service만 실행
+- **MySQL `8.0.46`:** 루트 Compose가 DB service만 실행. 운영 Compose와 테스트 DB도 같은 버전
 
 Agent standalone은 MySQL을 사용하지 않는다. manifest와 lockfile은 설치 요청 상태를 보여주며 실제 빌드·배포 성공은 별도 검증이 필요하다.
 
@@ -88,24 +88,24 @@ Agent standalone은 MySQL을 사용하지 않는다. manifest와 lockfile은 설
 
 ### Application·DB 관련 패키지
 
-- **FastAPI `0.141.1`:** `backend/app/main.py`가 인증 라우터와 health 경로를 연결
-- **Uvicorn `0.52.4`:** FastAPI 실행 서버로 선언
+- **FastAPI `0.141.1`:** `backend/app/main.py`가 인증·Case·서류 라우터와 health 경로를 연결
+- **Uvicorn `0.52.4`:** FastAPI 실행 서버. 운영은 프로세스 1개로 띄운다(`backend/Dockerfile`)
 - **SQLModel `0.0.42`:** `backend/app/be/models/`의 테이블과 `app/be/db.py`의 DB 세션에 사용. SQLAlchemy를 내부적으로 사용
 - **PyMySQL `1.2.0`:** MySQL 연결에 사용
-- **Alembic `1.19.2`:** migration 미구현
+- **Alembic `1.19.2`:** 설치만 돼 있고 쓰지 않는다. 운영 표는 `backend/sql/`의 SQL로 넣는다
 - **PyJWT `2.13.0`:** `backend/app/be/services/auth.py`에서 서비스 JWT 발급에 사용
-
-DB 연결 코드의 존재가 Agent 변경 후보의 저장·재조회 완료를 뜻하지는 않는다.
+- **python-multipart `0.0.20`:** 서류 업로드(`backend/app/be/routers/document.py`)의 파일 받기에 사용
+- **PyMuPDF `1.28.2`:** 서류 처리(`backend/app/agent/document_tool/`)에서 PDF를 읽는 데 사용
 
 ### 후속 AI 기능용 패키지
 
-- **Langfuse `4.15.1`:** `LangfuseTraceSink`로 metadata 전송 구현. 비용 금액 산출은 없음
+- **Langfuse `4.15.1`:** `LangfuseTraceSink`로 metadata를 전송한다. 별도 [`monitor_agent.py`](../backend/scripts/monitor_agent.py)가 기록된 사용량과 팀 원화 단가로 비용을 추정한다. `TraceSink`가 실행 중 금액을 계산하거나 공급자 청구 금액을 확인하는 것은 아니다.
 - **langchain-chroma `1.1.0` / ChromaDB `1.5.9`:** Agent 코드에 import가 없다. MVP 제외 범위라 `backend/requirements.txt`에서 빼도 되는지 BE 확인 필요
 
 ### 개발 도구
 
-- **pytest `9.1.1`:** 현재 Agent 테스트에 사용
-- **testcontainers[mysql] `4.15.0`:** 버전만 선언. DB 통합 테스트는 아직 없음
+- **pytest `9.1.1`:** BE·Agent 테스트에 사용
+- **testcontainers[mysql] `4.15.0`:** DB를 쓰는 BE 테스트가 테스트마다 격리된 MySQL 컨테이너를 띄우는 데 사용
 
 
 ### Agent와 공식 데이터
@@ -113,7 +113,7 @@ DB 연결 코드의 존재가 Agent 변경 후보의 저장·재조회 완료를
 Agent 호출 구조는 [`agent/architecture.md`](./agent/architecture.md), 포함·제외 범위는 [`agent/README.md`](./agent/README.md)를 따른다. 여기서는 패키지와 직접 관련된 것만 적는다.
 
 - **MVP 제외:** 기업마당 adapter, 미검수 공고 corpus·index·검색(`chromadb`), 공식 원문 crawler·parser, 요청 경로 RAG. 범위는 [`agent/README.md`](./agent/README.md)
-- **미구현:** Langfuse 비용 금액 산출, masking 정책 승인
+- **비용 확인:** 기록된 사용량으로 원화 비용을 사후 추정하는 집계는 구현돼 있다. 사용량·단가가 없으면 비용을 확정하지 않으며, 공급자 청구 금액과는 구분한다. 개인정보 가림은 구현돼 있고, 보관·삭제 정책 승인은 [#258](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/issues/258)에서 다룬다.
 
 Support Agent의 입력은 생성 시 주입된 reviewed catalog뿐이다.
 

@@ -1,9 +1,10 @@
 import type { Step, StepStatus } from '../components/ui/ProcessSteps'
-import { factLabelOf, fieldLabelOf, FRANCHISE_OPTIONS, LEASE_OPTIONS } from '../lib/caseOptions'
+import { businessLabelOf, factLabelOf, fieldLabelOf, FRANCHISE_OPTIONS, LEASE_OPTIONS } from '../lib/caseOptions'
 import type {
   CaseConflictsDecisionRequest,
   CaseResultsEntryResponse,
   CaseResultsSubmitResponse,
+  CasesEnvelope,
   LeaseStatus,
   RestorationStatus,
 } from '../types/api'
@@ -74,7 +75,10 @@ export function toValueLabel(field: string, raw: unknown): string | null {
   if (typeof raw !== 'string') return NEEDS_CHECK
 
   switch (field) {
+    // 코드 · 자유 글을 가르는 규칙은 `businessLabelOf` 에 있다. 그게 못 읽은 값만 확인 필요다
     case 'business_type':
+      return businessLabelOf(raw) ?? NEEDS_CHECK
+
     case 'restoration_scope_detail':
       return raw
 
@@ -213,10 +217,19 @@ export function toResultsEntry(body: CaseResultsEntryResponse | null): ResultsEn
       // 번호가 없으면 결과를 보낼 수 없고, 할 일이 없으면 무엇에 대한 결과인지 보여줄 수 없다
       const nextAction = toNextAction(body.next_action)
       if (!Number.isInteger(body.case_history_id) || nextAction === null) return { kind: 'UNRECOGNIZED' }
-      if (body.result_input_kind !== 'TEXT' && body.result_input_kind !== 'RESTORATION_ANSWER') {
+      if (!['TEXT', 'RESTORATION_ANSWER', 'ACTION_DONE'].includes(body.result_input_kind)) {
         return { kind: 'UNRECOGNIZED' }
       }
-      return { kind: 'READY', nextAction, historyId: body.case_history_id as number, inputKind: body.result_input_kind }
+      // [했어요] 버튼인데 종류가 없거나 모르는 값이면 어떤 버튼을 보여 줄지 정할 수 없다
+      const doneKind = body.result_input_kind === 'ACTION_DONE' ? body.action_done_kind : null
+      if (body.result_input_kind === 'ACTION_DONE'
+        && !['PREPARATION', 'SUBMISSION', 'PROCESSING', 'WORK'].includes(doneKind as string)) {
+        return { kind: 'UNRECOGNIZED' }
+      }
+      return {
+        kind: 'READY', nextAction, historyId: body.case_history_id as number,
+        inputKind: body.result_input_kind, doneKind,
+      }
     }
 
     case 'CONFLICT': {
@@ -228,7 +241,13 @@ export function toResultsEntry(body: CaseResultsEntryResponse | null): ResultsEn
       // 번호가 없으면 답을 보낼 수 없고, 질문이 없으면 무엇에 답하는지 보여줄 수 없다
       const questions = toQuestionsForUser(body.questions_for_user)
       if (!Number.isInteger(body.case_history_id) || questions === null) return { kind: 'UNRECOGNIZED' }
-      return { kind: 'ANSWER', questions, historyId: body.case_history_id as number }
+      // 원상복구 진행 상태 질문이면 버튼으로 받는다. 모르는 값은 다른 입력으로 바꾸지 않는다
+      if (body.result_input_kind !== 'TEXT' && body.result_input_kind !== 'RESTORATION_STATUS') {
+        return { kind: 'UNRECOGNIZED' }
+      }
+      return {
+        kind: 'ANSWER', questions, historyId: body.case_history_id as number, inputKind: body.result_input_kind,
+      }
     }
 
     /*
@@ -243,12 +262,38 @@ export function toResultsEntry(body: CaseResultsEntryResponse | null): ResultsEn
       return { kind: 'RESUBMIT', notice, historyId: body.case_history_id as number }
     }
 
+    // 판단 중이다. 홈이 안내한다
     case 'PENDING':
       return { kind: 'ELSEWHERE' }
+
+    // 등록된 절차 안내를 마쳤다(#315). 남은 일을 받을지는 화면이 Case 상태를 보고 정한다(#340)
+    case 'PROCEDURES_COMPLETED':
+      if (!Number.isInteger(body.case_history_id)) return { kind: 'UNRECOGNIZED' }
+      return { kind: 'PROCEDURES_COMPLETED', historyId: body.case_history_id as number }
 
     default:
       return { kind: 'UNRECOGNIZED' }
   }
+}
+
+/**
+ * 등록된 절차 안내를 마친 뒤(#315) 결과 알려주기로 들어왔을 때, 남은 일을 자유글로 받아도 되는지(#340).
+ *
+ * 로드맵에는 아직 끝나지 않은 일(예: 폐업 날짜 정하기)이 남아 그 화면이 결과 알려주기로 안내한다.
+ * 서버도 이 상태의 글을 받는다. 다만 `GET /cases/results` 에는 Case 전체 상태가 없어서 `GET /cases` 로
+ * 한 번 더 확인한다. 확인 없이 열면 폐업을 다 마친 Case에도 입력창이 뜨고, 보낸 뒤에야 409로 거절된다.
+ *
+ * 두 응답이 **같은 판단**을 가리킬 때만 연다. 두 번 묻는 사이에 새 판단이 생겼으면 그 판단이 보여 줄
+ * 화면이 따로 있다. 판단을 새로 하는 것이 아니라 서버 값으로 어느 화면을 열지 고르는 것이다(FE 규칙 1).
+ */
+export function opensInputAfterProcedures(envelope: CasesEnvelope | null, historyId: number): boolean {
+  if (envelope === null || typeof envelope !== 'object') return false
+  return (
+    envelope.case?.case_status === 'IN_PROGRESS'
+    && envelope.judgment_status === 'PROCEDURES_COMPLETED'
+    && Number.isInteger(envelope.case_history_id)
+    && envelope.case_history_id === historyId
+  )
 }
 
 const UNRECOGNIZED: SubmitOutcome = { kind: 'STAY', state: { kind: 'UNRECOGNIZED' } }
@@ -294,6 +339,10 @@ export function toSubmitOutcome(body: CaseResultsSubmitResponse | null): SubmitO
 
     case 'FAILED':
       return { kind: 'STAY', state: { kind: 'FAILED', notice: toFailureNotice(body) } }
+
+    // 다음 할 일이 없는 것이 정상이다. 반영 결과(⑤)는 다음 할 일을 꼭 그리는 화면이라 보내지 않는다
+    case 'PROCEDURES_COMPLETED':
+      return { kind: 'FINISHED' }
 
     default:
       return UNRECOGNIZED

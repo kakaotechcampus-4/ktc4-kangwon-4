@@ -2,18 +2,37 @@
 
 2026년 11월 1일 개인 카페 폐업 시안에 맞춘 Agent와 실제 LLM 호출을 검증했고, 11월 2일 Langfuse 모니터링 조회 기능을 추가했다. 같은 입력으로 모델과 추론 강도인 `effort`를 바꿔 품질·토큰·시간·비용을 비교한다. 아래 수치는 합성 입력에 대한 결과이며, 실제 고객 서류의 정확도나 전체 서비스의 응답 속도로 일반화하지 않는다.
 
-## 현재 코드와 과거 측정 구분 (2026-11-07)
+## 현재 코드와 과거 측정 구분 (2026-11-09)
 
-확인 기준은 develop `764f3c2`다. 아래 11/1~11/2의 모델 설정·수치·작업 범위는 당시 기록이며 현재 배포 상태를 뜻하지 않는다.
+현재 구현 설명의 확인 기준은 develop `77b313d`이다. 아래 11/1~11/7의 모델 설정·수치·작업 범위는 당시 기록이며 현재 배포 상태를 뜻하지 않는다.
 
-- 서류 업로드·목록·확인·삭제·점검·ZIP은 [BE 라우터](../../backend/app/be/routers/document.py)에 연결돼 있다(#159). FE 서류 화면 연결은 #170에 반영됐다. [서류 서비스](../../backend/app/be/services/document.py)는 Case별 Context를 파일에 보관하고, 아직 판단에 반영하지 않은 원상복구 조항이 있으면 재판단을 접수한다(#173). 브라우저 전체 흐름 검증은 #232, 운영 반영 확인은 #229·#240에서 추적한다.
+- 서류 업로드·목록·확인·삭제·점검·ZIP은 [BE 라우터](../../backend/app/be/routers/document.py)에 연결돼 있다(#159). FE 서류 화면 연결은 #170에 반영됐다. [서류 서비스](../../backend/app/be/services/document.py)는 서류 목록·점검 결과를 DB의 `case_document_context`에, 처리한 PDF·분석 캐시를 운영 볼륨에 보관하고, 아직 판단에 반영하지 않은 원상복구 조항이 있으면 재판단을 접수한다(#173). 브라우저 전체 흐름은 #250·#265로 검증해 #232를 닫았으며, 운영 반영 확인은 #229·#240에서 추적한다.
 - [현재 실행 경로](architecture.md)는 지원금 Agent를 호출하지 않는다. 아래 Support 결과는 해당 Agent를 따로 평가한 기록이며 현재 서비스의 지원 자격 판정 실적으로 세지 않는다.
 - [정산 점검 코드](../../backend/app/agent/document_tool/checks.py)의 필수 목록에서 통장 사본은 제외됐다(#140). 아래 7개 파일·ZIP 9항목은 통장 사본을 포함했던 초기 합성 평가의 구성이다.
-- 서류 안전 거절·위기 판정은 일반 처리 실패와 구분해 422 코드와 화면 안내를 반환한다(#227). 남은 실패 경로 검증은 #228에서 추적한다.
-- [멘토 리뷰 반영 #218](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/218)은 부분 원상복구의 세부 질문·중복 방지 검사를 보강했다. 후속 저장·화면 검증은 #233에서 추적한다.
-- 서버 과거 관측과 로컬 Agent 측정은 입력·측정 구간을 맞춘 전후 비교로 확인되지 않았다. HTTP·DB·화면 완료까지의 재측정은 #234에서 추적하며, 서로 다른 구간의 시간을 개선율로 합치지 않는다.
+- 서류 안전 거절·위기 판정은 일반 처리 실패와 구분해 422 코드와 화면 안내를 반환한다(#227). 실패 경로 회귀와 PM 문구는 #265·#276으로 확인해 #228을 닫았다. 운영 확인은 #240에 남아 있다.
+- [멘토 리뷰 반영 #218](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/218)은 부분 원상복구의 세부 질문·중복 방지 검사를 보강했다. 후속 저장·화면 회귀는 #249로 검증해 #233을 닫았다.
+- 서버 과거 관측과 로컬 Agent 측정은 입력·측정 구간을 맞춘 전후 비교로 확인되지 않았다. #234의 HTTP·DB·화면 완료까지의 측정은 [아래 첫 판단 결과](#실제-모델을-포함한-첫-판단의-화면db-확인-시간-2026-11-07)에 보존하며, 서로 다른 구간의 시간을 개선율로 합치지 않는다.
 
-이 절은 코드와 기존 PR을 대조한 설명이다. 실제 모델 재측정이나 운영 배포 확인 결과를 새로 추가한 것은 아니다.
+위 항목은 코드와 기존 PR을 대조한 설명이다. 11/9 운영 확인은 바로 아래에 별도로 기록하며 과거 정량 평가의 수치를 바꾸지 않는다. 현재 운영 설정 예시는 [`.env.prod.example`](../../.env.prod.example), 모델 검토와 코드 검사 구분은 [Review Tool](review-tool.md#두-겹-검사)을 따른다.
+
+## 운영 개인 카페 시나리오 (2026-11-09)
+
+11/9 16:48~16:57 KST, 운영 주소의 Windows 브라우저·기존 개인 카카오 로그인 세션으로 합성 개인 카페 Case4를 진행했다. FE는 `77b313d`, BE `/health`는 `2972e1c`였다. 가게 입력→판단·결과 입력 반복→원상복구 완료→점포 반환→등록 절차 안내 종료를 화면에서 확인했다. h49~69의 판단 21건이 모두 성공하고 Review도 21건 PASS(코드 검수20·모델 검수1)였다. 판단 이력 수와 모델 호출 수가 우연히 같을 뿐, 각 판단이 한 번씩 모델을 불렀다는 뜻은 아니다.
+
+| 구간 | 모델 호출 | 사용량 기준 추정 비용 |
+| --- | ---: | ---: |
+| 판단 이력 21건 | 21회 | 167.721786원 |
+| 합성 서류 6종 분석 | 15회 | 62.489835원 |
+| 서류 확인·점검·ZIP | 0회 | 0원 |
+| 합계 | 36회 | 230.211621원 |
+
+호출·비용은 Langfuse의 실행별 사용량으로 집계했다. 서류는 실제 업로드 시각과 동일 Context UUID로 연결했으며 이전 Case3 비용은 제외했다. 모델 호출 실패·전송 재시도·사용량 누락은 없었다. 금액은 설정된 Elice 단가로 계산한 추정치이며 실제 청구서 대조 금액은 아니다.
+
+추가 질문 뒤 원상복구 진행 버튼이 새로고침 없이 표시됐고, 미확인에서 직접 완료를 선택한 변경도 저장됐다. 최종 `PROCEDURES_COMPLETED`는 정상 홈·종료 기록·로드맵 이동으로 이어졌으며 새로고침과 `/results` 직접 재진입에서도 유지됐다. Case는 `IN_PROGRESS`이며 수동 로드맵·부가세 체크에 따른 전체 폐업 완료와 구분한다.
+
+서류는 세금계산서·철거 전후 이미지·공사내역서·이체확인증·폐업사실증명원 6종을 업로드했다. 점검은 `COMPLETE`·보완0건, 실제 내려받은 ZIP은 8항목(서류 PDF6개·제출안내 PDF·점검 JSON)이며 PDF7개 열기·렌더·CRC 검사를 통과했다. 새로고침 후에도 6종 점검 완료가 유지됐다. 전후 이미지는 합성 그림이며 종류를 화면에서 직접 지정했으므로 실제 철거 사진 분류 정확도의 근거로 삼지 않는다.
+
+[운영 버전·호출·화면 검증 기록](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/issues/271#issuecomment-6735556307)에 남겼다. 이는 개인 카페 한 Case의 운영 연결 확인이며 과거 20문항 평가나 서비스 전체 정확도·p95로 합치지 않는다. 정부 실제 제출·수동 로드맵 전체 완료·동시 갱신·판단 중 재시작 복구를 수행한 결과가 아니며, 남은 공통 운영 검증은 [#240](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/issues/240)·[#242](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/issues/242)에서 추적한다.
 
 ## 동일 입력의 실제 모델 파일럿 (2026-11-07)
 
@@ -105,7 +124,7 @@ Review의6/6은 **독립 LLM과 코드 검사를 합친 Tool의 최종 차단 �
 
 실제 Langfuse49개 trace의58개 generation을 조회해 로컬의 요청 수·197,047토큰·514.719748원과 일치함을 확인했다. 이 대조에서 조회 스크립트가 기존 `support_analysis` 이름을 제외하던 문제를 발견했다. 필터를 보완해 Support12요청도 집계하고 중복 계산 방지 회귀를 추가했다. 수정 전 같은 조회는46요청만 집계했다. Langfuse 대조를 별도 지출로 더하지 않는다.
 
-최종 자동 테스트는 MySQL 통합을 포함해625개/30.38초, 변경 Python의 Ruff도 통과했다. FE·BE·common·규칙 파일은 수정하지 않았다. [고정 입력](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/blob/feature/agent-evaluation-artifacts/docs/agent/evaluations/2026-11-02-agent-accuracy-inputs.json), [모델별 결과·재시도·요청별 사용량](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/blob/feature/agent-evaluation-artifacts/docs/agent/evaluations/2026-11-02-agent-accuracy.json), [Langfuse 대조 원본](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/blob/feature/agent-evaluation-artifacts/docs/agent/evaluations/2026-11-02-agent-accuracy-langfuse.json)은 #130에 보존한다.
+최종 자동 테스트는 MySQL 통합을 포함해625개/30.38초, 변경 Python의 Ruff도 통과했다. FE·BE·common·규칙 파일은 수정하지 않았다. [고정 입력](evaluations/2026-11-02-agent-accuracy-inputs.json), [모델별 결과·재시도·요청별 사용량](evaluations/2026-11-02-agent-accuracy.json), [Langfuse 대조 원본](evaluations/2026-11-02-agent-accuracy-langfuse.json)은 #130에 보존한다.
 
 ## 당시 코드 기준과 변경 범위 (2026-11-02)
 
@@ -151,7 +170,7 @@ JSON·CSV는 실제 고객 제출 서류 원본이 아니라 합성 평가 입�
 
 통장 이미지 기능 파일럿1회까지 포함한 이번 추가 검증 전체는86회·128,020토큰·추정565.818285원이다. 성공뿐 아니라 기존 OCR 실패와 중간 파일럿을 포함했다. 실제 모델과 별도로 자동 테스트622개가30.68초에 통과했고, 모델용 이미지에서 주민번호 앞/뒤 모두 판독되지 않는 것을 오프라인으로 확인했다. 새 API 키나 이미지 처리 의존성은 추가하지 않았다.
 
-[실제 요청별 사용량·실패·필드별 결과·코드 지문 원본](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/blob/feature/agent-evaluation-artifacts/docs/agent/evaluations/2026-11-02-document-quality.json)은 #130, 문서 구현과 상세 결과는 #128에서 확인한다. 아래 이전 측정은 당시의 결과로 보존한다.
+[실제 요청별 사용량·실패·필드별 결과·코드 지문 원본](evaluations/2026-11-02-document-quality.json)은 #130, 문서 구현과 상세 결과는 #128에서 확인한다. 아래 이전 측정은 당시의 결과로 보존한다.
 
 ## Agent·Tool별 정확도 검증 범위 (2026-11-02 기록)
 
@@ -197,7 +216,7 @@ Info의13/13 원본은 미게시 모바일 초안의 `reborn_mobile_facts`/`rebo
 
 이번 요청의 실제 호출은 합계 **50회·39,867토큰·145.132341원**이다. 파일럿과 중간 실행도 포함했다. 최종 두 실행은 같은 런타임 코드 지문을 사용했다. 두 ZIP 모두 9개 항목(가림 PDF 7개·점검 JSON·안내 PDF), PDF 열기·ZIP 무결성·6단계 완료·합성 주민번호 뒤쪽 OCR 불가를 별도 확인했다. 같은 파일 재업로드는 두 실행 모두 0회 호출이었다. 합성 서류 결과이며 실제 고객 정확도는 검증하지 않았다.
 
-[요청별 사용량·코드 지문·산출물 검사](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/blob/feature/agent-evaluation-artifacts/docs/agent/evaluations/2026-11-02-document-implementation.json)에 성공·실패를 함께 보존한다. 이전 로컬 보관분과 합친 범위는 **967회·확인된 2,164,685토큰·단가 확인 소계 7,025.941381원·비용 미확인 19회**다. Langfuse 24시간 조회와는 다른 집계 범위이므로 더하지 않는다.
+[요청별 사용량·코드 지문·산출물 검사](evaluations/2026-11-02-document-implementation.json)에 성공·실패를 함께 보존한다. 이전 로컬 보관분과 합친 범위는 **967회·확인된 2,164,685토큰·단가 확인 소계 7,025.941381원·비용 미확인 19회**다. Langfuse 24시간 조회와는 다른 집계 범위이므로 더하지 않는다.
 
 ### 초기 Python 호출 예시
 
@@ -242,7 +261,7 @@ finally:
 - 사용량이나 단가가 없으면 전체 비용을 `null`로 두고, 계산 가능한 비용 소계와 미확인 건수를 함께 표시한다. `failed_http_attempts`는 요청 처리 실패를 뜻하며 HTTP 200 뒤의 응답 검증 실패와 취소도 포함한다.
 - 조회 상한에 도달하면 `truncated=true`를 표시한다. 미완성 조회를 전체 기록으로 제시하지 않는다. 조회 실패는 본문·키를 출력하지 않고 오류 종류와 HTTP 상태만 알린다.
 
-실행은 현재 작업 폴더 `ktc4-kangwon-4-agent-monitoring`에서 한다. 조회 자체는 LLM을 호출하지 않는다. 출력 파일은 덮어쓰지 않으므로 새 경로를 사용한다.
+실행은 저장소 루트에서 한다. 조회 자체는 LLM을 호출하지 않는다. 출력 파일은 덮어쓰지 않으므로 새 경로를 사용한다.
 
 ```bash
 PYTHONPATH=backend python backend/scripts/monitor_agent.py --hours 24 --output eval-runs/monitoring-new.json
@@ -253,7 +272,7 @@ PYTHONPATH=backend python backend/scripts/monitor_agent.py --hours 24 --output e
 
 24시간 조회는 관측 1,445건 중 Agent 요청 927회, 처리 실패 5회, 사용량 미확인 3회, 비용 미확인 21회를 집계했다. 계산 가능한 비용의 소계는 7,028.5650원이며 전체 비용은 미확인이다. 로컬 완료 보고서와 달리 이 조회에는 연결 확인·중단 요청도 들어가므로 두 범위의 합계를 더하거나 억지로 맞추지 않는다.
 
-모니터링 관련 테스트 19개와, 격리된 MySQL을 포함한 전체 **623개 테스트가 39.61초로 통과**했다. Ruff와 diff 검사를 통과했다. [코드 지문·실제 호출·Langfuse 조회·자동 테스트 기록](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/blob/feature/agent-evaluation-artifacts/docs/agent/evaluations/2026-11-02-monitoring.json)에 결과를 보존한다.
+모니터링 관련 테스트 19개와, 격리된 MySQL을 포함한 전체 **623개 테스트가 39.61초로 통과**했다. Ruff와 diff 검사를 통과했다. [코드 지문·실제 호출·Langfuse 조회·자동 테스트 기록](evaluations/2026-11-02-monitoring.json)에 결과를 보존한다.
 
 사용자 요청 변경 당시 진행 중이던 Info `xhigh` 파일럿 1건은 Review 첫 통과로 종료했고 추가 비교는 중단했다. 이번의 실제 요청은 파일럿 3회와 모니터링 검증 1회를 합쳐 4회·61,273토큰·237.4504원이다. 모델 역할 설정은 유지했다. 이전 로컬 보관분과 합친 범위는 917회·확인된 2,124,818토큰·단가 확인 소계 6,880.8090원·비용 미확인 19회다. 입력이 달라 이번 두 실행으로 모델 절감률을 계산하지 않는다.
 
@@ -287,9 +306,9 @@ Luna 6 비교에서는 토큰 4.45%, 추정 비용 48.72%, 처리 시간 14.30%�
 
 시간은 서류 3개 처리, 동일 파일 재업로드 확인, 클라이언트 종료와 추적 전송까지 포함한다. 모델별 토큰화 방식과 제공자 캐시 사용량도 원본에 남긴다. 캐시 할인을 제외한 비용도 함께 보존한다. Haiku는 연결·구조화 출력 테스트는 통과했으나 이 문서 평가의 독립 검수에서 거절되어 채택 후보에서 제외했다.
 
-- [기존 4개 모델과 effort 비교 원본](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/blob/feature/agent-evaluation-artifacts/docs/agent/evaluations/2026-11-01-model-comparison.json)
-- [Luna 6 단계별 비교와 반복 검증](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/blob/feature/agent-evaluation-artifacts/docs/agent/evaluations/2026-11-01-luna6-comparison.json)
-- [이전 브랜치의 예비 실행과 실패 기록](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/blob/feature/agent-evaluation-artifacts/docs/agent/evaluations/2026-11-01-preliminary.json)
+- [기존 4개 모델과 effort 비교 원본](evaluations/2026-11-01-model-comparison.json)
+- [Luna 6 단계별 비교와 반복 검증](evaluations/2026-11-01-luna6-comparison.json)
+- [이전 브랜치의 예비 실행과 실패 기록](evaluations/2026-11-01-preliminary.json)
 
 ### 문서 추출 후보의 전체 단계 기록
 
@@ -343,8 +362,8 @@ Sol과 Luna 6 모두 `high → medium → low`로 비교했다. 한 문항에서
 
 기준 12회 중 동일 입력·동일 모델·동일 Agent 코드로 이미 통과한 9회는 기록을 재사용했다. 입력과 코드의 지문을 검사하고 원본 보고서 지문을 각 행에 남겼다. 최종 비교 보고서는 논리적 실행 30회지만, 이번 실행에서 새로 발생한 HTTP 요청은 42회이며 재사용한 비용을 새 지출에 중복 합산하지 않는다.
 
-- [전체 Supervisor 비교와 실제 요청 사용량](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/blob/feature/agent-evaluation-artifacts/docs/agent/evaluations/2026-11-01-supervisor-comparison.json)
-- [기준 실행 재사용 근거](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/blob/feature/agent-evaluation-artifacts/docs/agent/evaluations/2026-11-01-supervisor-baseline-checkpoint.json)
+- [전체 Supervisor 비교와 실제 요청 사용량](evaluations/2026-11-01-supervisor-comparison.json)
+- [기준 실행 재사용 근거](evaluations/2026-11-01-supervisor-baseline-checkpoint.json)
 
 ### Supervisor effort별 선별과 반복 검증 원본 집계
 
@@ -374,7 +393,7 @@ Luna 6 high의 선별 비용은 13.5466원, medium은 13.7076원, low는 15.0599
 | 기존 정보 분석 | `gpt-6.1-sol` | `high` | `AGENT_INFO_MODEL_PREFIX=INFO_`, `INFO_REASONING_EFFORT=high` |
 | 독립 Review·안전 검사·기존 지원금 분석 | `gpt-6.1-sol` | `xhigh` | 공용 `OPENAI_MODEL`, `OPENAI_REASONING_EFFORT` |
 
-[환경설정 실제 로딩 검사](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/blob/feature/agent-evaluation-artifacts/docs/agent/evaluations/2026-11-01-final-config.json)에서 factory가 만든 각 client의 모델과 effort를 확인했다. 공용 설정은 `xhigh`를 유지한다. 초기 문서 기본값 high는 위 정확도 재검증 뒤 Sol xhigh로 승격했고 `.env`와 `.env.example`에 반영했다. 과거 `low` 기록은 이전 비교 이력으로만 보존한다. 모든 평가 키와 Langfuse 키는 `.env`에만 남긴다.
+[환경설정 실제 로딩 검사](evaluations/2026-11-01-final-config.json)에서 factory가 만든 각 client의 모델과 effort를 확인했다. 공용 설정은 `xhigh`를 유지한다. 초기 문서 기본값 high는 위 정확도 재검증 뒤 Sol xhigh로 승격했고 `.env`와 `.env.example`에 반영했다. 과거 `low` 기록은 이전 비교 이력으로만 보존한다. 모든 평가 키와 Langfuse 키는 `.env`에만 남긴다.
 
 ## 과거 모바일 사실 추출과 기존 Info 충돌 확인
 
@@ -382,10 +401,10 @@ Luna 6 high의 선별 비용은 13.5466원, medium은 13.7076원, low는 15.0599
 
 확인 전 사실 유지, 변경 거절, 변경 확인을 모두 검사한다. 현재 판단할 수 없는 답변에는 확인 질문을 남긴다. 지시 우회 요청은 안전 검사에서 차단한다.
 
-- [합성 문장과 기대값](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/blob/feature/agent-evaluation-artifacts/docs/agent/evaluations/2026-11-01-landlord-cases.json)
-- [실제 호출 결과와 사용량](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/blob/feature/agent-evaluation-artifacts/docs/agent/evaluations/2026-11-01-landlord-results.json)
-- [최종 Info high의 같은 문장 검증](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/blob/feature/agent-evaluation-artifacts/docs/agent/evaluations/2026-11-01-landlord-info-high.json)
-- [기존 Info 계약의 충돌 검증: high](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/blob/feature/agent-evaluation-artifacts/docs/agent/evaluations/2026-11-01-existing-info-high.json)
+- [합성 문장과 기대값](evaluations/2026-11-01-landlord-cases.json)
+- [실제 호출 결과와 사용량](evaluations/2026-11-01-landlord-results.json)
+- [최종 Info high의 같은 문장 검증](evaluations/2026-11-01-landlord-info-high.json)
+- [기존 Info 계약의 충돌 검증: high](evaluations/2026-11-01-existing-info-high.json)
 
 모바일 초안에서 Info용 high 설정을 쓴 문장 평가는 실제37회 호출·26,052토큰·추정142.8500원이었다. 기존 Info Agent의 직접 검증과는 구분한다. 기존 Info 계약에서도 원상복구 범위·철거 필요 여부를 자동 변경하지 않고 충돌 후보로 보류하는 것을 실제 호출로 확인했다. 현재 설정은 품질 검증을 통과했지만, Info의 최적 effort를 확정하는 같은 버전의 반복 성능 비교는 후속 TODO다.
 
@@ -405,14 +424,14 @@ ZIP에는 정산 서류 PDF 7개, 제출 안내 PDF, 점검 JSON이 들어 있�
 
 Langfuse에서 최근 generation 300건의 토큰과 부모 연결을 조회했다. 55건은 캐시 입력이 0보다 컸으며, 프롬프트·응답 원문은 모두 없었다. 예를 들어 캐시 입력 3,756 + 일반 입력 3 + 추론 출력 325 + 일반 출력 78 = 총 4,162로 제공자 사용량과 같은 방식으로 합산된다. 이 조회에는 평가 중 실패 기록도 포함되며 전체가 성공했다는 뜻은 아니다.
 
-- [모바일 전체 실행](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/blob/feature/agent-evaluation-artifacts/docs/agent/evaluations/2026-11-01-full-flow.json)
-- [이전 Info xhigh 전체 실행](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/blob/feature/agent-evaluation-artifacts/docs/agent/evaluations/2026-11-01-full-flow-info-xhigh.json)
-- [최종 기존 LangGraph 실제 실행](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/blob/feature/agent-evaluation-artifacts/docs/agent/evaluations/2026-11-01-graph-final.json)
-- [ZIP·PDF 파일 지문과 검사](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/blob/feature/agent-evaluation-artifacts/docs/agent/evaluations/2026-11-01-artifacts.json)
-- [최종 자동 테스트](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/blob/feature/agent-evaluation-artifacts/docs/agent/evaluations/2026-11-01-tests-final.json)
-- [Langfuse 조회 결과](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/blob/feature/agent-evaluation-artifacts/docs/agent/evaluations/2026-11-01-langfuse.json)
-- [LLM 호출 지점별 실제 검증 근거](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/blob/feature/agent-evaluation-artifacts/docs/agent/evaluations/2026-11-01-llm-coverage.json)
-- [실행별 비교 CSV](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/blob/feature/agent-evaluation-artifacts/docs/agent/evaluations/2026-11-01-trials.csv)
+- [모바일 전체 실행](evaluations/2026-11-01-full-flow.json)
+- [이전 Info xhigh 전체 실행](evaluations/2026-11-01-full-flow-info-xhigh.json)
+- [최종 기존 LangGraph 실제 실행](evaluations/2026-11-01-graph-final.json)
+- [ZIP·PDF 파일 지문과 검사](evaluations/2026-11-01-artifacts.json)
+- [최종 자동 테스트](evaluations/2026-11-01-tests-final.json)
+- [Langfuse 조회 결과](evaluations/2026-11-01-langfuse.json)
+- [LLM 호출 지점별 실제 검증 근거](evaluations/2026-11-01-llm-coverage.json)
+- [실행별 비교 CSV](evaluations/2026-11-01-trials.csv)
 
 ### 전체 그래프 1건의 역할별 실제 사용량
 
@@ -449,13 +468,13 @@ Langfuse에서 최근 generation 300건의 토큰과 부모 연결을 조회했�
 
 재개 후 비용 함수는 요청·응답 모델 버전이 다르면 비용을 미확인으로 처리하도록 보완했다. 같은 버전의 제공자 접두어만 정규화한다. 문서 초안의 재업로드 캐시는 안전 정책 코드·모델·effort가 바뀌면 재검사한다. 두 변경은 회귀 테스트를 통과했다. 이후 이번 서류 구현에서 기존 정책의 내보내기 차단과 동일 문서 ID 교체를 구현하고 회귀 테스트로 확인했다.
 
-[분석 원본](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/blob/feature/agent-evaluation-artifacts/docs/agent/evaluations/2026-11-01-analysis.json)은 로컬 `results.json` 기록의 호출·토큰·비용을 대조하고, 기준 실행 재사용 9행을 중복 지출에서 제외한다. 단가 없는 구형 Luna와 사용량을 받지 못한 실패가 있어 확인 가능한 비용의 소계만 제공하며 전체 청구 금액으로 표시하지 않는다. [코드·입력·산출물 지문](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/blob/feature/agent-evaluation-artifacts/docs/agent/evaluations/2026-11-01-final-manifest.json)과 [변경 범위 확인](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/blob/feature/agent-evaluation-artifacts/docs/agent/evaluations/2026-11-01-scope-check.json)도 남겼다.
+[분석 원본](evaluations/2026-11-01-analysis.json)은 로컬 `results.json` 기록의 호출·토큰·비용을 대조하고, 기준 실행 재사용 9행을 중복 지출에서 제외한다. 단가 없는 구형 Luna와 사용량을 받지 못한 실패가 있어 확인 가능한 비용의 소계만 제공하며 전체 청구 금액으로 표시하지 않는다. [코드·입력·산출물 지문](evaluations/2026-11-01-final-manifest.json)과 [변경 범위 확인](evaluations/2026-11-01-scope-check.json)도 남겼다.
 
 이 집계 범위에는 HTTP 호출 750회, 확인된 토큰 1,496,620개가 기록돼 있다. 단가와 사용량이 확인된 비용 소계는 4,853.8890원이다. 구형 Luna 18회와 응답 크기 초과 1회는 비용 미확인이다. 초기 중단 실행·연결 확인 등 모든 과거 API 활동을 포함하는 총액은 아니다.
 
 ## 재개 후 검증과 분석
 
-[재개 결과·사용량 원본](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/blob/feature/agent-evaluation-artifacts/docs/agent/evaluations/2026-11-01-resumed-results.json)에 성공과 실패를 모두 합쳤다. 이전 평가 파일은 덮어쓰지 않았다. 재개 보고서 16개는 실제 HTTP 호출 163회, 566,925토큰, 추정 1,789.4697원이며 사용량 미확인은 없다. 이전 보관분과 합친 기록 범위는 913회·확인된 2,063,545토큰·가격 확인 소계 6,643.3586원이다. 기존의 비용 미확인 19회는 그대로 남는다. 서로 다른 입력의 합계이므로 전체 정확도·절감률로 계산하지 않으며 청구서 총액도 아니다.
+[재개 결과·사용량 원본](evaluations/2026-11-01-resumed-results.json)에 성공과 실패를 모두 합쳤다. 이전 평가 파일은 덮어쓰지 않았다. 재개 보고서 16개는 실제 HTTP 호출 163회, 566,925토큰, 추정 1,789.4697원이며 사용량 미확인은 없다. 이전 보관분과 합친 기록 범위는 913회·확인된 2,063,545토큰·가격 확인 소계 6,643.3586원이다. 기존의 비용 미확인 19회는 그대로 남는다. 서로 다른 입력의 합계이므로 전체 정확도·절감률로 계산하지 않으며 청구서 총액도 아니다.
 
 PR 120이 보내는 `[리본이 물어본 것] … / [사장님 답] …` 형식은 질문을 문맥으로만 사용한다. Info의 근거 인용을 답변 구간으로 제한했고, 같은 문구가 질문에 먼저 나와도 실제 답변의 위치를 사용한다. 질문만 인용한 사실·완료 보고는 재작업하거나 차단한다. 프롬프트에는 짧은 설명 한 문장만 더했다. 관련 자동 테스트 7개와 기존 Info 테스트를 합쳐 91개가 통과했다.
 
@@ -490,7 +509,7 @@ PR 120이 보내는 `[리본이 물어본 것] … / [사장님 답] …` 형식
 
 이번 3개 PR 재정리 후에는 평가 원본 디렉터리가 없는 모니터링 Git tree에서 **581개 테스트가 17.45초**, 문서 Tool 포함 Git tree에서 MySQL 통합까지 **619개가 34.00초**에 통과했다. 개별 변경 회귀34개도4.57초에 통과했다. 모니터링18파일·6커밋, 문서 Tool14파일·4커밋, 평가 원본50파일로 겹침 없이 나눴다. 기능 PR에는 docs/agent/evaluations가 없으며 원본 기록은 별도 PR에 그대로 보존한다. 새 커밋과 열린 PR 제목은 [AI]이며 리뷰어를 요청하지 않았다. Ruff·키 미포함·수정 범위·CSV CRLF 기준 diff 검사를 통과했다.
 
-## TODO와 후속 계획
+## 당시 완료 항목과 남은 검증 (2026-11-08 정리)
 
 - [x] Langfuse 역할·모델·effort·실제 토큰 추적과 기간별 집계, 실제 조회 대조.
 - [x] PR 115·118·120 기준 반영과 PR 120 질문/답변 근거 구간 보호.
@@ -502,12 +521,12 @@ PR 120이 보내는 `[리본이 물어본 것] … / [사장님 답] …` 형식
 - [ ] 최종 Info xhigh/high를 동일 공식 자료·코드의 여러 입력·각 3회로 비교. medium 실패 뒤 low는 제외한다.
 - [ ] 합성 스캔 Sol xhigh 필수 값3회 통과를 기준으로 실제 자료 범위를 확대한다. 이후 후보 모델/effort는 같은 품질 기준을 통과해야 비교에 포함한다.
 - [ ] 실제 비식별 고객 서류·촬영 사진·최신 공고 제출 요건과 가림 범위를 팀이 검수.
-- [ ] FE/BE 담당자가 업로드·목록·확인·삭제·다운로드 API와 권한·DB·화면을 연결한 뒤 앱 E2E 검증.
-- [ ] [미머지 PR 119](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/119)의 진단 항목 연동을 담당자와 합의. 미질문 값을 false로 확정하지 않는다.
-- [ ] 세 PR의 팀 검토와 병합. 리뷰 대상은 사용자가 지정하며 이번 작업에서 임의로 리뷰 요청하지 않는다. 자동 병합하지 않는다.
-- [ ] 연결 가능한 Discord 도구가 준비되면 미확인 팀 논의를 대조. 현재 확인 완료로 표시하지 않는다.
+- [x] 업로드·목록·확인·삭제·다운로드 API와 권한·DB·화면 연결 및 모델 대역 브라우저 E2E(#159·#170·#250·#265). 실제 운영·모델 품질 확인은 #240·#271에 남는다.
+- [x] #119의 직원·보험 진단 합의를 #133으로 저장·snapshot에 연결했다. 미질문 값을 false로 확정하지 않으며, 현재 FE 분기 확인은 #266에 반영됐다.
+- [x] 모니터링 #121·문서 Tool #128·평가 원본 #130은 develop에 병합됐다.
+- [ ] 당시 미확인 Discord 논의의 대조 여부는 이 기록만으로 확인하지 못한다.
 
-모니터링으로 실제 비용·실패 분포를 확인하고 Info 재시도 원인과 근거 묶음의 중복을 검토한다. 실제 서류 범위 확대와 API·화면 연동은 별도 작업으로 진행한다. 원래 작업 폴더의 브랜치와 미완료 변경은 그대로 보존했다.
+모니터링으로 실제 비용·실패 분포를 확인하고 Info 재시도 원인과 근거 묶음의 중복을 검토한다. API·화면 연결과 모델 대역 검증은 반영됐으며, 실제 서류 범위 확대와 운영 리허설은 별도로 남는다. 원래 작업 폴더의 브랜치와 미완료 변경은 그대로 보존했다.
 
 ## 재현 방법
 
@@ -533,9 +552,9 @@ PYTHONPATH=backend python backend/scripts/evaluate_agent_roles.py --accuracy --r
 PYTHONPATH=backend python backend/scripts/evaluate_documents.py --safety-only --output eval-runs/safety-new
 ```
 
-정확도 입력 JSON은 #130에서 가져오거나 해당 PR 병합 후 사용한다. `--validate-only`는 모델을 호출하지 않는다. 안전 검사 평가는 현재 공용 모델 설정을 사용하며 위 명령은4입력1회분이다.
+정확도 입력 JSON은 병합된 #130의 [저장소 파일](evaluations/2026-11-02-agent-accuracy-inputs.json)을 사용한다. `--validate-only`는 모델을 호출하지 않는다. 안전 검사 평가는 현재 공용 모델 설정을 사용하며 위 명령은4입력1회분이다.
 
-과거 로컬 모바일 초안의 평가 스크립트는 이번 게시에 포함하지 않는다. 그 측정은 [코드·입력 지문](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/blob/feature/agent-evaluation-artifacts/docs/agent/evaluations/2026-11-01-final-manifest.json)과 원본 요청별 사용량으로 식별하며, 현재 문서 전용 측정과 같은 코드의 직접 비교로 취급하지 않는다. 합성 PDF·가림 PDF·ZIP은 원래 작업 폴더 `eval-runs/agent-optimization-20261101/`와 `eval-runs/agent-optimization-20261102/document-implementation/`에 보존한다. 원본 업로드와 키는 저장소에 추가하지 않는다.
+과거 로컬 모바일 초안의 평가 스크립트는 이번 게시에 포함하지 않는다. 그 측정은 [코드·입력 지문](evaluations/2026-11-01-final-manifest.json)과 원본 요청별 사용량으로 식별하며, 현재 문서 전용 측정과 같은 코드의 직접 비교로 취급하지 않는다. 합성 PDF·가림 PDF·ZIP은 원래 작업 폴더 `eval-runs/agent-optimization-20261101/`와 `eval-runs/agent-optimization-20261102/document-implementation/`에 보존한다. 원본 업로드와 키는 저장소에 추가하지 않는다.
 
 ## 적용 경계
 

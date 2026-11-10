@@ -5,10 +5,18 @@ import { BE_URL, TOKEN_FILE } from '../playwright.config.ts'
 
 const SCOPE_TEXT = '원상복구 범위는 전부이고 철거가 필요합니다. 작업은 아직 시작하지 않았습니다.'
 const PREPARATION_TEXT = '철거 전 사진을 찍고, 업체와 증빙 준비사항을 확인했습니다.'
+// [준비했어요] 버튼이 남기는 고정 문장(RequirementsConfirmation.to_input_text)
+const PREPARATION_BUTTON_TEXT = '준비사항 확인을 마쳤어요.'
 
-// 모델 해석만 합성한다. 후보·검수·저장·새 조회는 실제 Graph/Guard와 격리 MySQL이다.
-test('철거 준비 확인만 저장해도 반영을 알리고 같은 준비 확인을 다시 시키지 않는다', async ({ page, request }) => {
-  const { preparation_member: member } = JSON.parse(readFileSync(TOKEN_FILE, 'utf-8'))
+// 준비 확인 할 일의 기본 입력은 [준비했어요] 버튼이다. 직접 쓰기도 같은 결과여야 한다
+const MODES = [
+  { name: '[준비했어요] 버튼', member: 'preparation_button_member', saved: PREPARATION_BUTTON_TEXT },
+  { name: '직접 쓰기', member: 'preparation_member', saved: PREPARATION_TEXT },
+] as const
+
+// 직접 쓰기는 모델 해석만 합성한다. 버튼은 모델 해석 없이 코드가 받는다. 후보·검수·저장·새 조회는 실제 Graph/Guard와 격리 MySQL이다.
+for (const mode of MODES) test(`철거 준비 확인(${mode.name})만 저장해도 반영을 알리고 같은 준비 확인을 다시 시키지 않는다`, async ({ page, request }) => {
+  const member = JSON.parse(readFileSync(TOKEN_FILE, 'utf-8'))[mode.member]
   const headers = { 'Access-Token': member.access_token }
   const created = await request.post(`${BE_URL}/cases`, { headers, data: {
     business_type: 'CAFE', franchise_status: false, lease_status: 'LEASED_PAID', employee_count: 0,
@@ -36,10 +44,16 @@ test('철거 준비 확인만 저장해도 반영을 알리고 같은 준비 확
   })
 
   await page.goto('/results')
-  await page.getByRole('textbox').fill(PREPARATION_TEXT)
   const sent = page.waitForResponse(response => response.url() === `${BE_URL}/cases/results`
     && response.request().method() === 'POST')
-  await page.getByRole('button', { name: '보내기', exact: true }).click()
+  if (mode.saved === PREPARATION_BUTTON_TEXT) {
+    await expect(page.getByRole('textbox')).toHaveCount(0)
+    await page.getByRole('button', { name: '준비했어요', exact: true }).click()
+  } else {
+    await page.getByRole('button', { name: '직접 쓸게요', exact: true }).click()
+    await page.getByRole('textbox').fill(PREPARATION_TEXT)
+    await page.getByRole('button', { name: '보내기', exact: true }).click()
+  }
   const accepted = await sent
   expect(accepted.ok()).toBe(true)
   const { case_history_id: historyId } = await accepted.json()
@@ -54,7 +68,7 @@ test('철거 준비 확인만 저장해도 반영을 알리고 같은 준비 확
   // 새 DB 세션에서 준비만 반영됐음을 확인한다. 공사 실행·완료·제출은 자동 확정하지 않는다.
   const saved = savedState(historyId)
   expect(saved).toMatchObject({
-    judgment_status: 'DONE', raw_input: PREPARATION_TEXT, restoration_status: 'NOT_STARTED',
+    judgment_status: 'DONE', raw_input: mode.saved, restoration_status: 'NOT_STARTED',
     step_status: 'IN_PROGRESS', requirements_confirmed: true, submitted: false,
     field_changes: 0, progress_changes: 1, conflict_snapshot: null, retained_info_result: null,
   })
