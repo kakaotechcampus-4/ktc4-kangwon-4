@@ -114,8 +114,7 @@ export function ConfirmChangePage() {
           case 'NEEDS_MORE_INFO':
             return leave('/results')
 
-          // 실패하면 서버가 아무것도 바꾸지 않아 충돌이 그대로 남는다. 그래서 홈으로 가면 충돌 카드만
-          // 다시 뜨고 실패 이유는 사라진다(#313). 어느 실패든 여기 머물며 이유를 알린다.
+          // 홈으로 바로 가면 실패 이유가 사라진다(#313). 어느 실패든 여기 머물며 이유를 알린다.
           // 다시 해볼 수 있는 실패만 같은 선택으로 다시 보내게 한다
           case 'FAILED': {
             const { notice } = outcome.state
@@ -347,8 +346,10 @@ function sendNotice(
 /**
  * 다시 해도 풀리지 않는 실패의 이유. 결과 입력의 `failureNotice` 와 같은 나눔이다.
  *
- * "기록은 그대로예요" 를 앞에 둔다 — 실패하면 서버가 충돌을 그대로 남긴다. 결과 입력처럼
- * "지금 상황 화면에서 새로 알려 달라" 고 하지 않는다. 홈에 가도 같은 충돌 카드만 다시 뜬다.
+ * "기록은 그대로예요" 를 앞에 둔다 — 실패해도 고른 값은 저장되지 않는다.
+ *
+ * `NO_RECOVERY` 는 다른 쪽을 고르라고 하지 않는다. 서버가 이 충돌을 정리하고 홈에서 새 상황을
+ * 받는다(#338). 홈 카드의 "새 상황 알려주기" 와 같은 말로 안내한다.
  */
 function failedNotice(notice: Exclude<FailureNotice, { kind: 'RETRY_AVAILABLE' }>): {
   title: string
@@ -358,7 +359,7 @@ function failedNotice(notice: Exclude<FailureNotice, { kind: 'RETRY_AVAILABLE' }
     case 'NO_RECOVERY':
       return {
         title: '고르신 내용으로는 다음 할 일을 정하지 못했어요.',
-        description: '기록은 그대로예요. 다른 쪽을 고르시면 다시 보내실 수 있어요.',
+        description: '기록은 그대로예요. 지금 상황 화면에서 새로 확인한 상황을 알려주실 수 있어요.',
       }
     case 'SERVICE_SIDE':
       return {
