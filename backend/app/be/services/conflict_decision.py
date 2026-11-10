@@ -168,7 +168,7 @@ def _save_decision_outcome(
     #
     #   DONE / NEEDS_MORE_INFO  고른 값 저장 + 충돌 닫기
     #   또 다른 충돌            새 충돌 저장 + 방금 고른 것은 닫기
-    #   실패                    충돌 유지. 단, 낡아 재입력이 필요한 묶음은 미채택으로 정리한다.
+    #   실패                    충돌 유지. 단, 재입력이 필요한 묶음은 미채택으로 정리한다.
     #
     # 되물을 것이 또 생겨도(NEEDS_MORE_INFO) 고른 값은 저장한다. 안 그러면 사장님이 답을
     # 했는데 Case가 그대로라 같은 질문을 또 받는다.
@@ -191,10 +191,9 @@ def _save_decision_outcome(
         return None
 
     if outcome.outcome_type == "SAFE_FAILURE":
-        if (getattr(outcome, "failure_code", None) == "STALE_CONFLICT_CONFIRMATION"
-                and outcome.recovery_action_code == "RESUBMIT_INPUT" and outcome.retryable is False
+        if (outcome.recovery_action_code == "RESUBMIT_INPUT"
                 and history.source == "CONFLICT_DECISION"):
-            if not _prepare_stale_failure(session, history, outcome, choices):
+            if not _prepare_resubmit_failure(session, history, outcome, choices):
                 return None
         decision_record_service.save_safe_failure(session, history, outcome)
         return None
@@ -204,16 +203,15 @@ def _save_decision_outcome(
     )
 
 
-def _prepare_stale_failure(
+def _prepare_resubmit_failure(
     session: Session, history: CaseHistory, outcome: SafeFailureOutcome, choices: dict[int, str]
 ) -> bool:
     """현재 결정이면 실패를 저장한다. 원본 묶음도 일치할 때만 미채택 처리를 함께 준비한다."""
     trigger = outcome.trigger
-    if (outcome.case_id != history.case_id or trigger.trigger_type != "CONFLICT_CONFIRMED"
-            or trigger.input_event_id != str(history.id)):
+    if outcome.case_id != history.case_id or trigger.input_event_id != str(history.id):
         return False
     case = session.get(Case, history.case_id, with_for_update=True, populate_existing=True)
-    if case is None or case.case_status != "IN_PROGRESS":
+    if case is None:
         return False
     session.refresh(history, with_for_update=True)
     latest = session.exec(select(CaseHistory.id).where(CaseHistory.case_id == case.id,
@@ -222,6 +220,8 @@ def _prepare_stale_failure(
     if (history.source != "CONFLICT_DECISION" or history.case_id != case.id
             or history.judgment_status != "PENDING" or latest != history.id):
         return False
+    if case.case_status != "IN_PROGRESS" or trigger.trigger_type != "CONFLICT_CONFIRMED":
+        return True
     # 원본 형식 등이 달라도 현재 판단은 실패로 끝낸다. 충돌 정리만 엄격히 제한한다.
     if trigger.conflict_snapshot is None:
         return True
