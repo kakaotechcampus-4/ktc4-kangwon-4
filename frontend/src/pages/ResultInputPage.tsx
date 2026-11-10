@@ -1,7 +1,13 @@
 import { type ComponentProps, type ReactNode, useEffect, useId, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 
-import { toAnswerInput, toResultSteps, toResultsEntry, toSubmitOutcome } from '../adapters/results'
+import {
+  opensInputAfterProcedures,
+  toAnswerInput,
+  toResultSteps,
+  toResultsEntry,
+  toSubmitOutcome,
+} from '../adapters/results'
 import { Button } from '../components/ui/Button'
 import { HammerLoader } from '../components/ui/HammerLoader'
 import { InfoBox } from '../components/ui/InfoBox'
@@ -12,6 +18,7 @@ import { ApiError, UnauthorizedError } from '../lib/api'
 import { usesMockData } from '../lib/auth'
 import { readMockKey } from '../lib/mockSwitch'
 import {
+  fetchCaseEnvelope,
   fetchResultsEntry,
   MAX_RESULT_LENGTH,
   RESULT_LENGTH_HINT_FROM,
@@ -184,6 +191,14 @@ export function ResultInputPage() {
     if (usesMock) return
     let current = true
 
+    function failLoad(error: unknown) {
+      if (!current) return
+      if (error instanceof UnauthorizedError) return navigate('/login', { replace: true })
+      // Case 가 없다. 진입 분기가 상황 진단으로 보낸다
+      if (error instanceof ApiError && error.status === 404) return navigate('/', { replace: true })
+      setFetched({ status: 'LOAD_FAILED' })
+    }
+
     fetchResultsEntry().then(
       (body) => {
         if (!current) return
@@ -214,6 +229,19 @@ export function ResultInputPage() {
           case 'NEW_INPUT':
             setFetched({ status: 'READY', ask: { kind: 'NEW_INPUT' }, historyId: entry.historyId })
             return
+          // 로드맵에 남은 일(폐업 날짜 등)을 알리러 왔을 수 있다. Case가 아직 진행 중일 때만 빈 글을 연다(#340)
+          case 'PROCEDURES_COMPLETED': {
+            const { historyId } = entry
+            fetchCaseEnvelope().then((envelope) => {
+              if (!current) return
+              if (opensInputAfterProcedures(envelope, historyId)) {
+                setFetched({ status: 'READY', ask: { kind: 'NEW_INPUT' }, historyId })
+              } else {
+                navigate('/case', { replace: true })
+              }
+            }, failLoad)
+            return
+          }
           // 확인을 기다리는 충돌부터 풀어야 한다. 뒤로 가기로 이 화면에 돌아오지 않게 바꿔 낀다
           case 'CONFIRM':
             navigate('/confirm', { replace: true, state: entry.view })
@@ -227,13 +255,7 @@ export function ResultInputPage() {
             return
         }
       },
-      (error: unknown) => {
-        if (!current) return
-        if (error instanceof UnauthorizedError) return navigate('/login', { replace: true })
-        // Case 가 없다. 진입 분기가 상황 진단으로 보낸다
-        if (error instanceof ApiError && error.status === 404) return navigate('/', { replace: true })
-        setFetched({ status: 'LOAD_FAILED' })
-      },
+      failLoad,
     )
 
     return () => {

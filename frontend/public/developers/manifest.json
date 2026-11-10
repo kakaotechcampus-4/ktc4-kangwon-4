@@ -1,0 +1,164 @@
+{
+  "source_revision": "5a8d11ada899409f6514be03dc3bec5ce3f8e267",
+  "checked_at": "2026-11-11T02:30:00+09:00",
+  "maintain_through": "2026-11-11",
+  "pages": [
+    {
+      "id": "home",
+      "title": "문서",
+      "url": "/developers/ko/home/"
+    },
+    {
+      "id": "guide/overview",
+      "title": "서비스 이해하기",
+      "url": "/developers/ko/guide/overview/"
+    },
+    {
+      "id": "guide/quickstart",
+      "title": "개발 환경",
+      "url": "/developers/ko/guide/quickstart/"
+    },
+    {
+      "id": "guide/ui-ux",
+      "title": "화면과 UX",
+      "url": "/developers/ko/guide/ui-ux/"
+    },
+    {
+      "id": "case/common",
+      "title": "상황 진단과 Case",
+      "url": "/developers/ko/case/common/"
+    },
+    {
+      "id": "results/common",
+      "title": "결과 알려주기",
+      "url": "/developers/ko/results/common/"
+    },
+    {
+      "id": "conflicts/common",
+      "title": "충돌 확인",
+      "url": "/developers/ko/conflicts/common/"
+    },
+    {
+      "id": "roadmap/common",
+      "title": "폐업 로드맵",
+      "url": "/developers/ko/roadmap/common/"
+    },
+    {
+      "id": "documents/common",
+      "title": "서류함과 정산 점검",
+      "url": "/developers/ko/documents/common/"
+    },
+    {
+      "id": "logs/common",
+      "title": "작업 기록",
+      "url": "/developers/ko/logs/common/"
+    },
+    {
+      "id": "auth/common",
+      "title": "카카오 로그인 이해하기",
+      "url": "/developers/ko/auth/common/"
+    },
+    {
+      "id": "auth/settings",
+      "title": "카카오 로그인 설정하기",
+      "url": "/developers/ko/auth/settings/"
+    },
+    {
+      "id": "agent/architecture",
+      "title": "AI 실행 구조",
+      "url": "/developers/ko/agent/architecture/"
+    },
+    {
+      "id": "agent/guardrails",
+      "title": "근거와 검수",
+      "url": "/developers/ko/agent/guardrails/"
+    },
+    {
+      "id": "operations/common",
+      "title": "실패와 복구",
+      "url": "/developers/ko/operations/common/"
+    },
+    {
+      "id": "reference/errors",
+      "title": "에러 코드",
+      "url": "/developers/ko/reference/errors/"
+    },
+    {
+      "id": "reference/tests",
+      "title": "테스트 케이스",
+      "url": "/developers/ko/reference/tests/"
+    },
+    {
+      "id": "reference/glossary",
+      "title": "용어집",
+      "url": "/developers/ko/reference/glossary/"
+    },
+    {
+      "id": "reference/changes",
+      "title": "변경 이력",
+      "url": "/developers/ko/reference/changes/"
+    },
+    {
+      "id": "reference/maintenance",
+      "title": "문서 갱신",
+      "url": "/developers/ko/reference/maintenance/"
+    },
+    {
+      "id": "account/common",
+      "title": "내 정보와 로그아웃",
+      "url": "/developers/ko/account/common/"
+    },
+    {
+      "id": "guide/tech-spec",
+      "title": "테크스펙",
+      "url": "/developers/ko/guide/tech-spec/"
+    },
+    {
+      "id": "auth/rest-api",
+      "title": "카카오 로그인 REST API",
+      "url": "/developers/ko/auth/rest-api/"
+    },
+    {
+      "id": "case/rest-api",
+      "title": "Case REST API",
+      "url": "/developers/ko/case/rest-api/"
+    },
+    {
+      "id": "results/rest-api",
+      "title": "결과 알려주기 REST API",
+      "url": "/developers/ko/results/rest-api/"
+    },
+    {
+      "id": "conflicts/rest-api",
+      "title": "충돌 확인 REST API",
+      "url": "/developers/ko/conflicts/rest-api/"
+    },
+    {
+      "id": "roadmap/rest-api",
+      "title": "로드맵 REST API",
+      "url": "/developers/ko/roadmap/rest-api/"
+    },
+    {
+      "id": "documents/rest-api",
+      "title": "서류 REST API",
+      "url": "/developers/ko/documents/rest-api/"
+    },
+    {
+      "id": "logs/rest-api",
+      "title": "기록 REST API",
+      "url": "/developers/ko/logs/rest-api/"
+    },
+    {
+      "id": "operations/rest-api",
+      "title": "복구와 운영 REST API",
+      "url": "/developers/ko/operations/rest-api/"
+    },
+    {
+      "id": "reference/schemas",
+      "title": "타입과 필드",
+      "url": "/developers/ko/reference/schemas/"
+    }
+  ],
+  "api_operations": 24,
+  "roadmap_tasks": 26
+}

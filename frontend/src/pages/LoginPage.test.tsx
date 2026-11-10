@@ -102,4 +102,21 @@ describe('LoginPage', () => {
 
     expect(kakaoButton()).toBeInTheDocument()
   })
+
+  /**
+   * 세 문서는 앱 밖의 정적 문서다. 라우터가 이 주소로 옮기면 모르는 경로라 홈으로 가 버린다.
+   * 브라우저가 문서를 받아 와야 해서, 눌러도 라우터의 위치는 그대로여야 한다
+   */
+  it.each([
+    ['개인정보처리방침', '/safety/policy/'],
+    ['운영철학과 안심 이용', '/safety/'],
+    ['서비스 안내와 개발 문서', '/developers/ko/home/'],
+  ])('%s 링크는 라우터가 아니라 브라우저가 %s 문서를 연다', (name, href) => {
+    const router = renderAt('/login')
+    const link = screen.getByRole('link', { name })
+
+    expect(link).toHaveAttribute('href', href)
+    fireEvent.click(link)
+    expect(router.state.location.pathname).toBe('/login')
+  })
 })

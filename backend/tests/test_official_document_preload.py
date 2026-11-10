@@ -45,7 +45,7 @@ def _start_app(engine, monkeypatch) -> None:
 
     monkeypatch.setattr("app.main.get_engine", lambda: engine)
     monkeypatch.setattr(judgment_service, "get_engine", lambda: engine)
-    monkeypatch.setattr("app.main.get_settings", lambda: SimpleNamespace(ENVIRONMENT="prod"))
+    monkeypatch.setattr("app.main.get_settings", lambda: SimpleNamespace(ENVIRONMENT="prod", DISCORD_ERROR_WEBHOOK_URL=None))
     with TestClient(app):
         pass
 

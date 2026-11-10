@@ -1,4 +1,4 @@
-import type { DiagnosisAnswers } from '../types/view'
+import type { DiagnosisAnswers, DiagnosisBusiness } from '../types/view'
 
 /**
  * 상황 진단 질문 하나의 이름. 주소의 `?step=` 값으로 그대로 쓴다.
@@ -23,6 +23,18 @@ export type DiagnosisStep =
   | 'hadStaff'
   | 'insurance'
   | 'date'
+
+/**
+ * 지금 진단을 받는 업종. 나머지 업종은 첫 질문에 보이기만 하고 "준비 중"으로 막는다(#310).
+ *
+ * 고를 수 있게 두면 Case가 만들어진 뒤 첫 판단이 바로 실패하고, 사장님은 다시 알려 줘도 풀리지 않는
+ * 실패 화면을 만난다. 업종을 열 때는 여기에 더한다 — 프랜차이즈 질문(`franchise`)은 그때를 위해 남겨 둔다.
+ */
+const OPEN_BUSINESSES: readonly DiagnosisBusiness[] = ['PERSONAL_CAFE']
+
+export function isOpenBusiness(business: DiagnosisBusiness | null): boolean {
+  return business !== null && OPEN_BUSINESSES.includes(business)
+}
 
 /**
  * 지금 답으로 물어야 할 질문들을 순서대로.
@@ -62,8 +74,9 @@ export function diagnosisSteps(answers: DiagnosisAnswers): DiagnosisStep[] {
  */
 export function isStepAnswered(step: DiagnosisStep, answers: DiagnosisAnswers): boolean {
   switch (step) {
+    // 막힌 업종을 골라 둔 답이 브라우저에 남아 있어도 답하지 않은 것으로 본다. 첫 질문에서 다시 고른다
     case 'biz':
-      return answers.business !== null
+      return isOpenBusiness(answers.business)
     case 'franchise':
       return answers.franchise !== null
     case 'situ':

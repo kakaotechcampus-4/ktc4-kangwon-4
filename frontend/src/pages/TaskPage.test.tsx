@@ -23,6 +23,7 @@ function envelope(judgment: Partial<CasesEnvelope>) {
     blocker: null,
     next_action: null,
     judgment_status: null,
+    case_history_id: null,
     questions_for_user: null,
     recovery_action_code: null,
     requested_field_paths: null,

@@ -1,6 +1,7 @@
 import { IconCheckmarkFatFill, IconChevronLeftLine, IconPlusLine } from '@karrotmarket/react-monochrome-icon'
 import { useId, useState, type ReactNode } from 'react'
 
+import { Badge } from './Badge'
 import { Button } from './Button'
 
 /** 보기 하나. `emoji`는 `assets/emoji/`에서 가져온 그림 주소다 */
@@ -10,6 +11,10 @@ interface ChoiceOption {
   /** 목록 모양에서 보기 아래 붙는 한 줄 */
   sub?: string
   emoji?: string
+  /** 목록 모양에서 보이기만 하고 고를 수 없는 보기 */
+  disabled?: boolean
+  /** 목록 모양에서 체크 표시 자리에 붙는 짧은 상태 글자. 고를 수 없는 이유를 적는다 */
+  badge?: string
 }
 
 interface StepperRow {
@@ -143,17 +148,28 @@ function Choices({ input, labelledBy }: { input: QuestionInput; labelledBy: stri
               type="button"
               role="radio"
               aria-checked={on}
+              disabled={option.disabled}
               onClick={() => input.onSelect(option.value)}
-              className="press-scale flex min-h-20 cursor-pointer items-center gap-4 rounded-14 px-2 py-2.5 text-left active:bg-bg-transparent-pressed"
+              className={`flex min-h-20 items-center gap-4 rounded-14 px-2 py-2.5 text-left ${
+                option.disabled
+                  ? 'cursor-not-allowed text-fg-disabled'
+                  : 'press-scale cursor-pointer active:bg-bg-transparent-pressed'
+              }`}
             >
               <span className="grid size-15 shrink-0 place-items-center rounded-full bg-bg-neutral-weak">
-                {option.emoji && <img src={option.emoji} alt="" className="size-8.5" />}
+                {option.emoji && (
+                  <img src={option.emoji} alt="" className={`size-8.5 ${option.disabled ? 'opacity-40' : ''}`} />
+                )}
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block text-19 font-bold">{option.label}</span>
-                {option.sub && <span className="mt-0.5 block text-15 text-fg-neutral-subtle">{option.sub}</span>}
+                {option.sub && (
+                  <span className={`mt-0.5 block text-15 ${option.disabled ? '' : 'text-fg-neutral-subtle'}`}>
+                    {option.sub}
+                  </span>
+                )}
               </span>
-              <CheckDot on={on} size="md" />
+              {option.badge ? <Badge>{option.badge}</Badge> : <CheckDot on={on} size="md" />}
             </button>
           )
         })}

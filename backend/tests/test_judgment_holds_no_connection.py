@@ -49,7 +49,7 @@ def isolated_lifespan(case_engine, monkeypatch):  # noqa: F811
     # get_db 교체는 startup에 적용되지 않는다. 같은 격리 DB를 쓰고 개발 DB 초기화를 막는다.
     monkeypatch.setattr("app.main.get_engine", lambda: case_engine)
     monkeypatch.setattr(judgment_service, "get_engine", lambda: case_engine)
-    monkeypatch.setattr("app.main.get_settings", lambda: SimpleNamespace(ENVIRONMENT="prod"))
+    monkeypatch.setattr("app.main.get_settings", lambda: SimpleNamespace(ENVIRONMENT="prod", DISCORD_ERROR_WEBHOOK_URL=None))
 
 
 @pytest.fixture

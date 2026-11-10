@@ -260,3 +260,28 @@ describe('MyInfoPage — 로그아웃', () => {
     expect(screen.getByRole('button', { name: '로그아웃' })).toBeEnabled()
   })
 })
+
+/**
+ * 개인정보처리방침은 가게 정보를 못 불러왔거나 가게가 없어도 볼 수 있어야 한다.
+ * 앱 밖 정적 문서라 라우터가 아니라 브라우저가 열어야 한다 — 눌러도 라우터 위치는 그대로다
+ */
+describe('MyInfoPage — 안내 문서 링크', () => {
+  it.each([
+    ['가게 정보가 있을 때', () => ok(envelope(SERVER_CASE)), '로그아웃'],
+    ['가게가 없을 때', () => ok(envelope(null)), '상황 진단하기'],
+    ['불러오지 못했을 때', () => failing, '다시 불러오기'],
+  ])('%s도 아래에 문서 링크를 둔다', async (_, answer, ready) => {
+    saveTokens('access-1', 'refresh-1')
+    serve([answer()])
+    const router = renderAt('/mypage')
+
+    await screen.findByRole('button', { name: ready })
+    const links = within(screen.getByRole('navigation', { name: '안내 문서' }))
+    expect(links.getByRole('link', { name: '개인정보처리방침' })).toHaveAttribute('href', '/safety/policy/')
+    expect(links.getByRole('link', { name: '운영철학과 안심 이용' })).toHaveAttribute('href', '/safety/')
+    expect(links.getByRole('link', { name: '서비스 안내와 개발 문서' })).toHaveAttribute('href', '/developers/ko/home/')
+
+    fireEvent.click(links.getByRole('link', { name: '개인정보처리방침' }))
+    expect(router.state.location.pathname).toBe('/mypage')
+  })
+})

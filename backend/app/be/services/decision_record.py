@@ -322,6 +322,13 @@ def save_safe_failure(session: Session, history: CaseHistory, outcome: SafeFailu
     history.retryable = outcome.retryable
     history.requested_field_paths = [field.value for field in outcome.requested_field_paths]
     session.commit()
+    # 사장님이 다시 하거나 더 알려 주면 풀리는 실패는 서버 로그에만 남긴다. 그 밖(CONTACT_SUPPORT 등)은
+    # 사장님이 빠져나올 수 없어 우리가 먼저 알아야 하므로 ERROR로 남겨 Discord 알림이 가게 한다(#334).
+    # 번호와 코드만 남기고 사장님 글은 넣지 않는다.
+    # 알림은 문구 틀이 같으면 1분에 한 번만 간다. 코드는 틀에 넣어 다른 실패가 앞 실패에 묻히지 않게 하고,
+    # 판단 번호만 %s로 두어 같은 실패는 한 번만 오게 한다(승준님 #331)
+    level = logging.WARNING if outcome.recovery_action_code in ("RETRY", "RESUBMIT_INPUT") else logging.ERROR
+    logger.log(level, f"case_history %s 판단 실패: {outcome.failure_code} / {outcome.recovery_action_code}", history.id)
 
 
 def mark_judgment_failed(session: Session, case_history_id: int, error: Exception | None = None) -> None:

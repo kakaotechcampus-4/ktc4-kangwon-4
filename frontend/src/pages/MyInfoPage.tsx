@@ -3,6 +3,7 @@ import { type ReactNode, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 
 import { Button } from '../components/ui/Button'
+import { DocLinks } from '../components/ui/DocLinks'
 import { EmptyState } from '../components/ui/EmptyState'
 import { HammerLoader } from '../components/ui/HammerLoader'
 import { TopBar } from '../components/ui/TopBar'
@@ -179,12 +180,18 @@ function FactRow({ fact }: { fact: Fact }) {
   )
 }
 
-/** 탭 없는 화면의 틀. 뒤로 버튼과 제목을 둔다 */
+/**
+ * 탭 없는 화면의 틀. 뒤로 버튼과 제목을 두고, 맨 아래에 안내 문서 링크를 둔다.
+ * 불러오는 중 · 실패 · 가게 없음에서도 개인정보처리방침은 볼 수 있어야 해서 틀에 둔다
+ */
 function MyInfoFrame({ children }: { children: ReactNode }) {
   return (
     <div className="screen-frame mx-auto flex min-h-dvh max-w-[402px] flex-col bg-bg-layer-default">
       <TopBar title="내 정보" />
       {children}
+      <div className="mt-auto px-4 pb-6">
+        <DocLinks />
+      </div>
     </div>
   )
 }

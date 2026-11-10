@@ -1,0 +1,222 @@
+"""서버 ERROR 로그를 Discord로 알릴 때, 개인정보를 빼고 몰린 오류는 한 번만 보내는지.
+
+실제 Discord는 부르지 않는다.
+"""
+
+import logging
+
+import pytest
+
+from app.common import error_alert
+from app.common.error_alert import DiscordErrorHandler, install_error_alert
+
+
+@pytest.fixture
+def clean_loggers():
+    """설치한 핸들러가 다른 테스트로 새지 않게 원래대로 돌려놓는다."""
+    loggers = [logging.getLogger("app"), logging.getLogger("uvicorn.error")]
+    before = [list(logger.handlers) for logger in loggers]
+    yield
+    for logger, handlers in zip(loggers, before):
+        logger.handlers = handlers
+
+
+@pytest.fixture
+def sent(monkeypatch):
+    """보내는 대신 내용만 모은다. 스레드도 바로 실행해 결과를 곧장 본다."""
+    contents = []
+    monkeypatch.setattr(DiscordErrorHandler, "_send", lambda self, content: contents.append(content))
+
+    class RunNow:
+        def __init__(self, target, args, daemon):
+            self._run = lambda: target(*args)
+
+        def start(self):
+            self._run()
+
+    monkeypatch.setattr(error_alert.threading, "Thread", RunNow)
+    return contents
+
+
+def _error_record(message, *args, error=None):
+    exc_info = None
+    if error is not None:
+        try:
+            raise error
+        except type(error):
+            import sys
+            exc_info = sys.exc_info()
+    return logging.LogRecord("app.be.services.judgment", logging.ERROR, __file__, 1, message, args, exc_info)
+
+
+def test_without_webhook_nothing_is_installed(clean_loggers):
+    handlers = list(logging.getLogger("app").handlers)
+
+    assert install_error_alert(None, "prod") is None
+    assert install_error_alert("", "prod") is None
+    assert logging.getLogger("app").handlers == handlers
+
+
+def test_alert_keeps_our_line_and_error_name_but_not_the_error_message(monkeypatch):
+    monkeypatch.setenv("APP_VERSION", "6b9b810")
+    handler = DiscordErrorHandler("https://discord.invalid/webhook", "prod")
+
+    # 예외 메시지에는 사장님 글이 섞일 수 있다. 오류 종류 이름만 보낸다
+    content = handler.format_alert(_error_record("case_history %s 판단 실패", 85, error=ValueError("사장님이 쓴 글")))
+
+    assert "case_history 85 판단 실패 (ValueError)" in content
+    assert "[prod 6b9b810] app.be.services.judgment" in content
+    assert "사장님이 쓴 글" not in content
+
+
+def test_same_error_is_sent_once_a_minute(sent):
+    handler = DiscordErrorHandler("https://discord.invalid/webhook", "prod")
+
+    handler.emit(_error_record("case_history %s 판단 실패", 85, error=ValueError()))
+    handler.emit(_error_record("case_history %s 판단 실패", 86, error=ValueError()))
+    handler.emit(_error_record("서류 처리 실패", error=ValueError()))
+
+    # 같은 자리의 같은 오류는 판단 번호가 달라도 한 번만, 다른 자리 오류는 따로 보낸다
+    assert len(sent) == 2
+
+
+def test_installing_keeps_warnings_in_the_server_log_and_alerts_errors_once(clean_loggers, sent, capsys):
+    handler = install_error_alert("https://discord.invalid/webhook", "prod")
+    # 다시 시작해도 두 번 달리지 않는다
+    assert install_error_alert("https://discord.invalid/webhook", "prod") is handler
+
+    logging.getLogger("app.be.services.auth").warning("카카오 토큰 요청 거절: %s", 400)
+    logging.getLogger("app.be.services.judgment").error("case_history %s 판단 실패", 85)
+
+    # 핸들러를 달면 파이썬 기본 출력이 꺼진다. 경고도 오류도 그대로 서버 로그에 남아야 한다
+    stderr = capsys.readouterr().err
+    assert "카카오 토큰 요청 거절: 400" in stderr
+    assert "case_history 85 판단 실패" in stderr
+    # Discord에는 ERROR만 간다
+    assert len(sent) == 1 and "case_history 85 판단 실패" in sent[0]
+
+
+def _crash_in_case():
+    raise ValueError("사장님이 쓴 글")
+
+
+def _crash_in_document():
+    raise ValueError("사장님이 쓴 글")
+
+
+def _unhandled_500(crash):
+    """처리되지 않은 500이 나면 uvicorn이 남기는 줄과 같은 모양으로 남긴다."""
+    try:
+        crash()
+    except ValueError:
+        logging.getLogger("uvicorn.error").error("Exception in ASGI application\n", exc_info=True)
+
+
+def test_unhandled_500s_from_different_places_are_alerted_separately_with_where(clean_loggers, sent):
+    install_error_alert("https://discord.invalid/webhook", "prod")
+
+    _unhandled_500(_crash_in_case)
+    _unhandled_500(_crash_in_document)
+    _unhandled_500(_crash_in_case)
+
+    # 문구가 늘 같아도 터진 자리가 다르면 따로 보내고, 같은 자리는 1분에 한 번만 보낸다
+    assert len(sent) == 2
+    assert all(content.startswith("🚨 [prod") and "uvicorn.error" in content for content in sent)
+    assert "위치: " in sent[0] and sent[0].split("위치: ")[1] != sent[1].split("위치: ")[1]
+    assert all("사장님이 쓴 글" not in content for content in sent)
+
+
+def test_a_broken_alert_does_not_break_the_caller(sent):
+    handler = DiscordErrorHandler("https://discord.invalid/webhook", "prod")
+    handler.handleError = lambda record: None
+    logger = logging.getLogger("app.alert_broken")
+    # pytest가 붙인 로그 수집도 같은 줄에서 터지므로, 이 핸들러만 보게 한다
+    logger.propagate = False
+    logger.addHandler(handler)
+    try:
+        # 인자 수가 안 맞아 메시지를 만들다 터져도, 로그를 부른 쪽으로 올라가지 않는다
+        logger.error("case_history %s %s 판단 실패", 85)
+    finally:
+        logger.removeHandler(handler)
+        logger.propagate = True
+
+    assert sent == []
+
+
+def test_startup_failure_sends_only_the_error_name_not_the_stack():
+    handler = DiscordErrorHandler("https://discord.invalid/webhook", "prod")
+    # uvicorn은 시작 실패를 traceback.format_exc() 글자 그대로 남긴다(exc_info 없음)
+    try:
+        raise ConnectionError("사장님이 쓴 글")
+    except ConnectionError:
+        import traceback
+        # SQLAlchemy는 스택 끝에 안내 줄을 한 줄 더 붙인다
+        stack = traceback.format_exc() + "(Background on this error at: https://sqlalche.me/e/20/e3q8)\n"
+    record = logging.LogRecord("uvicorn.error", logging.ERROR, __file__, 1, stack, None, None)
+
+    content = handler.format_alert(record)
+
+    assert "서버 시작 중 오류 (ConnectionError)" in content
+    assert "Traceback" not in content and "File " not in content and "사장님이 쓴 글" not in content
+
+
+def test_only_the_first_line_of_a_message_is_sent():
+    handler = DiscordErrorHandler("https://discord.invalid/webhook", "prod")
+
+    content = handler.format_alert(_error_record("case_history %s 판단 실패\n%s", 85, "사장님이 쓴 글"))
+
+    assert "case_history 85 판단 실패" in content and "사장님이 쓴 글" not in content
+
+
+@pytest.mark.parametrize(
+    ("recovery", "level"),
+    [("CONTACT_SUPPORT", logging.ERROR), ("NONE", logging.ERROR),
+     ("RETRY", logging.WARNING), ("RESUBMIT_INPUT", logging.WARNING)],
+)
+def test_ai_failures_the_owner_cannot_fix_are_logged_as_errors(caplog, recovery, level):
+    """AI가 실패로 끝낸 판단(save_safe_failure)은 예외가 아니라 로그가 없었다. 사장님이 빠져나올 수 없는 실패만 알린다."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from app.agent.schemas import SafeFailureOutcome
+    from app.be.services import decision_record
+
+    outcome = SafeFailureOutcome.model_construct(
+        failure_code="STRUCTURED_OUTPUT_FAILED", recovery_action_code=recovery,
+        retryable=recovery == "RETRY", requested_field_paths=[],
+    )
+    with caplog.at_level(logging.WARNING, logger="app.be.services.decision_record"):
+        decision_record.save_safe_failure(MagicMock(), SimpleNamespace(id=85), outcome)
+
+    [record] = [r for r in caplog.records if r.name == "app.be.services.decision_record"]
+    assert record.levelno == level
+    assert record.getMessage() == f"case_history 85 판단 실패: STRUCTURED_OUTPUT_FAILED / {recovery}"
+
+
+def test_different_ai_failures_are_alerted_separately_and_the_same_one_once(sent):
+    """AI 실패 로그는 예외가 없어 위치로 갈리지 않는다. 다른 실패가 앞 실패에 묻히면 안 된다(승준님 #331)."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from app.agent.schemas import SafeFailureOutcome
+    from app.be.services import decision_record
+
+    handler = DiscordErrorHandler("https://discord.invalid/webhook", "prod")
+    logger = logging.getLogger("app.be.services.decision_record")
+    logger.addHandler(handler)
+    try:
+        for history_id, failure, recovery in [
+            (85, "STRUCTURED_OUTPUT_FAILED", "NONE"),
+            (86, "COMPONENT_UNAVAILABLE", "CONTACT_SUPPORT"),
+            (87, "STRUCTURED_OUTPUT_FAILED", "NONE"),
+        ]:
+            outcome = SafeFailureOutcome.model_construct(
+                failure_code=failure, recovery_action_code=recovery, retryable=False, requested_field_paths=[],
+            )
+            decision_record.save_safe_failure(MagicMock(), SimpleNamespace(id=history_id), outcome)
+    finally:
+        logger.removeHandler(handler)
+
+    # 다른 코드는 따로 보내고, 같은 코드는 판단 번호가 달라도 1분에 한 번만 보낸다
+    assert len(sent) == 2
+    assert "STRUCTURED_OUTPUT_FAILED / NONE" in sent[0] and "COMPONENT_UNAVAILABLE / CONTACT_SUPPORT" in sent[1]

@@ -4,6 +4,7 @@ import type {
   CaseResultsSubmitAcceptedResponse,
   CaseResultsSubmitRequest,
   CaseResultsSubmitResponse,
+  CasesEnvelope,
   ActionDone,
   RestorationAnswer,
   RestorationStatusAnswer,
@@ -48,6 +49,15 @@ export async function fetchResultsEntry(): Promise<CaseResultsEntryResponse | nu
   const response = await request('/cases/results')
   // 본문이 `null` 일 수 있다고 타입에 드러낸다. 어댑터가 그 경우를 빠뜨리면 컴파일에서 막힌다
   return (await response.json()) as CaseResultsEntryResponse | null
+}
+
+/**
+ * 지금 Case와 판단. 절차 안내를 마친 뒤 남은 일을 받아도 되는지 볼 때 한 번 부른다(#340).
+ * 계속 지켜볼 것이 아니라 `useCase` 대신 한 번만 묻는다.
+ */
+export async function fetchCaseEnvelope(): Promise<CasesEnvelope | null> {
+  const response = await request('/cases')
+  return (await response.json()) as CasesEnvelope | null
 }
 
 /**
