@@ -90,7 +90,7 @@ export function LoginPage() {
           <a href="/safety/" className="inline-flex min-h-11 items-center px-2 underline underline-offset-4">
             운영철학과 안심 이용
           </a>
-          <a href="/developers/" className="inline-flex min-h-11 items-center px-2 underline underline-offset-4">
+          <a href="/developers/ko/home/" className="inline-flex min-h-11 items-center px-2 underline underline-offset-4">
             서비스 안내와 개발 문서
           </a>
         </div>
