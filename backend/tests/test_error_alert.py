@@ -191,3 +191,32 @@ def test_ai_failures_the_owner_cannot_fix_are_logged_as_errors(caplog, recovery,
     [record] = [r for r in caplog.records if r.name == "app.be.services.decision_record"]
     assert record.levelno == level
     assert record.getMessage() == f"case_history 85 판단 실패: STRUCTURED_OUTPUT_FAILED / {recovery}"
+
+
+def test_different_ai_failures_are_alerted_separately_and_the_same_one_once(sent):
+    """AI 실패 로그는 예외가 없어 위치로 갈리지 않는다. 다른 실패가 앞 실패에 묻히면 안 된다(승준님 #331)."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from app.agent.schemas import SafeFailureOutcome
+    from app.be.services import decision_record
+
+    handler = DiscordErrorHandler("https://discord.invalid/webhook", "prod")
+    logger = logging.getLogger("app.be.services.decision_record")
+    logger.addHandler(handler)
+    try:
+        for history_id, failure, recovery in [
+            (85, "STRUCTURED_OUTPUT_FAILED", "NONE"),
+            (86, "COMPONENT_UNAVAILABLE", "CONTACT_SUPPORT"),
+            (87, "STRUCTURED_OUTPUT_FAILED", "NONE"),
+        ]:
+            outcome = SafeFailureOutcome.model_construct(
+                failure_code=failure, recovery_action_code=recovery, retryable=False, requested_field_paths=[],
+            )
+            decision_record.save_safe_failure(MagicMock(), SimpleNamespace(id=history_id), outcome)
+    finally:
+        logger.removeHandler(handler)
+
+    # 다른 코드는 따로 보내고, 같은 코드는 판단 번호가 달라도 1분에 한 번만 보낸다
+    assert len(sent) == 2
+    assert "STRUCTURED_OUTPUT_FAILED / NONE" in sent[0] and "COMPONENT_UNAVAILABLE / CONTACT_SUPPORT" in sent[1]
