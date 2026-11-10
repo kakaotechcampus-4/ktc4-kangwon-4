@@ -5,6 +5,22 @@
       "destination": "https://reborn-ktc.duckdns.org/$1"
     },
     {
+      "source": "/safety",
+      "destination": "/safety/index.html"
+    },
+    {
+      "source": "/safety/:page",
+      "destination": "/safety/:page/index.html"
+    },
+    {
+      "source": "/developers",
+      "destination": "/developers/index.html"
+    },
+    {
+      "source": "/developers/ko/:path*",
+      "destination": "/developers/ko/:path*/index.html"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
