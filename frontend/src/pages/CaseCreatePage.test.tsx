@@ -260,4 +260,44 @@ describe('CaseCreatePage', () => {
     expect(await screen.findByRole('radio', { name: /개인 카페/ })).toBeChecked()
     expect(router.state.location.pathname).toBe('/cases/new')
   })
+
+  /**
+   * 개인 카페만 진단을 받는다(#310). 다른 업종을 고르게 두면 Case가 만들어진 뒤 첫 판단이 바로
+   * 실패하고, 사장님은 다시 알려 줘도 풀리지 않는 실패 화면을 만난다
+   */
+  describe('진단을 받지 않는 업종', () => {
+    it.each([/프랜차이즈 카페/, /다른 음식점/])('%s 는 준비 중으로 보이고 고를 수 없다', async (name) => {
+      saveTokens('access-1', 'refresh-1')
+      mockServer(200)
+      renderPage()
+
+      const option = await screen.findByRole('radio', { name })
+      expect(option).toHaveAccessibleName(/준비 중/)
+      expect(option).toBeDisabled()
+      fireEvent.click(option)
+
+      expect(option).not.toBeChecked()
+      expect(screen.getByRole('button', { name: '다음' })).toBeDisabled()
+    })
+
+    /** 막기 전에 골라 둔 답이 브라우저에 남아 있을 수 있다. 그대로 보내면 같은 실패가 난다 */
+    it('막힌 업종을 골라 둔 답이 남아 있으면 첫 질문에서 다시 고르게 한다', async () => {
+      saveTokens('access-1', 'refresh-1')
+      const fetchMock = mockServer(200)
+      useDiagnosisStore.getState().setAnswers({
+        business: 'RESTAURANT',
+        franchise: false,
+        situations: [],
+        hadEmployees: false,
+        insurances: [],
+        closure: 'UNDECIDED',
+      })
+      const router = renderPage('/cases/new?step=date')
+
+      expect(await screen.findByRole('radio', { name: /개인 카페/ })).not.toBeChecked()
+      expect(router.state.location.search).toBe('?step=biz')
+      expect(screen.getByRole('button', { name: '다음' })).toBeDisabled()
+      expect(postBody(fetchMock)).toBeUndefined()
+    })
+  })
 })

@@ -24,7 +24,13 @@ import { useCase } from '../hooks/useCase'
 import { ApiError, request, UnauthorizedError } from '../lib/api'
 import { usesMockData } from '../lib/auth'
 import { readMockKey } from '../lib/mockSwitch'
-import { diagnosisSteps, isStepAnswered, reachableStep, type DiagnosisStep } from '../lib/diagnosisSteps'
+import {
+  diagnosisSteps,
+  isOpenBusiness,
+  isStepAnswered,
+  reachableStep,
+  type DiagnosisStep,
+} from '../lib/diagnosisSteps'
 import { useDiagnosisStore } from '../stores/useDiagnosisStore'
 import type { DiagnosisAnswers } from '../types/view'
 
@@ -67,11 +73,15 @@ function questionOf(
         sub: '업종마다 신고할 곳이 달라요',
         input: {
           type: 'list',
-          options: [
-            { value: 'PERSONAL_CAFE', label: '개인 카페', sub: '직접 차려서 운영해요', emoji: coffeeUrl },
-            { value: 'FRANCHISE_CAFE', label: '프랜차이즈 카페', sub: '본사와 가맹 계약이 있어요', emoji: franchiseUrl },
-            { value: 'RESTAURANT', label: '다른 음식점', sub: '식당, 분식, 빵집 등', emoji: noodleUrl },
-          ],
+          options: (
+            [
+              { value: 'PERSONAL_CAFE', label: '개인 카페', sub: '직접 차려서 운영해요', emoji: coffeeUrl },
+              { value: 'FRANCHISE_CAFE', label: '프랜차이즈 카페', sub: '본사와 가맹 계약이 있어요', emoji: franchiseUrl },
+              { value: 'RESTAURANT', label: '다른 음식점', sub: '식당, 분식, 빵집 등', emoji: noodleUrl },
+            ] as const
+          ).map((option) =>
+            isOpenBusiness(option.value) ? option : { ...option, disabled: true, badge: '준비 중' },
+          ),
           selected: answers.business,
           onSelect: (value) => setAnswers({ business: value as DiagnosisAnswers['business'] }),
         },
