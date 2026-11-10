@@ -168,7 +168,7 @@ def _save_decision_outcome(
     #
     #   DONE / NEEDS_MORE_INFO  고른 값 저장 + 충돌 닫기
     #   또 다른 충돌            새 충돌 저장 + 방금 고른 것은 닫기
-    #   실패                    충돌 유지. 단, 재입력이 필요한 묶음은 미채택으로 정리한다.
+    #   실패                    충돌 유지. 단, 새 글로 이어지는 묶음은 미채택으로 정리한다.
     #
     # 되물을 것이 또 생겨도(NEEDS_MORE_INFO) 고른 값은 저장한다. 안 그러면 사장님이 답을
     # 했는데 Case가 그대로라 같은 질문을 또 받는다.
@@ -191,7 +191,8 @@ def _save_decision_outcome(
         return None
 
     if outcome.outcome_type == "SAFE_FAILURE":
-        if (outcome.recovery_action_code == "RESUBMIT_INPUT"
+        # NONE도 같은 판단 재시도는 막지만, 홈의 '새 상황 알려주기'까지 막지는 않는다.
+        if (outcome.recovery_action_code in {"RESUBMIT_INPUT", "NONE"}
                 and history.source == "CONFLICT_DECISION"):
             if not _prepare_resubmit_failure(session, history, outcome, choices):
                 return None

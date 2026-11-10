@@ -444,13 +444,17 @@ def stale_failure_case(engine):
 
 
 @pytest.mark.parametrize("side", ["PROPOSED", "STORED"])
-@pytest.mark.parametrize("code,fields", [
-    ("STALE_CONFLICT_CONFIRMATION", []), ("COMPONENT_UNAVAILABLE", ["employee_count"]),
+@pytest.mark.parametrize("code,recovery,fields", [
+    ("STALE_CONFLICT_CONFIRMATION", "RESUBMIT_INPUT", []),
+    ("COMPONENT_UNAVAILABLE", "RESUBMIT_INPUT", ["employee_count"]),
+    ("STRUCTURED_OUTPUT_FAILED", "NONE", []),
+    ("LOOP_LIMIT_REACHED", "NONE", []),
 ])
-def test_resubmit_failure_keeps_original_data_and_opens_new_text(mysql_engine, monkeypatch, side, code, fields):
+def test_new_input_failure_keeps_original_data_and_opens_new_text(mysql_engine, monkeypatch, side, code, recovery, fields):
     case_id, history_id, conflict_id, outcome = stale_failure_case(mysql_engine)
     outcome = SafeFailureOutcome.model_validate(outcome.model_dump(mode="python") | {
-        "failure_code": code, "message_code": code, "requested_field_paths": fields,
+        "failure_code": code, "message_code": code, "recovery_action_code": recovery,
+        "requested_field_paths": fields,
     })
     with Session(mysql_engine) as session:
         case = session.get(Case, case_id)
@@ -473,7 +477,7 @@ def test_resubmit_failure_keeps_original_data_and_opens_new_text(mysql_engine, m
         assert client.get("/cases").json()["judgment_status"] == "FAILED"
         entry = client.get("/cases/results").json()
         assert (entry["judgment_status"], entry["recovery_action_code"], entry["case_history_id"]) == (
-            "FAILED", "RESUBMIT_INPUT", history_id)
+            "FAILED", recovery, history_id)
         assert entry["requested_field_paths"] == fields
         status = client.get("/cases/results/status", params={"case_history_id": history_id}).json()
         assert status["result"] == "FAILED" and status["retryable"] is False
@@ -490,14 +494,16 @@ def test_resubmit_failure_keeps_original_data_and_opens_new_text(mysql_engine, m
         assert [row.model_dump() for row in case.case_procedure_steps] == original_progress
         failed = session.get(CaseHistory, history_id)
         assert (failed.judgment_status, failed.failure_code, failed.recovery_action_code) == (
-            "FAILED", code, "RESUBMIT_INPUT")
+            "FAILED", code, recovery)
         assert failed.requested_field_paths == fields
         assert session.get(CaseHistory, response.json()["case_history_id"]).judgment_status == "PENDING"
 
 
+@pytest.mark.parametrize("recovery", ["RESUBMIT_INPUT", "NONE"])
 @pytest.mark.parametrize("bad", ["case", "event", "ids", "batch", "resolved", "done", "newer", "snapshot", "payload", "retained", "legacy"])
-def test_stale_failure_target_and_cleanup_guards_are_independent(mysql_engine, bad):
+def test_stale_failure_target_and_cleanup_guards_are_independent(mysql_engine, bad, recovery):
     case_id, history_id, conflict_id, outcome = stale_failure_case(mysql_engine)
+    outcome = outcome.model_copy(update={"recovery_action_code": recovery})
     choices = {conflict_id: "PROPOSED"}
     with Session(mysql_engine) as session:
         history, row = session.get(CaseHistory, history_id), session.get(ConflictReference, conflict_id)
@@ -536,14 +542,14 @@ def test_stale_failure_target_and_cleanup_guards_are_independent(mysql_engine, b
             assert saved.model_dump() == original_history
         else:
             assert (saved.judgment_status, saved.failure_code, saved.recovery_action_code) == (
-                "FAILED", "STALE_CONFLICT_CONFIRMATION", "RESUBMIT_INPUT")
+                "FAILED", "STALE_CONFLICT_CONFIRMATION", recovery)
         assert session.get(CaseHistory, original_origin["id"]).model_dump() == original_origin
         assert [row.model_dump() for row in session.exec(select(ConflictReference).where(ConflictReference.case_id == case_id)).all()] == original_rows
 
 
 @pytest.mark.parametrize("code,recovery", [
     ("STALE_CONFLICT_CONFIRMATION", "RETRY"),
-    ("STALE_CONFLICT_CONFIRMATION", "CONTACT_SUPPORT"), ("STALE_CONFLICT_CONFIRMATION", "NONE"),
+    ("STALE_CONFLICT_CONFIRMATION", "CONTACT_SUPPORT"),
 ])
 def test_other_failures_keep_the_conflict_pending(mysql_engine, code, recovery):
     _, history_id, conflict_id, outcome = stale_failure_case(mysql_engine)
@@ -595,8 +601,10 @@ def test_cleanup_conditions_do_not_hide_current_failure_or_overwrite_late_result
         assert session.get(ConflictReference, conflict_id).model_dump() == original_conflict
 
 
-def test_stale_cleanup_and_failure_record_roll_back_together(mysql_engine, monkeypatch):
+@pytest.mark.parametrize("recovery", ["RESUBMIT_INPUT", "NONE"])
+def test_stale_cleanup_and_failure_record_roll_back_together(mysql_engine, monkeypatch, recovery):
     _, history_id, conflict_id, outcome = stale_failure_case(mysql_engine)
+    outcome = outcome.model_copy(update={"recovery_action_code": recovery})
     resolve = decision_record_service._resolve_conflicts
     def interrupted(*args):
         resolve(*args)
