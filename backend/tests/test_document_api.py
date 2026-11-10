@@ -495,7 +495,6 @@ def test_confirmed_document_can_be_confirmed_again_and_clears_the_check(api):
     # 1. 보낸 사람을 한 글자 틀리게 확인한다. 점검이 신청인과 다르다고 잡는다
     typo = client.post(confirm_url, json={"kind": "TRANSFER", "confirmed_fields": {**correct, "sender": "김리폰"}})
     assert typo.status_code == 200
-    assert not typo.json()["documents"][0]["needs_confirmation"] or True
     issues = client.post("/cases/documents/check", json=OWNER).json()["check"]
     assert issues["status"] == "ISSUES"
     assert "APPLICANT_MISMATCH" in {issue["code"] for issue in issues["issues"]}
