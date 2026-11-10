@@ -112,4 +112,21 @@
     if (location.hash !== link.hash) history.pushState(null, '', link.hash)
     if (target.hasAttribute('tabindex')) target.focus({ preventScroll: true })
   })
+  // 첫 화면 카드는 화면에 들어올 때 아래에서 올라온다. 숨기는 class는 스크립트가 붙이므로
+  // 스크립트가 돌지 않거나 움직임 줄이기를 켠 사람에게는 카드가 처음부터 그대로 보인다
+  const panels = document.body.dataset.page === 'home' ? [...document.querySelectorAll('.feature-panel')] : []
+  if (panels.length && 'IntersectionObserver' in window && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    document.documentElement.classList.add('reveal-ready')
+    const observer = new IntersectionObserver(entries => {
+      // 한 번에 건너뛰어(맨 아래로, 새로고침 복원) 지나친 위쪽 카드도 같이 보이게 한다
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue
+        for (const panel of panels.slice(0, panels.indexOf(entry.target) + 1)) {
+          panel.classList.add('is-visible')
+          observer.unobserve(panel)
+        }
+      }
+    }, { threshold: 0.15 })
+    panels.forEach(panel => observer.observe(panel))
+  }
 })()
