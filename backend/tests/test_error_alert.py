@@ -166,3 +166,28 @@ def test_only_the_first_line_of_a_message_is_sent():
     content = handler.format_alert(_error_record("case_history %s 판단 실패\n%s", 85, "사장님이 쓴 글"))
 
     assert "case_history 85 판단 실패" in content and "사장님이 쓴 글" not in content
+
+
+@pytest.mark.parametrize(
+    ("recovery", "level"),
+    [("CONTACT_SUPPORT", logging.ERROR), ("NONE", logging.ERROR),
+     ("RETRY", logging.WARNING), ("RESUBMIT_INPUT", logging.WARNING)],
+)
+def test_ai_failures_the_owner_cannot_fix_are_logged_as_errors(caplog, recovery, level):
+    """AI가 실패로 끝낸 판단(save_safe_failure)은 예외가 아니라 로그가 없었다. 사장님이 빠져나올 수 없는 실패만 알린다."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from app.agent.schemas import SafeFailureOutcome
+    from app.be.services import decision_record
+
+    outcome = SafeFailureOutcome.model_construct(
+        failure_code="STRUCTURED_OUTPUT_FAILED", recovery_action_code=recovery,
+        retryable=recovery == "RETRY", requested_field_paths=[],
+    )
+    with caplog.at_level(logging.WARNING, logger="app.be.services.decision_record"):
+        decision_record.save_safe_failure(MagicMock(), SimpleNamespace(id=85), outcome)
+
+    [record] = [r for r in caplog.records if r.name == "app.be.services.decision_record"]
+    assert record.levelno == level
+    assert record.getMessage() == f"case_history 85 판단 실패: STRUCTURED_OUTPUT_FAILED / {recovery}"
