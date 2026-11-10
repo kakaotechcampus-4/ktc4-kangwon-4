@@ -114,6 +114,7 @@ export function DocsPage() {
               <li key={issue}>{issue}</li>
             ))}
           </ul>
+          <p className="mt-1">값이 틀렸으면 서류를 눌러 고칠 수 있어요.</p>
         </InfoBox>
       )}
 
@@ -161,6 +162,9 @@ export function DocsPage() {
 /**
  * 서류 한 줄. 배지는 셋이다 — 서버가 확인이 필요하다고 한 서류는 "확인 필요", 마지막 점검이
  * 통과했으면 "점검 완료", 그 밖에는 "보관 중".
+ *
+ * 종류 이름·파일 이름을 누르면 어느 서류든 확인 시트가 열린다. 확인한 값에 오타가 있으면 점검이
+ * 막히는데, 다시 열 길이 없으면 고칠 방법이 없다(#341).
  */
 function DocumentRow({
   document,
@@ -197,10 +201,15 @@ function DocumentRow({
       >
         <IconDocumentLine size={22} />
       </span>
-      <span className="min-w-0 flex-1">
+      {/* 확인을 마친 서류도 다시 열어 고칠 수 있다. 고치면 서버가 지난 점검을 지운다(#341) */}
+      <button
+        type="button"
+        onClick={onConfirm}
+        className="-my-1 min-h-11 min-w-0 flex-1 cursor-pointer rounded-lg py-1 text-left focus-visible:outline-2 focus-visible:outline-stroke-brand-solid active:bg-bg-transparent-pressed"
+      >
         <span className="block truncate text-17 font-bold">{document.kindLabel}</span>
         <span className="mt-0.5 block truncate text-14 text-fg-neutral-muted">{document.filename}</span>
-      </span>
+      </button>
       {badge}
       <button
         type="button"
@@ -223,6 +232,10 @@ function DocumentRow({
  *
  * 빈 칸으로는 보내지 않는다. 서버는 받은 값을 사장님이 확인한 값으로 저장해서, 빈 값이 맞는 값으로
  * 남는다.
+ *
+ * **이미 확인한 서류를 다시 열 때**(#341) 칸에는 확인한 값이 들어 있다. 고치면 서버가 지난 점검을 지워서
+ * 그렇다고 미리 알린다. 아무것도 고치지 않았으면 보내지 않고 닫는다 — 처음 확인은 "확인했다"는 기록이
+ * 필요해 값이 같아도 보내지만, 다시 확인은 바뀐 것이 없으면 남길 것이 없다.
  */
 export function ConfirmSheet({
   document,
@@ -241,6 +254,7 @@ export function ConfirmSheet({
     Object.fromEntries((document?.fields ?? []).map((field) => [field.name, field.value])),
   )
   const kindId = useId()
+  const reopened = document !== null && !document.needsConfirmation
 
   // 보이는 칸만 본다. 안 보이는 칸이 비어 있으면 사장님은 왜 버튼이 잠겼는지 알 수 없다
   const filled = (document?.fields ?? [])
@@ -253,18 +267,24 @@ export function ConfirmSheet({
       open={document !== null}
       onClose={onCancel}
       title="서류 확인하기"
-      description={document ? `${document.filename} · 리본이 읽은 내용이 맞는지 봐 주세요.` : undefined}
+      description={
+        document
+          ? reopened
+            ? `${document.filename} · 확인한 내용을 고칠 수 있어요. 고치면 점검을 다시 해 주세요.`
+            : `${document.filename} · 리본이 읽은 내용이 맞는지 봐 주세요.`
+          : undefined
+      }
     >
       <form
         className="flex flex-col gap-4"
         onSubmit={(event) => {
           event.preventDefault()
           if (!ready) return
-          onConfirm(
-            document.id,
-            kind,
-            Object.fromEntries(Object.entries(values).map(([name, value]) => [name, value.trim()])),
-          )
+          const trimmed = Object.fromEntries(Object.entries(values).map(([name, value]) => [name, value.trim()]))
+          const unchanged =
+            kind === document.kind && document.fields.every((field) => trimmed[field.name] === field.value.trim())
+          if (reopened && unchanged) return onCancel()
+          onConfirm(document.id, kind, trimmed)
         }}
       >
         <div className="flex flex-col gap-1.5">

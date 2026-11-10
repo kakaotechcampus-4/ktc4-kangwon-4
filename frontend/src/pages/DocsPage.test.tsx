@@ -445,3 +445,79 @@ describe('DocsPage — 다음 단계 버튼', () => {
     expect(screen.queryByRole('button', { name: '정산 서류 점검하기' })).not.toBeInTheDocument()
   })
 })
+
+/**
+ * 확인한 값에 오타가 있으면 점검이 막힌다. 다시 열 길이 없으면 고칠 방법이 없다(#341).
+ *
+ * 서버는 받은 `confirmed_fields` 로 통째로 바꿔 끼운다. 고친 칸만 보내면 나머지 확인한 값이 사라진다.
+ */
+describe('DocsPage — 확인한 서류 다시 열기 (#341)', () => {
+  /** 보낸 사람을 오타로 확인한 이체확인증. `date` 는 서버가 꺼낸 칸에 없어 화면에 안 보이는 확인값이다 */
+  const TYPO = serverDocument({
+    fields: [
+      { name: 'sender', label: '보낸 사람', value: '김리본', page: 1 },
+      { name: 'amount', label: '금액', value: '3,300,000원', page: 1 },
+    ],
+    confirmed_fields: { sender: '김리븐', amount: '3,300,000원', date: '2026-11-01' },
+  })
+
+  /** 서류 줄의 종류·파일 이름 버튼. 배지·휴지통 버튼과 겹치지 않게 파일 이름으로 찾는다 */
+  const transferRow = () => screen.findByRole('button', { name: /transfer\.pdf/ })
+  const confirmSheet = () => screen.getByRole('dialog', { name: '서류 확인하기' })
+  const posts = (calls: ReturnType<typeof serve>['calls']) => calls().filter((call) => call.method === 'POST')
+
+  it('점검에 걸린 서류를 다시 열어 고치면 확인한 값을 모두 같이 보내고, 다시 점검하게 한다', async () => {
+    // 고친 뒤 서버는 지난 점검을 지운 목록을 돌려준다
+    const server = serve(json(serverList([TYPO], issuesCheck)), json(serverList([TYPO])))
+    renderAt('/docs')
+
+    fireEvent.click(await transferRow())
+    const sheet = confirmSheet()
+    expect(within(sheet).getByText(/확인한 내용을 고칠 수 있어요/)).toBeInTheDocument()
+    expect(within(sheet).getByLabelText('보낸 사람')).toHaveValue('김리븐')
+
+    fireEvent.change(within(sheet).getByLabelText('보낸 사람'), { target: { value: '김리본' } })
+    fireEvent.click(within(sheet).getByRole('button', { name: '맞아요, 확인했어요' }))
+
+    await vi.waitFor(() => expect(posts(server.calls)).toHaveLength(1))
+    expect(JSON.parse(posts(server.calls)[0].body as string)).toEqual({
+      kind: 'TRANSFER',
+      confirmed_fields: { sender: '김리본', amount: '3,300,000원', date: '2026-11-01' },
+    })
+    expect(await screen.findByRole('button', { name: '정산 서류 점검하기' })).toBeInTheDocument()
+  })
+
+  it('점검 오류 안내에 서류를 눌러 고칠 수 있다고 알린다', async () => {
+    serve(json(serverList([TYPO], issuesCheck)))
+    renderAt('/docs')
+
+    expect(await screen.findByText('값이 틀렸으면 서류를 눌러 고칠 수 있어요.')).toBeInTheDocument()
+  })
+
+  /** 점검을 통과한 뒤 오타를 발견해도 고칠 수 있어야 한다. 고치면 서버가 점검을 지운다 */
+  it('점검 완료 서류도 다시 열 수 있다', async () => {
+    serve(json(serverList([TYPO], completeCheck)))
+    renderAt('/docs')
+
+    fireEvent.click(await transferRow())
+
+    expect(within(confirmSheet()).getByLabelText('보낸 사람')).toHaveValue('김리븐')
+  })
+
+  /** 바뀐 것이 없으면 남길 것도 없다. 보내지 않고 닫는다 */
+  it.each([
+    ['그대로 확인하면', () => fireEvent.click(within(confirmSheet()).getByRole('button', { name: '맞아요, 확인했어요' }))],
+    ['앞뒤 공백만 바꾸면', () => {
+      fireEvent.change(within(confirmSheet()).getByLabelText('금액'), { target: { value: ' 3,300,000원 ' } })
+      fireEvent.click(within(confirmSheet()).getByRole('button', { name: '맞아요, 확인했어요' }))
+    }],
+  ])('다시 열고 %s 보내지 않고 닫는다', async (_, act) => {
+    const { calls } = await renderDocs([TYPO])
+
+    fireEvent.click(await transferRow())
+    act()
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '서류 확인하기' })).not.toBeInTheDocument())
+    expect(posts(calls)).toHaveLength(0)
+  })
+})
