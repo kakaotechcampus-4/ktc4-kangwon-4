@@ -140,15 +140,24 @@ GIT_SHA=$(git rev-parse --short HEAD) $C up -d --build
 - 두 백업 파일이 온전한지 **둘 다 먼저** 보고, 하나라도 아니면 아무것도 지우지 않고 멈춥니다
 - FastAPI는 DB·서류 복원이 모두 성공한 뒤에만 켭니다. 복원 도중 요청이 들어와 쓰지 않게 하려는 것입니다(승준님 #225)
 
+**백업이 어디 있는지부터 정합니다.** 손으로 받았으면 파일 이름에 시각이 붙어 있고, 버튼/스크립트(`scripts/deploy.sh`)로 받았으면 **실행마다 만든 폴더 안**에 있습니다. 스크립트는 끝낼 때 그 폴더 경로를 그대로 찍어 줍니다.
+
 ```bash
-TS=<2단계에서 적은 값>
+# 손으로 받은 백업
+BK=/home/ubuntu/backup && DB=$BK/db-<2단계에서 적은 값>.sql && DOCS=$BK/documents-<같은 값>.tgz
+
+# 스크립트가 받은 백업 (배포 로그의 "백업 …" 줄에 적힌 폴더)
+BK=/home/ubuntu/backup/<폴더이름> && DB=$BK/db.sql && DOCS=$BK/documents.tgz
+```
+
+```bash
 $C stop fastapi
 git checkout <1단계에서 적은 커밋>
-tail -n 1 /home/ubuntu/backup/db-$TS.sql | grep -q '^-- Dump completed' && \
-  tar tzf /home/ubuntu/backup/documents-$TS.tgz > /dev/null && \
-  $MYSQL closure_agent < /home/ubuntu/backup/db-$TS.sql && \
+tail -n 1 "$DB" | grep -q '^-- Dump completed' && \
+  tar tzf "$DOCS" > /dev/null && \
+  $MYSQL closure_agent < "$DB" && \
   $C run --rm --no-deps -T fastapi sh -c 'find /data/documents -mindepth 1 -delete && tar xzf - -C /data/documents' \
-    < /home/ubuntu/backup/documents-$TS.tgz && \
+    < "$DOCS" && \
   GIT_SHA=$(git rev-parse --short HEAD) $C up -d --build
 ```
 

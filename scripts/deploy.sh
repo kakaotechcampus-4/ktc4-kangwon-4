@@ -28,11 +28,15 @@ on_exit() { if [ $? -ne 0 ] && [ -n "$stopped" ]; then echo "멈췄던 FastAPI�
 trap on_exit EXIT
 
 echo "== 1/4 확인 =="
-# env 파일은 같은 이름이 여러 줄이면 마지막 값이 적용된다. 줄이 있는지만 보면 뒤에 dev가 또 있어도
-# 통과한다 — 그 상태로 올리면 main.py가 reset_all_tables()로 표를 전부 지운다(승준님 #321)
-env_lines=$(grep -cE '^ENVIRONMENT=' .env.prod || true)
-[ "$env_lines" = "1" ] || fail ".env.prod의 ENVIRONMENT가 ${env_lines}줄입니다. 정확히 한 줄만 두세요"
-grep -qE '^ENVIRONMENT=prod[[:space:]]*$' .env.prod || fail ".env.prod가 prod가 아닙니다. dev로 켜면 표가 전부 지워집니다"
+# .env.prod를 글자로 검사하지 않는다. 같은 이름이 여러 줄이면 마지막 값이 적용되는데,
+# ' ENVIRONMENT=dev' · 'ENVIRONMENT =dev' · 'export ENVIRONMENT=dev'는 어떤 grep 규칙을 써도
+# 앞줄만 보고 통과시킬 수 있고 Compose는 dev로 읽는다(승준님 #337, 세 형식 모두 재현).
+# 그래서 컨테이너 안에서 실제로 보이는 값을 Compose에게 직접 묻는다. 한 칸만 출력하므로
+# 다른 환경값·비밀값은 로그에 남지 않는다. dev로 켜면 main.py가 reset_all_tables()로 표를 전부 지운다.
+ENV_SEEN=$($C run --rm --no-deps -T fastapi printenv ENVIRONMENT 2>/dev/null | tr -d '\r\n') \
+  || fail "컨테이너가 보는 ENVIRONMENT를 읽지 못했습니다. docker compose 설정을 먼저 확인해 주세요"
+[ "$ENV_SEEN" = "prod" ] \
+  || fail "컨테이너가 보는 ENVIRONMENT가 '${ENV_SEEN}'입니다. prod가 아니면 켤 때 표가 전부 지워집니다"
 git fetch --quiet origin
 SHA=$(git rev-parse --verify "${TARGET}^{commit}") || fail "커밋 ${TARGET}을 찾지 못했습니다"
 BEFORE=$(git rev-parse --short HEAD)
@@ -60,17 +64,21 @@ echo "지금 ${BEFORE} → 올릴 $(git rev-parse --short "$SHA")"
 
 echo "== 2/4 백업 (FastAPI 멈춤) =="
 mkdir -p "$BACKUP"
-# 분 단위면 같은 분에 두 번 돌릴 때 앞 백업을 덮어쓴다. 되돌릴 때 쓰는 파일이다(승준님 #321)
-TS=$(date +%Y%m%d-%H%M%S)
-$C logs --no-color fastapi > "$BACKUP/fastapi-$TS.log"
+# 초 단위 이름으로는 모자란다. 같은 초에 실패한 뒤 바로 다시 돌리면 이름이 겹쳐 앞 백업을 덮어쓴다
+# (flock은 동시에 도는 것만 막지, 실패 뒤 재시도는 못 막는다 — 승준님 #337).
+# mktemp -d로 실행마다 새 폴더를 원자적으로 만든다. 이미 있으면 만들지 않으므로 덮어쓸 수 없다.
+RUN_DIR=$(mktemp -d "$BACKUP/$(date +%Y%m%d-%H%M%S)-XXXXXX") \
+  || fail "백업 폴더를 만들지 못했습니다: $BACKUP"
+TS=$(basename "$RUN_DIR")
+$C logs --no-color fastapi > "$RUN_DIR/fastapi.log"
 stopped=1
 $C stop fastapi
 $C exec -T mysql mysqldump --defaults-extra-file=/run/secrets/mysql_health_cnf \
-  --single-transaction --default-character-set=utf8mb4 closure_agent > "$BACKUP/db-$TS.sql"
-$C run --rm --no-deps -T fastapi tar czf - -C /data/documents . > "$BACKUP/documents-$TS.tgz"
-tail -n 1 "$BACKUP/db-$TS.sql" | grep -q '^-- Dump completed' || fail "DB 백업이 끝까지 받아지지 않았습니다"
-tar tzf "$BACKUP/documents-$TS.tgz" > /dev/null || fail "서류 백업 파일이 깨졌습니다"
-echo "백업 $TS (되돌릴 때 씁니다)"
+  --single-transaction --default-character-set=utf8mb4 closure_agent > "$RUN_DIR/db.sql"
+$C run --rm --no-deps -T fastapi tar czf - -C /data/documents . > "$RUN_DIR/documents.tgz"
+tail -n 1 "$RUN_DIR/db.sql" | grep -q '^-- Dump completed' || fail "DB 백업이 끝까지 받아지지 않았습니다"
+tar tzf "$RUN_DIR/documents.tgz" > /dev/null || fail "서류 백업 파일이 깨졌습니다"
+echo "백업 $BACKUP/$TS (되돌릴 때 씁니다)"
 
 echo "== 3/4 반영 =="
 git merge --ff-only "$SHA"
