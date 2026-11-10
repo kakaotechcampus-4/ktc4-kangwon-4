@@ -1,0 +1,41 @@
+{
+  "checked_at": "2026-11-10T02:04:09+09:00",
+  "source_revision": "c01bf12b4ddc5abed13b3c01af9040b1160baf1f",
+  "pages": [
+    {
+      "id": "home",
+      "title": "홈",
+      "url": "/safety/"
+    },
+    {
+      "id": "philosophy",
+      "title": "운영철학",
+      "url": "/safety/philosophy/"
+    },
+    {
+      "id": "guide",
+      "title": "안심 이용",
+      "url": "/safety/guide/"
+    },
+    {
+      "id": "standards",
+      "title": "운영 기준",
+      "url": "/safety/standards/"
+    },
+    {
+      "id": "ai",
+      "title": "AI와 검수",
+      "url": "/safety/ai/"
+    },
+    {
+      "id": "privacy",
+      "title": "정보 보호",
+      "url": "/safety/privacy/"
+    },
+    {
+      "id": "questions",
+      "title": "사례와 질문",
+      "url": "/safety/questions/"
+    }
+  ]
+}

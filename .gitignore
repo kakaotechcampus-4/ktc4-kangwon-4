@@ -114,6 +114,8 @@ langfuse_data/
 # ── Frontend 전용 규칙 (하위 디렉터리 포함) ─────────────
 # Logs
 /frontend/**/logs
+# 개발 문서의 "작업 기록" 페이지 폴더라 로그가 아니다
+!/frontend/public/developers/ko/logs/
 /frontend/**/*.log
 /frontend/**/npm-debug.log*
 /frontend/**/yarn-debug.log*
