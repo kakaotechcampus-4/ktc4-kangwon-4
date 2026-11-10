@@ -9,7 +9,7 @@
 ## 1. 먼저 보는 결론
 
 - 현재 Agent 실행은 **Pydantic, LangGraph, httpx**를 사용한다.
-- LLM은 LangChain이나 OpenAI SDK가 아니라 `httpx`로 OpenAI-compatible endpoint를 호출한다. `AGENT_SUPERVISOR_MODEL_PREFIX`·`AGENT_INFO_MODEL_PREFIX`가 Supervisor와 정보분석의 설정 묶음을 고른다. 기본값인 `SUPERVISOR_`·`INFO_`는 비어 있는 값을 공용 설정에서 읽지만, `LUNA6_` 등 다른 묶음을 고르면 해당 URL·토큰·모델을 모두 채워야 한다. 현재 [`.env.example`](../.env.example)·[운영 예시](../.env.prod.example)는 Supervisor에 `LUNA6_`, 정보분석에 `INFO_`를 지정한다. 지원금 Agent와 독립 Review는 공용 설정을 사용한다.
+- LLM은 LangChain이나 OpenAI SDK가 아니라 `httpx`로 OpenAI-compatible endpoint를 호출한다. `AGENT_SUPERVISOR_MODEL_PREFIX`·`AGENT_INFO_MODEL_PREFIX`가 Supervisor와 정보분석의 설정 묶음을 고른다. 기본값인 `SUPERVISOR_`·`INFO_`는 비어 있는 값을 공용 설정에서 읽는다. 대체 묶음은 `LUNA_`·`LUNA6_`·`HAIKU_`·`GEMINI_` 중에서만 고를 수 있고, 해당 URL·토큰·모델을 모두 채워야 한다. 그 밖의 값은 설정 오류다. 현재 [`.env.example`](../.env.example)·[운영 예시](../.env.prod.example)는 Supervisor에 `LUNA6_`, 정보분석에 `INFO_`를 지정한다. 지원금 Agent와 독립 Review는 공용 설정을 사용한다.
 - LangChain·OpenAI SDK·Chroma는 `backend/requirements.txt`에 고정돼 있지만 Agent 코드에 import가 없다. Langfuse는 credential이 설정된 경우에만 metadata 전송에 사용한다.
 - 루트 `docker-compose.yml`은 **MySQL 8.0 DB만** 실행한다. Backend와 Agent container는 없다.
 - 현재 작업 트리에는 SQLModel 테이블, DB 세션, FastAPI 진입점과 카카오 인증 라우터가 있다. Agent를 호출하는 라우터와 Case 저장·재조회 연동, migration은 아직 없다.
@@ -113,7 +113,7 @@ DB 연결 코드의 존재가 Agent 변경 후보의 저장·재조회 완료를
 Agent 호출 구조는 [`agent/architecture.md`](./agent/architecture.md), 포함·제외 범위는 [`agent/README.md`](./agent/README.md)를 따른다. 여기서는 패키지와 직접 관련된 것만 적는다.
 
 - **MVP 제외:** 기업마당 adapter, 미검수 공고 corpus·index·검색(`chromadb`), 공식 원문 crawler·parser, 요청 경로 RAG. 범위는 [`agent/README.md`](./agent/README.md)
-- **비용 확인:** 기록된 사용량으로 원화 비용을 사후 추정하는 집계는 구현돼 있다. 사용량·단가가 없으면 비용을 확정하지 않으며, 공급자 청구 금액과는 구분한다. masking 정책 승인은 별도 후속 범위다.
+- **비용 확인:** 기록된 사용량으로 원화 비용을 사후 추정하는 집계는 구현돼 있다. 사용량·단가가 없으면 비용을 확정하지 않으며, 공급자 청구 금액과는 구분한다. 개인정보 가림은 구현돼 있고, 보관·삭제 정책 승인은 [#258](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/issues/258)에서 다룬다.
 
 Support Agent의 입력은 생성 시 주입된 reviewed catalog뿐이다.
 
