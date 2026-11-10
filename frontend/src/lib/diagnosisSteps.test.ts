@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { EMPTY_DIAGNOSIS } from '../stores/useDiagnosisStore'
 import type { DiagnosisAnswers } from '../types/view'
-import { diagnosisSteps, reachableStep } from './diagnosisSteps'
+import { diagnosisSteps, isStepAnswered, reachableStep } from './diagnosisSteps'
 
 const answers = (patch: Partial<DiagnosisAnswers>): DiagnosisAnswers => ({ ...EMPTY_DIAGNOSIS, ...patch })
 
@@ -53,6 +53,14 @@ describe('diagnosisSteps', () => {
 describe('reachableStep', () => {
   it('앞 질문에 답하지 않았으면 그 질문으로 돌려보낸다', () => {
     expect(reachableStep('date', EMPTY_DIAGNOSIS)).toBe('biz')
+  })
+
+  /** 진단을 받지 않는 업종(#310)을 골라 둔 답이 남아 있으면, 나머지를 다 답했어도 첫 질문으로 돌아간다 */
+  it.each(['FRANCHISE_CAFE', 'RESTAURANT'] as const)('%s 를 골라 둔 답은 첫 질문에 답하지 않은 것으로 본다', (business) => {
+    const stored = { ...ANSWERED_CAFE, business, franchise: false }
+
+    expect(isStepAnswered('biz', stored)).toBe(false)
+    expect(reachableStep('date', stored)).toBe('biz')
   })
 
   it('지금 묻지 않는 질문을 열면 답하지 않은 첫 질문으로 보낸다', () => {
