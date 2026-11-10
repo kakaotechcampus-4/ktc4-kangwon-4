@@ -1,6 +1,6 @@
 """서버 ERROR 로그를 Discord로 알린다. 서버에 들어가 로그를 보기 전에 장애를 먼저 알기 위해서다.
 
-보내는 것은 로그 위치·우리가 쓴 한 줄(Case·판단 번호 정도)·오류 종류 이름·서버 버전·시각뿐이다.
+보내는 것은 로그 위치·우리가 쓴 한 줄(Case·판단 번호 정도)·오류 종류 이름·터진 파일과 줄·서버 버전·시각뿐이다.
 예외 메시지와 스택은 보내지 않는다. 거기에는 사장님 글이나 서류 값이 섞일 수 있다.
 Sentry 같은 서비스는 기본으로 요청 본문과 지역 변수까지 보내서 쓰지 않았다.
 
@@ -12,6 +12,7 @@ import os
 import sys
 import threading
 import time
+import traceback
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -32,27 +33,54 @@ class DiscordErrorHandler(logging.Handler):
 
     def format_alert(self, record: logging.LogRecord) -> str:
         error = record.exc_info[0].__name__ if record.exc_info and record.exc_info[0] else None
-        line = record.getMessage()[:_MAX_LINE]
+        # uvicorn의 500 문구는 줄바꿈으로 끝나서, 자르지 않으면 오류 이름이 다음 줄로 밀린다
+        line = record.getMessage().strip()[:_MAX_LINE]
+        where = _where(record)
         version = os.environ.get("APP_VERSION", "unknown")
         when = datetime.fromtimestamp(record.created, _KST).strftime("%Y-%m-%d %H:%M:%S KST")
-        return f"🚨 [{self._environment} {version}] {record.name}\n{line}" + (f" ({error})" if error else "") + f"\n{when}"
+        return (
+            f"🚨 [{self._environment} {version}] {record.name}\n{line}" + (f" ({error})" if error else "")
+            + (f"\n위치: {where}" if where else "") + f"\n{when}"
+        )
 
     def emit(self, record: logging.LogRecord) -> None:
-        key = (record.name, record.msg, record.exc_info[0] if record.exc_info else None)
-        now = time.monotonic()
-        with self._lock:
-            if now - self._last_sent.get(key, -_SAME_ALERT_SECONDS) < _SAME_ALERT_SECONDS:
-                return
-            self._last_sent[key] = now
-        content = self.format_alert(record)
-        # 요청·판단을 기다리게 하지 않는다. 보내다 실패해도 서비스에는 아무 영향이 없어야 한다
-        threading.Thread(target=self._send, args=(content,), daemon=True).start()
+        # 기본 핸들러처럼 전부 감싼다. 이 줄은 대개 except 블록 안에서 불려서, 여기서 터지면
+        # 처리하던 실패가 처리되지 않은 500으로 바뀐다(현종님 #331)
+        try:
+            # 500은 uvicorn이 늘 같은 문구로 남겨, 터진 자리까지 넣어야 다른 500이 한 묶음이 되지 않는다
+            key = (record.name, record.msg, record.exc_info[0] if record.exc_info else None, _where(record))
+            now = time.monotonic()
+            with self._lock:
+                if now - self._last_sent.get(key, -_SAME_ALERT_SECONDS) < _SAME_ALERT_SECONDS:
+                    return
+                self._last_sent[key] = now
+            content = self.format_alert(record)
+            # 요청·판단을 기다리게 하지 않는다. 보내다 실패해도 서비스에는 아무 영향이 없어야 한다
+            threading.Thread(target=self._send, args=(content,), daemon=True).start()
+        except Exception:
+            self.handleError(record)
 
     def _send(self, content: str) -> None:
         try:
             httpx.post(self._webhook_url, json={"content": content}, timeout=3)
         except httpx.HTTPError:
             pass
+
+
+def _where(record: logging.LogRecord) -> str | None:
+    """예외가 난 우리 코드의 파일·줄(`be/services/case.py:123`). 값은 담지 않는다.
+
+    라이브러리 안에서 터졌으면 그 라이브러리를 부른 우리 코드의 마지막 자리를 쓴다.
+    """
+    tb = record.exc_info[2] if record.exc_info else None
+    if tb is None:
+        return None
+    frames = traceback.extract_tb(tb)
+    ours = [f for f in frames if "/app/" in f.filename and "site-packages" not in f.filename]
+    if ours:
+        return f"{ours[-1].filename.rsplit('/app/', 1)[-1]}:{ours[-1].lineno}"
+    # 우리 코드를 거치지 않았으면 서버 경로는 빼고 파일 이름만 남긴다
+    return f"{os.path.basename(frames[-1].filename)}:{frames[-1].lineno}"
 
 
 def install_error_alert(webhook_url: str | None, environment: str) -> DiscordErrorHandler | None:

@@ -94,3 +94,50 @@ def test_installing_keeps_warnings_in_the_server_log_and_alerts_errors_once(clea
     assert "case_history 85 판단 실패" in stderr
     # Discord에는 ERROR만 간다
     assert len(sent) == 1 and "case_history 85 판단 실패" in sent[0]
+
+
+def _crash_in_case():
+    raise ValueError("사장님이 쓴 글")
+
+
+def _crash_in_document():
+    raise ValueError("사장님이 쓴 글")
+
+
+def _unhandled_500(crash):
+    """처리되지 않은 500이 나면 uvicorn이 남기는 줄과 같은 모양으로 남긴다."""
+    try:
+        crash()
+    except ValueError:
+        logging.getLogger("uvicorn.error").error("Exception in ASGI application\n", exc_info=True)
+
+
+def test_unhandled_500s_from_different_places_are_alerted_separately_with_where(clean_loggers, sent):
+    install_error_alert("https://discord.invalid/webhook", "prod")
+
+    _unhandled_500(_crash_in_case)
+    _unhandled_500(_crash_in_document)
+    _unhandled_500(_crash_in_case)
+
+    # 문구가 늘 같아도 터진 자리가 다르면 따로 보내고, 같은 자리는 1분에 한 번만 보낸다
+    assert len(sent) == 2
+    assert all(content.startswith("🚨 [prod") and "uvicorn.error" in content for content in sent)
+    assert "위치: " in sent[0] and sent[0].split("위치: ")[1] != sent[1].split("위치: ")[1]
+    assert all("사장님이 쓴 글" not in content for content in sent)
+
+
+def test_a_broken_alert_does_not_break_the_caller(sent):
+    handler = DiscordErrorHandler("https://discord.invalid/webhook", "prod")
+    handler.handleError = lambda record: None
+    logger = logging.getLogger("app.alert_broken")
+    # pytest가 붙인 로그 수집도 같은 줄에서 터지므로, 이 핸들러만 보게 한다
+    logger.propagate = False
+    logger.addHandler(handler)
+    try:
+        # 인자 수가 안 맞아 메시지를 만들다 터져도, 로그를 부른 쪽으로 올라가지 않는다
+        logger.error("case_history %s %s 판단 실패", 85)
+    finally:
+        logger.removeHandler(handler)
+        logger.propagate = True
+
+    assert sent == []
