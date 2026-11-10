@@ -1,4 +1,16 @@
 {
+  "redirects": [
+    {
+      "source": "/developers",
+      "destination": "/developers/ko/home/",
+      "permanent": false
+    },
+    {
+      "source": "/developers/",
+      "destination": "/developers/ko/home/",
+      "permanent": false
+    }
+  ],
   "rewrites": [
     {
       "source": "/api/(.*)",
