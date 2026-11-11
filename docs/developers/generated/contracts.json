@@ -1,5 +1,5 @@
 {
-  "checked_at": "2026-11-11T02:30:25+09:00",
+  "checked_at": "2026-11-11T12:10:09+09:00",
   "maintain_through": "2026-11-11",
   "openapi": {
     "components": {
@@ -4055,8 +4055,9 @@
     "backend/app/agent/blocker_candidates.py": "201a91f158d78c72106f4bc69731512a6fcac9ee90c767186fcda547d719236e",
     "backend/app/agent/claim_safety.py": "16a0c03e0af2f3cb8103fd7b2249688e0a222d1df78952f8e1c0454d26005f72",
     "backend/app/agent/document_tool/__init__.py": "e224c6b50e1c00b1029d7d6f0e7467b4b88c036106bc7a4bd2ede6fc5e78f113",
+    "backend/app/agent/document_tool/cache_compatibility.py": "8b29a4d709fa5b5c56b6bb9c0fda48bd7a463af5439955d9ffabc8f4c5765d96",
     "backend/app/agent/document_tool/checks.py": "abc3fd6040023ab5a79824e0b5c8366bb8e9969110465a7d8fcc5be217f6e107",
-    "backend/app/agent/document_tool/documents.py": "513d86b131c3915b48bea60bbdd955b6026219a119d8c4613396289880fbc5fa",
+    "backend/app/agent/document_tool/documents.py": "587ac8999e254630b105632ad21388a8fddb929f9b2bd645470afadd5d467d86",
     "backend/app/agent/document_tool/models.py": "7091c12967564ede22dd853740770fef94e55f7fc9e3535a221d07e4a1d94322",
     "backend/app/agent/document_tool/preparation.py": "13e9786e79f994520a8fa5c2c61f754a77ffdf20bf2eff8d4973639936abcf43",
     "backend/app/agent/document_tool/safety.py": "a802e5d84eb3ed9c0d5c803d3cc870f7556901ecb8e037dfa862f225e33ad70a",
@@ -4238,5 +4239,5 @@
     "frontend/vercel.json": "3751d2dade052e86c27a0fccc562f9eff8ad7fa240b714c7f9dd370b24dda92b",
     "frontend/vite.config.ts": "5aea7e89b922a21bd905069764da8c8eef193436ba616f36ea17db87a4779f70"
   },
-  "source_revision": "41885208c4c38fc7a9b731f8aa130d4854f87e6b"
+  "source_revision": "bcda4bf989fdd10b3a8748e6ac3d65efec19ac91"
 }
