@@ -513,8 +513,6 @@ function AnswerButton({
  * 다시 물어도 같은 실패 카드면 이 버튼이 그대로 남아 있어(같은 자리 같은 부품) 거절된 것을 기억한다.
  * 서버는 가입·결과 알려주기·서류 판단을 다시 돌려서(#196) 보통은 생기지 않는다. 서버가 받지 않는 실패가
  * 홈에 남는 드문 경우에 같은 409 를 되풀이하지 않게 잠근다.
- *
- * TODO(#55): 버튼·안내 문구는 제안 문구다. PM 답이 오면 바꾼다.
  */
 function RetryButton({ locked, busy, onRetried, onSendingChange }: {
   locked: boolean; busy: boolean; onRetried: () => void; onSendingChange: (sending: boolean) => void
@@ -589,8 +587,8 @@ function RetryButton({ locked, busy, onRetried, onSendingChange }: {
 /**
  * 다시 알아야 할 항목을 한 문장으로.
  *
- * **조사를 붙이지 않는다.** "업종을" 과 "범위를" 은 받침에 따라 갈리는데, 그걸 맞추는
- * 규칙을 넣기에는 이 문구 자체가 임시다. 항목을 문장 끝에 떼어 두면 조사가 필요 없다.
+ * **조사를 붙이지 않는다.** "업종을" 과 "범위를" 은 받침에 따라 갈린다. 항목을 문장 끝에
+ * 떼어 두면 조사를 맞추는 규칙이 필요 없다.
  */
 function requestedText({ fields, partial }: { fields: string[]; partial: boolean }): string {
   if (fields.length === 0) return '어떤 내용이 더 필요한지는 아직 확인되지 않았어요.'
@@ -599,13 +597,12 @@ function requestedText({ fields, partial }: { fields: string[]; partial: boolean
 }
 
 /**
- * 실패 이유에 맞는 안내.
+ * 실패 이유에 맞는 안내. **상황을 사실대로 적는다.**
  *
- * TODO(#55): 문구는 PM 이 정한다. 지금은 **상황을 사실대로 적기만 한** 초안이다.
- *
- * 아직 지켜야 할 것 둘:
- *   - **못 하는 일을 약속하지 않는다.** 실패한 Case 를 다시 판단시키는 수단이 없다(#57).
- *     더 알려주셔야 풀리는 실패(`askOwner`)만 결과 입력으로 다시 보낼 수 있다
+ * 지켜야 할 것 둘:
+ *   - **못 하는 일을 약속하지 않는다.** 같은 내용으로 다시 판단할 수 있는 것은 서버가 다시 해볼 수
+ *     있다고 한 실패(`RETRY_AVAILABLE`, `RetryButton`, #196)뿐이다. 더 알려주셔야 풀리는 실패(`askOwner`)는
+ *     결과 입력으로 다시 보낸다
  *   - **"상태 다시 확인" 을 재판단으로 읽히게 쓰지 않는다.** 그 버튼은 저장된 상태를 다시
  *     읽을 뿐이다
  *
