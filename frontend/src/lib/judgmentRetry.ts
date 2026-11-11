@@ -13,9 +13,9 @@ import { ApiError, request } from './api'
  */
 export async function retryJudgment(): Promise<number> {
   const response = await request('/cases/retry', { method: 'POST' })
-  const accepted = (await response.json()) as Partial<CaseRetryResponse>
+  const accepted = ((await response.json()) ?? {}) as Partial<CaseRetryResponse>
 
-  // 받았다는 답인데 번호가 없으면 정말 다시 돌았는지 알 수 없다
+  // 받았다는 답인데 번호가 없으면(본문이 null 이어도) 정말 다시 돌았는지 알 수 없다
   if (!Number.isInteger(accepted.case_history_id)) {
     throw new ApiError(response.status, '다시 판단한 번호를 읽지 못했습니다.')
   }

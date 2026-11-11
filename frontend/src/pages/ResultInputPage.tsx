@@ -44,8 +44,6 @@ import type { FailureNotice, NextAction, SubmitOutcome, SubmitState } from '../t
  * 말투는 시안(M05b "전부 원래대로 해야 한대요")처럼 **임대인에게 들은 말**로 쓴다. 화면이
  * "임대인이 뭐라고 했나요?"를 묻는데 "~해요"로 답하면 사장님이 스스로 정하는 것처럼 읽힌다.
  * 어느 쪽도 미리 골라 두지 않는다 — 고르지 않은 답이 들은 말로 들어간다.
- *
- * TODO(#55): 제안 문구다. PM 답이 오면 바꾼다.
  */
 const SCOPE_OPTIONS: { value: RestorationScope; label: string }[] = [
   { value: 'FULL', label: '전부 원래대로 해야 한대요' },
