@@ -36,6 +36,11 @@
       "id": "questions",
       "title": "사례와 질문",
       "url": "/safety/questions/"
+    },
+    {
+      "id": "policy",
+      "title": "개인정보처리방침",
+      "url": "/safety/policy/"
     }
   ]
 }

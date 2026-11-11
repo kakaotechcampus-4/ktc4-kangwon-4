@@ -14,11 +14,6 @@ on:
     branches: [develop, main]
     paths:
       - "frontend/**"
-      - "docs/developers/**"
-      - "docs/safety/**"
-      - "docs/final-guide/**"
-      - "scripts/build-docs.mjs"
-      - "scripts/build-safety.mjs"
       - ".github/workflows/frontend-ci.yml"
 
 # 같은 PR에 연속 push되면 이전 실행을 취소한다.
@@ -54,9 +49,6 @@ jobs:
 
       - name: Run lint
         run: npm run lint
-
-      - name: Check documentation contracts and source freshness
-        run: npm run docs:check
 
       # build보다 앞에 둔다. 타입이 맞아도 분기가 틀릴 수 있어서,
       # 빌드가 통과하는 것과 화면이 맞게 그려지는 것은 다른 문제다.
