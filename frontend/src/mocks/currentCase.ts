@@ -36,7 +36,7 @@ const store = { facts, completed: false, closureReport: null, depositReturn: nul
  * 주지 않는다. "막힌 것이 없는" Mock 을 두지 않는 이유도 같다. 볼 수 없는 화면을
  * Mock 으로 남겨두면 있는 줄 알게 된다.
  *
- * `reason` 과 `questions` 는 서버가 아직 안 보내지만 여기서는 채워 둔다. 값이 들어왔을 때
+ * `reason` 과 `questions` 도 서버가 보내는 모양대로 채워 둔다. 이유와 물어볼 말이 함께 있을 때
  * 화면이 어떻게 보이는지 확인할 길이 필요하다.
  */
 export const doneCase: CurrentCaseView = {

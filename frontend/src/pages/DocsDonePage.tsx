@@ -125,12 +125,20 @@ export function DocsDonePage() {
   )
 }
 
-/** 받은 파일을 브라우저 내려받기로 넘긴다. 잠깐 쓴 주소는 바로 돌려준다 */
+/**
+ * 잠깐 쓴 파일 주소를 돌려주기까지 기다리는 시간. 아이폰 사파리는 링크를 누른 뒤에야 파일을 읽기
+ * 시작해서, 누르자마자 돌려주면 받기가 실패하는데 화면에는 아무 말이 없다.
+ */
+export const RELEASE_FILE_URL_MS = 60_000
+
+/** 받은 파일을 브라우저 내려받기로 넘긴다. 링크는 페이지에 잠깐 붙였다 뗀다 — 붙어 있어야 누르기가 먹는 브라우저가 있다 */
 function saveFile(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
   link.download = filename
+  document.body.append(link)
   link.click()
-  URL.revokeObjectURL(url)
+  link.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), RELEASE_FILE_URL_MS)
 }

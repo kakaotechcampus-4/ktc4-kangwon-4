@@ -34,6 +34,13 @@ describe('retryJudgment', () => {
     await expect(retryJudgment()).rejects.toBeInstanceOf(ApiError)
   })
 
+  it('본문이 null 이어도 같은 실패로 올린다', async () => {
+    saveTokens('access-1', 'refresh-1')
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('null')))
+
+    await expect(retryJudgment()).rejects.toBeInstanceOf(ApiError)
+  })
+
   it('거절은 상태 코드 그대로 올린다', async () => {
     saveTokens('access-1', 'refresh-1')
     respond(null, 409)

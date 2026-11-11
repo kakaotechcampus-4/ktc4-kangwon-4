@@ -389,6 +389,26 @@ describe('ClosureReportFlow', () => {
     expect(screen.getByRole('button', { name: '결과 알려주기' })).toBeInTheDocument()
   })
 
+  /** 한 번 못 불러온 뒤 닫았다 다시 열면, 이번에 불러왔는데도 오류 상자만 남아 있었다 */
+  it('주소 찾기를 못 불러온 뒤 닫았다 다시 열면 찾기 창을 띄운다', async () => {
+    // 첫 번째 스크립트는 받다 실패한다
+    vi.spyOn(document.head, 'appendChild').mockImplementationOnce((node) => {
+      queueMicrotask(() => (node as HTMLScriptElement).onerror?.(new Event('error')))
+      return node
+    })
+    renderFlow(<ClosureReportFlow task={closureTask} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '주소 찾기' }))
+    expect(await screen.findByText('주소 찾기를 불러오지 못했어요.')).toBeInTheDocument()
+
+    fireEvent(screen.getByRole('dialog', { name: '가게 주소 찾기' }), new Event('cancel', { cancelable: true }))
+    stubPostcode()
+    fireEvent.click(screen.getByRole('button', { name: '주소 찾기' }))
+
+    await vi.waitFor(() => expect(window.daum?.Postcode).toHaveBeenCalled())
+    expect(screen.queryByText('주소 찾기를 불러오지 못했어요.')).not.toBeInTheDocument()
+  })
+
   it('저장이 끝나기 전에는 저장했다고 하지 않는다', async () => {
     const pick = stubPostcode()
     serve(hanging)

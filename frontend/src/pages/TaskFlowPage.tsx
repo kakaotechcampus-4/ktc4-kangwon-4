@@ -631,8 +631,15 @@ export function AddressSheet({
     }
   }, [open, attempt])
 
+  // 닫을 때 실패 표시를 지운다. 남아 있으면 다시 열어 불러오기에 성공해도 찾기 창 자리가 그려지지 않아
+  // 오류 상자만 보인다
+  function close() {
+    setFailed(false)
+    onClose()
+  }
+
   return (
-    <BottomSheet open={open} onClose={onClose} title="가게 주소 찾기" description="도로명이나 건물 이름으로 찾아 주세요.">
+    <BottomSheet open={open} onClose={close} title="가게 주소 찾기" description="도로명이나 건물 이름으로 찾아 주세요.">
       {failed ? (
         <InfoBox
           tone="critical"
