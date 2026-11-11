@@ -31,7 +31,7 @@ MVP 단순화를 이유로 제약을 완화하지 않는다.
 | 최종 판단(Blocker·Next Action) | [supervisor.md](./supervisor.md) | `supervisor/agent.py` |
 | 사실 추출·충돌 감지 | [info-agent.md](./info-agent.md) | `info_agent/agent.py` |
 | 절차 조회·실행 가능 판정 | [procedure-tool.md](./procedure-tool.md) | `procedure_tool/` |
-| 지원조건 비교 | [support-agent.md](./support-agent.md) | `support_agent/agent.py` |
+| 지원조건 비교 (**만들었지만 연결하지 않음**) | [support-agent.md](./support-agent.md) | `support_agent/agent.py` |
 | 독립 검수 | [review-tool.md](./review-tool.md) | `review_tool/tool.py` |
 | 근거·개인정보·상태 차단 | [guardrails.md](./guardrails.md) | `claim_safety.py`, `guardrails.py`, `projection.py`, `enrichment.py` |
 
@@ -42,6 +42,7 @@ MVP 단순화를 이유로 제약을 완화하지 않는다.
 Agent는 SQL·ORM으로 DB를 직접 읽거나 쓰지 않는다 — 저장·재조회는 이 저장소의 Agent 범위 밖이다.
 판단 방향은 [팀 원칙](../../CLAUDE.md), 사용자 흐름은 [Hero Scenario](../hero-scenario.md),
 호출 구조는 [architecture.md](./architecture.md)를 따른다.
+이 구조를 고른 이유와 대가는 [왜 이렇게 설계했나](./why-this-design.md)에 있다.
 
 ## 5단계 로드맵 조회와 체크 기록
 
