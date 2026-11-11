@@ -81,8 +81,7 @@ langfuse_data/
 
 # ── 개인 로컬 파일 (팀 공용 아님) ──────────────────────
 /handoff.md
-# 사용자의 11월 11일까지 문서 갱신 요청을 팀 작업에도 유지한다.
-!/AGENTS.md
+/AGENTS.md
 /docs/agent/handoof.md
 
 # ── Agent 로컬 도구·수집 데이터 ────────────────────────
@@ -127,10 +126,6 @@ langfuse_data/
 /frontend/**/node_modules
 /frontend/**/dist
 /frontend/**/dist-ssr
-/frontend/public/developers/
-/frontend/public/safety/
-/docs/developers/_qa/
-/docs/safety/_qa/
 /frontend/**/*.local
 
 # Editor directories and files

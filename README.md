@@ -112,6 +112,8 @@ flowchart LR
 | 기존 기록과 다르면 사장님이 고른다 | 새 값으로 자동 덮어쓰기 | 잘못 이해한 값이 사실로 굳는 것을 막습니다 |
 | 배포는 사람이 버튼으로 실행한다 | develop에 합쳐질 때마다 자동 배포 | 서버가 재시작되면 진행 중이던 판단이 실패로 바뀝니다. 시연과 QA 도중 재시작을 피합니다 |
 
+왜 AI가 필요했는지, 어디까지 AI에 맡기고 어디서 사람에게 묻는지, 그 대가가 무엇인지는 [왜 이렇게 설계했나](docs/agent/why-this-design.md)에 문제부터 순서대로 정리했습니다.
+
 ## 문제 해결 기록
 
 ### 1. 첫 할 일을 받는 데 2분이 걸렸다
@@ -119,7 +121,7 @@ flowchart LR
 - **문제:** 시연에서 첫 할 일이 나오기까지 5분 30초가 걸린 적이 있었습니다. 서버 기록 9건의 중간값은 180.5초였고, 그 시간의 83%를 정보분석 Agent가 썼습니다.
 - **원인:** 첫 판단의 입력은 버튼 값뿐이라 글에서 꺼낼 내용이 없는데도 모델을 불렀습니다. 모델은 매번 같은 절차 원문 8건을 다시 읽고 정리하고 있었습니다.
 - **시도 1, 실패:** 모델만 바꿔 봤습니다. 304초 뒤 실패해서 채택하지 않았고, "모델 교체가 아니라 하는 일을 줄여야 한다"는 근거가 됐습니다.
-- **시도 2:** 절차 원문을 사람이 검수한 정리본으로 미리 만들어 두고 첫 판단에서는 모델을 부르지 않게 했습니다([#189](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/189)). 이어서 원상복구 답변을 선택형으로 받고([#197](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/197)), 모델이 쓴 내용이 없는 판단은 코드 검사만 하게 했습니다([#203](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/203)).
+- **시도 2:** 절차 원문을 사람이 검수한 정리본으로 미리 만들어 두고 첫 판단의 정보분석에서는 모델을 부르지 않게 했습니다([#189](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/189)). 이어서 원상복구 답변을 선택형으로 받고([#197](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/197)), 모델이 쓴 내용이 없는 판단은 코드 검사만 하게 했습니다([#203](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/pull/203)).
 - **결과:** 같은 입력을 같은 구간에서 3번씩 쟀습니다.
 
   | 같은 첫 판단 | 평균 시간 | 모델 호출(3회 합계) | 정상 완료 |
@@ -191,7 +193,8 @@ backend/sql/           운영 DB에 넣는 SQL
 backend/tests/         서버·Agent 테스트
 frontend/src/          화면
 frontend/e2e/          브라우저 E2E 테스트
-docs/                  구조, 배포, 평가 기록, 개발 문서 원본
+frontend/public/       안심가이드·개발 문서 (정적 HTML이 원본)
+docs/                  구조, 배포, 평가 기록, 발표 자료
 ```
 
 ## 한계와 다음 과제
@@ -222,7 +225,7 @@ docs/                  구조, 배포, 평가 기록, 개발 문서 원본
 ## 문서 더 보기
 
 - [최종 발표 자료 PDF](docs/presentation/reborn-final-presentation.pdf) · [시연 영상](docs/presentation/reborn-demo.mp4): 2026년 11월 11일 발표본
-- [개발 문서 사이트](https://ktc4-kangwon-4.vercel.app/developers/): 서비스 흐름, 화면, API, 테스트 ([수정 방법](docs/developers/README.md))
-- [리본 안심가이드](https://ktc4-kangwon-4.vercel.app/safety): 서류 보호와 AI 검수 설명 ([수정 방법](docs/safety/README.md))
+- [개발 문서 사이트](https://ktc4-kangwon-4.vercel.app/developers/): 서비스 흐름, 화면, API, 테스트
+- [리본 안심가이드](https://ktc4-kangwon-4.vercel.app/safety): 서류 보호와 AI 검수 설명
 - [서비스 전체 설명서 PDF](docs/final-guide/리본_서비스_전체_설명서.pdf): 11월 7일 기준 보관본
 - [Agent 문서](docs/agent/README.md) · [대표 사용자 흐름](docs/hero-scenario.md) · [배포](docs/deploy.md) · [기술 스택](docs/tech-stack.md)

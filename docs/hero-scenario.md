@@ -1,6 +1,6 @@
 # RE:BORN Hero Scenario
 
-> 개발 문서 사이트는 [docs/developers](developers/README.md), 11월 7일 보관본 설명서는 [final-guide](final-guide/설명서.md)에서 볼 수 있습니다. 현재 계약의 기준은 코드와 테스트입니다.
+> 개발 문서 사이트는 [/developers](https://ktc4-kangwon-4.vercel.app/developers/), 11월 7일 보관본 설명서는 [final-guide](final-guide/설명서.md)에서 볼 수 있습니다. 현재 계약의 기준은 코드와 테스트입니다.
 
 > 사용자 시나리오와 Hero Loop 상세 흐름입니다. **기준은 2026-10-30 팀이 확정한 v3 모바일 프로토타입(봄날 개인카페 시연)** 입니다. 이전판(2026-09-28)의 "인수자 대기·임대인 번복" 이야기는 실제 사례가 확인되지 않아 대표 장면에서 뺐습니다(§9).
 > Agent·Tool 책임은 `docs/agent/architecture.md`를 참고합니다. BE와의 계약은 FastAPI 코드와 `backend/app/agent/schemas.py`가 기준입니다.
