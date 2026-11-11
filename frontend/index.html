@@ -4,7 +4,11 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="/src/assets/brand/reborn-hammer.svg" />
-    <!-- 크롬에서 앱으로 설치할 수 있게 한다. 오프라인 캐시(Service Worker)는 두지 않는다 — 배포 뒤 옛 화면이 남는다 -->
+    <!--
+      크롬에서 앱으로 설치할 수 있게 한다. 오프라인 캐시(Service Worker)는 두지 않는다 — 배포 뒤 옛 화면이 남는다.
+      manifest 의 display 는 standalone 이 아니라 minimal-ui 다. 아이폰은 standalone 앱에서 카카오 로그인을 앱 밖
+      시트로 열고, 돌아온 로그인이 그 시트에 남아 앱은 로그인되지 않는다. minimal-ui 면 아이폰은 사파리 탭으로 연다
+    -->
     <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="theme-color" content="#ffffff" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
