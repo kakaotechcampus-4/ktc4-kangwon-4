@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { REQUEST_TIMEOUT_MS } from '../lib/api'
 import { UPLOAD_TIMEOUT_MS } from '../lib/documentsApi'
-import { DocsDonePage } from './DocsDonePage'
+import { DocsDonePage, RELEASE_FILE_URL_MS } from './DocsDonePage'
 import { completeCheck, hanging, issuesCheck, json, serve, serverDocument, serverList, status } from './docsTestServer'
 
 function renderAt(path: string) {
@@ -47,6 +47,30 @@ describe('DocsDonePage', () => {
     await vi.waitFor(() => expect(calls()).toHaveLength(2))
     expect(calls()[1].url).toMatch(/\/cases\/documents\/settlement\.zip$/)
     await vi.waitFor(() => expect(URL.createObjectURL).toHaveBeenCalled())
+  })
+
+  /** 아이폰 사파리는 누른 뒤에 파일을 읽어서, 바로 돌려주면 아무 말 없이 받기가 실패한다 */
+  it('받은 파일 주소는 누르자마자 돌려주지 않고 잠시 뒤에 돌려준다', async () => {
+    vi.useFakeTimers()
+    serve(json(serverList([serverDocument()], completeCheck)), () => new Response('PK'))
+    const revoke = vi.fn()
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:zip'), revokeObjectURL: revoke }))
+    renderAt('/docs/done')
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: '파일 받기' }))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(URL.createObjectURL).toHaveBeenCalled()
+    expect(revoke).not.toHaveBeenCalled()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(RELEASE_FILE_URL_MS)
+    })
+    expect(revoke).toHaveBeenCalledWith('blob:zip')
   })
 
   /** ZIP 에는 사진·내역서가 여러 장 들어 크다. 다른 요청의 15초에 끊으면 휴대폰에서는 받을 수 없다 */
