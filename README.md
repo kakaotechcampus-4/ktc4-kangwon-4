@@ -8,6 +8,10 @@
 
 [개발 문서](https://ktc4-kangwon-4.vercel.app/developers/) · [안심가이드](https://ktc4-kangwon-4.vercel.app/safety) · [대표 사용자 흐름](docs/hero-scenario.md)
 
+운영 API: [API 명세 (Swagger)](https://reborn-ktc.duckdns.org/docs) · [서버 상태 확인](https://reborn-ktc.duckdns.org/health)
+
+[![BE·Agent CI](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/actions/workflows/be-agent-ci.yml/badge.svg)](.github/workflows/be-agent-ci.yml) [![Frontend CI](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/actions/workflows/frontend-ci.yml/badge.svg)](.github/workflows/frontend-ci.yml) [![E2E](https://github.com/kakaotechcampus-4/ktc4-kangwon-4/actions/workflows/e2e.yml/badge.svg)](.github/workflows/e2e.yml)
+
 <table>
   <tr>
     <td><img src="docs/final-guide/images/04-home.png" width="200" alt="홈: 오늘 할 일 하나"></td>
