@@ -191,7 +191,8 @@ backend/sql/           운영 DB에 넣는 SQL
 backend/tests/         서버·Agent 테스트
 frontend/src/          화면
 frontend/e2e/          브라우저 E2E 테스트
-docs/                  구조, 배포, 평가 기록, 개발 문서 원본
+frontend/public/       안심가이드·개발 문서 (정적 HTML이 원본)
+docs/                  구조, 배포, 평가 기록, 발표 자료
 ```
 
 ## 한계와 다음 과제
@@ -222,7 +223,7 @@ docs/                  구조, 배포, 평가 기록, 개발 문서 원본
 ## 문서 더 보기
 
 - [최종 발표 자료 PDF](docs/presentation/reborn-final-presentation.pdf) · [시연 영상](docs/presentation/reborn-demo.mp4): 2026년 11월 11일 발표본
-- [개발 문서 사이트](https://ktc4-kangwon-4.vercel.app/developers/): 서비스 흐름, 화면, API, 테스트 ([수정 방법](docs/developers/README.md))
-- [리본 안심가이드](https://ktc4-kangwon-4.vercel.app/safety): 서류 보호와 AI 검수 설명 ([수정 방법](docs/safety/README.md))
+- [개발 문서 사이트](https://ktc4-kangwon-4.vercel.app/developers/): 서비스 흐름, 화면, API, 테스트
+- [리본 안심가이드](https://ktc4-kangwon-4.vercel.app/safety): 서류 보호와 AI 검수 설명
 - [서비스 전체 설명서 PDF](docs/final-guide/리본_서비스_전체_설명서.pdf): 11월 7일 기준 보관본
 - [Agent 문서](docs/agent/README.md) · [대표 사용자 흐름](docs/hero-scenario.md) · [배포](docs/deploy.md) · [기술 스택](docs/tech-stack.md)
