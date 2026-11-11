@@ -99,7 +99,8 @@ export async function submitDecision(body: CaseConflictsDecisionRequest): Promis
  * 대기에 들어간다.
  */
 async function readAcceptedId(response: Response): Promise<number> {
-  const accepted = (await response.json()) as Partial<CaseResultsSubmitAcceptedResponse>
+  // 본문이 null 이어도 번호가 없는 것으로 다룬다. 그대로 읽으면 ApiError 가 아닌 오류로 새어 나간다
+  const accepted = ((await response.json()) ?? {}) as Partial<CaseResultsSubmitAcceptedResponse>
   if (!Number.isInteger(accepted.case_history_id)) {
     throw new ApiError(response.status, '접수 번호를 읽지 못했습니다.')
   }

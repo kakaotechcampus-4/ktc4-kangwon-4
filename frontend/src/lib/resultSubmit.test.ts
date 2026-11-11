@@ -100,6 +100,12 @@ describe('submitResult', () => {
     await expect(submitResult(12, '철거래요')).rejects.toBeInstanceOf(ApiError)
   })
 
+  it('접수 본문이 null 이어도 같은 실패로 끊는다', async () => {
+    mockFetchSequence(json(null))
+
+    await expect(submitResult(12, '철거래요')).rejects.toBeInstanceOf(ApiError)
+  })
+
   /** 어떤 409 인지 가르는 것은 화면 몫이 아니다. 상태 코드를 그대로 넘긴다 */
   it('지금 받을 수 없다는 답은 상태 코드째 올린다', async () => {
     mockFetchSequence(status(409))
