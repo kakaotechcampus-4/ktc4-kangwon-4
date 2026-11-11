@@ -105,6 +105,8 @@ flowchart LR
 
 ## 주요 기능
 
+<img src="docs/presentation/images/slide-05-flow.png" alt="상황 진단, 오늘 할 일, 결과 알려주기, 다시 판단, 서류 점검 5단계 흐름">
+
 ### 1. 버튼으로 가게 상황 진단
 
 업종, 임차·직원·대출·배달앱 계약 여부, 원상복구 조항, 폐업 시기를 한 장씩 버튼으로 답합니다. 모르는 것은 "모름"으로 남기고, 앞 답에 따라 필요 없는 질문은 빠집니다. 어떤 절차가 필요한지는 화면이 아니라 서버가 판단합니다.
@@ -218,6 +220,11 @@ flowchart LR
 
 ## 시스템 구조
 
+<img src="docs/presentation/images/slide-15-architecture.png" alt="시스템 아키텍처: Vercel 화면, EC2의 Caddy·FastAPI·LangGraph·MySQL, 외부 LLM, 카카오 로그인, Discord 오류 알림">
+
+<details>
+<summary>텍스트 다이어그램</summary>
+
 ```mermaid
 flowchart LR
   U["사장님<br/>모바일 브라우저"] --> FE["화면<br/>React · Vercel"]
@@ -233,9 +240,16 @@ flowchart LR
   AG -. "실행 기록만" .-> LF["Langfuse"]
 ```
 
+</details>
+
 화면은 판단하지 않고 입력 전달과 결과 표시만 합니다. Agent는 DB를 직접 읽거나 쓰지 않고, 저장과 권한 확인은 BE가 맡습니다.
 
 ### 판단 한 번이 지나가는 길
+
+<img src="docs/presentation/images/slide-16-agent-structure.png" alt="판단 구조: 절차조회, 정보분석, Supervisor, Review를 LangGraph로 잇고 반려되면 최대 2회 재작업">
+
+<details>
+<summary>텍스트 다이어그램</summary>
 
 ```mermaid
 flowchart LR
@@ -248,12 +262,20 @@ flowchart LR
   R -- "실패 · 한도 초과" --> F["안전 실패<br/>검수 전 초안은 보여주지 않음"]
 ```
 
+</details>
+
 | 구성요소 | 맡은 일 |
 |---|---|
 | 절차조회 Tool | 사람이 검수한 폐업 절차 자료에서 원문과 출처를 찾습니다. 순서나 할 일을 정하지 않습니다 |
 | 정보분석 Agent | 사장님 글에 실제로 있는 값만 꺼내고, 기존 기록과 다른 점을 찾습니다 |
 | Supervisor Agent | 다음 할 일을 정하는 유일한 곳입니다. 코드가 만든 후보 중에서 고릅니다 |
 | Review Tool | 모든 판단을 내보내기 전에 따로 검사합니다. 직접 고치지 않고 반려 사유만 돌려줍니다 |
+
+### 검수한 결과만 저장
+
+판단 초안은 코드 검사를 먼저 거치고, 모델이 쓴 내용이 들어간 경우에만 모델 검토를 한 번 더 합니다. 저장 직전에 검수 결과와 현재 값을 다시 대조한 뒤에만 진행에 반영합니다.
+
+<img src="docs/presentation/images/slide-17-review-and-save.png" alt="판단 초안, 코드 검사, 조건부 모델 검토, 저장 직전 대조 후 반영. 11/9 운영 확인 판단 21건 모두 통과">
 
 자세한 구조는 [Agent 아키텍처](docs/agent/architecture.md), DB는 [ERD](docs/schema/ERD.png)에 있습니다.
 
@@ -299,6 +321,8 @@ flowchart LR
   | 바꾼 뒤 | 3.0초 | 3번 | 3/3 |
 
   정해진 다음 할 일은 전후가 같았습니다. 화면에 다음 할 일이 보이기까지는 중간값 3.2초였습니다(10회).
+
+  <img src="docs/presentation/images/slide-18-first-judgment-speed.png" width="720" alt="첫 판단 평균 처리 시간 120.29초에서 2.97초로, 판단당 모델 호출 3회에서 1회로">
 - **배운 점:** 처음에는 서버 기록 180초와 로컬 3초를 나란히 놓고 "3분에서 3초"라고 썼습니다. 멘토 리뷰에서 측정 대상이 같은지 확인하라는 지적을 받았고, 같은 입력과 같은 구간끼리 다시 쟀습니다. 위 수치는 3회짜리 표본이라 서비스 전체의 속도로 일반화하지 않습니다.
 - **남은 것:** 글로 쓴 답변은 모델이 읽어야 해서 중간값 36.6초가 걸립니다.
 
@@ -344,6 +368,7 @@ flowchart LR
 | 환경 분리 | 개발은 `ENVIRONMENT=dev`(서버를 켤 때 DB 표 초기화), 운영은 `ENVIRONMENT=prod`(표를 건드리지 않고 `backend/sql/`의 SQL로만 변경). 설정도 `.env.example` / `.env.prod.example`, `docker-compose.yml` / `docker-compose.prod.yml`로 나눕니다 |
 | 상태 확인 | `/health`가 DB까지 확인하고, 지금 올라간 커밋을 돌려줍니다 |
 | 실행 기록 | 판단 실행 기록을 Langfuse에 남깁니다(키가 설정된 경우) |
+| 오류 알림 | 서버 ERROR 로그를 Discord로 알립니다. 위치·오류 종류·버전·시각만 보내고 예외 내용은 보내지 않습니다(웹훅이 설정된 경우) |
 | 폭주 방지 | 판단 한 번에 모델 호출 40번, 실행 7분을 넘으면 멈춥니다 |
 
 자동 배포를 하지 않는 이유는 [왜 이렇게 만들었나](#왜-이렇게-만들었나)에, 절차 전체는 [배포 문서](docs/deploy.md)에 있습니다.
